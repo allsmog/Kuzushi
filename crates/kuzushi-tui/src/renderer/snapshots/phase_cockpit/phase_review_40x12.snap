@@ -4,9 +4,9 @@ contract: cockpit-spine-v1
 phase: review
 size: 40x12
 ---
-KUZUSHI · VIEW REVIEW · ● LIVE
+KUZUSHI · Viewing Review · ● LIVE
  ▸ NEXT record terminal dispositions for
-        6 of 6 remaining candidates
+        6 of 6 ledger candidates
 │▸ FINDINGS · 6
 │▸F-0001  C [●●●] s1 @? CFM open SQ...
 │  ▸ next:patch · Enter open

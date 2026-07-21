@@ -8,6 +8,13 @@ const TOOL_JSON_EVIDENCE_TEXT_LIMIT: usize = 300;
 pub struct FindingListReport {
     pub count: usize,
     pub findings: Vec<Finding>,
+    /// Ledger-stable alias per row, parallel to `findings`. Aliases are
+    /// positional over the sorted WHOLE ledger, so a filtered or clamped
+    /// subset must carry them from the store — recomputing over the subset
+    /// can assign the same alias to a different finding than `kz finding`
+    /// resolves. Empty means the constructor had no whole-ledger view and
+    /// display falls back to subset-positional aliases.
+    pub aliases: Vec<String>,
 }
 
 impl FindingListReport {
@@ -23,8 +30,34 @@ impl FindingListReport {
         crate::module_result::completed_output_result(
             self.summary(),
             self.output(),
-            json!(FindingListToolData::from_report(self)),
+            self.aliased_rows_json(),
         )
+    }
+
+    /// The aliased machine-readable rows without the tool-result envelope —
+    /// the one serialization the CLI `--json` flag and the tool data share.
+    pub fn aliased_rows_json(&self) -> Value {
+        json!(FindingListToolData::from_report(self))
+    }
+
+    fn aliased_rows(&self) -> Vec<(String, Finding)> {
+        if self.aliases.len() != self.findings.len() {
+            return sorted_finding_aliases(&self.findings);
+        }
+        let mut rows: Vec<(String, Finding)> = self
+            .aliases
+            .iter()
+            .cloned()
+            .zip(self.findings.iter().cloned())
+            .collect();
+        // Ledger alias order IS (severity, fingerprint) order, so this keeps
+        // the table sorted while preserving the carried aliases.
+        rows.sort_by(|a, b| {
+            severity_rank(a.1.severity)
+                .cmp(&severity_rank(b.1.severity))
+                .then_with(|| a.1.fingerprint.cmp(&b.1.fingerprint))
+        });
+        rows
     }
 
     fn summary(&self) -> String {
@@ -45,10 +78,10 @@ struct FindingListToolData {
 
 impl FindingListToolData {
     fn from_report(report: &FindingListReport) -> Self {
-        let aliased = sorted_finding_aliases(&report.findings);
         Self {
             count: report.count,
-            findings: aliased
+            findings: report
+                .aliased_rows()
                 .iter()
                 .map(|(alias, finding)| FindingListToolFinding::from_finding(alias, finding))
                 .collect(),
@@ -172,7 +205,7 @@ struct FindingTableWidths {
 }
 
 fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
-    let aliased = sorted_finding_aliases(&report.findings);
+    let aliased = report.aliased_rows();
     let widths = finding_table_widths(&aliased, &report.findings);
     let mut lines = finding_table_header(widths);
     lines.extend(

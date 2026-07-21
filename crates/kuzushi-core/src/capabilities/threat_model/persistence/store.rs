@@ -99,6 +99,20 @@ pub(crate) fn write_normalized_artifact(
     Ok(path)
 }
 
+/// Write a named staged-pipeline artifact (research.json, coverage.json,
+/// gapfill.json) next to the normalized artifact, under the same
+/// workspace-containment checks.
+pub(crate) fn write_stage_artifact(
+    root: &Path,
+    output_dir: &str,
+    file_name: &str,
+    value: &Value,
+) -> Result<PathBuf> {
+    let path = checked_output_artifact_path(root, output_dir, file_name)?;
+    write_json_atomic(&path, value)?;
+    Ok(path)
+}
+
 pub(crate) fn read_json_optional(path: &Path) -> Option<Value> {
     let read = crate::bounded_file::read_utf8_text_prefix(path, MAX_THREAT_MODEL_JSON_BYTES).ok()?;
     if read.truncated {
@@ -116,6 +130,14 @@ fn checked_persistent_threat_model_path(root: &Path) -> Result<PathBuf> {
 }
 
 fn checked_normalized_artifact_path(root: &Path, output_dir: &str) -> Result<PathBuf> {
+    checked_output_artifact_path(root, output_dir, "normalized-threat-model.json")
+}
+
+fn checked_output_artifact_path(
+    root: &Path,
+    output_dir: &str,
+    file_name: &str,
+) -> Result<PathBuf> {
     let workspace = WorkspaceTarget::new(root)?;
     let directory = resolve_output_dir(workspace.root(), output_dir);
     let relative = directory.strip_prefix(workspace.root()).with_context(|| {
@@ -125,7 +147,7 @@ fn checked_normalized_artifact_path(root: &Path, output_dir: &str) -> Result<Pat
             workspace.root().display()
         )
     })?;
-    let artifact = relative.join("normalized-threat-model.json");
+    let artifact = relative.join(file_name);
     ensure_artifact_parent(workspace.root(), &artifact)?;
     crate::workspace::validated_workspace_descendant(workspace.root(), artifact)
 }

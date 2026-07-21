@@ -49,16 +49,42 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "config:show" => Some(Ok(config_show_json(ctx))),
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
+        "coverage:sweep" => Some(run_coverage_sweep(input, ctx)),
+        "coverage:baselines" => Some(run_coverage_baselines(ctx)),
+        "coverage:recommend" => Some(run_coverage_recommend(input, ctx)),
+        "fleet:register" => Some(run_fleet_register(input)),
+        "fleet:ingest" => Some(run_fleet_ingest()),
+        "fleet:status" => Some(run_fleet_status()),
+        "fleet:findings" => Some(run_fleet_findings(input)),
+        "fleet:diff-findings" => Some(run_fleet_diff_findings(input)),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
+        "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
+        "campaign:plan" => Some(crate::capabilities::campaign::execute_campaign_plan(
+            input, ctx,
+        )),
+        "campaign:status" => Some(crate::capabilities::campaign::execute_campaign_status(
+            input, ctx,
+        )),
+        "campaign:coverage" => Some(crate::capabilities::campaign::execute_campaign_coverage(
+            input, ctx,
+        )),
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
         "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
+        "findings:chains" => Some(crate::capabilities::chains::execute_findings_chains(
+            input, ctx,
+        )),
         "suppress:add" => Some(run_suppress_add(input, ctx)),
         "suppress:list" => Some(run_suppress_list(input, ctx)),
         "suppress:remove" => Some(run_suppress_remove(input, ctx)),
+        "pack:lint" => Some(crate::capabilities::pack_lint::execute_pack_lint(input, ctx)),
+        "pack:suggest-shards" => Some(crate::capabilities::shard_suggest::execute_suggest_shards(
+            input, ctx,
+        )),
         "report:build" => Some(build_report_tool(input, ctx)),
+        "report:sarif" => Some(crate::report::execute_report_sarif(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => None,
     }
@@ -113,6 +139,24 @@ pub(in crate::modules) fn config_show_json(ctx: &ToolExecutionContext<'_>) -> Va
         "model": ctx.config.model,
     });
     crate::module_result::completed_output_result(output.clone(), output, data)
+}
+
+fn workspace_import_findings_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("workspace:import-findings requires an active workspace target")?;
+    let path = bounty_import_path(input, "workspace:import-findings")?;
+    let tool_label =
+        string_input_any(input, &["tool"]).unwrap_or_else(|| "external-ledger".to_string());
+    let summary = crate::findings::import::import_ledger_jsonl(workspace, &path, &tool_label)?;
+    Ok(json!({
+        "ok": true,
+        "output": format!(
+            "workspace:import-findings imported {} finding(s) ({} row(s) skipped) from {}",
+            summary.imported, summary.skipped_rows, summary.source_path,
+        ),
+        "data": summary,
+    }))
 }
 
 fn bounty_import_har_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -203,15 +247,19 @@ pub(in crate::modules) fn list_findings_tool(
         .into_iter()
         .map(|summary| (summary.run_id.clone(), summary))
         .collect::<BTreeMap<_, _>>();
-    let findings = report
-        .findings
+    // Keep each kept row paired with its ledger alias through the
+    // provenance filter — re-aliasing the subset would relabel findings.
+    let (aliases, findings): (Vec<_>, Vec<_>) = report
+        .aliases
         .into_iter()
-        .filter(|finding| filter.matches_run_provenance(finding, &runs))
-        .collect::<Vec<_>>();
+        .zip(report.findings)
+        .filter(|(_, finding)| filter.matches_run_provenance(finding, &runs))
+        .unzip();
     let count = findings.len();
     Ok(crate::findings::FindingListReport {
         count,
         findings: findings.into_iter().take(requested_limit).collect(),
+        aliases: aliases.into_iter().take(requested_limit).collect(),
     }
     .to_tool_json())
 }
@@ -264,9 +312,9 @@ fn resolve_dismiss_target(
     if let Some(finding) = store.get_finding_by_reference(reference)? {
         return Ok(finding);
     }
-    let all = store
-        .list_findings_filtered(&FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT))?
-        .findings;
+    // Aliases are positional over the sorted whole ledger; a clamped list
+    // misresolves them once the ledger passes the presentation limit.
+    let all = store.list_all_findings()?;
     crate::findings::resolve_finding_alias(&all, reference)
         .with_context(|| format!("no finding found for {reference:?}"))
 }
@@ -519,6 +567,7 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
             Some(run_taint_iris_next_review_tool(input, ctx, runtime))
         }
         "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
+        "taint-iris-next:import-sinks" => Some(run_taint_iris_next_import_sinks_tool(input, ctx)),
         "taint-iris-next:codeql-db" => {
             Some(run_taint_iris_next_codeql_db_tool(input, ctx, runtime))
         }

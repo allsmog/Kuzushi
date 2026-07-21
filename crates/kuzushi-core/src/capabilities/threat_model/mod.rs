@@ -24,6 +24,7 @@ pub(crate) use persistence::*;
 
 pub use adapters::execute_threat_model_tool;
 pub use persistence::{
-    load_persistent_threat_model, persistent_threat_model_path, save_persistent_threat_model,
-    try_load_persistent_threat_model,
+    load_persistent_threat_model, persistent_threat_model_path, resolve_threat_model,
+    save_persistent_threat_model, try_load_persistent_threat_model, ResolvedThreatModel,
+    ThreatModelResolvedVia,
 };

@@ -25,11 +25,37 @@ pub(crate) struct WorkbenchTopBar {
     pub(crate) brand: &'static str,
     pub(crate) project: String,
     pub(crate) target: String,
-    pub(crate) live: bool,
+    pub(crate) liveness: WorkLiveness,
     pub(crate) phase: Option<String>,
     pub(crate) page: WorkbenchPage,
     pub(crate) phase_rail: Vec<JourneyPhaseStatus>,
     pub(crate) phase_next_summary: Option<String>,
+}
+
+/// Truthful activity badge state. `Idle` means nothing is changing the
+/// workspace — neither local workers nor external writers. An external
+/// writer flooding `.kuzushi` state must surface as `ExternalSync`, not
+/// masquerade as idle while the watcher churns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorkLiveness {
+    Live,
+    ExternalSync,
+    Idle,
+}
+
+/// How long the external-sync badge lingers after the last watcher batch.
+/// Long enough to survive the once-per-second liveness redraw, short enough
+/// to decay promptly once the external writer goes quiet.
+const EXTERNAL_SYNC_BADGE_WINDOW: std::time::Duration = std::time::Duration::from_secs(3);
+
+pub(crate) fn work_liveness(app: &ShellApp) -> WorkLiveness {
+    if app.has_running_work() {
+        WorkLiveness::Live
+    } else if app.ui().recent_external_sync(EXTERNAL_SYNC_BADGE_WINDOW) {
+        WorkLiveness::ExternalSync
+    } else {
+        WorkLiveness::Idle
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +105,7 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("Enter", "open in Prove"),
-    hint("findings", "clear projection"),
+    hint("findings", "show full queue"),
     hint("z", "open heatmap"),
     hint("scan", "again"),
 ];
@@ -109,26 +135,36 @@ fn workbench_chrome_model_with_journey(
     detail: Option<&FindingDetailModel>,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
+    let reference = detail.map(finding_operator_reference);
     workbench_chrome_model_for_selection_with_journey(
         app,
         page,
         detail.is_some(),
-        detail.map(|detail| detail.fingerprint.as_str()),
+        reference.as_deref(),
         journey,
     )
+}
+
+/// Operator surfaces speak in aliases (`F-0001`); the raw fingerprint is
+/// only a fallback for a finding the ledger has not aliased yet.
+fn finding_operator_reference(detail: &FindingDetailModel) -> String {
+    detail
+        .alias
+        .clone()
+        .unwrap_or_else(|| detail.fingerprint.clone())
 }
 
 fn workbench_chrome_model_for_selection_with_journey(
     app: &ShellApp,
     page: WorkbenchPage,
     has_detail: bool,
-    fingerprint: Option<&str>,
+    finding_reference: Option<&str>,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
     let state = workbench_state(app, journey);
     let mode = active_review_queue_mode(app);
     let report_cta = report_cta(state, super::visible_findings_len(app), mode);
-    chrome_model(app, page, report_cta, has_detail, fingerprint, journey)
+    chrome_model(app, page, report_cta, has_detail, finding_reference, journey)
 }
 
 fn chrome_model(
@@ -136,13 +172,13 @@ fn chrome_model(
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
     has_detail: bool,
-    fingerprint: Option<&str>,
+    finding_reference: Option<&str>,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchChromeModel {
     WorkbenchChromeModel {
         page,
         top_bar: top_bar_model(app, page, journey),
-        command_bar_hints: command_bar_hints(app, page, report_cta, has_detail, fingerprint),
+        command_bar_hints: command_bar_hints(app, page, report_cta, has_detail, finding_reference),
         zoom: app.router.workbench().zoom().pane(),
     }
 }
@@ -219,11 +255,11 @@ fn command_bar_hints(
     page: WorkbenchPage,
     report_cta: Option<WorkbenchHint>,
     has_detail: bool,
-    fingerprint: Option<&str>,
+    finding_reference: Option<&str>,
 ) -> Vec<WorkbenchHint> {
     let mut hints = page_command_bar_hint_slice(page).to_vec();
     if page == WorkbenchPage::Fix {
-        replace_patch_hint(&mut hints, fingerprint);
+        replace_patch_hint(&mut hints, finding_reference);
         replace_reverify_hint(&mut hints, app);
     }
     if page == WorkbenchPage::Prove && !has_detail {
@@ -239,7 +275,7 @@ pub(crate) fn workbench_reverify_control_hint(app: &ShellApp) -> String {
     }
     let bindings = app
         .ui()
-        .keymap_binding_labels("composer", "navigate_mode", &["F2"]);
+        .keymap_binding_labels("composer", "navigate_mode", &["Esc"]);
     if bindings.is_empty() {
         return "Navigate unbound".to_string();
     }
@@ -270,8 +306,8 @@ fn append_report_hint(hints: &mut Vec<WorkbenchHint>, report_cta: Option<Workben
     }
 }
 
-fn replace_patch_hint(hints: &mut [WorkbenchHint], fingerprint: Option<&str>) {
-    let Some(fingerprint) = fingerprint else {
+fn replace_patch_hint(hints: &mut [WorkbenchHint], finding_reference: Option<&str>) {
+    let Some(reference) = finding_reference else {
         return;
     };
     let Some(hint) = hints
@@ -280,9 +316,7 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], fingerprint: Option<&str>) {
     else {
         return;
     };
-    hint.verb = Cow::Owned(format!(
-        "run patch:finding {{\"fingerprint\":\"{fingerprint}\"}}"
-    ));
+    hint.verb = Cow::Owned(format!("patch {reference}"));
 }
 
 fn page_command_bar_hint_slice(page: WorkbenchPage) -> &'static [WorkbenchHint] {
@@ -312,7 +346,7 @@ fn top_bar_model(
         brand: "Kuzushi",
         project: project_label(app),
         target: target_label(app),
-        live: app.has_running_work(),
+        liveness: work_liveness(app),
         phase: journey.map(|journey| journey_phase_segment(journey.current)),
         page,
         phase_rail: journey
@@ -400,7 +434,7 @@ mod tests {
     fn reverify_control_names_the_active_input_mode_contract() {
         let mut app = app();
 
-        assert_eq!(workbench_reverify_control_hint(&app), "F2 then v");
+        assert_eq!(workbench_reverify_control_hint(&app), "Esc then v");
         assert!(
             app.reduce_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))
                 .handled
@@ -409,7 +443,7 @@ mod tests {
         app.set_input("unfinished draft".to_string());
         assert_eq!(
             workbench_reverify_control_hint(&app),
-            "clear prompt then F2 then v"
+            "clear prompt then Esc then v"
         );
         app.set_input(String::new());
         app.set_input_mode(crate::InputMode::Navigate);

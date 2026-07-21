@@ -79,12 +79,9 @@ fn status_line_is_kuzushi_state(line: &str) -> bool {
 }
 
 fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(args)
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(target).args(args);
+    let output = crate::bounded_subprocess::output(&mut command, "git").ok()?;
     output
         .status
         .success()
@@ -93,11 +90,9 @@ fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn run_git_checked(target: &Path, args: &[&str]) -> Result<()> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(args)
-        .output()
+    let mut command = Command::new("git");
+    command.arg("-C").arg(target).args(args);
+    let output = crate::bounded_subprocess::output(&mut command, "git")
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
     if output.status.success() {
         return Ok(());

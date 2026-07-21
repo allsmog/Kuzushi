@@ -128,8 +128,9 @@ pub(crate) fn capability_disposition(id: &str) -> Option<CapabilityDisposition> 
     use CapabilityDisposition::*;
     let disposition = match id {
         "recon" | "threat-model" | "sast" | "findings" | "verify" | "patch" => Product,
-        "bounty" | "config" | "context" | "engagement" | "entry-points" | "module-recommender"
-        | "randori" | "report" | "router" | "suppress" | "triage" | "workspace" | "x-ray" => Folded,
+        "bounty" | "campaign" | "config" | "context" | "coverage" | "engagement"
+        | "entry-points" | "fleet" | "module-recommender" | "pack" | "randori" | "report"
+        | "router" | "suppress" | "triage" | "workspace" | "x-ray" => Folded,
         "agentic-sast" | "cargo-audit" | "codeql" | "codeql-db" | "cpg" | "dep-hygiene"
         | "govulncheck" | "iac-scan" | "license-scan" | "ndiff" | "offense-review"
         | "sbom-scan" | "secret-scan" | "semgrep" | "taint-iris-next" | "threat-intel"

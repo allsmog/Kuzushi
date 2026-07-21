@@ -165,6 +165,10 @@ show runs - recent run artifacts
   aliases / examples: /show runs, runs, /runs
 jobs - live + recent run registry
   aliases / examples: /jobs, jobs list
+campaign [id] - campaign deck: planned job matrix + dispatcher queue state
+  aliases / examples: /campaign, campaigns
+coverage - coverage matrix: shards x threat sources with campaign progress + finding counts
+  aliases / examples: /coverage
 jobs -k <runId> - cancel a running job or drop a pending one
   aliases / examples: jobs kill <runId>, jobs cancel <runId>
 runs diff <left> <right> - compare findings snapshots from two runs
@@ -177,6 +181,10 @@ activity - live module-progress dashboard
   aliases / examples: /activity, progress, /progress, /a
 handoff - latest bounded failure handoff
   aliases / examples: /handoff, failure, /failure
+verify <finding> - verify a finding's exploitability (runs verify:finding)
+  aliases / examples: verify F-0001, /verify F-0001
+patch <finding> - draft a remediation for a finding (runs patch:finding)
+  aliases / examples: patch F-0001, /patch F-0001
 patch apply - apply the pending reviewed patch to the active target
   aliases / examples: /patch apply
 patch reject - discard the pending reviewed patch

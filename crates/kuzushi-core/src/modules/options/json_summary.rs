@@ -41,7 +41,13 @@ pub(in crate::modules) fn validate_tool_input_options(
             }
             None => {
                 if let Some(default) = spec.default.clone() {
-                    validated.insert(spec.name.clone(), default);
+                    // Defaults pass the same coercion as caller input so a
+                    // mistyped descriptor default cannot inject a value the
+                    // option type would have rejected.
+                    let coerced = coerce_option_value(spec, default).map_err(|error| {
+                        anyhow::anyhow!("{} option {} default: {error}", tool.name, spec.name)
+                    })?;
+                    validated.insert(spec.name.clone(), coerced);
                 }
             }
         }

@@ -1078,7 +1078,30 @@ fn normalize_state_write_path(
             state_root.display()
         )
     }
-    normalize_workspace_path(tool_name, option_name, path, workspace_root, false)
+    let normalized = normalize_workspace_path(tool_name, option_name, path, workspace_root, false)?;
+    ensure_state_write_containment(tool_name, option_name, &normalized, &state_root)?;
+    Ok(normalized)
+}
+
+/// Re-check state-root containment on the canonical path: the lexical check
+/// above cannot see a symlink under `.kuzushi/` that points elsewhere inside
+/// the workspace (which would pass workspace containment but escape state).
+fn ensure_state_write_containment(
+    tool_name: &str,
+    option_name: &str,
+    normalized: &str,
+    state_root: &std::path::Path,
+) -> Result<()> {
+    let canonical_state_root = state_root
+        .canonicalize()
+        .unwrap_or_else(|_| state_root.to_path_buf());
+    if std::path::Path::new(normalized).starts_with(&canonical_state_root) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "{tool_name} {option_name} state-write path {normalized} must stay under {}",
+        canonical_state_root.display()
+    )
 }
 
 fn enforce_path_write_authorization(
@@ -2143,6 +2166,33 @@ mod path_and_workspace_option_policy_tests {
             .to_string();
 
         assert!(error.contains("state-write path"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn state_write_symlink_cannot_escape_state_root_into_workspace() {
+        use std::os::unix::fs::symlink;
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("src")).unwrap();
+        std::fs::create_dir(temp.path().join(".kuzushi")).unwrap();
+        symlink(temp.path().join("src"), temp.path().join(".kuzushi/link")).unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let error = registry
+            .prepare_dispatch_input(
+                "codeql:create-db",
+                json!({"target": temp.path(), "outputPath": ".kuzushi/link/db"}),
+                &ctx,
+                None,
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("must stay under"), "{error}");
     }
 
     #[test]

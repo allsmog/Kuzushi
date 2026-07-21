@@ -34,7 +34,7 @@ pub(crate) fn export_findings_for_target(
     allow_empty: bool,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
-    let output = workspace_output_path(&workspace, output);
+    let output = workspace_output_path(&workspace, output)?;
     let format = format.map(WorkspaceExportFormat::from_input).transpose()?;
     let completeness = completeness
         .map(WorkspaceExportCompleteness::from_input)
@@ -84,10 +84,6 @@ fn workspace_view_from_status(status: WorkspaceStatus) -> WorkspaceView {
     }
 }
 
-fn workspace_output_path(workspace: &WorkspaceTarget, output: &PathBuf) -> PathBuf {
-    if output.is_absolute() {
-        output.clone()
-    } else {
-        workspace.root().join(output)
-    }
+fn workspace_output_path(workspace: &WorkspaceTarget, output: &PathBuf) -> Result<PathBuf> {
+    kuzushi_core::workspace::resolve_contained_output_path(workspace.root(), output)
 }

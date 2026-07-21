@@ -788,11 +788,13 @@ mod tests {
             "boot-splash",
             "cancel",
             "cancel-job",
+            "campaigns",
             "clear",
             "component",
             "config",
             "context",
             "cost",
+            "coverage",
             "demo",
             "detach",
             "failure-handoff",
@@ -870,6 +872,69 @@ mod tests {
         ]);
 
         assert_eq!(routed, expected);
+    }
+
+    /// U5 keypath registry: every command a "Next:" hint, empty-state CTA,
+    /// or NEXT strip advertises must actually route when typed verbatim
+    /// (placeholders substituted with realistic values). A renamed verb must
+    /// fail here, not in an operator's session after they typed what the
+    /// banner told them to.
+    #[test]
+    fn advertised_next_hint_commands_all_route() {
+        let advertised = [
+            // review queue empty CTA (renderer/views/workbench/panes/review_queue.rs)
+            "findings",
+            "findings filter completeness:open",
+            // finding detail next actions (ui_view_models/findings.rs)
+            "verify F-0001",
+            "patch F-0001",
+            // findings empty-state CTA + context snapshot hints
+            "context build",
+            "context status",
+            "context regen repo",
+            // workspace hints (ui_view_models/workspace.rs)
+            "workspace status",
+            "workspace scope init",
+            "workspace export findings out.json json",
+            // options hints (ui_view_models/options.rs)
+            "set MODEL_TRIAGE anthropic:claude-sonnet-4-6",
+            "setg ui.auto_open_viz false",
+            "show advanced",
+            "show missing",
+            "tools",
+            // sast task hints (ui_view_models/sast_tasks.rs)
+            "task block t1",
+            "task allow t1",
+            "task toggle",
+            "task mode auto",
+            // project model hints (ui_view_models/project_model.rs)
+            "threats summary",
+            "scan",
+            "project model",
+            // config hints (ui_view_models/config.rs)
+            "model 1",
+            "auth login openai",
+            "auth login anthropic",
+            "cost",
+            // knowledge base hints (ui_view_models/knowledge_base.rs)
+            "attach README.md",
+            // journey / cockpit verbs the NEXT banner and phase strip name
+            "next",
+            "workbench",
+            "report",
+            "setup",
+            "open F-0001",
+            "jobs",
+            "replay run-123",
+            "trace run-123",
+            "run patch:finding",
+        ];
+        for command in advertised {
+            assert!(
+                !matches!(parse_command(command), ShellCommand::Unknown(_)),
+                "advertised keypath {command:?} does not route; fix the hint or the parser"
+            );
+        }
     }
 
     #[test]
@@ -950,6 +1015,8 @@ mod tests {
             ShellCommand::ShowRuns => "show-runs",
             ShellCommand::ShowJobs => "show-jobs",
             ShellCommand::CancelJob(_) => "cancel-job",
+            ShellCommand::ShowCampaigns(_) => "campaigns",
+            ShellCommand::ShowCoverage => "coverage",
             ShellCommand::QueueCommand(_) => "queue-command",
             ShellCommand::Background => "background",
             ShellCommand::RunDiff { .. } => "run-diff",

@@ -189,6 +189,68 @@ fn findings_model_reconciliation_header_names_active_filter_expression() {
 }
 
 #[test]
+fn findings_model_reconciliation_header_tells_the_truth_in_backlog_mode() {
+    // The backlog preset hides decided rows, filters by chips, and sorts
+    // severity-major — the header must not keep claiming
+    // "review:all · sorted by priority".
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![Finding::new_tool(
+        "semgrep",
+        "demo.backlog",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "untriaged finding",
+    )];
+    let review = app.router.workbench_mut().review_mut();
+    review.backlog = true;
+    review.backlog_severity = Some("high");
+    review.backlog_tool = Some("semgrep".to_string());
+
+    let model = findings_model(&app);
+
+    assert_eq!(
+        model.reconciliation_header,
+        "showing 1 of 1 · filters:sev:high + tool:semgrep · review:open · sorted by severity"
+    );
+}
+
+#[test]
+fn findings_header_names_the_ledger_population_when_it_differs() {
+    // 481 loaded rows vs a 4340-candidate ledger must read as two labeled
+    // populations, not as two contradictory findings counts.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![Finding::new_tool(
+        "semgrep",
+        "demo.ledger",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "loaded finding",
+    )];
+    let counts = crate::app::FindingLedgerCounts {
+        total: 4340,
+        ..Default::default()
+    };
+    app.domain_mut().set_finding_ledger_counts(counts);
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.header, "FINDINGS · 1 · 1H · ledger:4340");
+
+    // Same populations → no redundant ledger segment.
+    let matching = crate::app::FindingLedgerCounts {
+        total: 1,
+        ..Default::default()
+    };
+    app.domain_mut().set_finding_ledger_counts(matching);
+    let model = findings_model(&app);
+    assert_eq!(model.header, "FINDINGS · 1 · 1H");
+}
+
+#[test]
 fn findings_model_applies_active_filter_to_visible_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_active_findings_filter(Some("decision:confirmed completeness:complete".to_string()));
@@ -964,4 +1026,53 @@ fn selected_out_of_window_finding_drives_detail_with_notice() {
     assert_eq!(detail.alias, None);
     assert_eq!(detail.title, opened.title);
     assert_eq!(detail.location, "src/opened.rs:9");
+}
+
+#[test]
+fn snippet_window_centers_on_the_finding_line_with_bounded_context() {
+    let content = (1..=20)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let snippet = snippet_from_content(&content, 10);
+
+    assert_eq!(snippet.start_line, 10 - SNIPPET_CONTEXT_BEFORE);
+    assert_eq!(snippet.focus_line, 10);
+    assert_eq!(
+        snippet.lines.len(),
+        SNIPPET_CONTEXT_BEFORE + 1 + SNIPPET_CONTEXT_AFTER
+    );
+    assert_eq!(snippet.lines[SNIPPET_CONTEXT_BEFORE], "line 10");
+    assert_eq!(snippet.note, None);
+}
+
+#[test]
+fn snippet_window_clamps_at_file_edges() {
+    let content = "one\ntwo\nthree";
+
+    let top = snippet_from_content(content, 1);
+    assert_eq!(top.start_line, 1);
+    assert_eq!(top.lines, vec!["one", "two", "three"]);
+
+    let bottom = snippet_from_content(content, 3);
+    assert_eq!(bottom.start_line, 1);
+    assert_eq!(bottom.lines.last().map(String::as_str), Some("three"));
+}
+
+#[test]
+fn snippet_window_reports_a_drifted_line_instead_of_guessing() {
+    let snippet = snippet_from_content("only line", 42);
+
+    assert!(snippet.lines.is_empty());
+    let note = snippet.note.expect("drift note");
+    assert!(note.contains("line 42"), "{note}");
+    assert!(note.contains("source has changed"), "{note}");
+}
+
+#[test]
+fn snippet_window_expands_tabs_for_stable_gutters() {
+    let snippet = snippet_from_content("\tindented", 1);
+
+    assert_eq!(snippet.lines, vec!["  indented"]);
 }

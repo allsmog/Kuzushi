@@ -117,6 +117,19 @@ create table if not exists finding_observations (
 );
 create index if not exists idx_finding_observations_stable_fp
   on finding_observations(stable_fp, created_seq desc);
+-- Expression indexes for the projected-id / fingerprint point lookups that
+-- run once per inserted finding: without them each insert re-scanned the
+-- whole observation history through json_extract (~40 ms/row at a few
+-- thousand rows, quadratic over import batches).
+create index if not exists idx_finding_observations_projected_id
+  on finding_observations(json_extract(finding_json, '$.id'), created_seq desc)
+  where finding_json is not null;
+create index if not exists idx_finding_observations_json_fingerprint
+  on finding_observations(json_extract(finding_json, '$.fingerprint'), created_seq desc)
+  where finding_json is not null;
+create index if not exists idx_finding_observations_run_id
+  on finding_observations(run_id, created_seq asc)
+  where finding_json is not null;
 
 create table if not exists finding_identities (
   identity_id text primary key,

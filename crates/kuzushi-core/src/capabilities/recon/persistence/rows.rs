@@ -11,11 +11,12 @@ pub(crate) fn row_to_host(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReconHost
 }
 
 pub(crate) fn row_to_service(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReconService> {
-    let port: i64 = row.get(2)?;
     Ok(ReconService {
         id: row.get(0)?,
         host_id: row.get(1)?,
-        port: port as u16,
+        // Typed get range-checks: a corrupted row surfaces as an error
+        // instead of silently truncating into a different port.
+        port: row.get(2)?,
         proto: row.get(3)?,
         name: row.get(4)?,
         banner: row.get(5)?,

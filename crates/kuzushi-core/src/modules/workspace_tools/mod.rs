@@ -8,7 +8,7 @@ use crate::workspace::{
     WorkspaceExportOptions, WorkspaceFindingsExport,
 };
 
-use super::input::{read_bool_any, resolve_input_path, string_input_any};
+use super::input::{read_bool_any, string_input_any};
 use super::ToolExecutionContext;
 
 pub(in crate::modules) fn workspace_status_output(ctx: &ToolExecutionContext<'_>) -> String {
@@ -53,7 +53,9 @@ struct WorkspaceExportToolRequest {
 fn workspace_export_tool_request(input: &Value, root: &Path) -> Result<WorkspaceExportToolRequest> {
     let output = string_input_any(&input, &["output", "path"])
         .context("workspace:export-findings requires output=<path>. Next: run workspace:export-findings {\"output\":\"findings.json\"}")?;
-    let output_path = resolve_input_path(root, &output);
+    let output_path =
+        crate::workspace::resolve_contained_output_path(root, Path::new(output.trim()))
+            .context("workspace:export-findings output must resolve inside the workspace root")?;
     let format = string_input_any(&input, &["format"])
         .map(|value| WorkspaceExportFormat::from_input(&value))
         .transpose()?;
@@ -253,6 +255,25 @@ authorization: Default::default(),
         let body: Value = serde_json::from_str(&std::fs::read_to_string(output).unwrap()).unwrap();
         assert_eq!(body["completeness"], "complete");
         assert_eq!(body["findings"][0]["ruleId"], "fixture/sql");
+    }
+
+    #[test]
+    fn export_workspace_findings_tool_rejects_output_outside_workspace() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        seed_workspace_finding(&workspace);
+        let config = V2Config::default();
+        let ctx = workspace_tool_context(&config, &workspace);
+
+        for output in ["../escape.json", "/tmp/outside-export.json"] {
+            let error = export_workspace_findings_tool(json!({ "output": output }), &ctx)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("inside the workspace root"),
+                "{output}: {error}"
+            );
+        }
     }
 
     #[test]

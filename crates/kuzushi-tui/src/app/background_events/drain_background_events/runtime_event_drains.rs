@@ -139,11 +139,19 @@ impl ShellApp {
             return false;
         };
         self.clear_pending_run_focus_completion();
-        self.restore_run_focus_origin(&completion);
+        let restored = self.restore_run_focus_origin(&completion);
         self.publish_run_focus_receipt(
             completion.receipt,
             completion.answer_acknowledgement.as_deref(),
         );
+        // Deferred decks open only after the receipt refresh above: it
+        // invalidates the view caches the deck renders from, so opening
+        // earlier lands on an empty frame until manually reopened.
+        if restored {
+            if let Some(page) = completion.pending_viz {
+                self.open_deferred_viz_page(page);
+            }
+        }
         true
     }
 
@@ -167,16 +175,14 @@ impl ShellApp {
         }
     }
 
-    fn restore_run_focus_origin(&mut self, completion: &RunFocusCompletion) {
+    fn restore_run_focus_origin(&mut self, completion: &RunFocusCompletion) -> bool {
         if !completion.should_restore(self.shell_view()) {
-            return;
+            return false;
         }
         let origin = completion.origin.expect("restore decision requires origin");
         self.set_shell_view(origin.view);
         self.set_input_mode(origin.input_mode);
-        if let Some(page) = completion.pending_viz {
-            self.open_scene_to_page(page);
-        }
+        true
     }
 
     fn publish_run_focus_receipt(

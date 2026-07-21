@@ -101,7 +101,11 @@ pub(crate) struct ScanAttemptModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ScanEngineOutcomeModel {
+    /// Operator-facing verb-phrase label.
     pub(crate) engine: String,
+    /// Raw registry key when known — the only valid source for a runnable
+    /// `run <tool> {}` command; labels are never parseable back into keys.
+    pub(crate) tool_key: Option<String>,
     pub(crate) outcome: String,
     pub(crate) run_ref: Option<String>,
     pub(crate) detail: Option<String>,
@@ -122,7 +126,7 @@ pub(crate) struct EngagementHeaderModel {
     pub(crate) cost_complete: bool,
     pub(crate) cost_invalid: bool,
     pub(crate) budget_usd: Option<f64>,
-    pub(crate) live: bool,
+    pub(crate) liveness: super::WorkLiveness,
     pub(crate) finding_filter: Option<String>,
     pub(crate) phase_rail: Vec<JourneyPhaseStatus>,
     pub(crate) next_action: String,
@@ -136,8 +140,27 @@ pub(crate) struct MapPhaseModel {
     pub(crate) project: ProjectModel,
     pub(crate) attack_surface: Option<AttackSurfaceRiskModel>,
     pub(crate) hot_modules: RiskByModule,
+    pub(crate) next_scans: NextScansState,
     pub(crate) dfd: DfdModel,
     pub(crate) empty_hint: Option<String>,
+}
+
+/// Coverage-ledger scan recommendations shown inside the HOT MODULES pane.
+/// `Pending` draws nothing: the fold runs off-frame in the hydration worker
+/// and the pane must not flash placeholder chrome while it loads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NextScansState {
+    Pending,
+    Ready(Vec<NextScanRow>),
+    Unavailable(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NextScanRow {
+    pub(crate) scope: String,
+    pub(crate) phase: String,
+    pub(crate) reason: String,
+    pub(crate) evidence: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -335,7 +358,7 @@ fn engagement_header_model(
         cost_complete: app.session().cost_accounting_is_complete(),
         cost_invalid: app.session().cost_accounting_error().is_some(),
         budget_usd: app.session().session_budget_usd(),
-        live: app.has_running_work(),
+        liveness: super::work_liveness(app),
         finding_filter: app.active_findings_filter().clone(),
         phase_rail: guidance.phase_rail,
         next_action: guidance.next_action,
@@ -355,11 +378,19 @@ fn phase_result_card_model(
     presentation: crate::app::PhaseResultPresentation,
 ) -> PhaseResultCardModel {
     let verified_remediation = app.verified_remediation_result_is_open(phase);
+    // The strip renders `recommended` as its own trailing `next:` row, so
+    // the identical row inside the presentation details would print twice.
+    let trailing_next = format!("next: {}", presentation.recommended_next);
+    let detail_rows = presentation
+        .detail_rows
+        .into_iter()
+        .filter(|row| row.text != trailing_next)
+        .collect();
     PhaseResultCardModel {
         attempt_id: presentation.attempt_id,
         outcome: presentation.outcome.clone(),
         detail: presentation.detail_lines.join("\n"),
-        detail_rows: presentation.detail_rows,
+        detail_rows,
         semantic_keys: presentation.semantic_keys,
         control_hint: phase_result_control_hint(
             app,
@@ -389,7 +420,7 @@ fn phase_result_control_hint(
 fn prompt_result_control_hint(app: &ShellApp) -> String {
     let bindings = app
         .ui()
-        .keymap_binding_labels("composer", "navigate_mode", &["F2"]);
+        .keymap_binding_labels("composer", "navigate_mode", &["Esc"]);
     if bindings.is_empty() {
         return "Navigate unbound · configure composer.navigate_mode".to_string();
     }
@@ -449,10 +480,10 @@ fn result_action_label(
         Refine => "Refine".to_string(),
         RunAgain => "Run again".to_string(),
         Regenerate => "Regenerate".to_string(),
-        Discard if matches!(phase, WorkflowPhase::Review | WorkflowPhase::Fix) => {
-            "Discard".to_string()
-        }
-        Discard => "Dismiss".to_string(),
+        // One verb per action everywhere: the guided card, the disposition
+        // event, and this strip all say Discard. "Dismiss" belongs to
+        // findings decisions, not attempt dispositions.
+        Discard => "Discard".to_string(),
     };
     let command = PhaseResultCommand::from_action(action);
     let labels = app.ui().keymap_binding_labels(

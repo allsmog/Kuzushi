@@ -556,6 +556,7 @@ mod tests {
             Some("hunt".to_string()),
             Some(workspace.root().to_path_buf()),
             Vec::new(),
+            None,
         )
         .expect_err("triage:run must be refused under deprecated --autonomy hunt alias");
         assert!(error.to_string().contains("raise posture"), "{error}");
@@ -572,6 +573,7 @@ mod tests {
             Some("bogus".to_string()),
             Some(workspace.root().to_path_buf()),
             Vec::new(),
+            None,
         )
         .expect_err("an unknown rung must be a hard error");
         assert!(
@@ -588,6 +590,7 @@ mod tests {
             None,
             Some(workspace.root().to_path_buf()),
             Vec::new(),
+            None,
         )
         .unwrap();
         latest_cli_run_id(workspace)
@@ -836,7 +839,7 @@ mod tests {
         assert!(bare.contains("loading config"));
         assert!(bare.contains("native registry"));
         assert!(bare.contains("choose a target in the picker"));
-        assert!(bare.contains("press d for the offline demo"));
+        assert!(bare.contains("run `demo` for the offline fixture"));
         assert!(!bare.contains("scan ."));
 
         let targeted = shell_startup_progress_messages(Some(Path::new("."))).join("\n");

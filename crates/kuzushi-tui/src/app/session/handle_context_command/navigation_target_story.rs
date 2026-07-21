@@ -335,6 +335,13 @@ impl ShellApp {
                 );
             }
         }
+        // Discovery can take a minute on large targets; without this line
+        // the transcript shows total silence between the view change and
+        // "project scopes ready".
+        self.log(
+            "scope:mapping",
+            "mapping project scopes in the background — findings work is not blocked",
+        );
         self.runtime_state
             .start_project_scope_discovery(root.to_path_buf());
     }
@@ -506,10 +513,19 @@ impl ShellApp {
         root: &Path,
         tree: kuzushi_core::NestedProjectScopeTree,
     ) {
+        // State events re-deliver the persisted tree; an unchanged tree must
+        // not reset the active scope or re-announce readiness. The dedup
+        // memory lives on the session, not in the workbench cache — cache
+        // invalidation from external `.kuzushi/v3` churn once turned this
+        // announcement into a per-watcher-batch log storm.
+        let already_announced = self.session.scope_tree_already_announced(root, &tree);
         let preferred = self.active_scope().map(|scope| scope.id.clone());
         self.workbench_cache()
             .borrow_mut()
             .cache_persisted_project_scope_tree(root, tree.clone());
+        if already_announced {
+            return;
+        }
         self.set_active_scope(active_scope_from_tree(&tree, preferred.as_deref()));
         self.log(
             "scope:mapping",
@@ -518,6 +534,8 @@ impl ShellApp {
                 tree.scopes.len().saturating_sub(1)
             ),
         );
+        self.session
+            .record_scope_tree_announcement(root.to_path_buf(), tree);
     }
 
     pub(crate) fn show_story(&mut self) {

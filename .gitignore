@@ -75,3 +75,9 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 plans/artifacts/
+
+# Rust compiler intermediates must never land outside target/.
+*.rmeta
+
+# Scratch space (screenshots, live-audit captures) — never tracked.
+/tmp/

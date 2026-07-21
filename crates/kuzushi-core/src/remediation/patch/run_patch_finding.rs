@@ -127,7 +127,7 @@ fn confirmed_patch_candidate(
     store: &crate::findings::FindingStore,
     input: &PatchFindingInput,
 ) -> Result<PatchCandidateLookup> {
-    let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
+    let Some(finding) = store.get_finding_by_operator_reference(&input.fingerprint)? else {
         return Ok(PatchCandidateLookup::Refused(
             super::patch_refusal_response::missing_patch_finding_response(&input.fingerprint),
         ));

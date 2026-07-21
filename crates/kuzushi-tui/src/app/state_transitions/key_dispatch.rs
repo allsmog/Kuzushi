@@ -12,6 +12,7 @@ enum JourneyPhaseEntry {
 
 impl ShellApp {
     pub(crate) fn reduce_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let key = normalize_back_tab(key);
         let update = self.reduce_key_without_recording(key);
         if update.handled {
             self.record_operator_interaction();
@@ -428,10 +429,13 @@ impl ShellApp {
             if self.guided_scan_is_awaiting(phase) {
                 self.clear_guided_scan();
             }
-            self.log(
+            // The card vanishes on discard, so a visible receipt is the only
+            // on-screen acknowledgement that the keypress resolved the
+            // attempt rather than deleting it. One verb: Discard.
+            self.set_info_notice(
                 "workflow",
                 format!(
-                    "dismissed attempt {} — canonical run evidence was retained",
+                    "discarded attempt {} — run evidence retained",
                     record.completed.attempt_id
                 ),
             );
@@ -683,6 +687,7 @@ impl ShellApp {
                 | ShellView::Keymap
                 | ShellView::Help
                 | ShellView::Jobs
+                | ShellView::Campaign
                 | ShellView::Replay
                 | ShellView::Trace
                 | ShellView::Scene
@@ -1088,19 +1093,27 @@ impl ShellApp {
     }
 
     fn handle_input_mode_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
-        if !modifiers.no_modifiers {
+        if !modifiers.no_modifiers || key.code != KeyCode::Esc {
             return false;
         }
-        if key.code == KeyCode::F(2) && self.default_composer_action_enabled("navigate_mode") {
-            self.enter_navigate_mode();
-            return true;
-        }
-        if key.code == KeyCode::Esc
-            && self.input_mode() == InputMode::Navigate
-            && self.default_composer_action_enabled("prompt_mode")
-        {
-            self.enter_prompt_mode();
-            return true;
+        // Esc toggles the composer mode: with a draft or completion popup the
+        // line editor consumes Esc first (clear/restore), so Navigate entry
+        // only fires on an empty prompt.
+        match self.input_mode() {
+            InputMode::Prompt => {
+                if self.input().is_empty()
+                    && self.default_composer_action_enabled("navigate_mode")
+                {
+                    self.enter_navigate_mode();
+                    return true;
+                }
+            }
+            InputMode::Navigate => {
+                if self.default_composer_action_enabled("prompt_mode") {
+                    self.enter_prompt_mode();
+                    return true;
+                }
+            }
         }
         false
     }
@@ -1136,7 +1149,7 @@ impl ShellApp {
 
     fn enter_prompt_mode(&mut self) {
         self.set_input_mode(InputMode::Prompt);
-        self.log("input", "prompt mode — F2 returns to navigation");
+        self.log("input", "prompt mode — Esc on an empty prompt returns to navigation");
     }
 
     fn handle_unhandled_navigation_key(
@@ -1160,6 +1173,18 @@ impl ShellApp {
         }
         true
     }
+}
+
+/// Terminals speaking an enhanced keyboard protocol (kitty CSI-u,
+/// modifyOtherKeys, tmux extended-keys) report Shift+Tab as `Tab` with the
+/// SHIFT modifier instead of the legacy `ESC [ Z` BackTab that every binding
+/// in this crate matches. Fold that encoding into the canonical BackTab
+/// before dispatch so Shift+Tab behaves the same on every terminal.
+fn normalize_back_tab(mut key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT) {
+        key.code = KeyCode::BackTab;
+    }
+    key
 }
 
 fn guided_question_yields_to_control_c(key: KeyEvent) -> bool {

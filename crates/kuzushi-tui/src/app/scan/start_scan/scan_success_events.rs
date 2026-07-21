@@ -717,9 +717,9 @@ fn scan_finding_label(count: usize) -> &'static str {
 
 fn scan_completion_next_step(findings_count: usize) -> &'static str {
     if findings_count == 0 {
-        "崩 scan complete · no candidates · inspect the Scan result before Report"
+        "Scan complete · no candidates · inspect the Scan result before Report"
     } else {
-        "next: 査 review · `findings` to browse or `next` to triage"
+        "next: Review · `findings` to browse or `next` to triage"
     }
 }
 

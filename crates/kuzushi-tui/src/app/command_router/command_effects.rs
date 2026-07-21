@@ -43,6 +43,14 @@ impl ShellApp {
                 Some(Vec::new())
             }
             ShellCommand::CancelJob(run_id) => Some(self.reduce_cancel_job(run_id)),
+            ShellCommand::ShowCampaigns(campaign_id) => {
+                self.open_campaign_view(campaign_id.clone());
+                Some(Vec::new())
+            }
+            ShellCommand::ShowCoverage => {
+                self.open_coverage_view();
+                Some(Vec::new())
+            }
             ShellCommand::QueueCommand(raw) => Some(self.reduce_queue_command(raw)),
             ShellCommand::Background => {
                 self.background_handoff();
@@ -590,7 +598,7 @@ impl ShellApp {
         self.log(
             "capability",
             format!(
-                "showing {count} phase-native {} · press F2, then e for expert engines",
+                "showing {count} phase-native {} · press Esc, then e for expert engines",
                 if count == 1 { "action" } else { "actions" }
             ),
         );
@@ -1025,7 +1033,7 @@ impl ShellApp {
         self.open_modules_view();
         self.log(
             "recommend",
-            "phase-native capabilities are derived from workspace reality · press F2, then e for engines",
+            "phase-native capabilities are derived from workspace reality · press Esc, then e for engines",
         );
         Vec::new()
     }

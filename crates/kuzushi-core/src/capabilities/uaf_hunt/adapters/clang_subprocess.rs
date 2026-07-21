@@ -318,34 +318,20 @@ pub(crate) fn rewrite_unsupported_method_error(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
-        match previous {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-    }
 
     #[test]
     fn locate_mcp_clang_honors_explicit_path_and_reports_missing_override() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = crate::test_env::mcp_clang_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let binary = temp.path().join("kuzushi-mcp-clang");
         std::fs::write(&binary, "").unwrap();
 
-        let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
-        std::env::set_var("KUZUSHI_MCP_CLANG_BIN", &binary);
+        let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_MCP_CLANG_BIN", &binary);
         assert_eq!(locate_mcp_clang_binary().unwrap(), binary);
 
-        std::env::set_var("KUZUSHI_MCP_CLANG_BIN", temp.path().join("missing"));
+        let _missing =
+            crate::test_env::ScopedEnv::set("KUZUSHI_MCP_CLANG_BIN", temp.path().join("missing"));
         let err = locate_mcp_clang_binary().unwrap_err().to_string();
-        restore_env("KUZUSHI_MCP_CLANG_BIN", previous);
 
         assert!(err.contains("KUZUSHI_MCP_CLANG_BIN"));
         assert!(err.contains("does not exist"));
@@ -354,15 +340,20 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn which_mcp_clang_finds_binary_on_path() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = crate::test_env::mcp_clang_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let binary = temp.path().join("kuzushi-mcp-clang");
         std::fs::write(&binary, "").unwrap();
 
-        let previous = std::env::var_os("PATH");
-        std::env::set_var("PATH", temp.path());
+        // Prepend rather than replace: PATH is process-global, and replacing it
+        // makes every concurrently spawned subprocess in sibling tests
+        // intermittently unresolvable.
+        let ambient_path = std::env::var("PATH").unwrap_or_default();
+        let _path = crate::test_env::ScopedEnv::set(
+            "PATH",
+            format!("{}:{ambient_path}", temp.path().display()),
+        );
         assert_eq!(which_kuzushi_mcp_clang(), Some(binary));
-        restore_env("PATH", previous);
     }
 
     #[test]

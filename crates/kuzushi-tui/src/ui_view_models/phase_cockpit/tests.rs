@@ -84,12 +84,12 @@ fn phase_result_card_discloses_controls_for_the_active_input_mode() {
 
     assert_eq!(
         map_result_control_hint(&app),
-        "F2 Navigate to resolve this result"
+        "Esc Navigate to resolve this result"
     );
     app.set_input("keep this operator draft");
     assert_eq!(
         map_result_control_hint(&app),
-        "F2 Navigate after finishing or clearing prompt draft"
+        "Esc Navigate after finishing or clearing prompt draft"
     );
     app.clear_input();
     app.set_input_mode(InputMode::Navigate);
@@ -503,7 +503,7 @@ fn fix_model_projects_every_durable_patch_lifecycle_receipt() {
             );
             assert_eq!(
                 fix.remediation.reverify_control_hint.as_deref(),
-                Some("F2 then v")
+                Some("Esc then v")
             );
         }
     }
@@ -630,7 +630,7 @@ fn restarted_result_card_restores_durable_metadata_and_typed_actions() {
     assert!(card.detail.contains("4 finding delta"));
     assert!(card.detail.contains("2 interaction(s)"));
     assert_eq!(card.recommended, "acknowledge the partial Scan");
-    assert_eq!(card.control_hint, "F2 Navigate to resolve this result");
+    assert_eq!(card.control_hint, "Esc Navigate to resolve this result");
 }
 
 #[test]
@@ -659,6 +659,49 @@ fn phase_result_card_retains_canonical_keys_until_rendering() {
     let card = phase_result_card_model(&app, WorkflowPhase::Scan, presentation);
 
     assert_eq!(card.semantic_keys, std::collections::BTreeSet::from([key]));
+}
+
+#[test]
+fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
+    // The strip renders `recommended` as its own `next:` row after the
+    // control hint; the identical presentation detail row must not make
+    // the recommendation print twice (J18 caught this live).
+    let presentation = crate::app::PhaseResultPresentation {
+        attempt_id: "attempt-failed".to_string(),
+        outcome: "failed".to_string(),
+        detail_lines: vec![
+            "1 canonical run reference(s)".to_string(),
+            "next: open the failed run, adjust its input, or run it again".to_string(),
+        ],
+        detail_rows: ["1 canonical run reference(s)", "next: open the failed run, adjust its input, or run it again"]
+            .into_iter()
+            .map(|text| crate::app::PhaseResultDetailRow {
+                key: None,
+                disclosed_keys: std::collections::BTreeSet::new(),
+                text: text.to_string(),
+            })
+            .collect(),
+        semantic_keys: std::collections::BTreeSet::new(),
+        actions: vec![PhaseResultAction::Open],
+        recommended_next: "open the failed run, adjust its input, or run it again".to_string(),
+    };
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let card = phase_result_card_model(&app, WorkflowPhase::Map, presentation);
+
+    assert_eq!(
+        card.detail_rows
+            .iter()
+            .filter(|row| row.text.starts_with("next: "))
+            .count(),
+        0,
+        "recommendation must render exactly once, from `recommended`"
+    );
+    assert_eq!(card.detail_rows.len(), 1);
+    assert_eq!(
+        card.recommended,
+        "open the failed run, adjust its input, or run it again"
+    );
 }
 
 fn persist_imported_scan_attempt(target: &std::path::Path) {

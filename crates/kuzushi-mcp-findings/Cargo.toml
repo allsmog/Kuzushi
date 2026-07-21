@@ -1,0 +1,27 @@
+[package]
+name = "kuzushi-mcp-findings"
+description = "Local MCP server serving read-only prior-finding queries from the workspace findings DB (.kuzushi/v3/index.sqlite3) to an agent."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "kuzushi-mcp-findings"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
+rusqlite.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

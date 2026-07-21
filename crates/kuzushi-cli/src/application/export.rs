@@ -23,7 +23,8 @@ pub(crate) fn export_command(
     if preview {
         return preview_export_command(&workspace, format, options);
     }
-    let output = resolve_export_output(workspace.root(), output);
+    let output = kuzushi_core::workspace::resolve_contained_output_path(workspace.root(), &output)
+        .context("export output must resolve inside the workspace root")?;
     let report = export_workspace_findings_with_options(&workspace, &output, options)?;
     println!(
         "exported {} finding(s) to {} ({}, completeness:{})",
@@ -55,10 +56,30 @@ fn resolve_export_format(
         .context("invalid export format")
 }
 
-fn resolve_export_output(root: &std::path::Path, output: PathBuf) -> PathBuf {
-    if output.is_absolute() {
-        output
-    } else {
-        root.join(output)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn export_output_outside_workspace_is_rejected() {
+        let workspace = tempfile::tempdir().unwrap();
+        kuzushi_core::WorkspaceTarget::new(workspace.path()).unwrap();
+
+        for output in ["../escape.json", "/tmp/outside-export.json"] {
+            let error = export_command(
+                workspace.path().to_path_buf(),
+                PathBuf::from(output),
+                Some("json".to_string()),
+                "all".to_string(),
+                false,
+                true,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(
+                error.contains("inside the workspace root"),
+                "{output}: {error}"
+            );
+        }
     }
 }

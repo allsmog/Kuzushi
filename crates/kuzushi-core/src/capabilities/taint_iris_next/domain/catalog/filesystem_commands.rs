@@ -22,6 +22,7 @@ pub(super) const COMMAND_INJECTION: TaintIrisNextCatalogEntry = TaintIrisNextCat
         "process.argv",
         "os.environ",
         "env::args",
+        "getenv(",
     ],
     sink_signals: &[
         "child_process.exec",
@@ -29,6 +30,10 @@ pub(super) const COMMAND_INJECTION: TaintIrisNextCatalogEntry = TaintIrisNextCat
         "Popen",
         "Command::new",
         "shell=True",
+        "system(",
+        "popen(",
+        "execv",
+        "posix_spawn",
     ],
     sanitizer_signals: &["execFile", "argument vector", "allowlist", "shellwords"],
     structural_queries: &[
@@ -37,5 +42,8 @@ pub(super) const COMMAND_INJECTION: TaintIrisNextCatalogEntry = TaintIrisNextCat
         "subprocess",
         "Popen",
         "shell=True",
+        "system(",
+        "popen(",
+        "execv",
     ],
 };

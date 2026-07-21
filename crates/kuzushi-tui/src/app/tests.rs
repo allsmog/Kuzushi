@@ -5074,9 +5074,21 @@ fn workspace_export_findings_to_temp_path() {
             ),
         )
         .unwrap();
-    let output = export_dir.path().join("findings.json");
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
+    // Output paths outside the workspace root are rejected (containment).
+    run_command(
+        &mut app,
+        ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+            output: export_dir.path().join("findings.json"),
+            format: None,
+            completeness: None,
+            allow_empty: false,
+        }),
+    );
+    assert_eq!(app.domain().workspace_view().last_export, None);
+
+    let output = workspace.root().join("exports/findings.json");
     run_command(
         &mut app,
         ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
@@ -10862,14 +10874,24 @@ fn target_picker_cannot_activate_candidate_while_planner_is_live() {
 }
 
 #[test]
-fn target_picker_d_starts_the_offline_fixture() {
+fn target_picker_command_line_demo_starts_the_offline_fixture() {
     let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::TargetPicker);
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
+    );
+    for ch in "demo".chars() {
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        );
+    }
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
     assert!(
@@ -10881,6 +10903,22 @@ fn target_picker_d_starts_the_offline_fixture() {
         .log_lines()
         .iter()
         .any(|line| line.body.contains("offline fixture ready")));
+}
+
+#[test]
+fn target_picker_plain_d_no_longer_starts_the_offline_fixture() {
+    // The bare `d` demo shortcut was removed from every onboarding picker; the
+    // fixture is reachable only through the explicit `demo` command.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::TargetPicker);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
+    );
+
+    assert!(app.target().is_none());
+    assert_eq!(app.shell_view(), ShellView::TargetPicker);
 }
 
 #[test]
@@ -11022,8 +11060,31 @@ fn auth_picker_selected_kind_tracks_the_row_model() {
 }
 
 #[test]
-fn auth_picker_d_runs_the_offline_fixture_outside_key_editor() {
+fn auth_picker_enter_on_offline_demo_row_runs_the_fixture() {
     let _fixture_lock = demo_fixture_test_lock();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.open_auth_method_picker("anthropic".to_string());
+    let demo_row = app.router.auth_picker().row_count() - 1;
+    app.router.auth_picker_mut().set_cursor(demo_row);
+    assert!(app.router.auth_picker().is_offline_demo_row());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert!(app.router.auth_picker().key_draft().is_empty());
+    assert!(
+        app.target().is_some(),
+        "offline fixture target should be active"
+    );
+    assert_ne!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+}
+
+#[test]
+fn auth_picker_plain_d_no_longer_runs_the_offline_fixture() {
+    // The bare `d` demo shortcut was removed; the offline fixture is reached
+    // through its dedicated picker row or the explicit `demo` command.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("anthropic".to_string());
     app.router.auth_picker_mut().set_cursor(1);
@@ -11033,12 +11094,8 @@ fn auth_picker_d_runs_the_offline_fixture_outside_key_editor() {
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()),
     );
 
-    assert!(app.router.auth_picker().key_draft().is_empty());
-    assert!(
-        app.target().is_some(),
-        "offline fixture target should be active"
-    );
-    assert_ne!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+    assert!(app.target().is_none());
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
 }
 
 #[test]
@@ -11968,6 +12025,54 @@ fn external_scope_artifact_invalidates_root_only_cache() {
         Some(ProjectScopeTreeState::Persisted(tree))
             if tree.scopes.iter().any(|scope| scope.rel_path == "packages/api")
     ));
+}
+
+#[test]
+fn unchanged_scope_tree_redelivery_announces_ready_only_once() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let component = target.path().join("packages/api");
+    fs::create_dir_all(component.join("src")).unwrap();
+    fs::write(component.join("package.json"), "{}").unwrap();
+    fs::write(component.join("src/index.ts"), "export const api = true;\n").unwrap();
+    kuzushi_core::discover_and_save_nested_project_scopes(target.path()).unwrap();
+    let scope_change = [PathBuf::from(".kuzushi/v3/project-model/scopes.json")];
+
+    app.apply_external_workspace_state_change(&scope_change);
+    assert_eq!(scope_ready_announcements(&app), 1);
+
+    // External `.kuzushi/v3` churn invalidates the workbench cache between
+    // re-deliveries of the same tree. The announcement dedup must survive
+    // that, or every watcher batch re-announces readiness — a real
+    // transcript recorded the same line 13,745 times in one session.
+    for _ in 0..3 {
+        app.workbench_cache()
+            .borrow_mut()
+            .invalidate_workspace_files();
+        app.apply_external_workspace_state_change(&scope_change);
+    }
+    assert_eq!(
+        scope_ready_announcements(&app),
+        1,
+        "an unchanged tree must be announced exactly once"
+    );
+
+    // A genuinely different tree is news and must be announced again.
+    let second = target.path().join("packages/worker");
+    fs::create_dir_all(second.join("src")).unwrap();
+    fs::write(second.join("package.json"), "{}").unwrap();
+    fs::write(second.join("src/index.ts"), "export const worker = true;\n").unwrap();
+    kuzushi_core::discover_and_save_nested_project_scopes(target.path()).unwrap();
+    app.apply_external_workspace_state_change(&scope_change);
+    assert_eq!(scope_ready_announcements(&app), 2);
+}
+
+fn scope_ready_announcements(app: &ShellApp) -> usize {
+    app.log_lines()
+        .iter()
+        .filter(|line| line.body.contains("project scopes ready"))
+        .count()
 }
 
 #[test]
@@ -13333,12 +13438,30 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 assert_eq!(app.input_mode(), crate::InputMode::Prompt);
                 assert!(!app.tool_is_running());
             }
+            ViewHotkeyAction::WorkbenchChainFold => {
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert_eq!(app.input(), "run findings:chains {}");
+                assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+                assert!(!app.tool_is_running());
+            }
             ViewHotkeyAction::WorkbenchCluster => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
                 assert!(app.log_lines().iter().any(|line| {
                     line.prefix == "cluster" && line.body.contains("distinct sinks")
                 }));
+            }
+            ViewHotkeyAction::WorkbenchBacklogToggle => {
+                app.router
+                    .workbench_mut()
+                    .set_page(Some(WorkbenchPage::Review));
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(app.router.workbench().review().backlog);
+                assert!(app.log_lines().iter().any(|line| {
+                    line.prefix == "review" && line.body.contains("backlog preset ON")
+                }));
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(!app.router.workbench().review().backlog);
             }
             ViewHotkeyAction::OpenNextPhase => {
                 let target = tempfile::tempdir().unwrap();
@@ -13527,6 +13650,22 @@ fn shift_tab_cycles_workbench_modes_without_mutating_the_shared_draft() {
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Fix));
     assert_eq!(app.input(), "scan only src/auth");
     assert_eq!(app.cursor(), 4);
+}
+
+#[test]
+fn shift_tab_reported_as_shifted_tab_still_cycles_workbench_modes() {
+    // Enhanced keyboard protocols (kitty CSI-u, modifyOtherKeys) deliver
+    // Shift+Tab as Tab+SHIFT instead of the legacy BackTab sequence.
+    let mut app = app_with_findings(2);
+    app.set_input_mode(crate::InputMode::Prompt);
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
+
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Fix));
 }
 
 #[test]
@@ -17429,7 +17568,10 @@ fn auto_open_viz_page_is_inert_when_disabled() {
 #[test]
 fn foreground_visualization_opens_contextually_after_run_focus_restores() {
     use crate::scene3d::VizPage;
+    let temp = tempfile::tempdir().unwrap();
+    write_concrete_threat_model_dfd(temp.path());
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
     app.ui_mut().set_auto_open_viz(true);
     app.set_shell_view(ShellView::Home);
     let session = app.capture_run_focus_origin(ActivitySession::new("run-viz"));
@@ -17452,6 +17594,55 @@ fn foreground_visualization_opens_contextually_after_run_focus_restores() {
     assert_eq!(app.shell_view(), ShellView::Scene);
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
     assert_eq!(app.router.overlay_origin(), Some(ShellView::Home));
+}
+
+/// The deferred deck re-checks content after the receipt refresh: a run that
+/// left no renderable artifact restores the origin instead of landing the
+/// operator on an empty deck (it previously opened blank until reopened).
+#[test]
+fn deferred_visualization_without_artifact_restores_origin_instead_of_empty_deck() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.ui_mut().set_auto_open_viz(true);
+    app.set_shell_view(ShellView::Home);
+    let session = app.capture_run_focus_origin(ActivitySession::new("run-viz"));
+    app.set_activity(Some(session));
+    app.set_shell_view(ShellView::Activity);
+    app.auto_open_viz_page(VizPage::Dfd);
+
+    app.activity_mut()
+        .expect("run focus")
+        .mark_run_focus_terminal_pending("completed");
+    assert!(app.run_background_maintenance());
+
+    assert_eq!(app.shell_view(), ShellView::Home);
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "scene" && line.body.contains("artifact still hydrating")
+    }));
+}
+
+fn write_concrete_threat_model_dfd(root: &std::path::Path) {
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(root);
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        path,
+        serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "node-a", "name": "api", "trustZone": "app", "type": "process"},
+                    {"id": "node-b", "name": "store", "trustZone": "data", "type": "data-store"}
+                ],
+                "flows": [{
+                    "id": "flow",
+                    "sourceId": "node-a",
+                    "targetId": "node-b",
+                    "description": "write"
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -18843,7 +19034,7 @@ fn non_empty_prompt_characters_type_instead_of_triggering_view_hotkeys() {
 }
 
 #[test]
-fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
+fn navigate_mode_enables_view_hotkeys_and_esc_toggles_modes() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
     app.router
@@ -18851,10 +19042,7 @@ fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
         .set_page(Some(WorkbenchPage::Review));
     *app.findings_mut() = sample_two_findings();
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::F(2), KeyModifiers::empty()),
-    );
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
@@ -18864,20 +19052,29 @@ fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
     assert_eq!(app.router.findings().cursor(), 1);
     assert_eq!(app.input_mode(), crate::InputMode::Navigate);
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::F(2), KeyModifiers::empty()),
-    );
-    assert_eq!(
-        app.input_mode(),
-        crate::InputMode::Navigate,
-        "F2 enters Navigate mode and never toggles back to Prompt"
-    );
-
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+}
+
+#[test]
+fn esc_with_a_prompt_draft_clears_before_entering_navigate_mode() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Prompt);
+    app.set_input("scan only src/auth".to_string());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert_eq!(app.input(), "", "first Esc clears the draft");
+    assert_eq!(
+        app.input_mode(),
+        crate::InputMode::Prompt,
+        "clearing a draft must not also switch modes"
+    );
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert_eq!(app.input_mode(), crate::InputMode::Navigate);
 }
 
 fn sample_two_findings() -> Vec<kuzushi_core::Finding> {
@@ -19370,4 +19567,453 @@ fn jobs_verb_opens_the_jobs_registry_view() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::ShowJobs);
     assert_eq!(app.shell_view(), ShellView::Jobs);
+}
+
+#[test]
+fn backlog_preset_filters_untriaged_and_keeps_severity_first_order() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut confirmed_critical = Finding::new_tool(
+        "fixture",
+        "confirmed-critical",
+        "src/a.rs",
+        1,
+        None,
+        Severity::Critical,
+        "confirmed critical",
+    );
+    confirmed_critical.triage = Some(kuzushi_core::TriageOutcome {
+        verdict: kuzushi_core::TriageVerdict::TruePositive,
+        confidence: 0.9,
+        rationale: "reviewed".to_string(),
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+    });
+    let untriaged_low = Finding::new_tool(
+        "fixture",
+        "untriaged-low",
+        "src/b.rs",
+        2,
+        None,
+        Severity::Low,
+        "untriaged low",
+    );
+    let untriaged_high = Finding::new_tool(
+        "fixture",
+        "untriaged-high",
+        "src/c.rs",
+        3,
+        None,
+        Severity::High,
+        "untriaged high",
+    );
+    *app.findings_mut() = vec![confirmed_critical, untriaged_low, untriaged_high];
+
+    app.router.workbench_mut().review_mut().backlog = true;
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+
+    // The already-decided critical is filtered out; the untriaged remainder
+    // keeps severity-major order (high before low).
+    assert_eq!(model.visible_count, 2, "{model:?}");
+    assert_eq!(model.rows[0].rule, "untriaged-high");
+    assert_eq!(model.rows[1].rule, "untriaged-low");
+    assert!(model.header.contains("REVIEW BACKLOG"), "{}", model.header);
+    assert!(model.header.contains("0 decided this session"));
+    assert_eq!(model.completeness_mode, "backlog");
+
+    // Toggling off restores the full queue.
+    app.router.workbench_mut().review_mut().backlog = false;
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    assert_eq!(model.visible_count, 3);
+}
+
+#[test]
+fn backlog_one_key_bindings_arm_only_while_the_preset_is_active() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![Finding::new_tool(
+        "fixture",
+        "untriaged",
+        "src/a.rs",
+        1,
+        None,
+        Severity::High,
+        "untriaged",
+    )];
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let has_decide = |app: &ShellApp| {
+        app.view_keybindings().iter().any(|binding| {
+            matches!(
+                binding.action,
+                ViewHotkeyAction::WorkbenchBacklogDecide("confirmed")
+            )
+        })
+    };
+    let has_toggle = |app: &ShellApp| {
+        app.view_keybindings()
+            .iter()
+            .any(|binding| binding.action == ViewHotkeyAction::WorkbenchBacklogToggle)
+    };
+    assert!(has_toggle(&app), "B toggle must be bound on Review");
+    assert!(!has_decide(&app), "one-key decisions must stay unarmed");
+
+    app.router.workbench_mut().review_mut().backlog = true;
+    assert!(has_decide(&app), "backlog preset arms one-key decisions");
+}
+
+#[test]
+fn backlog_one_key_decision_saves_through_the_existing_decision_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/open",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "open finding",
+            ),
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    run_command(
+        &mut app,
+        ShellCommand::FindingsFilter("completeness:open".to_string()),
+    );
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.workbench_mut().review_mut().backlog = true;
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()),
+    );
+
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let latest = store
+        .latest_review_decision(finding_id)
+        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "one-key decision saved; logs={:?}",
+                app.log_lines()
+                    .iter()
+                    .map(|line| format!("{}: {}", line.prefix, line.body))
+                    .collect::<Vec<_>>()
+            )
+        });
+    assert_eq!(
+        latest.decision.verdict,
+        kuzushi_core::findings::ReviewDecisionVerdict::Confirmed
+    );
+    assert!(
+        latest.decision.rationale.contains("backlog one-key confirmed"),
+        "{}",
+        latest.decision.rationale
+    );
+    assert_eq!(app.router.workbench().review().session_decided, 1);
+}
+
+fn backlog_v2_fixture_findings() -> Vec<Finding> {
+    vec![
+        Finding::new_tool("semgrep", "r-high", "src/a.rs", 1, None, Severity::High, "high a"),
+        Finding::new_tool("semgrep", "r-low", "src/b.rs", 2, None, Severity::Low, "low b"),
+        Finding::new_tool("systems-hunt", "r-high-2", "src/c.rs", 3, None, Severity::High, "high c"),
+    ]
+}
+
+#[test]
+fn backlog_severity_and_tool_filters_cycle_and_narrow_the_queue() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = backlog_v2_fixture_findings();
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.workbench_mut().review_mut().backlog = true;
+
+    // Severity cycle: critical (0 visible) → high (2 visible).
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    assert_eq!(
+        app.router.workbench().review().backlog_severity,
+        Some("critical")
+    );
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    assert_eq!(model.visible_count, 0, "{}", model.header);
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    assert_eq!(app.router.workbench().review().backlog_severity, Some("high"));
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    assert_eq!(model.visible_count, 2);
+    assert!(model.header.contains("sev:high"), "{}", model.header);
+
+    // Tool cycle narrows further; tools cycle in sorted order.
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()));
+    assert_eq!(
+        app.router.workbench().review().backlog_tool.as_deref(),
+        Some("semgrep")
+    );
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    assert_eq!(model.visible_count, 1);
+    assert!(model.header.contains("tool:semgrep"), "{}", model.header);
+
+    // Cycling severity past low returns to unfiltered.
+    for _ in 0..3 {
+        press_key(&mut app, KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    }
+    assert_eq!(app.router.workbench().review().backlog_severity, None);
+}
+
+#[test]
+fn backlog_bulk_defer_requires_confirm_and_undo_restores_the_trend_fold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    for finding in backlog_v2_fixture_findings() {
+        store.insert_finding("run-1", &finding).unwrap();
+    }
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    run_command(
+        &mut app,
+        ShellCommand::FindingsFilter("completeness:open".to_string()),
+    );
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.workbench_mut().review_mut().backlog = true;
+
+    let fp_rate_before = kuzushi_core::capabilities::campaign::trend::trend_metrics(
+        app.review_decisions(),
+        0.0,
+    )
+    .fp_rate();
+
+    // First X only arms the confirmation — nothing recorded yet.
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+    assert!(app.router.workbench().review().backlog_confirm_bulk);
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let all = store.list_all_findings().unwrap();
+    assert!(store
+        .list_review_decisions_for_findings(&all)
+        .unwrap()
+        .is_empty());
+    drop(store);
+
+    // Second X bulk-defers every visible finding.
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT));
+    assert!(!app.router.workbench().review().backlog_confirm_bulk);
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let records = store.list_review_decisions_for_findings(&all).unwrap();
+    assert_eq!(records.len(), 3, "one deferred record per visible finding");
+    assert!(records.iter().all(|record| {
+        record.decision.verdict == kuzushi_core::findings::ReviewDecisionVerdict::Deferred
+            && record.decision.rationale.contains("bulk defer")
+    }));
+    drop(store);
+    assert_eq!(app.router.workbench().review().backlog_last_batch.len(), 3);
+
+    // Undo appends inverse (needs_review) records — never deletes history —
+    // and the latest-decision-wins trend fold returns to the pre-defer state.
+    press_key(&mut app, KeyEvent::new(KeyCode::Char('u'), KeyModifiers::empty()));
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let records = store.list_review_decisions_for_findings(&all).unwrap();
+    assert_eq!(
+        records.len(),
+        6,
+        "undo appends, never deletes; logs={:?}",
+        app.log_lines()
+            .iter()
+            .map(|line| format!("{}: {}", line.prefix, line.body))
+            .collect::<Vec<_>>()
+    );
+    let metrics_after = kuzushi_core::capabilities::campaign::trend::trend_metrics(&records, 0.0);
+    assert_eq!(metrics_after.fp_rate(), fp_rate_before);
+    assert_eq!(metrics_after.decided_findings, 0, "all restored to undecided");
+    assert!(app.router.workbench().review().backlog_last_batch.is_empty());
+}
+
+/// Perf baseline for the shell-side folds (task queue #38): backlog
+/// projection and review-queue model over 10k in-memory findings + 30k
+/// decision records, plus a deck/trend refresh against a real workspace.
+/// Ignored by default; run with `-- --ignored perf_baseline --nocapture`.
+#[test]
+#[ignore = "perf baseline; run explicitly and read timings"]
+fn perf_baseline_backlog_and_deck_folds() {
+    use std::time::Instant;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    let severities = [
+        Severity::Critical,
+        Severity::High,
+        Severity::Medium,
+        Severity::Low,
+    ];
+    let verdicts = [
+        kuzushi_core::findings::ReviewDecisionVerdict::Confirmed,
+        kuzushi_core::findings::ReviewDecisionVerdict::RejectedFalsePositive,
+        kuzushi_core::findings::ReviewDecisionVerdict::Deferred,
+    ];
+    let mut findings = Vec::with_capacity(10_000);
+    let mut records = Vec::with_capacity(30_000);
+    let mut record_id = 0i64;
+    for index in 0..10_000i64 {
+        let mut finding = Finding::new_tool(
+            if index % 2 == 0 { "semgrep" } else { "systems-hunt" },
+            format!("perf-rule-{}", index % 40),
+            format!("src/mod{}/file{}.c", index % 20, index % 200),
+            (index % 900) as u32 + 1,
+            None,
+            severities[(index % 4) as usize],
+            format!("perf finding {index}"),
+        );
+        finding.id = Some(index);
+        findings.push(finding);
+        // Two-thirds of findings carry decision history (three rounds each).
+        if index % 3 != 0 {
+            for round in 0..3 {
+                record_id += 1;
+                records.push(kuzushi_core::findings::ReviewDecisionRecord {
+                    id: record_id,
+                    finding_id: index,
+                    identity_id: None,
+                    decision: kuzushi_core::findings::ReviewDecision {
+                        verdict: verdicts[((index + round) % 3) as usize],
+                        author: kuzushi_core::findings::TriageAuthor::Human,
+                        confidence: 1.0,
+                        rationale: "perf".to_string(),
+                        dismiss_reason: None,
+                        actor: None,
+                    },
+                    triage_verdict: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                });
+            }
+        }
+    }
+    *app.findings_mut() = findings;
+    app.set_review_decisions(records);
+    app.router.workbench_mut().review_mut().backlog = true;
+
+    let timer = Instant::now();
+    let visible = crate::ui_view_models::visible_sorted_finding_alias_indices(&app);
+    eprintln!("PERF backlog projection (cold) over 10k/30k: {:?} ({} visible)", timer.elapsed(), visible.len());
+    let timer = Instant::now();
+    let visible = crate::ui_view_models::visible_sorted_finding_alias_indices(&app);
+    eprintln!("PERF backlog projection (warm cache): {:?} ({} visible)", timer.elapsed(), visible.len());
+
+    let timer = Instant::now();
+    let model = crate::ui_view_models::review_queue_model(
+        &app,
+        crate::ui_view_models::ReviewQueueMode::All,
+    );
+    eprintln!("PERF review_queue_model (backlog): {:?} ({} rows)", timer.elapsed(), model.visible_count);
+
+    let timer = Instant::now();
+    app.refresh_campaign_deck();
+    eprintln!("PERF refresh_campaign_deck (incl trend + history IO): {:?}", timer.elapsed());
+    let timer = Instant::now();
+    app.refresh_workspace_trend();
+    eprintln!("PERF refresh_workspace_trend: {:?}", timer.elapsed());
+}
+
+#[test]
+fn default_phase_result_keys_work_outside_guided_flow() {
+    // J18's shape: a durable failed Map attempt seeded before launch, no
+    // guided flow. The RESULT strip advertises `o/r/d`; those keys must
+    // actually dispatch from Navigate mode on the phase page.
+    use kuzushi_core::workflow_attempts::{
+        PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
+    };
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let completed = PhaseAttemptCompleted::new(
+        WorkflowPhase::Map,
+        vec!["run-map-failed".to_string()],
+        PhaseTargetSnapshot::capture(target.path()),
+        PhaseAttemptOutcome::Failed,
+    );
+    kuzushi_core::workflow_attempts::append_phase_attempt_completed(target.path(), completed)
+        .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.refresh_phase_attempt_projection();
+    open_workbench_page_for_test(&mut app, WorkbenchPage::Map);
+    app.set_input_mode(crate::InputMode::Navigate);
+    assert!(app
+        .engagement
+        .unresolved_phase_attempt(WorkflowPhase::Map)
+        .is_some());
+
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('d'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+
+    assert!(update.handled);
+    assert!(
+        app.engagement
+            .unresolved_phase_attempt(WorkflowPhase::Map)
+            .is_none(),
+        "advertised `d` must discard the unresolved failed attempt"
+    );
+    assert!(
+        app.input().is_empty(),
+        "the discard key must not leak into the composer: {:?}",
+        app.input()
+    );
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("discard must leave a visible receipt — the card vanishing is not feedback");
+    assert!(
+        notice.message.contains("discarded attempt") && notice.message.contains("retained"),
+        "discard receipt must use the Discard verb and state that evidence \
+         survives: {:?}",
+        notice.message
+    );
+    assert!(
+        !notice.message.to_ascii_lowercase().contains("dismiss"),
+        "one verb per action: attempt dispositions are discarded, findings \
+         are dismissed: {:?}",
+        notice.message
+    );
 }

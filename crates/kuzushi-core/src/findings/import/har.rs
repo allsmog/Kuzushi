@@ -275,6 +275,40 @@ mod tests {
     }
 
     #[test]
+    fn path_at_sign_spoof_cannot_smuggle_out_of_scope_entries_past_the_gate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let scope_dir = tmp.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\nhosts = [\"*.lab.test\"]\n",
+        )
+        .unwrap();
+        let har = serde_json::json!({
+            "log": {
+                "entries": [
+                    {
+                        "request": {
+                            "method": "GET",
+                            "url": "https://evil.example/@api.lab.test",
+                            "headers": []
+                        }
+                    }
+                ]
+            }
+        })
+        .to_string();
+        let har_path = tmp.path().join("spoof.har");
+        fs::write(&har_path, har).unwrap();
+
+        let summary = import_har(&workspace, &har_path).unwrap();
+
+        assert_eq!(summary.imported, 0);
+        assert_eq!(summary.skipped_out_of_scope, 1);
+    }
+
+    #[test]
     fn missing_log_entries_section_is_a_clean_error() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();

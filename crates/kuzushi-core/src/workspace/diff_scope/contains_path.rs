@@ -20,14 +20,12 @@ impl DiffScope {
 
 pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) -> Result<DiffScope> {
     let trimmed = since_ref.trim();
+    // Leading '-' would be parsed as a git option (e.g. --output=<path>
+    // becomes an arbitrary-path write); the metacharacter check is defense
+    // in depth for values echoed into diagnostics.
+    crate::git_rev::ensure_safe_git_rev(trimmed, "diff_scope since_ref")?;
     anyhow::ensure!(
-        !trimmed.is_empty(),
-        "diff_scope: since_ref must be non-empty"
-    );
-    anyhow::ensure!(
-        !trimmed
-            .chars()
-            .any(|c| matches!(c, '\n' | '\0' | ';' | '|' | '`')),
+        !trimmed.chars().any(|c| matches!(c, ';' | '|' | '`')),
         "diff_scope: since_ref contains forbidden characters"
     );
 
@@ -38,10 +36,8 @@ pub fn git_diff_files(target: &Path, since_ref: &str, include_worktree: bool) ->
     } else {
         cmd.arg(format!("{trimmed}...HEAD"));
     }
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
+    let output = crate::bounded_subprocess::output(&mut cmd, "git diff")
         .with_context(|| format!("diff_scope: could not invoke git in {}", target.display()))?;
     if !output.status.success() {
         anyhow::bail!(

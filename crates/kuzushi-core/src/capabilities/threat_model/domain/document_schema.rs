@@ -36,6 +36,7 @@ pub(crate) fn build_agent_prompt(
     input: &BuildInput,
     previous_model: Option<&Value>,
     source_bundle: &ThreatModelSourceBundle,
+    grounding: &PromptGrounding,
 ) -> Result<String> {
     let files = inventory_files(&input.target, input.max_elements.saturating_mul(4).max(40))?;
     let manifest_summary = read_manifest_summary(&input.target)?;
@@ -44,6 +45,8 @@ pub(crate) fn build_agent_prompt(
             prompt_header(input),
             repository_inventory_section(&files),
             manifest_section(&manifest_summary),
+            attack_surface_section(&grounding.surfaces),
+            confirmed_findings_section(&grounding.confirmed_findings),
             previous_model_section(previous_model),
             source_bundle_section(source_bundle),
             source_rules_section().to_string(),

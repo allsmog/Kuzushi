@@ -1,0 +1,42 @@
+---
+source: Kuzushi Cockpit Spine
+contract: failure-path decision cards render honest outcome copy and recovery actions
+scenario: result_partial
+size: 120x36
+---
+KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · ○ idle · ctx:not built · model unconfigured
+ Map ● · Scan ○ · Review ○ · Prove ○ · Fix ○
+ ▸ NEXT build or explicitly skip the current-revision map
+ run sast:scan {} scan now · next continue workspace phase · z open findings heatmap · jobs inspect run receipts
+│RECORDED ENGINE OUTCOMES
+│⚠ Scan attempt · partial
+│
+│
+│
+
+
+
+
+
+
+
+
+
+
+
+
+route:shell · 1 PARTIAL · workbench · Map 1/5 · ⛭ fix · workbench                                             0 findings
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Ctrl+C request abort   Esc prompt
+┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│SCAN returned partial evidence. Review it and choose a recovery action.                                               │
+│1 canonical run reference(s) · legacy receipt metadata unavailable                                                    │
+│next: select this Scan, then open Review                                                                              │
+│›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.                            │
+│2 ○ Use scan & continue to Review                                                                                     │
+│3 ○ Open run evidence                                                                                                 │
+│4 ○ Refine                                                                                                            │
+│5 ○ Run again                                                                                                         │
+│6 ○ Discard                                                                                                           │
+│1/6 · ↑/↓ move · Enter choose · Esc dismiss                                                                           │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘

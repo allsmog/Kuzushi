@@ -112,6 +112,60 @@ pub(crate) enum KwpCommand {
 }
 
 #[derive(Debug, Subcommand)]
+pub(crate) enum CampaignCommand {
+    /// Execute a campaign plan's job matrix with a bounded worker pool.
+    Run {
+        /// Campaign id under `.kuzushi/v3/campaigns/` (from `campaign:plan`).
+        campaign_id: String,
+        #[arg(long, help = crate::support::TARGET_HELP)]
+        target: Option<PathBuf>,
+        /// Concurrent `kuzushi run` worker processes (1-8).
+        #[arg(long, default_value_t = 2)]
+        workers: usize,
+        /// Retry budget per job for tool-failed/partial exits. Prepare
+        /// failures park immediately; rate-limit failures never consume
+        /// an attempt.
+        #[arg(long, default_value_t = 2)]
+        max_attempts: u32,
+        /// Per-job wall-clock timeout in seconds; on expiry the job's whole
+        /// process group is killed and the attempt counts as a tool failure.
+        #[arg(long, default_value_t = 3600)]
+        job_timeout_secs: u64,
+        /// Consecutive rate-limited failures that trigger a global pause.
+        #[arg(long, default_value_t = 3)]
+        quota_wall_threshold: usize,
+        /// Global pause length in seconds after a quota wall.
+        #[arg(long, default_value_t = 900)]
+        quota_wall_pause_secs: u64,
+        /// Base requeue backoff in seconds (doubles per consumed attempt).
+        #[arg(long, default_value_t = 5)]
+        retry_backoff_secs: u64,
+        /// Total campaign budget in USD summed from child run costs; when
+        /// crossed, unstarted jobs are parked and the dispatcher stops.
+        #[arg(long)]
+        budget: Option<f64>,
+        /// Per-job budget in USD. A running job's live traced spend is
+        /// polled; crossing the ceiling kills the job's process group and
+        /// parks it `over-budget` (partial run state kept). A plan row's
+        /// `jobBudgetUsd` tightens this further for that job.
+        #[arg(long)]
+        job_budget: Option<f64>,
+        /// Return failed and resumably-parked jobs (over-budget,
+        /// budget-exhausted, interrupted, timed-out…) to `planned` with a
+        /// fresh attempt budget before dispatching. Prepare-failed parks
+        /// stay parked: the same input would be rejected again.
+        #[arg(long)]
+        resume: bool,
+        /// Only dispatch these job ids (repeat or comma-separate).
+        #[arg(long, value_delimiter = ',')]
+        jobs: Vec<String>,
+        /// Print the dispatch order and exit without spawning anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 pub(crate) enum RunsCommand {
     /// List run summaries.
     List {

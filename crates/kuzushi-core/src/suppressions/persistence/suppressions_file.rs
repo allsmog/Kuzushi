@@ -92,6 +92,7 @@ pub fn save_suppression_rules(
 }
 
 pub fn upsert_suppression_rule(workspace: &WorkspaceTarget, rule: SuppressionRule) -> Result<()> {
+    let _lock = suppressions_rmw_lock(workspace)?;
     let mut rules = load_suppression_rules(workspace)?;
     rules.retain(|existing| existing.id != rule.id);
     rules.push(rule);
@@ -100,6 +101,7 @@ pub fn upsert_suppression_rule(workspace: &WorkspaceTarget, rule: SuppressionRul
 
 /// Remove a rule by id. Returns whether a rule was actually removed.
 pub fn remove_suppression_rule(workspace: &WorkspaceTarget, rule_id: &str) -> Result<bool> {
+    let _lock = suppressions_rmw_lock(workspace)?;
     let mut rules = load_suppression_rules(workspace)?;
     let before = rules.len();
     rules.retain(|existing| existing.id != rule_id);
@@ -108,6 +110,17 @@ pub fn remove_suppression_rule(workspace: &WorkspaceTarget, rule_id: &str) -> Re
         save_suppression_rules(workspace, &rules)?;
     }
     Ok(removed)
+}
+
+/// Serializes the load→modify→save cycle across processes. Each save is
+/// already atomic, but two concurrent read-modify-writes (shell suppress vs
+/// a headless run's unsuppress) would silently drop the loser's rule.
+fn suppressions_rmw_lock(
+    workspace: &WorkspaceTarget,
+) -> Result<crate::file_lock::ExclusiveFileLock> {
+    crate::file_lock::ExclusiveFileLock::acquire(
+        &crate::workspace::workspace_state_dir(workspace.root()).join("suppressions.lock"),
+    )
 }
 
 /// Deterministic id derived from the canonical predicate + reason. Used when

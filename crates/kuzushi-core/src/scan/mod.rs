@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use uuid::Uuid;
 mod adapters;
 pub mod application;
@@ -40,11 +40,12 @@ pub use application::{
     run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions,
 };
 pub(crate) use application::{
-    select_default_scan_engines, DefaultScanEngineSelection, SkippedDefaultScanEngine,
+    parse_semgrep_report, select_default_scan_engines, semgrep_error_summaries,
+    semgrep_findings_from_report, DefaultScanEngineSelection, SkippedDefaultScanEngine,
 };
 pub use domain::{
     CodeqlPersistedRun, CodeqlScanReport, ScanEngine, ScanEngineOutput, SemgrepPersistedRun,
-    SemgrepScanReport, SemgrepScanner,
+    SemgrepScanOutcome, SemgrepScanReport, SemgrepScanner,
 };
 #[cfg(test)]
 pub(in crate::scan) use engines::codeql::*;
@@ -65,10 +66,12 @@ pub use engines::sbom_scan::{
 pub(in crate::scan) use engines::semgrep::*;
 use subprocess::{
     capture_scanner_process_pipes, configure_scanner_subprocess_env, join_scanner_process_readers,
-    wait_for_scanner_process, ProcessOutput,
+    wait_for_scanner_process, ProcessOutput, ScannerProcessOutput,
 };
-pub(crate) use subprocess::{configure_scanner_process_group, PreparedProcessGroup};
-pub use subprocess::{CancellationDisposition, RegisteredChild, ScanCancellation};
+pub(crate) use subprocess::configure_scanner_process_group;
+pub use subprocess::{
+    CancellationDisposition, PreparedProcessGroup, RegisteredChild, ScanCancellation,
+};
 
 pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {
     let summary = output_summary(&output);

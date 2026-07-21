@@ -32,6 +32,7 @@ fn detail_lines_for_model(
     push_signals_section(&mut lines, detail, budget);
     push_decision_section(&mut lines, detail, budget);
     push_next_section(&mut lines, detail, budget, report_command);
+    push_source_section(&mut lines, detail, budget);
     push_evidence_section(
         &mut lines,
         &detail.evidence,
@@ -129,6 +130,58 @@ fn push_next_section(
             theme::muted(),
         );
     }
+}
+
+fn push_source_section(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    budget: usize,
+) {
+    let Some(snippet) = detail.source_snippet.as_ref() else {
+        return;
+    };
+    push_section_header(lines, "SOURCE");
+    push_wrapped(lines, &detail.location, budget, "  ", theme::muted());
+    if let Some(note) = snippet.note.as_deref() {
+        push_wrapped(lines, note, budget, "  ", theme::warn());
+    }
+    let number_width = snippet_number_width(snippet);
+    for (offset, text) in snippet.lines.iter().enumerate() {
+        lines.push(snippet_code_line(snippet, offset, text, number_width, budget));
+    }
+}
+
+fn snippet_number_width(snippet: &crate::ui_view_models::SourceSnippetModel) -> usize {
+    let last = snippet.start_line + snippet.lines.len().saturating_sub(1);
+    last.to_string().chars().count()
+}
+
+/// One gutter-numbered code row. Code is clipped, never wrapped — a wrapped
+/// source line reads as two source lines. The finding's own line carries the
+/// marker and the brighter style so the eye lands on it first.
+fn snippet_code_line(
+    snippet: &crate::ui_view_models::SourceSnippetModel,
+    offset: usize,
+    text: &str,
+    number_width: usize,
+    budget: usize,
+) -> Line<'static> {
+    let number = snippet.start_line + offset;
+    let focused = number == snippet.focus_line;
+    let marker = if focused { "▶" } else { " " };
+    let gutter = format!("  {marker} {number:>number_width$} │ ");
+    let code_budget = budget
+        .saturating_sub(crate::renderer::shared::text::display_width(&gutter))
+        .max(8);
+    let (gutter_style, code_style) = if focused {
+        (theme::accent(), theme::primary())
+    } else {
+        (theme::subtle(), theme::muted())
+    };
+    Line::from(vec![
+        Span::styled(gutter, gutter_style),
+        Span::styled(fit(text, code_budget), code_style),
+    ])
 }
 
 fn push_fix_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
@@ -358,10 +411,27 @@ fn push_provenance_section(
     push_detail_kv(lines, "source signature", &detail.source_signature, budget);
     push_detail_kv(lines, "corroboration", &detail.corroboration, budget);
     push_detail_kv(lines, "identity", &detail.identity_label, budget);
-    push_detail_kv(lines, "fingerprint", &detail.fingerprint, budget);
+    push_detail_kv(
+        lines,
+        "fingerprint",
+        &compact_fingerprint(&detail.fingerprint),
+        budget,
+    );
     if detail.alias.is_none() {
         push_alias_note(lines, budget);
     }
+}
+
+/// A full `fp3_<64 hex>` value wraps into unreadable hex soup. The first 20
+/// characters are an unambiguous, typable prefix (reference resolution
+/// accepts prefixes), so clip honestly with an ellipsis.
+fn compact_fingerprint(fingerprint: &str) -> String {
+    const VISIBLE: usize = 20;
+    if fingerprint.chars().count() <= VISIBLE + 4 {
+        return fingerprint.to_string();
+    }
+    let prefix: String = fingerprint.chars().take(VISIBLE).collect();
+    format!("{prefix}…")
 }
 
 fn push_alias_note(lines: &mut Vec<Line<'static>>, budget: usize) {
@@ -517,6 +587,17 @@ mod tests {
         detail.message_lines = vec!["line 1".to_string()];
         detail.message_overflow = 2;
         detail.evidence_overflow = 3;
+        detail.source_snippet = Some(crate::ui_view_models::SourceSnippetModel {
+            start_line: 40,
+            focus_line: 42,
+            lines: vec![
+                "fn handler(req: Request) {".to_string(),
+                "    let name = req.param(\"name\");".to_string(),
+                "    db.query(&format!(\"SELECT {name}\"));".to_string(),
+                "}".to_string(),
+            ],
+            note: None,
+        });
     }
 
     fn detail_text(report_command: Option<&'static str>) -> String {
@@ -598,6 +679,7 @@ mod tests {
                 "STATUS",
                 "DECISION",
                 "NEXT",
+                "SOURCE",
                 "EVIDENCE",
                 "VERIFICATION",
                 "ANALYSIS",
@@ -606,6 +688,47 @@ mod tests {
                 "PROVENANCE",
             ],
         );
+    }
+
+    #[test]
+    fn source_section_numbers_lines_and_marks_the_finding_line() {
+        let text = detail_text(None);
+
+        assert!(text.contains("SOURCE"), "{text}");
+        assert!(text.contains("src/app.rs:42"), "{text}");
+        assert!(text.contains("    40 │ fn handler(req: Request) {"), "{text}");
+        assert!(
+            text.contains("  ▶ 42 │     db.query(&format!(\"SELECT {name}\"));"),
+            "{text}"
+        );
+        assert!(text.contains("    43 │ }"), "{text}");
+    }
+
+    #[test]
+    fn source_section_explains_an_unavailable_snippet_instead_of_vanishing() {
+        let mut detail = detail();
+        detail.source_snippet = Some(crate::ui_view_models::SourceSnippetModel {
+            start_line: 42,
+            focus_line: 42,
+            lines: Vec::new(),
+            note: Some("source unavailable · No such file or directory".to_string()),
+        });
+        let text = detail_text_for_width(&detail, 120, None);
+
+        assert!(text.contains("SOURCE"), "{text}");
+        assert!(
+            text.contains("source unavailable · No such file or directory"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn detail_without_a_snippet_renders_no_source_section() {
+        let mut detail = detail();
+        detail.source_snippet = None;
+        let text = detail_text_for_width(&detail, 120, None);
+
+        assert!(!text.contains("SOURCE"), "{text}");
     }
 
     #[test]

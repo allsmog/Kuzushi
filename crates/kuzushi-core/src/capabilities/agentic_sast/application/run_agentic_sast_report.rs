@@ -50,6 +50,7 @@ pub(crate) fn run_agentic_sast_report(
     apply_agentic_sast_whitebox_profile(&run, &mut result.value)?;
     let persisted = persist_agentic_sast_findings(&run.target, &result.value, ctx)?;
     emit_agentic_sast_persisted(ctx, parent_step, result.value.len(), persisted.as_ref());
+    emit_agentic_sast_finding_delta(ctx, persisted.as_ref(), &result.value)?;
     emit_agentic_sast_done(ctx, result.value.len());
     Ok(agentic_sast_report(
         &run,
@@ -219,6 +220,43 @@ fn emit_agentic_sast_persisted(
     }
 }
 
+/// Record the run's store delta so direct `agentic-sast:scan` receipts show
+/// real added/updated counts. Under the `sast:scan` umbrella the umbrella's
+/// own end-of-scan delta supersedes this one (receipts keep the last delta
+/// per run).
+fn emit_agentic_sast_finding_delta(
+    ctx: &ToolExecutionContext<'_>,
+    persisted: Option<&AgenticSastPersistedRun>,
+    findings: &[Finding],
+) -> Result<()> {
+    let (Some(observation), Some(persisted), Some(store)) =
+        (ctx.run_observation(), persisted, ctx.findings_store)
+    else {
+        return Ok(());
+    };
+    let store_watermark = store.projection_meta()?.applied_seq;
+    let finding_id_samples = findings
+        .iter()
+        .take(crate::run_lifecycle::MAX_FINDING_ID_SAMPLES)
+        .map(|finding| crate::run_lifecycle::SafeText::operator_visible(&finding.fingerprint))
+        .collect();
+    observation.emit(crate::run_lifecycle::RunItemRecord::new(
+        crate::run_lifecycle::RunItemId::new(),
+        crate::run_lifecycle::RunItemSource::Persistence,
+        crate::run_lifecycle::RunItemV1::FindingDelta {
+            delta: crate::run_lifecycle::FindingDeltaSummary {
+                added: persisted.findings_added,
+                updated: persisted.findings_updated,
+                removed: 0,
+                store_watermark: crate::run_lifecycle::SafeText::operator_visible(
+                    store_watermark.to_string(),
+                ),
+                finding_id_samples,
+            },
+        },
+    ))
+}
+
 fn begin_agentic_sast_child_scope(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
@@ -250,6 +288,7 @@ pub(crate) struct AgenticSastRun {
     pub(crate) tool_policy: AgentToolPolicy,
     pub(crate) whitebox_static: bool,
     pub(crate) inventory: Vec<(String, String)>,
+    pub(crate) enrichment: PromptEnrichment,
 }
 
 impl AgenticSastRun {
@@ -267,6 +306,7 @@ impl AgenticSastRun {
             &options.include_patterns,
             &options.exclude_patterns,
         )?;
+        let enrichment = PromptEnrichment::for_run(&target, &tool_policy);
         Ok(Self {
             target,
             options,
@@ -275,6 +315,7 @@ impl AgenticSastRun {
             tool_policy,
             whitebox_static,
             inventory,
+            enrichment,
         })
     }
 }

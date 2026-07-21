@@ -9,6 +9,28 @@ pub(in crate::modules) fn parse_triage_prompt_template(
         .transpose()
 }
 
+/// Fold the persisted threat-model digest into the stage-2 prompt template so
+/// verdicts weigh modeled threats. Deliberately part of the template: the
+/// runtime cache key hashes it, so a changed threat model re-triages instead
+/// of replaying verdicts judged under stale context.
+pub(in crate::modules) fn apply_threat_model_triage_context(
+    input: &mut TriageRunInput,
+    root: &Path,
+) {
+    let Some(digest) = crate::capabilities::agentic_sast::threat_model_scan_context(root) else {
+        return;
+    };
+    let base = input
+        .prompt_template
+        .clone()
+        .unwrap_or_else(|| crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string());
+    input.prompt_template = Some(format!(
+        "{base}\n\nWeigh whether the finding realizes one of the modeled threats below when \
+judging impact; the digest is derived context, not ground truth.\n{}",
+        crate::runbooks::untrusted::render_untrusted_derived_block("threat-model-digest", &digest),
+    ));
+}
+
 pub(in crate::modules) fn parse_triage_scan_id(input: &Value) -> Result<Option<String>> {
     Ok(optional_nonempty_string(input, "scanId")?.or(optional_nonempty_string(input, "scan_id")?))
 }

@@ -264,6 +264,41 @@ fn severity_rank(severity: Severity) -> u8 {
 mod tests {
     use super::*;
 
+    /// The per-insert point lookups must be index searches, not full-table
+    /// json_extract scans (the measured ~40 ms/row import cost).
+    #[test]
+    fn projected_id_and_fingerprint_lookups_use_expression_indexes() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let cases = [
+            (
+                "explain query plan select finding_json from finding_observations \
+                 where finding_json is not null \
+                 and json_extract(finding_json, '$.id') = ?1 \
+                 order by created_seq desc limit 1",
+                "idx_finding_observations_projected_id",
+            ),
+            (
+                "explain query plan select finding_json from finding_observations \
+                 where finding_json is not null \
+                 and json_extract(finding_json, '$.fingerprint') = ?1 \
+                 order by created_seq desc limit 1",
+                "idx_finding_observations_json_fingerprint",
+            ),
+        ];
+        for (sql, index) in cases {
+            let mut statement = store.conn.prepare(sql).unwrap();
+            let details = statement
+                .query_map([1i64], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert!(
+                details.iter().any(|detail| detail.contains(index)),
+                "expected {index} in plan, got {details:?}"
+            );
+        }
+    }
+
     #[test]
     fn global_projection_query_does_not_rescan_history_per_finding() {
         let store = FindingStore::open_in_memory().unwrap();

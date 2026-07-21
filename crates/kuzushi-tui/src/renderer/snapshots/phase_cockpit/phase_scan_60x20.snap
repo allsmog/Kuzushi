@@ -4,12 +4,12 @@ contract: cockpit-spine-v1
 phase: scan
 size: 60x20
 ---
-KUZUSHI · VIEW SCAN · REALITY REVIEW · target ./phase-target
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining
+KUZUSHI · Viewing Scan · pipeline live in Review · ● LIVE
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger
         candidates
 │▸ RECORDED ENGINE OUTCOMES
-│✓ sast:scan · complete · r:scan-phase
+│✓ Run SAST scan · complete · r:scan-phase
 │
 │
 │

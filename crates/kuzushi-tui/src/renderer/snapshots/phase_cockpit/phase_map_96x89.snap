@@ -4,9 +4,9 @@ contract: cockpit-spine-v1
 phase: map
 size: 96x89
 ---
-KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  next continue Map · context build build context · z open visualization · report open Report
 │▸ PROJECT CONTEXT                        │ATTACK SURFACE · z terrain
 │./phase-target · rev:unknown               │2 high/critical, max 91, tiers critical=1...
@@ -89,7 +89,7 @@ KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target · ● LIVE · co
 │                                         │
 │                                         │
 │                                         │
-route:run · 査  review 3/5 · ⛭ 掛  fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+route:run · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◇ MAP › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

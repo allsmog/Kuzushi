@@ -53,11 +53,13 @@ pub(in crate::modules) fn run_semgrep_scan(
         return Ok(failed_tool_output("semgrep:scan", &target, error));
     }
     emit_scan_start(ctx, "semgrep", &target);
-    let mut findings =
-        match ctx.with_cancellation(|cancel| scanner.scan_with_cancel(&target, cancel)) {
-            Ok(findings) => findings,
+    let outcome =
+        match ctx.with_cancellation(|cancel| scanner.scan_outcome_with_cancel(&target, cancel)) {
+            Ok(outcome) => outcome,
             Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
         };
+    let mut findings = outcome.findings;
+    emit_semgrep_coverage_gaps(ctx, &outcome.scan_errors);
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
         let static_proof_state =
@@ -66,7 +68,30 @@ pub(in crate::modules) fn run_semgrep_scan(
     }
     let persisted = persist_semgrep_findings(&target, &findings, ctx, index_static_evidence)?;
     emit_scan_done(ctx, "semgrep", findings.len());
-    Ok(SemgrepScanReport::new(target.display().to_string(), findings, persisted).to_tool_json())
+    Ok(
+        SemgrepScanReport::new(target.display().to_string(), findings, persisted)
+            .with_scan_errors(outcome.scan_errors)
+            .to_tool_json(),
+    )
+}
+
+fn emit_semgrep_coverage_gaps(ctx: &ToolExecutionContext<'_>, scan_errors: &[String]) {
+    if scan_errors.is_empty() {
+        return;
+    }
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool",
+                "scan",
+                format!(
+                    "semgrep reported {} scan error{} · coverage incomplete",
+                    scan_errors.len(),
+                    if scan_errors.len() == 1 { "" } else { "s" },
+                ),
+            )
+            .emit();
+    }
 }
 
 pub(in crate::modules) fn run_codeql_scan(

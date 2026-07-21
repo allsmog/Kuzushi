@@ -5,7 +5,8 @@ use cache_entries::{
     DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
     LatestRunPointerCache, PathStateCache, ProjectModelDocumentCache, PromptMutationsCache,
     RunArtifactTextCache, RunProjectionCache, RunSummaryEntriesCache, RunTraceCache,
-    ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache, TargetProfileCache,
+    ScanRecommendationsCache, ScopeTreeCache, SourceFileCache, StrategyQueueCache,
+    TargetBaseCache, TargetProfileCache,
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};
@@ -75,6 +76,7 @@ pub(crate) struct WorkbenchCache {
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     map_artifacts: MapArtifactsCache,
+    scan_recommendations: Option<ScanRecommendationsCache>,
     prompt_overrides: PromptOverrideCache,
     health_checks: BTreeMap<String, ViewHealthChecks>,
     finding_aliases: FindingAliasCache,
@@ -210,6 +212,23 @@ impl WorkbenchCache {
         self.loading_state(target, &ViewHydrationKey::MapArtifacts)
     }
 
+    pub(crate) fn cached_scan_recommendations(
+        &self,
+        target: Option<&Path>,
+    ) -> ViewDataState<ScanRecommendationsState> {
+        let Some(target) = target else {
+            return ViewDataState::NotRequested;
+        };
+        if let Some(cache) = self
+            .scan_recommendations
+            .as_ref()
+            .filter(|cache| cache.target == target)
+        {
+            return ViewDataState::Ready(cache.state.clone());
+        }
+        self.loading_state(target, &ViewHydrationKey::ScanRecommendations)
+    }
+
     pub(crate) fn cached_target_base(&self, target: Option<&Path>) -> ViewDataState<String> {
         let Some(target) = target else {
             return ViewDataState::NotRequested;
@@ -237,10 +256,10 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_run_summaries(&mut self) {
         self.invalidate_run_summary_dependents();
-        self.run_summary_entries = None;
+        self.mark_run_summary_entries_stale();
         self.latest_run_pointer = None;
         self.run_id_completion_values = None;
-        self.scan_stage_receipts.clear();
+        drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.bump_completion_generation();
     }
 
@@ -266,6 +285,26 @@ impl WorkbenchCache {
         state
     }
 
+    /// Whether the entries index must be (re-)read: never loaded for this
+    /// target, or loaded but marked stale by an invalidation. Stale entries
+    /// keep serving through `cached_run_summary_entries` in the meantime.
+    pub(crate) fn run_summary_entries_need_refresh(&self, target: &Path) -> bool {
+        match self
+            .run_summary_entries
+            .as_ref()
+            .filter(|cache| cache.target == target)
+        {
+            Some(cache) => cache.stale,
+            None => true,
+        }
+    }
+
+    fn mark_run_summary_entries_stale(&mut self) {
+        if let Some(cache) = self.run_summary_entries.as_mut() {
+            cache.stale = true;
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn run_summary_entries(&mut self, target: Option<&Path>) -> Vec<RunSummaryEntry> {
         let Some(target) = target else {
@@ -274,7 +313,7 @@ impl WorkbenchCache {
         if let Some(cache) = self
             .run_summary_entries
             .as_ref()
-            .filter(|cache| cache.target == target)
+            .filter(|cache| cache.target == target && !cache.stale)
         {
             return match &cache.state {
                 RunSummaryEntriesState::Ready(entries) => entries.clone(),
@@ -286,6 +325,7 @@ impl WorkbenchCache {
         self.run_summary_entries = Some(RunSummaryEntriesCache {
             target: target.to_path_buf(),
             state: RunSummaryEntriesState::Ready(entries.clone()),
+            stale: false,
         });
         self.invalidate_run_summary_dependents();
         entries
@@ -316,7 +356,6 @@ impl WorkbenchCache {
         summaries
     }
 
-    #[cfg(test)]
     pub(crate) fn read_source_file(&mut self, path: &Path) -> Result<String, String> {
         if let Some(cache) = self.source_file.as_ref().filter(|cache| cache.path == path) {
             return cache.state.clone();
@@ -361,9 +400,10 @@ impl WorkbenchCache {
         self.bump_completion_generation();
         self.run_traces.clear();
         self.run_artifact_texts.clear();
-        self.scan_stage_receipts.clear();
+        drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
         self.map_artifacts.invalidate();
+        self.scan_recommendations = None;
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
         self.clear_view_hydration_loading();
@@ -388,7 +428,7 @@ impl WorkbenchCache {
         }
         if run_summaries_changed {
             self.invalidate_run_summary_dependents();
-            self.run_summary_entries = None;
+            self.mark_run_summary_entries_stale();
             self.latest_run_pointer = None;
             self.run_id_completion_values = None;
         }
@@ -400,6 +440,7 @@ impl WorkbenchCache {
         self.strategy_queue = None;
         self.prompt_mutations = None;
         self.project_model_document = None;
+        self.scan_recommendations = None;
         (findings_changed, run_summaries_changed)
     }
 
@@ -515,6 +556,17 @@ impl WorkbenchCache {
         });
     }
 
+    pub(crate) fn persisted_project_scope_tree_is_current(
+        &self,
+        target: &Path,
+        tree: &NestedProjectScopeTree,
+    ) -> bool {
+        self.scope_tree.as_ref().is_some_and(|cache| {
+            cache.target == target
+                && matches!(&cache.state, ProjectScopeTreeState::Persisted(cached) if cached == tree)
+        })
+    }
+
     pub(crate) fn invalidate_strategy_queue(&mut self) {
         self.strategy_queue = None;
     }
@@ -587,6 +639,7 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_map_artifacts(&mut self) {
         self.map_artifacts.invalidate();
+        self.scan_recommendations = None;
     }
 
     pub(crate) fn sorted_finding_alias_indices(
@@ -764,7 +817,9 @@ fn invalidate_cached_scan_stage_receipt(
     broad: bool,
 ) {
     if broad {
-        receipts.retain(|(cached_target, _), _| cached_target != target);
+        receipts.retain(|(cached_target, _), state| {
+            cached_target != target || scan_stage_receipt_is_settled(state)
+        });
         return;
     }
     let Some(run_id) = path
@@ -775,7 +830,28 @@ fn invalidate_cached_scan_stage_receipt(
     else {
         return;
     };
-    receipts.remove(&(target.to_path_buf(), run_id.to_string()));
+    let key = (target.to_path_buf(), run_id.to_string());
+    if receipts
+        .get(&key)
+        .is_some_and(|state| !scan_stage_receipt_is_settled(state))
+    {
+        receipts.remove(&key);
+    }
+}
+
+/// A `Ready` receipt describes a terminal run and is written exactly once,
+/// so cache invalidation keeps it; only `Missing`/`Failed` can still
+/// transition (the receipt file lands later, a transient read error clears).
+/// Dropping `Ready` entries made the Scan page fall back to its legacy
+/// projection on every external workspace refresh — a visible flap.
+fn scan_stage_receipt_is_settled(state: &ScanStageReceiptState) -> bool {
+    matches!(state, ScanStageReceiptState::Ready(_))
+}
+
+fn drop_unsettled_scan_stage_receipts(
+    receipts: &mut BTreeMap<(PathBuf, String), ScanStageReceiptState>,
+) {
+    receipts.retain(|_, state| scan_stage_receipt_is_settled(state));
 }
 
 fn run_artifact_identity<'a>(runs_root: &Path, path: &'a Path) -> Option<(&'a str, &'a str)> {

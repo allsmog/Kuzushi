@@ -58,6 +58,21 @@ impl ShellApp {
         self.open_or_log_scene_ready(page);
     }
 
+    /// Open a deck that was deferred past a foreground Run Focus session.
+    /// The completion's post-run refresh has just invalidated the view caches
+    /// the deck renders from, so re-hydrate and re-check content before
+    /// opening — never land the operator on an empty deck.
+    pub(crate) fn open_deferred_viz_page(&mut self, page: VizPage) {
+        if page == VizPage::Dfd {
+            self.hydrate_latest_threat_model_for_dfd();
+        }
+        if self.viz_page_has_content(page) {
+            self.open_scene_to_page(page);
+        } else {
+            self.log_scene_ready(page, "artifact still hydrating; use `scene` to view");
+        }
+    }
+
     pub(crate) fn auto_open_workbench_dfd(&mut self) {
         if !self.ui().auto_open_viz() {
             return;

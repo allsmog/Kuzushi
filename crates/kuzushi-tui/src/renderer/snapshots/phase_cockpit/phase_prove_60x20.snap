@@ -4,17 +4,17 @@ contract: cockpit-spine-v1
 phase: prove
 size: 60x20
 ---
-KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining
+KUZUSHI · Viewing Prove · pipeline live in Review · ● LIVE
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger
         candidates
 │▸ STATUS / NEXT
-│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)
-│runtime_verified
+│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  ru...
 │SQL injection reaches query
 │src/auth/login.rs:17
 │STATUS runtime_verified · decision:needs_review ·...
-│NEXT   patch · patch F-0001
+│NEXT   patch F-0001
+│
 │
 │
 │

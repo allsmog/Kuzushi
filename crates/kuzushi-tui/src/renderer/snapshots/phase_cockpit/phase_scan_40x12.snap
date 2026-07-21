@@ -4,11 +4,11 @@ contract: cockpit-spine-v1
 phase: scan
 size: 40x12
 ---
-KUZUSHI · VIEW SCAN · REALITY REVIEW
+KUZUSHI · Viewing Scan · now in Review
  ▸ NEXT record terminal dispositions for
-        6 of 6 remaining candidates
+        6 of 6 ledger candidates
 │▸ RECORDED ENGINE OUTCOMES
-│✓ sast:scan · complete · r:scan-phase
+│✓ Run SAST … · complete · r:scan-phase
 │
 │
 route:ru... 6 findings · 1 C · 2 H · 2 M

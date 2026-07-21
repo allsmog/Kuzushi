@@ -1,0 +1,36 @@
+# J18 — Failed Map recovery (failure-path honesty)
+# Error states are where operators are most stressed and where raw
+# internals leak. Pre-seed a durable FAILED map attempt, launch against
+# that target, and verify the operator sees the honest failure — RESULT
+# failed with a plain recovery next-step, never "partial evidence" or a
+# fabricated happy phase page — and that discard actually clears it.
+name: Failed map recovery honesty
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: mkdir -p @TMP_TARGET/.kuzushi/v3/workflow && printf '{"event":"phase_attempt_completed","attemptId":"attempt-j18-map","phase":"map","runRefs":["run-j18-map"],"targetSnapshot":{"target":"%s","dirty":false},"outcome":"failed","derivation":"original","completedAtUnix":1}\n' "$(readlink -f @TMP_TARGET)" > @TMP_TARGET/.kuzushi/v3/workflow/phase-attempts.jsonl
+launch: --target @TMP_TARGET
+wait-for: 30 KUZUSHI
+submit: workbench
+wait-for: 8 RESULT
+# Let async target hydration settle — its completion resets the input
+# mode to Prompt, which would swallow the phase-result keys below.
+wait: 4
+keys: Escape
+wait: 1
+snap: failed-map-result
+expect: NAVIGATE
+expect: RESULT failed
+expect: 1 RESULT
+expect: open the failed run
+expect-not: returned partial evidence
+ask: Failed Map — does the page state the failure plainly (RESULT failed, attempt identity, recovery next-step) with no fabricated progress and no internal jargon?
+keys: d
+wait: 2
+snap: after-discard
+expect-not: RESULT failed
+expect: discarded attempt
+ask: Discard recovery — after discarding the failed attempt, does Map return to a clean "build or explicitly skip" state with no residue of the failed attempt?
+submit: next
+wait: 3
+snap: next-after-recovery
+ask: Recovery path — does `next` offer a fresh Map plan (the normal guided route) rather than being wedged on the discarded failure?

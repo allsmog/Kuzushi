@@ -45,9 +45,7 @@ impl WorkbenchCache {
             ViewHydrationKey::LatestRunPointer => self
                 .cached_latest_run_pointer(Some(target))
                 .is_not_requested(),
-            ViewHydrationKey::RunSummaryEntries => self
-                .cached_run_summary_entries(Some(target))
-                .is_not_requested(),
+            ViewHydrationKey::RunSummaryEntries => self.run_summary_entries_need_refresh(target),
             ViewHydrationKey::RunArtifactText { run_id, leaf } => self
                 .cached_run_artifact_text(target, run_id, leaf)
                 .is_not_requested(),
@@ -132,6 +130,9 @@ impl WorkbenchCache {
             ViewHydrationKey::MapArtifacts => self
                 .cached_map_artifacts_built(Some(target))
                 .is_not_requested(),
+            ViewHydrationKey::ScanRecommendations => self
+                .cached_scan_recommendations(Some(target))
+                .is_not_requested(),
             ViewHydrationKey::TargetBase => {
                 self.cached_target_base(Some(target)).is_not_requested()
             }
@@ -176,7 +177,11 @@ impl WorkbenchCache {
     }
 
     fn store_run_summary_entries(&mut self, target: PathBuf, state: RunSummaryEntriesState) {
-        self.run_summary_entries = Some(RunSummaryEntriesCache { target, state });
+        self.run_summary_entries = Some(RunSummaryEntriesCache {
+            target,
+            state,
+            stale: false,
+        });
         self.invalidate_run_summary_dependents();
     }
 
@@ -346,6 +351,12 @@ impl WorkbenchCache {
             (ViewHydrationKey::MapArtifacts, ViewHydrationValue::MapArtifacts(built)) => {
                 self.map_artifacts.store(target, built);
             }
+            (
+                ViewHydrationKey::ScanRecommendations,
+                ViewHydrationValue::ScanRecommendations(state),
+            ) => {
+                self.scan_recommendations = Some(ScanRecommendationsCache { target, state });
+            }
             (ViewHydrationKey::TargetProfile, ViewHydrationValue::TargetProfile(profile)) => {
                 self.target_profile = Some(TargetProfileCache { target, profile });
             }
@@ -392,6 +403,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         ViewHydrationKey::HealthChecks { .. }
         | ViewHydrationKey::TargetProfile
         | ViewHydrationKey::MapArtifacts
+        | ViewHydrationKey::ScanRecommendations
         | ViewHydrationKey::TargetBase => HydrationGroup::Status,
     }
 }

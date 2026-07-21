@@ -21,7 +21,7 @@ pub(crate) struct VerifyFindingToolRequest<'a> {
 
 pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
     let input = VerifyFindingInput::from_tool_input(&request.input, request.workspace_root)?;
-    let Some(finding) = request.store.get_finding_by_reference(&input.fingerprint)? else {
+    let Some(finding) = request.store.get_finding_by_operator_reference(&input.fingerprint)? else {
         return Ok(missing_finding_response(&input.fingerprint));
     };
     // Require a triage verdict to exist before spending a verify pass, but

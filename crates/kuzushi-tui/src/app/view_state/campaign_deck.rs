@@ -1,0 +1,175 @@
+//! Route-local state for the Campaign deck.
+//!
+//! Snapshots are re-read from disk on entry and on refresh — the deck never
+//! caches lifecycle truth beyond one render generation, because the
+//! dispatcher (a separate process) owns `queue.json`.
+
+use kuzushi_core::capabilities::campaign::snapshot::CampaignSnapshot;
+use kuzushi_core::capabilities::campaign::trend::TrendMetrics;
+use kuzushi_core::capabilities::campaign::trend_history::TrendSnapshot;
+use std::collections::BTreeSet;
+
+pub(crate) const CAMPAIGN_DEFAULT_WORKERS: usize = 2;
+pub(crate) const CAMPAIGN_MAX_WORKERS: usize = 8;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CampaignRouteState {
+    pub(crate) campaigns: Vec<CampaignSnapshot>,
+    pub(crate) selected_campaign: usize,
+    /// List mode shows every campaign; detail mode shows the selected
+    /// campaign's job matrix.
+    pub(crate) detail: bool,
+    pub(crate) selected_job: usize,
+    /// Job ids excluded from the next Launch (per selected campaign;
+    /// cleared when the campaign selection changes).
+    pub(crate) excluded: BTreeSet<String>,
+    pub(crate) workers: usize,
+    /// Pid of the dispatcher THIS deck launched (kill target for `K`).
+    /// Dispatchers started elsewhere are visible only through queue state.
+    pub(crate) dispatcher_pid: Option<u32>,
+    pub(crate) notice: Option<String>,
+    /// Workspace-level effectiveness trend (FP rate, cost per confirmed),
+    /// refreshed with the deck and on Report entry; `None` until a target
+    /// makes the fold computable.
+    pub(crate) trend: Option<TrendMetrics>,
+    /// Bounded trend history backing the sparkline strip; refreshed with
+    /// the trend. Empty until two distinct snapshots exist.
+    pub(crate) trend_history: Vec<TrendSnapshot>,
+}
+
+impl Default for CampaignRouteState {
+    fn default() -> Self {
+        Self {
+            campaigns: Vec::new(),
+            selected_campaign: 0,
+            detail: false,
+            selected_job: 0,
+            excluded: BTreeSet::new(),
+            workers: CAMPAIGN_DEFAULT_WORKERS,
+            dispatcher_pid: None,
+            notice: None,
+            trend: None,
+            trend_history: Vec::new(),
+        }
+    }
+}
+
+impl CampaignRouteState {
+    pub(crate) fn selected_campaign(&self) -> Option<&CampaignSnapshot> {
+        self.campaigns.get(self.selected_campaign)
+    }
+
+    pub(crate) fn selected_job(&self) -> Option<&kuzushi_core::capabilities::campaign::snapshot::CampaignJobSnapshot> {
+        self.selected_campaign()?.jobs.get(self.selected_job)
+    }
+
+    pub(crate) fn move_cursor(&mut self, delta: i64) {
+        let len = if self.detail {
+            self.selected_campaign().map(|c| c.jobs.len()).unwrap_or(0)
+        } else {
+            self.campaigns.len()
+        };
+        if len == 0 {
+            return;
+        }
+        let cursor = if self.detail {
+            &mut self.selected_job
+        } else {
+            &mut self.selected_campaign
+        };
+        *cursor = (*cursor as i64 + delta).clamp(0, len as i64 - 1) as usize;
+        if !self.detail {
+            self.selected_job = 0;
+            self.excluded.clear();
+        }
+    }
+
+    pub(crate) fn included_job_ids(&self) -> Vec<String> {
+        self.selected_campaign()
+            .map(|campaign| {
+                campaign
+                    .jobs
+                    .iter()
+                    .map(|job| job.job_id.clone())
+                    .filter(|job_id| !self.excluded.contains(job_id))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn toggle_selected_exclusion(&mut self) {
+        let Some(job_id) = self.selected_job().map(|job| job.job_id.clone()) else {
+            return;
+        };
+        if !self.excluded.remove(&job_id) {
+            self.excluded.insert(job_id);
+        }
+    }
+
+    pub(crate) fn detail_job_ceiling(&self) -> usize {
+        self.selected_campaign()
+            .map(|campaign| campaign.jobs.len().saturating_sub(1))
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn cycle_workers(&mut self) {
+        self.workers = self.workers % CAMPAIGN_MAX_WORKERS + 1;
+    }
+}
+
+/// The exact dispatcher argv the deck's Launch composes — kept pure so the
+/// launch contract is testable without spawning anything.
+pub(crate) fn dispatcher_args(
+    campaign_id: &str,
+    target: &std::path::Path,
+    workers: usize,
+    included: &[String],
+    total_jobs: usize,
+) -> Vec<String> {
+    let mut args = vec![
+        "--target".to_string(),
+        target.display().to_string(),
+        "campaign".to_string(),
+        "run".to_string(),
+        campaign_id.to_string(),
+        "--workers".to_string(),
+        workers.to_string(),
+    ];
+    if included.len() < total_jobs {
+        args.push("--jobs".to_string());
+        args.push(included.join(","));
+    }
+    args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatcher_args_omit_jobs_when_everything_is_included() {
+        let target = std::path::Path::new("/tmp/ws");
+        let all = ["j1".to_string(), "j2".to_string()];
+        let args = dispatcher_args("camp1", target, 3, &all, 2);
+        assert_eq!(
+            args,
+            vec!["--target", "/tmp/ws", "campaign", "run", "camp1", "--workers", "3"]
+        );
+
+        let subset = ["j2".to_string()];
+        let args = dispatcher_args("camp1", target, 3, &subset, 2);
+        assert_eq!(args[7..], ["--jobs".to_string(), "j2".to_string()]);
+    }
+
+    #[test]
+    fn cycle_workers_wraps_within_the_dispatcher_cap() {
+        let mut deck = CampaignRouteState::default();
+        for _ in 0..CAMPAIGN_MAX_WORKERS {
+            deck.cycle_workers();
+        }
+        assert_eq!(deck.workers, CAMPAIGN_DEFAULT_WORKERS);
+        deck.workers = CAMPAIGN_MAX_WORKERS;
+        deck.cycle_workers();
+        assert_eq!(deck.workers, 1);
+    }
+}

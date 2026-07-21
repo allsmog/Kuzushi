@@ -1,0 +1,32 @@
+# J19 — Partial Scan acknowledgement (failure-path honesty)
+# A partial Scan attempt must not advance reality until the operator
+# explicitly acknowledges the gap. Pre-seed a skipped Map plus a durable
+# PARTIAL scan attempt, verify the RESULT strip demands a decision, select
+# it (which records acknowledged_partial), and verify the acknowledgement
+# is visible afterwards — not silently upgraded to a clean completion.
+name: Partial scan acknowledgement
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: cd @TMP_TARGET && git add -A && git -c user.email=devex@journey -c user.name=devex commit -qm 'J19 fixture' && SHA=$(git rev-parse HEAD) && CANON=$(readlink -f .) && mkdir -p .kuzushi/v3/workflow .kuzushi/v3/runs/run-j19-scan && printf '{"runId":"run-j19-scan","kind":"tool","status":"completed","target":"%s","startedAtUnix":1,"completedAtUnix":2,"targetGit":{"sha":"%s","dirty":false}}\n' "$CANON" "$SHA" > .kuzushi/v3/runs/run-j19-scan/run.json && { printf '{"event":"phase_checkpoint_skipped","phase":"map","targetSnapshot":{"target":"%s","revision":"%s","dirty":false},"recordedAtUnix":1}\n' "$CANON" "$SHA"; printf '{"event":"phase_attempt_completed","attemptId":"attempt-j19-scan","phase":"scan","runRefs":["run-j19-scan"],"targetSnapshot":{"target":"%s","revision":"%s","dirty":false},"outcome":"partial","derivation":"original","completedAtUnix":2}\n' "$CANON" "$SHA"; } > .kuzushi/v3/workflow/phase-attempts.jsonl
+launch: --target @TMP_TARGET
+wait-for: 30 KUZUSHI
+submit: workbench
+wait-for: 8 RESULT
+# Let async target hydration settle — its completion resets the input
+# mode to Prompt, which would swallow the phase-result keys below.
+wait: 4
+keys: Escape
+wait: 1
+snap: partial-scan-result
+expect: NAVIGATE
+expect: RESULT partial
+expect: 1 PARTIAL
+expect: acknowledge the partial
+ask: Partial Scan — does the RESULT strip state the partial outcome plainly and demand an explicit decision rather than auto-advancing to Review?
+keys: u
+wait: 2
+snap: after-acknowledge
+expect: partial acknowledged
+ask: Acknowledgement — after selecting the partial attempt, is the acknowledgement recorded visibly (selected · partial acknowledged) instead of silently rebranding it as a clean completion?
+# Durable truth: the disposition must be on disk with the acknowledgement.
+shell: grep -q '"acknowledged_partial":true' @TMP_TARGET/.kuzushi/v3/workflow/phase-attempts.jsonl

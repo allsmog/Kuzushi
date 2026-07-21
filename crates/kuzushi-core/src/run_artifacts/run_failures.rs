@@ -47,6 +47,10 @@ pub fn write_run_failures(
     error: &str,
     artifacts: &[RunArtifact],
 ) -> Result<RunArtifact> {
+    // Failure text is persisted verbatim into a durable artifact; redact
+    // credential-shaped content (Authorization headers, api keys echoed by
+    // provider or wrapper errors) before it lands on disk.
+    let error = crate::session_transcript::redaction::redact_text(error);
     let failure = RunFailure {
         tool: tool.to_string(),
         status: status.to_string(),
@@ -55,7 +59,7 @@ pub fn write_run_failures(
             target.as_ref(),
             run_id,
             tool,
-            error,
+            &error,
             artifacts,
         ),
     };
@@ -393,4 +397,28 @@ fn forbidden_failure_claims() -> Vec<String> {
     .into_iter()
     .map(str::to_string)
     .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_failure_text_is_redacted() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_failures(
+            tmp.path(),
+            "run-redact",
+            "demo:tool",
+            "failed",
+            "provider rejected request: Authorization: Bearer sk-live-secret-000000 retry later",
+            &[],
+        )
+        .unwrap();
+
+        let report = load_run_failures(tmp.path(), "run-redact").unwrap();
+        let error = &report.failures[0].error;
+        assert!(!error.contains("sk-live-secret"), "{error}");
+        assert!(error.contains("[REDACTED]"), "{error}");
+    }
 }

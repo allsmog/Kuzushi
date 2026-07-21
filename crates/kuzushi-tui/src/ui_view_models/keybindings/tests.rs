@@ -55,7 +55,7 @@ fn unmapped_leaf_views_advertise_only_reachable_mode_actions() {
         app.set_shell_view(view);
         let prompt = footer_keybindings(&app);
         assert!(
-            prompt.contains(&bind("F2", "nav mode")),
+            prompt.contains(&bind("Esc", "nav mode")),
             "{view:?}: {prompt:?}"
         );
         assert!(
@@ -90,7 +90,9 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     let prompt = footer_keybindings(&app);
     assert!(prompt.contains(&bind("Tab", "complete")));
     assert!(prompt.contains(&bind("Shift+Tab", "mode")));
-    assert!(prompt.contains(&bind("F2", "nav mode")));
+    // Review with findings: the Esc doorway must teach the findings flow the
+    // Prompt-mode filter otherwise hides (j/k select, Enter opens Prove).
+    assert!(prompt.contains(&bind("Esc", "nav findings · j/k move · Enter prove")));
     assert!(prompt.contains(&bind("scan", "guided plan")));
     assert!(prompt.contains(&bind("run sast:scan {}", "rescan now")));
     assert!(prompt.contains(&bind("Ctrl+C", "exit")));
@@ -216,6 +218,36 @@ fn workbench_footer_only_advertises_enter_for_an_actionable_findings_pane() {
         .all(|binding| binding.key != "Enter"));
 }
 
+#[test]
+fn prompt_esc_label_teaches_the_findings_flow_only_where_it_exists() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    *app.findings_mut() = vec![workbench_finding()];
+
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Scan));
+    let scan_page = footer_keybindings(&app);
+    assert!(scan_page.contains(&bind("Esc", "nav mode")), "{scan_page:?}");
+
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    *app.findings_mut() = Vec::new();
+    let empty_review = footer_keybindings(&app);
+    assert!(
+        empty_review.contains(&bind("Esc", "nav mode")),
+        "{empty_review:?}"
+    );
+
+    *app.findings_mut() = vec![workbench_finding()];
+    let review = footer_keybindings(&app);
+    assert!(
+        review.contains(&bind("Esc", "nav findings · j/k move · Enter prove")),
+        "{review:?}"
+    );
+}
+
 fn workbench_finding() -> kuzushi_core::Finding {
     kuzushi_core::Finding::new_semgrep(
         "demo.rule",
@@ -252,7 +284,7 @@ fn footer_keybindings_show_scan_abort_action_when_running() {
     assert_eq!(bindings[0], bind("Ctrl+C", "request abort"));
     assert!(bindings.contains(&bind("findings", "list")));
     assert!(bindings.contains(&bind("Tab", "complete")));
-    assert!(bindings.contains(&bind("F2", "nav mode")));
+    assert!(bindings.contains(&bind("Esc", "nav mode")));
 }
 
 #[test]

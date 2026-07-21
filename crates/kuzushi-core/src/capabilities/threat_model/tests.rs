@@ -334,6 +334,31 @@ authorization: Default::default(),
         assert!(requests[0].prompt.contains("Bootstrap stages"));
         assert!(requests[0].prompt.contains("Evidence raises likelihood"));
         assert!(requests[0].prompt.contains("DREAD-style"));
+        assert!(
+            requests[0].prompt.contains("attack-surface-map"),
+            "deterministic attack-surface grounding must reach the prompt"
+        );
+        assert!(
+            requests[0].prompt.contains("Confirmed prior findings"),
+            "confirmed-findings grounding section must reach the prompt"
+        );
+        assert!(
+            result
+                .pointer("/data/document/coverage/invariantSatisfied")
+                .and_then(Value::as_bool)
+                .is_some(),
+            "deterministic coverage report must be stamped on the document"
+        );
+        assert_eq!(
+            result
+                .pointer("/data/document/provenance/pipeline")
+                .and_then(Value::as_str),
+            Some("single")
+        );
+        assert!(result
+            .pointer("/data/document/provenance/builtAtMs")
+            .and_then(Value::as_u64)
+            .is_some());
         assert!(requests[0]
             .prompt
             .contains(DEFAULT_THREAT_MODEL_GUIDANCE));
@@ -11974,6 +11999,375 @@ authorization: Default::default(),
         assert!(
             format!("{missing_artifacts:#}").contains("could not be resolved inside workspace")
         );
+    }
+
+    #[test]
+    fn threat_model_read_without_output_dir_falls_back_to_persistent_model() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_persistent_threat_model(workspace.root(), &sample_document(), true).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool("threat-model:read", json!({}), &ctx)
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.pointer("/data/resolvedFrom").and_then(Value::as_str),
+            Some("persistent")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/document/threats/0/id")
+                .and_then(Value::as_str),
+            Some("T-001")
+        );
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|output| output.contains(".kuzushi/threat-model.json (persistent)")));
+    }
+
+    #[test]
+    fn threat_model_build_reports_gaps_for_uncovered_ground_truth_surfaces() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/admin.js"),
+            "const express = require('express');\nconst app = express();\napp.get('/admin/debug', (req, res) => res.send('ok'));\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let coverage = result
+            .pointer("/data/document/coverage")
+            .expect("coverage object stamped");
+        assert!(
+            coverage["entryPointsConsidered"].as_u64().unwrap_or(0) > 0,
+            "the express route in src/admin.js must be detected as ground truth"
+        );
+        assert_eq!(
+            coverage["invariantSatisfied"],
+            json!(false),
+            "sample document never mentions src/admin.js, so the detected route must be a gap"
+        );
+        assert_eq!(coverage["gapFillMethod"], json!("unresolved"));
+        assert!(coverage["gaps"]
+            .as_array()
+            .is_some_and(|gaps| gaps
+                .iter()
+                .any(|gap| gap["path"] == json!("src/admin.js"))));
+    }
+
+    fn express_route_workspace() -> tempfile::TempDir {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/admin.js"),
+            "const express = require('express');\nconst app = express();\napp.get('/admin/debug', (req, res) => res.send('ok'));\n",
+        )
+        .unwrap();
+        temp
+    }
+
+    fn staged_ctx<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        }
+    }
+
+    fn gap_covering_response() -> Value {
+        json!({
+            "threats": [{
+                "id": "T-GAP-1",
+                "category": "elevation-of-privilege",
+                "title": "Debug route exposes admin state",
+                "surface": "GET /admin/debug",
+                "asset": "application state",
+                "impact": "high",
+                "likelihood": "medium",
+                "affectedFiles": [{"filePath": "src/admin.js", "startLine": 3}],
+                "evidence": [{"kind": "commit", "ref": "invented-by-model", "summary": "must be stripped"}]
+            }],
+            "deprioritized": []
+        })
+    }
+
+    #[test]
+    fn staged_pipeline_gap_fills_uncovered_surfaces_and_stamps_evidence_metadata() {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::responses(vec![
+            AgentQueryResponse {
+                text: String::new(),
+                structured: Some(json!({"document": sample_document()})),
+                ..Default::default()
+            },
+            AgentQueryResponse {
+                text: String::new(),
+                structured: Some(gap_covering_response()),
+                ..Default::default()
+            },
+        ]);
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "pipeline": "staged",
+                    "outputDir": ".kuzushi/tm-staged",
+                    "preserveUserEdits": false
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let requests = runtime.requests();
+        assert_eq!(requests.len(), 2, "synthesis + gap-fill");
+        assert!(requests[0].prompt.contains("Staged synthesis contract"));
+        assert!(requests[1].prompt.contains("Uncovered entry points"));
+        assert!(requests[1].prompt.contains("src/admin.js"));
+
+        let document = result.pointer("/data/document").unwrap();
+        assert_eq!(document["coverage"]["gapFillMethod"], json!("stride-llm"));
+        assert_eq!(document["coverage"]["invariantSatisfied"], json!(true));
+        assert_eq!(document["provenance"]["pipeline"], json!("staged"));
+        assert!(document["provenance"]["researchStats"]["surfaces"]
+            .as_u64()
+            .is_some_and(|surfaces| surfaces > 0));
+        let threats = document["threats"].as_array().unwrap();
+        let gap_threat = threats
+            .iter()
+            .find(|threat| threat["gapFill"] == json!(true))
+            .expect("gap-fill threat merged");
+        assert_eq!(
+            gap_threat["evidence"],
+            json!([]),
+            "gap-fill threats must not carry invented evidence"
+        );
+        assert!(threats
+            .iter()
+            .all(|threat| threat["stableId"].as_str().is_some_and(|id| id.starts_with("tm-"))));
+        for artifact in ["research.json", "coverage.json", "gapfill.json"] {
+            assert!(
+                temp.path().join(".kuzushi/tm-staged").join(artifact).exists(),
+                "stage artifact {artifact} must be written"
+            );
+        }
+    }
+
+    #[test]
+    fn staged_pipeline_without_gaps_makes_exactly_one_call() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"pipeline": "staged", "preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(runtime.requests().len(), 1, "no gaps → no gap-fill call");
+        assert_eq!(
+            result.pointer("/data/document/coverage/gapFillMethod"),
+            Some(&json!("none-needed"))
+        );
+    }
+
+    #[test]
+    fn staged_pipeline_drops_hallucinated_evidence_refs_with_warnings() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let mut document = sample_document();
+        document["threats"][0]["evidence"] = json!([
+            {"kind": "commit", "ref": "feedfacefeedface", "summary": "invented"}
+        ]);
+        let runtime = MockThreatRuntime::new(json!({"document": document}));
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"pipeline": "staged", "preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let document = result.pointer("/data/document").unwrap();
+        assert_eq!(document["threats"][0]["evidence"], json!([]));
+        assert!(document["evidenceWarnings"][0]
+            .as_str()
+            .is_some_and(|warning| warning.contains("feedfacefeedface")));
+    }
+
+    #[test]
+    fn staged_pipeline_degrades_gap_fill_when_budget_is_exhausted() {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::responses(vec![AgentQueryResponse {
+            text: String::new(),
+            structured: Some(json!({"document": sample_document()})),
+            cost_usd: 0.05,
+            cost_usd_reported: true,
+            ..Default::default()
+        }]);
+        let ctx = staged_ctx(&config, &workspace);
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "pipeline": "staged",
+                    "budgetUsd": 0.01,
+                    "preserveUserEdits": false
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            runtime.requests().len(),
+            1,
+            "budget crossed after synthesis → gap-fill must not dispatch"
+        );
+        let coverage = result.pointer("/data/document/coverage").unwrap();
+        assert_eq!(coverage["gapFillMethod"], json!("budget-exhausted"));
+        assert_eq!(coverage["invariantSatisfied"], json!(false));
+    }
+
+    #[test]
+    fn staged_pipeline_without_runtime_is_rejected_explicitly() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = staged_ctx(&config, &workspace);
+
+        let error = registry
+            .execute_tool("threat-model:build", json!({"pipeline": "staged"}), &ctx)
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("staged-pipeline options require a configured model/runtime"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[test]
+    fn phase1_document_additions_do_not_break_downstream_consumers() {
+        let mut document = sample_document();
+        document["coverage"] = json!({
+            "entryPointsConsidered": 3,
+            "entryPointsCovered": 2,
+            "invariantSatisfied": false,
+            "gapFillMethod": "unresolved",
+            "gaps": [{"entryPoint": "GET /admin", "path": "src/admin.js"}],
+        });
+        document["provenance"] = json!({
+            "pipeline": "single",
+            "builtAtMs": 1_784_000_000_000u64,
+            "revision": "a1b2c3d4",
+        });
+        document["attackSurface"] = json!({
+            "entryPoints": [{"name": "handle_login", "trustZone": "external",
+                             "evidence": "src/auth.ts:1", "description": "login handler"}],
+            "externalSinks": [{"name": "exec", "category": "exec", "context": "spawn"}],
+            "roleGates": [],
+            "trustedCallers": [],
+        });
+
+        let hints =
+            crate::capabilities::taint_iris_next::collect_taint_iris_next_attack_surface_hints(
+                Some(&document),
+            );
+        assert!(
+            format!("{hints:?}").contains("handle_login"),
+            "taint-iris-next must still read entry points from a stamped document"
+        );
+
+        let digest =
+            crate::capabilities::agentic_sast::render_threat_model_digest(&document)
+                .expect("agentic-sast digest must render from a stamped document");
+        assert!(digest.contains("Session spoofing"));
     }
 
     #[test]

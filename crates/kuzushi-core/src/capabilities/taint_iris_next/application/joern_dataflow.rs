@@ -689,13 +689,12 @@ mod tests {
         std::fs::write(&cpg, "fake cpg").unwrap();
 
         let (fake_joern, fake_script) = write_fake_joern_fixture(temp.path());
-        let env = JoernEnvSnapshot::set_fake_fixture(&fake_joern, &fake_script);
+        let _env = JoernEnvSnapshot::set_fake_fixture(&fake_joern, &fake_script);
 
         let flows = run_joern_flows(&joern_dataflow_test_plan(temp.path().to_path_buf()))
             .unwrap()
             .expect("joern flows");
 
-        env.restore();
         assert_single_joern_flow(&flows);
     }
 
@@ -735,52 +734,38 @@ printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sour
         assert_eq!(flows[0].steps.len(), 2);
     }
 
+    /// Panic-safe fixture: each field restores its variable on drop.
     struct JoernEnvSnapshot {
-        bin: Option<std::ffi::OsString>,
-        script: Option<std::ffi::OsString>,
-        cpg: Option<std::ffi::OsString>,
+        _bin: crate::test_env::ScopedEnv,
+        _script: crate::test_env::ScopedEnv,
+        _cpg: crate::test_env::ScopedEnv,
     }
 
     impl JoernEnvSnapshot {
         fn set_fake_fixture(fake_joern: &Path, fake_script: &Path) -> Self {
-            let snapshot = Self {
-                bin: std::env::var_os("KUZUSHI_JOERN_BIN"),
-                script: std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT"),
-                cpg: std::env::var_os("KUZUSHI_JOERN_CPG"),
-            };
-            std::env::set_var("KUZUSHI_JOERN_BIN", fake_joern);
-            std::env::set_var("KUZUSHI_JOERN_FLOW_SCRIPT", fake_script);
-            std::env::remove_var("KUZUSHI_JOERN_CPG");
-            snapshot
-        }
-
-        fn restore(self) {
-            restore_env("KUZUSHI_JOERN_BIN", self.bin);
-            restore_env("KUZUSHI_JOERN_FLOW_SCRIPT", self.script);
-            restore_env("KUZUSHI_JOERN_CPG", self.cpg);
-        }
-    }
-
-    fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
-        match previous {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
+            Self {
+                _bin: crate::test_env::ScopedEnv::set("KUZUSHI_JOERN_BIN", fake_joern),
+                _script: crate::test_env::ScopedEnv::set(
+                    "KUZUSHI_JOERN_FLOW_SCRIPT",
+                    fake_script,
+                ),
+                _cpg: crate::test_env::ScopedEnv::unset("KUZUSHI_JOERN_CPG"),
+            }
         }
     }
 
     #[test]
     fn resolve_joern_cpg_path_prefers_env_override() {
         let _guard = crate::test_env::joern_env_lock();
-        std::env::set_var("KUZUSHI_JOERN_CPG", "/tmp/alt-cpg.bin");
+        let _cpg = crate::test_env::ScopedEnv::set("KUZUSHI_JOERN_CPG", "/tmp/alt-cpg.bin");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/tmp/alt-cpg.bin"));
-        std::env::remove_var("KUZUSHI_JOERN_CPG");
     }
 
     #[test]
     fn resolve_joern_cpg_path_falls_back_to_canonical_when_env_unset() {
         let _guard = crate::test_env::joern_env_lock();
-        std::env::remove_var("KUZUSHI_JOERN_CPG");
+        let _cpg = crate::test_env::ScopedEnv::unset("KUZUSHI_JOERN_CPG");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),);
     }
@@ -788,10 +773,9 @@ printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sour
     #[test]
     fn resolve_joern_cpg_path_ignores_empty_env_value() {
         let _guard = crate::test_env::joern_env_lock();
-        std::env::set_var("KUZUSHI_JOERN_CPG", "");
+        let _cpg = crate::test_env::ScopedEnv::set("KUZUSHI_JOERN_CPG", "");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),);
-        std::env::remove_var("KUZUSHI_JOERN_CPG");
     }
 
     #[test]

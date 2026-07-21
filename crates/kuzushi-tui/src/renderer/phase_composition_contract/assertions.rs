@@ -113,15 +113,20 @@ impl PhaseCompositionContract {
     fn priority_atoms(self, width: u16) -> Vec<String> {
         let mut atoms = vec!["KUZUSHI".to_string(), "NEXT".to_string()];
         if width >= 50 {
-            atoms.push(format!("VIEW {}", self.slug.to_ascii_uppercase()));
+            let mut slug = self.slug.chars();
+            let title = match slug.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + slug.as_str(),
+                None => String::new(),
+            };
+            atoms.push(format!("Viewing {title}"));
         }
         atoms
     }
 
     fn critical_compact_atoms(self) -> &'static [&'static str] {
         match self.phase {
-            kuzushi_core::WorkflowPhase::Map => &["VIEW MAP", "context:present"],
-            kuzushi_core::WorkflowPhase::Scan => &["VIEW SCAN", "complete", "scan-phase"],
+            kuzushi_core::WorkflowPhase::Map => &["Viewing Map", "context:present"],
+            kuzushi_core::WorkflowPhase::Scan => &["Viewing Scan", "complete", "scan-phase"],
             kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
             kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
             kuzushi_core::WorkflowPhase::Fix => &["REMEDIATION", "Staged", "report"],

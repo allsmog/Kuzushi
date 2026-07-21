@@ -1,6 +1,39 @@
 use super::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Once;
+
+/// True while raw mode + alternate screen are engaged. The panic hook swaps
+/// it off so exactly one restore runs, and normal teardown clears it so a
+/// later panic doesn't emit stray escape sequences into a sane terminal.
+static TERMINAL_GUARD_ACTIVE: AtomicBool = AtomicBool::new(false);
+static TERMINAL_PANIC_HOOK: Once = Once::new();
+
+pub(crate) fn mark_terminal_guard_active() {
+    TERMINAL_GUARD_ACTIVE.store(true, Ordering::SeqCst);
+}
+
+pub(crate) fn take_terminal_guard() -> bool {
+    TERMINAL_GUARD_ACTIVE.swap(false, Ordering::SeqCst)
+}
+
+/// Without this hook a panic prints its message into the alternate screen
+/// while raw mode is still active: the terminal is wiped on unwind and the
+/// operator never sees why Kuzushi died. Restore the terminal FIRST, then
+/// chain to the previous hook so the message lands on the normal screen.
+pub(crate) fn install_terminal_panic_hook() {
+    TERMINAL_PANIC_HOOK.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            if take_terminal_guard() {
+                rollback_terminal_mode();
+            }
+            previous(info);
+        }));
+    });
+}
 
 pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {
+    install_terminal_panic_hook();
     let stdout = setup_terminal_stdout()?;
     Terminal::new(CrosstermBackend::new(stdout)).map_err(|error| {
         rollback_terminal_mode();
@@ -39,6 +72,9 @@ pub(crate) fn setup_terminal_stdout() -> Result<Stdout> {
 
 fn raw_terminal_stdout() -> Result<Stdout> {
     enable_raw_mode().context("Could not enable raw mode")?;
+    // Arm the panic guard the moment raw mode engages: every later setup
+    // failure or panic must put the operator's terminal back.
+    mark_terminal_guard_active();
     // Enter the alternate screen so the shell owns a dedicated full-screen
     // buffer: the terminal has no scrollback to drift through, the view stays
     // locked in place, and rendered frames don't pile into the user's history.
@@ -50,12 +86,16 @@ fn raw_terminal_stdout() -> Result<Stdout> {
 }
 
 fn rollback_terminal_mode() {
+    take_terminal_guard();
+    // `cursor::Show` covers the panic-hook path, which has no Terminal
+    // handle to call `show_cursor()` on.
     let _ = execute!(
         io::stdout(),
         DisableMouseCapture,
         DisableBracketedPaste,
         crossterm::terminal::SetTitle("Kuzushi"),
-        LeaveAlternateScreen
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
     );
     let _ = disable_raw_mode();
 }
@@ -96,6 +136,7 @@ pub(crate) fn mouse_capture_setting_enabled(value: Option<&str>) -> bool {
 }
 
 pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<()> {
+    take_terminal_guard();
     let escape_result = execute!(
         terminal.backend_mut(),
         DisableMouseCapture,

@@ -1197,6 +1197,44 @@ fn recovering_ledger_projects_the_valid_prefix_and_degraded_state() {
 }
 
 #[test]
+fn append_heals_a_torn_tail_left_by_a_killed_writer() {
+    let target = tempfile::tempdir().unwrap();
+    let first = completed(PhaseAttemptOutcome::Completed);
+    append_phase_attempt_completed(target.path(), first.clone()).unwrap();
+    let path = phase_attempt_ledger_path(target.path());
+    let mut body = fs::read_to_string(&path).unwrap();
+    body.push_str("{\"phaseAttemptCompleted\":{\"tor");
+    fs::write(&path, body).unwrap();
+
+    let second = completed(PhaseAttemptOutcome::Completed);
+    append_phase_attempt_completed(target.path(), second.clone()).unwrap();
+
+    // The strict loader succeeding proves the torn tail was truncated,
+    // not appended after.
+    let ledger = load_phase_attempt_ledger(target.path()).unwrap();
+    assert!(ledger.attempt(&first.attempt_id).is_some());
+    assert!(ledger.attempt(&second.attempt_id).is_some());
+}
+
+#[test]
+fn append_refuses_a_newline_terminated_corrupt_line_as_real_corruption() {
+    let target = tempfile::tempdir().unwrap();
+    let first = completed(PhaseAttemptOutcome::Completed);
+    append_phase_attempt_completed(target.path(), first).unwrap();
+    let path = phase_attempt_ledger_path(target.path());
+    let mut body = fs::read_to_string(&path).unwrap();
+    body.push_str("not-json\n");
+    fs::write(&path, &body).unwrap();
+
+    let error = append_phase_attempt_completed(target.path(), completed(PhaseAttemptOutcome::Completed))
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("Invalid workflow attempt event"), "{error}");
+    assert_eq!(fs::read_to_string(&path).unwrap(), body);
+}
+
+#[test]
 fn unverifiable_legacy_v1_selection_round_trips_as_history_without_reuse() {
     let target = tempfile::tempdir().unwrap();
     let attempt = completed(PhaseAttemptOutcome::Completed);

@@ -53,7 +53,21 @@ pub fn emit_persisted_terminal_outcome_for_call(
         RunItemSource::Workflow,
         terminal_item(target, run_id, output)?,
     ))?;
+    record_coverage_baseline(target, &summary);
     Ok(())
+}
+
+/// Coverage is derived truth written only after the terminal receipt exists;
+/// a ledger write failure must not fail the terminal event itself.
+fn record_coverage_baseline(target: &Path, summary: &crate::run_artifacts::RunSummary) {
+    if let Err(error) =
+        crate::workspace::coverage_ledger::record_baseline_from_summary(target, summary)
+    {
+        eprintln!(
+            "kuzushi: coverage baseline not recorded for run {}: {error:#}",
+            summary.run_id
+        );
+    }
 }
 
 pub fn emit_result_persistence_failure(
@@ -262,7 +276,7 @@ fn terminal_item(target: &Path, run_id: &str, output: &Value) -> Result<RunItemV
         .unwrap_or("tool run finished");
     Ok(RunItemV1::TerminalOutcome {
         status,
-        summary: SafeText::operator_visible(summary),
+        summary: SafeText::condensed_line(summary),
         cost,
         continuation: terminal_continuation(run_id, status)?,
     })

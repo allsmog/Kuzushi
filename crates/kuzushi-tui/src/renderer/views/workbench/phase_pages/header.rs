@@ -332,46 +332,70 @@ fn finding_filter_line(filter: &str, width: usize) -> Line<'static> {
 fn identity_line(header: &EngagementHeaderModel, width: usize) -> Line<'static> {
     let mut spans = Vec::new();
     let mut used = 0;
-    for (text, style) in identity_atoms(header) {
-        push_atom(&mut spans, &mut used, width, text, style);
+    for atom in identity_atoms(header) {
+        if !push_atom(&mut spans, &mut used, width, atom.text, atom.style) {
+            if let Some(compact) = atom.compact {
+                push_atom(&mut spans, &mut used, width, compact, atom.style);
+            }
+        }
     }
     Line::from(spans)
 }
 
-fn identity_atoms(header: &EngagementHeaderModel) -> Vec<(String, ratatui::style::Style)> {
+struct IdentityAtom {
+    text: String,
+    /// Narrower phrasing tried when the full text would evict the atom.
+    /// Reality must survive at 40 columns; the viewed page lying about the
+    /// pipeline's live phase is worse than terse wording.
+    compact: Option<String>,
+    style: ratatui::style::Style,
+}
+
+fn atom(text: String, style: ratatui::style::Style) -> IdentityAtom {
+    IdentityAtom {
+        text,
+        compact: None,
+        style,
+    }
+}
+
+fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
     let mut atoms = vec![
-        ("KUZUSHI".to_string(), theme::heading()),
-        (
-            format!("VIEW {}", header.phase.label()),
+        atom("KUZUSHI".to_string(), theme::heading()),
+        atom(
+            format!("Viewing {}", header.phase.title()),
             mode_style(header.phase),
         ),
     ];
-    if header
+    if let Some(reality) = header
         .reality_phase
-        .is_some_and(|reality| reality != header.phase)
+        .filter(|reality| *reality != header.phase)
     {
-        let reality = header.reality_phase.expect("checked reality phase");
-        atoms.push((format!("REALITY {}", reality.label()), theme::muted()));
+        atoms.push(IdentityAtom {
+            text: format!("pipeline live in {}", reality.title()),
+            compact: Some(format!("now in {}", reality.title())),
+            style: theme::muted(),
+        });
     }
-    atoms.extend([
-        (format!("target {}", header.target), theme::label()),
-        live_atom(header.live),
-    ]);
+    atoms.push(atom(format!("target {}", header.target), theme::label()));
+    let (live_text, live_style) = live_atom(header.liveness);
+    atoms.push(atom(live_text, live_style));
     if header.cost_invalid {
-        atoms.push(("cost invalid".to_string(), theme::danger()));
+        atoms.push(atom("cost invalid".to_string(), theme::danger()));
     } else if !header.cost_complete {
-        atoms.push((
+        atoms.push(atom(
             format!("cost >=${:.2} incomplete", header.cost_usd),
             theme::warn(),
         ));
     } else if header.cost_usd > 0.0 {
-        atoms.push((format!("cost ${:.2}", header.cost_usd), theme::primary()));
+        atoms.push(atom(format!("cost ${:.2}", header.cost_usd), theme::primary()));
     }
-    atoms.extend([
-        (header.context.clone(), context_style(&header.context)),
-        (format!("model {}", header.model), theme::muted()),
-        (module_atom(&header.module), module_style(&header.module)),
-    ]);
+    atoms.push(atom(header.context.clone(), context_style(&header.context)));
+    atoms.push(atom(format!("model {}", header.model), theme::muted()));
+    atoms.push(atom(
+        module_atom(&header.module),
+        module_style(&header.module),
+    ));
     atoms
 }
 
@@ -412,15 +436,24 @@ fn context_style(context: &str) -> ratatui::style::Style {
     }
 }
 
-fn live_atom(live: bool) -> (String, ratatui::style::Style) {
-    if !live {
-        return ("○ idle".to_string(), theme::subtle());
+fn live_atom(
+    liveness: crate::ui_view_models::WorkLiveness,
+) -> (String, ratatui::style::Style) {
+    match liveness {
+        crate::ui_view_models::WorkLiveness::Idle => ("○ idle".to_string(), theme::subtle()),
+        // External writers are updating workspace state — real activity the
+        // badge must not report as idle, even though no local worker runs.
+        crate::ui_view_models::WorkLiveness::ExternalSync => {
+            ("◌ workspace sync".to_string(), theme::warn())
+        }
+        crate::ui_view_models::WorkLiveness::Live => {
+            let mut style = theme::success();
+            if live_pulse_on() {
+                style = style.add_modifier(Modifier::BOLD);
+            }
+            ("● LIVE".to_string(), style)
+        }
     }
-    let mut style = theme::success();
-    if live_pulse_on() {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    ("● LIVE".to_string(), style)
 }
 
 fn live_pulse_on() -> bool {
@@ -439,17 +472,18 @@ fn push_atom(
     width: usize,
     text: String,
     style: ratatui::style::Style,
-) {
+) -> bool {
     let separator_width = usize::from(*used > 0) * 3;
     let atom_width = display_width(&text);
     if used.saturating_add(separator_width + atom_width) > width {
-        return;
+        return false;
     }
     if *used > 0 {
         spans.push(Span::styled(" · ", theme::subtle()));
     }
     spans.push(Span::styled(text, style));
     *used += separator_width + atom_width;
+    true
 }
 
 fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line<'static>> {

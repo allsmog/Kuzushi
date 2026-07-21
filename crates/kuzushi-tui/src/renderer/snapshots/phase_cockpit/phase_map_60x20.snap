@@ -4,9 +4,9 @@ contract: cockpit-spine-v1
 phase: map
 size: 60x20
 ---
-KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining
+KUZUSHI · Viewing Map · pipeline live in Review · ● LIVE
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger
         candidates
 │▸ PROJECT CONTEXT
 │./phase-target · rev:unknown

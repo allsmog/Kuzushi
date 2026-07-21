@@ -110,7 +110,7 @@ fn shared_reference_seed_populates_every_phase_projection() {
     assert_eq!(journey.current, WorkflowPhase::Review);
     assert!(journey
         .next_action
-        .contains("record terminal dispositions for 6 of 6 remaining candidates"));
+        .contains("record terminal dispositions for 6 of 6 ledger candidates"));
 }
 
 #[test]

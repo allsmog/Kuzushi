@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use std::fs;
 
     #[test]
     fn source_span_extracts_repo_relative_snippet_and_hash() {

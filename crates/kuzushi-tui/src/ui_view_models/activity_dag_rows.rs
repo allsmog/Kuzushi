@@ -211,7 +211,7 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
     let marker = if selected { "▌" } else { " " };
     let right_reserve: usize = 9;
     let task_pad = width.saturating_sub(right_reserve + 3).max(8);
-    let task_label = fit(task_display_label(row), task_pad);
+    let task_label = fit(&task_display_label(row), task_pad);
     let elapsed = elapsed_label(row, now);
     let body = format!(
         "{marker} {symbol} {task:<task_pad$} {elapsed:>8}",
@@ -224,11 +224,19 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
     fit(&body, width)
 }
 
-fn task_display_label(row: &DagTaskRow) -> &str {
-    if kuzushi_core::run_lifecycle::RunTaskId::parse(&row.task_id).is_ok() {
-        return &row.module_id;
+fn task_display_label(row: &DagTaskRow) -> String {
+    let raw = if kuzushi_core::run_lifecycle::RunTaskId::parse(&row.task_id).is_ok() {
+        &row.module_id
+    } else {
+        &row.task_id
+    };
+    // `module:verb` registry keys render as their operator label; anything
+    // else (custom step labels, run ids) stays verbatim.
+    if raw.contains(':') {
+        kuzushi_core::modules::tool_display_name(raw)
+    } else {
+        raw.clone()
     }
-    &row.task_id
 }
 
 /// A task's row, plus — under a running task — a sub-line showing what it's
@@ -414,7 +422,7 @@ mod tests {
         let rows = activity_dag_pane_rows(&session, &route, 40, Instant::now(), None);
 
         assert_eq!(rows.len(), 3);
-        assert!(rows[0].text.contains("semgrep:scan"));
+        assert!(rows[0].text.contains("Run Semgrep scan"));
         assert_eq!(rows[0].tone, ActivityDagRowTone::Queued);
         assert!(rows[1].text.contains("subsystems (2)"));
         assert!(rows[1].text.contains("expanded"));
@@ -429,7 +437,7 @@ mod tests {
 
         let text = dag_row_text(&row, 60, Instant::now(), false);
 
-        assert!(text.contains("context:build"));
+        assert!(text.contains("Build project context"));
         assert!(!text.contains(task_id));
     }
 
@@ -524,7 +532,7 @@ mod tests {
         let rows = activity_dag_pane_rows(&session, &route, 80, Instant::now(), None);
 
         assert_eq!(rows.len(), 4);
-        assert!(rows[0].text.contains("agentic-sast:scan"));
+        assert!(rows[0].text.contains("Agentic SAST hunt"));
         assert!(rows[1].text.contains("✓ inventory-review"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
         assert!(rows[2].text.contains("↳ vulnerability-hunt"));

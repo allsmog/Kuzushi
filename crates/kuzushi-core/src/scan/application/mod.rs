@@ -9,6 +9,9 @@ pub use run_scan_engines_with_options::{
     normalize_semgrep_json, run_scan_engines_with_options,
     run_scan_engines_with_options_and_cancellation,
 };
+pub(crate) use run_scan_engines_with_options::{
+    parse_semgrep_report, semgrep_error_summaries, semgrep_findings_from_report,
+};
 #[cfg(test)]
 pub(in crate::scan) use run_semgrep_scan::default_scan_engine_selection_for_test;
 pub use run_semgrep_scan::{

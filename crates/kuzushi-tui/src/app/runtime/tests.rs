@@ -350,4 +350,69 @@ mod tests {
 
         assert!(error.contains("terminal event reader failed: boom"));
     }
+
+    /// Event floods must not monopolize the loop with imperceptible draws:
+    /// a dirty frame inside the minimum interval defers, and the deferred
+    /// frame shortens the next wait so it still paints on time.
+    #[test]
+    fn frame_cap_defers_flood_draws_but_schedules_the_deferred_repaint() {
+        let base = std::time::Instant::now();
+        let just_drawn = Some(base);
+        let long_ago = Some(base - MIN_FRAME_INTERVAL * 2);
+
+        // Draw gating: clean frames never draw; dirty frames draw when the
+        // interval elapsed (or nothing was drawn yet), defer when inside it.
+        assert!(!should_draw_frame(false, None, base));
+        assert!(should_draw_frame(true, None, base));
+        assert!(should_draw_frame(true, long_ago, base));
+        assert!(!should_draw_frame(true, just_drawn, base));
+        assert!(should_draw_frame(true, just_drawn, base + MIN_FRAME_INTERVAL));
+
+        // Timeout capping: an idle 250ms wait shrinks to the remaining frame
+        // interval while a deferred frame is pending, and only then.
+        let idle = Duration::from_millis(250);
+        assert_eq!(deferred_frame_timeout(idle, false, just_drawn, base), idle);
+        assert_eq!(deferred_frame_timeout(idle, true, None, base), idle);
+        let capped = deferred_frame_timeout(idle, true, just_drawn, base);
+        assert!(capped <= MIN_FRAME_INTERVAL, "{capped:?}");
+        assert!(capped >= Duration::from_millis(1), "{capped:?}");
+        // A view cadence faster than the frame cap is never slowed down.
+        let scene = Duration::from_millis(5);
+        assert_eq!(deferred_frame_timeout(scene, true, just_drawn, base), scene);
+    }
+
+    /// The panic hook must restore the terminal exactly once (the guard is
+    /// consumed on first take) and must keep unwinding so the panic message
+    /// still reaches the operator. One sequential test owns the global flag
+    /// so parallel test threads never race it.
+    #[test]
+    fn terminal_panic_guard_is_armed_once_and_consumed_by_the_hook() {
+        // The guard is consumable: exactly one restore per armed session.
+        mark_terminal_guard_active();
+        assert!(take_terminal_guard());
+        assert!(!take_terminal_guard(), "second take must be a no-op");
+
+        // Chain under a quiet probe hook so the assertion below observes the
+        // chained call instead of default-hook stderr noise.
+        let observed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let probe = observed.clone();
+        std::panic::set_hook(Box::new(move |_| {
+            probe.store(true, std::sync::atomic::Ordering::SeqCst);
+        }));
+        install_terminal_panic_hook();
+
+        mark_terminal_guard_active();
+        let unwound = std::panic::catch_unwind(|| panic!("t3 probe"));
+
+        assert!(unwound.is_err(), "panic must keep unwinding after the hook");
+        assert!(
+            observed.load(std::sync::atomic::Ordering::SeqCst),
+            "hook must chain to the previous hook"
+        );
+        assert!(
+            !take_terminal_guard(),
+            "hook must consume the guard so restore runs exactly once"
+        );
+        let _ = std::panic::take_hook();
+    }
 }

@@ -148,6 +148,19 @@ pub(crate) struct FindingDetailModel {
     pub(crate) message_overflow: usize,
     pub(crate) evidence_overflow: usize,
     pub(crate) triage: Option<TriageSummaryModel>,
+    pub(crate) source_snippet: Option<SourceSnippetModel>,
+}
+
+/// On-disk source context around the finding's `file_path:start_line`,
+/// read through the workbench cache so browsing findings never re-reads
+/// the same file per frame. `lines` is empty when `note` explains why the
+/// snippet is unavailable (unreadable file, line beyond EOF).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct SourceSnippetModel {
+    pub(crate) start_line: usize,
+    pub(crate) focus_line: usize,
+    pub(crate) lines: Vec<String>,
+    pub(crate) note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -195,12 +208,18 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         triaged,
         pending,
         counts,
-        header: findings_header(total, counts, active_component_rel_path(app).as_deref()),
+        header: findings_header_with_ledger(
+            total,
+            counts,
+            active_component_rel_path(app).as_deref(),
+            ledger_population(app),
+        ),
         reconciliation_header: findings_reconciliation_header(
             total,
             app.findings().len(),
             active_findings_filter_label(app).as_str(),
             active_component_rel_path(app).as_deref(),
+            backlog_reconciliation_state(app),
         ),
         cursor: app.router.findings().cursor().min(total.saturating_sub(1)),
         empty: empty_state(app),
@@ -210,16 +229,55 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
     }
 }
 
+/// Backlog-preset facts the reconciliation header must reflect: the preset
+/// hides review-complete rows, adds severity/tool chips, and switches the
+/// sort to severity-major — the header claims must track all three.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct BacklogReconciliationState {
+    active: bool,
+    severity: Option<&'static str>,
+    tool: Option<String>,
+}
+
+fn backlog_reconciliation_state(app: &ShellApp) -> BacklogReconciliationState {
+    if !review_backlog_active(app) {
+        return BacklogReconciliationState::default();
+    }
+    let review = app.router.workbench().review();
+    BacklogReconciliationState {
+        active: true,
+        severity: review.backlog_severity,
+        tool: review.backlog_tool.clone(),
+    }
+}
+
 fn findings_reconciliation_header(
     total: usize,
     loaded: usize,
     active_filter: &str,
     component: Option<&str>,
+    backlog: BacklogReconciliationState,
 ) -> String {
-    format!(
-        "showing {total} of {loaded} · filters:{} · review:all · sorted by priority",
-        combined_filter_label(active_filter, component)
-    )
+    let mut filters = combined_filter_label(active_filter, component);
+    if backlog.active {
+        if let Some(severity) = backlog.severity {
+            filters = join_filter_label(filters, format!("sev:{severity}"));
+        }
+        if let Some(tool) = backlog.tool.as_deref() {
+            filters = join_filter_label(filters, format!("tool:{tool}"));
+        }
+    }
+    let review = if backlog.active { "open" } else { "all" };
+    let sort = if backlog.active { "severity" } else { "priority" };
+    format!("showing {total} of {loaded} · filters:{filters} · review:{review} · sorted by {sort}")
+}
+
+fn join_filter_label(current: String, chip: String) -> String {
+    if current == "all" {
+        chip
+    } else {
+        format!("{current} + {chip}")
+    }
 }
 
 fn active_findings_filter_label(app: &ShellApp) -> String {
@@ -246,7 +304,17 @@ fn combined_filter_label(active_filter: &str, component: Option<&str>) -> String
     }
 }
 
-fn findings_header(total: usize, counts: SeverityCounts, component: Option<&str>) -> String {
+/// The durable candidate ledger can hold far more rows than this session has
+/// loaded (e.g. a long-running campaign written by other sessions). When the
+/// populations differ, name the ledger one so the operator can reconcile this
+/// pane's count with the ledger-based NEXT banner instead of concluding one
+/// of them is wrong.
+fn findings_header_with_ledger(
+    total: usize,
+    counts: SeverityCounts,
+    component: Option<&str>,
+    ledger_total: Option<usize>,
+) -> String {
     let mut parts = vec![format!("FINDINGS · {total}")];
     if let Some(component) = component {
         parts.push(format!("component:{component}"));
@@ -254,7 +322,19 @@ fn findings_header(total: usize, counts: SeverityCounts, component: Option<&str>
     for segment in severity_count_segments(counts) {
         parts.push(segment);
     }
+    if let Some(ledger) = ledger_total {
+        parts.push(format!("ledger:{ledger}"));
+    }
     parts.join(" · ")
+}
+
+/// The ledger population, only when it holds MORE than this session loaded —
+/// the "481 findings here, 4340 candidates there" confusion. A smaller or
+/// matching ledger (fresh in-memory findings not yet persisted) would only
+/// add noise.
+fn ledger_population(app: &ShellApp) -> Option<usize> {
+    let ledger = app.domain().finding_ledger_counts()?.total;
+    (ledger > app.findings().len()).then_some(ledger)
 }
 
 fn severity_count_segments(counts: SeverityCounts) -> Vec<String> {
@@ -288,13 +368,82 @@ pub(crate) fn finding_detail_model_for_projection(
     let decision = review_index.effective_decision_for(finding);
     let runs = run_summary_index(app);
     let provenance = finding_run_provenance(finding, &runs);
-    FindingDetailModel::from_finding(
+    let mut detail = FindingDetailModel::from_finding(
         finding,
         alias,
         target_base(app).as_deref(),
         decision.as_ref(),
         provenance,
-    )
+    );
+    detail.source_snippet = source_snippet_model(app, finding);
+    detail
+}
+
+const SNIPPET_CONTEXT_BEFORE: usize = 3;
+const SNIPPET_CONTEXT_AFTER: usize = 4;
+
+/// Read the finding's source context through the workbench cache. `None`
+/// means the finding carries no usable location (no file, line 0, or no
+/// way to resolve a relative path without a target); an unreadable file
+/// still yields a model whose `note` says why, so the operator learns the
+/// snippet is missing rather than wondering where it went.
+fn source_snippet_model(app: &ShellApp, finding: &Finding) -> Option<SourceSnippetModel> {
+    let focus_line = finding.start_line as usize;
+    if focus_line == 0 {
+        return None;
+    }
+    let path = finding_source_path(app, finding)?;
+    let content = app.workbench_cache().borrow_mut().read_source_file(&path);
+    Some(match content {
+        Ok(content) => snippet_from_content(&content, focus_line),
+        Err(error) => snippet_note(focus_line, format!("source unavailable · {error}")),
+    })
+}
+
+fn finding_source_path(app: &ShellApp, finding: &Finding) -> Option<std::path::PathBuf> {
+    let raw = finding.file_path.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path = std::path::Path::new(raw);
+    if path.is_absolute() {
+        return Some(path.to_path_buf());
+    }
+    Some(app.target()?.join(path))
+}
+
+fn snippet_from_content(content: &str, focus_line: usize) -> SourceSnippetModel {
+    let all: Vec<&str> = content.lines().collect();
+    if focus_line > all.len() {
+        let total = all.len();
+        let plural = if total == 1 { "" } else { "s" };
+        return snippet_note(
+            focus_line,
+            format!(
+                "line {focus_line} is beyond the on-disk file ({total} line{plural}) · source has changed since the scan"
+            ),
+        );
+    }
+    let start_line = focus_line.saturating_sub(SNIPPET_CONTEXT_BEFORE).max(1);
+    let end_line = focus_line.saturating_add(SNIPPET_CONTEXT_AFTER).min(all.len());
+    SourceSnippetModel {
+        start_line,
+        focus_line,
+        lines: all[start_line - 1..end_line]
+            .iter()
+            .map(|line| line.replace('\t', "  "))
+            .collect(),
+        note: None,
+    }
+}
+
+fn snippet_note(focus_line: usize, note: String) -> SourceSnippetModel {
+    SourceSnippetModel {
+        start_line: focus_line,
+        focus_line,
+        lines: Vec::new(),
+        note: Some(note),
+    }
 }
 
 pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
@@ -402,9 +551,62 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     let sorted = cached_sorted_finding_alias_indices(app);
-    let display_ordered = confidence_first_display_order(app, sorted);
+    // The backlog preset keeps the severity-major base order (skipping the
+    // confidence-first display reorder) so an operator can burn down the
+    // untriaged queue worst-severity-first. Explicit toggle only.
+    let display_ordered = if review_backlog_active(app) {
+        sorted
+    } else {
+        confidence_first_display_order(app, sorted)
+    };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
-    active_filter_finding_alias_indices(app, component_filtered)
+    let filtered = active_filter_finding_alias_indices(app, component_filtered);
+    backlog_open_only_finding_alias_indices(app, filtered)
+}
+
+pub(crate) fn review_backlog_active(app: &ShellApp) -> bool {
+    app.router.workbench().review().backlog
+}
+
+/// Backlog preset visibility: drop findings whose review is already complete
+/// (same completeness rule as the review queue's `open` mode).
+fn backlog_open_only_finding_alias_indices(
+    app: &ShellApp,
+    visible: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
+    if !review_backlog_active(app) {
+        return visible;
+    }
+    let review = app.router.workbench().review();
+    let severity_filter = review.backlog_severity;
+    let tool_filter = review.backlog_tool.clone();
+    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+        app.findings(),
+        app.review_decisions(),
+    );
+    visible
+        .into_iter()
+        .filter(|(_, index)| {
+            app.findings().get(*index).is_some_and(|finding| {
+                let decision = review_index.effective_decision_for(finding);
+                !super::review_state::effective_review_decision_complete(
+                    finding,
+                    decision.as_ref(),
+                ) && backlog_filters_match(finding, severity_filter, tool_filter.as_deref())
+            })
+        })
+        .collect()
+}
+
+/// Backlog v2 filters: severity chip (`s`) and tool chip (`t`) narrow the
+/// untriaged queue; `None` means the axis is unfiltered.
+fn backlog_filters_match(
+    finding: &Finding,
+    severity: Option<&'static str>,
+    tool: Option<&str>,
+) -> bool {
+    severity.is_none_or(|wanted| finding.severity.as_str() == wanted)
+        && tool.is_none_or(|wanted| finding.tool == wanted)
 }
 
 /// Re-order the severity-major aliased pairs into confidence-first *display*
@@ -556,11 +758,27 @@ pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCache
 }
 
 fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
-    app.active_findings_filter()
+    let filter = app
+        .active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
-        .map(ToString::to_string)
+        .map(ToString::to_string);
+    // The backlog preset changes visibility and ordering, so it must key the
+    // projection cache alongside the filter expression.
+    if review_backlog_active(app) {
+        // Severity/tool filters change visibility, so they must key the
+        // cache too — a chip toggle with unchanged revisions must not
+        // serve stale rows.
+        let review = app.router.workbench().review();
+        return Some(format!(
+            "[backlog sev:{} tool:{}]{}",
+            review.backlog_severity.unwrap_or("*"),
+            review.backlog_tool.as_deref().unwrap_or("*"),
+            filter.unwrap_or_default()
+        ));
+    }
+    filter
 }
 
 #[cfg(test)]
@@ -1204,7 +1422,13 @@ fn compact_identity_id(identity_id: &str) -> String {
         let compact = suffix.chars().take(8).collect::<String>();
         return format!("FI-{}", compact.to_ascii_uppercase());
     }
-    trimmed.chars().take(12).collect()
+    if trimmed.chars().count() <= 12 {
+        return trimmed.to_string();
+    }
+    // Never clip mid-word without saying so — a bare cut reads as the
+    // actual identity ("phase-findin").
+    let prefix: String = trimmed.chars().take(11).collect();
+    format!("{prefix}…")
 }
 
 struct DetailStatusFields {

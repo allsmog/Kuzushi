@@ -8,6 +8,7 @@ pub(crate) fn build_agentic_sast_prompt(
     inventory: &[(String, String)],
     review_context: Option<&str>,
     whitebox_static: bool,
+    enrichment: &PromptEnrichment,
 ) -> String {
     let mut prompt = vec![
         "Scan this repository for concrete application-security vulnerabilities.".to_string(),
@@ -41,6 +42,23 @@ pub(crate) fn build_agentic_sast_prompt(
         prompt.push(String::new());
         prompt.push(whitebox_static_triage_prompt_block().to_string());
     }
+    if let Some(threat_context) = &enrichment.threat_context {
+        prompt.push(String::new());
+        prompt.push(
+            "Threat-model handoff: prioritize hunting paths that realize the modeled threats \
+and cross-check the listed entry points and sinks. The digest is derived context, not \
+ground truth — verify against source before reporting."
+                .to_string(),
+        );
+        prompt.push(render_untrusted_derived_block(
+            "threat-model-digest",
+            threat_context,
+        ));
+    }
+    if let Some(guidance) = mcp_guidance_line(&enrichment.attached_mcps) {
+        prompt.push(String::new());
+        prompt.push(guidance);
+    }
     if let Some(review_context) = review_context {
         prompt.push(String::new());
         prompt.push(render_untrusted_derived_block(
@@ -54,6 +72,26 @@ pub(crate) fn build_agentic_sast_prompt(
     prompt.push("Repository inventory and snippets:".to_string());
     prompt.push(render_untrusted_repo_blocks(inventory));
     prompt.join("\n")
+}
+
+/// Advertise only the MCP servers the tool policy actually attached, with
+/// concrete first-use guidance for the two scan-critical ones.
+fn mcp_guidance_line(attached: &[String]) -> Option<String> {
+    if attached.is_empty() {
+        return None;
+    }
+    let mut line = format!("Attached MCP toolsets: {}.", attached.join(", "));
+    if attached.iter().any(|name| name == "threat-model") {
+        line.push_str(
+            " Query threat_model:threats / threat_model:elements for full threat detail beyond the digest.",
+        );
+    }
+    if attached.iter().any(|name| name == "findings") {
+        line.push_str(
+            " Query findings:query for prior findings on a file BEFORE reporting there; report new evidence, not duplicates of known findings.",
+        );
+    }
+    Some(line)
 }
 
 pub(crate) fn summarize_agentic_findings_for_review(findings: &[Finding]) -> String {
@@ -71,4 +109,51 @@ pub(crate) fn summarize_agentic_findings_for_review(findings: &[Finding]) -> Str
         ));
     }
     lines.join("\n")
+}
+
+#[cfg(test)]
+mod enrichment_tests {
+    use super::*;
+
+    fn minimal_options() -> AgenticSastInput {
+        AgenticSastInput::from_tool_input(&json!({})).unwrap()
+    }
+
+    #[test]
+    fn threat_digest_and_attached_mcps_reach_the_prompt() {
+        let enrichment = PromptEnrichment {
+            threat_context: Some("Modeled threats:\n- [high] spec reaches execve".to_string()),
+            attached_mcps: vec!["treesitter".to_string(), "threat-model".to_string(), "findings".to_string()],
+        };
+
+        let prompt = build_agentic_sast_prompt(
+            Path::new("/tmp/target"),
+            &minimal_options(),
+            &[],
+            None,
+            false,
+            &enrichment,
+        );
+
+        assert!(prompt.contains("threat-model-digest"));
+        assert!(prompt.contains("spec reaches execve"));
+        assert!(prompt.contains("Attached MCP toolsets: treesitter, threat-model, findings."));
+        assert!(prompt.contains("threat_model:threats"));
+        assert!(prompt.contains("findings:query"));
+    }
+
+    #[test]
+    fn empty_enrichment_leaves_the_prompt_unchanged() {
+        let prompt = build_agentic_sast_prompt(
+            Path::new("/tmp/target"),
+            &minimal_options(),
+            &[],
+            None,
+            false,
+            &PromptEnrichment::default(),
+        );
+
+        assert!(!prompt.contains("threat-model-digest"));
+        assert!(!prompt.contains("Attached MCP toolsets"));
+    }
 }

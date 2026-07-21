@@ -245,7 +245,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi modules [--json]` | List visible native modules. |
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
-| `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
+| `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand.Batch contract for unattended callers: exit `0` completed/skipped, `2` run could not be prepared (unknown tool, bad input — retry is pointless), `3` tool executed and failed, `4` `status=partial`; every prepared run atomically publishes `.kuzushi/v3/runs/<runId>/done.json` (`runId`, `tool`, `status`, `ok`, `exitCode`) at its terminal envelope, so a run directory without it and with a dead `processId` in `run.json` crashed. |
 | `kuzushi mcp serve\|health <backend>` | Run or health-check a shipped local MCP server over stdio. Backends: `gtags`, `clang`, `joern`, `tree-sitter`, `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`, `x-ray`. |
 | `kuzushi auth ping [provider] [--model <spec>]` | Round-trip a 1-token request to verify credentials, network, and bridge. Interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |

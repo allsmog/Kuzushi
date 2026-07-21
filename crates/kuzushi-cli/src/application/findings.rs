@@ -17,7 +17,10 @@ pub(crate) fn findings_command(
     let report = store.list_findings_filtered(&filter)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // The aliased rows, not the raw report: aliases are how decisions
+        // and detail lookups address findings, so the machine output must
+        // carry the same ledger-stable aliases the plain table shows.
+        println!("{}", serde_json::to_string_pretty(&report.aliased_rows_json())?);
     } else if report.findings.is_empty() {
         println!(
             "no findings found at {}\nNext: kuzushi scan {}",
@@ -38,14 +41,16 @@ pub(crate) fn finding_command(
     let target = require_cli_target("finding", target, None)?;
     let workspace = WorkspaceTarget::new(target)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
-    let all_findings = store
-        .list_findings_filtered(&FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT))?
-        .findings;
+    // Aliases are positional over the sorted WHOLE ledger; resolving against
+    // a clamped list both loses aliases past the limit and can assign the
+    // same alias to a different finding than exports/lists over the full set.
+    let all_findings = store.list_all_findings()?;
 
+    // Keep the alias-resolved row itself: fingerprints can collide across
+    // sibling findings (they exclude the line), so a fingerprint round-trip
+    // could silently swap in a different finding than the alias names.
     let finding = if let Some(alias_finding) = resolve_finding_alias(&all_findings, &reference) {
-        store
-            .get_finding_by_fingerprint(&alias_finding.fingerprint)?
-            .unwrap_or(alias_finding)
+        alias_finding
     } else {
         store
             .get_finding_by_reference(&reference)?
@@ -68,13 +73,11 @@ pub(crate) fn resolve_persisted_finding(
     reference: &str,
     workspace: &WorkspaceTarget,
 ) -> Result<kuzushi_core::Finding> {
-    let all_findings = store
-        .list_findings_filtered(&FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT))?
-        .findings;
+    let all_findings = store.list_all_findings()?;
     if let Some(alias_finding) = resolve_finding_alias(&all_findings, reference) {
-        return Ok(store
-            .get_finding_by_fingerprint(&alias_finding.fingerprint)?
-            .unwrap_or(alias_finding));
+        // No fingerprint round-trip: colliding fingerprints would swap in a
+        // sibling finding at a different line than the alias names.
+        return Ok(alias_finding);
     }
     store
         .get_finding_by_reference(reference)?

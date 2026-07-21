@@ -11,7 +11,7 @@ pub(crate) fn refresh_terminal_redraw_state(
     sync_terminal_title(terminal, app, state)?;
     state.needs_redraw |= clear_terminal_after_external_output(terminal, app)?;
     state.needs_redraw |= app.schedule_active_view_hydration();
-    state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+    draw_terminal_if_needed(terminal, app, state)?;
     Ok(background.work_tail_may_remain)
 }
 
@@ -98,15 +98,55 @@ where
     Ok(true)
 }
 
+/// Minimum interval between full-frame draws (~30 fps). Under a sustained
+/// background-event flood the loop otherwise degenerates into
+/// drain-slice → draw → wake → drain-slice, spending most of its time
+/// painting frames no human can perceive and starving input handling.
+pub(crate) const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+
 pub(crate) fn draw_terminal_if_needed(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &ShellApp,
-    needs_redraw: bool,
-) -> Result<bool> {
-    if needs_redraw {
-        terminal.draw(|frame| render_app(frame, app))?;
+    state: &mut TerminalLoopState,
+) -> Result<()> {
+    if !should_draw_frame(state.needs_redraw, state.last_draw, Instant::now()) {
+        // A deferred dirty frame stays pending; the capped recv timeout in
+        // `terminal_shell_step` guarantees it paints within the interval.
+        return Ok(());
     }
-    Ok(false)
+    terminal.draw(|frame| render_app(frame, app))?;
+    state.last_draw = Some(Instant::now());
+    state.needs_redraw = false;
+    Ok(())
+}
+
+pub(crate) fn should_draw_frame(
+    needs_redraw: bool,
+    last_draw: Option<Instant>,
+    now: Instant,
+) -> bool {
+    needs_redraw
+        && last_draw.is_none_or(|at| now.saturating_duration_since(at) >= MIN_FRAME_INTERVAL)
+}
+
+/// The recv timeout for the next loop wait: the view-driven cadence, capped
+/// by the remaining frame interval when a dirty frame was deferred so the
+/// deferred repaint lands on time instead of waiting out the idle timeout.
+pub(crate) fn deferred_frame_timeout(
+    view_timeout: Duration,
+    needs_redraw: bool,
+    last_draw: Option<Instant>,
+    now: Instant,
+) -> Duration {
+    if !needs_redraw {
+        return view_timeout;
+    }
+    let Some(last_draw) = last_draw else {
+        return view_timeout;
+    };
+    let remaining =
+        MIN_FRAME_INTERVAL.saturating_sub(now.saturating_duration_since(last_draw));
+    view_timeout.min(remaining.max(Duration::from_millis(1)))
 }
 
 pub(crate) fn terminal_event_timeout(app: &ShellApp) -> Duration {

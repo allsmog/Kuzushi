@@ -39,7 +39,7 @@ fn projects_only_terminal_scan_phase_runs() {
     assert_eq!(attempt.run_id, "scan-run");
     assert_eq!(attempt.findings, Some(3));
     assert_eq!(attempt.duration_secs, Some(9));
-    assert_eq!(model.engine_outcomes[0].engine, "sast:scan");
+    assert_eq!(model.engine_outcomes[0].engine, "Run SAST scan");
 }
 
 fn write_map_and_scan_summaries(target: &std::path::Path) {
@@ -89,23 +89,113 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
     let run_id = "typed-scan-cockpit";
+    record_typed_scan_attempt(target.path(), run_id);
+
+    let app = app_with_hydrated_typed_attempt(&workspace, run_id);
+    let model = scan_phase_model(&app);
+    let attempt = model.attempt.expect("typed Scan attempt");
+
+    assert!(model.scope.contains("paths src/auth"));
+    assert_eq!(
+        model.plan,
+        "manual selection · semgrep, cargo-audit".to_string()
+    );
+    assert_eq!(model.engine_outcomes[0].outcome, "complete");
+    assert_eq!(
+        model.engine_outcomes[0].run_ref.as_deref(),
+        Some("semgrep-child")
+    );
+    assert_eq!(model.engine_outcomes[1].outcome, "skipped");
+    assert_eq!(attempt.outcome, "partial");
+    assert_eq!(attempt.findings_added, Some(4));
+    assert_eq!(attempt.findings_updated, Some(2));
+    assert_eq!(attempt.findings, Some(6));
+    assert_eq!(attempt.artifact_count, 1);
+    assert_eq!(
+        attempt.artifact_paths,
+        vec!["semgrep-child:result.json".to_string()]
+    );
+    assert_eq!(attempt.duration_secs, Some(2));
+    assert_eq!(attempt.cost_complete, Some(false));
+}
+
+/// Regression: an external workspace refresh invalidates the run-summary
+/// index and view caches on every writer burst. The typed attempt card must
+/// hold steady — no downgrade to the legacy projection, no transient
+/// "receipts are loading" hint flapping beneath it.
+#[test]
+fn typed_projection_survives_external_cache_invalidation_without_hint_flap() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let run_id = "typed-scan-stable";
+    record_typed_scan_attempt(target.path(), run_id);
+    let app = app_with_hydrated_typed_attempt(&workspace, run_id);
+    let before = scan_phase_model(&app);
+    assert!(before.attempt.is_some(), "typed attempt before refresh");
+    assert_eq!(before.empty_hint, None);
+
+    app.workbench_cache().borrow_mut().invalidate_workspace_files();
+    app.workbench_cache()
+        .borrow_mut()
+        .invalidate_state_artifact_paths(
+            workspace.root(),
+            &[std::path::PathBuf::from(".kuzushi/v3")],
+        );
+
+    let after = scan_phase_model(&app);
+    assert_eq!(after.plan, before.plan, "typed plan must not downgrade");
+    assert_eq!(after.attempt, before.attempt);
+    assert_eq!(after.engine_outcomes, before.engine_outcomes);
+    assert_eq!(after.empty_hint, None, "no loading hint under a typed card");
+}
+
+/// Regression: attempts with no typed receipt (direct engine runs) project
+/// from the run-summary index. That index now serves stale entries while it
+/// rehydrates, so the legacy card must also hold steady across an external
+/// workspace refresh instead of degrading to "plan not recorded".
+#[test]
+fn legacy_projection_survives_external_cache_invalidation() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let scan = write_partial_scan(target.path());
+    select_partial_attempt(target.path(), &scan);
+    let mut app = hydrated_app(&workspace);
+    app.refresh_phase_attempt_projection();
+    let before = scan_phase_model(&app);
+    assert!(before.attempt.is_some(), "legacy attempt before refresh");
+
+    app.workbench_cache()
+        .borrow_mut()
+        .invalidate_state_artifact_paths(
+            workspace.root(),
+            &[std::path::PathBuf::from(".kuzushi/v3")],
+        );
+
+    let after = scan_phase_model(&app);
+    assert_eq!(after.plan, before.plan, "legacy plan must not degrade");
+    assert_eq!(after.attempt, before.attempt);
+    assert_eq!(after.engine_outcomes, before.engine_outcomes);
+    assert_eq!(after.empty_hint, before.empty_hint);
+}
+
+fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
     let mut summary = RunSummary::running(
         run_id,
         "scan",
         Some("sast:scan".to_string()),
-        target.path().display().to_string(),
+        target.display().to_string(),
     );
     summary.status = "partial".to_string();
     summary.completed_at_unix = Some(summary.started_at_unix + 99);
-    write_run_summary(target.path(), &summary).unwrap();
-    let snapshot = PhaseTargetSnapshot::capture(target.path());
+    write_run_summary(target, &summary).unwrap();
+    let snapshot = PhaseTargetSnapshot::capture(target);
     let receipt = PhaseStageReceipt {
         phase: WorkflowPhase::Scan,
         outcome: PhaseStageOutcome::Partial,
         run_refs: vec![run_id.to_string(), "semgrep-child".to_string()],
         scan: Some(ScanStageData {
             scope: ScanStageScope {
-                target: target.path().display().to_string(),
+                target: target.display().to_string(),
                 paths: vec!["src/auth".to_string()],
             },
             plan: ScanStagePlan {
@@ -142,7 +232,7 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
             target_snapshot: snapshot.clone(),
         }),
     };
-    let stage_path = kuzushi_core::run_artifacts::run_dir(target.path(), run_id)
+    let stage_path = kuzushi_core::run_artifacts::run_dir(target, run_id)
         .join(SAST_PHASE_STAGES_JSONL_FILE);
     std::fs::create_dir_all(stage_path.parent().unwrap()).unwrap();
     std::fs::write(
@@ -156,9 +246,11 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
         snapshot,
         PhaseAttemptOutcome::Partial,
     );
-    append_phase_attempt_completed(target.path(), completed).unwrap();
+    append_phase_attempt_completed(target, completed).unwrap();
+}
 
-    let mut app = hydrated_app(&workspace);
+fn app_with_hydrated_typed_attempt(workspace: &WorkspaceTarget, run_id: &str) -> ShellApp {
+    let mut app = hydrated_app(workspace);
     app.refresh_phase_attempt_projection();
     app.hydrate_view_keys_blocking(
         workspace.root(),
@@ -166,31 +258,7 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
             run_id: run_id.to_string(),
         }],
     );
-    let model = scan_phase_model(&app);
-    let attempt = model.attempt.expect("typed Scan attempt");
-
-    assert!(model.scope.contains("paths src/auth"));
-    assert_eq!(
-        model.plan,
-        "manual selection · semgrep, cargo-audit".to_string()
-    );
-    assert_eq!(model.engine_outcomes[0].outcome, "complete");
-    assert_eq!(
-        model.engine_outcomes[0].run_ref.as_deref(),
-        Some("semgrep-child")
-    );
-    assert_eq!(model.engine_outcomes[1].outcome, "skipped");
-    assert_eq!(attempt.outcome, "partial");
-    assert_eq!(attempt.findings_added, Some(4));
-    assert_eq!(attempt.findings_updated, Some(2));
-    assert_eq!(attempt.findings, Some(6));
-    assert_eq!(attempt.artifact_count, 1);
-    assert_eq!(
-        attempt.artifact_paths,
-        vec!["semgrep-child:result.json".to_string()]
-    );
-    assert_eq!(attempt.duration_secs, Some(2));
-    assert_eq!(attempt.cost_complete, Some(false));
+    app
 }
 
 fn write_partial_scan(target: &std::path::Path) -> RunSummary {

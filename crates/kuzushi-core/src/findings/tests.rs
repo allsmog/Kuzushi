@@ -244,6 +244,42 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_delta_splits_new_from_reobserved_distinct_fingerprints() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-delta";
+        store
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
+            .unwrap();
+        let existing = Finding::new_tool(
+            "full-mode",
+            "rule-existing",
+            "src/foo.c",
+            10,
+            None,
+            Severity::High,
+            "already in the store",
+        );
+        store.insert_finding(run, &existing).unwrap();
+        let fresh = Finding::new_tool(
+            "full-mode",
+            "rule-fresh",
+            "src/bar.c",
+            20,
+            None,
+            Severity::Critical,
+            "new this run",
+        );
+
+        // The re-observed finding, one new finding, and a byte-duplicate of
+        // the new finding (same fingerprint) — duplicates count once.
+        let (added, updated) = store
+            .fingerprint_delta(&[existing.clone(), fresh.clone(), fresh.clone()])
+            .unwrap();
+
+        assert_eq!((added, updated), (1, 1));
+    }
+
+    #[test]
     fn insert_findings_batches_projection_and_v3_observations() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-batch";
@@ -2134,6 +2170,52 @@ mod tests {
         assert_eq!(resolved.fingerprint, finding.fingerprint);
     }
 
+    /// The shell advertises `verify F-0001` / `patch F-0001` keypaths;
+    /// positional aliases must therefore resolve wherever an operator
+    /// reference is accepted, not only exact/prefix fingerprints.
+    #[test]
+    fn operator_reference_resolves_positional_alias() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run_id = "run-alias";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let critical = Finding::new_semgrep(
+            "demo.sqli",
+            "src/login.ts",
+            17,
+            Some(17),
+            Severity::Critical,
+            "sql injection reaches query",
+        );
+        let low = Finding::new_semgrep(
+            "demo.log",
+            "src/log.ts",
+            3,
+            Some(3),
+            Severity::Low,
+            "log forging",
+        );
+        store.insert_finding(run_id, &critical).unwrap();
+        store.insert_finding(run_id, &low).unwrap();
+
+        let first = store
+            .get_finding_by_operator_reference("F-0001")
+            .unwrap()
+            .expect("F-0001 resolves");
+        let second = store
+            .get_finding_by_operator_reference("F-0002")
+            .unwrap()
+            .expect("F-0002 resolves");
+
+        assert_eq!(first.fingerprint, critical.fingerprint, "F-0001 is the top-sorted finding");
+        assert_eq!(second.fingerprint, low.fingerprint);
+        assert!(store
+            .get_finding_by_operator_reference("F-0099")
+            .unwrap()
+            .is_none());
+    }
+
     #[test]
     fn repeated_observations_do_not_make_a_fingerprint_prefix_ambiguous() {
         let store = FindingStore::open_in_memory().unwrap();
@@ -2517,6 +2599,7 @@ mod tests {
         let report = FindingListReport {
             count: 2,
             findings: vec![high_late, high_early],
+            aliases: vec![],
         };
 
         let output = report.output();
@@ -2562,6 +2645,7 @@ mod tests {
         let report = FindingListReport {
             count: 1,
             findings: vec![finding],
+            aliases: vec![],
         };
 
         let output = report.to_tool_json().to_string();

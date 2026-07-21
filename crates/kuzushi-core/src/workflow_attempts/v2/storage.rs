@@ -15,6 +15,9 @@ pub(super) fn append_v2_event(target: &Path, event: PhaseAttemptEventV2) -> Resu
     fs::create_dir_all(parent)?;
     let _lock = crate::file_lock::ExclusiveFileLock::acquire(&parent.join(LEDGER_LOCK))?;
     reject_unsafe_path(&path)?;
+    // A writer killed mid-append leaves a newline-less partial line; the
+    // strict duplicate scan below would otherwise fail on it forever.
+    crate::jsonl_tail::heal_torn_jsonl_tail_at(&path, MAX_EVENT_BYTES, "phase-attempt v2 ledger")?;
     let envelope = PhaseAttemptEnvelopeV2 {
         schema_version: SCHEMA_VERSION,
         record: event,
@@ -151,4 +154,51 @@ fn open_append_file(path: &Path) -> Result<fs::File> {
 #[cfg(not(unix))]
 fn open_append_file(path: &Path) -> Result<fs::File> {
     Ok(OpenOptions::new().create(true).append(true).open(path)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{
+        PhaseAttemptCompletedV2, PhaseReceiptReferenceV2, TargetContentIdentity,
+    };
+    use super::*;
+    use crate::run_lifecycle::{RunAttemptId, RunId, RunItemId, RunItemStatus, SafeText};
+    use crate::WorkflowPhase;
+
+    fn sample_completed_event() -> PhaseAttemptEventV2 {
+        let run_id = RunId::parse(&crate::run_artifacts::new_run_id("torn")).unwrap();
+        PhaseAttemptEventV2::Completed(PhaseAttemptCompletedV2 {
+            attempt_id: RunAttemptId::new(),
+            phase: WorkflowPhase::Scan,
+            run_refs: vec![run_id.clone()],
+            final_receipt: PhaseReceiptReferenceV2 {
+                run_id,
+                item_id: RunItemId::new(),
+                event_hash: SafeText::operator_visible("hash"),
+            },
+            outcome: RunItemStatus::Completed,
+            target: SafeText::operator_visible("/target"),
+            target_content_identity: TargetContentIdentity::Unavailable {
+                reason: SafeText::operator_visible("test fixture"),
+            },
+        })
+    }
+
+    #[test]
+    fn append_heals_a_torn_tail_left_by_a_killed_writer() {
+        let target = tempfile::tempdir().unwrap();
+        let path = phase_attempt_v2_ledger_path(target.path());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "{\"schemaVersion\":2,\"tor").unwrap();
+
+        append_v2_event(target.path(), sample_completed_event()).unwrap();
+
+        let body = fs::read_to_string(&path).unwrap();
+        assert_eq!(body.lines().count(), 1);
+        assert!(body.starts_with("{\"schemaVersion\":2"), "{body}");
+        assert!(body.ends_with('\n'));
+        let ledger = super::super::load_phase_attempt_ledger_v2(target.path()).unwrap();
+        assert_eq!(ledger.attempts.len(), 1);
+        assert_eq!(ledger.malformed_line, None);
+    }
 }

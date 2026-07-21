@@ -26,12 +26,15 @@ pub(crate) fn parse_nested_shell_command(
         "project" => parse_project_command(args),
         "runs" => parse_runs_command(args),
         "jobs" => parse_jobs_command(args),
+        "campaign" | "campaigns" => parse_campaign_command(args),
+        "coverage" => ShellCommand::ShowCoverage,
         "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
         "proof" => parse_proof_command(args),
         "dismiss" => parse_dismiss_command(args),
         "suppress" => parse_suppress_command(args),
+        "verify" => parse_verify_command(args),
         "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
@@ -92,6 +95,14 @@ fn parse_jobs_command(args: &[&str]) -> ShellCommand {
         ["-k", id] | ["kill", id] | ["cancel", id] => ShellCommand::CancelJob((*id).to_string()),
         ["-k"] | ["kill"] | ["cancel"] => ShellCommand::Unknown("jobs -k <id>".to_string()),
         [other, ..] => ShellCommand::Unknown(format!("jobs {other}")),
+    }
+}
+
+fn parse_campaign_command(args: &[&str]) -> ShellCommand {
+    match args {
+        [] | ["list"] => ShellCommand::ShowCampaigns(None),
+        [id] => ShellCommand::ShowCampaigns(Some((*id).to_string())),
+        [other, ..] => ShellCommand::Unknown(format!("campaign {other}")),
     }
 }
 
@@ -257,6 +268,34 @@ fn unsupported_suppress() -> ShellCommand {
     ))
 }
 
+/// `verify <F-alias|fingerprint>` — the keypath the finding detail and help
+/// advertise. Desugars into the ordinary `run` machinery (`verify` resolves
+/// to `verify:finding`; its `fingerprint` option accepts a stable alias), so
+/// the advertised one-step path is a deterministic verb instead of falling
+/// into the Workbench phase-intent planner.
+fn parse_verify_command(args: &[&str]) -> ShellCommand {
+    let [reference] = args else {
+        return ShellCommand::Unknown("verify <finding>".to_string());
+    };
+    finding_reference_tool_run("verify:finding", reference)
+}
+
+fn finding_reference_tool_run(tool: &str, reference: &str) -> ShellCommand {
+    ShellCommand::RunTool {
+        tool: Some(tool.to_string()),
+        input: Some(serde_json::json!({ "fingerprint": reference }).to_string()),
+    }
+}
+
+/// A bare finding reference (`F-0001`, `fi_…`, or a long fingerprint) — used
+/// to disambiguate `patch <finding>` from an unknown patch subverb.
+fn looks_like_finding_reference(value: &str) -> bool {
+    let alias = value.len() >= 3
+        && (value.starts_with("F-") || value.starts_with("f-"))
+        && value[2..].chars().all(|ch| ch.is_ascii_digit());
+    alias || value.starts_with("fi_") || value.chars().count() >= 12
+}
+
 fn parse_patch_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         Some("apply") => ShellCommand::Patch(PatchCommand::Apply),
@@ -264,6 +303,11 @@ fn parse_patch_command(args: &[&str]) -> ShellCommand {
         Some("regen" | "regenerate") => ShellCommand::Patch(PatchCommand::Regen {
             style: parse_patch_regen_style(args.get(1..).unwrap_or_default()),
         }),
+        // `patch F-0001` — the finding detail's advertised remediation
+        // keypath; routes through `run` like `verify <finding>`.
+        Some(reference) if args.len() == 1 && looks_like_finding_reference(reference) => {
+            finding_reference_tool_run("patch:finding", reference)
+        }
         Some(other) => ShellCommand::Patch(PatchCommand::Unsupported(format!("patch {other}"))),
         None => ShellCommand::Patch(PatchCommand::Unsupported("patch".to_string())),
     }

@@ -201,6 +201,9 @@ fn append_validated_event(target: &Path, event: PhaseAttemptEvent) -> Result<Pat
     })?;
     let _guard = crate::file_lock::ExclusiveFileLock::acquire(&parent.join(ATTEMPT_LEDGER_LOCK))?;
     reject_unsafe_target(&path)?;
+    // A writer killed mid-append leaves a newline-less partial line; the
+    // strict validation re-read below would otherwise fail on it forever.
+    crate::jsonl_tail::heal_torn_jsonl_tail_at(&path, MAX_EVENT_BYTES, "Workflow attempt ledger")?;
     validate_appended_event(target, &event)?;
     append_event_line(&path, &event)?;
     Ok(path)

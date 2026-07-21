@@ -112,6 +112,10 @@ pub struct RunSummary {
     pub prompt_overrides: Vec<RunPromptOverrideFingerprint>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threat_model_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threat_model_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threat_model_resolved_via: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub env_fingerprint: Vec<RunEnvFingerprint>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -160,6 +164,8 @@ impl RunSummary {
             house_rules: Vec::new(),
             prompt_overrides: Vec::new(),
             threat_model_sha256: None,
+            threat_model_source: None,
+            threat_model_resolved_via: None,
             env_fingerprint: Vec::new(),
             target_git: None,
             llm_calls: Vec::new(),
@@ -291,6 +297,8 @@ impl RunSummary {
         self.house_rules = source.house_rules.clone();
         self.prompt_overrides = source.prompt_overrides.clone();
         self.threat_model_sha256 = source.threat_model_sha256.clone();
+        self.threat_model_source = source.threat_model_source.clone();
+        self.threat_model_resolved_via = source.threat_model_resolved_via.clone();
         self.env_fingerprint = source.env_fingerprint.clone();
         self.target_git = source.target_git.clone();
         self.cli_args = source.cli_args.clone();
@@ -344,6 +352,16 @@ impl RunSummary {
 
     pub fn with_threat_model_sha256(mut self, threat_model_sha256: Option<String>) -> Self {
         self.threat_model_sha256 = non_empty_metadata(threat_model_sha256);
+        self
+    }
+
+    pub fn with_threat_model_provenance(
+        mut self,
+        source: Option<String>,
+        resolved_via: Option<String>,
+    ) -> Self {
+        self.threat_model_source = non_empty_metadata(source);
+        self.threat_model_resolved_via = non_empty_metadata(resolved_via);
         self
     }
 

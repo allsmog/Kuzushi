@@ -314,6 +314,9 @@ fn git_repo_has_commit(target: &Path, sha: &str) -> Result<bool> {
 }
 
 fn git_show_file(target: &Path, rev: &str, file: &str) -> Result<String> {
+    // The rev comes from harvested advisory data; a '-'-leading value
+    // would be parsed as a `git show` option instead of a revision.
+    crate::git_rev::ensure_safe_git_rev(rev, "threat-intel regression gate")?;
     let revspec = format!("{rev}:{file}");
     let output = run_git(target, &["show", revspec.as_str()])?;
     if !output.status.success() {
@@ -327,17 +330,14 @@ fn git_show_file(target: &Path, rev: &str, file: &str) -> Result<String> {
 }
 
 fn run_git(target: &Path, args: &[&str]) -> Result<std::process::Output> {
-    Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(args)
-        .output()
-        .with_context(|| {
-            format!(
-                "could not invoke git in {} (is git installed and is the target a repository?)",
-                target.display()
-            )
-        })
+    let mut command = Command::new("git");
+    command.arg("-C").arg(target).args(args);
+    crate::bounded_subprocess::output(&mut command, "git").with_context(|| {
+        format!(
+            "could not invoke git in {} (is git installed and is the target a repository?)",
+            target.display()
+        )
+    })
 }
 
 fn count_query_hits(text: &str, queries: &[String]) -> u32 {

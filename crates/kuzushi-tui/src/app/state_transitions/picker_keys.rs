@@ -167,7 +167,6 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_model_picker_choice()),
-            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_model_picker();
                 InputUpdate::handled()
@@ -427,7 +426,6 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_target_picker_choice()),
-            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_target_picker();
                 InputUpdate::handled()
@@ -508,7 +506,6 @@ impl ShellApp {
                 self.move_auth_picker_cursor(1);
                 InputUpdate::handled()
             }
-            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Enter => self.accept_auth_picker_choice(),
             _ => InputUpdate::ignored(),
         }

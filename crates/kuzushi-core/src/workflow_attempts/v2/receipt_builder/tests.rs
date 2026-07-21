@@ -58,6 +58,126 @@ fn build(run_id: &RunId, projection: &RunProjection) -> Result<RunItemV1> {
     .build()
 }
 
+fn build_failed(
+    phase: WorkflowPhase,
+    run_id: &RunId,
+    projection: &RunProjection,
+) -> Result<RunItemV1> {
+    PhaseReceiptBuilder::new(
+        phase,
+        RunItemStatus::Failed,
+        std::slice::from_ref(run_id),
+        std::slice::from_ref(projection),
+    )
+    .build()
+}
+
+fn failed_projection(run_id: &RunId, summary: &str) -> RunProjection {
+    let mut projection = projection(run_id.clone(), RunItemStatus::Failed);
+    projection.terminal.as_mut().unwrap().summary = SafeText::operator_visible(summary);
+    projection
+}
+
+fn receipt_continuation(item: &RunItemV1) -> &WorkflowContinuation {
+    let RunItemV1::PhaseReceipt { continuation, .. } = item else {
+        panic!("expected a phase receipt: {item:?}");
+    };
+    continuation
+}
+
+#[test]
+fn failed_map_receipt_asks_the_operator_to_rebuild_the_context() {
+    let run_id = run_id();
+    let projection = failed_projection(
+        &run_id,
+        "context:build failed | Context inventory exceeded the 100000-entry coverage limit",
+    );
+
+    let item = build_failed(WorkflowPhase::Map, &run_id, &projection).unwrap();
+
+    let WorkflowContinuation::Retry { reason } = receipt_continuation(&item) else {
+        panic!("failed map must ask for a rebuild via Retry: {item:?}");
+    };
+    assert_eq!(
+        reason.as_str(),
+        "rebuild the map context — a coverage cap was hit: scope the target (or audit via shards) first",
+    );
+}
+
+#[test]
+fn failed_map_receipt_asks_for_rebuild_even_when_the_failure_class_is_unknown() {
+    let run_id = run_id();
+    let projection = failed_projection(&run_id, "scanner worker exited abnormally");
+
+    let item = build_failed(WorkflowPhase::Map, &run_id, &projection).unwrap();
+
+    let WorkflowContinuation::Retry { reason } = receipt_continuation(&item) else {
+        panic!("failed map must ask for a rebuild via Retry: {item:?}");
+    };
+    assert_eq!(
+        reason.as_str(),
+        "rebuild the current-revision map context after inspecting the failure evidence",
+    );
+}
+
+#[test]
+fn failed_map_receipt_offers_one_retry_and_keeps_the_inspect_escape_hatch() {
+    let run_id = run_id();
+    let projection = failed_projection(&run_id, "scanner worker exited abnormally");
+
+    let item = build_failed(WorkflowPhase::Map, &run_id, &projection).unwrap();
+
+    let RunItemV1::PhaseReceipt {
+        offered_actions, ..
+    } = item
+    else {
+        unreachable!();
+    };
+    let retries = offered_actions
+        .iter()
+        .filter(|action| matches!(action, WorkflowContinuation::Retry { .. }))
+        .count();
+    assert_eq!(retries, 1, "rebuild ask must not duplicate the generic retry");
+    assert!(offered_actions
+        .iter()
+        .any(|action| matches!(action, WorkflowContinuation::InspectRun { .. })));
+}
+
+#[test]
+fn failed_scan_receipt_drafts_remediation_into_the_inspect_reason() {
+    let run_id = run_id();
+    let projection = failed_projection(
+        &run_id,
+        "sast:scan failed | run-item stream budget exhausted",
+    );
+
+    let item = build_failed(WorkflowPhase::Scan, &run_id, &projection).unwrap();
+
+    let WorkflowContinuation::InspectRun { reason, .. } = receipt_continuation(&item) else {
+        panic!("failed scan continues with InspectRun: {item:?}");
+    };
+    assert_eq!(
+        reason.as_str(),
+        "the run hit its budget cap — raise the budget or narrow scope, then retry",
+    );
+}
+
+#[test]
+fn failed_scan_receipt_keeps_generic_inspect_reason_for_unknown_failures() {
+    let run_id = run_id();
+    let projection = failed_projection(&run_id, "scanner worker exited abnormally");
+
+    let item = build_failed(WorkflowPhase::Scan, &run_id, &projection).unwrap();
+
+    let WorkflowContinuation::InspectRun { reason, .. } = receipt_continuation(&item) else {
+        panic!("failed scan continues with InspectRun: {item:?}");
+    };
+    assert_eq!(
+        reason.as_str(),
+        "inspect the incomplete phase evidence before retrying",
+    );
+}
+
 #[test]
 fn derives_interactions_and_clean_scan_destination_from_typed_projection() {
     let run_id = run_id();
@@ -84,6 +204,32 @@ fn derives_interactions_and_clean_scan_destination_from_typed_projection() {
             ..
         }
     ));
+}
+
+#[test]
+fn receipt_keeps_only_the_last_finding_delta_per_run() {
+    let run_id = run_id();
+    let mut projection = projection(run_id.clone(), RunItemStatus::Completed);
+    for (added, updated) in [(9_u64, 1_u64), (13, 2)] {
+        projection.finding_deltas.push(FindingDeltaSummary {
+            added,
+            updated,
+            removed: 0,
+            store_watermark: SafeText::operator_visible("ledger:7"),
+            finding_id_samples: Vec::new(),
+        });
+    }
+
+    let item = build(&run_id, &projection).unwrap();
+
+    let RunItemV1::PhaseReceipt { finding_delta, .. } = item else {
+        panic!("expected phase receipt");
+    };
+    assert_eq!(
+        (finding_delta.added, finding_delta.updated),
+        (13, 2),
+        "an orchestrator's end-of-run delta supersedes nested engine deltas"
+    );
 }
 
 #[test]

@@ -333,7 +333,7 @@ mod tests {
         let mut model = remediation_model(RemediationLoadState::Ready, None);
         model.reverify_command =
             Some("run patch:reverify {\"applicationId\":\"application-1\"}".to_string());
-        model.reverify_control_hint = Some("F2 then v".to_string());
+        model.reverify_control_hint = Some("Esc then v".to_string());
 
         let rendered = lifecycle_lines(&model, 120)
             .into_iter()
@@ -341,7 +341,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("▸ F2 then v re-verify · run patch:reverify"));
+        assert!(rendered.contains("▸ Esc then v re-verify · run patch:reverify"));
         assert!(!rendered.contains("▸ v  re-verify"));
     }
 }

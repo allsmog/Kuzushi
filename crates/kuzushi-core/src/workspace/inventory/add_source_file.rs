@@ -82,9 +82,14 @@ impl InventoryBuilder {
             .or_insert(item);
     }
 
-    pub(crate) fn finish(self, root_name: String) -> RepositoryInventory {
+    pub(crate) fn finish(
+        self,
+        root_name: String,
+        truncation: Option<InventoryTruncation>,
+    ) -> RepositoryInventory {
         RepositoryInventory {
             root_name,
+            truncation,
             languages: self
                 .languages
                 .into_iter()

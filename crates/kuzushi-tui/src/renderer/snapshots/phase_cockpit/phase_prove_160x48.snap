@@ -4,17 +4,16 @@ contract: cockpit-spine-v1
 phase: prove
 size: 160x48
 ---
-KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built · model configured openai:gpt-5.4 [auth missing]
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built · model configured openai:gpt-5.4 [auth missing]
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report
 │STATUS / NEXT                                                  │▸ EVIDENCE · z attack path                     │PROOF LADDER
-│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)            │evidence:1 · 1 source(s) · 1                   │● 1 signal captured
-│runtime_verified                                               │1. observed code evidence · source-sink ·...   │● 2 path-linked
-│SQL injection reaches query                                    │request_input -> database_query                │● 3 exploited
-│src/auth/login.rs:17                                           │attacker-controlled input reaches a...         │current [●●●] verified L4 · 1 source(s)
-│STATUS runtime_verified · decision:needs_review · evidence:1   │                                               │
-│NEXT   patch · patch F-0001                                    │                                               │
+│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  runtim... │evidence:1 · 1 source(s) · 1                   │● 1 signal captured
+│SQL injection reaches query                                    │1. observed code evidence · source-sink ·...   │● 2 path-linked
+│src/auth/login.rs:17                                           │request_input -> database_query                │● 3 exploited
+│STATUS runtime_verified · decision:needs_review · evidence:1   │attacker-controlled input reaches a...         │current [●●●] verified L4 · 1 source(s)
+│NEXT   patch F-0001                                            │                                               │
 │                                                               │                                               │
 │                                                               │                                               │
 │                                                               │                                               │
@@ -48,7 +47,8 @@ KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target · ● LIVE · 
 │                                                               │                                               │
 │                                                               │                                               │
 │                                                               │                                               │
-route:run · 査  review 3/5 · ⛭ 掛  fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                             6 findings / 1 crit / 2 high / 2 med
+│                                                               │                                               │
+route:run · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                                   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◎ PROVE › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

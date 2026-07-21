@@ -138,7 +138,7 @@ fn prompt_json_is_structured_and_bounded() {
     assert!(json.contains("\"focusedPane\": \"Findings\""));
     assert!(json.contains("\"selectedRun\": \"run-1\""));
     assert!(json.contains("\"dirty\": true"));
-    assert!(json.contains("\"scopeLabel\": \"scope: repo · 崩 scan · abc123-dirty\""));
+    assert!(json.contains("\"scopeLabel\": \"scope: repo · Scan · abc123-dirty\""));
     assert!(json.contains("\"cursor\""));
 }
 
@@ -185,7 +185,7 @@ fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
 
     assert_eq!(
         context.scope_chip().as_deref(),
-        Some("scope: F-0001 · 作 prove · abc1234-dirty")
+        Some("scope: F-0001 · Prove · abc1234-dirty")
     );
 }
 

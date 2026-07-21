@@ -138,6 +138,11 @@ pub struct WorkspaceEvidenceExportSummary {
     pub derived_source_present: bool,
     pub source_count: usize,
     pub raw_http_blob_present: bool,
+    /// Highest per-evidence confidence, when any evidence row carries one.
+    /// External-ledger imports store their verdict-derived confidence here
+    /// (e.g. VALIDATED→90, REFUTED→10), which is otherwise summarized away.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_confidence_max: Option<u8>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]

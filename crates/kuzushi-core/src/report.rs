@@ -5,6 +5,7 @@
 
 mod application;
 mod artifact_summary;
+mod confirmed_sarif;
 mod domain;
 mod failure_handoff;
 mod markdown;
@@ -12,6 +13,7 @@ mod markdown;
 mod tests;
 
 pub use application::build_run_report;
+pub use confirmed_sarif::execute_report_sarif;
 pub use domain::{CanonicalReportArtifact, ReportFailureHandoff, RunReportBuild};
 pub use crate::findings::FindingListReport;
 pub use crate::pr_comment::build_pr_comment;

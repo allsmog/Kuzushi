@@ -160,7 +160,7 @@ fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExpor
             markdown_table_cell(&record.review_decision),
             markdown_table_cell(&record.lifecycle_status),
             markdown_table_cell(&record.evidence.state),
-            record.location.file,
+            markdown_table_cell(&record.location.file),
             record.location.start_line
         ));
     }
@@ -172,6 +172,31 @@ fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExpor
 
 fn markdown_table_cell(value: &str) -> String {
     value.replace('|', "\\|").replace(['\n', '\r'], " ")
+}
+
+/// Finding-derived text placed on a single markdown line (headers, list
+/// items). Newlines would let hostile capture content inject its own
+/// markdown lines into the bundle.
+fn markdown_inline_text(value: &str) -> String {
+    value.replace(['\n', '\r'], " ")
+}
+
+/// Wrap finding-derived text in a code fence longer than any backtick run
+/// inside it, so snippet content (e.g. a captured HTTP body containing
+/// ```` ``` ````) cannot close the fence and inject markdown.
+fn fenced_snippet_block(snippet: &str) -> String {
+    let fence = "`".repeat(longest_backtick_run(snippet).max(2) + 1);
+    format!("{fence}\n{snippet}\n{fence}\n\n")
+}
+
+fn longest_backtick_run(value: &str) -> usize {
+    let mut longest = 0usize;
+    let mut current = 0usize;
+    for ch in value.chars() {
+        current = if ch == '`' { current + 1 } else { 0 };
+        longest = longest.max(current);
+    }
+    longest
 }
 
 fn write_bundle_finding_files(
@@ -225,7 +250,11 @@ fn render_bundle_finding_markdown(
 }
 
 fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
-    out.push_str(&format!("# {} · {}\n\n", record.alias, record.title));
+    out.push_str(&format!(
+        "# {} · {}\n\n",
+        record.alias,
+        markdown_inline_text(&record.title)
+    ));
     out.push_str(&format!("- **Severity:** {}\n", record.severity));
     out.push_str(&format!(
         "- **Review decision:** {}\n",
@@ -247,7 +276,8 @@ fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
     push_bundle_remediation(out, record);
     out.push_str(&format!(
         "- **Location:** `{}:{}`\n\n",
-        record.location.file, record.location.start_line
+        markdown_inline_text(&record.location.file),
+        record.location.start_line
     ));
 }
 
@@ -333,8 +363,8 @@ fn push_bundle_message(out: &mut String, finding: &Finding) {
 fn push_bundle_evidence(out: &mut String, evidence: &FindingEvidence) {
     out.push_str(&format!(
         "### {kind} · {file}:{line}\n\n",
-        kind = evidence.kind,
-        file = evidence.file_path,
+        kind = markdown_inline_text(&evidence.kind),
+        file = markdown_inline_text(&evidence.file_path),
         line = evidence.line
     ));
     out.push_str(&format!(
@@ -342,9 +372,7 @@ fn push_bundle_evidence(out: &mut String, evidence: &FindingEvidence) {
         finding_evidence_origin_label(evidence)
     ));
     if !evidence.snippet.is_empty() {
-        out.push_str("```\n");
-        out.push_str(&evidence.snippet);
-        out.push_str("\n```\n\n");
+        out.push_str(&fenced_snippet_block(&evidence.snippet));
     }
     if !evidence.rationale.is_empty() {
         out.push_str(&evidence.rationale);

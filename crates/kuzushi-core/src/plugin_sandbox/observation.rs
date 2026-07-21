@@ -4,7 +4,6 @@ use super::{
 use crate::identity::hash_parts;
 use crate::storage_v3::writer_actor::CandidateObservationWrite;
 use anyhow::{bail, Context, Result};
-use std::fs;
 
 pub(super) fn candidate_observation_write(
     finding: ValidatedFindingCandidate,
@@ -61,8 +60,13 @@ fn source_span(
             candidate.rule_id
         )
     })?;
-    let bytes = fs::read(path)
-        .with_context(|| format!("Could not read granted blob object {}", path.display()))?;
+    // CAS ingestion already caps objects at this size; re-applying the cap
+    // here keeps a tampered store object from exhausting memory.
+    let bytes = crate::bounded_file::read_regular_bytes(
+        path,
+        crate::content_store::MAX_CONTENT_OBJECT_BYTES as usize,
+    )
+    .with_context(|| format!("Could not read granted blob object {}", path.display()))?;
     let start = usize::try_from(candidate.byte_start).context("plugin byte_start is too large")?;
     let end = usize::try_from(candidate.byte_end).context("plugin byte_end is too large")?;
     if start >= end || end > bytes.len() {

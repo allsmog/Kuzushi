@@ -1,5 +1,4 @@
 use super::*;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -51,7 +50,8 @@ pub(in crate::modules) fn run_entry_points_extract(
 
 fn load_context_snapshot(target: &Path) -> Result<Value> {
     let path = target.join(".kuzushi/context-snapshot.json");
-    let body = fs::read_to_string(&path).with_context(|| {
+    // The snapshot ships inside the (untrusted) target: cap the read.
+    let body = crate::bounded_file::read_utf8_text(&path, 64 * 1024 * 1024).with_context(|| {
         format!(
             "entry-points:extract requires .kuzushi/context-snapshot.json — \
              run `context:build` first ({} missing or unreadable)",
@@ -163,6 +163,7 @@ fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use super::*;
 
     #[cfg(unix)]

@@ -22,6 +22,8 @@ pub(crate) struct UiPrefs {
     keymap_home: Option<PathBuf>,
     keymap_config_fingerprint: Option<ConfigFingerprint>,
     last_keymap_check: Option<Instant>,
+    typing_hint_shown: bool,
+    last_external_sync: Option<Instant>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,7 +69,15 @@ impl UiPrefs {
             keymap_home,
             keymap_config_fingerprint,
             last_keymap_check: None,
+            typing_hint_shown: false,
+            last_external_sync: None,
         }
+    }
+
+    /// One-shot gate for the first-keystroke typing hint: true exactly once
+    /// per session, the first time it is consulted.
+    pub(crate) fn take_typing_hint(&mut self) -> bool {
+        !std::mem::replace(&mut self.typing_hint_shown, true)
     }
 
     pub(crate) fn apply_keymap_overrides(
@@ -222,6 +232,18 @@ impl UiPrefs {
         self.last_operator_interaction = Some(now);
     }
 
+    /// External writers (other sessions, detached campaigns) changing
+    /// workspace state are real activity even though no local worker runs —
+    /// the liveness badge must not claim "idle" while they churn.
+    pub(crate) fn record_external_sync(&mut self, now: Instant) {
+        self.last_external_sync = Some(now);
+    }
+
+    pub(crate) fn recent_external_sync(&self, grace: Duration) -> bool {
+        self.last_external_sync
+            .is_some_and(|at| at.elapsed() <= grace)
+    }
+
     pub(crate) fn recent_operator_interaction(&self, grace: Duration) -> bool {
         self.last_operator_interaction
             .is_some_and(|at| at.elapsed() <= grace)
@@ -338,6 +360,16 @@ mod tests {
             !prefs.liveness_redraw_due(start + Duration::from_millis(999), Duration::from_secs(1))
         );
         assert!(prefs.liveness_redraw_due(start + Duration::from_secs(1), Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn external_sync_recency_decays_after_the_grace_window() {
+        let mut prefs = UiPrefs::new(true, true, RuntimeKeymap::default());
+        assert!(!prefs.recent_external_sync(Duration::from_secs(3)));
+
+        prefs.record_external_sync(Instant::now());
+        assert!(prefs.recent_external_sync(Duration::from_secs(3)));
+        assert!(!prefs.recent_external_sync(Duration::ZERO));
     }
 
     #[test]

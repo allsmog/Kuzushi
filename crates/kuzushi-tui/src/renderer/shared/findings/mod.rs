@@ -1,6 +1,13 @@
 pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::{SeverityCounts, SeverityTone};
 
+/// Title owns the row. It claims the width it needs (leaving a minimum
+/// location tail) and the location gets the remainder, truncated from the
+/// LEFT so `…/file.rs:42` survives — a deep path must never squeeze the
+/// text that says what the finding IS down to a stub.
+const COMPACT_ROW_MIN_TITLE_WIDTH: usize = 12;
+const COMPACT_ROW_MIN_LOCATION_WIDTH: usize = 12;
+
 pub(crate) fn compact_finding_row(
     alias: &str,
     severity_label: &str,
@@ -13,8 +20,10 @@ pub(crate) fn compact_finding_row(
     let sev_w = 9;
     let used = 1 + alias_w + 2 + sev_w;
     let total = (width as usize).saturating_sub(used);
-    let location_w = location.chars().count().min(total.saturating_sub(2)).max(8);
-    let name_w = total.saturating_sub(location_w + 2).max(12);
+    let name_w = display_width(name)
+        .min(total.saturating_sub(COMPACT_ROW_MIN_LOCATION_WIDTH + 2))
+        .max(COMPACT_ROW_MIN_TITLE_WIDTH.min(total));
+    let location_w = total.saturating_sub(name_w + 2);
     Line::from(vec![
         Span::raw(" "),
         Span::styled(pad(alias, alias_w), theme::accent()),
@@ -25,6 +34,6 @@ pub(crate) fn compact_finding_row(
         ),
         Span::styled(pad(&fit(name, name_w), name_w), theme::primary()),
         Span::styled("  ", Style::default()),
-        Span::styled(fit(location, location_w), theme::muted()),
+        Span::styled(fit_path(location, location_w), theme::muted()),
     ])
 }

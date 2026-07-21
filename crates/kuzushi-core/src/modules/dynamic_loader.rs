@@ -1046,6 +1046,16 @@ impl DynamicToolContext for ToolExecutionContext<'_> {
 
 fn validate_dynamic_module_shape(loaded: &mut DynamicModuleDescription) -> Result<()> {
     validate_dynamic_module_id(&loaded.module.id)?;
+    // `hidden` exists for built-in DAG-internal nodes. A dynamic module or
+    // tool that is dispatchable but absent from `/use` and the tool list
+    // would evade operator review, so approved KWP surface must stay
+    // visible until dynamic DAG scheduling is a real, reviewed feature.
+    if loaded.hidden {
+        anyhow::bail!(
+            "dynamic module {:?} cannot be hidden; approved KWP modules must stay operator-visible",
+            loaded.module.id
+        );
+    }
     let mut tool_names = BTreeSet::new();
     for tool in &mut loaded.tools {
         validate_dynamic_tool_name(&loaded.module.id, &tool.name)?;
@@ -1059,6 +1069,12 @@ fn validate_dynamic_module_shape(loaded: &mut DynamicModuleDescription) -> Resul
 }
 
 fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
+    if tool.hidden {
+        anyhow::bail!(
+            "dynamic tool {:?} cannot be hidden; a dispatchable but unlisted dynamic tool would evade operator review",
+            tool.name
+        );
+    }
     if tool.runtime_requirement == RuntimeRequirement::InputAware {
         anyhow::bail!(
             "dynamic tool {:?} cannot declare input-aware runtime policy without a native predicate",
@@ -1815,6 +1831,18 @@ mod dynamic_loader_tests {
             .to_string();
 
         assert!(error.contains("native predicate"), "{error}");
+    }
+
+    #[test]
+    fn hidden_dynamic_tools_and_modules_are_rejected() {
+        let mut descriptor = tool("example:run", "example");
+        descriptor.hidden = true;
+        descriptor.effect = ToolEffect::Read;
+
+        let error = validate_dynamic_tool_policy(&descriptor)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("evade operator review"), "{error}");
     }
 
     #[test]

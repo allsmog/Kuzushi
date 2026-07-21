@@ -44,14 +44,6 @@ impl PhaseResultDetailRow {
         }
     }
 
-    fn keyed(row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1) -> Self {
-        Self {
-            key: Some(row.key),
-            disclosed_keys: std::collections::BTreeSet::new(),
-            text: row.text,
-        }
-    }
-
     fn disclosure(
         text: impl Into<String>,
         disclosed_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
@@ -309,6 +301,15 @@ impl ShellApp {
         &self,
         completed: &PhaseAttemptCompleted,
     ) -> Option<String> {
+        // Failed/canceled attempts are already terminal and unselectable;
+        // demoting them to "partial evidence" would misstate the outcome
+        // exactly when the operator needs the honest one.
+        if matches!(
+            completed.outcome,
+            PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled
+        ) {
+            return None;
+        }
         if let Some(reason) = completed.selection_blocked_reason.as_ref() {
             return Some(reason.clone());
         }
@@ -545,14 +546,14 @@ fn typed_run_result_details(
         let detail =
             format!("run {run_id} · semantic replay degraded — inspect the valid item prefix");
         let mut rows = vec![PhaseResultDetailRow::unkeyed(detail)];
-        rows.extend(phase_card_run_rows(&presentation));
+        rows.extend(phase_card_run_rows(&presentation, true));
         return Some(TypedRunResultDetails {
             is_problem: true,
             rows,
         });
     }
     let terminal = read.projection.terminal.as_ref()?;
-    let rows = phase_card_run_rows(&presentation);
+    let rows = phase_card_run_rows(&presentation, false);
     let is_problem = matches!(
         terminal.status,
         RunItemStatus::Failed
@@ -563,20 +564,51 @@ fn typed_run_result_details(
     Some(TypedRunResultDetails { is_problem, rows })
 }
 
+/// The result card is an operator decision surface, not a run debugger:
+/// keep the terminal outcome, hydrated result summaries (error + artifacts
+/// by label), finding deltas, and operator questions/decisions. The work
+/// ledger (plan/task/call rows), artifact digests, duplicate receipt rows,
+/// and nominal stream-health lines stay behind the disclosure rows —
+/// replay/trace own that depth. `include_overview` re-admits the run-id and
+/// stream-health lines when the projection itself is degraded.
 fn phase_card_run_rows(
     presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    include_overview: bool,
 ) -> Vec<PhaseResultDetailRow> {
-    let mut rows = presentation
-        .overview_lines()
-        .into_iter()
-        .map(PhaseResultDetailRow::unkeyed)
-        .collect::<Vec<_>>();
-    rows.extend(
-        presentation
-            .summary_text_rows()
-            .into_iter()
-            .map(PhaseResultDetailRow::keyed),
-    );
+    let mut rows = Vec::new();
+    if include_overview {
+        rows.extend(
+            presentation
+                .overview_lines()
+                .into_iter()
+                .map(PhaseResultDetailRow::unkeyed),
+        );
+    }
+    let mut folded_keys = std::collections::BTreeSet::new();
+    let has_result_row = phase_card_has_result_row(presentation);
+    for section in &presentation.summary {
+        for cell in &section.cells {
+            let lines = phase_card_cell_lines(&section.kind, cell, has_result_row);
+            if lines.is_empty() {
+                folded_keys.insert(cell.key.clone());
+                continue;
+            }
+            rows.extend(lines.into_iter().map(|text| PhaseResultDetailRow {
+                key: Some(cell.key.clone()),
+                disclosed_keys: std::collections::BTreeSet::new(),
+                text,
+            }));
+        }
+    }
+    if !folded_keys.is_empty() {
+        rows.push(PhaseResultDetailRow::disclosure(
+            format!(
+                "{} run ledger cell(s) omitted from the result card · inspect replay",
+                folded_keys.len()
+            ),
+            folded_keys,
+        ));
+    }
     if !presentation.timeline.is_empty() {
         let disclosed_keys = presentation
             .timeline
@@ -592,6 +624,53 @@ fn phase_card_run_rows(
         ));
     }
     rows
+}
+
+/// The Terminal cell restates what the card already shows elsewhere: its
+/// Cost line repeats the receipt header row and its run-level NEXT competes
+/// with the card's phase-level `next:` footer, so only the leading Outcome
+/// line survives — and even that folds away when a shown `Result ·` row
+/// already carries the same tool summary.
+fn phase_card_cell_lines(
+    kind: &kuzushi_core::run_lifecycle::RunPresentationSectionKindV1,
+    cell: &kuzushi_core::run_lifecycle::RunPresentationCellV1,
+    has_result_row: bool,
+) -> Vec<String> {
+    use kuzushi_core::run_lifecycle::RunPresentationPayloadV1 as Payload;
+    if !phase_card_shows_cell(kind, cell) {
+        return Vec::new();
+    }
+    match &cell.payload {
+        Payload::Terminal(_) if has_result_row => Vec::new(),
+        Payload::Terminal(_) => cell.display_lines().into_iter().take(1).collect(),
+        _ => cell.display_lines(),
+    }
+}
+
+fn phase_card_has_result_row(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) -> bool {
+    use kuzushi_core::run_lifecycle::RunPresentationPayloadV1 as Payload;
+    presentation.summary.iter().any(|section| {
+        section.cells.iter().any(|cell| {
+            matches!(cell.payload, Payload::ResultSummary(_))
+                && phase_card_shows_cell(&section.kind, cell)
+        })
+    })
+}
+
+fn phase_card_shows_cell(
+    kind: &kuzushi_core::run_lifecycle::RunPresentationSectionKindV1,
+    cell: &kuzushi_core::run_lifecycle::RunPresentationCellV1,
+) -> bool {
+    use kuzushi_core::run_lifecycle::RunPresentationPayloadV1 as Payload;
+    use kuzushi_core::run_lifecycle::RunPresentationSectionKindV1 as Kind;
+    match kind {
+        Kind::Attention => true,
+        Kind::Outcome => !matches!(cell.payload, Payload::PhaseReceipt(_)),
+        Kind::Evidence => !matches!(cell.payload, Payload::Artifact(_)),
+        Kind::Work => false,
+    }
 }
 
 fn result_summary_lines(result: &kuzushi_core::run_artifacts::RunResultSummary) -> Vec<String> {
@@ -1048,7 +1127,14 @@ mod tests {
             .actions
             .contains(&PhaseResultAction::SelectAndContinue));
         assert!(!presentation.recommended_next.contains("wrong transient"));
-        assert_contains_detail(&presentation, "typed receipt NEXT · open REVIEW");
+        assert!(
+            !presentation
+                .detail_lines
+                .iter()
+                .any(|line| line.contains("receipt NEXT")),
+            "continuation renders once via the card's next: row, not in details: {:?}",
+            presentation.detail_lines
+        );
     }
 
     #[test]
@@ -1164,6 +1250,81 @@ mod tests {
                 .contains("timeline cell(s) omitted from the result card · inspect replay"),
             "phase card must explicitly disclose its bounded timeline"
         );
+    }
+
+    /// The result card is a decision surface: stream-health diagnostics and
+    /// the plan/task/call work ledger stay behind the disclosure row, while
+    /// the terminal outcome stays visible.
+    #[test]
+    fn typed_phase_result_card_folds_the_work_ledger_behind_a_disclosure() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "typed-phase-result-folded";
+        let mut fixture = typed_phase_fixture(target.path(), run_id, WorkflowPhase::Map);
+        fixture.app.refresh_phase_attempt_projection();
+
+        let presentation = fixture
+            .app
+            .phase_result_presentation_for(&fixture.completed);
+
+        let detail = presentation.detail_lines.join("\n");
+        assert!(
+            !detail.contains("Stream:") && !detail.contains("Durability:"),
+            "stream-health diagnostics leaked into the card: {detail}"
+        );
+        assert!(
+            !detail.contains("Task "),
+            "work-ledger rows leaked into the card: {detail}"
+        );
+        assert!(
+            detail.contains("Outcome · "),
+            "terminal outcome missing from the card: {detail}"
+        );
+        assert!(
+            !detail.contains("Cost · ") && !detail.contains("NEXT · "),
+            "terminal cost/continuation rows duplicate the receipt header and \
+             the card's next: footer: {detail}"
+        );
+        assert!(
+            detail.contains("run ledger cell(s) omitted from the result card"),
+            "missing work-ledger disclosure: {detail}"
+        );
+    }
+
+    /// The run's Terminal cell restates the receipt header (cost) and
+    /// competes with the card's phase-level `next:` footer (run-level
+    /// continuation); the card keeps only the Outcome line — and folds even
+    /// that behind the disclosure when a shown `Result ·` row already
+    /// carries the same tool summary.
+    #[test]
+    fn phase_card_compacts_the_terminal_cell() {
+        use kuzushi_core::run_lifecycle::*;
+        let cell = RunPresentationCellV1 {
+            key: RunCellKey {
+                source: RunCellSourceV1::Item(RunItemId::new()),
+                role: RunCellRoleV1::TerminalOutcome,
+                ordinal: 0,
+            },
+            importance: RunCellImportanceV1::Essential,
+            payload: RunPresentationPayloadV1::Terminal(TerminalPresentationV1 {
+                status: RunItemStatus::Completed,
+                summary: SafeText::operator_visible("hunt completed 7 chunks"),
+                cost: kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("run terminal"),
+                },
+            }),
+            disclosure: None,
+        };
+        let kind = RunPresentationSectionKindV1::Outcome;
+
+        assert!(
+            phase_card_cell_lines(&kind, &cell, true).is_empty(),
+            "with a Result row shown the whole cell folds behind the disclosure"
+        );
+
+        let standalone = phase_card_cell_lines(&kind, &cell, false);
+        assert_eq!(standalone.len(), 1, "outcome only: {standalone:?}");
+        assert!(standalone[0].starts_with("Outcome · completed"));
     }
 
     #[test]
@@ -1415,6 +1576,35 @@ mod tests {
             .unwrap();
         assert!(!policy.actions.contains(&PhaseResultAction::Select));
         assert!(policy.recommended_next.unwrap().contains("degraded"));
+    }
+
+    #[test]
+    fn failed_and_canceled_attempts_are_never_demoted_to_partial_by_evidence_blockers() {
+        // An empty target trips the legacy map-evidence blocker; the
+        // blocker must not rewrite a terminal Failed/Canceled outcome into
+        // "partial evidence", which would misstate what happened.
+        let target = tempfile::tempdir().unwrap();
+        let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target.path());
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        for outcome in [PhaseAttemptOutcome::Failed, PhaseAttemptOutcome::Canceled] {
+            let completed = PhaseAttemptCompleted::new(
+                WorkflowPhase::Map,
+                vec!["map-run".to_string()],
+                snapshot.clone(),
+                outcome,
+            );
+            assert_eq!(app.effective_phase_attempt_outcome(&completed), outcome);
+            assert_eq!(app.effective_phase_attempt_blocker(&completed), None);
+            let presentation = app.phase_result_presentation_for(&completed);
+            assert!(
+                !presentation
+                    .detail_lines
+                    .iter()
+                    .any(|line| line.contains("partial")),
+                "{outcome:?} attempt presented as partial: {:?}",
+                presentation.detail_lines
+            );
+        }
     }
 
     #[test]

@@ -35,6 +35,15 @@ impl ScanEngineOutput {
     }
 }
 
+/// Findings plus semgrep's own account of what it failed to scan. A run can
+/// exit successfully while skipping files or rules; callers that report scan
+/// completion should disclose those gaps instead of implying full coverage.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SemgrepScanOutcome {
+    pub findings: Vec<Finding>,
+    pub scan_errors: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct SemgrepScanner {
     pub binary: String,

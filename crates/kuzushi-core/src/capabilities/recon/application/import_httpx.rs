@@ -127,7 +127,9 @@ fn httpx_port(entry: &Value) -> u16 {
                 .and_then(Value::as_str)
                 .and_then(|port| port.parse().ok())
         })
-        .map(|p| p.min(u16::MAX as u64) as u16)
+        // An out-of-range port in hostile capture data is dropped, not
+        // clamped: clamping would mint a real-looking port 65535 record.
+        .and_then(|p| u16::try_from(p).ok())
         .or_else(|| {
             string_field(entry, "url").and_then(|url| {
                 url::Url::parse(&url)
@@ -207,3 +209,18 @@ fn service_name_from_entry(entry: &Value, scheme: &str) -> String {
     }
     scheme.to_string()
 }
+
+#[cfg(test)]
+mod port_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn out_of_range_ports_are_dropped_not_clamped() {
+        // Clamping 70000 would mint a real-looking port-65535 service.
+        assert_eq!(httpx_port(&json!({ "port": 70000, "url": "https://a.test" })), 443);
+        assert_eq!(httpx_port(&json!({ "port": 8443 })), 8443);
+        assert_eq!(httpx_port(&json!({ "port": "70000", "url": "http://a.test" })), 80);
+    }
+}
+

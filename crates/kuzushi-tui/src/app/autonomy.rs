@@ -60,8 +60,7 @@ impl ShellApp {
         self.log(
             "autonomy",
             format!(
-                "posture {} {} (authorizes up to {}; cap {}) — Ctrl+Up/Down or `autonomy <recon|scan|review|prove|fix>`",
-                posture.kanji(),
+                "posture {} (authorizes up to {}; cap {}) — Ctrl+Up/Down or `autonomy <recon|scan|review|prove|fix>`",
                 posture.label(),
                 posture.ceiling().word(),
                 self.autonomy_cap().label(),
@@ -74,8 +73,7 @@ impl ShellApp {
         let applied = self.set_autonomy(requested);
         if applied == previous {
             let message = format!(
-                "posture stays at {} {} (cap: {})",
-                applied.kanji(),
+                "posture stays at {} (cap: {})",
                 applied.label(),
                 self.autonomy_cap().label()
             );
@@ -84,8 +82,7 @@ impl ShellApp {
             return;
         }
         let message = format!(
-            "posture → {} {} — authorizes up to the {} phase",
-            applied.kanji(),
+            "posture → {} — authorizes up to the {} phase",
             applied.label(),
             applied.ceiling().word()
         );

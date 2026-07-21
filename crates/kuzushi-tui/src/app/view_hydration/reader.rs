@@ -117,6 +117,9 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         ViewHydrationKey::MapArtifacts => Some(ViewHydrationValue::MapArtifacts(
             map_evidence_is_adequate(target),
         )),
+        ViewHydrationKey::ScanRecommendations => Some(ViewHydrationValue::ScanRecommendations(
+            scan_recommendations(target),
+        )),
         ViewHydrationKey::TargetBase => Some(ViewHydrationValue::TargetBase(target_base(target))),
         _ => None,
     }
@@ -193,6 +196,23 @@ fn read_latest_pointer(target: &Path) -> ViewHydrationValue {
 fn map_evidence_is_adequate(target: &Path) -> bool {
     let facts = kuzushi_core::workflow_attempts::collect_map_evidence(target, &[]);
     kuzushi_core::workflow_attempts::assess_map_evidence(&facts).is_adequate()
+}
+
+/// Runs the coverage sweep (git diffs + repo walk) off-frame; the findings
+/// store is advisory, so a target without one still yields recommendations.
+fn scan_recommendations(target: &Path) -> ScanRecommendationsState {
+    let db_path = kuzushi_core::workspace::workspace_findings_db_path(target);
+    let store = db_path
+        .exists()
+        .then(|| kuzushi_core::FindingStore::open_read_only(&db_path).ok())
+        .flatten();
+    match kuzushi_core::capabilities::scan_recommender::recommend_scans_for_target(
+        target,
+        store.as_ref(),
+    ) {
+        Ok(rows) => ScanRecommendationsState::Ready(rows),
+        Err(error) => ScanRecommendationsState::Failed(error.to_string()),
+    }
 }
 
 fn project_scope_tree(target: &Path) -> ProjectScopeTreeState {

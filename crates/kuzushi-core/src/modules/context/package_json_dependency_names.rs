@@ -109,13 +109,16 @@ pub(in crate::modules) fn read_optional_manifest(path: &Path) -> Result<Option<S
     }
 }
 
+/// Walks the context file tree. Returns `true` when the entry cap stopped the
+/// walk early — the caller must surface that the index is PARTIAL rather than
+/// labeling it complete.
 pub(in crate::modules) fn collect_context_files(
     root: &Path,
     dir: &Path,
     sample_limit: usize,
     files_indexed: &mut usize,
     files_sample: &mut Vec<String>,
-) -> Result<()> {
+) -> Result<bool> {
     collect_context_files_with_limit(
         root,
         dir,
@@ -133,8 +136,9 @@ fn collect_context_files_with_limit(
     files_indexed: &mut usize,
     files_sample: &mut Vec<String>,
     entry_limit: usize,
-) -> Result<()> {
+) -> Result<bool> {
     let mut entries_seen = 0usize;
+    let mut truncated = false;
     collect_context_files_inner(
         root,
         dir,
@@ -143,9 +147,12 @@ fn collect_context_files_with_limit(
         files_sample,
         &mut entries_seen,
         entry_limit,
-    )
+        &mut truncated,
+    )?;
+    Ok(truncated)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_context_files_inner(
     root: &Path,
     dir: &Path,
@@ -154,17 +161,22 @@ fn collect_context_files_inner(
     files_sample: &mut Vec<String>,
     entries_seen: &mut usize,
     entry_limit: usize,
+    truncated: &mut bool,
 ) -> Result<()> {
+    if *entries_seen >= entry_limit {
+        *truncated = true;
+        return Ok(());
+    }
     let read_dir = fs::read_dir(dir)
         .with_context(|| format!("Could not read context directory {}", dir.display()))?;
     let remaining = entry_limit.saturating_sub(*entries_seen);
     let mut entries = read_dir
         .take(remaining.saturating_add(1))
         .collect::<std::io::Result<Vec<_>>>()?;
-    anyhow::ensure!(
-        entries.len() <= remaining,
-        "Context inventory exceeded the {entry_limit}-entry coverage limit"
-    );
+    if entries.len() > remaining {
+        entries.truncate(remaining);
+        *truncated = true;
+    }
     *entries_seen += entries.len();
     entries.sort_by_key(|entry| entry.path());
 
@@ -177,12 +189,14 @@ fn collect_context_files_inner(
             files_sample,
             entries_seen,
             entry_limit,
+            truncated,
         )?;
     }
 
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_context_entry(
     root: &Path,
     entry: fs::DirEntry,
@@ -191,6 +205,7 @@ fn collect_context_entry(
     files_sample: &mut Vec<String>,
     entries_seen: &mut usize,
     entry_limit: usize,
+    truncated: &mut bool,
 ) -> Result<()> {
     if should_skip_path(&entry.file_name().to_string_lossy()) {
         return Ok(());
@@ -206,6 +221,7 @@ fn collect_context_entry(
             files_sample,
             entries_seen,
             entry_limit,
+            truncated,
         );
     }
     if file_type.is_file() {
@@ -219,24 +235,47 @@ mod context_walk_limit_tests {
     use super::*;
 
     #[test]
-    fn context_walk_errors_instead_of_silently_truncating() {
+    fn entry_capped_walk_returns_partial_index_marked_truncated() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
         fs::write(temp.path().join("b.rs"), "fn b() {}\n").unwrap();
         let mut indexed = 0;
         let mut sample = Vec::new();
 
-        let error = collect_context_files_with_limit(
+        let truncated = collect_context_files_with_limit(
             temp.path(),
             temp.path(),
-            1,
+            10,
             &mut indexed,
             &mut sample,
             1,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(error.to_string().contains("coverage limit"));
+        assert!(truncated, "capped walk must be marked partial");
+        assert_eq!(indexed, 1);
+        assert_eq!(sample.len(), 1);
+    }
+
+    #[test]
+    fn uncapped_walk_is_not_marked_truncated() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+        let mut indexed = 0;
+        let mut sample = Vec::new();
+
+        let truncated = collect_context_files_with_limit(
+            temp.path(),
+            temp.path(),
+            10,
+            &mut indexed,
+            &mut sample,
+            100,
+        )
+        .unwrap();
+
+        assert!(!truncated);
+        assert_eq!(indexed, 1);
     }
 }
 

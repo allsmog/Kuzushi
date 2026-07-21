@@ -459,8 +459,9 @@ is expected to behave identically and should be filed as a parity bug.
   Prove proof sidecar replays only the verification run and warns when the
   proof belongs to an earlier observation of the same durable finding.
 - **Prompt/Navigate modes are interactive-only.** Prompt mode owns printable
-  input and submission. `F2` enters Navigate mode, where view bindings operate
-  without editing the prompt; `Esc` returns to Prompt mode. Runtime dispatch
+  input and submission. `Esc` on an empty prompt enters Navigate mode (with a
+  draft, `Esc` first clears it), where view bindings operate without editing
+  the prompt; `Esc` returns to Prompt mode. Runtime dispatch
   and rendered hints consume the same resolved keymap, including question and
   phase-result cards. A typed attention broker projects approvals, questions,
   credential gates, partial acknowledgements, and unresolved results into the
@@ -495,6 +496,15 @@ is expected to behave identically and should be filed as a parity bug.
   launch. `b` restores that origin without cancellation; final chain/plan/steer
   completion restores it with one accumulated receipt. Manual Run Focus
   inspection and background-owned runs never auto-return or hijack focus.
+- **Campaign deck (`campaign [id]`, `ShellView::Campaign`) is shell-only
+  presentation over shared campaign artifacts.** It renders the same
+  `plan.json` + `queue.json` fold as `campaign:status` (one snapshot
+  implementation in `kuzushi-core::capabilities::campaign::snapshot`), adds
+  cursor-driven include/exclude, worker-count, and prompt-preview interaction,
+  and launches/kills a **detached** `kuzushi campaign run` dispatcher in its
+  own process group (never in-process). Dispatched jobs are ordinary runs, so
+  they appear in `jobs`/`runs` unchanged; headless parity is `campaign:status`
+  plus `kuzushi campaign run`.
 - **Contextual utilities are shell-only presentation.** Help, Controls, and
   Capabilities are modal; Jobs, Replay, Trace, and visualization pages are
   scrollable full-frame decks. They share one non-nesting origin: replacing one

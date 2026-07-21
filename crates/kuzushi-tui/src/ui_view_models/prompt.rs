@@ -43,10 +43,12 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
 }
 
 fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<String> {
-    app.input().is_empty().then(|| {
-        mode.map(workbench_prompt_placeholder)
-            .unwrap_or("type help or press Tab")
-            .to_string()
+    app.input().is_empty().then(|| match mode {
+        // The nav hint lives in the placeholder because that is where a
+        // first-session operator is already looking when they wonder why
+        // j/k types letters instead of moving the list.
+        Some(page) => format!("{} · Esc list keys", workbench_prompt_placeholder(page)),
+        None => "type help or press Tab".to_string(),
     })
 }
 

@@ -1,5 +1,7 @@
 use super::WorkflowPhase;
 use crate::modules::descriptor::{ToolDescriptor, ToolEffect, ToolPhase};
+use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 /// How a descriptor relates to the engagement spine for autonomy gating.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,10 +21,9 @@ pub fn classify_descriptor(tool: &ToolDescriptor) -> Option<ToolClassification> 
 /// Compatibility lookup for shell presentation. Built-ins are resolved from
 /// their registered descriptor, so this cannot drift from dispatch policy.
 pub fn classify(tool_name: &str) -> Option<ToolClassification> {
-    let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
-    registry
-        .resolve_tool(tool_name)
-        .and_then(classify_descriptor)
+    builtin_tool_policies()
+        .get(tool_name)
+        .and_then(|policy| policy.classification)
 }
 
 pub fn tool_phase(tool_name: &str) -> Option<WorkflowPhase> {
@@ -33,10 +34,37 @@ pub fn tool_phase(tool_name: &str) -> Option<WorkflowPhase> {
 }
 
 pub fn tool_mutates(tool_name: &str) -> bool {
-    let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
-    registry
-        .resolve_tool(tool_name)
-        .is_some_and(|tool| tool.effect.needs_operator_approval())
+    builtin_tool_policies()
+        .get(tool_name)
+        .is_some_and(|policy| policy.mutates)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BuiltinToolPolicy {
+    classification: Option<ToolClassification>,
+    mutates: bool,
+}
+
+/// The builtin descriptor set is process-static, but registry construction
+/// is not cheap: it clones every descriptor. The shell consults these
+/// lookups per frame (journey/autonomy chrome), so the derived policy is
+/// computed once. Exact-name keying matches `resolve_tool`, and dynamic
+/// modules were never part of this compatibility surface.
+fn builtin_tool_policies() -> &'static BTreeMap<String, BuiltinToolPolicy> {
+    static POLICIES: OnceLock<BTreeMap<String, BuiltinToolPolicy>> = OnceLock::new();
+    POLICIES.get_or_init(|| {
+        crate::modules::registry::ModuleRegistry::with_v2_builtins()
+            .tools
+            .iter()
+            .map(|(name, tool)| {
+                let policy = BuiltinToolPolicy {
+                    classification: classify_descriptor(tool),
+                    mutates: tool.effect.needs_operator_approval(),
+                };
+                (name.clone(), policy)
+            })
+            .collect()
+    })
 }
 
 fn workflow_phase(phase: ToolPhase) -> Option<WorkflowPhase> {
@@ -75,5 +103,22 @@ mod tests {
     #[test]
     fn unknown_tool_has_no_compatibility_classification() {
         assert_eq!(classify("brand-new-module:do-thing"), None);
+    }
+
+    #[test]
+    fn cached_policies_match_a_freshly_built_registry_exactly() {
+        let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
+        for (name, tool) in &registry.tools {
+            assert_eq!(
+                classify(name),
+                classify_descriptor(tool),
+                "cached classification drifted for {name}"
+            );
+            assert_eq!(
+                tool_mutates(name),
+                tool.effect.needs_operator_approval(),
+                "cached mutation policy drifted for {name}"
+            );
+        }
     }
 }

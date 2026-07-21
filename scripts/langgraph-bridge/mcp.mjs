@@ -223,6 +223,7 @@ const READ_CAPABILITY_SERVERS = new Set([
   "threat-model",
   "threat-intel",
   "x-ray",
+  "findings",
 ]);
 const SERVER_CHILD_ENV = {
   joern: [

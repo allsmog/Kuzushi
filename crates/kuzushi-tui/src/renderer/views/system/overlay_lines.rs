@@ -216,7 +216,7 @@ fn compact_catalog_action_line(
     let label = cells[0].as_str();
     let description = cells[1].as_str();
     let mut body = format!("{prefix}{label}");
-    let remaining = width.saturating_sub(body.chars().count());
+    let remaining = width.saturating_sub(display_width(&body));
     if remaining > 4 {
         body.push_str(" — ");
         body.push_str(&fit(description, remaining.saturating_sub(3)));
@@ -226,7 +226,7 @@ fn compact_catalog_action_line(
 
 fn catalog_overlay_action_line(cells: &[String; 2], selected: bool, width: usize) -> Line<'static> {
     let marker = if selected { "▸ " } else { "  " };
-    let content_width = width.saturating_sub(marker.chars().count());
+    let content_width = width.saturating_sub(display_width(marker));
     let label_width = if width < 56 {
         (content_width * 2 / 5).clamp(10, 18)
     } else {
@@ -449,7 +449,7 @@ fn boot_check_line(width: usize, check: BootSplashCheck) -> Line<'static> {
     let state = boot_state_symbol(check.state);
     let label = fixed_width(&fit(&check.label, 28), 28);
     let value = fixed_width(&boot_check_value(&check), 40);
-    let inner_width = state.chars().count() + label.chars().count() + value.chars().count();
+    let inner_width = display_width(state) + display_width(&label) + display_width(&value);
     let pad = width.saturating_sub(inner_width) / 2;
     raw(format!("{}{state}{label}{value}", " ".repeat(pad)))
 }
@@ -470,13 +470,15 @@ fn boot_state_symbol(state: BootSplashCheckState) -> &'static str {
 }
 
 fn centered(width: usize, text: &str) -> Line<'static> {
-    let pad = width.saturating_sub(text.chars().count()) / 2;
+    let pad = width.saturating_sub(display_width(text)) / 2;
     raw(format!("{}{}", " ".repeat(pad), text))
 }
 
 fn fixed_width(value: &str, width: usize) -> String {
-    let mut out = value.chars().take(width).collect::<String>();
-    let fill = width.saturating_sub(out.chars().count());
+    // Column-aware: a wide (CJK/emoji) value must not break the box border
+    // this padding aligns.
+    let mut out = take_columns(value, width);
+    let fill = width.saturating_sub(display_width(&out));
     out.push_str(&" ".repeat(fill));
     out
 }
@@ -526,7 +528,7 @@ fn quit_status_line(status: &QuitConfirmStatus) -> Line<'static> {
 fn quit_warning_box(width: usize, title: &str, body: &str) -> Vec<Line<'static>> {
     let top_prefix = "   ╔══ ";
     let top_title = format!("{title} ");
-    let top_fill = width.saturating_sub(top_prefix.chars().count() + top_title.chars().count() + 2);
+    let top_fill = width.saturating_sub(display_width(top_prefix) + display_width(&top_title) + 2);
     let body_width = width.saturating_sub(8);
     let body = format!(" {body}");
     vec![
@@ -540,7 +542,7 @@ fn quit_footer_stage_line(width: usize, footer: &QuitConfirmFooter) -> String {
     let left = format!(" stage {} · routing direct", footer.stage);
     let right = format!("Ctrl+C quit · findings {}", footer.findings);
     let gap = width
-        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(display_width(&left) + display_width(&right))
         .saturating_sub(1);
     format!("{left}{}{right}", " ".repeat(gap))
 }

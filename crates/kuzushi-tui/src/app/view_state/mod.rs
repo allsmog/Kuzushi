@@ -14,6 +14,8 @@ use std::time::Instant;
 mod activity;
 mod auth_screen;
 mod boot_splash;
+mod campaign_deck;
+mod coverage_deck;
 mod command_palette;
 mod config_screen;
 mod confirm_dialog;
@@ -58,6 +60,9 @@ pub use activity::ACTIVITY_FEED_RING_CAPACITY;
 pub use activity::{RunFocusOrigin, RunFocusReceipt, RunFocusSteerEditor};
 pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
 pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
+pub use campaign_deck::CampaignRouteState;
+pub use coverage_deck::CoverageRouteState;
+pub(crate) use campaign_deck::dispatcher_args;
 pub use command_palette::{CommandPaletteFooter, CommandPaletteSnapshot, CommandPaletteStatus};
 pub use config_screen::{ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus};
 pub use confirm_dialog::{ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus};
@@ -127,5 +132,5 @@ pub(crate) use workbench_cache::{
 };
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;
-pub use workbench_review_state::{PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};
+pub use workbench_review_state::{BacklogUndoEntry, PendingDecision, ReviewMode, ReviewRow, WorkbenchReviewState};
 pub use workbench_zoom::WorkbenchZoom;

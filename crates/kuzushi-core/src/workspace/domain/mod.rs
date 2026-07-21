@@ -26,7 +26,8 @@ pub(crate) use workspace_state_initialization::initialize_workspace_state;
 pub use workspace_state_io::{
     ensure_workspace_output_dir, prepare_workspace_output_path,
     read_optional_workspace_text, read_workspace_text, remove_workspace_state_file,
-    write_workspace_file, write_workspace_state_file,
+    resolve_contained_output_path, resolve_report_output_path, write_workspace_file,
+    write_workspace_state_file,
 };
 pub use workspace_target::{
     legacy_codeql_db_path,

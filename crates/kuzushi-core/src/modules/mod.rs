@@ -3,13 +3,16 @@ use crate::findings::FindingStore;
 use crate::runtime::AgentRuntime;
 use anyhow::{Context, Result};
 pub(in crate::modules) use bounty_module::*;
+pub(in crate::modules) use campaign_module::*;
 pub(in crate::modules) use carlini_threat_hunt_module::*;
 pub(in crate::modules) use codeql_db_module::*;
+pub(in crate::modules) use coverage_module::*;
 pub(in crate::modules) use cpg_module::*;
 pub(in crate::modules) use descriptor::*;
 pub(in crate::modules) use engagement_module::*;
 pub(in crate::modules) use entry_points_module::*;
 pub(in crate::modules) use findings_module::*;
+pub(in crate::modules) use fleet_module::*;
 pub(in crate::modules) use full_mode_config_paths::*;
 pub(in crate::modules) use full_mode_dry_run::*;
 pub(in crate::modules) use full_mode_module::*;
@@ -23,6 +26,7 @@ pub(in crate::modules) use pipeline_module::*;
 pub(in crate::modules) use plugin_resolution::*;
 pub(in crate::modules) use pwn::*;
 pub(in crate::modules) use recon_module::*;
+pub(in crate::modules) use pack_module::*;
 pub(in crate::modules) use report_module::*;
 pub(in crate::modules) use resolve_tool_model::*;
 pub(in crate::modules) use router_module::*;
@@ -53,10 +57,12 @@ mod chrome_rce;
 pub(crate) mod context;
 mod contracts;
 mod descriptor;
+pub mod display_name;
 mod dynamic_loader;
 mod engagement_module;
 mod execution_context;
 mod findings_module;
+mod fleet_module;
 mod input;
 mod native_scanners;
 mod offense_module;
@@ -69,6 +75,7 @@ mod plugin_resolution;
 mod prompt_armor;
 mod pwn;
 mod registry;
+mod pack_module;
 mod report_module;
 mod runtime_requirements;
 mod sast_run;
@@ -81,8 +88,10 @@ mod verify;
 mod workspace_tools;
 
 mod bounty_module;
+mod campaign_module;
 mod carlini_threat_hunt_module;
 mod codeql_db_module;
+mod coverage_module;
 mod cpg_module;
 mod entry_points_module;
 mod full_mode_config_paths;
@@ -124,6 +133,7 @@ pub use contracts::{
     WorkspaceRequirement,
 };
 pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
+pub use display_name::tool_display_name;
 pub use dynamic_loader::{
     approve_dynamic_module, default_dynamic_lockfile_path, inspect_dynamic_module,
     revoke_dynamic_module, DynamicModuleInspection, DynamicModuleLoadOptions,

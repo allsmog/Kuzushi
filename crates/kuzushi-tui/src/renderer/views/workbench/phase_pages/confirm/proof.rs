@@ -1,4 +1,5 @@
 use super::*;
+use crate::renderer::shared::text::display_width;
 use crate::ui_view_models::{FindingDetailModel, ProofReplayModel, ProofTier};
 
 pub(super) fn finding_header_lines(
@@ -16,28 +17,60 @@ pub(super) fn finding_header_lines(
 
 fn finding_identity_line(finding: &FindingDetailModel, width: usize) -> Line<'static> {
     let alias = finding.alias.as_deref().unwrap_or("selected");
+    let severity = finding.severity_label.to_ascii_uppercase();
     let proof = format!(
-        "{} {} · {} · {} source(s)  ",
+        "{} {} · {} · {} source(s)",
         finding.proof_marker,
         finding.proof_meter,
         finding.proof_confidence_label,
         finding.source_count
     );
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(format!("{alias}  "), theme::label()),
-        Span::styled(
-            format!("{}  ", finding.severity_label.to_ascii_uppercase()),
-            theme::severity_tone(finding.severity_tone),
-        ),
-        Span::styled(
-            proof,
+        Span::styled(format!("{severity}  "), theme::severity_tone(finding.severity_tone)),
+    ];
+    let tail_budget =
+        width.saturating_sub(display_width(alias) + display_width(&severity) + 4);
+    if display_width(&proof) + 2 <= tail_budget {
+        let lifecycle_budget = tail_budget - display_width(&proof) - 2;
+        spans.push(Span::styled(
+            format!("{proof}  "),
             theme::proof_confidence_tone(finding.proof_confidence),
-        ),
-        Span::styled(
-            fit(&finding.lifecycle_status, width.saturating_sub(28)),
+        ));
+        spans.push(Span::styled(
+            fit(&finding.lifecycle_status, lifecycle_budget),
             theme::muted(),
-        ),
-    ])
+        ));
+    } else {
+        // The pane border would otherwise hard-clip mid-segment and leave a
+        // dangling `·` on screen.
+        spans.push(Span::styled(
+            fit_without_dangling_separator(&proof, tail_budget),
+            theme::proof_confidence_tone(finding.proof_confidence),
+        ));
+    }
+    Line::from(spans)
+}
+
+/// "patch · patch F-0001" says the action twice; when the command already
+/// leads with the action word, the command alone is the whole message.
+fn join_action_and_detail(label: &str, detail: &str) -> String {
+    let leads_with_label = detail
+        .split_whitespace()
+        .next()
+        .is_some_and(|word| word.eq_ignore_ascii_case(label));
+    if leads_with_label {
+        return detail.to_string();
+    }
+    format!("{label} · {detail}")
+}
+
+fn fit_without_dangling_separator(text: &str, width: usize) -> String {
+    let fitted = fit(text, width);
+    fitted
+        .replace(" · ...", " ...")
+        .trim_end_matches(" ·")
+        .to_string()
 }
 
 fn finding_status_line(finding: &FindingDetailModel, width: usize) -> Line<'static> {
@@ -55,8 +88,10 @@ fn finding_next_line(finding: &FindingDetailModel, width: usize) -> Line<'static
     let next = finding
         .next_command
         .as_deref()
-        .map(|command| format!("{} · {command}", finding.next_action_label))
-        .unwrap_or_else(|| format!("{} · {}", finding.next_action_label, finding.next_detail));
+        .map(|command| join_action_and_detail(&finding.next_action_label, command))
+        .unwrap_or_else(|| {
+            join_action_and_detail(&finding.next_action_label, &finding.next_detail)
+        });
     Line::from(vec![
         Span::styled("NEXT   ", theme::warn()),
         Span::styled(fit(&next, width.saturating_sub(7)), theme::accent()),

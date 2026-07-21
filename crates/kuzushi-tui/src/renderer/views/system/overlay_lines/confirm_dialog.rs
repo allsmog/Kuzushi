@@ -1,4 +1,5 @@
 use super::raw;
+use crate::renderer::shared::text::display_width;
 use crate::ui_view_models::{confirm_dialog_model, ConfirmDialogModel};
 use crate::{ConfirmDialogFooter, ConfirmDialogStatus, ShellApp};
 use ratatui::layout::Rect;
@@ -35,7 +36,7 @@ fn confirm_footer_stage_line(width: usize, footer: &ConfirmDialogFooter) -> Stri
     let left = format!(" stage {} · routing direct", footer.stage);
     let right = format!("Ctrl+C quit · findings {}", footer.findings);
     let gap = width
-        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(display_width(&left) + display_width(&right))
         .saturating_sub(1);
     format!("{left}{}{right}", " ".repeat(gap))
 }

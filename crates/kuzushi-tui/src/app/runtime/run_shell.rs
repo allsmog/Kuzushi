@@ -252,6 +252,9 @@ pub(crate) fn terminal_shell_loop(
 #[derive(Debug)]
 pub(crate) struct TerminalLoopState {
     pub(crate) needs_redraw: bool,
+    /// When the last full frame was painted; gates draws to
+    /// `MIN_FRAME_INTERVAL` so event floods cannot monopolize the loop.
+    pub(crate) last_draw: Option<Instant>,
     pub(crate) last_title: Option<String>,
     run_focus_hold: RunFocusVisibilityHold,
 }
@@ -260,6 +263,7 @@ impl Default for TerminalLoopState {
     fn default() -> Self {
         Self {
             needs_redraw: true,
+            last_draw: None,
             last_title: None,
             run_focus_hold: RunFocusVisibilityHold::default(),
         }
@@ -276,16 +280,22 @@ pub(crate) fn terminal_shell_step(
 ) -> Result<()> {
     if let Some(input_changed) = state.run_focus_hold.intercept_input(app, input)? {
         state.needs_redraw |= input_changed;
-        state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+        draw_terminal_if_needed(terminal, app, state)?;
         return Ok(());
     }
     let work_tail_may_remain = refresh_terminal_redraw_state(terminal, app, state, watcher)?;
     rearm_work_tail(wake, work_tail_may_remain);
     let view_before_input = app.shell_view();
-    let input_changed = wait_for_terminal_loop_event(app, input)?;
+    let timeout = deferred_frame_timeout(
+        terminal_event_timeout(app),
+        state.needs_redraw,
+        state.last_draw,
+        Instant::now(),
+    );
+    let input_changed = wait_for_terminal_loop_event_within(app, input, timeout)?;
     state.needs_redraw |= input_changed;
     if input_changed {
-        state.needs_redraw = draw_terminal_if_needed(terminal, app, state.needs_redraw)?;
+        draw_terminal_if_needed(terminal, app, state)?;
         state
             .run_focus_hold
             .begin_after_transition(view_before_input, app);

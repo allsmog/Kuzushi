@@ -107,7 +107,7 @@ pub(super) fn fixture_remediation(state: SemanticFixture) -> RemediationLifecycl
         detail: Some("fixture lifecycle".to_string()),
         updated_at: Some("2026-07-14T00:00:00Z".to_string()),
         reverify_command: Some("verify F-001".to_string()),
-        reverify_control_hint: Some("F2 then v".to_string()),
+        reverify_control_hint: Some("Esc then v".to_string()),
         load_error: None,
     }
 }

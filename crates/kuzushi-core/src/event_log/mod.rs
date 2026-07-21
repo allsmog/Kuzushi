@@ -144,9 +144,13 @@ impl EventLog {
 
     pub fn read_all(&self) -> Result<Vec<EventEnvelope>> {
         let mut events = Vec::new();
-        for (_, path) in self.segment_files()? {
+        let segments = self.segment_files()?;
+        let last_index = segments.len().saturating_sub(1);
+        for (position, (_, path)) in segments.iter().enumerate() {
             let remaining = MAX_EVENT_LOG_EVENTS.saturating_sub(events.len());
-            let segment = read_segment_events(&path, remaining)?;
+            // Only the active (last) segment may carry a torn tail from a
+            // process killed mid-append; earlier segments must be pristine.
+            let segment = read_segment_events(path, remaining, position == last_index)?;
             anyhow::ensure!(
                 segment.len() <= remaining,
                 "Event log exceeds the {MAX_EVENT_LOG_EVENTS}-event aggregate limit"
@@ -220,6 +224,7 @@ impl EventLog {
         );
         let path = self.segment_path_for_append(line.len() as u64)?;
         let (mut file, created) = open_segment_for_append(&path)?;
+        heal_torn_tail(&mut file, &path)?;
         file.write_all(line.as_bytes())
             .context("Could not append event")?;
         file.sync_all().context("Could not fsync event log")?;
@@ -381,19 +386,58 @@ fn ensure_log_directory(path: &Path) -> Result<()> {
     }
 }
 
-fn read_segment_events(path: &Path, event_limit: usize) -> Result<Vec<EventEnvelope>> {
+fn read_segment_events(
+    path: &Path,
+    event_limit: usize,
+    allow_torn_tail: bool,
+) -> Result<Vec<EventEnvelope>> {
     let mut file = open_segment_for_read(path)
         .with_context(|| format!("Could not open {}", path.display()))?;
-    let mut body = String::new();
+    let mut bytes = Vec::new();
     std::io::Read::by_ref(&mut file)
         .take(MAX_EVENT_LOG_SEGMENT_BYTES.saturating_add(1))
-        .read_to_string(&mut body)
-        .context("Could not read event log segment as UTF-8")?;
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("Could not read {}", path.display()))?;
     anyhow::ensure!(
-        body.len() as u64 <= MAX_EVENT_LOG_SEGMENT_BYTES,
+        bytes.len() as u64 <= MAX_EVENT_LOG_SEGMENT_BYTES,
         "Event log segment exceeds the {MAX_EVENT_LOG_SEGMENT_BYTES}-byte limit"
     );
-    parse_segment_body(path, &body, event_limit)
+    let (complete, torn) = split_torn_tail(&bytes);
+    if !torn.is_empty() {
+        // A real interrupted append is at most one line; anything larger is
+        // corruption, not a torn tail.
+        anyhow::ensure!(
+            torn.len() <= MAX_EVENT_LOG_LINE_BYTES,
+            "Event log line {} exceeds the {MAX_EVENT_LOG_LINE_BYTES}-byte limit in {}",
+            complete.iter().filter(|byte| **byte == b'\n').count() + 1,
+            path.display()
+        );
+        anyhow::ensure!(
+            allow_torn_tail,
+            "Event log segment {} has a torn, newline-less tail outside the active segment",
+            path.display()
+        );
+        eprintln!(
+            "kuzushi: warning: dropping {} torn tail byte(s) from {} (process died mid-append); \
+             the next append will truncate them",
+            torn.len(),
+            path.display()
+        );
+    }
+    let body = std::str::from_utf8(complete)
+        .context("Could not read event log segment as UTF-8")?;
+    parse_segment_body(path, body, event_limit)
+}
+
+/// Split segment bytes into the complete-line region (up to and including
+/// the final newline) and any torn tail a killed writer left behind. Every
+/// well-formed append ends with `\n`, so a newline-less tail is exactly one
+/// interrupted `write`.
+fn split_torn_tail(bytes: &[u8]) -> (&[u8], &[u8]) {
+    match bytes.iter().rposition(|byte| *byte == b'\n') {
+        Some(position) => bytes.split_at(position + 1),
+        None => (&[], bytes),
+    }
 }
 
 fn parse_segment_body(path: &Path, body: &str, event_limit: usize) -> Result<Vec<EventEnvelope>> {
@@ -415,6 +459,18 @@ fn parse_segment_body(path: &Path, body: &str, event_limit: usize) -> Result<Vec
         events.push(parse_event_line(path, index + 1, line.to_string())?);
     }
     Ok(events)
+}
+
+/// Truncate a torn, newline-less tail left by a writer killed mid-append.
+/// Runs on the single-writer append path (readers only tolerate the tail),
+/// so the segment self-heals on the next durable event.
+fn heal_torn_tail(file: &mut fs::File, path: &Path) -> Result<()> {
+    crate::jsonl_tail::heal_torn_jsonl_tail(
+        file,
+        path,
+        MAX_EVENT_LOG_LINE_BYTES,
+        "Event log segment",
+    )
 }
 
 fn open_segment_for_append(path: &Path) -> Result<(fs::File, bool)> {
@@ -461,9 +517,12 @@ fn validate_segment_metadata(path: &Path, metadata: &fs::Metadata) -> Result<()>
 #[cfg(unix)]
 fn open_append_no_follow(path: &Path) -> std::io::Result<fs::File> {
     use std::os::unix::fs::OpenOptionsExt;
+    // `read` lets the torn-tail healer inspect the segment through the same
+    // descriptor; O_APPEND still forces every write to the end.
     OpenOptions::new()
         .create(true)
         .append(true)
+        .read(true)
         .mode(0o600)
         .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
         .open(path)
@@ -471,7 +530,11 @@ fn open_append_no_follow(path: &Path) -> std::io::Result<fs::File> {
 
 #[cfg(not(unix))]
 fn open_append_no_follow(path: &Path) -> std::io::Result<fs::File> {
-    OpenOptions::new().create(true).append(true).open(path)
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(path)
 }
 
 #[cfg(unix)]

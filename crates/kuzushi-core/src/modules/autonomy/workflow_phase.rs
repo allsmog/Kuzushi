@@ -69,6 +69,17 @@ impl WorkflowPhase {
         }
     }
 
+    /// Title-case operator word: the primary way a phase is named in chrome.
+    pub fn title(self) -> &'static str {
+        match self {
+            WorkflowPhase::Map => "Map",
+            WorkflowPhase::Scan => "Scan",
+            WorkflowPhase::Review => "Review",
+            WorkflowPhase::Prove => "Prove",
+            WorkflowPhase::Fix => "Fix",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             WorkflowPhase::Map => "MAP",

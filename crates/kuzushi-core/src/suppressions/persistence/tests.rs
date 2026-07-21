@@ -224,3 +224,33 @@ fn derived_id_is_deterministic() {
     assert_eq!(a, b);
     assert!(a.starts_with("sup-"));
 }
+
+#[test]
+fn concurrent_upserts_keep_every_rule() {
+    let (_dir, workspace) = workspace();
+    let workspace = std::sync::Arc::new(workspace);
+
+    // Without the read-modify-write lock, racing upserts load the same
+    // snapshot and the last save silently drops the other thread's rule.
+    let handles: Vec<_> = (0..8)
+        .map(|index| {
+            let workspace = std::sync::Arc::clone(&workspace);
+            std::thread::spawn(move || {
+                upsert_suppression_rule(&workspace, sample_rule(&format!("sup-{index}"))).unwrap();
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let mut ids: Vec<String> = load_suppression_rules(&workspace)
+        .unwrap()
+        .into_iter()
+        .map(|rule| rule.id)
+        .collect();
+    ids.sort();
+    let expected: Vec<String> = (0..8).map(|index| format!("sup-{index}")).collect();
+    assert_eq!(ids, expected);
+}
+

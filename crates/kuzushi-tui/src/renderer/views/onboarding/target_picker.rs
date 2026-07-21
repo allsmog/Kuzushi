@@ -73,7 +73,7 @@ fn compact_target_footer(app: &ShellApp) -> Vec<Line<'static>> {
         return picker_prompt_footer_lines(false);
     }
     vec![
-        muted(" ↑/↓ move · Enter select · d demo"),
+        muted(" ↑/↓ move · Enter select"),
         muted(" Esc browse · : command"),
     ]
 }
@@ -277,14 +277,13 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
         &[
             ("↑/↓/j/k", "move"),
             (":", "type a command"),
-            ("d", "offline fixture"),
+            (":demo", "offline fixture"),
             ("Enter", "select"),
             ("Esc/q", "browse without a target"),
         ],
         &[
             ("↑/↓", "move"),
             ("Enter", "select"),
-            ("d", "demo"),
             ("Esc", "browse"),
         ],
     ));
@@ -294,7 +293,7 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
 fn candidate_label_width(candidates: &[TargetCandidate]) -> usize {
     candidates
         .iter()
-        .map(|candidate| candidate.label.chars().count())
+        .map(|candidate| display_width(&candidate.label))
         .max()
         .unwrap_or(0)
 }

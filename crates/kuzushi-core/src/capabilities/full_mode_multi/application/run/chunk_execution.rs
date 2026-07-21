@@ -36,7 +36,35 @@ pub(super) fn run_full_mode_chunk(
     let result = query_full_mode_chunk(runtime, cfg, model, system_prompt, prompt);
     let cost = chunk_cost_report(&result)?;
     settle_full_mode_chunk_budget(spend, ticket, cost.exact_usd())?;
-    Ok(chunk_result_from_query(result, cost))
+    let mut chunk_result = chunk_result_from_query(result, cost);
+    restore_absolute_lines(chunk, &mut chunk_result.findings);
+    Ok(chunk_result)
+}
+
+/// Window buckets show the model a slice of a large file, so reported lines
+/// are window-relative. Restore absolute lines from the bucket's
+/// `start_line`. Only unambiguous (single-bucket-per-path) matches are
+/// adjusted; a chunk never carries two windows of one file in practice
+/// because each window exceeds the chunk token cap and plans as a
+/// singleton.
+pub(crate) fn restore_absolute_lines(chunk: &ChunkPlan, findings: &mut [Finding]) {
+    for finding in findings {
+        let mut matches = chunk
+            .files
+            .iter()
+            .filter(|bucket| bucket.path == finding.file_path);
+        let (Some(bucket), None) = (matches.next(), matches.next()) else {
+            continue;
+        };
+        if !bucket.is_window() || bucket.start_line <= 1 {
+            continue;
+        }
+        let offset = (bucket.start_line - 1) as u32;
+        finding.start_line = finding.start_line.saturating_add(offset);
+        if let Some(end) = finding.end_line {
+            finding.end_line = Some(end.saturating_add(offset));
+        }
+    }
 }
 
 fn reserve_full_mode_chunk_budget(

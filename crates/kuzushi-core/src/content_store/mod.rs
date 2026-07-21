@@ -88,7 +88,11 @@ pub struct ContentStore {
     root: PathBuf,
 }
 
-pub const MAX_CONTENT_OBJECT_BYTES: u64 = 64 * 1024 * 1024;
+/// Anti-corruption read bound for a single CAS object, NOT a blob-size
+/// policy (indexing already caps file blobs at MAX_INDEXED_FILE_BYTES).
+/// Flat tree objects on monorepo-scale targets are legitimately large:
+/// ~200 bytes per entry puts a 1M-file tree near 200 MB.
+pub const MAX_CONTENT_OBJECT_BYTES: u64 = 256 * 1024 * 1024;
 
 impl ContentStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -99,6 +103,12 @@ impl ContentStore {
     }
 
     pub fn put_bytes(&self, kind: ObjectKind, bytes: &[u8]) -> Result<ObjectRef> {
+        anyhow::ensure!(
+            bytes.len() as u64 <= MAX_CONTENT_OBJECT_BYTES,
+            "refusing to install a {}-byte CAS object above the {}-byte read limit",
+            bytes.len(),
+            MAX_CONTENT_OBJECT_BYTES
+        );
         let hash = object_hash(kind, bytes);
         let object_ref = object_ref(kind, hash.clone(), bytes.len());
         let path = self.object_path(&hash);

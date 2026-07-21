@@ -11,10 +11,19 @@ impl FindingStore {
         self.v3_findings_for_scan_id(scan_id)
     }
 
+    /// Full-ledger fetch. Presentation lists clamp to
+    /// `FindingListFilter::MAX_LIMIT`, but two consumers must see every
+    /// finding: exports (which stamp completeness into metadata) and alias
+    /// resolution (aliases are positional over the sorted whole ledger — a
+    /// clamped subset both loses aliases past the limit and can assign the
+    /// SAME alias to a different finding than the full set does).
+    pub fn list_all_findings(&self) -> Result<Vec<Finding>> {
+        self.v3_all_findings()
+    }
+
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
         let all_findings = self.v3_all_findings()?;
-        let (count, findings) = collect_filtered_findings(self, all_findings, filter)?;
-        Ok(FindingListReport { count, findings })
+        collect_filtered_findings(self, all_findings, filter)
     }
 }
 
@@ -22,9 +31,13 @@ fn collect_filtered_findings(
     store: &FindingStore,
     rows: Vec<Finding>,
     filter: &FindingListFilter,
-) -> Result<(usize, Vec<Finding>)> {
+) -> Result<FindingListReport> {
+    // Aliases are positional over the sorted whole ledger, so they must be
+    // assigned here — before filtering — and travel with the kept rows.
+    let alias_by_row = ledger_aliases_by_row_index(&rows);
     let mut count = 0;
     let mut findings = Vec::new();
+    let mut aliases = Vec::new();
     let review_cache = store.latest_review_decisions_for_findings(&rows, false)?;
     let human_review_cache = filter
         .has_derived_triage_state_filter()
@@ -33,7 +46,8 @@ fn collect_filtered_findings(
         .unwrap_or_default();
     let stable_fps = rows.iter().map(finding_stable_key).collect::<Vec<_>>();
     let lifecycle_cache = store.current_statuses_for(&stable_fps)?;
-    for row in rows {
+    for (index, row) in rows.into_iter().enumerate() {
+        let kept_before = findings.len();
         count += push_matching_finding(
             &review_cache,
             &human_review_cache,
@@ -42,8 +56,23 @@ fn collect_filtered_findings(
             row,
             filter,
         ) as usize;
+        if findings.len() > kept_before {
+            aliases.push(alias_by_row[index].clone());
+        }
     }
-    Ok((count, findings))
+    Ok(FindingListReport {
+        count,
+        findings,
+        aliases,
+    })
+}
+
+fn ledger_aliases_by_row_index(rows: &[Finding]) -> Vec<String> {
+    let mut by_row = vec![String::new(); rows.len()];
+    for (alias, row_index) in crate::findings::sorted_finding_alias_indices(rows) {
+        by_row[row_index] = alias;
+    }
+    by_row
 }
 
 fn push_matching_finding(
@@ -106,4 +135,88 @@ fn finding_stable_key(finding: &Finding) -> String {
         .identity_id
         .clone()
         .unwrap_or_else(|| finding.fingerprint.clone())
+}
+
+#[cfg(test)]
+mod full_ledger_fetch_tests {
+    use crate::findings::{Finding, FindingStore};
+    use crate::Severity;
+
+    #[test]
+    fn list_all_findings_sees_past_the_presentation_clamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
+        store
+            .with_run_lifecycle("run-clamp-test", tmp.path(), || {
+                for index in 0..501usize {
+                    let finding = Finding::new_tool(
+                        "clamp-test",
+                        "clamp/rule",
+                        &format!("src/f{index}.c"),
+                        1,
+                        None,
+                        Severity::Low,
+                        &format!("clamp row {index}"),
+                    );
+                    store.insert_finding("run-clamp-test", &finding)?;
+                }
+                Ok(((), 501usize))
+            })
+            .unwrap();
+
+        assert_eq!(store.list_findings(1000).unwrap().len(), 500);
+        let all = store.list_all_findings().unwrap();
+        assert_eq!(all.len(), 501);
+        // Alias indices must be assignable across the whole ledger.
+        let aliases = crate::findings::sorted_finding_aliases(&all);
+        assert_eq!(aliases.len(), 501);
+    }
+
+    /// A filtered list must show the same alias `kz finding F-nnnn`
+    /// resolves — ledger-positional, not subset-positional. A severity
+    /// filter that drops earlier-aliased rows is the regression trap.
+    #[test]
+    fn filtered_list_carries_ledger_stable_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
+        store
+            .with_run_lifecycle("run-alias-test", tmp.path(), || {
+                for (index, severity) in
+                    [Severity::High, Severity::High, Severity::Low].iter().enumerate()
+                {
+                    let finding = Finding::new_tool(
+                        "alias-test",
+                        "alias/rule",
+                        &format!("src/f{index}.c"),
+                        1,
+                        None,
+                        *severity,
+                        &format!("alias row {index}"),
+                    );
+                    store.insert_finding("run-alias-test", &finding)?;
+                }
+                Ok(((), 3usize))
+            })
+            .unwrap();
+
+        let filter = crate::findings::FindingListFilter::from_tool_input(
+            &serde_json::json!({"severity": ["low"]}),
+        )
+        .unwrap();
+        let report = store.list_findings_filtered(&filter).unwrap();
+
+        assert_eq!(report.findings.len(), 1);
+        let all = store.list_all_findings().unwrap();
+        let ledger_alias = crate::findings::stable_finding_alias(
+            &all,
+            &report.findings[0].fingerprint,
+        )
+        .unwrap();
+        // The low row sorts after both highs, so subset-positional aliasing
+        // would mislabel it F-0001.
+        assert_eq!(ledger_alias, "F-0003");
+        assert_eq!(report.aliases, vec![ledger_alias]);
+        assert!(report.output().contains("F-0003"));
+        assert!(!report.output().contains("F-0001"));
+    }
 }

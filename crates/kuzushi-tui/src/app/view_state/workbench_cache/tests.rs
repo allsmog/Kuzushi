@@ -67,6 +67,105 @@ fn seed_harness_file(target: &Path, contents: &str) -> PathBuf {
     path
 }
 
+/// `Ready` scan receipts describe terminal runs and never change on disk, so
+/// every invalidation path keeps them; only unsettled `Missing`/`Failed`
+/// entries re-read. Dropping settled receipts made the Scan page flap to its
+/// legacy projection on each external workspace refresh.
+#[test]
+fn settled_scan_receipts_survive_cache_invalidation() {
+    let target = PathBuf::from("/tmp/receipt-cache-target");
+    let mut cache = WorkbenchCache::default();
+    seed_scan_receipt(&mut cache, &target, "run-ready", ready_receipt_state());
+    seed_scan_receipt(&mut cache, &target, "run-missing", ScanStageReceiptState::Missing);
+
+    cache.invalidate_state_artifact_paths(
+        &target,
+        &[
+            PathBuf::from(".kuzushi/v3/runs/run-ready/done.json"),
+            PathBuf::from(".kuzushi/v3/runs/run-missing/done.json"),
+        ],
+    );
+    assert!(matches!(
+        cache.cached_scan_stage_receipt(&target, "run-ready"),
+        ViewDataState::Ready(ScanStageReceiptState::Ready(_))
+    ));
+    assert!(cache
+        .cached_scan_stage_receipt(&target, "run-missing")
+        .is_not_requested());
+
+    seed_scan_receipt(&mut cache, &target, "run-missing", ScanStageReceiptState::Missing);
+    cache.invalidate_state_artifact_paths(&target, &[PathBuf::from(".kuzushi/v3")]);
+    cache.invalidate_workspace_files();
+    cache.invalidate_run_summaries();
+
+    assert!(matches!(
+        cache.cached_scan_stage_receipt(&target, "run-ready"),
+        ViewDataState::Ready(ScanStageReceiptState::Ready(_))
+    ));
+    assert!(cache
+        .cached_scan_stage_receipt(&target, "run-missing")
+        .is_not_requested());
+}
+
+/// Invalidation marks the entries index stale instead of dropping it: the
+/// previous entries keep serving (no empty-index frame on durable pages)
+/// while the hydration gate reports a refresh is due.
+#[test]
+fn stale_run_summary_entries_serve_until_rehydrated() {
+    let target = PathBuf::from("/tmp/entries-cache-target");
+    let mut cache = WorkbenchCache::default();
+    let entry = RunSummaryEntry {
+        run_id: "scan-run".to_string(),
+        path: target.join(".kuzushi/v3/runs/scan-run/summary.json"),
+        state: kuzushi_core::RunSummaryEntryState::Ready(RunSummary::running(
+            "scan-run",
+            "scan",
+            None,
+            "target",
+        )),
+    };
+    cache.apply_view_hydration(ViewHydrationResult {
+        target: target.clone(),
+        key: ViewHydrationKey::RunSummaryEntries,
+        value: ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(vec![
+            entry,
+        ])),
+    });
+    assert!(!cache.run_summary_entries_need_refresh(&target));
+
+    cache.invalidate_state_artifact_paths(&target, &[PathBuf::from(".kuzushi/v3")]);
+
+    assert!(cache.run_summary_entries_need_refresh(&target));
+    assert!(matches!(
+        cache.cached_run_summary_entries(Some(&target)),
+        ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) if entries.len() == 1
+    ));
+}
+
+fn ready_receipt_state() -> ScanStageReceiptState {
+    ScanStageReceiptState::Ready(kuzushi_core::run_artifacts::PhaseStageReceipt {
+        phase: kuzushi_core::WorkflowPhase::Scan,
+        outcome: kuzushi_core::run_artifacts::PhaseStageOutcome::Completed,
+        run_refs: vec!["run-ready".to_string()],
+        scan: None,
+    })
+}
+
+fn seed_scan_receipt(
+    cache: &mut WorkbenchCache,
+    target: &Path,
+    run_id: &str,
+    state: ScanStageReceiptState,
+) {
+    cache.apply_view_hydration(ViewHydrationResult {
+        target: target.to_path_buf(),
+        key: ViewHydrationKey::ScanStageReceipt {
+            run_id: run_id.to_string(),
+        },
+        value: ViewHydrationValue::ScanStageReceipt(state),
+    });
+}
+
 #[test]
 fn run_summary_cache_refreshes_after_run_persistence() {
     let temp = tempfile::tempdir().unwrap();

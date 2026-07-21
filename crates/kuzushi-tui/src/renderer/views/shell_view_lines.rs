@@ -16,7 +16,20 @@ pub(crate) fn shell_view_lines_for(
         .or_else(|| threat_run_shell_view_lines(app, area, view))
         .or_else(|| system_shell_view_lines(app, area, view))
         .or_else(|| workspace_session_shell_view_lines(app, area, view))
-        .unwrap_or_else(|| home_lines(app, area))
+        .unwrap_or_else(|| unwired_view_lines(app, area, view))
+}
+
+/// Honest fallback for a `ShellView` variant no router arm claims. Silently
+/// showing Home here hid wiring bugs — the operator saw the wrong screen
+/// with no indication anything was broken. The registry test iterates every
+/// variant and fails on this sentinel.
+fn unwired_view_lines(app: &ShellApp, area: Rect, view: ShellView) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        format!("⚠ {view:?} is not wired to a renderer — showing Home. Please report this."),
+        theme::warn(),
+    )];
+    lines.extend(home_lines(app, area));
+    lines
 }
 
 fn primary_shell_view_lines(
@@ -76,6 +89,8 @@ fn threat_run_shell_view_lines(
         ShellView::ActorDetail => actor_detail_lines(app, area, app.router.actor_detail().index()),
         ShellView::Runs => default_scrolled_lines(app, area, runs_lines(app, area)),
         ShellView::Jobs => default_scrolled_lines(app, area, jobs_lines(app, area)),
+        ShellView::Campaign => campaign_lines(app, area),
+        ShellView::Coverage => default_scrolled_lines(app, area, coverage_lines(app, area)),
         ShellView::RunDiff => run_diff_view_lines(app, area),
         ShellView::Replay => default_scrolled_lines(
             app,
@@ -273,5 +288,29 @@ mod tests {
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// The wiring registry: EVERY `ShellView` variant must reach a real
+    /// renderer arm. Before this test, an unwired variant silently rendered
+    /// the Home screen; now it renders a loud sentinel and fails here.
+    /// Adding a variant without a router arm fails this test automatically —
+    /// `strum::EnumIter` iterates the enum, so there is no second list to
+    /// keep in sync.
+    #[test]
+    fn every_shell_view_variant_is_wired_to_a_renderer() {
+        use strum::IntoEnumIterator;
+        let area = Rect::new(0, 0, 100, 24);
+        for view in ShellView::iter() {
+            let app = ShellApp::new(V2Config::default(), None);
+            let text = rendered_text(shell_view_lines_for(&app, area, view));
+            assert!(
+                !text.contains("is not wired to a renderer"),
+                "{view:?} has no renderer arm in shell_view_lines_for"
+            );
+            assert!(
+                !text.trim().is_empty(),
+                "{view:?} rendered an entirely blank screen"
+            );
+        }
     }
 }

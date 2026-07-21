@@ -279,7 +279,7 @@ fn classify_notify_result_with_state(
 
 fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
     let relative = watch_relative_path(root, path)?;
-    if is_sqlite_shared_memory(&relative) {
+    if is_sqlite_side_file(&relative) || is_high_churn_state_internal(&relative) {
         return None;
     }
     if relative.starts_with(".kuzushi/v3") {
@@ -291,10 +291,28 @@ fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
     is_legacy_workspace_artifact(&relative).then_some(relative)
 }
 
-fn is_sqlite_shared_memory(path: &Path) -> bool {
+/// Per-write internals that flood notify while a headless scan writes into
+/// the same workspace — the watcher storm that pinned a core: run-dir
+/// contents (live `trace.jsonl` appends, child logs) except the terminal
+/// `done.json` sentinel, event-log segment appends (one fsync'd write per
+/// observation), and content-store blobs. External store progress still
+/// surfaces through the projection sqlite main file on WAL checkpoint and
+/// through `done.json`/`queue.json` transitions.
+fn is_high_churn_state_internal(path: &Path) -> bool {
+    if path.starts_with(".kuzushi/v3/runs") {
+        return path.file_name() != Some(std::ffi::OsStr::new("done.json"));
+    }
+    path.starts_with(".kuzushi/v3/log") || path.starts_with(".kuzushi/v3/objects")
+}
+
+fn is_sqlite_side_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".sqlite3-shm"))
+        .is_some_and(|name| {
+            name.ends_with(".sqlite3-shm")
+                || name.ends_with(".sqlite3-wal")
+                || name.ends_with(".sqlite3-journal")
+        })
 }
 
 fn is_legacy_workspace_artifact(path: &Path) -> bool {
@@ -357,16 +375,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn watcher_ignores_sqlite_shared_memory_but_keeps_wal_changes() {
+    fn watcher_ignores_all_sqlite_side_files_but_keeps_the_main_database() {
         let root = Path::new("/tmp/workspace");
 
+        for side in ["-shm", "-wal", "-journal"] {
+            assert_eq!(
+                runtime_state_path(root, &root.join(format!(".kuzushi/v3/index.sqlite3{side}"))),
+                None,
+                "{side} must not wake the shell per store write"
+            );
+        }
         assert_eq!(
-            runtime_state_path(root, &root.join(".kuzushi/v3/index.sqlite3-shm")),
-            None
+            runtime_state_path(root, &root.join(".kuzushi/v3/index.sqlite3")),
+            Some(PathBuf::from(".kuzushi/v3/index.sqlite3"))
         );
+    }
+
+    /// A headless scan writing into the watched workspace must not generate
+    /// per-write watcher work: a burst of run-dir appends, event-log segment
+    /// appends, WAL touches, and blob writes classifies to zero changes and
+    /// zero state events — only the terminal sentinel and queue transitions
+    /// surface.
+    #[test]
+    fn store_write_burst_produces_no_watcher_work() {
+        let root = Path::new("/tmp/workspace");
+        let churn = [
+            ".kuzushi/v3/runs/run-1/trace.jsonl",
+            ".kuzushi/v3/runs/run-1/summary.json",
+            ".kuzushi/v3/log/events-000000.jsonl",
+            ".kuzushi/v3/objects/ab/abcdef",
+            ".kuzushi/v3/index.sqlite3-wal",
+        ];
+        for _ in 0..200 {
+            for path in churn {
+                let event = Event {
+                    kind: EventKind::Modify(ModifyKind::Any),
+                    paths: vec![root.join(path)],
+                    attrs: Default::default(),
+                };
+                let (changes, state) = classify_notify_event_with_state(root, event);
+                assert!(changes.is_empty(), "{path} classified as a source change");
+                assert!(state.is_empty(), "{path} classified as a state event");
+            }
+        }
+
+        let sentinel = Event {
+            kind: EventKind::Create(notify::event::CreateKind::File),
+            paths: vec![root.join(".kuzushi/v3/runs/run-1/done.json")],
+            attrs: Default::default(),
+        };
+        let (_, state) = classify_notify_event_with_state(root, sentinel);
+        assert_eq!(state, vec![PathBuf::from(".kuzushi/v3/runs/run-1/done.json")]);
+
+        let queue = Event {
+            kind: EventKind::Modify(ModifyKind::Any),
+            paths: vec![root.join(".kuzushi/v3/campaigns/camp/queue.json")],
+            attrs: Default::default(),
+        };
+        let (_, state) = classify_notify_event_with_state(root, queue);
         assert_eq!(
-            runtime_state_path(root, &root.join(".kuzushi/v3/index.sqlite3-wal")),
-            Some(PathBuf::from(".kuzushi/v3/index.sqlite3-wal"))
+            state,
+            vec![PathBuf::from(".kuzushi/v3/campaigns/camp/queue.json")]
         );
     }
 }

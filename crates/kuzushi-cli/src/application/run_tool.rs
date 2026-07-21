@@ -1,5 +1,8 @@
 #[cfg(test)]
 pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
+use super::run_exit::{
+    run_exit_code, write_done_sentinel, RunCommandExit, EXIT_RUN_PREPARE_FAILED,
+};
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_requirements::resolve_run_target;
 use anyhow::{Context, Result};
@@ -32,14 +35,16 @@ pub(crate) fn run_tool_command(
     autonomy: Option<String>,
     global_target: Option<PathBuf>,
     load: Vec<String>,
+    run_id: Option<String>,
 ) -> Result<()> {
     let input = resolve_run_input(input)?;
     let target = resolve_run_target(global_target);
     let tool_label = tool.clone();
-    match prepare_cli_tool_run(tool, input, options, autonomy, target, load) {
+    match prepare_cli_tool_run(tool, input, options, autonomy, target, load, run_id) {
         Ok(run) => {
             let output = execute_cli_tool_run(&run)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
+            publish_done_sentinel(&run, &output);
             fail_cli_on_failure_like_tool_output(&output)
         }
         // Prepare-stage failures (unknown tool, bad JSON, unknown option, missing
@@ -50,7 +55,10 @@ pub(crate) fn run_tool_command(
             let message = error.to_string();
             let output = prepare_failure_output(&tool_label, &message);
             println!("{}", serde_json::to_string_pretty(&output)?);
-            anyhow::bail!("{message}")
+            Err(anyhow::Error::new(RunCommandExit::new(
+                EXIT_RUN_PREPARE_FAILED,
+                message,
+            )))
         }
     }
 }
@@ -361,10 +369,29 @@ fn output_has_artifacts(object: &serde_json::Map<String, serde_json::Value>) -> 
     }
 }
 
+// The sentinel is a poller convenience, never an outcome input: a write
+// failure is reported on stderr and the exit code stays whatever the tool
+// envelope dictates.
+fn publish_done_sentinel(run: &PreparedCliToolRun, output: &serde_json::Value) {
+    let result = write_done_sentinel(
+        &run.artifact_target,
+        &run.run_id,
+        &run.tool,
+        output,
+        run_exit_code(output),
+    );
+    if let Err(error) = result {
+        eprintln!("kuzushi: warning: done sentinel not written: {error}");
+    }
+}
+
 fn fail_cli_on_failure_like_tool_output(output: &serde_json::Value) -> Result<()> {
     let status = tool_result_status(output);
     if status.is_failure_like() {
-        anyhow::bail!("{}", cli_failure_like_tool_message(output, status));
+        return Err(anyhow::Error::new(RunCommandExit::new(
+            run_exit_code(output),
+            cli_failure_like_tool_message(output, status),
+        )));
     }
     Ok(())
 }
@@ -472,6 +499,20 @@ mod tests {
     }
 
     #[test]
+    fn failure_like_output_carries_the_deterministic_batch_exit_code() {
+        let partial = fail_cli_on_failure_like_tool_output(&json!({"status": "partial"}))
+            .unwrap_err()
+            .downcast::<crate::application::run_exit::RunCommandExit>()
+            .expect("partial must carry a typed exit");
+        assert_eq!(partial.code(), 4);
+        let failed = fail_cli_on_failure_like_tool_output(&json!({"status": "failed"}))
+            .unwrap_err()
+            .downcast::<crate::application::run_exit::RunCommandExit>()
+            .expect("failed must carry a typed exit");
+        assert_eq!(failed.code(), 3);
+    }
+
+    #[test]
     fn cli_persistence_fault_timing_tracks_the_dispatch_boundary() {
         assert!(!CliExecutionTiming::BeforeDispatch.execution_may_have_occurred());
         assert!(CliExecutionTiming::AfterDispatch.execution_may_have_occurred());
@@ -487,6 +528,7 @@ mod tests {
             None,
             Some(target.path().to_path_buf()),
             Vec::new(),
+            None,
         )
         .unwrap();
         let run_dir = kuzushi_core::run_dir(target.path(), &run.run_id);

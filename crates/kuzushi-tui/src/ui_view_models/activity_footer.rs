@@ -480,7 +480,7 @@ mod tests {
         let pairs = plain_pairs(&model);
 
         assert!(pairs.contains(&("s", "steer")));
-        assert!(!pairs.iter().any(|(key, _)| *key == "F2"));
+        assert!(!pairs.contains(&("Esc", "nav mode")));
 
         let running = activity_footer_model(
             &session,

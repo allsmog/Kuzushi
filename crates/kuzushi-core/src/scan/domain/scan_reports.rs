@@ -8,6 +8,10 @@ pub struct SemgrepScanReport {
     pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<SemgrepPersistedRun>,
+    /// Semgrep-reported scan errors (skipped files/rules). Non-empty means
+    /// the run completed with incomplete coverage, and the report says so.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub scan_errors: Vec<String>,
 }
 
 impl SemgrepScanReport {
@@ -21,7 +25,13 @@ impl SemgrepScanReport {
             count: findings.len(),
             findings,
             persisted,
+            scan_errors: Vec::new(),
         }
+    }
+
+    pub fn with_scan_errors(mut self, scan_errors: Vec<String>) -> Self {
+        self.scan_errors = scan_errors;
+        self
     }
 
     pub fn output(&self) -> String {
@@ -36,17 +46,49 @@ impl SemgrepScanReport {
 fn semgrep_output_lines(report: &SemgrepScanReport) -> Vec<String> {
     let mut lines = vec![semgrep_summary_line(report)];
     append_semgrep_persisted_run(&mut lines, report.persisted.as_ref());
+    append_semgrep_scan_errors(&mut lines, &report.scan_errors);
     append_top_findings(&mut lines, &report.findings);
     lines
 }
 
 fn semgrep_summary_line(report: &SemgrepScanReport) -> String {
+    let coverage_note = if report.scan_errors.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " (coverage incomplete: {} scan error{})",
+            report.scan_errors.len(),
+            plural_suffix(report.scan_errors.len())
+        )
+    };
     format!(
-        "semgrep: {} finding{} under {}",
+        "semgrep: {} finding{} under {}{}",
         report.count,
         plural_suffix(report.count),
-        report.target
+        report.target,
+        coverage_note
     )
+}
+
+const MAX_LISTED_SCAN_ERRORS: usize = 3;
+
+fn append_semgrep_scan_errors(lines: &mut Vec<String>, scan_errors: &[String]) {
+    if scan_errors.is_empty() {
+        return;
+    }
+    lines.push("  Semgrep skipped some files or rules:".to_string());
+    lines.extend(
+        scan_errors
+            .iter()
+            .take(MAX_LISTED_SCAN_ERRORS)
+            .map(|entry| format!("  ! {entry}")),
+    );
+    if scan_errors.len() > MAX_LISTED_SCAN_ERRORS {
+        lines.push(format!(
+            "  ... and {} more scan errors",
+            scan_errors.len() - MAX_LISTED_SCAN_ERRORS
+        ));
+    }
 }
 
 fn append_semgrep_persisted_run(lines: &mut Vec<String>, persisted: Option<&SemgrepPersistedRun>) {

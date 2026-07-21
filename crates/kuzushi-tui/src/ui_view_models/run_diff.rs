@@ -75,8 +75,8 @@ pub(crate) struct RunDiffDecisionSummary {
 
 pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiffModel {
     let mut warnings = Vec::new();
-    append_run_id_warning(&mut warnings, left);
-    append_run_id_warning(&mut warnings, right);
+    append_run_id_warning(&mut warnings, "left", left);
+    append_run_id_warning(&mut warnings, "right", right);
     let left_metadata = run_metadata(app, left);
     let right_metadata = run_metadata(app, right);
     append_status_warning(&mut warnings, left, &left_metadata.status);
@@ -318,9 +318,12 @@ fn run_metadata(app: &ShellApp, run_id: &str) -> RunDiffMetadata {
     }
 }
 
-fn append_run_id_warning(warnings: &mut Vec<String>, run_id: &str) {
+/// Name the side — two bad run ids would otherwise emit indistinguishable
+/// duplicate warnings. The raw value is deliberately never reflected
+/// (traversal/control characters must not reach the screen).
+fn append_run_id_warning(warnings: &mut Vec<String>, side: &str, run_id: &str) {
     if let Err(error) = RunId::parse(run_id) {
-        warnings.push(format!("invalid run id: {error}"));
+        warnings.push(format!("invalid run id ({side}): {error}"));
     }
 }
 

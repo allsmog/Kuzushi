@@ -784,7 +784,10 @@ mod tests {
         let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
         std::fs::write(temp.path().join("main.c"), "int main(void) { return 0; }\n").unwrap();
-        let previous = set_codeql_bin_for_test(&write_fake_codeql_build_script(temp.path()));
+        let _bin = crate::test_env::ScopedEnv::set(
+            "KUZUSHI_CODEQL_BIN",
+            write_fake_codeql_build_script(temp.path()),
+        );
         let config = codeql_build_test_config();
         let ctx = codeql_build_test_context(&config);
 
@@ -795,7 +798,6 @@ mod tests {
         )
         .unwrap();
 
-        restore_codeql_bin(previous);
         assert_codeql_build_report(report);
     }
 
@@ -822,12 +824,6 @@ printf 'fake warning\n' >&2
         fake_codeql
     }
 
-    fn set_codeql_bin_for_test(fake_codeql: &Path) -> Option<std::ffi::OsString> {
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", fake_codeql);
-        previous
-    }
-
     fn codeql_build_test_config() -> V2Config {
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
@@ -842,13 +838,6 @@ printf 'fake warning\n' >&2
             trace: None,
             cancellation: None,
             authorization: Default::default(),
-        }
-    }
-
-    fn restore_codeql_bin(previous: Option<std::ffi::OsString>) {
-        match previous {
-            Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
-            None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
         }
     }
 

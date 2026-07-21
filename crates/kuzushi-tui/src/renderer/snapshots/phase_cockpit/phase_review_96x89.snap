@@ -4,10 +4,10 @@ contract: cockpit-spine-v1
 phase: review
 size: 96x89
 ---
-KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built · module context
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
- Enter open in Prove · findings clear projection · z open heatmap · scan again
+KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Enter open in Prove · findings show full queue · z open heatmap · scan again
 │▸ FINDINGS · 6                           │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @? CFM open SQL...   │SQL injection reaches query
 │  SQL injection reaches query            │
@@ -26,6 +26,17 @@ KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx
 │                                         │── NEXT ──
 │                                         │  patch: `patch F-0001`
 │                                         │  runtime proof is recorded; generate remediation
+│                                         │
+│                                         │── SOURCE ──
+│                                         │  src/auth/login.rs:17
+│                                         │    14 │ }
+│                                         │    15 │
+│                                         │    16 │ pub fn login(attempt: &LoginAttempt)...
+│                                         │  ▶ 17 │     let rows = query(&format!("SELECT...
+│                                         │    18 │     match rows.first() {
+│                                         │    19 │         Some(user) => Response::sessio...
+│                                         │    20 │         None => Response::unauthorized(),
+│                                         │    21 │     }
 │                                         │
 │                                         │── EVIDENCE ──
 │                                         │  origin: observed code evidence
@@ -57,10 +68,8 @@ KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx
 │                                         │source signature:
 │                                         │login.rs:17:sql-injection-reaches-query
 │                                         │corroboration: 1
-│                                         │identity: phase-findin
-│                                         │fingerprint:
-│                                         │fp3_ed97bede6bddb8528fdfaad97714184aea0182bae8bf29
-│                                         │53e2c2451f61b5ae9c
+│                                         │identity: phase-findi…
+│                                         │fingerprint: fp3_ed97bede6bddb852…
 │                                         │
 │                                         │
 │                                         │
@@ -80,16 +89,7 @@ KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx
 │                                         │
 │                                         │
 │                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-│                                         │
-route:run · 査  review 3/5 · ⛭ 掛  fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+route:run · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ▣ REVIEW › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

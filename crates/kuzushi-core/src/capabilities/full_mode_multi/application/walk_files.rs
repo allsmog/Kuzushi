@@ -6,6 +6,9 @@ use std::fs;
 use std::path::Path;
 
 pub(crate) fn walk_files(cfg: &FullModeConfig) -> Result<Vec<FileBucket>> {
+    if let Some(scope) = &cfg.scope_files {
+        return Ok(scoped_file_buckets(&cfg.workspace_root, scope));
+    }
     let extensions = if cfg.include_extensions.is_empty() {
         c_default_extensions()
     } else {
@@ -21,11 +24,95 @@ pub(crate) fn walk_files(cfg: &FullModeConfig) -> Result<Vec<FileBucket>> {
         &extensions,
         &mut out,
     )?;
-    if let Some(scope) = &cfg.scope_files {
-        let allowed: std::collections::HashSet<&Path> = scope.iter().map(|p| p.as_path()).collect();
-        out.retain(|fb| allowed.contains(Path::new(&fb.path)));
-    }
     Ok(out)
+}
+
+/// An explicit scope list is an operator allowlist: plan exactly the named
+/// files, with no language-extension filter. Filtering scope entries through
+/// `c_default_extensions()` silently planned 0 files for Scala/Python/Go
+/// shards while still reporting a completed run.
+fn scoped_file_buckets(root: &Path, scope: &[std::path::PathBuf]) -> Vec<FileBucket> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for rel in scope {
+        if !seen.insert(rel.as_path()) {
+            continue;
+        }
+        let Ok(metadata) = root.join(rel).metadata() else {
+            continue;
+        };
+        let bytes = metadata.len() as usize;
+        if !metadata.is_file() || bytes == 0 {
+            continue;
+        }
+        push_file_buckets(root, &rel.to_string_lossy(), bytes, &mut out);
+    }
+    out
+}
+
+/// Files above `MAX_FILE_BYTES` are split into line-aligned window buckets
+/// instead of being dropped. Dropping was silent and hit exactly the files
+/// most worth scanning (334 KB PowerShellExecutor.cpp with 9 known
+/// injection sites planned into ZERO chunks with no diagnostic).
+fn push_file_buckets(root: &Path, rel_path: &str, bytes: usize, out: &mut Vec<FileBucket>) {
+    if bytes <= MAX_FILE_BYTES {
+        out.push(FileBucket::whole(
+            rel_path.to_owned(),
+            bytes,
+            est_tokens_for_bytes(bytes),
+        ));
+        return;
+    }
+    match window_buckets_for_large_file(root, rel_path) {
+        Some(windows) => out.extend(windows),
+        // Unreadable / non-UTF-8 oversized files keep the old skip, but the
+        // common source-file case is now covered.
+        None => {}
+    }
+}
+
+fn window_buckets_for_large_file(root: &Path, rel_path: &str) -> Option<Vec<FileBucket>> {
+    let content = fs::read_to_string(root.join(rel_path)).ok()?;
+    let mut windows = Vec::new();
+    let mut window_start_byte = 0usize;
+    let mut window_start_line = 1usize;
+    let mut current_len = 0usize;
+    let mut current_lines = 0usize;
+    for line in content.split_inclusive('\n') {
+        if current_len > 0 && current_len + line.len() > MAX_FILE_BYTES {
+            windows.push(window_bucket(
+                rel_path,
+                window_start_byte,
+                window_start_line,
+                current_len,
+            ));
+            window_start_byte += current_len;
+            window_start_line += current_lines;
+            current_len = 0;
+            current_lines = 0;
+        }
+        current_len += line.len();
+        current_lines += 1;
+    }
+    if current_len > 0 {
+        windows.push(window_bucket(
+            rel_path,
+            window_start_byte,
+            window_start_line,
+            current_len,
+        ));
+    }
+    Some(windows)
+}
+
+fn window_bucket(path: &str, start_byte: usize, start_line: usize, bytes: usize) -> FileBucket {
+    FileBucket {
+        path: path.to_owned(),
+        bytes,
+        est_tokens: est_tokens_for_bytes(bytes),
+        start_byte,
+        start_line,
+    }
 }
 
 pub(crate) fn c_default_extensions() -> Vec<String> {
@@ -91,14 +178,10 @@ fn collect_file_bucket(root: &Path, path: &Path, extensions: &[String], out: &mu
         return;
     };
     let bytes = metadata.len() as usize;
-    if bytes == 0 || bytes > MAX_FILE_BYTES {
+    if bytes == 0 {
         return;
     }
-    out.push(FileBucket {
-        path: relative_file_path(root, path),
-        bytes,
-        est_tokens: est_tokens_for_bytes(bytes),
-    });
+    push_file_buckets(root, &relative_file_path(root, path), bytes, out);
 }
 
 fn has_included_extension(path: &Path, extensions: &[String]) -> bool {

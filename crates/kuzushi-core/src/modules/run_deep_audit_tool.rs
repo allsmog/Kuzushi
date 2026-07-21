@@ -166,15 +166,21 @@ fn deep_audit_options(input: &Value) -> DeepAuditOptions {
             "passes",
             crate::capabilities::deep_auditor::DEFAULT_PASSES,
         )
-        .max(1),
+        .clamp(1, MAX_DEEP_AUDIT_PASSES),
     }
 }
 
+/// Every consensus pass is a paid model run; same ceiling discipline as
+/// verify:finding's VERIFY_PASSES cap.
+const MAX_DEEP_AUDIT_PASSES: u32 = 7;
+
+/// Saturating, not truncating: `passes: 4294967297` must not silently
+/// become 1 pass while looking like a huge request.
 fn read_deep_audit_u32(input: &Value, key: &str, default: u32) -> u32 {
     input
         .get(key)
         .and_then(Value::as_u64)
-        .map(|v| v as u32)
+        .map(|v| u32::try_from(v).unwrap_or(u32::MAX))
         .unwrap_or(default)
 }
 
@@ -260,3 +266,26 @@ fn deep_audit_response(
     }
     result
 }
+
+#[cfg(test)]
+mod deep_audit_option_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn passes_saturate_and_clamp_instead_of_truncating() {
+        // 2^32 + 1 used to truncate to 1 via `as u32`.
+        let wrapped = deep_audit_options(&json!({ "passes": 4_294_967_297u64 }));
+        assert_eq!(wrapped.passes, MAX_DEEP_AUDIT_PASSES);
+
+        let huge = deep_audit_options(&json!({ "passes": u64::MAX }));
+        assert_eq!(huge.passes, MAX_DEEP_AUDIT_PASSES);
+
+        let zero = deep_audit_options(&json!({ "passes": 0 }));
+        assert_eq!(zero.passes, 1);
+
+        let normal = deep_audit_options(&json!({ "passes": 3 }));
+        assert_eq!(normal.passes, 3);
+    }
+}
+

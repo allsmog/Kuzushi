@@ -172,6 +172,7 @@ fn result_preview(output: &Value) -> Vec<SafeText> {
         .get("summary")
         .and_then(Value::as_str)
         .into_iter()
+        .flat_map(str::lines)
         .chain(output_lines(output))
         .filter(|line| !line.trim().is_empty())
         .take(crate::run_lifecycle::MAX_PREVIEW_LINES)

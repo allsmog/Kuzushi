@@ -233,6 +233,8 @@ impl ShellApp {
         total_count: usize,
         read_watermark: Option<u64>,
     ) {
+        let cursored_identity = crate::ui_view_models::visible_finding_at_cursor(self)
+            .map(|(_, finding)| finding_generation_key(&finding));
         self.set_findings(findings);
         self.set_findings_total_count(total_count);
         self.set_findings_read_watermark(read_watermark);
@@ -240,9 +242,34 @@ impl ShellApp {
         self.set_active_findings_filter(None);
         self.reselect_current_finding();
         self.sync_findings_cursor_to_selected();
+        self.reanchor_cursor_to_cursored_identity(cursored_identity);
+        // A reload invalidates a pending X-X bulk-defer confirmation: the
+        // second press must defer exactly the set whose count the arm
+        // message showed, so new data means re-arming with a fresh count.
+        self.router.workbench_mut().review_mut().backlog_confirm_bulk = false;
         if announce {
             let count = self.findings().len();
             self.log("findings", findings_loaded_message(count, total_count));
+        }
+    }
+
+    /// One-key decisions act on the CURSORED row, so a reload that reorders
+    /// the projection must never swap a different finding under a stationary
+    /// cursor. Re-anchor to the finding the operator was on, overriding the
+    /// selected-finding sync (selection tracks the last OPENED finding, which
+    /// may be rows away from where the operator is browsing). A vanished row
+    /// (e.g. just decided in the backlog) keeps the clamped index so the
+    /// cursor advances to the next row.
+    fn reanchor_cursor_to_cursored_identity(&mut self, identity: Option<String>) {
+        let Some(identity) = identity else {
+            return;
+        };
+        let position = (0..crate::ui_view_models::visible_findings_len(self)).find(|index| {
+            crate::ui_view_models::visible_finding_at_index(self, *index)
+                .is_some_and(|(_, finding)| finding_generation_key(&finding) == identity)
+        });
+        if let Some(index) = position {
+            self.router.findings_mut().set_cursor(index);
         }
     }
 
@@ -443,5 +470,70 @@ mod tests {
         assert!(app.active_findings_filter().is_none());
         assert_eq!(app.findings().len(), 2);
         assert_eq!(crate::ui_view_models::visible_findings_len(&app), 2);
+    }
+
+    /// The decision-integrity guard: a background reload that inserts rows
+    /// ABOVE the cursor must not swap a different finding under it — one-key
+    /// backlog decisions target the cursored row, so the cursor follows the
+    /// finding's identity across refreshes, not its old index.
+    #[test]
+    fn refresh_keeps_the_cursor_on_the_same_finding_when_rows_shift() {
+        let (_temp, workspace) = filtered_workspace();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings(false);
+        assert_eq!(crate::ui_view_models::visible_findings_len(&app), 2);
+
+        // Cursor onto the LAST visible finding (never opened, so
+        // selected_finding stays None and cannot mask the regression).
+        let last = crate::ui_view_models::visible_findings_len(&app) - 1;
+        app.router.findings_mut().set_cursor(last);
+        let (_, cursored_before) =
+            crate::ui_view_models::visible_finding_at_cursor(&app).expect("cursored row");
+
+        // An external writer lands a CRITICAL finding that sorts above the
+        // cursored row in the projection.
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .insert_finding(
+                "scan-1",
+                &Finding::new_semgrep(
+                    "demo.critical.new",
+                    "src/app.rs",
+                    3,
+                    None,
+                    Severity::Critical,
+                    "externally landed critical",
+                ),
+            )
+            .unwrap();
+        app.refresh_findings(false);
+
+        assert_eq!(crate::ui_view_models::visible_findings_len(&app), 3);
+        let (_, cursored_after) =
+            crate::ui_view_models::visible_finding_at_cursor(&app).expect("cursored row");
+        assert_eq!(
+            cursored_after.fingerprint, cursored_before.fingerprint,
+            "refresh swapped the finding under the cursor"
+        );
+    }
+
+    /// A reload between the two X presses must disarm the bulk-defer
+    /// confirmation — otherwise "press X again to defer 12" could defer a
+    /// different (larger) set that landed from an external writer.
+    #[test]
+    fn refresh_disarms_a_pending_bulk_defer_confirmation() {
+        let (_temp, workspace) = filtered_workspace();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings(false);
+
+        app.router.workbench_mut().review_mut().backlog = true;
+        app.router.workbench_mut().review_mut().backlog_confirm_bulk = true;
+
+        app.refresh_findings(false);
+
+        assert!(
+            !app.router.workbench().review().backlog_confirm_bulk,
+            "reload left the bulk-defer confirmation armed"
+        );
     }
 }

@@ -33,6 +33,7 @@ fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
             hot_surfaces: Vec::new(),
         }),
         hot_modules: fixture_hot_modules(richness),
+        next_scans: super::super::NextScansState::Pending,
         dfd: fixture_dfd(richness >= 3),
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),
     }
@@ -101,6 +102,7 @@ fn fixture_engine_outcomes(richness: usize, state: SemanticFixture) -> Vec<ScanE
     (richness >= 1)
         .then(|| ScanEngineOutcomeModel {
             engine: "fixture-engine".to_string(),
+            tool_key: None,
             outcome: outcome_label(state).to_string(),
             run_ref: Some("run-test".to_string()),
             detail: Some("hydrated".to_string()),

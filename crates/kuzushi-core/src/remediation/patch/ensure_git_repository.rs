@@ -485,7 +485,7 @@ mod tests {
 
         std::fs::write(
             filter,
-            format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+            format!("#!/bin/sh\nPATH=/usr/bin:/bin\ntouch '{}'\ncat\n", marker.display()),
         )
         .unwrap();
         std::fs::set_permissions(filter, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -714,7 +714,7 @@ mod tests {
         initialize_repo(&repo);
         let marker = outer.path().join("hook-ran");
         let hook = repo.join(".git/hooks/post-checkout");
-        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        std::fs::write(&hook, format!("#!/bin/sh\nPATH=/usr/bin:/bin\ntouch '{}'\n", marker.display())).unwrap();
         let mut permissions = std::fs::metadata(&hook).unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(&hook, permissions).unwrap();

@@ -10,6 +10,9 @@ pub(crate) use app::*;
 pub(crate) use commands::*;
 pub(crate) use renderer::*;
 mod app;
+#[cfg(test)]
+mod boundary_lints;
+
 mod build_provenance;
 mod commands;
 mod renderer;

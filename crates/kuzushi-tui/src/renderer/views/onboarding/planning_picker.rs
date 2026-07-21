@@ -327,7 +327,7 @@ fn planning_row_selected(app: &ShellApp, row: &PlanningTaskRow) -> bool {
         .contains(&row.id)
 }
 
-/// Announce the current judo phase (組→崩→作→掛) and its intent.
+/// Announce the current phase and its intent.
 fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
     if app.engagement.planning_picker().returns_to_setup() {
         push_setup_plan_header(app, width, lines);
@@ -438,11 +438,11 @@ fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'stati
 
 fn fallback_phase_rail_label(phase: WorkflowPhase) -> &'static str {
     match phase {
-        WorkflowPhase::Map => "組 map",
-        WorkflowPhase::Scan => "崩 scan",
-        WorkflowPhase::Review => "査 review",
-        WorkflowPhase::Prove => "作 prove",
-        WorkflowPhase::Fix => "掛 fix",
+        WorkflowPhase::Map => "Map",
+        WorkflowPhase::Scan => "Scan",
+        WorkflowPhase::Review => "Review",
+        WorkflowPhase::Prove => "Prove",
+        WorkflowPhase::Fix => "Fix",
     }
 }
 
@@ -566,7 +566,7 @@ fn legend_spans(with_gloss: bool) -> Vec<Span<'static>> {
 }
 
 fn spans_width(spans: &[Span<'static>]) -> usize {
-    spans.iter().map(|span| span.content.chars().count()).sum()
+    spans.iter().map(|span| display_width(&span.content)).sum()
 }
 
 /// A subtle column header so operators can read the grid. Dropped entirely on
@@ -1191,7 +1191,7 @@ fn border_line(
 ) -> Line<'static> {
     let inner_width = width.saturating_sub(2);
     let title = fit(title, inner_width);
-    let fill = inner_width.saturating_sub(title.chars().count());
+    let fill = inner_width.saturating_sub(display_width(&title));
     Line::from(vec![
         Span::styled(left.to_string(), border_style),
         Span::styled(title, title_style),

@@ -94,7 +94,16 @@ pub(crate) fn wait_for_terminal_loop_event(
     app: &mut ShellApp,
     inbox: &TerminalLoopInbox,
 ) -> Result<bool> {
-    match inbox.recv_timeout(terminal_event_timeout(app))? {
+    let timeout = terminal_event_timeout(app);
+    wait_for_terminal_loop_event_within(app, inbox, timeout)
+}
+
+pub(crate) fn wait_for_terminal_loop_event_within(
+    app: &mut ShellApp,
+    inbox: &TerminalLoopInbox,
+    timeout: Duration,
+) -> Result<bool> {
+    match inbox.recv_timeout(timeout)? {
         Some(TerminalLoopEvent::Terminal(event)) => {
             Ok(update_and_execute_effects(app, Msg::Term(event)))
         }

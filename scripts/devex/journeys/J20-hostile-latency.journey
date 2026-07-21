@@ -1,0 +1,44 @@
+# J20 — Prompt latency under hostile external state churn
+# The shell must stay responsive while another process hammers the target's
+# `.kuzushi/v3` state (exactly what a detached campaign or fuzzing fleet
+# does). Seed a persisted scope tree, start a writer that rewrites the SAME
+# tree and churns run state every ~100ms, then machine-check two promises:
+# keystroke→echo stays inside a hard budget, and the transcript is not a
+# storm of re-announced readiness (the M1 linter found 13,745 repeats of
+# one line in a real session before the dedup fix).
+name: Prompt latency under hostile state churn
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: mkdir -p @TMP_TARGET/.kuzushi/v3/project-model @TMP_TARGET/packages/api/src && printf '{}' > @TMP_TARGET/packages/api/package.json && printf '{"schemaVersion":1,"root":"root","scopes":[{"id":"root","parent":null,"kind":"root","relPath":".","inheritedSections":[]},{"id":"package-packages-api","parent":"root","kind":"package-root","relPath":"packages/api","inheritedSections":["context-feed","threat-model"]}]}' > @TMP_TARGET/.kuzushi/v3/project-model/scopes.json
+# Hostile writer: atomically rewrites the unchanged scope tree and creates a
+# new run stub every 100ms. Self-limiting (600 iterations ≈ 60s) so it can
+# never outlive the journey.
+shell: nohup sh -c 'i=0; while [ $i -lt 600 ]; do cp @TMP_TARGET/.kuzushi/v3/project-model/scopes.json @TMP_TARGET/.kuzushi/v3/project-model/.scopes.tmp && mv @TMP_TARGET/.kuzushi/v3/project-model/.scopes.tmp @TMP_TARGET/.kuzushi/v3/project-model/scopes.json; mkdir -p @TMP_TARGET/.kuzushi/v3/runs/churn-$i; printf x > @TMP_TARGET/.kuzushi/v3/runs/churn-$i/marker; i=$((i+1)); sleep 0.1; done' >/dev/null 2>&1 & echo writer-started
+launch: --target @TMP_TARGET
+wait-for: 30 KUZUSHI
+# Let the watcher start reporting churn before the first probe.
+wait: 3
+expect-echo-within: 800 zzqqxx1
+snap: echo-early-churn
+expect: zzqqxx1
+keys: C-u
+# Ten more seconds of sustained churn, then probe again — latency must not
+# degrade as invalidation work accumulates.
+wait: 10
+expect-echo-within: 800 zzqqxx2
+snap: echo-sustained-churn
+expect: zzqqxx2
+keys: C-u
+ask: Hostile churn — while an external writer rewrites `.kuzushi/v3` 10×/s, does the prompt feel like a text editor (echo, cursor, backspace) with no visible stutter or repaint tearing?
+# The transcript must not be a storm: the same unchanged tree re-delivered
+# hundreds of times may be announced at most once on screen.
+submit: logs
+wait: 2
+snap: transcript-under-churn
+expect: project scopes ready
+expect-count-at-most: 1 project scopes ready
+expect-not: transcript is degraded
+ask: Storm honesty — is the visible transcript readable operator narrative (target set, scopes ready once, churn silent), not wallpaper of repeated watcher lines?
+keys: Escape
+wait: 1
+snap: back-to-work

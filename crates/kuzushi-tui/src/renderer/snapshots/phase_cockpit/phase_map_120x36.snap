@@ -4,17 +4,17 @@ contract: cockpit-spine-v1
 phase: map
 size: 120x36
 ---
-KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built · module context
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  next continue Map · context build build context · z open visualization · attach <path> seed materials
 │▸ PROJECT CONTEXT                              │ATTACK SURFACE · z terrain         │HOT MODULES · z heatmap
 │./phase-target · rev:unknown                     │2 high/critical, max 91, tiers...  │auth  12.0 · 1C 0H 1M 0L 0I
 │context:present · ⠋ context:build indexing...  │criticalAxum · POST /login · 91    │api   7.0 · 0C 1H 1M 0L 0I
 │○ scope tree    no persisted nested...         │high    Axum · GET /orders/:id...  │web   5.0 · 0C 1H 0M 0L 0I
 │◆ context feed  ./.kuzushi/context-snapsho...  │▸ z open terrain visualization     │src   1.0 · 0C 0H 0M 1L 0I
-│◆ inventory     indexed=3 total=3 files ·...   │                                   │
-│◆ threat model  current threat model...        │                                   │
+│◆ inventory     indexed=3 total=3 files ·...   │                                   │NEXT SCANS
+│◆ threat model  current threat model...        │                                   │root · scan · never-scanned
 │◆ data flow     3 nodes · 2 flows · zones...   │                                   │
 │◆ review surface6 items · 0 triaged · 6...     │                                   │
 │                                               │                                   │
@@ -36,7 +36,7 @@ KUZUSHI · VIEW MAP · REALITY REVIEW · target ./phase-target · ● LIVE · co
 │                                               │                                   │
 │                                               │                                   │
 │                                               │                                   │
-route:run · 査  review 3/5 · ⛭ 掛  fix · workbench · openai:gpt-5.4 · ⠋...            6 findings / 1 crit / 2 high / 2 med
+route:run · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◇ MAP › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

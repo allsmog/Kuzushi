@@ -280,11 +280,11 @@ fn selected_item_scope_label(item: &ScreenSelectedItem) -> String {
 
 fn active_phase_chip(phase: &str) -> String {
     match phase {
-        "map" => "組 map",
-        "scan" | "hunt" => "崩 scan",
-        "review" => "査 review",
-        "prove" | "confirm" => "作 prove",
-        "fix" => "掛 fix",
+        "map" => "Map",
+        "scan" | "hunt" => "Scan",
+        "review" => "Review",
+        "prove" | "confirm" => "Prove",
+        "fix" => "Fix",
         other => other,
     }
     .to_string()

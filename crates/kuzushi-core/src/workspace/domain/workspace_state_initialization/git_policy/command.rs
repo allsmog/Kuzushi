@@ -4,7 +4,11 @@ use std::process::{Command, Output};
 use std::time::Duration;
 
 const GIT_PROOF_TIMEOUT: Duration = Duration::from_secs(5);
-const GIT_STDOUT_LIMIT: usize = 16 * 1024;
+// The config-origin enumeration repeats the absolute origin path for every
+// config key; monorepos with large configs exceed 16 KiB long before the
+// output is adversarial. 1 MiB keeps the read bounded without rejecting
+// legitimate workspaces.
+const GIT_STDOUT_LIMIT: usize = 1024 * 1024;
 const GIT_STDERR_LIMIT: usize = 16 * 1024;
 const DISPLAY_DIAGNOSTIC_LIMIT: usize = 2 * 1024;
 

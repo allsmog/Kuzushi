@@ -32,7 +32,7 @@ async fn press_key_pair_without_delay(world: &mut OnboardingWorld, first: String
 async fn type_command(world: &mut OnboardingWorld, command: String) {
     let session = world.require_session();
     session
-        .send_keys(&["F2"])
+        .send_keys(&["Escape"])
         .expect("tmux navigation-mode entry failed");
     std::thread::sleep(Duration::from_millis(150));
     session

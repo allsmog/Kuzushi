@@ -21,6 +21,7 @@ unicode-width.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+strum = { version = "0.28", features = ["derive"] }
 
 [lints]
 workspace = true

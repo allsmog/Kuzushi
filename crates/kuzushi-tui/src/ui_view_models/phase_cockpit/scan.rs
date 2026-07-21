@@ -39,13 +39,23 @@ pub(super) fn scan_phase_model(app: &ShellApp) -> ScanPhaseModel {
         engine_outcomes: projection
             .map(|projection| projection.engine_outcomes)
             .unwrap_or_default(),
-        empty_hint: summary_index.load_hint.or_else(|| {
-            (!has_projection).then(|| {
-                "no terminal Scan run is recorded — describe a target in the Scan composer"
-                    .to_string()
-            })
-        }),
+        empty_hint: scan_page_hint(&summary_index, has_projection),
     }
+}
+
+/// The run-summary index reloads on every external workspace refresh. While
+/// a durable projection is already on screen, a transient "receipts are
+/// loading" note would flap in and out beneath it, so pending-index hints
+/// only show when the page has nothing else to stand on.
+fn scan_page_hint(index: &ScanSummaryIndex, has_projection: bool) -> Option<String> {
+    if index.index_pending && has_projection {
+        return None;
+    }
+    index.load_hint.clone().or_else(|| {
+        (!has_projection).then(|| {
+            "no terminal Scan run is recorded — describe a target in the Scan composer".to_string()
+        })
+    })
 }
 
 struct ScanProjection {
@@ -162,7 +172,8 @@ fn typed_scan_projection(
         .engines
         .iter()
         .map(|engine| ScanEngineOutcomeModel {
-            engine: engine.engine.clone(),
+            engine: kuzushi_core::modules::tool_display_name(&engine.engine),
+            tool_key: Some(engine.engine.clone()),
             outcome: typed_engine_outcome(engine.outcome).to_string(),
             run_ref: engine.run_ref.clone(),
             detail: engine.detail.clone(),
@@ -188,6 +199,9 @@ fn typed_engine_outcome(outcome: ScanEngineStageOutcome) -> &'static str {
 struct ScanSummaryIndex {
     entries: Vec<RunSummaryEntry>,
     load_hint: Option<String>,
+    /// The entries index is still hydrating — its hint is transient, not a
+    /// durable statement about the recorded Scan attempt.
+    index_pending: bool,
 }
 
 fn scan_summary_entries(app: &ShellApp) -> ScanSummaryIndex {
@@ -200,18 +214,22 @@ fn scan_summary_entries(app: &ShellApp) -> ScanSummaryIndex {
         ViewDataState::Ready(RunSummaryEntriesState::Ready(entries)) => ScanSummaryIndex {
             entries,
             load_hint: receipt_hint,
+            index_pending: false,
         },
         ViewDataState::Ready(RunSummaryEntriesState::Failed(error)) => ScanSummaryIndex {
             entries: Vec::new(),
             load_hint: Some(format!("Scan receipt index unavailable: {error}")),
+            index_pending: false,
         },
         ViewDataState::Loading => ScanSummaryIndex {
             entries: Vec::new(),
             load_hint: Some("Scan receipts are loading".to_string()),
+            index_pending: true,
         },
         ViewDataState::NotRequested => ScanSummaryIndex {
             entries: Vec::new(),
             load_hint: Some("Scan receipts have not been loaded for this target".to_string()),
+            index_pending: true,
         },
     }
 }

@@ -109,6 +109,7 @@ authorization: Default::default(),
         write_executable(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 cat <<'OUT'
 Host: 192.0.2.10 (web.example) Ports: 80/open/tcp//http//nginx/, 443/open/tcp//https//nginx TLS/
 OUT
@@ -171,6 +172,7 @@ OUT
         write_executable(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 cat <<'JSON'
 [{"name_value":"www.example.com\napi.example.com"}]
 JSON
@@ -215,6 +217,7 @@ JSON
         write_executable(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 cat <<'HTTP'
 HTTP/1.1 200 OK
 Server: nginx

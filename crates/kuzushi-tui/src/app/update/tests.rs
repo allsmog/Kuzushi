@@ -112,24 +112,35 @@ fn update_terminal_enter_returns_submit_effects_without_executing_them() {
 }
 
 #[test]
-fn update_terminal_picker_demo_key_returns_effect_without_executing_it() {
+fn update_terminal_picker_demo_command_returns_effect_without_executing_it() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_model_picker();
 
+    for code in [
+        KeyCode::Char(':'),
+        KeyCode::Char('d'),
+        KeyCode::Char('e'),
+        KeyCode::Char('m'),
+        KeyCode::Char('o'),
+    ] {
+        update(
+            &mut app,
+            Msg::Term(TermEvent::Key(KeyEvent::new(code, KeyModifiers::empty()))),
+        );
+    }
     let result = update(
         &mut app,
         Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Char('d'),
+            KeyCode::Enter,
             KeyModifiers::empty(),
         ))),
     );
 
     assert!(result.changed);
-    assert_eq!(result.effects.len(), 1);
-    assert!(matches!(
-        result.effects[0],
-        ShellEffect::StartOfflineDemoFixtureScan
-    ));
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, ShellEffect::StartOfflineDemoFixtureScan)));
     assert!(app.scan_is_none());
     assert!(!app.jobs().is_running(JobKind::Run));
 }

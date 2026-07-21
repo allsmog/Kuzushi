@@ -285,7 +285,7 @@ mod tests {
 mod since_scope_tests {
     use super::super::*;
     use std::fs;
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     use tempfile::tempdir;
 
     fn git(dir: &Path, args: &[&str]) {
@@ -393,5 +393,22 @@ mod since_scope_tests {
         assert!(!scope.contains_path(Path::new("src/baz.c")));
         assert!(scope.contains_prefix(Path::new("src")));
         assert!(!scope.contains_prefix(Path::new("tests")));
+    }
+
+    #[test]
+    fn since_ref_that_parses_as_a_git_option_is_rejected() {
+        let tmp = tempdir().unwrap();
+        for hostile in ["--output=/tmp/pwn", "-O/tmp/pwn", "", "a\nb"] {
+            let error = git_diff_files(tmp.path(), hostile, false)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                error.contains("must not start with '-'")
+                    || error.contains("is empty")
+                    || error.contains("control characters"),
+                "{hostile:?}: {error}"
+            );
+        }
+        assert!(!Path::new("/tmp/pwn").exists());
     }
 }

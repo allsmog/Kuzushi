@@ -19,6 +19,7 @@ const LEDGER_LOCK: &str = ".phase-attempts.v2.lock";
 const MAX_LEDGER_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 
+mod failure_remediation;
 mod identity;
 mod legacy_projection;
 mod receipt;

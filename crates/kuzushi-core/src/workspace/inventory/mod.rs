@@ -35,6 +35,7 @@ pub use repository_inventory::InventoryLanguage;
 pub use repository_inventory::InventoryPathClassification;
 pub use repository_inventory::InventoryRouteController;
 pub use repository_inventory::InventorySourceFile;
+pub use repository_inventory::InventoryTruncation;
 pub use repository_inventory::RepositoryInventory;
 pub use target_kind::{
     classify_target_kind, target_has_compile_commands, TargetKind, TargetProfile,

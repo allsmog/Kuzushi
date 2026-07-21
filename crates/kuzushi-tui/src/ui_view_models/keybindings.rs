@@ -44,7 +44,7 @@ fn apply_operator_chrome_overrides(
     for (context, action, replaced_key) in [
         ("global", "command_palette", "Ctrl+G"),
         ("global", "help", "help"),
-        ("composer", "navigate_mode", "F2"),
+        ("composer", "navigate_mode", "Esc"),
         ("composer", "prompt_mode", "Esc"),
         ("composer", "complete", "Tab"),
     ] {
@@ -155,11 +155,26 @@ fn is_global_chord(key: &str) -> bool {
 
 fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     let binding = match app.input_mode() {
-        crate::InputMode::Prompt => bind("F2", "nav mode"),
+        crate::InputMode::Prompt => bind("Esc", prompt_navigate_label(app)),
         crate::InputMode::Navigate => bind("Esc", "prompt"),
     };
     if !bindings.contains(&binding) {
         bindings.insert(after_critical_binding(bindings), binding);
+    }
+}
+
+/// On the Review page the whole findings flow lives behind Navigate mode
+/// (j/k selects, Enter opens Prove), but Prompt mode filters those physical
+/// keys out of the footer. Name the flow on the doorway itself so the footer
+/// still gives direction instead of a bare "nav mode".
+fn prompt_navigate_label(app: &ShellApp) -> String {
+    let review_flow_available = app.shell_view() == crate::ShellView::Workbench
+        && super::active_workbench_page(app) == crate::app::WorkbenchPage::Review
+        && super::visible_findings_len(app) > 0;
+    if review_flow_available {
+        "nav findings · j/k move · Enter prove".to_string()
+    } else {
+        "nav mode".to_string()
     }
 }
 

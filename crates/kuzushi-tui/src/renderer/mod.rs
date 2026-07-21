@@ -26,6 +26,12 @@ mod phase_composition_contract;
 mod render_app;
 mod section_slot;
 #[cfg(test)]
+mod failure_coverage;
+#[cfg(test)]
+mod plain_parity;
+#[cfg(test)]
+mod surface_lints;
+#[cfg(test)]
 mod tests;
 pub use plain::{render_plain_app, render_plain_command_result};
 pub use render_app::render_app;

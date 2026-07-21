@@ -114,6 +114,12 @@ pub(super) struct TargetProfileCache {
     pub(super) profile: crate::app::TargetProfile,
 }
 
+#[derive(Debug)]
+pub(super) struct ScanRecommendationsCache {
+    pub(super) target: PathBuf,
+    pub(super) state: super::ScanRecommendationsState,
+}
+
 #[cfg(test)]
 #[derive(Debug)]
 pub(super) struct RunSummaryCache {
@@ -125,6 +131,10 @@ pub(super) struct RunSummaryCache {
 pub(super) struct RunSummaryEntriesCache {
     pub(super) target: PathBuf,
     pub(super) state: RunSummaryEntriesState,
+    /// Invalidation marks the index stale instead of dropping it: readers
+    /// keep the previous entries while hydration re-reads, so durable pages
+    /// never downgrade to an empty index mid-refresh.
+    pub(super) stale: bool,
 }
 
 #[derive(Debug)]

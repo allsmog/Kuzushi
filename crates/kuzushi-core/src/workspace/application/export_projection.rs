@@ -264,7 +264,17 @@ fn evidence_summary(finding: &Finding) -> WorkspaceEvidenceExportSummary {
         derived_source_present: derived_source_present(finding),
         source_count: finding.sources.len(),
         raw_http_blob_present: counts.observed_capture_count > 0,
+        evidence_confidence_max: evidence_confidence_max(finding),
     }
+}
+
+fn evidence_confidence_max(finding: &Finding) -> Option<u8> {
+    finding
+        .evidence
+        .iter()
+        .map(|evidence| evidence.confidence)
+        .filter(|confidence| *confidence > 0)
+        .max()
 }
 
 fn derived_source_present(finding: &Finding) -> bool {

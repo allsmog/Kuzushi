@@ -24,7 +24,7 @@ fn scan_header(
         cost_complete: true,
         cost_invalid: false,
         budget_usd: None,
-        live: false,
+        liveness: crate::ui_view_models::WorkLiveness::Idle,
         finding_filter: None,
         phase_rail: Vec::new(),
         next_action: "acknowledge the partial Scan".to_string(),
@@ -45,7 +45,7 @@ fn partial_result_card() -> crate::ui_view_models::PhaseResultCardModel {
         }],
         semantic_keys: std::collections::BTreeSet::new(),
         actions: vec![kuzushi_core::workflow_attempts::PhaseResultAction::Select],
-        control_hint: "F2 Navigate to resolve this result".to_string(),
+        control_hint: "Esc Navigate to resolve this result".to_string(),
         recommended: "acknowledge the partial Scan".to_string(),
     }
 }
@@ -84,7 +84,7 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
         cost_complete: true,
         cost_invalid: false,
         budget_usd: None,
-        live: false,
+        liveness: crate::ui_view_models::WorkLiveness::Idle,
         finding_filter: None,
         phase_rail: Vec::new(),
         next_action: String::new(),
@@ -94,9 +94,28 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
 
     let text = line_text(identity_line(&header, 40));
 
-    assert!(text.contains("VIEW SCAN"), "{text}");
-    assert!(text.contains("REALITY REVIEW"), "{text}");
+    assert!(text.contains("Viewing Scan"), "{text}");
+    assert!(
+        text.contains("now in Review"),
+        "reality must survive 40 columns via the compact phrasing: {text}"
+    );
     assert!(!text.contains("target"), "{text}");
+
+    let wide = line_text(identity_line(&header, 120));
+    assert!(wide.contains("pipeline live in Review"), "{wide}");
+}
+
+#[test]
+fn liveness_badge_distinguishes_external_sync_from_idle_and_live() {
+    // The "86% CPU watcher while the badge says idle" incident: external
+    // writers churning workspace state must not render as idle.
+    let (idle, _) = live_atom(crate::ui_view_models::WorkLiveness::Idle);
+    let (sync, _) = live_atom(crate::ui_view_models::WorkLiveness::ExternalSync);
+    let (live, _) = live_atom(crate::ui_view_models::WorkLiveness::Live);
+
+    assert_eq!(idle, "○ idle");
+    assert_eq!(sync, "◌ workspace sync");
+    assert_eq!(live, "● LIVE");
 }
 
 #[test]
@@ -121,7 +140,7 @@ fn compact_result_card_keeps_prompt_draft_navigation_instruction_visible() {
         }],
         semantic_keys: std::collections::BTreeSet::new(),
         actions: vec![kuzushi_core::workflow_attempts::PhaseResultAction::Select],
-        control_hint: "F2 Navigate after finishing or clearing prompt draft".to_string(),
+        control_hint: "Esc Navigate after finishing or clearing prompt draft".to_string(),
         recommended: "use the result".to_string(),
     };
 
@@ -131,7 +150,7 @@ fn compact_result_card_keeps_prompt_draft_navigation_instruction_visible() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    assert!(text.contains("F2 Navigate after finishing"), "{text}");
+    assert!(text.contains("Esc Navigate after finishing"), "{text}");
     assert!(!text.contains("u Use"), "{text}");
 }
 
@@ -204,7 +223,7 @@ fn unresolved_partial_result_suppresses_phase_command_hints() {
     let text = rendered_header_text(&scan_header(Some(partial_result_card())));
 
     assert!(text.contains("NEXT acknowledge the partial Scan"), "{text}");
-    assert!(text.contains("F2 Navigate to resolve"), "{text}");
+    assert!(text.contains("Esc Navigate to resolve"), "{text}");
     assert!(
         text.contains("next: acknowledge the partial Scan"),
         "{text}"

@@ -807,16 +807,10 @@ mod tests {
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
         let fake_codeql = write_fake_codeql_flow_script(temp.path());
 
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
+        let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_CODEQL_BIN", &fake_codeql);
         let plan = codeql_dataflow_test_plan(temp.path().to_path_buf());
 
         let flows = run_codeql_flows(&plan).unwrap().expect("codeql flows");
-
-        match previous {
-            Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
-            None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
-        }
 
         assert_eq!(flows.len(), 1);
         assert_eq!(flows[0].cwe, "CWE-89");

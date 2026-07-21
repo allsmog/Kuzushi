@@ -158,15 +158,18 @@ fn extract_host(target: &str) -> String {
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or(trimmed);
-    let after_userinfo = after_scheme
-        .rsplit_once('@')
-        .map(|(_, rest)| rest)
-        .unwrap_or(after_scheme);
-    let host_and_rest = after_userinfo
+    // The authority ends at the first path/query/fragment delimiter, and the
+    // userinfo strip must stay inside it: an `@` later in the URL
+    // (`https://evil.test/@in-scope.host`) must not spoof the host.
+    let authority = after_scheme
         .split(['/', '?', '#'])
         .next()
-        .unwrap_or(after_userinfo);
-    strip_port(host_and_rest).to_string()
+        .unwrap_or(after_scheme);
+    let host_and_port = authority
+        .rsplit_once('@')
+        .map(|(_, rest)| rest)
+        .unwrap_or(authority);
+    strip_port(host_and_port).to_string()
 }
 
 fn strip_port(host: &str) -> &str {
@@ -258,6 +261,28 @@ mod tests {
         assert_eq!(
             scope.verdict("http://user:pw@api.example.com:8443/"),
             ScopeVerdict::InScope
+        );
+    }
+
+    #[test]
+    fn at_sign_in_path_query_or_fragment_cannot_spoof_the_host() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.example.com"]
+            "#,
+        );
+        assert_eq!(
+            scope.verdict("https://evil.test/@api.example.com"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("https://evil.test/?next=user@api.example.com"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(
+            scope.verdict("https://evil.test/#user@api.example.com"),
+            ScopeVerdict::OutOfScope
         );
     }
 

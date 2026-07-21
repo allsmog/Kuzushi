@@ -90,6 +90,120 @@ mod tests {
     }
 
     #[test]
+    fn scoped_plan_includes_non_c_sources_verbatim() {
+        let body = "// padding\n".repeat(1_500);
+        let tmp = make_workspace(&[
+            ("src/Throttle.scala", &body),
+            ("src/conf.py", &body),
+            ("src/tmpl.j2", &body),
+            ("src/unscoped.scala", &body),
+        ]);
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            scope_files: Some(vec![
+                PathBuf::from("src/Throttle.scala"),
+                PathBuf::from("src/conf.py"),
+                PathBuf::from("src/tmpl.j2"),
+                PathBuf::from("src/tmpl.j2"), // duplicate scope line plans once
+                PathBuf::from("src/missing.scala"),
+            ]),
+            ..Default::default()
+        };
+        let plan = plan(&cfg).unwrap();
+        let mut paths: Vec<&str> = plan
+            .chunks
+            .iter()
+            .flat_map(|c| c.files.iter().map(|f| f.path.as_str()))
+            .collect();
+        paths.sort_unstable();
+        assert_eq!(paths, vec!["src/Throttle.scala", "src/conf.py", "src/tmpl.j2"]);
+    }
+
+    /// The PowerShellExecutor.cpp regression: a scoped file larger than
+    /// MAX_FILE_BYTES was silently dropped from the plan (zero coverage of
+    /// the shard's primary seed file, no diagnostic). Oversized files must
+    /// now plan as contiguous line-aligned window buckets.
+    #[test]
+    fn oversized_scoped_file_windows_instead_of_dropping() {
+        let line = format!("{}\n", "y".repeat(99)); // 100 bytes/line
+        let lines = MAX_FILE_BYTES / 100 + 500; // ~1.17 windows worth
+        let big = line.repeat(lines);
+        assert!(big.len() > MAX_FILE_BYTES);
+        let tmp = make_workspace(&[("src/huge.cpp", &big), ("src/small.c", "void s(){}\n")]);
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            scope_files: Some(vec![
+                PathBuf::from("src/huge.cpp"),
+                PathBuf::from("src/small.c"),
+            ]),
+            ..Default::default()
+        };
+        let plan = plan(&cfg).unwrap();
+        let windows: Vec<_> = plan
+            .chunks
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .filter(|f| f.path == "src/huge.cpp")
+            .collect();
+        assert_eq!(windows.len(), 2, "334KB-class file must yield 2 windows");
+        // Contiguous byte coverage of the whole file, line-aligned.
+        assert_eq!(windows[0].start_byte, 0);
+        assert_eq!(windows[0].start_line, 1);
+        assert!(windows[0].bytes <= MAX_FILE_BYTES);
+        assert_eq!(windows[1].start_byte, windows[0].bytes);
+        assert_eq!(windows[1].start_line, windows[0].bytes / 100 + 1);
+        assert_eq!(windows[0].bytes + windows[1].bytes, big.len());
+        assert!(windows[1].is_window());
+        // The small scoped sibling still plans as a whole file.
+        assert!(plan
+            .chunks
+            .iter()
+            .flat_map(|c| c.files.iter())
+            .any(|f| f.path == "src/small.c" && !f.is_window()));
+    }
+
+    /// Window buckets render the correct slice with a window header, and
+    /// the chunk executor restores absolute lines from `start_line`.
+    #[test]
+    fn window_bucket_renders_slice_and_lines_restore() {
+        use super::super::application::{render_chunk_prompt, restore_absolute_lines};
+        use crate::findings::Finding;
+
+        let body = "line one\nline two\nline three\nline four\n";
+        let tmp = make_workspace(&[("src/win.cpp", body)]);
+        // Window covering "line three\nline four\n" (starts at byte 18, line 3).
+        let window = FileBucket {
+            path: "src/win.cpp".to_string(),
+            bytes: body.len() - 18,
+            est_tokens: 10,
+            start_byte: 18,
+            start_line: 3,
+        };
+        let chunk = ChunkPlan {
+            id: 0,
+            files: vec![window],
+            est_tokens: 10,
+        };
+        let prompt = render_chunk_prompt(tmp.path(), &chunk).unwrap();
+        assert!(prompt.contains("line three"));
+        assert!(!prompt.contains("line one"), "window must not leak the prefix");
+        assert!(prompt.contains("first line is line 3"));
+
+        let mut findings = vec![Finding::new_tool(
+            "full-mode-multi",
+            "full-mode-multi/scan",
+            "src/win.cpp",
+            1, // window-relative: first visible line = real line 3
+            Some(2),
+            Severity::Low,
+            "window finding",
+        )];
+        restore_absolute_lines(&chunk, &mut findings);
+        assert_eq!(findings[0].start_line, 3);
+        assert_eq!(findings[0].end_line, Some(4));
+    }
+
+    #[test]
     fn plan_skips_skip_dirs() {
         let tmp = make_workspace(&[
             ("src/keep.c", "void k(){}"),

@@ -166,20 +166,20 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         "prior-state banner: {rendered}"
     );
     assert!(
-        rendered.contains("組 map"),
+        rendered.contains("Map"),
         "phase rail shows map: {rendered}"
     );
     assert!(
-        rendered.contains("崩 scan"),
+        rendered.contains("Scan"),
         "phase rail shows Scan: {rendered}"
     );
     assert!(
-        rendered.contains("覧 review"),
+        rendered.contains("Review"),
         "phase rail shows Review: {rendered}"
     );
     assert!(rendered.contains("‹h"), "rail advertises h: {rendered}");
     assert!(
-        rendered.contains("1 組 map"),
+        rendered.contains("1 Map"),
         "rail numbers phases: {rendered}"
     );
     assert!(rendered.contains("l›"), "rail advertises l: {rendered}");
@@ -4492,7 +4492,7 @@ fn auth_view_stacks_and_wraps_on_narrow_terminals() {
 #[test]
 fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     // The engagement spine must be ambient: the home view carries the
-    // 組 map → 崩 scan → 覧 review → 証 prove → 掛 fix rail and the idle footer a
+    // Map → Scan → Review → Prove → Fix rail and the idle footer a
     // compact journey chip whenever a target is active.
     let dir = tempfile::tempdir().expect("temp target");
     let backend = TestBackend::new(120, 34);
@@ -4504,20 +4504,20 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("組 map"), "rail shows map phase");
-    assert!(rendered.contains("崩 scan"), "rail shows Scan phase");
-    assert!(rendered.contains("覧 review"), "rail shows Review phase");
-    assert!(rendered.contains("証 prove"), "rail shows Prove phase");
-    assert!(rendered.contains("掛 fix"), "rail shows fix phase");
+    assert!(rendered.contains("Map"), "rail shows map phase");
+    assert!(rendered.contains("Scan"), "rail shows Scan phase");
+    assert!(rendered.contains("Review"), "rail shows Review phase");
+    assert!(rendered.contains("Prove"), "rail shows Prove phase");
+    assert!(rendered.contains("Fix"), "rail shows fix phase");
     assert!(
-        !rendered.contains("崩 hunt"),
+        !rendered.contains("Hunt"),
         "legacy Hunt label is retired"
     );
     assert!(
-        !rendered.contains("作 confirm"),
+        !rendered.contains("Confirm"),
         "legacy Confirm label is retired"
     );
-    assert!(rendered.contains("組 map 1/5"), "footer phase chip");
+    assert!(rendered.contains("Map 1/5"), "footer phase chip");
     assert!(
         rendered.contains("type `next`"),
         "NEXT mechanics name the typed command"
@@ -4831,7 +4831,7 @@ fn ultra_compact_target_picker_keeps_selection_consent_and_controls_visible() {
     assert!(rendered.contains("▸ api"), "{rendered}");
     assert!(rendered.contains("Enter selects: api"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
-    assert!(rendered.contains("d demo"), "{rendered}");
+    assert!(!rendered.contains("d demo"), "{rendered}");
     assert!(rendered.contains("Esc browse"), "{rendered}");
 }
 
@@ -4880,7 +4880,7 @@ fn model_picker_renders_offline_demo_escape_hatch() {
     assert!(rendered.contains("/work/acme"));
     assert!(rendered.contains("Try offline fixture"));
     assert!(rendered.contains("local/no auth"));
-    assert!(rendered.contains("d demo"));
+    assert!(!rendered.contains("d demo"));
 }
 
 #[test]
@@ -4899,7 +4899,7 @@ fn compact_model_picker_keeps_the_selected_model_visible() {
 
     assert!(rendered.contains("models 5-5 of 5"), "{rendered}");
     assert!(rendered.contains("▸ Claude Opus"), "{rendered}");
-    assert!(rendered.contains("d demo"), "{rendered}");
+    assert!(!rendered.contains("d demo"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
 }
 
@@ -4951,7 +4951,7 @@ fn ultra_compact_auth_picker_keeps_selected_method_and_valid_actions_visible() {
                 rendered.contains("Enter runs the offline demo"),
                 "{rendered}"
             );
-            assert!(rendered.contains("d demo"), "{rendered}");
+            assert!(!rendered.contains("d demo"), "{rendered}");
             assert!(rendered.contains("q Setup"), "{rendered}");
         }
     }
@@ -5013,7 +5013,7 @@ fn home_view_without_target_has_no_journey_rail() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(!rendered.contains("組 map"));
+    assert!(!rendered.contains("Map ●"));
     assert!(!rendered.contains("phase:"));
     assert!(rendered.contains("quickstart"));
 }
@@ -5837,6 +5837,86 @@ fn compact_finding_row_renders_alias_severity_and_location() {
     assert!(text.contains("apps/api/orders.rs:142"));
 }
 
+/// Information hierarchy: the title says what the finding IS and must own
+/// the row; a deep path yields, keeping its useful `file.rs:line` tail
+/// (left-truncated) instead of its repo-root prefix.
+#[test]
+fn compact_finding_row_title_survives_a_deep_path() {
+    let line = compact_finding_row(
+        "F-0002",
+        "HIGH",
+        SeverityTone::High,
+        "heap write via attacker-length memcpy",
+        "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs:123",
+        100,
+    );
+    let text = line_text(&line);
+    assert!(
+        text.contains("heap write via attacker-length memcpy"),
+        "full title must render: {text}"
+    );
+    assert!(
+        text.contains("execution.rs:123"),
+        "location tail must survive: {text}"
+    );
+    assert!(
+        !text.contains("crates/kuzushi-core"),
+        "root prefix yields before the tail does: {text}"
+    );
+    assert!(
+        text.chars().count() <= 100,
+        "row must not overflow its width: {}",
+        text.chars().count()
+    );
+}
+
+/// T6 sweep: every major view must render without panicking at degenerate
+/// terminal sizes (1-cell, 1-row, 1-column) with wide (CJK), emoji, and
+/// combining-mark content loaded — width math that slices bytes or counts
+/// chars instead of columns breaks exactly here.
+#[test]
+fn views_survive_degenerate_geometry_with_unicode_content() {
+    let views = [
+        ShellView::Home,
+        ShellView::Catalog,
+        ShellView::Workbench,
+        ShellView::Setup,
+        ShellView::Report,
+        ShellView::Activity,
+        ShellView::Campaign,
+        ShellView::Coverage,
+        ShellView::Jobs,
+        ShellView::Runs,
+        ShellView::Logs,
+        ShellView::Help,
+        ShellView::Threat,
+        ShellView::PromptsEditor,
+        ShellView::Tune,
+        ShellView::Auth,
+        ShellView::Cost,
+        ShellView::TargetPicker,
+        ShellView::Quickstart,
+        ShellView::BootSplash,
+        ShellView::QuitConfirm,
+    ];
+    let sizes = [(1u16, 1u16), (2, 2), (5, 3), (80, 1), (1, 40), (33, 6), (120, 40)];
+    for view in views {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_error_notice("工具", "扫描失败 🚨 café ẍ 深いパス/评估.rs:42");
+        app.set_throttle("anthropic", "429 · 再試行 14秒 👾");
+        app.set_shell_view(view);
+        for (columns, rows) in sizes {
+            let backend = TestBackend::new(columns, rows);
+            let mut terminal = Terminal::new(backend).unwrap();
+            terminal
+                .draw(|frame| render_app(frame, &app))
+                .unwrap_or_else(|error| {
+                    panic!("{view:?} failed to draw at {columns}x{rows}: {error}")
+                });
+        }
+    }
+}
+
 #[test]
 fn error_notice_banner_renders_above_throttle() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -6316,8 +6396,9 @@ fn rich_fix_reference_sizes_keep_phase_kanji_out_of_diagram_whitespace() {
         let rendered = render_phase_workbench_for_test(WorkbenchPage::Fix, width, height);
         assert_eq!(
             rendered.matches('掛').count(),
-            2,
-            "Fix {width}x{height} leaked a decorative kanji into content: {rendered}"
+            0,
+            "Fix {width}x{height} leaked a decorative kanji into content \
+             (the Fix backdrop no longer paints one): {rendered}"
         );
     }
 }
@@ -6673,7 +6754,7 @@ fn assert_keymap_sections_have_a_body(rendered: &str, width: u16, height: u16) {
         ("── NAVIGATION", "j  ·  k"),
         ("── DISPATCH", "/scan"),
         ("── LIFECYCLE", "/history"),
-        ("── VIEW · Workbench", "F2"),
+        ("── VIEW · Workbench", "Esc"),
     ] {
         if rendered.contains(heading) {
             assert!(
@@ -6740,12 +6821,15 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
 
     assert!(rendered.contains("KUZUSHI"), "{rendered}");
     assert!(rendered.contains("target "), "{rendered}");
-    assert!(rendered.contains("VIEW MAP"), "{rendered}");
+    assert!(rendered.contains("Viewing Map"), "{rendered}");
     assert!(!rendered.contains("phase:"), "{rendered}");
-    assert!(rendered.contains("組 map"), "{rendered}");
+    assert!(rendered.contains("Map ●"), "{rendered}");
     assert!(rendered.contains("▸ NEXT"), "{rendered}");
     assert!(rendered.contains("PROJECT CONTEXT"), "{rendered}");
-    assert!(rendered.contains("no map artifacts yet"), "{rendered}");
+    assert!(
+        rendered.contains("checking durable map artifacts"),
+        "un-hydrated Map shows the neutral placeholder, not an evidence verdict: {rendered}"
+    );
     assert!(rendered.contains("context:missing"), "{rendered}");
     assert!(rendered.contains("build context"), "{rendered}");
 }
@@ -6853,8 +6937,8 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("VIEW PROVE"), "{rendered}");
-    assert!(rendered.contains("REALITY MAP"), "{rendered}");
+    assert!(rendered.contains("Viewing Prove"), "{rendered}");
+    assert!(rendered.contains("pipeline live in Map"), "{rendered}");
     assert!(rendered.contains("STATUS / NEXT"), "{rendered}");
     assert!(rendered.contains("EVIDENCE"), "{rendered}");
     assert!(rendered.contains("PROOF"), "{rendered}");

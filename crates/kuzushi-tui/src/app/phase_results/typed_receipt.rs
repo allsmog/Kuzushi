@@ -124,19 +124,18 @@ fn phase_outcome(status: RunItemStatus) -> PhaseAttemptOutcome {
 }
 
 fn receipt_detail_lines(receipt: &PhaseReceiptProjection) -> Vec<String> {
+    // The continuation is NOT repeated here: the card's trailing `next:` row
+    // already carries `receipt.continuation` via the receipt policy.
     let delta = &receipt.finding_delta;
-    vec![
-        format!(
-            "typed receipt · {} · {} run(s) · {} · findings +{} ~{} -{} · {} artifact(s) · {} interaction(s)",
-            receipt.status.label(),
-            receipt.run_ids.len(),
-            kuzushi_core::run_lifecycle::cost_label(receipt.cost),
-            delta.added,
-            delta.updated,
-            delta.removed,
-            receipt.artifact_ids.len(),
-            receipt.interaction_count,
-        ),
-        format!("typed receipt NEXT · {}", receipt.continuation.operator_label()),
-    ]
+    vec![format!(
+        "receipt · {} · {} run(s) · {} · findings +{} ~{} -{} · {} artifact(s) · {} interaction(s)",
+        receipt.status.label(),
+        receipt.run_ids.len(),
+        kuzushi_core::run_lifecycle::cost_label(receipt.cost),
+        delta.added,
+        delta.updated,
+        delta.removed,
+        receipt.artifact_ids.len(),
+        receipt.interaction_count,
+    )]
 }

@@ -5,7 +5,7 @@ pub(crate) use parse_name_status::*;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
 mod build_whitebox_diff_scope_report;
 mod contains_path;
 mod diff_scope_model;

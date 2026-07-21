@@ -2,15 +2,23 @@ use super::*;
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+/// A guarded Unix process group for one child and its descendants.
+///
+/// `configure` spawns a lifeline guard that owns a fresh process group and
+/// arranges for the command to join it. If the configuring process dies for
+/// any reason — including SIGKILL — the kernel closes the guard's lifeline
+/// pipe and the guard SIGKILLs the whole group, so no child outlives its
+/// owner. Dropping this value also kills the group (cleaning up stragglers),
+/// so keep it alive until after the child's final `wait`.
 #[derive(Debug, Default)]
-pub(crate) struct PreparedProcessGroup {
+pub struct PreparedProcessGroup {
     process_group_id: Option<u32>,
     #[cfg(unix)]
     parent_death_guard: Option<ParentDeathGuard>,
 }
 
 impl PreparedProcessGroup {
-    pub(crate) fn configure(command: &mut Command) -> Result<Self> {
+    pub fn configure(command: &mut Command) -> Result<Self> {
         #[cfg(unix)]
         {
             let guard = ParentDeathGuard::spawn()?;
@@ -29,7 +37,7 @@ impl PreparedProcessGroup {
         }
     }
 
-    pub(crate) fn process_group_id(&self) -> Option<u32> {
+    pub fn process_group_id(&self) -> Option<u32> {
         self.process_group_id
     }
 

@@ -78,6 +78,14 @@ pub struct FullModeConfig {
     /// 1.0; deep-audit refunds unused budget.
     #[serde(default)]
     pub auto_triage_deposit_usd: Option<f64>,
+    /// Optional per-run USD budget. When the accumulated observed chunk
+    /// cost reaches this ceiling the dispatcher stops gracefully: findings
+    /// from completed chunks are kept and every undispatched chunk is
+    /// reported in `failed_chunk_errors` so a `failedChunkIds` retry can
+    /// finish the plan. Distinct from workspace spend caps, which are
+    /// lifetime ledger ceilings rather than per-run ones.
+    #[serde(default)]
+    pub run_budget_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,6 +109,7 @@ impl Default for FullModeConfig {
             auto_triage: false,
             auto_triage_max_steps: None,
             auto_triage_deposit_usd: None,
+            run_budget_usd: None,
         }
     }
 }
@@ -110,6 +119,46 @@ pub struct FileBucket {
     pub path: String,
     pub bytes: usize,
     pub est_tokens: usize,
+    /// Byte offset this bucket's content starts at. Non-zero only for
+    /// window buckets of a file larger than `MAX_FILE_BYTES` — those files
+    /// were previously dropped from scoped plans SILENTLY (the
+    /// PowerShellExecutor.cpp regression: 334 KB, 9 known injection sites,
+    /// zero coverage, no warning).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub start_byte: usize,
+    /// 1-based line number of the first line in this bucket (1 for whole
+    /// files and first windows). Model-reported lines are window-relative;
+    /// the chunk executor adds `start_line - 1` to restore absolute lines.
+    #[serde(default = "default_start_line", skip_serializing_if = "is_one")]
+    pub start_line: usize,
+}
+
+impl FileBucket {
+    pub fn whole(path: String, bytes: usize, est_tokens: usize) -> Self {
+        Self {
+            path,
+            bytes,
+            est_tokens,
+            start_byte: 0,
+            start_line: 1,
+        }
+    }
+
+    pub fn is_window(&self) -> bool {
+        self.start_byte != 0 || self.start_line > 1
+    }
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+fn is_one(value: &usize) -> bool {
+    *value == 1
+}
+
+fn default_start_line() -> usize {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

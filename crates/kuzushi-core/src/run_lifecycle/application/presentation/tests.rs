@@ -44,6 +44,37 @@ fn verified_result_is_keyed_by_digest_and_discloses_omissions() {
     assert_eq!(cell.disclosure.as_ref().unwrap().omitted_count, Some(2));
 }
 
+/// Single-line tool outputs are routinely the summary restated; the preview
+/// row must not echo the heading verbatim while distinct lines still show.
+#[test]
+fn result_display_skips_the_preview_line_that_restates_the_summary() {
+    let run_id = RunId::parse("run-presentation-echo").unwrap();
+    let mut summary = result_summary(&run_id);
+    summary.output_lines = vec![
+        "bounded evidence".to_string(),
+        "Saved: report".to_string(),
+    ];
+    let item_id = RunItemId::new();
+    let call_id = RunCallId::new();
+    let projection = super::super::reduce_run_items(tool_call_items(&run_id, item_id, call_id));
+    let mut hydration = RunPresentationHydrationV1::default();
+    hydration.insert_verified(item_id, summary);
+    let presentation =
+        present_projection_with_hydration(&projection, RunProjectionSource::TypedV1, &hydration);
+
+    let lines = find_result_cell(&presentation).display_lines();
+
+    assert!(lines[0].contains("bounded evidence"), "heading: {lines:?}");
+    assert!(
+        !lines[1..].iter().any(|line| line.contains("bounded evidence")),
+        "summary echoed below the heading: {lines:?}"
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("Saved: report")),
+        "distinct preview line lost: {lines:?}"
+    );
+}
+
 #[test]
 fn resolved_question_keeps_projection_truth_without_repeating_actionable_copy() {
     let fixture = question_fixture(true);

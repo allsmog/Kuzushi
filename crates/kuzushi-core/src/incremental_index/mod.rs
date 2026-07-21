@@ -42,6 +42,10 @@ pub enum WorkspaceChange {
 pub const MAX_INDEXED_FILE_BYTES: u64 = 64 * 1024 * 1024;
 pub const MAX_INDEXED_SNAPSHOT_BYTES: u64 = 1024 * 1024 * 1024;
 pub const MAX_INDEXED_SNAPSHOT_FILES: usize = 200_000;
+/// Hash-only tree identity stores no blobs, so its ceilings bound read time
+/// rather than disk; monorepo-scale targets must fit.
+pub const MAX_TREE_IDENTITY_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+pub const MAX_TREE_IDENTITY_FILES: usize = 1_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReindexPlan {
@@ -150,7 +154,7 @@ pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWo
 pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
     let root = root.as_ref();
     let mut entries = Vec::new();
-    let mut budget = IndexBudget::default();
+    let mut budget = IndexBudget::tree_identity();
     collect_current_tree_entries(root, root, &mut entries, &mut budget)?;
     entries.sort_by(|left, right| {
         left.name
@@ -159,6 +163,35 @@ pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
     });
     let bytes = serde_json::to_vec(&TreeObject { entries })?;
     Ok(object_hash(ObjectKind::Tree, &bytes).as_str().to_string())
+}
+
+/// Register a hash-only workspace tree identity: tree and snapshot objects
+/// in the content store plus a `target_snapshots` projection row, with no
+/// blob storage. This is what lets a phase attempt cite a verifiable
+/// content identity on targets whose full content index exceeds the
+/// blob-store budget.
+pub fn register_workspace_tree_identity(
+    workspace: &WorkspaceTarget,
+) -> Result<IndexedWorkspaceSnapshot> {
+    workspace.ensure_state_dir()?;
+    let store = ContentStore::open(workspace.objects_dir())?;
+    let mut entries = Vec::new();
+    let mut budget = IndexBudget::tree_identity();
+    collect_current_tree_entries(workspace.root(), workspace.root(), &mut entries, &mut budget)?;
+    let tree = store.put_tree(entries)?;
+    let metadata = snapshot_metadata(workspace.root(), &[]);
+    let snapshot = store.put_snapshot(&TargetSnapshot {
+        tree_hash: tree.hash.clone(),
+        workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
+        git_commit: metadata.git_commit.clone(),
+        git_branch: metadata.git_branch.clone(),
+        dirty_hash: metadata.dirty_hash.clone(),
+        index_hash: None,
+        config_hash: None,
+        rule_set_hashes: Vec::new(),
+        created_at: "snapshot-content-addressed".to_string(),
+    })?;
+    commit_index_projection(workspace, &snapshot, &tree, &metadata, &[])
 }
 
 fn collect_current_tree_entries(
@@ -176,11 +209,19 @@ fn collect_current_tree_entries(
         let kind = entry.file_type()?;
         if kind.is_dir() {
             collect_current_tree_entries(root, &path, entries, budget)?;
-        } else if kind.is_file() {
+        } else if kind.is_file() && !exceeds_indexed_file_size(&entry)? {
             entries.push(current_tree_entry(root, &path, budget)?);
         }
     }
     Ok(())
+}
+
+/// Oversized files are deterministically excluded from indexing and tree
+/// identity: the rule depends only on file size, so the producing and
+/// verifying walks always agree on the same tree — one core dump or fat
+/// artifact must not fail (or skew) the whole workspace identity.
+fn exceeds_indexed_file_size(entry: &fs::DirEntry) -> Result<bool> {
+    Ok(entry.metadata()?.len() > MAX_INDEXED_FILE_BYTES)
 }
 
 fn current_tree_entry(root: &Path, path: &Path, budget: &mut IndexBudget) -> Result<TreeEntry> {
@@ -426,7 +467,7 @@ fn collect_indexed_files_from(
         let kind = entry.file_type()?;
         if kind.is_dir() {
             collect_indexed_files_from(root, &path, store, files, budget)?;
-        } else if kind.is_file() {
+        } else if kind.is_file() && !exceeds_indexed_file_size(&entry)? {
             let indexed = index_file(root, &path, store)?;
             budget.record(indexed.file_size)?;
             files.push(indexed);
@@ -544,19 +585,40 @@ fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedF
     })
 }
 
-#[derive(Default)]
 struct IndexBudget {
     files: usize,
     bytes: u64,
+    max_files: usize,
+    max_bytes: u64,
+}
+
+impl Default for IndexBudget {
+    fn default() -> Self {
+        Self::with_limits(MAX_INDEXED_SNAPSHOT_FILES, MAX_INDEXED_SNAPSHOT_BYTES)
+    }
 }
 
 impl IndexBudget {
+    fn with_limits(max_files: usize, max_bytes: u64) -> Self {
+        Self {
+            files: 0,
+            bytes: 0,
+            max_files,
+            max_bytes,
+        }
+    }
+
+    fn tree_identity() -> Self {
+        Self::with_limits(MAX_TREE_IDENTITY_FILES, MAX_TREE_IDENTITY_BYTES)
+    }
+
     fn from_files(files: &[IndexedFile]) -> Self {
         Self {
             files: files.len(),
             bytes: files
                 .iter()
                 .fold(0_u64, |total, file| total.saturating_add(file.file_size)),
+            ..Self::default()
         }
     }
 
@@ -564,12 +626,14 @@ impl IndexBudget {
         self.files = self.files.saturating_add(1);
         self.bytes = self.bytes.saturating_add(bytes);
         anyhow::ensure!(
-            self.files <= MAX_INDEXED_SNAPSHOT_FILES,
-            "workspace index exceeds the {MAX_INDEXED_SNAPSHOT_FILES}-file safety limit"
+            self.files <= self.max_files,
+            "workspace index exceeds the {}-file safety limit",
+            self.max_files
         );
         anyhow::ensure!(
-            self.bytes <= MAX_INDEXED_SNAPSHOT_BYTES,
-            "workspace index exceeds the {MAX_INDEXED_SNAPSHOT_BYTES}-byte safety limit"
+            self.bytes <= self.max_bytes,
+            "workspace index exceeds the {}-byte safety limit",
+            self.max_bytes
         );
         Ok(())
     }

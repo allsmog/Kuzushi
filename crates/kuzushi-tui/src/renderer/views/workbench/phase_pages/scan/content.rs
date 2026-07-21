@@ -171,6 +171,7 @@ mod tests {
     fn engine_row_retains_compact_run_reference_at_eighty_column_pane_width() {
         let outcome = ScanEngineOutcomeModel {
             engine: "taint-iris-next".to_string(),
+            tool_key: Some("taint-iris-next:hunt".to_string()),
             outcome: "complete".to_string(),
             run_ref: Some("1234567890abcdef".to_string()),
             detail: None,

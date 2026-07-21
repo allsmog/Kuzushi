@@ -13,7 +13,6 @@ const API_KEY_NARROW_HINTS: &[HintBinding] =
     &[("↑/↓", "move"), ("Enter", "accept"), ("Esc", "back")];
 const AUTH_METHOD_WIDE_HINTS: &[HintBinding] = &[
     ("↑/↓/j/k", "move"),
-    ("d", "offline fixture"),
     (":", "type a command"),
     ("Enter", "confirm"),
     ("Esc", "back"),
@@ -22,7 +21,6 @@ const AUTH_METHOD_WIDE_HINTS: &[HintBinding] = &[
 const AUTH_METHOD_NARROW_HINTS: &[HintBinding] = &[
     ("↑/↓", "move"),
     ("Enter", "select"),
-    ("d", "demo"),
     ("Esc", "back"),
     ("q", "Setup"),
 ];
@@ -113,7 +111,7 @@ fn compact_auth_footer(app: &ShellApp) -> Vec<Line<'static>> {
         ];
     }
     vec![
-        muted(" ↑/↓/j/k move · Enter select · d demo"),
+        muted(" ↑/↓/j/k move · Enter select"),
         muted(" Esc back · q Setup · : command"),
     ]
 }

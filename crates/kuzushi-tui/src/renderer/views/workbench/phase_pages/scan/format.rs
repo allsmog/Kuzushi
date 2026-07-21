@@ -70,8 +70,8 @@ fn scan_rerun_command(model: &ScanPhaseModel) -> String {
     model
         .engine_outcomes
         .iter()
-        .find(|outcome| outcome.engine.contains(':'))
-        .map(|outcome| format!("> run {} {{}}", outcome.engine))
+        .find_map(|outcome| outcome.tool_key.as_deref())
+        .map(|key| format!("> run {key} {{}}"))
         .unwrap_or_else(|| "> describe what to scan".to_string())
 }
 

@@ -19,6 +19,20 @@ impl SafeText {
         Self(bound_chars(safe.as_str(), MAX_PREVIEW_LINE_CHARS))
     }
 
+    /// One-line projection of possibly multi-line text: lines are trimmed and
+    /// joined with " · " before escaping, so a condensed card never shows a
+    /// literal `\n` where the producer meant a line break.
+    pub fn condensed_line(value: impl AsRef<str>) -> Self {
+        let joined = value
+            .as_ref()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        Self::preview_line(joined)
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -70,4 +84,27 @@ fn bound_chars(value: &str, maximum: usize) -> String {
     let mut bounded = value.chars().take(maximum - 1).collect::<String>();
     bounded.push('…');
     bounded
+}
+
+#[cfg(test)]
+mod condensed_line_tests {
+    use super::SafeText;
+
+    #[test]
+    fn condensed_line_joins_multiline_text_without_escaped_newlines() {
+        let condensed = SafeText::condensed_line(
+            "[+] Triaged 13 of 13 findings (stage1 dropped 0)\n      tp=12  fp=1\n      cost=$3.58",
+        );
+        assert_eq!(
+            condensed.as_str(),
+            "[+] Triaged 13 of 13 findings (stage1 dropped 0) · tp=12  fp=1 · cost=$3.58"
+        );
+        assert!(!condensed.as_str().contains("\\n"));
+    }
+
+    #[test]
+    fn condensed_line_still_escapes_other_control_characters() {
+        let condensed = SafeText::condensed_line("alert\u{7} done");
+        assert_eq!(condensed.as_str(), "alert\\u{7} done");
+    }
 }

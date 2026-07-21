@@ -538,6 +538,120 @@ printf '{"results":[]}'
     }
 
     #[cfg(unix)]
+    fn executable_fixture_script(dir: &Path, name: &str, body: &str) -> SemgrepScanner {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scanner_path = dir.join(name);
+        fs::write(&scanner_path, body).unwrap();
+        let mut permissions = fs::metadata(&scanner_path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&scanner_path, permissions).unwrap();
+        SemgrepScanner {
+            binary: scanner_path.display().to_string(),
+            config: vec!["ignored".to_string()],
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nonzero_semgrep_exit_is_a_failure_even_when_json_was_emitted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scanner = executable_fixture_script(
+            tmp.path(),
+            "failing-semgrep.sh",
+            "#!/bin/sh\nprintf '{\"errors\":[{\"message\":\"config fetch failed for p/security-audit\",\"level\":\"error\"}],\"results\":[]}'\nexit 2\n",
+        );
+
+        let error = scanner
+            .scan_with_cancel(tmp.path(), &ScanCancellation::default())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("semgrep failed with status"), "{error}");
+        assert!(
+            error.contains("config fetch failed for p/security-audit"),
+            "the failure must carry semgrep's own reported error: {error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_nonzero_semgrep_exit_without_parseable_json_reports_stderr() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scanner = executable_fixture_script(
+            tmp.path(),
+            "crashing-semgrep.sh",
+            "#!/bin/sh\necho 'network down while fetching rules' >&2\nexit 7\n",
+        );
+
+        let error = scanner
+            .scan_with_cancel(tmp.path(), &ScanCancellation::default())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("semgrep failed with status"), "{error}");
+        assert!(error.contains("network down while fetching rules"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_successful_run_still_discloses_semgrep_scan_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let report = r#"{"results":[{"check_id":"audit.rule","path":"src/lib.rs","start":{"line":1},"extra":{"severity":"ERROR","message":"finding"}}],"errors":[{"message":"Failed to parse","path":"src/minified.js"},{"message":"rule pack partially skipped"}]}"#;
+        let scanner = executable_fixture_script(
+            tmp.path(),
+            "degraded-semgrep.sh",
+            &format!("#!/bin/sh\nprintf '%s' '{report}'\n"),
+        );
+
+        let outcome = scanner
+            .scan_outcome_with_cancel(tmp.path(), &ScanCancellation::default())
+            .unwrap();
+
+        assert_eq!(outcome.findings.len(), 1);
+        assert_eq!(
+            outcome.scan_errors,
+            vec![
+                "src/minified.js: Failed to parse".to_string(),
+                "rule pack partially skipped".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn semgrep_report_with_scan_errors_admits_incomplete_coverage() {
+        let report = SemgrepScanReport::new("repo".to_string(), Vec::new(), None).with_scan_errors(
+            vec![
+                "a.js: Failed to parse".to_string(),
+                "b.js: Failed to parse".to_string(),
+            ],
+        );
+
+        let output = report.output();
+        assert!(
+            output.contains("coverage incomplete: 2 scan errors"),
+            "{output}"
+        );
+        assert!(output.contains("a.js: Failed to parse"), "{output}");
+
+        let json = report.to_tool_json();
+        assert_eq!(
+            json.pointer("/data/scanErrors/0"),
+            Some(&serde_json::json!("a.js: Failed to parse"))
+        );
+    }
+
+    #[test]
+    fn semgrep_report_without_scan_errors_serializes_no_scan_error_field() {
+        let json = SemgrepScanReport::new("repo".to_string(), Vec::new(), None).to_tool_json();
+        assert_eq!(json.pointer("/data/scanErrors"), None);
+        assert!(!json["output"]
+            .as_str()
+            .unwrap()
+            .contains("coverage incomplete"));
+    }
+
+    #[cfg(unix)]
     #[test]
     fn cancels_running_scanner_process() {
         use std::fs;
@@ -548,7 +662,11 @@ printf '{"results":[]}'
         let scanner_path = tmp.path().join("slow-scanner.sh");
         fs::write(
             &scanner_path,
-            "#!/bin/sh\nsleep 5\nprintf '{\"results\":[]}'\n",
+            // Pin PATH: concurrent tests legitimately point the ambient PATH
+            // at a tempdir, and the scrubbed scanner environment snapshots it.
+            // Without the pin, `sleep` intermittently resolves to nothing and
+            // this fixture falls through to a fast fake success.
+            "#!/bin/sh\nPATH=/usr/bin:/bin\nsleep 5\nprintf '{\"results\":[]}'\n",
         )
         .unwrap();
         let mut permissions = fs::metadata(&scanner_path).unwrap().permissions();
@@ -872,7 +990,11 @@ printf '{"results":[]}'
             "codeql"
         });
         fs::write(&codeql, "").unwrap();
-        let _path = EnvVarGuard::set("PATH", &bin_dir.display().to_string());
+        // Prepend rather than replace: PATH is process-global, and replacing it
+        // makes every concurrently spawned subprocess (git, sleep, mkdir in
+        // sibling tests) intermittently unresolvable.
+        let ambient_path = env::var("PATH").unwrap_or_default();
+        let _path = EnvVarGuard::set("PATH", &format!("{}:{ambient_path}", bin_dir.display()));
 
         assert_eq!(
             resolve_codeql_binary(Some(" /custom/codeql ")).unwrap(),
@@ -1015,6 +1137,7 @@ JSON
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 if [ "$1" = "resolve" ] && [ "$2" = "languages" ]; then
   printf '["javascript"]'
   exit 0
@@ -1278,6 +1401,7 @@ exit 2
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 if [ "${AWS_SECRET_ACCESS_KEY+x}" = "x" ] || [ "${GITHUB_TOKEN+x}" = "x" ] || [ "${DATABASE_URL+x}" = "x" ]; then
   echo "credential env leaked to codeql" >&2
   exit 44
@@ -1372,7 +1496,7 @@ exit 2
         let binary = tmp.path().join("slow-codeql.sh");
         fs::write(
             &binary,
-            "#!/bin/sh\nsleep 5\nout=\"\"\nfor arg in \"$@\"; do case \"$arg\" in --output=*) out=\"${arg#--output=}\" ;; esac; done\nprintf '{\"runs\":[]}' > \"$out\"\n",
+            "#!/bin/sh\nPATH=/usr/bin:/bin\nsleep 5\nout=\"\"\nfor arg in \"$@\"; do case \"$arg\" in --output=*) out=\"${arg#--output=}\" ;; esac; done\nprintf '{\"runs\":[]}' > \"$out\"\n",
         )
         .unwrap();
         let mut permissions = fs::metadata(&binary).unwrap().permissions();

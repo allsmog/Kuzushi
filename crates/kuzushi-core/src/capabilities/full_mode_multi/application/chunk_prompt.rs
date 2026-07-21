@@ -75,15 +75,19 @@ pub(crate) fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<Stri
     let mut body = String::with_capacity(chunk.est_tokens * 4);
     body.push_str("Files in this chunk:\n\n");
     for fb in &chunk.files {
-        let abs = root.join(&fb.path);
-        let contents = match crate::bounded_file::read_utf8_text(
-            &abs,
-            fb.bytes.min(MAX_FILE_BYTES),
-        ) {
-            Ok(c) => c,
-            Err(_) => continue,
+        let Some(contents) = bucket_contents(root, fb) else {
+            continue;
         };
-        body.push_str(&format!("=== {} ===\n", fb.path));
+        if fb.is_window() {
+            // The model reports lines as counted within what it sees; the
+            // chunk executor restores absolute lines from `start_line`.
+            body.push_str(&format!(
+                "=== {} (window of a larger file; its first line is line {} of the real file) ===\n",
+                fb.path, fb.start_line
+            ));
+        } else {
+            body.push_str(&format!("=== {} ===\n", fb.path));
+        }
         body.push_str(&contents);
         if !contents.ends_with('\n') {
             body.push('\n');
@@ -91,6 +95,19 @@ pub(crate) fn render_chunk_prompt(root: &Path, chunk: &ChunkPlan) -> Result<Stri
         body.push('\n');
     }
     Ok(body)
+}
+
+fn bucket_contents(root: &Path, fb: &crate::capabilities::full_mode_multi::domain::FileBucket) -> Option<String> {
+    let abs = root.join(&fb.path);
+    if !fb.is_window() {
+        return crate::bounded_file::read_utf8_text(&abs, fb.bytes.min(MAX_FILE_BYTES)).ok();
+    }
+    // Window bucket: read through the end of the window, then slice. Window
+    // boundaries are line-aligned byte offsets produced by walk_files.
+    let end = fb.start_byte.checked_add(fb.bytes)?;
+    let text = crate::bounded_file::read_utf8_text(&abs, end).ok()?;
+    text.get(fb.start_byte..end.min(text.len()))
+        .map(str::to_owned)
 }
 
 pub(crate) fn parse_chunk_value(value: serde_json::Value) -> Result<Vec<Finding>> {

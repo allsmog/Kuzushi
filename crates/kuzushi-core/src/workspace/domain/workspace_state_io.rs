@@ -38,6 +38,55 @@ pub fn ensure_workspace_output_dir(
     ensure_workspace_descendant_dir(root, relative)
 }
 
+/// Resolve an operator-supplied export/report output path (absolute or
+/// workspace-relative) to a symlink-checked location inside the workspace
+/// root. Rejects `..`, absolute paths outside the root, and symlinks at any
+/// component. Does not create directories; callers own parent creation so a
+/// failed operation leaves no partial artifacts.
+pub fn resolve_contained_output_path(root: impl AsRef<Path>, output: &Path) -> Result<PathBuf> {
+    let root = canonical_workspace_root(root.as_ref())?;
+    let relative = contained_relative_output(&root, output)?;
+    validated_workspace_descendant(&root, &relative)
+}
+
+/// Resolve a report/export destination with a state-directory default.
+/// A requested path goes through the full containment + symlink checks;
+/// absent, the default lands under `.kuzushi/v3/<default_state_relative>`
+/// with the same checks, so a pre-planted symlink at a well-known default
+/// artifact path cannot redirect the write outside the workspace.
+pub fn resolve_report_output_path(
+    root: impl AsRef<Path>,
+    requested: Option<&Path>,
+    default_state_relative: &str,
+) -> Result<PathBuf> {
+    let root = root.as_ref();
+    match requested {
+        Some(output) => resolve_contained_output_path(root, output),
+        None => {
+            let relative = Path::new(KUZUSHI_STATE_DIR)
+                .join(WORKSPACE_STATE_VERSION_DIR)
+                .join(default_state_relative);
+            resolve_contained_output_path(root, &relative)
+        }
+    }
+}
+
+fn contained_relative_output(root: &Path, output: &Path) -> Result<PathBuf> {
+    if !output.is_absolute() {
+        return Ok(output.to_path_buf());
+    }
+    output
+        .strip_prefix(root)
+        .map(Path::to_path_buf)
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "output path {} is outside the workspace root {}",
+                output.display(),
+                root.display()
+            )
+        })
+}
+
 pub fn prepare_workspace_output_path(
     root: impl AsRef<Path>,
     relative: impl AsRef<Path>,
@@ -258,6 +307,52 @@ mod tests {
     }
 
     #[test]
+    fn contained_output_rejects_parent_traversal_and_outside_absolutes() {
+        let workspace = tempfile::tempdir().unwrap();
+
+        let traversal = resolve_contained_output_path(
+            workspace.path(),
+            Path::new("../escape/findings.json"),
+        );
+        assert!(traversal.is_err(), "{traversal:?}");
+
+        let outside =
+            resolve_contained_output_path(workspace.path(), Path::new("/tmp/outside-export.json"));
+        assert!(outside.is_err(), "{outside:?}");
+    }
+
+    #[test]
+    fn contained_output_accepts_relative_and_inside_absolute_without_creating_dirs() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+
+        let relative =
+            resolve_contained_output_path(workspace.path(), Path::new("exports/out.json"))
+                .unwrap();
+        assert_eq!(relative, root.join("exports/out.json"));
+        assert!(!root.join("exports").exists(), "must not create dirs");
+
+        let absolute =
+            resolve_contained_output_path(workspace.path(), &root.join("reports/ci.json"))
+                .unwrap();
+        assert_eq!(absolute, root.join("reports/ci.json"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn contained_output_rejects_symlink_escape_components() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), workspace.path().join("exports")).unwrap();
+
+        let escape =
+            resolve_contained_output_path(workspace.path(), Path::new("exports/out.json"));
+        assert!(escape.is_err(), "{escape:?}");
+    }
+
+    #[test]
     fn workspace_read_error_keeps_the_bounded_read_reason_actionable() {
         let workspace = tempfile::tempdir().unwrap();
         let path = workspace.path().join("oversized.json");
@@ -268,5 +363,37 @@ mod tests {
             .to_string();
 
         assert!(error.contains("maximum supported size"), "{error}");
+    }
+
+    #[test]
+    fn report_output_default_lands_under_state_dir_and_requested_is_contained() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(workspace.path()).unwrap();
+
+        let default =
+            resolve_report_output_path(workspace.path(), None, "reports/out.sarif").unwrap();
+        assert_eq!(default, root.join(".kuzushi/v3/reports/out.sarif"));
+
+        let escape = resolve_report_output_path(
+            workspace.path(),
+            Some(Path::new("../escape.sarif")),
+            "reports/out.sarif",
+        );
+        assert!(escape.is_err(), "{escape:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn report_output_default_refuses_a_preplanted_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let workspace = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let reports = workspace.path().join(".kuzushi/v3/reports");
+        fs::create_dir_all(&reports).unwrap();
+        symlink(outside.path(), reports.join("out.sarif")).unwrap();
+
+        let redirected = resolve_report_output_path(workspace.path(), None, "reports/out.sarif");
+        assert!(redirected.is_err(), "{redirected:?}");
     }
 }

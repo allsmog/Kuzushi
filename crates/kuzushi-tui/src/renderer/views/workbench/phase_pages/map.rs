@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel, MapPhaseModel,
-    ModuleRisk, ProjectModelOrigin,
+    ModuleRisk, NextScansState, ProjectModelOrigin,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -48,7 +48,7 @@ pub(super) fn plain_lines(
     ));
     lines.extend(divider_lines(
         "HOT MODULES",
-        hot_module_lines(&model.hot_modules.modules, width),
+        hot_modules_pane_lines(model, width),
         width,
     ));
     lines.extend(divider_lines(
@@ -80,7 +80,7 @@ fn render_compact(
     lines.push(divider("ATTACK SURFACE", area.width.saturating_sub(2)));
     lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
     lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
-    lines.extend(hot_module_lines(&model.hot_modules.modules, width));
+    lines.extend(hot_modules_pane_lines(model, width));
     lines.push(divider("THREAT MODEL / DFD", area.width.saturating_sub(2)));
     lines.extend(dfd_readiness_lines(&model.dfd, width));
     render_lines_pane(
@@ -136,10 +136,7 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         lines.push(Line::styled(fit(hint, width), theme::warn()));
     }
     lines.push(Line::styled(
-        fit(
-            &format!("context:{} · {}", model.context.state, model.context.status),
-            width,
-        ),
+        fit(&context_status_line(model), width),
         artifact_state_style(model.context.state),
     ));
     lines.extend(model.project.rows.iter().take(8).map(|row| {
@@ -152,6 +149,18 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         ])
     }));
     lines
+}
+
+/// "context:missing · missing. Next: …" repeats the state; strip a status
+/// prefix that restates it so the line reads "context:missing · Next: …".
+fn context_status_line(model: &MapPhaseModel) -> String {
+    let state = model.context.state.to_string();
+    let status = model
+        .context
+        .status
+        .strip_prefix(&format!("{state}. "))
+        .unwrap_or(&model.context.status);
+    format!("context:{state} · {status}")
 }
 
 fn render_attack_surface(
@@ -217,13 +226,50 @@ fn render_hot_modules(
         frame,
         area,
         "HOT MODULES · z heatmap",
-        hot_module_lines(
-            &model.hot_modules.modules,
-            area.width.saturating_sub(2) as usize,
-        ),
+        hot_modules_pane_lines(model, area.width.saturating_sub(2) as usize),
         WorkbenchPane::Findings,
         state,
     );
+}
+
+/// Hot-module risk rows followed by coverage-ledger NEXT SCANS rows; one
+/// builder keeps the grid pane, compact stack, and plain output identical.
+fn hot_modules_pane_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = hot_module_lines(&model.hot_modules.modules, width);
+    lines.extend(next_scan_lines(&model.next_scans, width));
+    lines
+}
+
+fn next_scan_lines(next_scans: &NextScansState, width: usize) -> Vec<Line<'static>> {
+    let rows = match next_scans {
+        NextScansState::Pending => return Vec::new(),
+        NextScansState::Unavailable(error) => {
+            return vec![
+                Line::styled("NEXT SCANS", theme::heading()),
+                Line::styled(fit(&format!("unavailable: {error}"), width), theme::muted()),
+            ];
+        }
+        NextScansState::Ready(rows) => rows,
+    };
+    let mut lines = vec![Line::styled("NEXT SCANS", theme::heading())];
+    if rows.is_empty() {
+        lines.push(Line::styled(
+            fit("coverage current — nothing recommended", width),
+            theme::muted(),
+        ));
+        return lines;
+    }
+    lines.extend(rows.iter().map(|row| {
+        let label = format!("{} · {} · {}", row.scope, row.phase, row.reason);
+        Line::from(vec![
+            Span::styled(fit(&label, width.min(34)), theme::primary()),
+            Span::styled(
+                fit(&format!("  {}", row.evidence), width.saturating_sub(36)),
+                theme::muted(),
+            ),
+        ])
+    }));
+    lines
 }
 
 fn hot_module_lines(modules: &[ModuleRisk], width: usize) -> Vec<Line<'static>> {
@@ -339,5 +385,53 @@ fn tier_style(tier: &str) -> ratatui::style::Style {
         "critical" | "high" => theme::danger(),
         "medium" => theme::warn(),
         _ => theme::muted(),
+    }
+}
+
+
+#[cfg(test)]
+mod next_scan_tests {
+    use super::*;
+    use crate::ui_view_models::NextScanRow;
+
+    fn text(lines: &[Line<'_>]) -> String {
+        lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn pending_recommendations_draw_no_chrome() {
+        assert!(next_scan_lines(&NextScansState::Pending, 80).is_empty());
+    }
+
+    #[test]
+    fn ready_rows_and_failures_render_under_a_next_scans_heading() {
+        let ready = NextScansState::Ready(vec![NextScanRow {
+            scope: "root".to_string(),
+            phase: "scan".to_string(),
+            reason: "changed".to_string(),
+            evidence: "14 files changed since a1b2c3d4".to_string(),
+        }]);
+        let rendered = text(&next_scan_lines(&ready, 80));
+        assert!(rendered.contains("NEXT SCANS"));
+        assert!(rendered.contains("root \u{b7} scan \u{b7} changed"));
+        assert!(rendered.contains("14 files changed"));
+
+        let empty = text(&next_scan_lines(&NextScansState::Ready(Vec::new()), 80));
+        assert!(empty.contains("coverage current"));
+
+        let failed = text(&next_scan_lines(
+            &NextScansState::Unavailable("ledger locked".to_string()),
+            80,
+        ));
+        assert!(failed.contains("unavailable: ledger locked"));
     }
 }

@@ -68,10 +68,12 @@ pub(crate) fn collect_changed_files(root: &Path, diff_base: &str) -> Result<Vec<
 }
 
 pub(crate) fn verify_diff_base(root: &Path, diff_base: &str) -> Result<()> {
-    let output = Command::new("git")
+    crate::git_rev::ensure_safe_git_rev(diff_base, "whitebox-static diffBase")?;
+    let mut command = Command::new("git");
+    command
         .args(["rev-parse", "--verify", diff_base])
-        .current_dir(root)
-        .output()
+        .current_dir(root);
+    let output = crate::bounded_subprocess::output(&mut command, "git rev-parse")
         .with_context(|| {
             "whitebox-static diff mode requires local git; install git or omit diffBase"
         })?;
@@ -86,10 +88,9 @@ pub(crate) fn verify_diff_base(root: &Path, diff_base: &str) -> Result<()> {
 }
 
 pub(crate) fn git_output(root: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
+    let mut command = Command::new("git");
+    command.args(args).current_dir(root);
+    let output = crate::bounded_subprocess::output(&mut command, "git diff")
         .with_context(|| {
             "whitebox-static diff mode requires local git; install git or omit diffBase"
         })?;

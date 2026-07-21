@@ -61,9 +61,16 @@ pub(crate) fn curl_text(url: &str, input: &Value, tool: &str) -> Result<Option<S
         .or_else(|| input.get("binary"))
         .and_then(Value::as_str)
         .unwrap_or("curl");
+    // Advisory-derived URLs must stay web URLs: curl would otherwise accept
+    // file:// (local file read into the summary) or parse a '-'-leading
+    // value as an option.
+    anyhow::ensure!(
+        url.starts_with("https://") || url.starts_with("http://"),
+        "{tool}: refusing non-http(s) patch URL {url:?}"
+    );
     let mut command = Command::new(binary);
     command
-        .args(["-fsSL", "--max-time", "15", "-H", "Accept: text/plain"])
+        .args(["-fsSL", "--max-time", "15", "-H", "Accept: text/plain", "--"])
         .arg(url);
     let output = crate::bounded_subprocess::output(&mut command, "curl patch fetch").with_context(|| {
         format!("{tool} requires curl to fetch advisories or patches; install curl or pass patchText/offline fixtures")
@@ -132,4 +139,20 @@ pub(crate) fn require_model(
             .map(ToString::to_string),
         ctx.config.model.as_deref(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn non_http_patch_urls_are_refused_before_curl_runs() {
+        for url in ["file:///etc/passwd", "dict://x/", "-o/tmp/pwn", "ftp://x/"] {
+            let error = curl_text(url, &json!({}), "variant-ndiff")
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("non-http(s)"), "{url}: {error}");
+        }
+    }
 }

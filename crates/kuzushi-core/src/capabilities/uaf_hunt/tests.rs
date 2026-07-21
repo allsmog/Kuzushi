@@ -10,7 +10,7 @@ use crate::runtime::{
 };
 use anyhow::Result;
 use serde_json::json;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use tempfile::tempdir;
 
 struct ScriptedUafRuntime {
@@ -56,11 +56,6 @@ impl AgentRuntime for ScriptedUafRuntime {
         }
         Ok(steps.remove(0))
     }
-}
-
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
 }
 
 #[test]
@@ -236,12 +231,11 @@ fn default_max_agent_steps_is_120_with_a_400_cap() {
 
 #[test]
 fn run_uaf_hunt_rejects_bare_model_before_clang_spawn() {
-    let _guard = env_lock().lock().unwrap();
+    let _guard = crate::test_env::mcp_clang_env_lock();
     let dir = tempdir().unwrap();
     std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
 
-    let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
-    std::env::set_var(
+    let _bin = crate::test_env::ScopedEnv::set(
         "KUZUSHI_MCP_CLANG_BIN",
         dir.path().join("missing-kuzushi-mcp-clang"),
     );
@@ -263,11 +257,6 @@ fn run_uaf_hunt_rejects_bare_model_before_clang_spawn() {
         Some(&runtime),
     )
     .unwrap_err();
-
-    match previous {
-        Some(value) => std::env::set_var("KUZUSHI_MCP_CLANG_BIN", value),
-        None => std::env::remove_var("KUZUSHI_MCP_CLANG_BIN"),
-    }
 
     let message = format!("{err:#}");
     assert!(
@@ -332,7 +321,7 @@ fn non_method_not_found_errors_pass_through_unchanged() {
 #[test]
 #[cfg(unix)]
 fn run_uaf_hunt_report_drives_tool_loop_and_repo_tools() {
-    let _guard = env_lock().lock().unwrap();
+    let _guard = crate::test_env::mcp_clang_env_lock();
     let dir = tempdir().unwrap();
     std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
     std::fs::write(
@@ -366,8 +355,7 @@ done
         std::fs::set_permissions(&fake_clang, perms).unwrap();
     }
 
-    let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
-    std::env::set_var("KUZUSHI_MCP_CLANG_BIN", &fake_clang);
+    let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_MCP_CLANG_BIN", &fake_clang);
 
     let runtime = ScriptedUafRuntime::new(vec![
         AgentLoopStep::ToolCall {
@@ -430,11 +418,6 @@ done
     };
 
     let report = run_uaf_hunt_report(&json!({"target": dir.path()}), &ctx, Some(&runtime)).unwrap();
-
-    match previous {
-        Some(value) => std::env::set_var("KUZUSHI_MCP_CLANG_BIN", value),
-        None => std::env::remove_var("KUZUSHI_MCP_CLANG_BIN"),
-    }
 
     assert_eq!(report.count, 1);
     assert_eq!(report.clang_tool_calls, 1);

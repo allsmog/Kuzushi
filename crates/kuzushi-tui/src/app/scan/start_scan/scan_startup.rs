@@ -186,7 +186,7 @@ impl ShellApp {
     fn log_scan_start(&mut self, target_root: &PathBuf, effective_options: &[EffectiveScanOption]) {
         self.log(
             "phase",
-            "崩 scan (2/5): `scan` is the discovery action for this phase",
+            "Scan (2/5): `scan` is the discovery action for this phase",
         );
         self.log("scan", format!("starting {}", target_root.display()));
         self.log(

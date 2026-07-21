@@ -98,13 +98,13 @@ fn legend_row(layout: HeatmapLayout) -> Line<'static> {
     if layout.compact {
         return line(vec![
             span("  C/H/M/L/I  ", theme::label()),
-            span("critical → info · · none", theme::muted()),
+            span("critical → info · — none", theme::muted()),
         ]);
     }
     line(vec![
         span("  legend  ", theme::label()),
         span(
-            "bar width ∝ count · colour = severity column · · = none",
+            "bar width ∝ count · colour = severity column · — = none",
             theme::muted(),
         ),
     ])
@@ -123,7 +123,9 @@ fn selected_row_style(selected: bool) -> ratatui::style::Style {
 
 fn cell(count: u32, sev: Sev, cell_w: usize) -> Span<'static> {
     if count == 0 {
-        return span(fixed("·", cell_w), theme::subtle());
+        // `—` matches the UI-wide "absent value" glyph; `·` here collides
+        // with the separator dot used everywhere else on screen.
+        return span(fixed("—", cell_w), theme::subtle());
     }
     // Keep `blocks + label` within CELL_W: a 4-digit count would otherwise make
     // the cell 8 wide and `fixed` would truncate it to a misleading number

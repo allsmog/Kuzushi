@@ -244,8 +244,10 @@ pub(super) fn engine_outcome(summary: &RunSummary) -> ScanEngineOutcomeModel {
     ScanEngineOutcomeModel {
         engine: summary
             .tool
-            .clone()
+            .as_deref()
+            .map(kuzushi_core::modules::tool_display_name)
             .unwrap_or_else(|| "scan run".to_string()),
+        tool_key: summary.tool.clone(),
         outcome: normalized_engine_outcome(&summary.status).to_string(),
         run_ref: Some(summary.run_id.clone()),
         detail: summary.error.clone(),

@@ -50,10 +50,26 @@ fn summary_with_prompt_overrides(target: &Path, summary: RunSummary) -> RunSumma
 }
 
 fn summary_with_threat_model_digest(target: &Path, summary: RunSummary) -> RunSummary {
+    let summary = summary_with_threat_model_provenance(target, summary);
     if let Some(hash) = threat_model_sha256(target) {
         return summary.with_threat_model_sha256(Some(hash));
     }
     summary
+}
+
+/// Record which document governs this target and via which resolution step
+/// (scope file, ancestor file, or the persistent model), so review can
+/// answer "which model seeded this run".
+fn summary_with_threat_model_provenance(target: &Path, summary: RunSummary) -> RunSummary {
+    let Some(resolved) =
+        crate::capabilities::threat_model::resolve_threat_model(target, ".")
+    else {
+        return summary;
+    };
+    summary.with_threat_model_provenance(
+        Some(resolved.source_path.to_string_lossy().into_owned()),
+        Some(resolved.resolved_via.as_str().to_string()),
+    )
 }
 
 fn summary_with_env_fingerprint(summary: RunSummary) -> RunSummary {

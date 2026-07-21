@@ -74,7 +74,16 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchReverifyPatch,
     WorkbenchSuppress,
     WorkbenchOrderChain,
+    WorkbenchChainFold,
     WorkbenchCluster,
+    WorkbenchBacklogToggle,
+    /// One-key backlog decision; payload is the review verdict keyword fed
+    /// through the ordinary `decision <verdict> <reason>` path.
+    WorkbenchBacklogDecide(&'static str),
+    WorkbenchBacklogSeverityCycle,
+    WorkbenchBacklogToolCycle,
+    WorkbenchBacklogBulkDefer,
+    WorkbenchBacklogUndo,
     RecommendCursorPrevious,
     RecommendCursorNext,
     RecommendScanComponent,
@@ -120,6 +129,16 @@ pub(crate) enum ViewHotkeyAction {
     QuestionNext,
     QuestionPrevious,
     QuestionOther,
+    CampaignCursorPrevious,
+    CampaignCursorNext,
+    CampaignOpenDetail,
+    CampaignBackToList,
+    CampaignToggleExclude,
+    CampaignCycleWorkers,
+    CampaignLaunch,
+    CampaignKill,
+    CampaignShowPrompt,
+    CampaignRefresh,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

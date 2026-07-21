@@ -132,12 +132,150 @@ pub(crate) fn persist_full_mode_report(
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = ctx.finding_run_id();
+    let (added, updated) = store.fingerprint_delta(&report.findings)?;
     store.with_run_lifecycle(&scan_id, workspace.root(), || {
         for finding in &mut report.findings {
             finding.id = Some(store.insert_finding(&scan_id, finding)?);
         }
         Ok(((), report.findings.len()))
-    })
+    })?;
+    emit_full_mode_finding_delta(ctx, &store, added, updated, &report.findings)
+}
+
+/// Record the chunked run's store delta so `agentic-sast:scan strategy=chunked`
+/// receipts show real added/updated counts instead of an absent observation.
+/// A zero delta is still emitted: it is what lets a clean chunked scan offer
+/// the Report continuation truthfully.
+fn emit_full_mode_finding_delta(
+    ctx: &ToolExecutionContext<'_>,
+    store: &FindingStore,
+    added: u64,
+    updated: u64,
+    findings: &[crate::findings::Finding],
+) -> Result<()> {
+    let Some(observation) = ctx.run_observation() else {
+        return Ok(());
+    };
+    let store_watermark = store.projection_meta()?.applied_seq;
+    let finding_id_samples = findings
+        .iter()
+        .take(crate::run_lifecycle::MAX_FINDING_ID_SAMPLES)
+        .map(|finding| crate::run_lifecycle::SafeText::operator_visible(&finding.fingerprint))
+        .collect();
+    observation.emit(crate::run_lifecycle::RunItemRecord::new(
+        crate::run_lifecycle::RunItemId::new(),
+        crate::run_lifecycle::RunItemSource::Persistence,
+        crate::run_lifecycle::RunItemV1::FindingDelta {
+            delta: crate::run_lifecycle::FindingDeltaSummary {
+                added,
+                updated,
+                removed: 0,
+                store_watermark: crate::run_lifecycle::SafeText::operator_visible(
+                    store_watermark.to_string(),
+                ),
+                finding_id_samples,
+            },
+        },
+    ))
+}
+
+#[cfg(test)]
+mod persist_full_mode_report_tests {
+    use super::*;
+
+    #[test]
+    fn persist_emits_a_real_finding_delta() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(temp.path()).unwrap();
+        let mut report = test_report(vec![test_finding("rule-a"), test_finding("rule-b")]);
+
+        let delta = persisted_delta(temp.path(), &workspace, "full-mode-delta", &mut report);
+
+        assert_eq!((delta.added, delta.updated, delta.removed), (2, 0, 0));
+        assert!(!delta.store_watermark.as_str().contains("unavailable"));
+        assert_eq!(delta.finding_id_samples.len(), 2);
+    }
+
+    #[test]
+    fn zero_findings_still_emit_a_delta_observation() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(temp.path()).unwrap();
+        let mut report = test_report(Vec::new());
+
+        let delta = persisted_delta(temp.path(), &workspace, "full-mode-clean", &mut report);
+
+        assert_eq!((delta.added, delta.updated), (0, 0));
+        assert!(!delta.store_watermark.as_str().contains("unavailable"));
+    }
+
+    fn persisted_delta(
+        target: &std::path::Path,
+        workspace: &crate::WorkspaceTarget,
+        run_id: &str,
+        report: &mut crate::capabilities::full_mode_multi::FullModeReport,
+    ) -> crate::run_lifecycle::FindingDeltaSummary {
+        let config = crate::V2Config::default();
+        {
+            let trace =
+                crate::run_artifacts::TraceHandle::observed_jsonl_with_delivery_subscribers(
+                    target, run_id, None, None, None,
+                )
+                .unwrap();
+            let ctx = ToolExecutionContext {
+                config: &config,
+                workspace: Some(workspace),
+                findings_store: None,
+                trace: Some(&trace),
+                cancellation: None,
+                authorization: Default::default(),
+            };
+
+            persist_full_mode_report(&ctx, report).unwrap();
+            // The run-item writer commits asynchronously; dropping the trace
+            // joins the writer thread so the projection read sees the delta.
+        }
+
+        let projection = crate::run_lifecycle::load_run_projection(target, run_id)
+            .unwrap()
+            .projection;
+        assert_eq!(projection.finding_deltas.len(), 1);
+        projection.finding_deltas.into_iter().next().unwrap()
+    }
+
+    fn test_report(
+        findings: Vec<crate::findings::Finding>,
+    ) -> crate::capabilities::full_mode_multi::FullModeReport {
+        use crate::capabilities::full_mode_multi::{FullModePlan, FullModeReport};
+        FullModeReport {
+            findings,
+            plan: FullModePlan {
+                chunks: Vec::new(),
+                total_files: 1,
+                total_bytes: 64,
+                total_tokens: 16,
+            },
+            chunks_dispatched: 1,
+            chunks_failed: 0,
+            failed_chunk_errors: Vec::new(),
+            cost_usd: Some(0.0),
+            observed_cost_usd: 0.0,
+            unresolved_provider_spend: false,
+            dry_run: false,
+            first_chunk_error: None,
+        }
+    }
+
+    fn test_finding(rule_id: &str) -> crate::findings::Finding {
+        crate::findings::Finding::new_tool(
+            "full-mode",
+            rule_id,
+            "src/a.c",
+            42,
+            None,
+            crate::findings::Severity::High,
+            "test finding",
+        )
+    }
 }
 
 pub(crate) fn run_classifier_score_tool(

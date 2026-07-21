@@ -85,22 +85,30 @@ fn workbench_prompt_projects_the_selected_mode_token_and_placeholder() {
     app.set_shell_view(ShellView::Workbench);
 
     for (page, token, placeholder) in [
-        (WorkbenchPage::Map, "◇ MAP › ", "describe what to map"),
-        (WorkbenchPage::Scan, "▦ SCAN › ", "describe what to scan"),
+        (
+            WorkbenchPage::Map,
+            "◇ MAP › ",
+            "describe what to map · Esc list keys",
+        ),
+        (
+            WorkbenchPage::Scan,
+            "▦ SCAN › ",
+            "describe what to scan · Esc list keys",
+        ),
         (
             WorkbenchPage::Review,
             "▣ REVIEW › ",
-            "describe what to review",
+            "describe what to review · Esc list keys",
         ),
         (
             WorkbenchPage::Prove,
             "◎ PROVE › ",
-            "describe what to verify",
+            "describe what to verify · Esc list keys",
         ),
         (
             WorkbenchPage::Fix,
             "◆ FIX › ",
-            "describe the patch to draft",
+            "describe the patch to draft · Esc list keys",
         ),
     ] {
         app.router.workbench_mut().set_page(Some(page));
@@ -109,6 +117,16 @@ fn workbench_prompt_projects_the_selected_mode_token_and_placeholder() {
         assert_eq!(model.prefix, token);
         assert_eq!(model.placeholder.as_deref(), Some(placeholder));
     }
+}
+
+#[test]
+fn typing_hint_fires_exactly_once_per_session() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(app.ui_mut().take_typing_hint());
+    assert!(
+        !app.ui_mut().take_typing_hint(),
+        "typing hint must be one-shot"
+    );
 }
 
 #[test]

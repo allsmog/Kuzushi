@@ -26,7 +26,7 @@ fn review_queue_empty_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<
         Line::styled("∅ review queue empty", theme::muted()),
         Line::raw(fit(reason, width)),
         Line::styled("▸ findings", theme::accent()),
-        Line::styled("▸ filter completeness:open", theme::accent()),
+        Line::styled("▸ findings filter completeness:open", theme::accent()),
     ]
 }
 
@@ -127,7 +127,7 @@ fn compact_selected_detail_lines(
     let open_hint = if navigation_active {
         "Enter open"
     } else {
-        "F2 nav, then Enter open"
+        "Esc nav, then Enter open"
     };
     let action = Line::styled(
         fit(
@@ -611,7 +611,7 @@ mod tests {
             Rect::new(0, 0, 48, 6),
         ));
 
-        assert!(text.contains("F2 nav, then Enter open"), "{text}");
+        assert!(text.contains("Esc nav, then Enter open"), "{text}");
     }
 
     #[test]

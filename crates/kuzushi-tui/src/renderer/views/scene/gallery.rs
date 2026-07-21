@@ -305,7 +305,9 @@ fn append_page_tabs(spans: &mut Vec<Span<'static>>, app: &ShellApp, active: VizP
 fn page_tab_span(app: &ShellApp, page: VizPage, active: VizPage) -> Span<'static> {
     let mut label = page_nav_label(page).to_string();
     if !page_has_content(app, page) {
-        label.push('·');
+        // `∅` = page has no backing artifact yet; a `·` marker collides
+        // with the ` · ` tab separator and renders as `path· · dfd`.
+        label.push('∅');
     }
     if page == active {
         Span::styled(format!("[{label}]"), theme::accent())

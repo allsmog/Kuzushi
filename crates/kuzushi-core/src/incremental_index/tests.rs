@@ -111,20 +111,24 @@ fn full_snapshot_excludes_git_and_kuzushi_owned_state() {
     assert_eq!(snapshot.files[0].path, "src/lib.rs");
 }
 
+/// The skip is decided from `stat` alone — the oversized file is never
+/// read — and the rest of the workspace still indexes instead of one fat
+/// artifact failing the whole snapshot.
 #[test]
-fn oversized_source_file_fails_before_unbounded_read() {
+fn oversized_source_file_is_excluded_without_reading_it() {
     let temp = tempfile::tempdir().unwrap();
     let oversized = temp.path().join("oversized.bin");
     fs::File::create(&oversized)
         .unwrap()
         .set_len(MAX_INDEXED_FILE_BYTES + 1)
         .unwrap();
+    fs::write(temp.path().join("kept.rs"), "pub fn kept() {}\n").unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
 
-    let error = index_workspace_snapshot(&workspace).unwrap_err();
+    let snapshot = index_workspace_snapshot(&workspace).unwrap();
 
-    assert!(error.to_string().contains("safety limit"));
-    assert!(error.to_string().contains("oversized.bin"));
+    assert_eq!(snapshot.files.len(), 1);
+    assert_eq!(snapshot.files[0].path, "kept.rs");
 }
 
 #[test]
@@ -132,12 +136,14 @@ fn snapshot_budget_rejects_excess_files_and_bytes() {
     let mut file_budget = IndexBudget {
         files: MAX_INDEXED_SNAPSHOT_FILES,
         bytes: 0,
+        ..IndexBudget::default()
     };
     assert!(file_budget.record(0).is_err());
 
     let mut byte_budget = IndexBudget {
         files: 0,
         bytes: MAX_INDEXED_SNAPSHOT_BYTES,
+        ..IndexBudget::default()
     };
     assert!(byte_budget.record(1).is_err());
 }
@@ -241,19 +247,26 @@ fn watcher_ignores_owned_state_but_keeps_policy_signals() {
 
 #[test]
 fn state_aware_watcher_reports_v3_path_without_indexing_it() {
+    // Per-write run internals (live trace.jsonl appends) are the watcher
+    // storm source and are deliberately suppressed; the terminal done.json
+    // sentinel and non-run v3 state still surface as state paths, never as
+    // indexable changes.
     let event = Event::new(EventKind::Modify(ModifyKind::Data(
         notify::event::DataChange::Any,
     )))
-    .add_path("/repo/.kuzushi/v3/runs/run-1/trace.jsonl".into());
+    .add_path("/repo/.kuzushi/v3/runs/run-1/trace.jsonl".into())
+    .add_path("/repo/.kuzushi/v3/runs/run-1/done.json".into())
+    .add_path("/repo/.kuzushi/v3/campaigns/camp/queue.json".into());
 
     let (changes, state_paths) = classify_notify_event_with_state(Path::new("/repo"), event);
 
     assert!(changes.is_empty());
     assert_eq!(
         state_paths,
-        vec![PathBuf::from(
-            ".kuzushi/v3/runs/run-1/trace.jsonl"
-        )]
+        vec![
+            PathBuf::from(".kuzushi/v3/campaigns/camp/queue.json"),
+            PathBuf::from(".kuzushi/v3/runs/run-1/done.json"),
+        ]
     );
 }
 
@@ -655,4 +668,53 @@ fn git(target: &Path, args: &[&str]) {
         args.join(" "),
         String::from_utf8_lossy(&output.stderr)
     );
+}
+
+/// One oversized file (a core dump, a fat generated artifact) must neither
+/// fail the identity walk nor change the tree: exclusion is by size rule,
+/// so producer and verifier walks agree with or without the file present.
+#[test]
+fn oversized_file_is_deterministically_excluded_from_tree_identity() {
+    let target = tempfile::tempdir().unwrap();
+    fs::create_dir_all(target.path().join("src")).unwrap();
+    fs::write(target.path().join("src/main.rs"), "fn main() {}\n").unwrap();
+    let baseline = current_workspace_tree_hash(target.path()).unwrap();
+
+    let dump = fs::File::create(target.path().join("core")).unwrap();
+    dump.set_len(MAX_INDEXED_FILE_BYTES + 1).unwrap();
+    drop(dump);
+
+    assert_eq!(current_workspace_tree_hash(target.path()).unwrap(), baseline);
+    fs::remove_file(target.path().join("core")).unwrap();
+    assert_eq!(current_workspace_tree_hash(target.path()).unwrap(), baseline);
+}
+
+/// The hash-only registration must satisfy exactly what the attempt
+/// identity verifier reads: a target_snapshots row plus verifiable
+/// snapshot and tree objects — with no blobs written for file contents.
+#[test]
+fn tree_identity_registration_matches_the_live_tree_and_projects_a_row() {
+    let target = tempfile::tempdir().unwrap();
+    fs::create_dir_all(target.path().join("src")).unwrap();
+    fs::write(target.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+    let registered = register_workspace_tree_identity(&workspace).unwrap();
+
+    assert_eq!(
+        registered.tree_hash,
+        current_workspace_tree_hash(target.path()).unwrap()
+    );
+    assert_eq!(registered.file_count, 0, "identity stores no file rows");
+    let connection =
+        crate::sqlite_connection::open_read_only_file(&workspace.findings_db_path()).unwrap();
+    let (tree_hash, fingerprint): (String, String) = connection
+        .query_row(
+            "select tree_hash, workspace_root_fingerprint from target_snapshots where snapshot_hash = ?1",
+            [registered.snapshot_hash.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(tree_hash, registered.tree_hash);
+    assert_eq!(fingerprint, workspace_root_fingerprint(workspace.root()));
 }

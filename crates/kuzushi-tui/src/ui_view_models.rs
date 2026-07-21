@@ -163,10 +163,12 @@ pub(crate) use finding_summary::{
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{
     current_finding_for_detail, finding_detail_model_for_projection, findings_model,
-    selected_finding_detail_model, visible_finding_at_cursor, visible_finding_at_index,
-    visible_finding_position_for, visible_findings_len, visible_sorted_finding_alias_indices,
+    review_backlog_active, selected_finding_detail_model, visible_finding_at_cursor,
+    visible_finding_at_index, visible_finding_position_for, visible_findings_len,
+    visible_sorted_finding_alias_indices,
     CleanScanEmptyState, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, TriageSummaryModel,
+    FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel,
+    TriageSummaryModel,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
@@ -223,7 +225,8 @@ pub(crate) use permission_policy::{
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
     phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
-    EngagementHeaderModel, FixPhaseModel, LayoutDensity, MapPhaseModel, PhaseCockpitBody,
+    EngagementHeaderModel, FixPhaseModel, LayoutDensity, MapPhaseModel, NextScanRow,
+    NextScansState, PhaseCockpitBody,
     PhaseCockpitModel, PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId,
     PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel,
     RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel, ScanAttemptModel,
@@ -338,9 +341,10 @@ pub(crate) use viz_data::{
     ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
 };
 pub(crate) use workbench::{
-    active_review_queue_mode, active_workbench_page, workbench_presentation_snapshot,
-    workbench_report_command, workbench_reverify_control_hint, WorkbenchChromeModel, WorkbenchHint,
-    WorkbenchPresentationSnapshot, WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
+    active_review_queue_mode, active_workbench_page, work_liveness,
+    workbench_presentation_snapshot, workbench_report_command, workbench_reverify_control_hint,
+    WorkLiveness, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
+    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

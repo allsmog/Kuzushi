@@ -8,6 +8,8 @@ use crate::spend::SpendLimiter;
 use anyhow::{Context, Result};
 
 mod chunk_execution;
+#[cfg(test)]
+pub(crate) use chunk_execution::restore_absolute_lines;
 mod run_setup;
 
 pub fn run(
@@ -35,22 +37,115 @@ fn dispatch_full_mode_chunks(
     system_prompt: &str,
 ) -> Result<FullModeReport> {
     let mut chunks = FullModeChunkAccumulator::default();
+    // Once set, no further chunk is dispatched; every remaining chunk is
+    // recorded under this reason so a `failedChunkIds` retry can finish
+    // the plan while the findings gathered so far persist normally.
+    let mut stop_reason: Option<String> = None;
     for chunk in &plan.chunks {
         if should_skip_chunk(cfg, chunk.id) {
             continue;
         }
-        let chunk_result =
-            chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)?;
-        chunks.record(chunk.id, chunk_result)?;
+        if stop_reason.is_none() {
+            stop_reason = run_budget_stop_reason(cfg, chunks.cost_usd);
+        }
+        if let Some(reason) = &stop_reason {
+            chunks.record_failure(chunk.id, Some(reason.clone()));
+            continue;
+        }
+        match chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)
+        {
+            Ok(chunk_result) => chunks.record(chunk.id, chunk_result)?,
+            Err(error) if is_spend_cap_exhausted(&error) => {
+                let reason = format!("not dispatched: {error:#}");
+                chunks.record_failure(chunk.id, Some(reason.clone()));
+                stop_reason = Some(reason);
+            }
+            Err(error) => return Err(error),
+        }
     }
 
     Ok(chunks.into_report(plan))
+}
+
+/// A graceful stop keeps completed-chunk findings instead of losing the
+/// whole hunt: crossing `budgetUsd` (or exhausting a workspace spend cap)
+/// must not degrade into an external kill that discards every result.
+fn run_budget_stop_reason(cfg: &FullModeConfig, observed_cost_usd: f64) -> Option<String> {
+    let budget = cfg.run_budget_usd?;
+    (observed_cost_usd >= budget).then(|| {
+        format!(
+            "not dispatched: run budget ${budget:.2} exhausted \
+             (observed cost ${observed_cost_usd:.2})"
+        )
+    })
+}
+
+fn is_spend_cap_exhausted(error: &anyhow::Error) -> bool {
+    matches!(
+        error.downcast_ref::<crate::spend::SpendError>(),
+        Some(
+            crate::spend::SpendError::Exceeded { .. }
+                | crate::spend::SpendError::HardCeilingExceeded { .. }
+        )
+    )
 }
 
 fn should_skip_chunk(cfg: &FullModeConfig, chunk_id: u32) -> bool {
     cfg.failed_chunk_ids
         .as_ref()
         .is_some_and(|ids| !ids.contains(&chunk_id))
+}
+
+#[cfg(test)]
+mod graceful_stop_tests {
+    use super::{is_spend_cap_exhausted, run_budget_stop_reason};
+    use crate::capabilities::full_mode_multi::domain::FullModeConfig;
+    use anyhow::Context;
+
+    fn config_with_budget(budget: Option<f64>) -> FullModeConfig {
+        FullModeConfig {
+            run_budget_usd: budget,
+            ..FullModeConfig::default()
+        }
+    }
+
+    #[test]
+    fn no_budget_never_stops() {
+        assert_eq!(run_budget_stop_reason(&config_with_budget(None), 999.0), None);
+    }
+
+    #[test]
+    fn under_budget_keeps_dispatching() {
+        assert_eq!(
+            run_budget_stop_reason(&config_with_budget(Some(2.5)), 2.49),
+            None
+        );
+    }
+
+    #[test]
+    fn crossing_the_budget_stops_with_an_actionable_reason() {
+        let reason = run_budget_stop_reason(&config_with_budget(Some(2.5)), 2.61)
+            .expect("crossing the run budget must stop dispatch");
+        assert!(reason.contains("$2.50"), "reason should name the budget: {reason}");
+        assert!(reason.contains("$2.61"), "reason should name observed cost: {reason}");
+    }
+
+    #[test]
+    fn spend_cap_errors_are_a_graceful_stop_even_behind_context() {
+        let error = anyhow::Error::from(crate::spend::SpendError::Exceeded {
+            op: "full-mode-multi",
+            cap: 1.0,
+            committed: 0.9,
+            request: 0.2,
+        })
+        .context("full_mode_multi: deposit failed");
+        assert!(is_spend_cap_exhausted(&error));
+    }
+
+    #[test]
+    fn ordinary_chunk_errors_still_abort_the_hunt() {
+        assert!(!is_spend_cap_exhausted(&anyhow::anyhow!("bridge crashed")));
+    }
 }
 
 #[derive(Default)]

@@ -4,9 +4,9 @@ contract: cockpit-spine-v1
 phase: review
 size: 60x20
 ---
-KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining
+KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger
         candidates
 │▸ FINDINGS · 6
 │▸F-0001  C [●●●] s1 @? CFM open       SQL injection...

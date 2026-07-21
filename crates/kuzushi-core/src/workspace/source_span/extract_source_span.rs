@@ -1,5 +1,9 @@
 use super::*;
 
+/// Files larger than this cannot be cited: the whole file is loaded to
+/// resolve line/column spans, and the target repository is untrusted.
+const MAX_CITED_SOURCE_BYTES: usize = 64 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceSpan {
@@ -43,7 +47,9 @@ pub fn extract_source_span(
         );
     }
 
-    let bytes = fs::read(&canonical_file)
+    // The file lives in the scanned repository: cap the read so a hostile
+    // multi-gigabyte "source file" cannot exhaust memory during citation.
+    let bytes = crate::bounded_file::read_regular_bytes(&canonical_file, MAX_CITED_SOURCE_BYTES)
         .with_context(|| format!("failed to read source file {}", canonical_file.display()))?;
     if looks_binaryish(&bytes) {
         bail!(

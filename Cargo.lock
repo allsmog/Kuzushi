@@ -1797,6 +1797,7 @@ dependencies = [
  "kuzushi-core",
  "kuzushi-openai",
  "kuzushi-tui",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -1878,6 +1879,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-fleet"
+version = "0.24.0-alpha.8"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "kuzushi-mcp-clang"
 version = "0.24.0-alpha.8"
 dependencies = [
@@ -1939,6 +1952,19 @@ dependencies = [
  "anyhow",
  "async-trait",
  "kuzushi-mcp-common",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-findings"
+version = "0.24.0-alpha.8"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "rusqlite",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2078,6 +2104,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "strum",
  "tempfile",
  "unicode-width",
  "uuid",

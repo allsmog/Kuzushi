@@ -469,6 +469,70 @@ mod tests {
         assert!(error.contains("markdown-bundle preview is directory-shaped"));
     }
 
+    #[test]
+    fn markdown_bundle_neutralizes_hostile_finding_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-hostile", workspace.root(), "completed")
+            .unwrap();
+        let mut finding = Finding::new_tool(
+            "burp-har",
+            "http-evidence",
+            "src/a|pp.ts",
+            12,
+            None,
+            Severity::Info,
+            "GET https://api.lab.test/x (imported)",
+        )
+        .with_evidence(vec![FindingEvidence {
+            kind: "sink\n# heading-kind".to_string(),
+            file_path: "src/x\n|y.ts".to_string(),
+            line: 12,
+            snippet: "payload\n```\n# injected markdown\n```tail".to_string(),
+            rationale: "capture-derived".to_string(),
+            confidence: 50,
+            ..Default::default()
+        }]);
+        finding.title = "Evil\n# fake title".to_string();
+        store.insert_finding("run-hostile", &finding).unwrap();
+
+        let bundle_dir = tmp.path().join("bundle");
+        export_workspace_findings(
+            &workspace,
+            &bundle_dir,
+            Some(WorkspaceExportFormat::MarkdownBundle),
+        )
+        .unwrap();
+
+        let finding_doc = fs::read_dir(bundle_dir.join("findings"))
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .path();
+        let markdown = fs::read_to_string(finding_doc).unwrap();
+        // Snippet fence is longer than any backtick run inside the snippet,
+        // so the embedded ``` cannot terminate it early.
+        let fence_lines: Vec<&str> = markdown
+            .lines()
+            .filter(|line| line.trim_end() == "````")
+            .collect();
+        assert_eq!(fence_lines.len(), 2, "expected 4-backtick fences:\n{markdown}");
+        // Newlines in inline fields collapse to spaces instead of minting
+        // injected markdown lines. (The store itself normalizes the unknown
+        // evidence kind to "reasoning" before the bundle ever sees it.)
+        assert!(markdown.contains("· src/x |y.ts:12"), "{markdown}");
+        assert!(
+            !markdown.lines().any(|line| line == "# fake title"),
+            "{markdown}"
+        );
+
+        let readme = fs::read_to_string(bundle_dir.join("README.md")).unwrap();
+        assert!(readme.contains("src/a\\|pp.ts"), "{readme}");
+    }
+
     fn fixture_finding(rule_id: &str, severity: Severity, line: u32) -> Finding {
         Finding::new_tool(
             "fixture",

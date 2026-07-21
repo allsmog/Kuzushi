@@ -31,8 +31,39 @@ pub(crate) fn parse_build_input(
                 .unwrap_or_else(|| DEFAULT_THREAT_MODEL_GUIDANCE.to_string()),
         ),
         model: build_model(input, ctx, flavor)?,
+        pipeline: read_pipeline(input)?,
+        budget_usd: read_budget_usd(input)?,
+        history_depth: read_usize(input, &["historyDepth", "history_depth"], 300, 0),
         target,
     })
+}
+
+fn read_pipeline(input: &Value) -> Result<String> {
+    let Some(pipeline) = read_string(input, &["pipeline"]) else {
+        return Ok("single".to_string());
+    };
+    let pipeline = pipeline.to_lowercase();
+    if !VALID_PIPELINES.contains(&pipeline.as_str()) {
+        anyhow::bail!(
+            "threat-model:build pipeline must be one of {}, got {pipeline:?}",
+            VALID_PIPELINES.join(", ")
+        );
+    }
+    Ok(pipeline)
+}
+
+fn read_budget_usd(input: &Value) -> Result<Option<f64>> {
+    let Some(budget) = input.get("budgetUsd").or_else(|| input.get("budget_usd")) else {
+        return Ok(None);
+    };
+    let budget = budget
+        .as_f64()
+        .context("threat-model:build budgetUsd must be a number")?;
+    anyhow::ensure!(
+        budget.is_finite() && budget > 0.0,
+        "threat-model:build budgetUsd must be a positive number, got {budget}"
+    );
+    Ok(Some(budget))
 }
 
 fn context_limit(input: &Value) -> usize {

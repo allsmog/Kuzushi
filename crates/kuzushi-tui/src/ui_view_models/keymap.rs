@@ -196,7 +196,10 @@ fn active_view_keymap_section(app: &ShellApp) -> KeymapSection {
         .overlay_origin()
         .unwrap_or(crate::ShellView::Keymap);
     let mut seen = BTreeSet::new();
-    let mut rows = vec![KeymapBindingRow::new("F2", "enter navigation mode")];
+    let mut rows = vec![KeymapBindingRow::new(
+        "Esc",
+        "enter navigation mode (empty prompt)",
+    )];
     rows.extend(
         app.view_keybindings_for_view(origin)
             .into_iter()

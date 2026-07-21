@@ -2928,7 +2928,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "3d3046a9178a8849645d132f680776ec88a099356ec03a34749c8d99f00438ea",
+            "6ce6bf6190195b788942eb0c910b85d4576ee869ff53d3662a6a99b2b742ceb8",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }
@@ -2952,6 +2952,38 @@ process.stdin.on("end", () => {
                 );
             }
         }
+    }
+
+    /// Docs-parity gate, same review spirit as the policy fingerprint above:
+    /// a tool cannot ship without at least a mention in the operator handbook
+    /// or the mode-parity matrix. Substring match on the full
+    /// `<module>:<verb>` name keeps the gate deterministic and free of any
+    /// markdown parsing.
+    #[test]
+    fn every_builtin_tool_is_documented_for_operators() {
+        let docs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        let handbook = fs::read_to_string(docs.join("OPERATOR.md"))
+            .expect("docs/OPERATOR.md is the operator handbook and must exist");
+        let parity = fs::read_to_string(docs.join("assessments/mode-parity.md"))
+            .expect("docs/assessments/mode-parity.md must exist");
+
+        let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        let mut undocumented: Vec<String> = registry
+            .tools
+            .values()
+            .map(|tool| tool.name.to_string())
+            .filter(|name| !handbook.contains(name.as_str()) && !parity.contains(name.as_str()))
+            .collect();
+        undocumented.sort();
+
+        assert!(
+            undocumented.is_empty(),
+            "built-in tools missing from both docs/OPERATOR.md and \
+             docs/assessments/mode-parity.md — document each one (operator \
+             handbook for user-facing tools, mode-parity matrix or its \
+             internal-tools appendix otherwise):\n{}",
+            undocumented.join("\n")
+        );
     }
 
     fn builtin_policy_row(tool: &ToolDescriptor) -> String {

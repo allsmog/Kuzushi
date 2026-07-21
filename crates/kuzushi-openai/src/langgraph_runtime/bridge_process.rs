@@ -560,6 +560,7 @@ pub(super) fn mcp_binary_env_defaults() -> Vec<(&'static str, PathBuf)> {
         ("KUZUSHI_MCP_REVNG_BIN", "kuzushi-mcp-revng"),
         ("KUZUSHI_MCP_CONTEXT_BIN", "kuzushi-mcp-context"),
         ("KUZUSHI_MCP_ENTRY_POINTS_BIN", "kuzushi-mcp-entry-points"),
+        ("KUZUSHI_MCP_FINDINGS_BIN", "kuzushi-mcp-findings"),
         ("KUZUSHI_MCP_THREAT_MODEL_BIN", "kuzushi-mcp-threat-model"),
         ("KUZUSHI_MCP_THREAT_INTEL_BIN", "kuzushi-mcp-threat-intel"),
         ("KUZUSHI_MCP_X_RAY_BIN", "kuzushi-mcp-x-ray"),

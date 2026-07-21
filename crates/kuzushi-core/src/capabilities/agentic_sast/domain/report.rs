@@ -76,24 +76,9 @@ fn append_top_findings(lines: &mut Vec<String>, findings: &[Finding]) {
     }
     lines.push(String::new());
     lines.push("Top findings:".to_string());
-    lines.extend(findings.iter().take(10).map(finding_line));
-    append_remaining_count(lines, findings.len());
-}
-
-fn finding_line(finding: &Finding) -> String {
-    format!(
-        "  - {} - {} - {}:{}",
-        finding.severity.as_str(),
-        finding.rule_id,
-        finding.file_path,
-        finding.start_line
-    )
-}
-
-fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
-    if finding_count > 10 {
-        lines.push(format!("  ... and {} more", finding_count - 10));
-    }
+    lines.extend(crate::findings::presentation::top_finding_lines(
+        findings, 10,
+    ));
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -101,4 +86,10 @@ fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
 pub struct AgenticSastPersistedRun {
     pub run_id: String,
     pub findings_db: String,
+    /// Distinct fingerprints not present in the store before this run.
+    #[serde(default)]
+    pub findings_added: u64,
+    /// Distinct fingerprints re-observed over an existing store finding.
+    #[serde(default)]
+    pub findings_updated: u64,
 }

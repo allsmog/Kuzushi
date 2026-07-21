@@ -281,6 +281,7 @@ mod tests {
             )],
             None,
             false,
+            &PromptEnrichment::default(),
         );
 
         assert!(prompt
@@ -313,6 +314,7 @@ mod tests {
             )],
             None,
             false,
+            &PromptEnrichment::default(),
         );
 
         let begin = prompt.find(crate::prompts::UNTRUSTED_REPO_BEGIN).unwrap();

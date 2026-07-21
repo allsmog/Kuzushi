@@ -236,11 +236,7 @@ fn identity_line(top: &WorkbenchTopBar, width: usize) -> Line<'static> {
 }
 
 fn identity_atoms(top: &WorkbenchTopBar) -> Vec<(String, ratatui::style::Style)> {
-    let live_atom = if top.live {
-        ("● LIVE".to_string(), theme::success())
-    } else {
-        ("○ idle".to_string(), theme::subtle())
-    };
+    let live_atom = liveness_atom(top.liveness);
     let mut atoms = vec![
         (top.brand.to_string(), theme::heading()),
         (
@@ -253,6 +249,18 @@ fn identity_atoms(top: &WorkbenchTopBar) -> Vec<(String, ratatui::style::Style)>
     atoms.extend(identity_phase_atom(top));
     atoms.push((format!("modules:{}", top.target), theme::muted()));
     atoms
+}
+
+fn liveness_atom(liveness: crate::ui_view_models::WorkLiveness) -> (String, ratatui::style::Style) {
+    match liveness {
+        crate::ui_view_models::WorkLiveness::Live => ("● LIVE".to_string(), theme::success()),
+        // External writers (another session, a detached campaign) are
+        // changing workspace state: not our work, but not idle either.
+        crate::ui_view_models::WorkLiveness::ExternalSync => {
+            ("◌ workspace sync".to_string(), theme::warn())
+        }
+        crate::ui_view_models::WorkLiveness::Idle => ("○ idle".to_string(), theme::subtle()),
+    }
 }
 
 fn page_mode_style(page: WorkbenchPage) -> ratatui::style::Style {

@@ -103,6 +103,7 @@ impl ShellApp {
                 self.router.report_mut().set_origin(origin);
             }
         }
+        self.refresh_workspace_trend();
         self.set_shell_view(ShellView::Report);
         self.set_input_mode(InputMode::Navigate);
     }
@@ -948,10 +949,11 @@ impl ShellApp {
     pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {
         self.invalidate_view_hydration();
         self.domain.apply_workspace_changes(changes);
-        let target = self.target_owned();
-        let mut cache = self.workbench_cache().borrow_mut();
-        cache.invalidate_workspace_files();
-        cache.git_metadata(target.as_deref());
+        // Invalidate only — git metadata refills through async view
+        // hydration. Refilling here ran `git status` on the UI thread for
+        // every watcher-reported source change, which stalls input for
+        // seconds on large targets.
+        self.workbench_cache().borrow_mut().invalidate_workspace_files();
     }
 
     pub(crate) fn apply_external_workspace_state_change(

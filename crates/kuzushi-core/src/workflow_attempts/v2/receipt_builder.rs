@@ -99,12 +99,31 @@ impl<'a> PhaseReceiptBuilder<'a> {
             return Ok(Some(inspect_continuation(self.final_run()?, reason)));
         }
         if self.status != RunItemStatus::Completed {
-            return Ok(Some(inspect_continuation(
-                self.final_run()?,
-                "inspect the incomplete phase evidence before retrying",
-            )));
+            return Ok(Some(self.failure_continuation()?));
         }
         Ok(None)
+    }
+
+    /// A failed Map asks the operator to rebuild the context (Retry maps to
+    /// the card's run-again action); other failed phases inspect with the
+    /// recognized remediation drafted in. Unknown classes stay generic.
+    fn failure_continuation(&self) -> Result<WorkflowContinuation> {
+        let remediation = self.terminal_remediation();
+        if self.phase == WorkflowPhase::Map {
+            return Ok(WorkflowContinuation::Retry {
+                reason: SafeText::operator_visible(map_rebuild_reason(remediation)),
+            });
+        }
+        let reason = remediation.map_or_else(
+            || "inspect the incomplete phase evidence before retrying".to_string(),
+            |found| format!("{} — {}, then retry", found.cause, found.action),
+        );
+        Ok(inspect_continuation(self.final_run()?, &reason))
+    }
+
+    fn terminal_remediation(&self) -> Option<super::failure_remediation::FailureRemediation> {
+        let terminal = self.projections.last()?.terminal.as_ref()?;
+        super::failure_remediation::remediation_for(terminal.summary.as_str())
     }
 
     fn final_run(&self) -> Result<RunId> {
@@ -164,10 +183,13 @@ fn aggregate_cost(projections: &[RunProjection]) -> Result<RuntimeCostReport> {
     )
 }
 
+/// Each run's LAST finding delta is its authoritative end-of-run store diff:
+/// an orchestrator (e.g. `sast:scan`) emits a whole-scan diff after its inner
+/// engines have emitted theirs, and summing nested deltas would double-count.
 fn aggregate_finding_delta(projections: &[RunProjection]) -> Result<FindingDeltaSummary> {
     let deltas = projections
         .iter()
-        .flat_map(|projection| projection.finding_deltas.iter())
+        .filter_map(|projection| projection.finding_deltas.last())
         .collect::<Vec<_>>();
     Ok(FindingDeltaSummary {
         added: sum_delta(&deltas, |delta| delta.added)?,
@@ -279,6 +301,16 @@ fn inspect_continuation(run_id: RunId, reason: &str) -> WorkflowContinuation {
     }
 }
 
+fn map_rebuild_reason(
+    remediation: Option<super::failure_remediation::FailureRemediation>,
+) -> String {
+    remediation.map_or_else(
+        || "rebuild the current-revision map context after inspecting the failure evidence"
+            .to_string(),
+        |found| format!("rebuild the map context — {}: {} first", found.cause, found.action),
+    )
+}
+
 fn offered_actions(
     final_run: RunId,
     primary: &WorkflowContinuation,
@@ -302,7 +334,9 @@ fn offered_actions(
         );
     }
     push_unique(&mut offered, inspect);
-    push_unique(&mut offered, retry);
+    if !matches!(primary, WorkflowContinuation::Retry { .. }) {
+        push_unique(&mut offered, retry);
+    }
     offered
 }
 

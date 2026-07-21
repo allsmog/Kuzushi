@@ -42,7 +42,7 @@ fn cost_footer_stage_line(width: usize, footer: &CostScreenFooter) -> String {
     let left = format!(" stage {} · routing direct", footer.stage);
     let right = format!("Ctrl+C quit · findings {}", footer.findings);
     let gap = width
-        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(display_width(&left) + display_width(&right))
         .saturating_sub(1);
     format!("{left}{}{right}", " ".repeat(gap))
 }

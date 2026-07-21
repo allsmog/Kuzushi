@@ -74,7 +74,7 @@ pub fn emit_preparation_rejection(
         RunItemSource::Workflow,
         RunItemV1::TerminalOutcome {
             status: RunItemStatus::Failed,
-            summary: SafeText::operator_visible(detail),
+            summary: SafeText::condensed_line(detail),
             cost: RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
             continuation: WorkflowContinuation::NoFurtherAction {
                 reason: SafeText::operator_visible("correct the rejected request before retrying"),

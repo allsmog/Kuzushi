@@ -86,6 +86,18 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "live + recent run registry",
     },
     ShellCommandSpec {
+        command: "campaign [id]",
+        aliases: &["/campaign", "campaigns"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "campaign deck: planned job matrix + dispatcher queue state",
+    },
+    ShellCommandSpec {
+        command: "coverage",
+        aliases: &["/coverage"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "coverage matrix: shards × threat sources with campaign progress + finding counts",
+    },
+    ShellCommandSpec {
         command: "jobs -k <runId>",
         aliases: &["jobs kill <runId>", "jobs cancel <runId>"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -120,6 +132,18 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["handoff", "/handoff", "failure", "/failure"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "latest bounded failure handoff",
+    },
+    ShellCommandSpec {
+        command: "verify <finding>",
+        aliases: &["verify F-0001", "/verify F-0001"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "verify a finding's exploitability (runs verify:finding)",
+    },
+    ShellCommandSpec {
+        command: "patch <finding>",
+        aliases: &["patch F-0001", "/patch F-0001"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "draft a remediation for a finding (runs patch:finding)",
     },
     ShellCommandSpec {
         command: "patch apply",

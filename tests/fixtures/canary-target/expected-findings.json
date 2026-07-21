@@ -1,0 +1,41 @@
+{
+  "description": "Planted-findings manifest for scanner-fidelity checks. Tier-1 asserts the ingest contract (severity ceilings, class enum, clustering) deterministically; tier-2 (opt-in, spends LLM) asserts recall and tier-capping on a real scan. If every plant comes back critical, trust-boundary calibration is not being applied.",
+  "plants": [
+    {
+      "id": "plant-a",
+      "file": "src/kvsnapshot/file_server.c",
+      "line": 11,
+      "lineWindow": 5,
+      "class": "mem-oob-write",
+      "claimedSeverity": "P0",
+      "precondition": "unauth-network",
+      "expectedSeverity": "critical",
+      "expectCapped": false,
+      "why": "Pre-auth network write primitive: wire-controlled length into a fixed buffer with no bound check. P0 stands."
+    },
+    {
+      "id": "plant-b",
+      "file": "src/agent/oracle_handler.c",
+      "line": 10,
+      "lineWindow": 5,
+      "class": "injection",
+      "claimedSeverity": "P0",
+      "precondition": "authed-role",
+      "expectedSeverity": "high",
+      "expectCapped": true,
+      "why": "Calibration trap: real command injection, but reachable only by an authenticated operator role. The authed-role ceiling is high \u2014 reporting P0 here means calibration is not applied."
+    },
+    {
+      "id": "plant-c",
+      "file": "src/utils/metrics.c",
+      "line": 8,
+      "lineWindow": 5,
+      "class": "info-leak",
+      "claimedSeverity": "P2",
+      "precondition": "local-uid",
+      "expectedSeverity": "medium",
+      "expectCapped": false,
+      "why": "Secret written to a world-readable log, exploitable only with a local uid. P2 stands."
+    }
+  ]
+}

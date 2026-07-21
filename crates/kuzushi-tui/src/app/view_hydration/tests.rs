@@ -105,6 +105,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::TargetProfile(TargetProfile::conservative())
         }
         ViewHydrationKey::MapArtifacts => ViewHydrationValue::MapArtifacts(false),
+        ViewHydrationKey::ScanRecommendations => ViewHydrationValue::ScanRecommendations(
+            ScanRecommendationsState::Ready(Vec::new()),
+        ),
         ViewHydrationKey::TargetBase => ViewHydrationValue::TargetBase("target".to_string()),
     }
 }

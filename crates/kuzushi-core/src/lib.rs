@@ -10,7 +10,7 @@ macro_rules! public_modules {
 public_modules!(
     agent_router, artifact_kb, attachments, attack_surface, capabilities, carlini_threat_hunt,
     classifier_gate, code_nav, concurrency, config, content_store, context, deep_auditor, demo, dep_hygiene, diff_scope,
-    engagement, event_log, events, evidence, findings, full_mode_multi, iac_scan, identity, incremental_index,
+    engagement, event_log, events, evidence, findings, fleet, full_mode_multi, iac_scan, identity, incremental_index,
     license_scan, modules, offense, options, patch, plugin_sandbox, pr_comment, prompt_stack, prompts, proof, query, recon,
     remediation, report, repository_inventory, run_artifacts, run_lifecycle,
     session_transcript,
@@ -25,9 +25,15 @@ pub(crate) mod artifact_contract;
 pub(crate) mod bounded_file;
 pub(crate) mod bounded_subprocess;
 pub(crate) mod codeql_build_mode;
+#[cfg(test)]
+mod env_boundary_lint;
 pub(crate) mod file_lock;
 pub(crate) mod fs_atomic;
+pub(crate) mod git_rev;
+pub(crate) mod jsonl_tail;
 pub(crate) mod module_result;
+#[cfg(test)]
+mod panic_surface_lint;
 pub(crate) mod process_lookup;
 pub(crate) mod sqlite_connection;
 pub(crate) mod structured_output;

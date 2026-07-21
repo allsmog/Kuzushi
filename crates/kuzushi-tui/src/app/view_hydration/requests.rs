@@ -113,6 +113,7 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
         ViewHydrationKey::HarnessFile,
     ]);
     append_scan_receipt_keys(app, keys);
+    append_scan_recommendation_key(app, keys);
     let Some(target) = app.target() else {
         return;
     };
@@ -121,6 +122,15 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
             path: target.join(relative),
         });
     }
+}
+
+/// The recommender fold runs git diffs and a repo walk, so it hydrates only
+/// while the Map page could actually show the rows.
+fn append_scan_recommendation_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Map {
+        return;
+    }
+    keys.push(ViewHydrationKey::ScanRecommendations);
 }
 
 fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {

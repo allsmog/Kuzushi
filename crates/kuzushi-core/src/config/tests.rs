@@ -1,33 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
-    use std::{env, fs};
-
-    struct EnvVarGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &std::path::Path) -> Self {
-            let prior = env::var_os(key);
-            unsafe {
-                env::set_var(key, value);
-            }
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prior {
-                    Some(value) => env::set_var(self.key, value),
-                    None => env::remove_var(self.key),
-                }
-            }
-        }
-    }
+    use std::fs;
 
     #[test]
     fn loads_defaults_without_files() {
@@ -263,8 +237,9 @@ prompt_variant = "   "
 
     #[test]
     fn persists_global_model_selection_to_global_config() {
+        let _env = crate::test_env::config_env_lock();
         let tmp = tempfile::tempdir().unwrap();
-        let _home = EnvVarGuard::set("HOME", tmp.path());
+        let _home = crate::test_env::ScopedEnv::set("HOME", tmp.path());
 
         let path = persist_global_model_selection("openai:gpt-5.5", Some("xhigh")).unwrap();
         let body = fs::read_to_string(&path).unwrap();
@@ -438,14 +413,11 @@ worker_watchdog_timeout_ms = 120000
 
     #[test]
     fn env_var_enables_anthropic_oauth_with_defaults() {
+        let _env = crate::test_env::config_env_lock();
         // We use a temp HOME so the env override has somewhere to anchor.
         let tmp = tempfile::tempdir().unwrap();
-        // Save previous env values so we restore them; tests share the process env.
-        let prev_enable = env::var("KUZUSHI_ANTHROPIC_OAUTH").ok();
-        let prev_creds = env::var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS").ok();
-        unsafe {
-            env::set_var("KUZUSHI_ANTHROPIC_OAUTH", "1");
-        }
+        let _enable = crate::test_env::ScopedEnv::set("KUZUSHI_ANTHROPIC_OAUTH", "1");
+        let _creds = crate::test_env::ScopedEnv::unset("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS");
 
         let config = load_config(ConfigPaths {
             home_dir: tmp.path().join("home"),
@@ -453,58 +425,25 @@ worker_watchdog_timeout_ms = 120000
         })
         .unwrap();
 
-        // Restore env regardless of assertion outcome.
-        let restore = || unsafe {
-            match prev_enable.clone() {
-                Some(v) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH", v),
-                None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH"),
-            }
-            match prev_creds.clone() {
-                Some(v) => env::set_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS", v),
-                None => env::remove_var("KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS"),
-            }
-        };
-
         assert!(
             config.runtime.anthropic_oauth.is_some(),
             "expected env override to enable anthropic_oauth"
         );
-        restore();
     }
 
     #[test]
     fn legacy_product_behavior_env_vars_do_not_override_config() {
+        let _env = crate::test_env::config_env_lock();
         let tmp = tempfile::tempdir().unwrap();
-        let prev_budget = env::var("KUZUSHI_BUDGET_USD").ok();
-        let prev_ceiling = env::var("KUZUSHI_MAX_USD_PER_RUN").ok();
-        let prev_thinking = env::var("KUZUSHI_THINKING_LEVEL").ok();
-        unsafe {
-            env::set_var("KUZUSHI_BUDGET_USD", "99");
-            env::set_var("KUZUSHI_MAX_USD_PER_RUN", "123");
-            env::set_var("KUZUSHI_THINKING_LEVEL", "xhigh");
-        }
-
-        let restore = || unsafe {
-            match prev_budget.clone() {
-                Some(v) => env::set_var("KUZUSHI_BUDGET_USD", v),
-                None => env::remove_var("KUZUSHI_BUDGET_USD"),
-            }
-            match prev_ceiling.clone() {
-                Some(v) => env::set_var("KUZUSHI_MAX_USD_PER_RUN", v),
-                None => env::remove_var("KUZUSHI_MAX_USD_PER_RUN"),
-            }
-            match prev_thinking.clone() {
-                Some(v) => env::set_var("KUZUSHI_THINKING_LEVEL", v),
-                None => env::remove_var("KUZUSHI_THINKING_LEVEL"),
-            }
-        };
+        let _budget = crate::test_env::ScopedEnv::set("KUZUSHI_BUDGET_USD", "99");
+        let _ceiling = crate::test_env::ScopedEnv::set("KUZUSHI_MAX_USD_PER_RUN", "123");
+        let _thinking = crate::test_env::ScopedEnv::set("KUZUSHI_THINKING_LEVEL", "xhigh");
 
         let config = load_config(ConfigPaths {
             home_dir: tmp.path().join("home"),
             target_dir: None,
-        });
-        restore();
-        let config = config.unwrap();
+        })
+        .unwrap();
 
         assert_eq!(config.operator.session_budget_usd, None);
         assert_eq!(config.operator.spend_hard_ceiling_usd, None);

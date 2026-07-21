@@ -7,6 +7,7 @@ pub enum Operation {
     DeepAudit,
     FullModeMulti,
     Patch,
+    ThreatModelStaged,
 }
 
 impl Operation {
@@ -17,6 +18,7 @@ impl Operation {
             Self::DeepAudit => "deep_audit",
             Self::FullModeMulti => "full_mode_multi",
             Self::Patch => "patch",
+            Self::ThreatModelStaged => "threat_model_staged",
         }
     }
 
@@ -27,6 +29,7 @@ impl Operation {
             "deep_audit" => Some(Self::DeepAudit),
             "full_mode_multi" => Some(Self::FullModeMulti),
             "patch" => Some(Self::Patch),
+            "threat_model_staged" => Some(Self::ThreatModelStaged),
             _ => None,
         }
     }
@@ -38,6 +41,7 @@ impl Operation {
             Self::DeepAudit,
             Self::FullModeMulti,
             Self::Patch,
+            Self::ThreatModelStaged,
         ]
     }
 }

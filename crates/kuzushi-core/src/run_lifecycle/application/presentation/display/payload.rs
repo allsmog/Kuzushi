@@ -114,18 +114,46 @@ fn model_call_lines(value: &ModelCallPresentationV1) -> Vec<String> {
 }
 
 fn result_lines(value: &ResultSummaryPresentationV1) -> Vec<String> {
+    // Operator label, not the registry key: `Result · Plan campaign jobs`
+    // instead of `Result · campaign:plan`. Keys stay in run artifacts and
+    // replay for grep-ability.
     let mut lines = vec![format!(
         "Result · {} · {} · {}",
-        value.tool, value.status, value.summary
+        crate::modules::tool_display_name(value.tool.as_str()),
+        value.status,
+        value.summary
     )];
-    lines.extend(value.output_lines.iter().map(|line| format!("  | {line}")));
+    // Single-line tool outputs are routinely the summary restated; echoing
+    // that line as a preview row directly under the heading is pure noise.
+    let summary_text = value.summary.as_str().trim();
+    lines.extend(
+        value
+            .output_lines
+            .iter()
+            .filter(|line| line.as_str().trim() != summary_text)
+            .map(|line| format!("  | {line}")),
+    );
+    // The output preview frequently already ends with the operator-facing
+    // warning/error text; repeating it verbatim reads as a rendering bug.
+    let previewed = value
+        .output_lines
+        .iter()
+        .map(|line| line.as_str().trim())
+        .collect::<std::collections::BTreeSet<_>>();
     lines.extend(
         value
             .warnings
             .iter()
+            .filter(|message| !previewed.contains(message.as_str().trim()))
             .map(|message| format!("  ⚠ {message}")),
     );
-    lines.extend(value.errors.iter().map(|message| format!("  ✗ {message}")));
+    lines.extend(
+        value
+            .errors
+            .iter()
+            .filter(|message| !previewed.contains(message.as_str().trim()))
+            .map(|message| format!("  ✗ {message}")),
+    );
     append_result_artifacts(&mut lines, &value.artifacts);
     lines
 }

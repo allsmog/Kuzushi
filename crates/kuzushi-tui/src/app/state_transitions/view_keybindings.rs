@@ -1,5 +1,5 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, catalog_keybindings, home_keybindings,
+    activity_keybindings, actor_detail_keybindings, campaign_keybindings, catalog_keybindings, home_keybindings,
     prompts_editor_keybindings, recommend_keybindings, threat_keybindings, tune_keybindings,
     workbench_keybindings,
 };
@@ -39,6 +39,7 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self, view: ShellView) -> Vec<ViewKeybinding> {
         match view {
+            ShellView::Campaign => campaign_keybindings(),
             ShellView::Catalog => catalog_keybindings(),
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(self),
@@ -118,5 +119,115 @@ impl ShellApp {
         self.scan().is_some_and(|scan| scan.running)
             && self.scan_cancel_token().is_some()
             && self.is_scan_paused()
+    }
+}
+
+#[cfg(test)]
+mod keymap_collision_tests {
+    use super::super::view_keybinding_helpers::{
+        pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
+    };
+    use super::super::view_keybinding_groups::activity_keybindings;
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    /// Dispatch is first-match over the composed list, so a duplicate trigger
+    /// silently shadows everything after it. Shadowing the shared scroll base
+    /// or the universal Esc-back is the documented rebind pattern; any other
+    /// duplicate is an accidental collision the operator cannot discover.
+    fn assert_no_accidental_collisions(context: &str, binds: &[ViewKeybinding]) {
+        for (index, binding) in binds.iter().enumerate() {
+            for shadowed in binds[index + 1..]
+                .iter()
+                .filter(|later| later.trigger == binding.trigger)
+                .filter(|later| later.action != binding.action)
+            {
+                assert!(
+                    matches!(
+                        shadowed.action,
+                        ViewHotkeyAction::ViewScrollUp
+                            | ViewHotkeyAction::ViewScrollDown
+                            | ViewHotkeyAction::ViewScrollTop
+                            | ViewHotkeyAction::ViewScrollBottom
+                            | ViewHotkeyAction::ViewPageUp
+                            | ViewHotkeyAction::ViewPageDown
+                            | ViewHotkeyAction::Back
+                    ),
+                    "{context}: {:?} binds {:?} but silently shadows {:?}; \
+                     only the shared scroll base / Esc-back may be rebound",
+                    binding.trigger,
+                    binding.action,
+                    shadowed.action,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_view_keymap_is_free_of_accidental_collisions() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let views = [
+            ShellView::Home,
+            ShellView::Catalog,
+            ShellView::Recommend,
+            ShellView::ModuleRun,
+            ShellView::Workbench,
+            ShellView::Tune,
+            ShellView::Threat,
+            ShellView::PromptsEditor,
+            ShellView::ActorDetail,
+            ShellView::Activity,
+            ShellView::Campaign,
+            ShellView::Coverage,
+            ShellView::Runs,
+            ShellView::Jobs,
+            ShellView::Replay,
+            ShellView::Trace,
+            ShellView::Logs,
+            ShellView::Help,
+        ];
+        for view in views {
+            let binds = app.view_keybindings_for_view(view);
+            assert_no_accidental_collisions(&format!("{view:?}"), &binds);
+        }
+    }
+
+    /// The backlog preset arms eight extra one-key decisions on the Review
+    /// page — the densest keymap in the shell and the one where a collision
+    /// would record a wrong review decision.
+    #[test]
+    fn review_backlog_keymap_is_free_of_accidental_collisions() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Review));
+        app.router.workbench_mut().review_mut().backlog = true;
+
+        let binds = app.view_keybindings_for_view(ShellView::Workbench);
+
+        assert_no_accidental_collisions("Workbench/Review+backlog", &binds);
+        // The decisions the preset advertises must actually be armed.
+        for key in ['c', 'f', 'd', 'w', 'u'] {
+            assert!(
+                binds
+                    .iter()
+                    .any(|binding| binding.trigger == HotkeyTrigger::Char(key)),
+                "backlog decision key {key:?} missing from the composed keymap"
+            );
+        }
+    }
+
+    /// The pause/resume overlays join Activity's extras conditionally at
+    /// runtime; compose the maximal union statically so a future extra can
+    /// never collide with `p`/`P`/`r`/`R` unnoticed.
+    #[test]
+    fn scan_pause_resume_overlays_never_collide_with_activity_extras() {
+        let mut binds = activity_keybindings();
+        binds.extend(pause_scan_keybindings());
+        binds.extend(resume_scan_keybindings());
+        binds.extend(scroll_keybindings());
+
+        assert_no_accidental_collisions("Activity+pause+resume", &binds);
     }
 }

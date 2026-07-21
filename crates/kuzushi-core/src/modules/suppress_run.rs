@@ -147,7 +147,7 @@ fn resolve_finding_ref(input: &Value, store: &FindingStore) -> Result<Option<Fin
         return Ok(None);
     };
     let finding = store
-        .get_finding_by_reference(&reference)?
+        .get_finding_by_operator_reference(&reference)?
         .with_context(|| format!("no finding matches reference {reference:?}"))?;
     Ok(Some(FindingRef(finding.fingerprint)))
 }

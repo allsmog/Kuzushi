@@ -23,7 +23,7 @@ pub async fn run() -> Result<()> {
     let command = cli
         .command
         .unwrap_or(command::Command::Shell { target: None });
-    dispatch::dispatch_command(
+    let result = dispatch::dispatch_command(
         command,
         cli.target,
         plain,
@@ -31,5 +31,21 @@ pub async fn run() -> Result<()> {
         cli.no_session_persistence,
         argv,
     )
-    .await
+    .await;
+    exit_with_batch_code_on_typed_run_failure(result)
+}
+
+/// `kuzushi run` batch contract: a typed run failure exits with its
+/// deterministic code (2 prepare, 3 failed, 4 partial) instead of the
+/// generic anyhow 1. Mapped only here so in-process callers keep plain
+/// `Err` semantics.
+fn exit_with_batch_code_on_typed_run_failure(result: Result<()>) -> Result<()> {
+    let Err(error) = result else {
+        return Ok(());
+    };
+    if let Some(exit) = error.downcast_ref::<application::run_exit::RunCommandExit>() {
+        eprintln!("Error: {error}");
+        std::process::exit(exit.code());
+    }
+    Err(error)
 }

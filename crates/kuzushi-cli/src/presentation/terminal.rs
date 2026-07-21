@@ -13,7 +13,7 @@ pub(crate) fn should_emit_shell_startup_progress(plain: bool) -> bool {
 
 pub(crate) fn shell_startup_progress_messages(target: Option<&Path>) -> Vec<String> {
     let destination = target.map_or_else(
-        || "kuzushi: choose a target in the picker; press d for the offline demo".to_string(),
+        || "kuzushi: choose a target in the picker; run `demo` for the offline fixture".to_string(),
         |path| format!("kuzushi: target {}; opening operator shell", path.display()),
     );
     vec![

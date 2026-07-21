@@ -4,10 +4,10 @@ contract: cockpit-spine-v1
 phase: review
 size: 80x24
 ---
-KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
- Enter open in Prove · findings clear projection · z open heatmap · scan again
+KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
+ Enter open in Prove · findings show full queue · z open heatmap · scan again
 │▸ FINDINGS · 6                    │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @? CFM open   │SQL injection reaches query
 │  SQL injection reaches query     │
@@ -24,7 +24,7 @@ KUZUSHI · VIEW REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx
 │                                  │  decision history: no decision history
 │                                  │  loaded
 │                                  │
-route:run · 査  review 3/5 · ⛭ 掛  fix ·...   6 findings / 1 crit / 2 high / 2 med
+route:run · Review 3/5 · ⛭ fix ·...         6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ▣ REVIEW › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

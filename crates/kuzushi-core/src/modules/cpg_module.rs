@@ -37,6 +37,16 @@ fn cpg_build_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
         opt(
+            "importPath",
+            OptionType::Path,
+            "Reuse a prebuilt Joern CPG instead of parsing: the file is validated and copied \
+             to the canonical <target>/.kuzushi/cpg.bin so every downstream consumer finds it. \
+             Skips joern-parse entirely (joern need not be installed). Use for large targets \
+             where the CPG is built out-of-band or shared across checkouts.",
+        )
+        .external_read()
+        .aliases(&["import_path", "existingCpg", "existing_cpg"]),
+        opt(
             "outputPath",
             OptionType::Path,
             "Destination CPG binary below <target>/.kuzushi. Defaults to <target>/.kuzushi/cpg.bin; paths outside Kuzushi state are rejected.",
@@ -95,6 +105,9 @@ pub(in crate::modules) fn run_cpg_build(
 ) -> Result<Value> {
     ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
+    if let Some(import_path) = resolve_cpg_import_path(input) {
+        return run_cpg_import(ctx, &target, &import_path, input);
+    }
     let bin = match locate_joern_parse_bin() {
         Some(path) => path,
         None => return Ok(skipped_response(&target, "joern-parse")),
@@ -169,6 +182,114 @@ fn cleanup_cpg_after_error(output_path: &Path, error: anyhow::Error) -> anyhow::
         Ok(()) => error,
         Err(cleanup) => cleanup.context(error),
     }
+}
+
+fn resolve_cpg_import_path(input: &Value) -> Option<PathBuf> {
+    input
+        .get("importPath")
+        .or_else(|| input.get("import_path"))
+        .or_else(|| input.get("existingCpg"))
+        .or_else(|| input.get("existing_cpg"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+}
+
+/// Import a prebuilt CPG: validate the source, then copy it to the canonical
+/// output path so downstream consumers (taint-iris-next, the Joern MCP probe)
+/// find it where they already look. No joern-parse involvement.
+fn run_cpg_import(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    import_path: &Path,
+    input: &Value,
+) -> Result<Value> {
+    let source_bytes = validated_cpg_import_source(import_path)?;
+    let output_path = resolve_cpg_output_path(input, target);
+    prepare_cpg_output_path(target, &output_path)?;
+    clear_cpg_output(&output_path)?;
+    announce_cpg_phase(
+        ctx,
+        "tool",
+        &format!("cpg:build import from {}", import_path.display()),
+    );
+    let started = Instant::now();
+    fs::copy(import_path, &output_path).with_context(|| {
+        format!(
+            "Could not copy prebuilt CPG {} to {}",
+            import_path.display(),
+            output_path.display()
+        )
+    })?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let bytes = cpg_output_size_checked(&output_path)?;
+    anyhow::ensure!(
+        bytes == source_bytes,
+        "prebuilt CPG copy is truncated: {} bytes copied of {}",
+        bytes,
+        source_bytes
+    );
+    announce_cpg_phase(ctx, "done", &cpg_complete_label(bytes, elapsed_ms));
+    let timestamp = now_ms()?;
+    Ok(cpg_import_response(
+        target,
+        &output_path,
+        import_path,
+        bytes,
+        elapsed_ms,
+        timestamp,
+    ))
+}
+
+/// A usable import source is an existing, non-empty regular file (symlinks are
+/// followed; the resolved file must still be regular). Returns its size.
+fn validated_cpg_import_source(import_path: &Path) -> Result<u64> {
+    let metadata = fs::metadata(import_path).with_context(|| {
+        format!(
+            "prebuilt CPG not found at {} — check importPath",
+            import_path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        metadata.is_file(),
+        "prebuilt CPG {} is not a regular file",
+        import_path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() > 0,
+        "prebuilt CPG {} is empty",
+        import_path.display()
+    );
+    Ok(metadata.len())
+}
+
+fn cpg_import_response(
+    target: &Path,
+    output_path: &Path,
+    import_path: &Path,
+    bytes: u64,
+    elapsed_ms: u64,
+    timestamp: u64,
+) -> Value {
+    let output = format!(
+        "cpg:build imported {} bytes from {} to {} in {} ms",
+        bytes,
+        import_path.display(),
+        output_path.display(),
+        elapsed_ms
+    );
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "target": target.display().to_string(),
+            "cpgPath": output_path.display().to_string(),
+            "importedFrom": import_path.display().to_string(),
+            "bytes": bytes,
+            "elapsedMs": elapsed_ms,
+            "timestamp": timestamp,
+        }),
+    )
 }
 
 fn locate_joern_parse_bin() -> Option<PathBuf> {
@@ -565,6 +686,41 @@ mod joern_skip_tests {
         let next = suggested_retry_heap_mb(4096);
         assert!(next >= 4096, "retry heap must not shrink");
         assert!(next <= MAX_HEAP_MB);
+    }
+
+    #[test]
+    fn import_path_resolves_from_any_alias_and_ignores_blank() {
+        assert_eq!(
+            resolve_cpg_import_path(&json!({"importPath": "/x/cpg.bin"})),
+            Some(PathBuf::from("/x/cpg.bin"))
+        );
+        assert_eq!(
+            resolve_cpg_import_path(&json!({"existing_cpg": "/y/cpg.bin"})),
+            Some(PathBuf::from("/y/cpg.bin"))
+        );
+        assert_eq!(resolve_cpg_import_path(&json!({"importPath": "  "})), None);
+        assert_eq!(resolve_cpg_import_path(&json!({})), None);
+    }
+
+    #[test]
+    fn import_source_must_exist_and_be_nonempty() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("absent.bin");
+        assert!(validated_cpg_import_source(&missing).is_err());
+
+        let empty = temp.path().join("empty.bin");
+        std::fs::write(&empty, b"").unwrap();
+        assert!(validated_cpg_import_source(&empty).is_err());
+
+        let real = temp.path().join("real.bin");
+        std::fs::write(&real, b"CPG\0payload").unwrap();
+        assert_eq!(validated_cpg_import_source(&real).unwrap(), 11);
+    }
+
+    #[test]
+    fn import_source_rejects_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(validated_cpg_import_source(temp.path()).is_err());
     }
 
     #[cfg(unix)]

@@ -590,6 +590,7 @@ mod tests {
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 cat <<'JSON'
 {
   "results": [
@@ -641,6 +642,7 @@ JSON
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 if [ "$1" = "database" ] && [ "$2" = "create" ]; then
   mkdir -p "$3"
   printf 'name: test\n' > "$3/codeql-database.yml"
@@ -734,6 +736,7 @@ exit 2
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 case "$*" in
   *crt.sh*)
     cat <<'JSON'
@@ -767,6 +770,7 @@ esac
         fs::write(
             &binary,
             r#"#!/bin/sh
+PATH=/usr/bin:/bin
 cat <<'OUT'
 Host: 192.0.2.10 (web.example) Ports: 80/open/tcp//http//nginx/, 443/open/tcp//https//nginx TLS/
 OUT

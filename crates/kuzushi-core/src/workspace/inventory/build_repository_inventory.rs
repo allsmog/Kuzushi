@@ -10,6 +10,7 @@ struct InventoryBudget {
     inspected_bytes: usize,
     max_entries: usize,
     max_inspected_bytes: usize,
+    truncation: Option<String>,
 }
 
 pub fn build_repository_inventory(root: impl AsRef<Path>) -> Result<RepositoryInventory> {
@@ -35,7 +36,10 @@ fn build_repository_inventory_with_limits(
     let mut builder = InventoryBuilder::default();
     let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes);
     walk_repository(&root, &root, &mut builder, &mut budget)?;
-    Ok(builder.finish(root_name(&root)))
+    let truncation = budget
+        .truncation
+        .map(|reason| InventoryTruncation { reason });
+    Ok(builder.finish(root_name(&root), truncation))
 }
 
 impl InventoryBudget {
@@ -45,35 +49,52 @@ impl InventoryBudget {
             inspected_bytes: 0,
             max_entries,
             max_inspected_bytes,
+            truncation: None,
         }
+    }
+
+    fn entries_exhausted(&self) -> bool {
+        self.entries >= self.max_entries
     }
 
     fn collect_dir(&mut self, read_dir: fs::ReadDir, dir: &Path) -> Result<Vec<fs::DirEntry>> {
         let remaining = self.max_entries.saturating_sub(self.entries);
-        let entries = read_dir
+        let mut entries = read_dir
             .take(remaining.saturating_add(1))
             .collect::<std::io::Result<Vec<_>>>()
             .with_context(|| format!("Could not enumerate {}", dir.display()))?;
-        anyhow::ensure!(
-            entries.len() <= remaining,
-            "Repository inventory exceeded the {}-entry coverage limit at {}",
-            self.max_entries,
-            dir.display()
-        );
+        if entries.len() > remaining {
+            entries.truncate(remaining);
+            self.mark_truncated(format!(
+                "entry cap of {} reached at {}; inventory covers the walked prefix only",
+                self.max_entries,
+                dir.display()
+            ));
+        }
         self.entries += entries.len();
         Ok(entries)
     }
 
-    fn record_inspected_bytes(&mut self, bytes: usize, path: &Path) -> Result<()> {
+    /// Returns whether the file's content may still be inspected. Once the
+    /// byte budget is exhausted the walk continues metadata-only.
+    fn record_inspected_bytes(&mut self, bytes: usize, path: &Path) -> bool {
         let next = self.inspected_bytes.saturating_add(bytes);
-        anyhow::ensure!(
-            next <= self.max_inspected_bytes,
-            "Repository inventory exceeded the {}-byte inspection limit at {}",
-            self.max_inspected_bytes,
-            path.display()
-        );
+        if next > self.max_inspected_bytes {
+            self.mark_truncated(format!(
+                "content-inspection cap of {} bytes reached at {}; remaining files recorded metadata-only",
+                self.max_inspected_bytes,
+                path.display()
+            ));
+            return false;
+        }
         self.inspected_bytes = next;
-        Ok(())
+        true
+    }
+
+    fn mark_truncated(&mut self, reason: String) {
+        if self.truncation.is_none() {
+            self.truncation = Some(reason);
+        }
     }
 }
 
@@ -83,6 +104,13 @@ fn walk_repository(
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget,
 ) -> Result<()> {
+    if budget.entries_exhausted() {
+        budget.mark_truncated(format!(
+            "entry cap reached before walking {}; inventory covers the walked prefix only",
+            dir.display()
+        ));
+        return Ok(());
+    }
     let read_dir = fs::read_dir(dir)
         .with_context(|| format!("Could not read repository directory {}", dir.display()))?;
     let mut entries = budget.collect_dir(read_dir, dir)?;
@@ -146,7 +174,9 @@ fn walk_repository_file(
     let Some(text) = read_text_prefix(path, MAX_FILE_INSPECTION_BYTES)? else {
         return Ok(());
     };
-    budget.record_inspected_bytes(text.len(), path)?;
+    if !budget.record_inspected_bytes(text.len(), path) {
+        return Ok(());
+    }
     inspect_manifest_frameworks(relative, name, &text, builder);
     if generated_vendor.is_some() {
         return Ok(());
@@ -189,23 +219,38 @@ mod coverage_limit_tests {
     use super::*;
 
     #[test]
-    fn refuses_to_label_an_entry_capped_walk_complete() {
+    fn entry_capped_walk_returns_partial_inventory_marked_truncated() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
         fs::write(temp.path().join("b.rs"), "fn b() {}\n").unwrap();
 
-        let error = build_repository_inventory_with_limits(temp.path(), 1, 1024).unwrap_err();
+        let inventory = build_repository_inventory_with_limits(temp.path(), 1, 1024).unwrap();
 
-        assert!(error.to_string().contains("entry coverage limit"));
+        let truncation = inventory.truncation.expect("partial walk must be marked");
+        assert!(truncation.reason.contains("entry cap"));
+        assert_eq!(inventory.source_files.len(), 1);
     }
 
     #[test]
-    fn refuses_to_label_a_byte_capped_walk_complete() {
+    fn byte_capped_walk_keeps_metadata_and_marks_truncated() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("large.rs"), "x".repeat(64)).unwrap();
 
-        let error = build_repository_inventory_with_limits(temp.path(), 10, 8).unwrap_err();
+        let inventory = build_repository_inventory_with_limits(temp.path(), 10, 8).unwrap();
 
-        assert!(error.to_string().contains("inspection limit"));
+        let truncation = inventory.truncation.expect("partial inspection must be marked");
+        assert!(truncation.reason.contains("content-inspection cap"));
+        assert!(inventory.source_files.is_empty());
+    }
+
+    #[test]
+    fn uncapped_walk_carries_no_truncation_marker() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+
+        let inventory = build_repository_inventory_with_limits(temp.path(), 100, 1024).unwrap();
+
+        assert!(inventory.truncation.is_none());
+        assert_eq!(inventory.source_files.len(), 1);
     }
 }

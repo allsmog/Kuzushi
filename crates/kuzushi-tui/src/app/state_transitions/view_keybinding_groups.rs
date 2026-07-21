@@ -1,6 +1,41 @@
 use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
+pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
+    let mut bindings = vec![
+        bind_char('k', "j/k", "cursor", ViewHotkeyAction::CampaignCursorPrevious),
+        bind_char('j', "j/k", "cursor", ViewHotkeyAction::CampaignCursorNext),
+        bind(
+            HotkeyTrigger::Up,
+            "↑/↓",
+            "cursor",
+            ViewHotkeyAction::CampaignCursorPrevious,
+        ),
+        bind(
+            HotkeyTrigger::Down,
+            "↑/↓",
+            "cursor",
+            ViewHotkeyAction::CampaignCursorNext,
+        ),
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "open jobs",
+            ViewHotkeyAction::CampaignOpenDetail,
+        ),
+        bind_char('q', "q", "campaign list", ViewHotkeyAction::CampaignBackToList),
+    ];
+    bindings.extend([
+        bind_char('x', "x", "include/exclude", ViewHotkeyAction::CampaignToggleExclude),
+        bind_char('w', "w", "workers", ViewHotkeyAction::CampaignCycleWorkers),
+        bind_char('L', "L", "launch", ViewHotkeyAction::CampaignLaunch),
+        bind_char('K', "K", "kill dispatcher", ViewHotkeyAction::CampaignKill),
+        bind_char('e', "e", "prompt", ViewHotkeyAction::CampaignShowPrompt),
+        bind_char('r', "r", "refresh", ViewHotkeyAction::CampaignRefresh),
+    ]);
+    bindings
+}
+
 pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
     vec![
         bind(
@@ -140,7 +175,10 @@ pub(super) fn workbench_keybindings_for_plan(
     if !plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
         bindings.extend(workbench_zoom_keybindings());
     }
-    bindings.extend(workbench_secondary_action_keybindings(page));
+    bindings.extend(workbench_secondary_action_keybindings(
+        page,
+        crate::ui_view_models::review_backlog_active(app),
+    ));
     bindings.extend(workbench_return_keybindings(plan));
     bindings
 }
@@ -284,9 +322,12 @@ fn workbench_open_keybinding() -> ViewKeybinding {
     )
 }
 
-fn workbench_secondary_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding> {
+fn workbench_secondary_action_keybindings(
+    page: WorkbenchPage,
+    backlog: bool,
+) -> Vec<ViewKeybinding> {
     let mut bindings = workbench_page_navigation_keybindings();
-    bindings.extend(workbench_page_action_keybindings(page));
+    bindings.extend(workbench_page_action_keybindings(page, backlog));
     bindings
 }
 
@@ -303,15 +344,10 @@ fn workbench_page_navigation_keybindings() -> Vec<ViewKeybinding> {
     ]
 }
 
-fn workbench_page_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding> {
+fn workbench_page_action_keybindings(page: WorkbenchPage, backlog: bool) -> Vec<ViewKeybinding> {
     match page {
         WorkbenchPage::Prove => prove_page_action_keybindings(),
-        WorkbenchPage::Review => vec![bind_char(
-            'D',
-            "D",
-            "cluster",
-            ViewHotkeyAction::WorkbenchCluster,
-        )],
+        WorkbenchPage::Review => review_page_action_keybindings(backlog),
         WorkbenchPage::Fix => vec![bind_char(
             'v',
             "v",
@@ -320,6 +356,71 @@ fn workbench_page_action_keybindings(page: WorkbenchPage) -> Vec<ViewKeybinding>
         )],
         WorkbenchPage::Map | WorkbenchPage::Scan => Vec::new(),
     }
+}
+
+/// The backlog preset arms one-key decisions; they are bound (and shown in
+/// the footer) only while the preset is active so ordinary Review browsing
+/// cannot record a decision by a stray keypress.
+fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
+    let mut bindings = vec![
+        bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
+        bind_char('C', "C", "chains", ViewHotkeyAction::WorkbenchChainFold),
+        bind_char(
+            'B',
+            "B",
+            if backlog { "backlog off" } else { "backlog" },
+            ViewHotkeyAction::WorkbenchBacklogToggle,
+        ),
+    ];
+    // `1..5` are the page-switch keys, so decisions use mnemonic letters.
+    if backlog {
+        bindings.extend([
+            bind_char(
+                'c',
+                "c",
+                "confirm",
+                ViewHotkeyAction::WorkbenchBacklogDecide("confirmed"),
+            ),
+            bind_char(
+                'f',
+                "f",
+                "reject-FP",
+                ViewHotkeyAction::WorkbenchBacklogDecide("rejected_false_positive"),
+            ),
+            bind_char(
+                'd',
+                "d",
+                "defer",
+                ViewHotkeyAction::WorkbenchBacklogDecide("deferred"),
+            ),
+            bind_char(
+                'w',
+                "w",
+                "needs-review",
+                ViewHotkeyAction::WorkbenchBacklogDecide("needs_review"),
+            ),
+            bind_char(
+                's',
+                "s",
+                "sev filter",
+                ViewHotkeyAction::WorkbenchBacklogSeverityCycle,
+            ),
+            bind_char(
+                't',
+                "t",
+                "tool filter",
+                ViewHotkeyAction::WorkbenchBacklogToolCycle,
+            ),
+            bind_char(
+                'X',
+                "X",
+                "defer-all",
+                ViewHotkeyAction::WorkbenchBacklogBulkDefer,
+            ),
+            bind_char('u', "u", "undo", ViewHotkeyAction::WorkbenchBacklogUndo),
+        ]);
+    }
+    bindings
 }
 
 fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {

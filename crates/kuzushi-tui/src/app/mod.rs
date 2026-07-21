@@ -69,6 +69,8 @@ mod artifacts;
 mod attention;
 mod autonomy;
 mod background_events;
+mod campaign;
+mod coverage;
 mod catalog;
 mod command_palette;
 mod command_router;

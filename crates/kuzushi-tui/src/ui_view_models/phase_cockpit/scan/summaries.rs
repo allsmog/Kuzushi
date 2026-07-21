@@ -68,6 +68,7 @@ pub(super) fn scanner_outcomes(
     if outcomes.is_empty() {
         vec![ScanEngineOutcomeModel {
             engine: "Scan attempt".to_string(),
+            tool_key: None,
             outcome: engine_outcome_from_attempt(attempt_outcome).to_string(),
             run_ref: None,
             detail: None,

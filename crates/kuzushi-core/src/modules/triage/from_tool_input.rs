@@ -11,6 +11,7 @@ pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) stage2_tier: ModelTier,
     pub(in crate::modules) model: Option<String>,
     pub(in crate::modules) retriage: bool,
+    pub(in crate::modules) votes: usize,
 }
 
 impl TriageRunInput {
@@ -25,8 +26,25 @@ impl TriageRunInput {
             stage2_tier: parse_triage_stage2_tier(input)?,
             model: optional_nonempty_string(input, "model")?,
             retriage: parse_triage_retriage(input),
+            votes: parse_triage_votes(input)?,
         })
     }
+}
+
+pub(in crate::modules) const MAX_TRIAGE_VOTES: usize = 5;
+
+pub(in crate::modules) fn parse_triage_votes(input: &Value) -> Result<usize> {
+    let Some(value) = input.get("votes") else {
+        return Ok(1);
+    };
+    let votes = value
+        .as_u64()
+        .with_context(|| format!("triage:run votes must be a positive integer, got {value}"))?;
+    anyhow::ensure!(
+        (1..=MAX_TRIAGE_VOTES as u64).contains(&votes),
+        "triage:run votes must be between 1 and {MAX_TRIAGE_VOTES}, got {votes}"
+    );
+    Ok(votes as usize)
 }
 
 pub(in crate::modules) fn parse_triage_fingerprints(input: &Value) -> Result<Option<Vec<String>>> {

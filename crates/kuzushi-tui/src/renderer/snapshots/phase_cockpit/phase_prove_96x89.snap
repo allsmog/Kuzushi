@@ -4,17 +4,16 @@ contract: cockpit-spine-v1
 phase: prove
 size: 96x89
 ---
-KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target · ● LIVE · cost $0.37 · ctx:✓ built
- 組  map ✓ · 崩  scan ✓ · 覧  review ● · 証  prove · · 掛  fix ·
- ▸ NEXT record terminal dispositions for 6 of 6 remaining candidates
+KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue
 │STATUS / NEXT                            │▸ EVIDENCE · z attack path
-│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1│evidence:1 · 1 source(s) · 1
-│source(s)  runtime_v...                  │1. observed code evidence · source-sink · conf...
-│SQL injection reaches query              │request_input -> database_query
-│src/auth/login.rs:17                     │attacker-controlled input reaches a security...
-│STATUS runtime_verified · decision:ne... │
-│NEXT   patch · patch F-0001              │
+│F-0001  CRITICAL  ✓ [●●●] · CONFIRMED... │evidence:1 · 1 source(s) · 1
+│SQL injection reaches query              │1. observed code evidence · source-sink · conf...
+│src/auth/login.rs:17                     │request_input -> database_query
+│STATUS runtime_verified · decision:ne... │attacker-controlled input reaches a security...
+│NEXT   patch F-0001                      │
 │                                         │
 │                                         │
 │                                         │
@@ -89,7 +88,8 @@ KUZUSHI · VIEW PROVE · REALITY REVIEW · target ./phase-target · ● LIVE · 
 │                                         │
 │                                         │
 │                                         │
-route:run · 査  review 3/5 · ⛭ 掛  fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+│                                         │
+route:run · Review 3/5 · ⛭ fix · workbench ·...             6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◎ PROVE › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt

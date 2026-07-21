@@ -52,6 +52,21 @@ impl ShellApp {
         true
     }
 
+    /// Test-only: drive the guided flow to the RESULT READY card for an
+    /// already-persisted attempt, exactly as the runtime path does —
+    /// Running stage, workbench routing, then result binding.
+    #[cfg(test)]
+    pub(crate) fn await_guided_phase_result_for_test(
+        &mut self,
+        phase: WorkflowPhase,
+        attempt_id: String,
+    ) -> bool {
+        self.engagement
+            .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::Running(phase)));
+        self.show_guided_phase(phase);
+        self.bind_guided_phase_result(phase, attempt_id)
+    }
+
     pub(crate) fn clear_guided_scan(&mut self) {
         self.engagement.clear_guided_scan();
         self.ui_mut().clear_phase_result_cursor();

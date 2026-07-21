@@ -1,6 +1,6 @@
 use super::{ShellSessionTranscript, SteerQueue, TargetCandidateScope};
 use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
-use kuzushi_core::{ModuleRegistry, ToolOptionStore, V2Config};
+use kuzushi_core::{ModuleRegistry, NestedProjectScopeTree, ToolOptionStore, V2Config};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -11,6 +11,10 @@ pub(crate) struct SessionState {
     option_store: ToolOptionStore,
     target: Option<PathBuf>,
     active_scope: Option<TargetCandidateScope>,
+    /// The last scope tree announced as ready, kept here — not in the
+    /// invalidation-driven workbench cache — so external state churn can
+    /// never defeat the "an unchanged tree is announced once" dedup.
+    announced_scope_tree: Option<(PathBuf, NestedProjectScopeTree)>,
     session_cost: RuntimeCostReport,
     unscoped_cost: RuntimeCostReport,
     run_costs: BTreeMap<String, RunCostEntry>,
@@ -48,6 +52,7 @@ impl SessionState {
             option_store,
             target,
             active_scope: None,
+            announced_scope_tree: None,
             session_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             unscoped_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             run_costs: BTreeMap::new(),
@@ -146,6 +151,26 @@ impl SessionState {
 
     pub(crate) fn set_active_scope(&mut self, scope: Option<TargetCandidateScope>) {
         self.active_scope = scope;
+    }
+
+    pub(crate) fn scope_tree_already_announced(
+        &self,
+        root: &Path,
+        tree: &NestedProjectScopeTree,
+    ) -> bool {
+        self.announced_scope_tree
+            .as_ref()
+            .is_some_and(|(announced_root, announced)| {
+                announced_root == root && announced == tree
+            })
+    }
+
+    pub(crate) fn record_scope_tree_announcement(
+        &mut self,
+        root: PathBuf,
+        tree: NestedProjectScopeTree,
+    ) {
+        self.announced_scope_tree = Some((root, tree));
     }
 
     pub(crate) fn session_cost_usd(&self) -> f64 {

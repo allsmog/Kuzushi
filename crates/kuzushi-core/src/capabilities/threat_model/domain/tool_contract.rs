@@ -18,6 +18,8 @@ pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] = &[
 
 pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
 
+pub(crate) const VALID_PIPELINES: &[&str] = &["single", "staged"];
+
 pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
     "spoofing",
     "tampering",
@@ -107,6 +109,15 @@ pub(crate) struct BuildInput {
     pub(crate) preserve_user_edits: bool,
     pub(crate) prompt_override: Option<String>,
     pub(crate) model: String,
+    pub(crate) pipeline: String,
+    pub(crate) budget_usd: Option<f64>,
+    pub(crate) history_depth: usize,
+}
+
+impl BuildInput {
+    pub(crate) fn is_staged(&self) -> bool {
+        self.pipeline == "staged"
+    }
 }
 
 #[cfg(test)]

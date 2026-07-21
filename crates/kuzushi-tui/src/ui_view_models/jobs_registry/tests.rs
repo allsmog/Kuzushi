@@ -284,9 +284,15 @@ fn invalidated_run_history_stays_stale_until_it_is_rehydrated() {
     app.workbench_cache()
         .borrow_mut()
         .invalidate_run_summaries();
+    // Stale entries keep serving so the deck never blanks mid-refresh; the
+    // hydration gate still reports the index as due for a re-read.
     let pending = jobs_registry_model(&app, 20);
-    assert!(pending.rows.is_empty());
-    assert_eq!(pending.history_state, JobHistoryState::NotRequested);
+    assert_eq!(pending.rows.len(), 1);
+    assert_eq!(pending.history_state, JobHistoryState::Ready);
+    assert!(app
+        .workbench_cache()
+        .borrow()
+        .run_summary_entries_need_refresh(app.target().unwrap()));
 
     hydrate_run_history(&mut app);
     let refreshed = jobs_registry_model(&app, 20);

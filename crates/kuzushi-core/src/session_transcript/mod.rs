@@ -3,6 +3,7 @@
 //! Session transcripts are global semantic audit logs. They intentionally do
 //! not replace target-scoped run artifacts or the findings event log.
 
+pub mod lint;
 mod model;
 mod process_identity;
 pub(crate) mod redaction;
@@ -10,6 +11,7 @@ mod store;
 mod time;
 mod writer;
 
+pub use lint::{lint_transcript, TranscriptLintReport};
 pub use model::*;
 pub use store::{default_sessions_root, render_session_markdown, SessionTranscriptStore};
 pub use writer::SessionRecorder;

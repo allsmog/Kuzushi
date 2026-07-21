@@ -114,6 +114,12 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
     let visible_count = rows.len();
     let cursor = app.router.findings().cursor();
     let selected_row = rows.iter().position(|row| row.projection_index == cursor);
+    let backlog = super::review_backlog_active(app);
+    let header = if backlog {
+        backlog_header(visible_count, app.router.workbench().review())
+    } else {
+        review_queue_header(visible_count, total_count, open_count, complete_count)
+    };
     ReviewQueueModel {
         navigation_active: app.input_mode() == crate::InputMode::Navigate,
         total_count,
@@ -121,12 +127,36 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         open_count,
         complete_count,
         filter_label: review_queue_filter_label(app, mode),
-        completeness_mode: mode.label(),
-        header: review_queue_header(visible_count, total_count, open_count, complete_count),
+        completeness_mode: if backlog { "backlog" } else { mode.label() },
+        header,
         empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
         rows,
         selected_row,
     }
+}
+
+/// The backlog projection already dropped decided findings, so the header
+/// reports burn-down progress instead of open/complete split. Active
+/// severity/tool filter chips render inline so the operator always sees
+/// what the one-key and bulk actions will hit.
+fn backlog_header(
+    visible_count: usize,
+    review: &crate::app::WorkbenchReviewState,
+) -> String {
+    let mut chips = String::new();
+    if let Some(severity) = review.backlog_severity {
+        chips.push_str(&format!(" - sev:{severity}"));
+    }
+    if let Some(tool) = review.backlog_tool.as_deref() {
+        chips.push_str(&format!(" - tool:{tool}"));
+    }
+    if review.backlog_confirm_bulk {
+        chips.push_str(&format!(" - CONFIRM defer-all {visible_count}? press X again"));
+    }
+    format!(
+        "REVIEW BACKLOG - {visible_count} untriaged, severity-first{chips} - {} decided this session - c confirm - f reject-FP - d defer - w needs-review - s/t filter - X defer-all - u undo",
+        review.session_decided
+    )
 }
 
 fn cached_review_queue_rows(

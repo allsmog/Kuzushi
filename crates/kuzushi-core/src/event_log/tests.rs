@@ -202,3 +202,74 @@ fn event_log_enforces_the_aggregate_event_limit_while_parsing() {
 
     assert!(error.to_string().contains("aggregate limit"));
 }
+
+#[test]
+fn torn_tail_from_a_killed_writer_is_tolerated_and_healed_on_next_append() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("events-000000.jsonl");
+    {
+        let log = EventLog::open(tmp.path()).unwrap();
+        log.append(EventKind::RunStarted, "writer", Some("r1".into()), None, json!({}))
+            .unwrap();
+    }
+    // Simulate SIGKILL mid-append: a partial line with no trailing newline,
+    // cut inside a multi-byte UTF-8 character for good measure.
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(br#"{"seq":2,"actor":"caf"#);
+    bytes.extend_from_slice(&[0xC3]); // first byte of a two-byte char
+    std::fs::write(&path, &bytes).unwrap();
+
+    // Reopen: the store must not brick — the durable prefix reads and the
+    // chain verifies.
+    let log = EventLog::open(tmp.path()).unwrap();
+    let events = log.read_all().unwrap();
+    assert_eq!(events.len(), 1);
+    log.verify_chain().unwrap();
+
+    // The next append truncates the torn bytes and continues the chain.
+    let second = log
+        .append(EventKind::RunCompleted, "writer", Some("r1".into()), None, json!({}))
+        .unwrap();
+    assert_eq!(second.seq, 2);
+    assert_eq!(second.prev_event_hash, Some(events[0].event_hash.clone()));
+    let healed = std::fs::read(&path).unwrap();
+    assert!(healed.ends_with(b"\n"), "healed segment must end at a full line");
+    let reopened = EventLog::open(tmp.path()).unwrap();
+    assert_eq!(reopened.read_all().unwrap().len(), 2);
+    reopened.verify_chain().unwrap();
+}
+
+#[test]
+fn torn_tail_outside_the_active_segment_stays_an_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    log.append(EventKind::RunStarted, "writer", None, None, json!({}))
+        .unwrap();
+    let rolled = log.roll_segment().unwrap();
+    std::fs::write(&rolled, "{\"seq\":2}\n").unwrap_or_default();
+    // Corrupt the FIRST (non-active) segment with a newline-less tail.
+    let first = tmp.path().join("events-000000.jsonl");
+    let mut bytes = std::fs::read(&first).unwrap();
+    bytes.extend_from_slice(b"{\"torn");
+    std::fs::write(&first, &bytes).unwrap();
+
+    let error = log.read_all().unwrap_err().to_string();
+
+    assert!(error.contains("torn"), "{error}");
+}
+
+#[test]
+fn garbage_complete_line_is_still_hard_corruption() {
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    log.append(EventKind::RunStarted, "writer", None, None, json!({}))
+        .unwrap();
+    let path = tmp.path().join("events-000000.jsonl");
+    let mut bytes = std::fs::read(&path).unwrap();
+    bytes.extend_from_slice(b"not-json-but-newline-terminated\n");
+    std::fs::write(&path, &bytes).unwrap();
+
+    let error = log.read_all().unwrap_err().to_string();
+
+    assert!(error.contains("Invalid event log line"), "{error}");
+}

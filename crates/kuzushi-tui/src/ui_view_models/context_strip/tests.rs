@@ -46,7 +46,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     assert!(model.context_present);
     assert_eq!(model.context_state, "present");
     assert_eq!(model.model, "openai:gpt-5.2");
-    assert_eq!(model.phase.as_deref(), Some("組 map 1/5"));
+    assert_eq!(model.phase.as_deref(), Some("Map 1/5"));
     assert_eq!(model.cost, Some("$0.42".to_string()));
     assert!(model
         .compact_segments()

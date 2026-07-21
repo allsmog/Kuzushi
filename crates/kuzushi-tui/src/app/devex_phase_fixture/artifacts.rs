@@ -68,12 +68,36 @@ fn seed_attack_surface(target: &Path) -> Result<(), String> {
     fs::write(&path, body).map_err(|error| io_error("write", &path, error))
 }
 
+// The reference finding sits at src/auth/login.rs:17, so the seeded file
+// keeps a real sink on that exact line — the Review detail pane's SOURCE
+// snippet in the canonical snapshots renders live code, not a drift note.
+const LOGIN_FIXTURE_SOURCE: &str = r#"use crate::db::query;
+use crate::http::{Request, Response};
+
+pub struct LoginAttempt {
+    pub username: String,
+    pub password: String,
+}
+
+pub fn parse(request: &Request) -> LoginAttempt {
+    LoginAttempt {
+        username: request.form("username"),
+        password: request.form("password"),
+    }
+}
+
+pub fn login(attempt: &LoginAttempt) -> Response {
+    let rows = query(&format!("SELECT * FROM users WHERE name = '{}'", attempt.username));
+    match rows.first() {
+        Some(user) => Response::session_for(user),
+        None => Response::unauthorized(),
+    }
+}
+"#;
+
 fn seed_project_files(target: &Path) -> Result<(), String> {
     let files = [
-        (
-            "src/auth/login.rs",
-            "pub fn login(input: &str) { query(input); }\n",
-        ),
+        ("src/auth/login.rs", LOGIN_FIXTURE_SOURCE),
         (
             "src/api/orders.rs",
             "pub fn order(id: &str) { lookup(id); }\n",

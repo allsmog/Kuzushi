@@ -22,6 +22,10 @@ pub(crate) struct RuntimeState {
     project_scope_discovery: ProjectScopeDiscoveryRuntime,
     target_candidate_discovery: TargetCandidateDiscoveryRuntime,
     view_hydration: ViewHydrationRuntime,
+    /// Handle of the campaign dispatcher THIS shell launched. Held so the
+    /// deck can reap it (no zombie) and so kill targets a verified-live pid
+    /// instead of a possibly recycled one.
+    dispatcher_child: Option<std::process::Child>,
 }
 
 #[derive(Debug, Clone)]
@@ -186,5 +190,26 @@ impl RuntimeState {
 
     pub(crate) fn jobs_mut(&mut self) -> &mut JobHub {
         &mut self.jobs
+    }
+
+    pub(crate) fn set_dispatcher_child(&mut self, child: Option<std::process::Child>) {
+        self.dispatcher_child = child;
+    }
+
+    pub(crate) fn take_dispatcher_child(&mut self) -> Option<std::process::Child> {
+        self.dispatcher_child.take()
+    }
+
+    /// Reap the deck-launched dispatcher if it has exited. Returns true when
+    /// a defunct dispatcher was just collected (callers then clear the pid).
+    pub(crate) fn reap_exited_dispatcher(&mut self) -> bool {
+        let exited = matches!(
+            self.dispatcher_child.as_mut().map(std::process::Child::try_wait),
+            Some(Ok(Some(_)))
+        );
+        if exited {
+            self.dispatcher_child = None;
+        }
+        exited
     }
 }

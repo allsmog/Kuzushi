@@ -13,6 +13,16 @@ pub struct RepositoryInventory {
     pub entrypoints: Vec<InventoryEntrypoint>,
     pub routes_controllers: Vec<InventoryRouteController>,
     pub generated_vendor_paths: Vec<InventoryPathClassification>,
+    /// Present when a walk budget was exhausted: the inventory is usable but
+    /// PARTIAL, and downstream surfaces must never label it complete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncation: Option<InventoryTruncation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InventoryTruncation {
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -223,9 +223,15 @@ fn index_scan_static_evidence(
 }
 
 pub fn normalize_semgrep_json(raw: &str) -> Result<Vec<Finding>> {
-    let report: SemgrepReport =
-        serde_json::from_str(raw).context("Could not parse semgrep JSON")?;
-    Ok(report
+    Ok(semgrep_findings_from_report(parse_semgrep_report(raw)?))
+}
+
+pub(crate) fn parse_semgrep_report(raw: &str) -> Result<SemgrepReport> {
+    serde_json::from_str(raw).context("Could not parse semgrep JSON")
+}
+
+pub(crate) fn semgrep_findings_from_report(report: SemgrepReport) -> Vec<Finding> {
+    report
         .results
         .into_iter()
         .map(|result| {
@@ -241,13 +247,45 @@ pub fn normalize_semgrep_json(raw: &str) -> Result<Vec<Finding>> {
                     .unwrap_or_else(|| "Semgrep finding".to_string()),
             )
         })
-        .collect())
+        .collect()
+}
+
+/// One line per semgrep-reported scan error, e.g. a target file it could not
+/// parse or a rule it skipped. These describe coverage the scan did NOT get.
+pub(crate) fn semgrep_error_summaries(errors: &[SemgrepReportError]) -> Vec<String> {
+    errors.iter().map(semgrep_error_summary).collect()
+}
+
+fn semgrep_error_summary(error: &SemgrepReportError) -> String {
+    // Semgrep error messages can carry multi-line tracebacks; keep the first
+    // line so summaries stay one row per skipped file/rule.
+    let message = error
+        .message
+        .as_deref()
+        .and_then(|text| text.lines().next())
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("semgrep reported an unspecified scan error");
+    match error.path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(path) => format!("{path}: {message}"),
+        None => message.to_string(),
+    }
 }
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct SemgrepReport {
     #[serde(default)]
     pub(crate) results: Vec<SemgrepResult>,
+    #[serde(default)]
+    pub(crate) errors: Vec<SemgrepReportError>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct SemgrepReportError {
+    #[serde(default)]
+    pub(crate) message: Option<String>,
+    #[serde(default)]
+    pub(crate) path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

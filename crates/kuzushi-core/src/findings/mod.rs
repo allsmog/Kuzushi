@@ -1,6 +1,7 @@
 mod application;
 mod domain;
 pub mod import;
+pub mod ingest_contract;
 mod persistence;
 pub mod presentation;
 

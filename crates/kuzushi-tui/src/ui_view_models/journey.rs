@@ -81,7 +81,9 @@ impl JourneyPhaseState {
             Self::Current => "●",
             Self::Failed => "!",
             Self::Skipped => "⊘",
-            Self::Pending => "·",
+            // "○" not "·": the rail joins segments with " · ", and a
+            // middle-dot pending glyph collides into "scan · ·".
+            Self::Pending => "○",
         }
     }
 }
@@ -553,12 +555,13 @@ fn report_phase_state(phase: WorkflowPhase, reason: ReportReason) -> JourneyPhas
 }
 
 fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
+    // English word carries the phase; the state glyph that follows accents it.
     match phase {
-        WorkflowPhase::Map => "組 map ",
-        WorkflowPhase::Scan => "崩 scan ",
-        WorkflowPhase::Review => "覧 review ",
-        WorkflowPhase::Prove => "証 prove ",
-        WorkflowPhase::Fix => "掛 fix ",
+        WorkflowPhase::Map => "Map ",
+        WorkflowPhase::Scan => "Scan ",
+        WorkflowPhase::Review => "Review ",
+        WorkflowPhase::Prove => "Prove ",
+        WorkflowPhase::Fix => "Fix ",
     }
 }
 
@@ -570,8 +573,11 @@ fn destination_next_action(destination: JourneyDestination, progress: JourneyPro
         JourneyDestination::Phase(WorkflowPhase::Scan) => {
             "run discovery-only scanners and select a completed attempt".to_string()
         }
+        // "ledger candidates" names the population: these counts come from
+        // the durable candidate ledger, which can be far larger than the
+        // findings loaded into this session's list.
         JourneyDestination::Phase(WorkflowPhase::Review) => format!(
-            "record terminal dispositions for {} of {} remaining candidates",
+            "record terminal dispositions for {} of {} ledger candidates",
             progress.unreviewed_findings(),
             progress.finding_total
         ),
@@ -640,11 +646,9 @@ fn destination_next_summary(
         .then_some(" · legacy inferred")
         .unwrap_or("");
     match destination {
-        JourneyDestination::Phase(phase) => format!(
-            "{} {} · {next_action}{inferred}",
-            phase.kanji(),
-            phase.label()
-        ),
+        JourneyDestination::Phase(phase) => {
+            format!("{} · {next_action}{inferred}", phase.title())
+        }
         JourneyDestination::Report(reason) => format!("REPORT · {}{inferred}", reason.label()),
     }
 }
@@ -665,11 +669,8 @@ fn destination_tools(destination: JourneyDestination) -> String {
 
 pub(crate) fn journey_phase_segment(phase: WorkflowPhase) -> String {
     format!(
-        "{} {} {}/{}",
-        phase.kanji(),
-        crate::app::WorkbenchPage::from_phase(phase)
-            .title()
-            .to_ascii_lowercase(),
+        "{} {}/{}",
+        phase.title(),
         phase.position(),
         WorkflowPhase::ORDER.len()
     )
@@ -688,7 +689,7 @@ pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
 pub fn autonomy_footer_segment(app: &ShellApp) -> Option<String> {
     let journey = journey_model(app)?;
     let posture = app.autonomy();
-    let mut segment = format!("⛭ {} {}", posture.kanji(), posture.label());
+    let mut segment = format!("⛭ {}", posture.label());
     if posture.ceiling() < journey.current {
         segment.push_str(" ⚠");
     }

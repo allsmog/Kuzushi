@@ -393,7 +393,10 @@ fn stable_finding_reads_wait_for_projection_watermark() {
     let read = reader
         .list_stable_findings(ReadOptions::wait_for_min_seq_with_poll(
             2,
-            std::time::Duration::from_secs(1),
+            // Generous: a saturated full-suite run can starve the writer
+            // thread well past a 1s budget. Timeout semantics are covered
+            // separately by stable_finding_reads_wait_timeout_is_explicit.
+            std::time::Duration::from_secs(10),
             std::time::Duration::from_millis(5),
         ))
         .unwrap();

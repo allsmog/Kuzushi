@@ -2,8 +2,10 @@ mod application;
 pub mod artifact_kb;
 pub mod artifacts;
 pub mod attack_surface;
+pub mod coverage_ledger;
 pub mod diff_scope;
 mod domain;
+mod git_history_mining;
 mod git_metadata;
 pub mod inventory;
 pub mod source_span;
@@ -42,7 +44,8 @@ pub(crate) use domain::{
 pub use domain::{
     ensure_workspace_output_dir, legacy_codeql_db_path, prepare_workspace_output_path,
     project_model_dir, project_model_scopes_path, read_optional_workspace_text,
-    read_workspace_text, remove_workspace_state_file, workspace_artifact_kb_db_path,
+    read_workspace_text, remove_workspace_state_file, resolve_contained_output_path,
+    resolve_report_output_path, workspace_artifact_kb_db_path,
     workspace_attachments_path, workspace_codeql_db_path, workspace_config_path,
     workspace_event_log_dir, workspace_findings_db_path, workspace_history_path,
     workspace_models_path, workspace_objects_dir, workspace_options_path, workspace_state_dir,
@@ -56,6 +59,9 @@ pub use domain::{
     WORKSPACE_CONFIG_FILE, WORKSPACE_EVENT_LOG_DIR, WORKSPACE_FINDINGS_DB_FILE,
     WORKSPACE_MODELS_FILE, WORKSPACE_OBJECTS_DIR, WORKSPACE_OPTIONS_FILE,
     WORKSPACE_STATE_VERSION_DIR, WORKSPACE_STATIC_EVIDENCE_DB_FILE, WORKSPACE_SUPPRESSIONS_FILE,
+};
+pub use git_history_mining::{
+    mine_vuln_history, security_keywords_for_languages, GitHistoryMiningConfig, VulnCommit,
 };
 pub use git_metadata::{
     resolve_target_git_commit, switch_target_revision, target_git_metadata, TargetRevisionSwitch,

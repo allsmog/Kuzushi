@@ -40,6 +40,10 @@ pub const MCP_ARTIFACT_TABLE: &[McpArtifactSpec] = &[
         artifact_relative_path: ".kuzushi/threat-model.json",
     },
     McpArtifactSpec {
+        name: "findings",
+        artifact_relative_path: ".kuzushi/v3/index.sqlite3",
+    },
+    McpArtifactSpec {
         name: "threat-intel",
         artifact_relative_path: ".kuzushi/threat-intel/candidates.json",
     },

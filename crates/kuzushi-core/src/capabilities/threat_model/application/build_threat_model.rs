@@ -23,14 +23,49 @@ fn build_agentic_threat_model(
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
+    if input.is_staged() {
+        return build_staged_threat_model(runtime, ctx, flavor, verb, input);
+    }
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    let generated =
-        generate_threat_model_document(runtime, ctx, flavor, verb, &input, &source_bundle)?;
-    finish_agentic_threat_model(ctx, flavor, verb, input, generated, source_bundle)
+    let grounding = load_prompt_grounding(&input, ctx)?;
+    emit_grounding_loaded(ctx, verb, &grounding);
+    let generated = generate_threat_model_document(
+        runtime,
+        ctx,
+        flavor,
+        verb,
+        &input,
+        &source_bundle,
+        &grounding,
+    )?;
+    finish_agentic_threat_model(ctx, flavor, verb, input, generated, source_bundle, grounding)
 }
 
 fn finish_agentic_threat_model(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    mut generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+    grounding: PromptGrounding,
+) -> Result<Value> {
+    stamp_provenance(&mut generated.document, &input.target, "single");
+    let coverage = check_coverage(&generated.document, &grounding.surfaces);
+    apply_coverage(
+        &mut generated.document,
+        &coverage,
+        single_pipeline_gap_fill_method(&coverage),
+    );
+    emit_coverage_checked(ctx, verb, &coverage);
+    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
+}
+
+/// Shared tail of every agentic build pipeline: artifact writes, persistence,
+/// summary lines, and the result envelope. Callers stamp provenance and the
+/// measured coverage object on the document before arriving here.
+pub(crate) fn complete_threat_model_build(
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
     verb: &str,
@@ -90,7 +125,7 @@ fn reject_source_options_without_runtime(
 ) -> Result<()> {
     if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
-            "threat-model:build seed/design/source prompt options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
+            "threat-model:build seed/design/source/prompt/staged-pipeline options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
         );
     }
     Ok(())
@@ -98,6 +133,7 @@ fn reject_source_options_without_runtime(
 
 fn has_runtime_only_source_option(input: &Value, ctx: &ToolExecutionContext<'_>) -> bool {
     has_nonempty_list(input, "seed")
+        || staged_pipeline_options_requested(input)
         || read_string(input, &["designDoc", "design_doc", "design"]).is_some()
         || explicit_prompt_override_requested(input, ctx)
         || nondefault_sources_requested(input)
@@ -114,6 +150,12 @@ fn has_nonempty_list(input: &Value, key: &str) -> bool {
         Some(Value::String(value)) => !value.trim().is_empty(),
         _ => false,
     }
+}
+
+fn staged_pipeline_options_requested(input: &Value) -> bool {
+    read_string(input, &["pipeline"]).is_some_and(|pipeline| pipeline.to_lowercase() != "single")
+        || input.get("budgetUsd").is_some()
+        || input.get("budget_usd").is_some()
 }
 
 fn nondefault_sources_requested(input: &Value) -> bool {
@@ -217,7 +259,7 @@ fn emit_threat_model_start(
     }
 }
 
-fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, loaded_count: usize) {
+pub(crate) fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, loaded_count: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -226,6 +268,46 @@ fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, loaded_
                 format!("source:parent artifacts · {loaded_count} loaded"),
             )
             .emit();
+    }
+}
+
+pub(crate) fn emit_grounding_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, grounding: &PromptGrounding) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                verb,
+                format!(
+                    "grounding: {} surfaces · {} confirmed findings",
+                    grounding.surfaces.len(),
+                    grounding.confirmed_findings.len()
+                ),
+            )
+            .emit();
+    }
+}
+
+pub(crate) fn emit_coverage_checked(ctx: &ToolExecutionContext<'_>, verb: &str, coverage: &CoverageReport) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                verb,
+                format!(
+                    "coverage: {}/{} entry points covered",
+                    coverage.covered(),
+                    coverage.considered
+                ),
+            )
+            .emit();
+    }
+}
+
+fn single_pipeline_gap_fill_method(coverage: &CoverageReport) -> &'static str {
+    if coverage.invariant_satisfied() {
+        "none-needed"
+    } else {
+        "unresolved"
     }
 }
 
@@ -254,11 +336,11 @@ fn emit_artifact_write(
     }
 }
 
-struct GeneratedThreatModel {
-    document: Value,
-    bridge_findings: Option<Vec<Value>>,
-    cost_usd: f64,
-    cost_usd_exact: bool,
+pub(crate) struct GeneratedThreatModel {
+    pub(crate) document: Value,
+    pub(crate) bridge_findings: Option<Vec<Value>>,
+    pub(crate) cost_usd: f64,
+    pub(crate) cost_usd_exact: bool,
 }
 
 fn generate_threat_model_document(
@@ -268,8 +350,9 @@ fn generate_threat_model_document(
     verb: &str,
     input: &BuildInput,
     source_bundle: &ThreatModelSourceBundle,
+    grounding: &PromptGrounding,
 ) -> Result<GeneratedThreatModel> {
-    let prompt = threat_model_prompt(input, source_bundle)?;
+    let prompt = threat_model_prompt(input, source_bundle, grounding)?;
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
     generated.cost_usd = costed.cost_usd;
@@ -281,12 +364,13 @@ fn generate_threat_model_document(
 fn threat_model_prompt(
     input: &BuildInput,
     source_bundle: &ThreatModelSourceBundle,
+    grounding: &PromptGrounding,
 ) -> Result<String> {
     let previous_model = try_load_persistent_threat_model(&input.target)?;
-    build_agent_prompt(input, previous_model.as_ref(), source_bundle)
+    build_agent_prompt(input, previous_model.as_ref(), source_bundle, grounding)
 }
 
-fn query_threat_model_document(
+pub(crate) fn query_threat_model_document(
     runtime: &dyn AgentRuntime,
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
@@ -336,7 +420,7 @@ fn validate_threat_model_raw(raw: Value, methodology: &str) -> Result<Value> {
     Ok(raw)
 }
 
-fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<GeneratedThreatModel> {
+pub(crate) fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<GeneratedThreatModel> {
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
     let document = normalize_document(document_candidate, methodology)?;
     let document = apply_methodology(document, methodology)?;

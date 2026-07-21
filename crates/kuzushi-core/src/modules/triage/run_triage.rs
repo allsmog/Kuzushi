@@ -36,7 +36,8 @@ fn prepare_triage_run<'a>(
 ) -> Result<PreparedTriageRun<'a>> {
     let workspace = require_triage_workspace(ctx)?;
     let store = require_triage_store(ctx)?;
-    let input = TriageRunInput::from_tool_input(&input, workspace.root())?;
+    let mut input = TriageRunInput::from_tool_input(&input, workspace.root())?;
+    apply_threat_model_triage_context(&mut input, workspace.root());
     emit_triage_start(ctx, &input);
     let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
     emit_triage_loaded(ctx, findings.len(), missing_fingerprints.len());

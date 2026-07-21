@@ -17,6 +17,7 @@ pub(crate) fn query_agentic_sast_findings_with_cost(
                 &run.inventory,
                 review_context,
                 run.whitebox_static,
+                &run.enrichment,
             ),
         )
         .with_tool_policy(run.tool_policy.clone()),

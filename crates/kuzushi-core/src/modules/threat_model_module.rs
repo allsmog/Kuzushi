@@ -85,6 +85,29 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
 
 fn threat_model_generation_options() -> Vec<OptionSpec> {
     vec![
+        opt(
+            "pipeline",
+            OptionType::Enum,
+            "Build pipeline: one synthesis call, or the staged evidence pipeline (research, synthesis, coverage gap-fill).",
+        )
+        .choices(&["single", "staged"])
+        .default(json!("single"))
+        .advanced(),
+        opt(
+            "budgetUsd",
+            OptionType::Float,
+            "Model-spend cap for the staged pipeline; gap-fill degrades gracefully at the cap.",
+        )
+        .aliases(&["budget_usd"])
+        .advanced(),
+        opt(
+            "historyDepth",
+            OptionType::Int,
+            "Commits of git history mined for security fixes in the staged pipeline (0 disables).",
+        )
+        .aliases(&["history_depth"])
+        .default(json!(300))
+        .advanced(),
         opt("slice", OptionType::Enum, "Threat-model slice to generate.")
             .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
             .default(json!("all"))
@@ -110,10 +133,13 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
 fn threat_model_read_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
-        opt("outputDir", OptionType::Path, "Threat-model artifact directory.")
-            .aliases(&["output_dir"])
-            .workspace_read()
-            .required(),
+        opt(
+            "outputDir",
+            OptionType::Path,
+            "Threat-model artifact directory. Omit to read the persistent workspace model.",
+        )
+        .aliases(&["output_dir"])
+        .workspace_read(),
         threat_model_methodology_option("pasta"),
     ]
 }

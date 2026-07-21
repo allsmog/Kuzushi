@@ -23,8 +23,21 @@ impl ShellApp {
     }
 
     pub(super) fn insert_printable_key(&mut self, ch: char) {
+        let first_char_into_empty_composer = self.input().is_empty();
         self.insert_char_at_cursor(ch);
         self.ui_mut().record_operator_interaction(Instant::now());
+        // First-session operators reliably press j/k expecting the list to
+        // move and conclude the app hung when letters land in the composer
+        // instead — say where the keys went, once per session.
+        if first_char_into_empty_composer
+            && self.shell_view() == ShellView::Workbench
+            && self.ui_mut().take_typing_hint()
+        {
+            self.log(
+                "keys",
+                "typing goes to the command line — Esc (empty prompt) switches to list keys (j/k move, Enter opens)",
+            );
+        }
     }
 
     pub(super) fn handle_enter_key(&mut self) -> InputUpdate {

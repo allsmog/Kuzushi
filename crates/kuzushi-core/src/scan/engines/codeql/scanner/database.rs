@@ -377,7 +377,7 @@ esac
         let db = temp.path().join("codeql-db");
         fs::create_dir_all(&repo).unwrap();
         create_codeql_database_parent(&db).unwrap();
-        let fake = write_fake_codeql(temp.path(), "#!/bin/sh\nsleep 60\n");
+        let fake = write_fake_codeql(temp.path(), "#!/bin/sh\nPATH=/usr/bin:/bin\nsleep 60\n");
         let scanner = CodeqlScanner {
             language: Some("javascript".to_string()),
             build_mode: Some("none".to_string()),

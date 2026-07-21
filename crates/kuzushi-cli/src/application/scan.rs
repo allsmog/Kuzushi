@@ -19,6 +19,16 @@ use kuzushi_core::{
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
 
+/// CLI scope flags (`--shard`, `--shard-manifest`, `--paths`) that compile
+/// into the canonical `sast:scan` `paths`/`shard` input keys.
+#[derive(Debug, Default)]
+pub(crate) struct ScanScopeArgs {
+    pub(crate) shard: Option<String>,
+    pub(crate) shard_manifest: Option<PathBuf>,
+    pub(crate) paths: Vec<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn scan_command(
     target: PathBuf,
     mode: Option<ScanModeArg>,
@@ -27,6 +37,7 @@ pub(crate) async fn scan_command(
     json: bool,
     ci: bool,
     budget: Option<String>,
+    scope: ScanScopeArgs,
     since: Option<String>,
     include_worktree: bool,
     gate: ScanGatePolicy,
@@ -41,6 +52,7 @@ pub(crate) async fn scan_command(
             &tasks,
             triage,
             budget.as_deref(),
+            &scope,
             since.as_deref(),
             include_worktree,
             json,

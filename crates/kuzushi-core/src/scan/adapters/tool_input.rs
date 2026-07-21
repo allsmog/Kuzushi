@@ -29,16 +29,33 @@ impl SemgrepScanner {
         target: &Path,
         cancel: &ScanCancellation,
     ) -> Result<Vec<Finding>> {
-        let output = self.run_semgrep_process(target, cancel)?;
+        Ok(self.scan_outcome_with_cancel(target, cancel)?.findings)
+    }
+
+    /// Like [`Self::scan_with_cancel`], but also returns semgrep's reported
+    /// scan errors so callers can disclose incomplete coverage.
+    pub fn scan_outcome_with_cancel(
+        &self,
+        target: &Path,
+        cancel: &ScanCancellation,
+    ) -> Result<SemgrepScanOutcome> {
+        let (output, status) = self.run_semgrep_process(target, cancel)?;
         let stdout = String::from_utf8(output.stdout).context("semgrep emitted non-UTF8 JSON")?;
-        normalize_semgrep_json(&stdout)
+        if !status.success() {
+            anyhow::bail!(semgrep_run_failure(status, &stdout, &output.stderr));
+        }
+        let report = parse_semgrep_report(&stdout)?;
+        Ok(SemgrepScanOutcome {
+            scan_errors: semgrep_error_summaries(&report.errors),
+            findings: semgrep_findings_from_report(report),
+        })
     }
 
     fn run_semgrep_process(
         &self,
         target: &Path,
         cancel: &ScanCancellation,
-    ) -> Result<ProcessOutput> {
+    ) -> Result<(ScannerProcessOutput, ExitStatus)> {
         if cancel.is_cancelled() {
             anyhow::bail!("semgrep scan cancelled");
         }
@@ -65,17 +82,7 @@ impl SemgrepScanner {
             anyhow::bail!("semgrep scan cancelled");
         };
 
-        if !status.success() && output.stdout.is_empty() {
-            anyhow::bail!(
-                "semgrep failed with status {}: {}",
-                status,
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        Ok(ProcessOutput {
-            stdout: output.stdout,
-        })
+        Ok((output, status))
     }
 
     pub(in crate::scan) fn semgrep_command(&self, target: &Path) -> Command {
@@ -96,3 +103,35 @@ impl SemgrepScanner {
         command
     }
 }
+
+/// Kuzushi never passes `--error`, so semgrep exits zero whenever the scan ran
+/// (findings or not). A nonzero exit means semgrep itself reports a failed run
+/// and must never be presented as a completed scan, even when partial JSON was
+/// emitted. Prefer semgrep's own structured errors for the detail; fall back
+/// to stderr.
+fn semgrep_run_failure(status: ExitStatus, stdout: &str, stderr: &[u8]) -> String {
+    format!(
+        "semgrep failed with status {}: {}",
+        status,
+        semgrep_failure_detail(stdout, stderr)
+    )
+}
+
+const MAX_REPORTED_SEMGREP_ERRORS: usize = 5;
+
+fn semgrep_failure_detail(stdout: &str, stderr: &[u8]) -> String {
+    let reported = parse_semgrep_report(stdout)
+        .map(|report| semgrep_error_summaries(&report.errors))
+        .unwrap_or_default();
+    if reported.is_empty() {
+        return String::from_utf8_lossy(stderr).trim().to_string();
+    }
+    let mut lines = reported;
+    let remaining = lines.len().saturating_sub(MAX_REPORTED_SEMGREP_ERRORS);
+    lines.truncate(MAX_REPORTED_SEMGREP_ERRORS);
+    if remaining > 0 {
+        lines.push(format!("... and {remaining} more semgrep errors"));
+    }
+    lines.join("; ")
+}
+

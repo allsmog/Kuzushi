@@ -78,7 +78,7 @@ fn model_picker_controls(width: usize) -> Line<'static> {
         width,
         &[
             ("↑/↓/j/k", "move"),
-            ("d/demo", "offline fixture"),
+            (":demo", "offline fixture"),
             (":", "type a command"),
             ("Enter", "confirm"),
             ("Esc/q", "defer (you'll need to /model later)"),
@@ -86,7 +86,6 @@ fn model_picker_controls(width: usize) -> Line<'static> {
         &[
             ("↑/↓", "move"),
             ("Enter", "select"),
-            ("d", "demo"),
             ("Esc", "defer"),
         ],
     )

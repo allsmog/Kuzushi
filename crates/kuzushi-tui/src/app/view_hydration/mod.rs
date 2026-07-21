@@ -49,6 +49,12 @@ pub(crate) enum ScanStageReceiptState {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ScanRecommendationsState {
+    Ready(Vec<kuzushi_core::capabilities::scan_recommender::ScanRecommendation>),
+    Failed(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FindingPatchTruthState {
     Ready(FindingPatchTruth),
@@ -162,6 +168,7 @@ pub(crate) enum ViewHydrationKey {
     },
     TargetProfile,
     MapArtifacts,
+    ScanRecommendations,
     TargetBase,
 }
 
@@ -191,6 +198,7 @@ pub(crate) enum ViewHydrationValue {
     HealthChecks(ViewHealthChecks),
     TargetProfile(TargetProfile),
     MapArtifacts(bool),
+    ScanRecommendations(ScanRecommendationsState),
     TargetBase(String),
 }
 

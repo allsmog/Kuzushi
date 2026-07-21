@@ -6,14 +6,17 @@ pub(crate) fn host_from_url(url: &str) -> Option<String> {
         .split_once("://")
         .map(|(_, rest)| rest)
         .unwrap_or_else(|| url.trim());
-    let without_credentials = without_scheme
-        .rsplit_once('@')
-        .map(|(_, rest)| rest)
-        .unwrap_or(without_scheme);
-    let host_port = without_credentials
+    // Cut the authority at the first path/query/fragment delimiter BEFORE
+    // stripping credentials: an `@` later in the URL
+    // (`https://evil.test/@in-scope.host`) must not spoof the host.
+    let authority = without_scheme
         .split(['/', '?', '#'])
         .next()
         .unwrap_or_default();
+    let host_port = authority
+        .rsplit_once('@')
+        .map(|(_, rest)| rest)
+        .unwrap_or(authority);
     let host = host_port.split(':').next().unwrap_or_default().trim();
     if host.is_empty() {
         None
@@ -73,6 +76,37 @@ pub(crate) fn plural(count: usize) -> &'static str {
         ""
     } else {
         "s"
+    }
+}
+
+#[cfg(test)]
+mod http_target_tests {
+    use super::*;
+
+    #[test]
+    fn host_from_url_handles_schemes_credentials_and_ports() {
+        assert_eq!(
+            host_from_url("https://user:pw@API.Example.com:8443/path?q=1"),
+            Some("api.example.com".to_string())
+        );
+        assert_eq!(host_from_url("example.com/path"), Some("example.com".to_string()));
+        assert_eq!(host_from_url("   "), None);
+    }
+
+    #[test]
+    fn host_from_url_is_not_spoofed_by_at_signs_after_the_authority() {
+        assert_eq!(
+            host_from_url("https://evil.test/@api.example.com"),
+            Some("evil.test".to_string())
+        );
+        assert_eq!(
+            host_from_url("https://evil.test/?next=user@api.example.com"),
+            Some("evil.test".to_string())
+        );
+        assert_eq!(
+            host_from_url("https://evil.test/#user@api.example.com"),
+            Some("evil.test".to_string())
+        );
     }
 }
 

@@ -86,6 +86,25 @@ pub(in crate::modules) fn call_triage_runtime(
     })
 }
 
+/// One additional consensus vote. Deliberately bypasses the runtime cache in
+/// both directions: reading it would replay vote #1 verbatim (defeating vote
+/// independence), and writing it would let a later single-vote run pick up
+/// an arbitrary vote instead of the consensus.
+pub(in crate::modules) fn call_triage_runtime_uncached(
+    runtime: &dyn AgentRuntime,
+    config: &TriageExecutionConfig,
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> Result<TriageOutcome> {
+    let request = TriageRequest {
+        model: config.stage2_model.clone(),
+        cwd: config.cwd.clone(),
+        finding: finding.clone(),
+        prompt_template: input.prompt_template.clone(),
+    };
+    crate::runtime::triage_finding_blocking_checked(runtime, request)
+}
+
 fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
     let cache = TRIAGE_RUNTIME_CACHE.get_or_init(|| Mutex::new(TriageRuntimeCache::default()));
     let guard = cache.lock().unwrap_or_else(|poison| poison.into_inner());
@@ -159,6 +178,34 @@ pub(in crate::modules) fn persist_triage_outcome(
     Ok(())
 }
 
+/// A cluster duplicate inherits the representative's verdict without an LLM
+/// call: persisted like an auto-triage, recorded with a `dedupe` stage row so
+/// the operator can see the inheritance instead of a silent drop.
+pub(in crate::modules) fn propagate_duplicate_outcome(
+    store: &FindingStore,
+    stats: &mut TriageRunStats,
+    finding: Finding,
+    representative_outcome: &TriageOutcome,
+    representative_fingerprint: &str,
+) {
+    let inherited = TriageOutcome {
+        rationale: duplicate_rationale(
+            representative_fingerprint,
+            &representative_outcome.rationale,
+        ),
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+        ..representative_outcome.clone()
+    };
+    if let Err(error) = store.record_auto_triage_for_fingerprint(&finding.fingerprint, &inherited) {
+        eprintln!(
+            "[triage:run] could not persist inherited triage for finding {}: {error}",
+            finding.fingerprint
+        );
+    }
+    stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);
+}
+
 pub(in crate::modules) fn high_confidence_false_positive(result: &Value) -> bool {
     result.get("verdict").and_then(Value::as_str) == Some("false_positive")
         && result
@@ -222,6 +269,7 @@ fn triage_response_data(
         "byDesign": stats.by_design,
         "missingFingerprints": missing_fingerprints,
         "concurrency": input.concurrency,
+        "votes": input.votes,
         "stage2Tier": triage_tier_label(input.stage2_tier),
         "costCapUsd": input.cost_cap_usd,
         "costCapHit": stats.cost_cap_hit,
@@ -283,9 +331,19 @@ pub(in crate::modules) fn triage_stages(
             "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
         },
         {
+            "stage": "dedupe",
+            "clusters": stats.clusters,
+            "duplicatesInherited": stats.duplicates_inherited,
+            "rule": format!(
+                "same tool+rule within {} lines inherits the representative verdict",
+                crate::findings::ingest_contract::CLUSTER_WINDOW_LINES
+            ),
+        },
+        {
             "stage": "haiku",
             "model": config.stage2_model,
             "concurrency": input.concurrency,
+            "votes": input.votes,
             "triaged": stats.triaged(),
             "tp": stats.tp,
             "fp": stats.fp,
