@@ -258,7 +258,7 @@ pub(crate) use recent_module_activity::{
 };
 pub(crate) use recommendation::{
     recommendation_artifact_needs_refresh, recommendation_components, recommendation_model,
-    ComponentRecommendationRow, RecommendationModel, RecommendationRow,
+    ComponentRecommendationRow, RecommendationModel, RecommendationRow, NO_REASON_RECORDED,
 };
 pub(crate) use report_preview::{
     report_preview_model, ReportPreviewCounts, ReportPreviewModel, ReportPreviewRow,

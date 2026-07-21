@@ -83,13 +83,28 @@ pub(super) fn context_question_options() -> Vec<GuidedQuestionOption> {
 pub(super) fn module_question_option(
     row: &PlanningTaskRow,
     selected: bool,
+    seed: Option<&ScanSeedContext>,
 ) -> GuidedQuestionOption {
     GuidedQuestionOption {
         label: row.label.to_string(),
-        description: module_row_description(row),
+        description: seeded_module_description(row, seed),
         selected,
-        recommended: selected,
+        recommended: selected || seed.is_some_and(|seed| seed.recommends(row.tool_name)),
         other: false,
+    }
+}
+
+/// Append the recommender's rationale to a runnable row so the checkbox reads
+/// as "recommended because …". Blocked/unavailable rows keep their blocker
+/// text — a reason must never drown out why a row cannot run.
+fn seeded_module_description(row: &PlanningTaskRow, seed: Option<&ScanSeedContext>) -> String {
+    let base = module_row_description(row);
+    if row.blocker.is_some() || !row.cli_available {
+        return base;
+    }
+    match seed.and_then(|seed| seed.reason_for(row.tool_name)) {
+        Some(reason) => format!("{base} — {reason}"),
+        None => base,
     }
 }
 

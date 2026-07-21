@@ -56,11 +56,16 @@ impl ShellApp {
         flow: &GuidedScanFlow,
         phase: WorkflowPhase,
     ) -> GuidedScanQuestionModel {
+        // Scan module choices are seeded by the threat model + recommender;
+        // Map builds those artifacts, so its own selection stays unseeded.
+        let seed = (phase == WorkflowPhase::Scan).then(|| self.scan_seed_context());
         let picker = self.engagement.planning_picker();
         let mut options = picker
             .tasks()
             .iter()
-            .map(|row| module_question_option(row, picker.selected().contains(&row.id)))
+            .map(|row| {
+                module_question_option(row, picker.selected().contains(&row.id), seed.as_ref())
+            })
             .collect::<Vec<_>>();
         options.push(question_option(
             &continue_module_label(
@@ -73,7 +78,7 @@ impl ShellApp {
             !picker.selected().is_empty(),
         ));
         options.push(other_option());
-        base_question(
+        let mut model = base_question(
             flow,
             &format!("{} · MODULES", phase.label()),
             &format!("Which {} modules should Kuzushi run?", phase.word()),
@@ -84,7 +89,11 @@ impl ShellApp {
                 phase,
                 self.map_context_is_missing(),
             )),
-        )
+        );
+        if let Some(seed) = seed {
+            model.detail_lines.push(seed.provenance);
+        }
+        model
     }
 
     fn context_question(&self, flow: &GuidedScanFlow) -> GuidedScanQuestionModel {

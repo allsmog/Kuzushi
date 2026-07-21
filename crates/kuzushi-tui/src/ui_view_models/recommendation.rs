@@ -5,6 +5,10 @@ use crate::{app::JsonFileState, ShellApp, ViewDataState};
 use kuzushi_core::LatestRunPointerState;
 use std::path::{Path, PathBuf};
 
+/// Placeholder shown when a recommender row records no rationale; consumers
+/// seeding "recommended because …" copy treat it as no reason at all.
+pub(crate) const NO_REASON_RECORDED: &str = "No reason recorded.";
+
 const RECOMMENDATION_COLUMN_COUNT: usize = 5;
 const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
@@ -387,7 +391,7 @@ fn recommendation_from_value(value: serde_json::Value) -> Option<RecommendationR
             string_field(&value, "tool")?,
             runtime_label(requires_runtime(&value)).to_string(),
             primary_signal(&value).unwrap_or_else(|| "-".to_string()),
-            string_field(&value, "reason").unwrap_or_else(|| "No reason recorded.".to_string()),
+            string_field(&value, "reason").unwrap_or_else(|| NO_REASON_RECORDED.to_string()),
         ],
     })
 }

@@ -9,8 +9,11 @@ mod options;
 mod other;
 mod presentation_copy;
 mod projection;
+mod seed_context;
 #[cfg(test)]
 mod tests;
+
+pub(self) use seed_context::ScanSeedContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuidedScanStage {

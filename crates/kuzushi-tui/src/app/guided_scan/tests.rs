@@ -798,3 +798,131 @@ fn partial_map_result_copy_never_claims_modules_finished() {
     assert!(!prompt.contains("finished"));
     assert!(!prompt.contains("continue to Scan"));
 }
+
+fn scan_picker_row(id: PlanningTaskId) -> PlanningTaskRow {
+    PlanningTaskRow {
+        id,
+        label: id.label(),
+        tool_name: id.tool_name(),
+        artifact_path: std::path::PathBuf::from("/tmp/audit-artifact"),
+        artifact_state: PlanningArtifactState::Action,
+        artifact_modified: None,
+        model_backed: id.is_model_backed(),
+        required_cli: None,
+        cli_available: true,
+        blocker: None,
+    }
+}
+
+fn write_seed_evidence(root: &std::path::Path) {
+    let threat_path = kuzushi_core::capabilities::persistent_threat_model_path(root);
+    std::fs::create_dir_all(threat_path.parent().unwrap()).unwrap();
+    std::fs::write(
+        threat_path,
+        serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "a", "name": "api", "trustZone": "app", "type": "process"},
+                    {"id": "b", "name": "db", "trustZone": "data", "type": "data-store"}
+                ],
+                "flows": [{"id": "f", "sourceId": "a", "targetId": "b"}],
+                "trustBoundaries": [{"id": "edge"}]
+            },
+            "threats": [{"id": "T-1"}, {"id": "T-2"}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let run_dir = crate::ui_view_models::ui_run_dir(Some(root), "run-seed");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let summary =
+        kuzushi_core::RunSummary::running("run-seed", "tool", None, root.display().to_string());
+    std::fs::write(
+        run_dir.join("run.json"),
+        serde_json::to_string(&summary).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        crate::ui_view_models::ui_latest_run_path(Some(root)),
+        "run-seed",
+    )
+    .unwrap();
+    std::fs::write(
+        run_dir.join("recommendations.json"),
+        serde_json::json!({
+            "recommendations": [{
+                "tool": "semgrep:scan",
+                "priority": "high",
+                "reason": "Falcon routes match semgrep coverage."
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+}
+
+fn app_in_module_selection(root: &std::path::Path, phase: WorkflowPhase) -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(root.to_path_buf()));
+    app.engagement.planning_picker_mut().open(
+        vec![scan_picker_row(PlanningTaskId::ScanSemgrep)],
+        BTreeSet::new(),
+    );
+    app.engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::ModuleSelection(phase)));
+    app.show_guided_phase(phase);
+    app.hydrate_all_view_data_for_test();
+    app
+}
+
+#[test]
+fn scan_module_selection_is_seeded_by_threat_model_and_recommender() {
+    let temp = tempfile::tempdir().unwrap();
+    write_seed_evidence(temp.path());
+    let app = app_in_module_selection(temp.path(), WorkflowPhase::Scan);
+
+    let question = app.guided_scan_question_model().unwrap();
+
+    assert_eq!(
+        question.detail_lines.last().map(String::as_str),
+        Some("Seeded by the threat model (2 threat(s) · 1 trust boundary) and workspace signals.")
+    );
+    let semgrep = &question.options[0];
+    assert!(
+        semgrep
+            .description
+            .ends_with("— Falcon routes match semgrep coverage."),
+        "{}",
+        semgrep.description
+    );
+    assert!(semgrep.recommended);
+    assert!(!semgrep.selected);
+}
+
+#[test]
+fn scan_module_selection_degrades_honestly_without_seed_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let app = app_in_module_selection(temp.path(), WorkflowPhase::Scan);
+
+    let question = app.guided_scan_question_model().unwrap();
+
+    let provenance = question.detail_lines.last().unwrap();
+    assert!(
+        provenance.contains("generic engine defaults"),
+        "{provenance}"
+    );
+    assert!(provenance.contains("Run Map"), "{provenance}");
+    assert!(!question.options[0].recommended);
+}
+
+#[test]
+fn map_module_selection_stays_unseeded() {
+    let temp = tempfile::tempdir().unwrap();
+    write_seed_evidence(temp.path());
+    let app = app_in_module_selection(temp.path(), WorkflowPhase::Map);
+
+    let question = app.guided_scan_question_model().unwrap();
+
+    assert_eq!(question.detail_lines.len(), 1);
+    assert!(!question.detail_lines[0].contains("Seeded"));
+}
