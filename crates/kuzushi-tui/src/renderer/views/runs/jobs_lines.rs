@@ -37,16 +37,11 @@ pub(crate) fn jobs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
 fn column_widths(area: Rect) -> [usize; 7] {
     let [run_id, kind, status, elapsed, step, findings] = JOBS_COLUMN_WIDTHS;
-    let fixed_used = run_id + kind + status + elapsed + step + findings + 14;
-    [
-        run_id,
-        kind,
-        status,
-        elapsed,
-        step,
-        findings,
-        value_width(area, fixed_used),
-    ]
+    fit_table_widths(
+        area.width as usize,
+        [run_id, kind, status, elapsed, step, findings, 32],
+        [6, 3, 5, 3, 4, 1, 6],
+    )
 }
 
 fn job_row_line(row: &JobRow, widths: &[usize; 7]) -> Line<'static> {
@@ -81,10 +76,7 @@ fn job_row_line(row: &JobRow, widths: &[usize; 7]) -> Line<'static> {
             format!("{}  ", pad(&findings_label(row), widths[5])),
             theme::primary(),
         ),
-        Span::styled(
-            format!("{}  ", pad(&fit(&row.target, widths[6]), widths[6])),
-            theme::muted(),
-        ),
+        Span::styled(pad(&fit(&row.target, widths[6]), widths[6]), theme::muted()),
     ])
 }
 
@@ -233,6 +225,36 @@ mod tests {
     use crate::app::ViewHydrationKey;
     use crate::ui_view_models::JobSource;
     use kuzushi_core::{write_run_summary, RunSummary, V2Config};
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum()
+    }
+
+    #[test]
+    fn job_columns_fit_narrow_area_budgets() {
+        let row = JobRow {
+            run_id: "run-日本語-123456".to_string(),
+            kind: "agent".to_string(),
+            label: "sast:scan".to_string(),
+            status: JobRunStatus::WaitingInput,
+            elapsed_secs: Some(123),
+            phase: Some("collecting evidence".to_string()),
+            findings: Some(42),
+            target: "/long/日本語/target".to_string(),
+            source: JobSource::Live,
+            cancelable: true,
+        };
+        for width in [40, 60, 80] {
+            let widths = column_widths(Rect::new(0, 0, width, 20));
+            let line = job_row_line(&row, &widths);
+
+            assert_eq!(table_width(&widths), width as usize);
+            assert!(line_width(&line) <= width as usize);
+        }
+    }
 
     #[test]
     fn durable_job_uses_tool_identity_when_it_has_no_live_step() {

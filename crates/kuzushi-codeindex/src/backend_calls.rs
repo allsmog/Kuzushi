@@ -89,16 +89,16 @@ pub(crate) fn symbol_matches(value: &Value) -> Vec<Symbol> {
         .unwrap_or_default()
 }
 
-pub(crate) fn log_backend_failure(
+pub(crate) fn backend_failure_diagnostic(
     backend: Backend,
     operation: &str,
     symbol: &str,
     err: &anyhow::Error,
-) {
-    eprintln!(
-        "[codeindex] {} backend failed for {operation}({symbol}): {err}",
+) -> String {
+    format!(
+        "{} backend failed for {operation}({symbol}): {err}",
         backend.binary_name()
-    );
+    )
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

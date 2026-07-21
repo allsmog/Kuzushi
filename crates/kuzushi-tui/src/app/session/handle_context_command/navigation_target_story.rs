@@ -179,8 +179,11 @@ impl ShellApp {
         &mut self,
         workspace: &WorkspaceTarget,
     ) -> Option<kuzushi_core::GuidedPhaseConfig> {
-        match kuzushi_core::load_config_for_target(Some(workspace.root())) {
-            Ok(config) => Some(config.phases),
+        match kuzushi_core::load_config_for_target_with_diagnostics(Some(workspace.root())) {
+            Ok(loaded_config) => {
+                self.log_config_diagnostics(&loaded_config.diagnostics);
+                Some(loaded_config.config.phases)
+            }
             Err(error) => {
                 self.log(
                     "target",
@@ -210,9 +213,10 @@ impl ShellApp {
 
     fn reload_external_phase_config(&mut self, target: &Path) {
         let posture = self.autonomy();
-        match kuzushi_core::load_config_for_target(Some(target)) {
-            Ok(config) => {
-                self.config_mut().phases = config.phases;
+        match kuzushi_core::load_config_for_target_with_diagnostics(Some(target)) {
+            Ok(loaded_config) => {
+                self.log_config_diagnostics(&loaded_config.diagnostics);
+                self.config_mut().phases = loaded_config.config.phases;
                 self.set_autonomy(posture);
             }
             Err(error) => self.log(
@@ -221,6 +225,16 @@ impl ShellApp {
                     "external project config change rejected; keeping active settings: {error}"
                 ),
             ),
+        }
+    }
+
+    pub(crate) fn log_config_diagnostics(
+        &mut self,
+        diagnostics: &[kuzushi_core::ConfigDiagnostic],
+    ) {
+        let diagnostics = self.ui_mut().take_new_config_diagnostics(diagnostics);
+        for diagnostic in diagnostics {
+            self.log("config", diagnostic.to_string());
         }
     }
 

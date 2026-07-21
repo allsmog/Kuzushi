@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicI64;
 use tokio::io::BufReader;
 use tokio::process::{Child, ChildStdin, ChildStdout};
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -19,6 +20,7 @@ pub struct McpClient {
     pub(crate) child: Mutex<Child>,
     pub(crate) stdin: Mutex<ChildStdin>,
     pub(crate) stdout: Mutex<BufReader<ChildStdout>>,
+    pub(crate) stderr_drain: Mutex<Option<JoinHandle<u64>>>,
     pub(crate) next_id: AtomicI64,
     pub(crate) initialized: Mutex<bool>,
     pub(crate) binary: String,

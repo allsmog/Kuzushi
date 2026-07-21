@@ -126,6 +126,20 @@ fn phase_composition_contract_covers_120_phase_size_profile_buffers() {
 }
 
 #[test]
+fn scan_composition_contract_covers_reported_warp_104_by_61_viewport() {
+    let scan = CONTRACTS
+        .iter()
+        .copied()
+        .find(|contract| contract.page == WorkbenchPage::Scan)
+        .expect("scan composition contract");
+
+    for profile in TerminalProfile::ALL {
+        let (buffer, text) = render_phase(scan, 104, 61, profile);
+        scan.assert_buffer(&buffer, &text, profile);
+    }
+}
+
+#[test]
 fn plain_phase_contract_covers_all_five_phases_at_all_six_widths() {
     let mut count = 0;
     for contract in CONTRACTS {

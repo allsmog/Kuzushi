@@ -50,12 +50,7 @@ impl LiveTraceBudget {
     }
 
     fn record_dropped_live_copy(&self) {
-        let dropped = self.dropped_live.fetch_add(1, Ordering::AcqRel) + 1;
-        if dropped == 1 || dropped.is_power_of_two() {
-            eprintln!(
-                "[activity] dropped {dropped} live trace UI frame(s); trace.jsonl remains authoritative"
-            );
-        }
+        self.dropped_live.fetch_add(1, Ordering::AcqRel);
     }
 
     pub(crate) fn release(&self) {

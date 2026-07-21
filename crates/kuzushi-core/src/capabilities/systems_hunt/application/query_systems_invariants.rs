@@ -149,5 +149,12 @@ pub(crate) async fn score_with_index(
     for surface in surfaces {
         out.push(index_score_surface(&mut facade, &ffi_set, surface).await);
     }
+    record_codeindex_diagnostics(&mut facade);
     out
+}
+
+fn record_codeindex_diagnostics(facade: &mut kuzushi_codeindex::IndexFacade) {
+    for message in facade.take_diagnostics() {
+        crate::runtime_diagnostics::record_runtime_diagnostic("codeindex", message);
+    }
 }

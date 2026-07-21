@@ -245,11 +245,19 @@ fn split_at_width(value: &str, width: usize) -> (String, String) {
     for (index, ch) in value.char_indices() {
         let next = used + char_display_width(ch);
         if next > width {
-            return (value[..index].to_string(), value[index..].to_string());
+            return split_before_overflow(value, index, ch);
         }
         used = next;
     }
     (value.to_string(), String::new())
+}
+
+fn split_before_overflow(value: &str, index: usize, ch: char) -> (String, String) {
+    if index > 0 {
+        return (value[..index].to_string(), value[index..].to_string());
+    }
+    let next_index = ch.len_utf8();
+    ("?".to_string(), value[next_index..].to_string())
 }
 
 #[cfg(test)]
@@ -284,5 +292,13 @@ mod fit_path_tests {
         let lines = wrap_text("ab日本cd", 4);
         assert!(lines.iter().all(|line| display_width(line) <= 4));
         assert_eq!(lines, vec!["ab日", "本cd"]);
+    }
+
+    #[test]
+    fn wrap_text_makes_progress_when_one_wide_glyph_exceeds_the_width() {
+        let lines = wrap_text("日", 1);
+
+        assert_eq!(lines, vec!["?"]);
+        assert!(lines.iter().all(|line| display_width(line) <= 1));
     }
 }

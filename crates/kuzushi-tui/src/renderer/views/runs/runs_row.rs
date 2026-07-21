@@ -20,9 +20,6 @@ pub(crate) fn runs_row(
             format!("{}  ", pad(&fit(revision, widths[3]), widths[3])),
             theme::subtle(),
         ),
-        Span::styled(
-            format!("{}  ", pad(&fit(target, widths[4]), widths[4])),
-            theme::muted(),
-        ),
+        Span::styled(pad(&fit(target, widths[4]), widths[4]), theme::muted()),
     ])
 }

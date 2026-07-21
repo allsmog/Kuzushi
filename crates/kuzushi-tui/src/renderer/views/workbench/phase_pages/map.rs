@@ -125,13 +125,11 @@ fn render_context(
 }
 
 fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(vec![
-        Span::styled(fit(&model.project.scope_label, width), theme::heading()),
-        Span::styled(
-            format!(" · {}", model.project.revision_label),
-            theme::muted(),
-        ),
-    ])];
+    let mut lines = vec![context_heading_line(
+        &model.project.scope_label,
+        &model.project.revision_label,
+        width,
+    )];
     if let Some(hint) = model.empty_hint.as_deref() {
         lines.push(Line::styled(fit(hint, width), theme::warn()));
     }
@@ -149,6 +147,29 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
         ])
     }));
     lines
+}
+
+fn context_heading_line(scope: &str, revision: &str, width: usize) -> Line<'static> {
+    let separator = " · ";
+    let combined_width = display_width(scope) + display_width(separator) + display_width(revision);
+    if combined_width <= width {
+        return Line::from(vec![
+            Span::styled(scope.to_string(), theme::heading()),
+            Span::styled(format!("{separator}{revision}"), theme::muted()),
+        ]);
+    }
+    if width < 16 {
+        return Line::styled(fit(scope, width), theme::heading());
+    }
+    let content_width = width.saturating_sub(display_width(separator));
+    let revision_width = content_width / 3;
+    let scope_width = content_width.saturating_sub(revision_width);
+    let scope = fit(scope, scope_width);
+    let revision = fit(revision, revision_width);
+    Line::from(vec![
+        Span::styled(scope, theme::heading()),
+        Span::styled(format!("{separator}{revision}"), theme::muted()),
+    ])
 }
 
 /// "context:missing · missing. Next: …" repeats the state; strip a status
@@ -282,23 +303,31 @@ fn hot_module_lines(modules: &[ModuleRisk], width: usize) -> Vec<Line<'static>> 
     modules
         .iter()
         .take(8)
-        .map(|module| {
-            let [critical, high, medium, low, info] = module.counts;
-            Line::from(vec![
-                Span::styled(
-                    fit(&module.module, width.saturating_sub(25)),
-                    theme::primary(),
-                ),
-                Span::styled(
-                    format!(
-                        "  {:>4.1} · {critical}C {high}H {medium}M {low}L {info}I",
-                        module.score
-                    ),
-                    theme::muted(),
-                ),
-            ])
-        })
+        .flat_map(|module| hot_module_row_lines(module, width))
         .collect()
+}
+
+fn hot_module_row_lines(module: &ModuleRisk, width: usize) -> Vec<Line<'static>> {
+    let metadata = hot_module_metadata(module);
+    if display_width(&module.module) + 2 + display_width(&metadata) <= width {
+        return vec![Line::from(vec![
+            Span::styled(module.module.clone(), theme::primary()),
+            Span::styled(format!("  {metadata}"), theme::muted()),
+        ])];
+    }
+    let module_line = Line::styled(fit(&module.module, width), theme::primary());
+    let metadata_lines = wrap_text(&metadata, width)
+        .into_iter()
+        .map(|line| Line::styled(line, theme::muted()));
+    std::iter::once(module_line).chain(metadata_lines).collect()
+}
+
+fn hot_module_metadata(module: &ModuleRisk) -> String {
+    let [critical, high, medium, low, info] = module.counts;
+    format!(
+        "{:>4.1} · {critical}C {high}H {medium}M {low}L {info}I",
+        module.score
+    )
 }
 
 fn render_dfd_readiness(
@@ -388,11 +417,17 @@ fn tier_style(tier: &str) -> ratatui::style::Style {
     }
 }
 
-
 #[cfg(test)]
 mod next_scan_tests {
     use super::*;
     use crate::ui_view_models::NextScanRow;
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum()
+    }
 
     fn text(lines: &[Line<'_>]) -> String {
         lines
@@ -433,5 +468,60 @@ mod next_scan_tests {
             80,
         ));
         assert!(failed.contains("unavailable: ledger locked"));
+    }
+
+    #[test]
+    fn context_heading_budgets_scope_and_revision_as_one_line() {
+        let line = context_heading_line("日本語の長いスコープ", "revision-with-a-long-name", 20);
+        let rendered = line.to_string();
+
+        assert!(line_width(&line) <= 20);
+        assert!(
+            rendered.starts_with("日本語"),
+            "scope identity was lost: {rendered}"
+        );
+        assert!(
+            display_width(line.spans[1].content.as_ref()) > display_width(" · "),
+            "revision was lost: {rendered}"
+        );
+
+        let roomy = context_heading_line("scope:auth", "rev:a1b2c3", 40).to_string();
+        assert!(roomy.contains("scope:auth"));
+        assert!(roomy.contains("rev:a1b2c3"));
+
+        let long = context_heading_line(
+            "scope:services/identity/authorization",
+            "rev:feature/long-lived-security-branch",
+            96,
+        )
+        .to_string();
+        assert!(long.contains("scope:services/identity/authorization"));
+        assert!(long.contains("rev:feature/long-lived-security-branch"));
+    }
+
+    #[test]
+    fn hot_module_suffix_uses_its_actual_count_width() {
+        let lines = hot_module_lines(
+            &[ModuleRisk {
+                module: "src/日本語/very-long-module-name".to_string(),
+                counts: [10_000, 20_000, 30_000, 40_000, 50_000],
+                score: 1000.0,
+            }],
+            40,
+        );
+
+        let rendered = text(&lines);
+        assert!(lines.iter().all(|line| line_width(line) <= 40));
+        for atom in [
+            "src/日本語",
+            "1000.0",
+            "10000C",
+            "20000H",
+            "30000M",
+            "40000L",
+            "50000I",
+        ] {
+            assert!(rendered.contains(atom), "missing {atom:?}: {rendered}");
+        }
     }
 }

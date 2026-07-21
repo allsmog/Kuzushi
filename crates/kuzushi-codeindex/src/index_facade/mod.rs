@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::path::Path;
 
 use crate::backend_calls::{
-    callees_call, callers_call, definition_call, log_backend_failure, references_call,
+    backend_failure_diagnostic, callees_call, callers_call, definition_call, references_call,
     symbol_matches, BackendToolCall,
 };
 use crate::client::McpClient;
@@ -23,4 +23,5 @@ pub struct IndexFacade {
     pub clang: Option<McpClient>,
     pub joern: Option<McpClient>,
     pub(crate) routing: RoutingTable,
+    diagnostics: Vec<String>,
 }

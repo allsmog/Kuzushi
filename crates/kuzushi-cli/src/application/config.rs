@@ -1,7 +1,7 @@
 use crate::command::ConfigCommand;
 use anyhow::Result;
 use kuzushi_core::config::write_default_config;
-use kuzushi_core::{load_config_for_target, WorkspaceTarget};
+use kuzushi_core::WorkspaceTarget;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn config_command(command: ConfigCommand, target: Option<PathBuf>) -> Result<()> {
@@ -14,7 +14,8 @@ pub(crate) fn config_command(command: ConfigCommand, target: Option<PathBuf>) ->
 
 pub(crate) fn config_show_command(target: Option<PathBuf>) -> Result<()> {
     let workspace = target.as_deref().map(WorkspaceTarget::new).transpose()?;
-    let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
+    let config =
+        super::config_diagnostics::load_cli_config(workspace.as_ref().map(WorkspaceTarget::root))?;
     println!("{}", serde_json::to_string_pretty(&config)?);
     Ok(())
 }

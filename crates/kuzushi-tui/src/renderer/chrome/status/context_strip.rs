@@ -43,22 +43,23 @@ fn context_strip_spans(model: &ContextStripModel) -> Vec<Span<'static>> {
 fn spans_overflow(spans: &[Span<'static>], width: u16) -> bool {
     spans
         .iter()
-        .map(|span| span.content.chars().count())
+        .map(|span| display_width(span.content.as_ref()))
         .sum::<usize>()
         + 1
         > width as usize
 }
 
 fn compact_context_strip_line(model: &ContextStripModel, area: Rect) -> Vec<Line<'static>> {
-    let rest = fit(
-        &model.compact_segments().join(" · "),
-        area.width.saturating_sub(9) as usize,
-    );
-    vec![Line::from(vec![
-        Span::styled("KUZUSHI", theme::heading()),
-        Span::raw(" "),
-        Span::styled(rest, theme::primary()),
-    ])]
+    let width = area.width as usize;
+    let brand = fit("KUZUSHI", width);
+    let rest_width = width.saturating_sub(display_width(&brand) + 1);
+    let rest = fit(&model.compact_segments().join(" · "), rest_width);
+    let mut spans = vec![Span::styled(brand, theme::heading())];
+    if !rest.is_empty() {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(rest, theme::primary()));
+    }
+    vec![Line::from(spans)]
 }
 
 fn push_breadcrumb_segment(spans: &mut Vec<Span<'static>>, view: String) {
@@ -123,5 +124,37 @@ fn push_cost_or_trim(spans: &mut Vec<Span<'static>>, cost: Option<String>) {
     }
     if matches!(spans.last(), Some(span) if span.content == " · ") {
         spans.pop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum()
+    }
+
+    #[test]
+    fn detects_overflow_by_terminal_cell_width() {
+        assert!(spans_overflow(&[Span::raw("日本")], 4));
+        assert!(!spans_overflow(&[Span::raw("日本")], 5));
+    }
+
+    #[test]
+    fn context_strip_fits_every_width_including_sub_brand_widths() {
+        let app = ShellApp::new(V2Config::default(), None);
+        for width in 0..=100 {
+            let lines = context_strip(&app, Rect::new(0, 0, width, 1));
+
+            assert!(
+                lines.iter().all(|line| line_width(line) <= width as usize),
+                "context strip exceeded {width}: {lines:?}"
+            );
+        }
     }
 }

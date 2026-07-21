@@ -57,8 +57,11 @@ fn append_campaign_list(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteStat
 
 fn campaign_list_widths(area: Rect) -> [usize; 5] {
     let [id, tool, jobs, states] = CAMPAIGN_LIST_WIDTHS;
-    let fixed_used = 2 + id + tool + jobs + states + 10;
-    [2, id, tool, jobs, states.max(value_width(area, fixed_used))]
+    fit_table_widths(
+        area.width as usize,
+        [2, id, tool, jobs, states],
+        [1, 6, 4, 2, 7],
+    )
 }
 
 fn campaign_row_line(
@@ -70,13 +73,19 @@ fn campaign_row_line(
     Line::from(vec![
         Span::styled(format!("{}  ", pad(marker, widths[0])), theme::accent()),
         Span::styled(
-            format!("{}  ", pad(&fit(&campaign.campaign_id, widths[1]), widths[1])),
+            format!(
+                "{}  ",
+                pad(&fit(&campaign.campaign_id, widths[1]), widths[1])
+            ),
             theme::accent(),
         ),
         Span::styled(
             format!(
                 "{}  ",
-                pad(&fit(campaign.tool.as_deref().unwrap_or("—"), widths[2]), widths[2])
+                pad(
+                    &fit(campaign.tool.as_deref().unwrap_or("—"), widths[2]),
+                    widths[2]
+                )
             ),
             theme::subtle(),
         ),
@@ -85,7 +94,7 @@ fn campaign_row_line(
             theme::primary(),
         ),
         Span::styled(
-            format!("{}  ", pad(&fit(&states_label(campaign), widths[4]), widths[4])),
+            pad(&fit(&states_label(campaign), widths[4]), widths[4]),
             theme::primary(),
         ),
     ])
@@ -114,29 +123,58 @@ fn append_campaign_detail(
         area.width,
     ));
     lines.push(detail_summary_line(deck, campaign));
-    if let Some(burn) = burn_bar_label(campaign.total_cost_usd, campaign.budget_usd) {
-        lines.push(Line::styled(
-            format!("  {burn}"),
-            burn_bar_style(campaign.total_cost_usd, campaign.budget_usd),
-        ));
-    }
-    if let Some(cap) = job_budget_label(campaign.job_budget_usd) {
-        lines.push(Line::styled(format!("  {cap}"), theme::subtle()));
-    }
-    if let Some(gap) = gap_fill_label(campaign.fill_gaps, campaign.skipped_covered_cells) {
-        lines.push(Line::styled(format!("  {gap}"), theme::subtle()));
-    }
-    if let Some(countdown) = pause_countdown_label(campaign.paused_until_ms, unix_now_ms()) {
-        lines.push(Line::styled(format!("  {countdown}"), theme::warn()));
-    }
+    append_campaign_operational_detail(lines, campaign);
     lines.push(blank());
     let widths = job_list_widths(area);
     lines.push(aligned_header(
-        &["  ", "in", "job", "state", "att", "prio", "cost", "find", "shard / threat"],
+        &[
+            "  ",
+            "in",
+            "job",
+            "state",
+            "att",
+            "prio",
+            "cost",
+            "find",
+            "shard / threat",
+        ],
         &widths,
     ));
     for (index, job) in campaign.jobs.iter().enumerate() {
         lines.push(job_row_line(deck, job, index == deck.selected_job, &widths));
+    }
+}
+
+fn append_campaign_operational_detail(lines: &mut Vec<Line<'static>>, campaign: &CampaignSnapshot) {
+    append_optional_campaign_detail(
+        lines,
+        burn_bar_label(campaign.total_cost_usd, campaign.budget_usd),
+        burn_bar_style(campaign.total_cost_usd, campaign.budget_usd),
+    );
+    append_optional_campaign_detail(
+        lines,
+        job_budget_label(campaign.job_budget_usd),
+        theme::subtle(),
+    );
+    append_optional_campaign_detail(
+        lines,
+        gap_fill_label(campaign.fill_gaps, campaign.skipped_covered_cells),
+        theme::subtle(),
+    );
+    append_optional_campaign_detail(
+        lines,
+        pause_countdown_label(campaign.paused_until_ms, unix_now_ms()),
+        theme::warn(),
+    );
+}
+
+fn append_optional_campaign_detail(
+    lines: &mut Vec<Line<'static>>,
+    label: Option<String>,
+    style: Style,
+) {
+    if let Some(label) = label {
+        lines.push(Line::styled(format!("  {label}"), style));
     }
 }
 
@@ -160,18 +198,13 @@ fn detail_summary_line(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -
 
 fn job_list_widths(area: Rect) -> [usize; 9] {
     let [marker, job, state, attempts, priority, cost, findings] = JOB_LIST_WIDTHS;
-    let fixed_used = 2 + marker + job + state + attempts + priority + cost + findings + 18;
-    [
-        2,
-        marker,
-        job,
-        state,
-        attempts,
-        priority,
-        cost,
-        findings,
-        value_width(area, fixed_used),
-    ]
+    fit_table_widths(
+        area.width as usize,
+        [
+            2, marker, job, state, attempts, priority, cost, findings, 36,
+        ],
+        [1, 1, 4, 3, 1, 1, 2, 1, 4],
+    )
 }
 
 fn job_row_line(
@@ -186,42 +219,45 @@ fn job_row_line(
     } else {
         "✓"
     };
-    Line::from(vec![
-        Span::styled(format!("{}  ", pad(marker, widths[0])), theme::accent()),
-        Span::styled(format!("{}  ", pad(included, widths[1])), theme::subtle()),
-        Span::styled(
-            format!("{}  ", pad(&fit(&job.job_id, widths[2]), widths[2])),
-            theme::accent(),
-        ),
-        Span::styled(
-            format!("{}  ", pad(&job.state, widths[3])),
-            job_state_style(&job.state),
-        ),
-        Span::styled(
-            format!("{}  ", pad(&job.attempts.to_string(), widths[4])),
-            theme::subtle(),
-        ),
-        Span::styled(
-            format!("{}  ", pad(&job.priority.to_string(), widths[5])),
-            theme::subtle(),
-        ),
-        Span::styled(
-            format!("{}  ", pad(&job_cost_label(job), widths[6])),
-            theme::primary(),
-        ),
-        Span::styled(
-            format!("{}  ", pad(&job_findings_label(job), widths[7])),
-            if job.findings.unwrap_or(0) > 0 {
-                theme::warn()
-            } else {
-                theme::subtle()
-            },
-        ),
-        Span::styled(
-            format!("{}  ", pad(&fit(&job_scope_label(job), widths[8]), widths[8])),
-            theme::muted(),
-        ),
-    ])
+    Line::from(job_row_spans(job, marker, included, widths))
+}
+
+fn job_row_spans(
+    job: &CampaignJobSnapshot,
+    marker: &str,
+    included: &str,
+    widths: &[usize; 9],
+) -> Vec<Span<'static>> {
+    let findings_style = if job.findings.unwrap_or(0) > 0 {
+        theme::warn()
+    } else {
+        theme::subtle()
+    };
+    let cells = [
+        job_cell(marker, widths[0], theme::accent()),
+        job_cell(included, widths[1], theme::subtle()),
+        job_cell(&job.job_id, widths[2], theme::accent()),
+        job_cell(&job.state, widths[3], job_state_style(&job.state)),
+        job_cell(&job.attempts.to_string(), widths[4], theme::subtle()),
+        job_cell(&job.priority.to_string(), widths[5], theme::subtle()),
+        job_cell(&job_cost_label(job), widths[6], theme::primary()),
+        job_cell(&job_findings_label(job), widths[7], findings_style),
+        job_cell(&job_scope_label(job), widths[8], theme::muted()),
+    ];
+    cells
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, cell)| {
+            (index > 0)
+                .then_some(Span::raw("  "))
+                .into_iter()
+                .chain([cell])
+        })
+        .collect()
+}
+
+fn job_cell(value: &str, width: usize, style: Style) -> Span<'static> {
+    Span::styled(pad(&fit(value, width), width), style)
 }
 
 fn job_findings_label(job: &CampaignJobSnapshot) -> String {
@@ -324,7 +360,16 @@ fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState,
     }
     lines.push(blank());
     let commands: &[&str] = if deck.detail {
-        &["j/k", "x include/exclude", "w workers", "L launch", "K kill", "e prompt", "r refresh", "q list"]
+        &[
+            "j/k",
+            "x include/exclude",
+            "w workers",
+            "L launch",
+            "K kill",
+            "e prompt",
+            "r refresh",
+            "q list",
+        ]
     } else {
         &["j/k", "Enter jobs", "r refresh", "campaign <id>", "back"]
     };
@@ -349,6 +394,43 @@ fn append_empty_deck(lines: &mut Vec<Line<'static>>) {
 mod tests {
     use super::*;
     use kuzushi_core::V2Config;
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum()
+    }
+
+    #[test]
+    fn campaign_tables_fit_narrow_area_budgets() {
+        let deck = CampaignRouteState::default();
+        let job = sample_job("job-日本語-long", "retry-wait");
+        let campaign = CampaignSnapshot {
+            campaign_id: "campaign-日本語-long".to_string(),
+            tool: Some("sast:scan".to_string()),
+            created_at_ms: None,
+            paused_until_ms: None,
+            budget_usd: None,
+            job_budget_usd: None,
+            fill_gaps: false,
+            skipped_covered_cells: None,
+            total_cost_usd: 0.0,
+            jobs: vec![job.clone()],
+        };
+        for width in [40, 60, 80] {
+            let area = Rect::new(0, 0, width, 20);
+            let list_widths = campaign_list_widths(area);
+            let job_widths = job_list_widths(area);
+            let campaign_line = campaign_row_line(&campaign, true, &list_widths);
+            let job_line = job_row_line(&deck, &job, true, &job_widths);
+
+            assert_eq!(table_width(&list_widths), width as usize);
+            assert_eq!(table_width(&job_widths), width as usize);
+            assert!(line_width(&campaign_line) <= width as usize);
+            assert!(line_width(&job_line) <= width as usize);
+        }
+    }
 
     #[test]
     fn empty_deck_renders_plan_guidance() {
@@ -454,11 +536,9 @@ mod tests {
     #[test]
     fn deck_list_renders_the_workspace_trend_strip_when_folded() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.router.campaign_mut().trend =
-            Some(kuzushi_core::capabilities::campaign::trend::trend_metrics(
-                &[],
-                12.5,
-            ));
+        app.router.campaign_mut().trend = Some(
+            kuzushi_core::capabilities::campaign::trend::trend_metrics(&[], 12.5),
+        );
         let text = rendered_text(&app);
         assert!(
             text.contains("TREND  FP rate — (no decisions) · 0 confirmed · $12.50 spent"),

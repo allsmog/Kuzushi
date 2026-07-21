@@ -186,7 +186,8 @@ pub use prereq_chain::{
     PrereqPlanStep, PrereqStep,
 };
 pub use runtime::{
-    run_shell, run_shell_with_context, run_shell_with_plain, ShellLaunchContext, ShellTargetSource,
+    run_shell, run_shell_with_context, run_shell_with_context_and_config_diagnostics,
+    run_shell_with_plain, ShellLaunchContext, ShellTargetSource,
 };
 pub(crate) use settings::{
     api_key_model_choice_for_provider, auth_provider_label, bridge_command_status,

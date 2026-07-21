@@ -1,21 +1,12 @@
 use super::*;
 
-pub(crate) fn pause_raw_mode_for_auth_login() -> bool {
-    disable_raw_mode().is_ok()
-}
-
-pub(crate) fn restore_raw_mode_after_auth_login(raw_mode_was_disabled: bool) {
-    if raw_mode_was_disabled {
-        let _ = enable_raw_mode();
-    }
-}
-
 pub(crate) fn spawn_auth_login_process(
     program: &str,
     args: &[String],
     provider: &str,
     method: &str,
 ) -> io::Result<std::process::ExitStatus> {
+    let suspension = crate::app::ExternalTerminalSuspension::begin().map_err(terminal_io_error)?;
     let mut command = ProcessCommand::new(program);
     command
         .args(args)
@@ -24,16 +15,24 @@ pub(crate) fn spawn_auth_login_process(
     if !method.is_empty() {
         command.arg(method);
     }
-    command
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
+    let status = command
+        .stdin(Stdio::inherit()) // terminal-output: suspended child
+        .stdout(Stdio::inherit()) // terminal-output: suspended child
+        .stderr(Stdio::inherit()) // terminal-output: suspended child
+        .status();
+    suspension.resume().map_err(terminal_io_error)?;
+    status
+}
+
+fn terminal_io_error(error: anyhow::Error) -> io::Error {
+    io::Error::other(error.to_string())
 }
 
 pub(crate) fn repaint_after_auth_login(ui: &mut crate::app::UiPrefs) {
-    let mut stdout = io::stdout();
-    let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0));
+    if crate::app::terminal_guard_active() {
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0));
+    }
     ui.request_full_redraw();
 }
 

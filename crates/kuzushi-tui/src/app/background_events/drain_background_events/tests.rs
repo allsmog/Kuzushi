@@ -253,6 +253,11 @@ fn dropped_live_trace_degrades_cost_until_terminal_reconciliation() {
         .runtime_cost_report()
         .unwrap()
         .is_complete());
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "activity"
+            && line.body.contains("dropped 1 live trace UI frame")
+            && line.body.contains("trace.jsonl remains authoritative")
+    }));
 
     let terminal = kuzushi_core::runtime::RuntimeCostReport::known(
         kuzushi_core::runtime::RuntimeCost::from_usd(0.20, "terminal cost").unwrap(),
@@ -269,6 +274,24 @@ fn dropped_live_trace_degrades_cost_until_terminal_reconciliation() {
             .exact_usd(),
         Some(0.20)
     );
+}
+
+#[test]
+fn dropped_live_trace_is_logged_without_provider_cost_tracking() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    let ticket = app.jobs_mut().start(JobKind::Run, "deterministic tool");
+    let budget = app.jobs().trace_budget();
+    for _ in 0..LIVE_TRACE_CHANNEL_CAPACITY {
+        assert!(budget.reserve_for_test());
+    }
+    let sink = StampedTraceSink::new(Arc::new(NoopTraceSink), ticket.sink(), budget);
+
+    kuzushi_core::TraceSink::record(&sink, &RunTraceStep::new(1, "tool", "deterministic"));
+
+    assert!(app.drain_job_events());
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "activity" && line.body.contains("dropped 1 live trace UI frame")
+    }));
 }
 
 #[test]

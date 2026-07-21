@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicI64, Ordering};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 use super::{
     ensure_server_line_read, json_line, json_rpc_request_body, parse_json_line,
@@ -23,10 +24,12 @@ impl McpClient {
             .with_context(|| format!("could not spawn MCP server `{binary}`"))?;
         let stdin = child.stdin.take().context("server stdin missing")?;
         let stdout = child.stdout.take().context("server stdout missing")?;
+        let stderr = child.stderr.take().context("server stderr missing")?;
         Ok(Self {
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             stdout: Mutex::new(BufReader::new(stdout)),
+            stderr_drain: Mutex::new(Some(spawn_stderr_drain(stderr))),
             next_id: AtomicI64::new(1),
             initialized: Mutex::new(false),
             binary: binary.to_string(),
@@ -68,6 +71,8 @@ impl McpClient {
         let _ = self.notify("exit", json!({})).await;
         let mut child = self.child.lock().await;
         let _ = child.kill().await;
+        drop(child);
+        self.wait_for_stderr_drain().await;
         Ok(())
     }
 
@@ -119,4 +124,30 @@ impl McpClient {
         ensure_server_line_read(n)?;
         Ok(line)
     }
+
+    async fn wait_for_stderr_drain(&self) {
+        let drain = self.stderr_drain.lock().await.take();
+        if let Some(drain) = drain {
+            let _ = drain.await;
+        }
+    }
+}
+
+const STDERR_DRAIN_BUFFER_BYTES: usize = 8 * 1024;
+
+pub(crate) fn spawn_stderr_drain<R>(mut stderr: R) -> JoinHandle<u64>
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buffer = [0_u8; STDERR_DRAIN_BUFFER_BYTES];
+        let mut drained_bytes = 0_u64;
+        while let Ok(read) = stderr.read(&mut buffer).await {
+            if read == 0 {
+                break;
+            }
+            drained_bytes = drained_bytes.saturating_add(read as u64);
+        }
+        drained_bytes
+    })
 }

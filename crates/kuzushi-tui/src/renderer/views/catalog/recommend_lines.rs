@@ -36,13 +36,11 @@ fn append_report(
     }
     append_components(&mut lines, model, area, recommend_cursor);
     if !model.rows.is_empty() {
-        lines.push(aligned_header(
-            &model.report_headers,
-            &[8, 26, 8, 34, value_width(area, 84)],
-        ));
+        let widths = recommendation_widths(area.width as usize);
+        lines.push(aligned_header(&model.report_headers, &widths));
         let take = (area.height.saturating_sub(10) as usize).max(4);
         for recommendation in model.rows.iter().take(take) {
-            lines.extend(recommendation_lines(recommendation, area.width));
+            lines.extend(recommendation_lines(recommendation, &widths));
         }
     }
     lines.push(blank());
@@ -51,6 +49,10 @@ fn append_report(
         area.width as usize,
     ));
     lines
+}
+
+fn recommendation_widths(width: usize) -> [usize; 5] {
+    fit_table_widths(width, [8, 26, 8, 34, 40], [3, 8, 3, 6, 4])
 }
 
 fn append_components(
@@ -81,12 +83,10 @@ fn component_lines(
         "{marker} ◆ {} · {} · risk {} · {}",
         component.class_label, component.tier_label, component.risk_score, component.rel_path
     );
+    let widths = fit_table_widths(width as usize, [38, 40], [12, 8]);
     let mut lines = vec![row(&[
-        fit(&title, 38),
-        fit(
-            &component.reason,
-            (width as usize).saturating_sub(40).max(20),
-        ),
+        pad(&title, widths[0]),
+        pad(&component.reason, widths[1]),
     ])];
     lines.push(muted(&fit(
         &format!("scan focused: {}", component.scan_command),
@@ -99,6 +99,38 @@ fn component_lines(
         )));
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_width(line: &Line<'_>) -> usize {
+        line.spans
+            .iter()
+            .map(|span| display_width(span.content.as_ref()))
+            .sum()
+    }
+
+    #[test]
+    fn recommendation_columns_fit_narrow_area_budgets() {
+        let row = RecommendationRow {
+            cells: [
+                "high".to_string(),
+                "tool:日本語-long".to_string(),
+                "agent".to_string(),
+                "a detailed signal".to_string(),
+                "a long reason that wraps without crossing the terminal edge".to_string(),
+            ],
+        };
+        for width in [40, 60, 80] {
+            let widths = recommendation_widths(width);
+            let lines = recommendation_lines(&row, &widths);
+
+            assert_eq!(table_width(&widths), width);
+            assert!(lines.iter().all(|line| line_width(line) <= width));
+        }
+    }
 }
 
 fn append_empty_recommendations(
@@ -119,26 +151,29 @@ fn append_empty_recommendations(
 /// One recommendation. The reason explains WHY the tool is worth running —
 /// truncating it defeats the view — so a reason that overflows its column
 /// continues on indented follow-up lines instead of ending in an ellipsis.
-fn recommendation_lines(recommendation: &RecommendationRow, width: u16) -> Vec<Line<'static>> {
-    const REASON_COLUMN: usize = 8 + 26 + 8 + 34 + 8;
+fn recommendation_lines(
+    recommendation: &RecommendationRow,
+    widths: &[usize; 5],
+) -> Vec<Line<'static>> {
     let [priority, tool, runtime, signal, reason] = &recommendation.cells;
-    let reason_width = (width as usize).saturating_sub(REASON_COLUMN).max(24);
+    let reason_width = widths[4].max(1);
     let mut chunks = wrap_text(reason, reason_width);
     if chunks.is_empty() {
         chunks.push(String::new());
     }
     let mut lines = vec![row(&[
-        pad(priority, 8),
-        pad(tool, 26),
-        pad(runtime, 8),
-        pad(signal, 34),
-        chunks[0].clone(),
+        pad(priority, widths[0]),
+        pad(tool, widths[1]),
+        pad(runtime, widths[2]),
+        pad(signal, widths[3]),
+        pad(&chunks[0], widths[4]),
     ])];
+    let reason_column = widths[..4].iter().sum::<usize>() + table_gap_width(5);
     for chunk in chunks.iter().skip(1) {
         lines.push(muted(&format!(
-            "{:indent$}{chunk}",
+            "{:reason_column$}{}",
             "",
-            indent = REASON_COLUMN
+            fit(chunk, widths[4])
         )));
     }
     lines

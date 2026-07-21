@@ -1,5 +1,6 @@
 use super::{AdvisoryState, ConfiguredKeyResult, PendingKeyChord, RuntimeKeymap, ShellView};
 use crossterm::event::KeyEvent;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -24,6 +25,7 @@ pub(crate) struct UiPrefs {
     last_keymap_check: Option<Instant>,
     typing_hint_shown: bool,
     last_external_sync: Option<Instant>,
+    seen_config_diagnostics: BTreeSet<kuzushi_core::ConfigDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,6 +73,7 @@ impl UiPrefs {
             last_keymap_check: None,
             typing_hint_shown: false,
             last_external_sync: None,
+            seen_config_diagnostics: BTreeSet::new(),
         }
     }
 
@@ -173,7 +176,7 @@ impl UiPrefs {
     pub(crate) fn poll_runtime_keymap(
         &mut self,
         now: Instant,
-    ) -> Option<Result<Vec<kuzushi_core::config::KeybindingOverrideConfig>, String>> {
+    ) -> Option<Result<ReloadedKeymap, String>> {
         if self
             .last_keymap_check
             .is_some_and(|previous| now.duration_since(previous) < Duration::from_secs(1))
@@ -188,20 +191,37 @@ impl UiPrefs {
             return None;
         }
         self.keymap_config_fingerprint = fingerprint;
-        let loaded = kuzushi_core::config::load_config(kuzushi_core::ConfigPaths {
-            home_dir: home,
-            target_dir: None,
-        })
-        .map_err(|error| error.to_string());
-        let bindings = match loaded {
-            Ok(config) => config.operator.keybindings,
+        let loaded =
+            kuzushi_core::config::load_config_with_diagnostics(kuzushi_core::ConfigPaths {
+                home_dir: home,
+                target_dir: None,
+            })
+            .map_err(|error| error.to_string());
+        let loaded = match loaded {
+            Ok(loaded) => loaded,
             Err(error) => return Some(Err(error)),
         };
+        let diagnostics = loaded.diagnostics;
+        let bindings = loaded.config.operator.keybindings;
         let keymap = RuntimeKeymap::from_config(&bindings);
         if let Err(error) = self.replace_runtime_keymap(keymap) {
             return Some(Err(error));
         }
-        Some(Ok(bindings))
+        Some(Ok(ReloadedKeymap {
+            bindings,
+            diagnostics,
+        }))
+    }
+
+    pub(crate) fn take_new_config_diagnostics(
+        &mut self,
+        diagnostics: &[kuzushi_core::ConfigDiagnostic],
+    ) -> Vec<kuzushi_core::ConfigDiagnostic> {
+        diagnostics
+            .iter()
+            .filter(|diagnostic| self.seen_config_diagnostics.insert((*diagnostic).clone()))
+            .cloned()
+            .collect()
     }
 
     pub(crate) fn advisory(&self) -> &AdvisoryState {
@@ -336,6 +356,11 @@ impl UiPrefs {
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {
         self.viewport = viewport;
     }
+}
+
+pub(crate) struct ReloadedKeymap {
+    pub(crate) bindings: Vec<kuzushi_core::config::KeybindingOverrideConfig>,
+    pub(crate) diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
 }
 
 fn config_fingerprint(path: &std::path::Path) -> Option<ConfigFingerprint> {

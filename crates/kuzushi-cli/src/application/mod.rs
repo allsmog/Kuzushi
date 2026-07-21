@@ -3,6 +3,7 @@ pub(crate) mod campaign_run;
 pub(crate) mod catalog;
 pub(crate) mod ci;
 pub(crate) mod config;
+pub(crate) mod config_diagnostics;
 pub(crate) mod demo;
 pub(crate) mod export;
 pub(crate) mod findings;

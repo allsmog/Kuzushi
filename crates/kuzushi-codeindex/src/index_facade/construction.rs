@@ -37,4 +37,10 @@ impl IndexFacade {
         }
         out
     }
+
+    /// Drain recoverable backend failures without writing to the host
+    /// terminal. Embedders choose the appropriate presentation boundary.
+    pub fn take_diagnostics(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.diagnostics)
+    }
 }

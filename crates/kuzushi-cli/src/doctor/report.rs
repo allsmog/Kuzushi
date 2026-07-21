@@ -3,7 +3,7 @@ use super::{
     check_model_config, check_offense_sandbox, check_revng_image, check_scanner_binary,
     deterministic_capability_checks, DoctorCheck, DoctorReport,
 };
-use kuzushi_core::{load_config_for_target, WorkspaceTarget};
+use kuzushi_core::WorkspaceTarget;
 use std::fs;
 use std::path::PathBuf;
 
@@ -60,7 +60,9 @@ fn resolve_doctor_config(
     workspace: Option<&WorkspaceTarget>,
     checks: &mut Vec<DoctorCheck>,
 ) -> Option<kuzushi_core::V2Config> {
-    match load_config_for_target(workspace.map(WorkspaceTarget::root)) {
+    match crate::application::config_diagnostics::load_cli_config(
+        workspace.map(WorkspaceTarget::root),
+    ) {
         Ok(config) => {
             checks.push(DoctorCheck::ok(
                 "config",

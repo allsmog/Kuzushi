@@ -14,7 +14,16 @@ impl ShellApp {
         changed |= self.advance_liveness_clock(now);
         changed |= self.advance_scene(now);
         changed |= self.reload_operator_keymap(now);
+        changed |= self.drain_core_runtime_diagnostics();
         changed
+    }
+
+    fn drain_core_runtime_diagnostics(&mut self) -> bool {
+        let diagnostics = kuzushi_core::take_runtime_diagnostics();
+        for diagnostic in &diagnostics {
+            self.log_ephemeral(&diagnostic.source, &diagnostic.message);
+        }
+        !diagnostics.is_empty()
     }
 
     fn reload_operator_keymap(&mut self, now: Instant) -> bool {
@@ -22,8 +31,9 @@ impl ShellApp {
             return false;
         };
         match result {
-            Ok(bindings) => {
-                self.config_mut().operator.keybindings = bindings;
+            Ok(reloaded) => {
+                self.log_config_diagnostics(&reloaded.diagnostics);
+                self.config_mut().operator.keybindings = reloaded.bindings;
                 self.set_info_notice("keymap", "operator keybindings reloaded");
             }
             Err(error) => {

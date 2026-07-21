@@ -8,7 +8,7 @@ use super::auth_oauth::{
 };
 use crate::command::AuthCommand;
 use anyhow::Result;
-use kuzushi_core::{load_config_for_target, WorkspaceTarget};
+use kuzushi_core::WorkspaceTarget;
 use std::path::PathBuf;
 
 pub(crate) fn auth_command(command: AuthCommand, target: Option<PathBuf>) -> Result<()> {
@@ -35,7 +35,7 @@ pub(crate) fn auth_ping_workspace(target: Option<PathBuf>) -> Result<Option<Work
 pub(crate) fn auth_ping_config(
     workspace: Option<&WorkspaceTarget>,
 ) -> Result<kuzushi_core::V2Config> {
-    load_config_for_target(workspace.map(WorkspaceTarget::root))
+    crate::application::config_diagnostics::load_cli_config(workspace.map(WorkspaceTarget::root))
 }
 
 pub(crate) fn run_auth_ping_checks(
@@ -67,7 +67,7 @@ pub(crate) fn required_auth_ping_bridge_command(
     let command = auth_ping_bridge_command(config);
     if command.is_empty() {
         log.record(false, "bridge command is empty");
-        std::process::exit(1);
+        crate::application::config_diagnostics::exit_after_runtime_diagnostics(1);
     }
     command
 }
@@ -75,7 +75,7 @@ pub(crate) fn required_auth_ping_bridge_command(
 pub(crate) fn record_auth_ping_result(parsed: &serde_json::Value, log: &mut AuthPingLog) {
     if let Some(error) = bridge_ping_error(parsed) {
         log.record(false, format!("bridge ping failed: {error}"));
-        std::process::exit(1);
+        crate::application::config_diagnostics::exit_after_runtime_diagnostics(1);
     }
     log.record(true, bridge_ping_summary(parsed));
 }
@@ -103,7 +103,7 @@ impl AuthPingLog {
 
     pub(crate) fn exit_if_failed(&self) {
         if !self.all_ok {
-            std::process::exit(1);
+            crate::application::config_diagnostics::exit_after_runtime_diagnostics(1);
         }
     }
 }

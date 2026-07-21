@@ -4,6 +4,9 @@ use crate::ui_view_models::{
     TuneHouseRules, TuneModel,
 };
 
+const TUNE_HINT_GUTTER: &str = "    ";
+const PROMPT_TABLE_GUTTER: usize = 2;
+
 pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let model = tune_model(app, house_rule_line_limit(area));
@@ -11,22 +14,42 @@ pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     append_tune_summary(&mut lines, &model, area.width);
     append_tune_actions(&mut lines, &model.actions, area.width);
     append_house_rules(&mut lines, &model.house_rules, area);
-    lines.push(keybind_hint_line(&[
-        ("↑/↓/j/k", "move"),
-        ("Enter", "activate"),
-        ("show/set/reset", "direct"),
-        ("back", "home"),
-    ]));
+    lines.push(responsive_keybind_hint_line(
+        area.width as usize,
+        &[
+            ("↑/↓/j/k", "move"),
+            ("Enter", "activate"),
+            ("show/set/reset", "direct"),
+            ("back", "home"),
+        ],
+        &[("j/k", "move"), ("Enter", "open"), ("back", "home")],
+    ));
     lines
 }
 
 fn append_tune_summary(lines: &mut Vec<Line<'static>>, model: &TuneModel, width: u16) {
     lines.push(divider("TUNE", width));
-    lines.push(detail("module", &model.module));
-    lines.push(detail("severity floor", model.severity_floor));
-    lines.push(detail("triage confidence", model.triage_confidence));
-    lines.push(detail("scan concurrency", model.scan_concurrency));
-    lines.push(detail("house rules", &model.house_rules_path));
+    lines.extend(detail_wrapped("module", &model.module, width));
+    lines.extend(detail_wrapped(
+        "severity floor",
+        model.severity_floor,
+        width,
+    ));
+    lines.extend(detail_wrapped(
+        "triage confidence",
+        model.triage_confidence,
+        width,
+    ));
+    lines.extend(detail_wrapped(
+        "scan concurrency",
+        model.scan_concurrency,
+        width,
+    ));
+    lines.extend(detail_wrapped(
+        "house rules",
+        &model.house_rules_path,
+        width,
+    ));
     lines.push(blank());
 }
 
@@ -34,11 +57,17 @@ fn append_tune_actions(lines: &mut Vec<Line<'static>>, actions: &[TuneActionRow]
     lines.push(divider("ACTIONS", width));
     for action in actions {
         lines.push(tune_action_label_line(action, width));
-        lines.push(Line::styled(
-            fit(&format!("    {}", action.hint), width as usize),
-            theme::muted(),
-        ));
+        lines.push(tune_action_hint_line(action, width));
     }
+}
+
+fn tune_action_hint_line(action: &TuneActionRow, width: u16) -> Line<'static> {
+    let gutter = fit(TUNE_HINT_GUTTER, width as usize);
+    let hint_width = (width as usize).saturating_sub(display_width(&gutter));
+    Line::from(vec![
+        Span::raw(gutter),
+        Span::styled(fit(action.hint, hint_width), theme::muted()),
+    ])
 }
 
 fn tune_action_label_line(action: &TuneActionRow, width: u16) -> Line<'static> {
@@ -65,18 +94,77 @@ fn append_house_rules(lines: &mut Vec<Line<'static>>, house_rules: &TuneHouseRul
             lines.push(blank());
         }
         TuneHouseRules::Unreadable(path) => {
-            lines.push(muted(&format!("house rules file is unreadable: {path}")));
+            lines.push(muted(&fit(
+                &format!("house rules file is unreadable: {path}"),
+                area.width as usize,
+            )));
         }
         TuneHouseRules::Empty => {
-            lines.push(muted(
+            lines.push(muted(&fit(
                 "no house rules set — choose `edit house rules` above to add one",
-            ));
+                area.width as usize,
+            )));
         }
     }
 }
 
 fn house_rule_line_limit(area: Rect) -> usize {
     (area.height as usize).saturating_sub(10).max(4)
+}
+
+#[cfg(test)]
+mod tune_width_tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn tune_projection_includes_its_hint_gutter_in_narrow_budgets() {
+        let app = ShellApp::new(V2Config::default(), None);
+        for width in [40, 60, 80] {
+            let lines = tune_lines(&app, Rect::new(0, 0, width, 30));
+            let overlong = lines.iter().find(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| display_width(span.content.as_ref()))
+                    .sum::<usize>()
+                    > width as usize
+            });
+
+            assert!(overlong.is_none(), "tune exceeded {width}: {overlong:?}");
+        }
+    }
+
+    #[test]
+    fn prompt_tables_include_their_external_gutter_in_narrow_budgets() {
+        let row = PromptRow {
+            role: "security-reviewer".to_string(),
+            verb: "日本語-hunt".to_string(),
+            source: "override".to_string(),
+            path: "/long/path/to/prompt.md".to_string(),
+            selected: true,
+        };
+        for width in [40, 60, 80] {
+            let area = Rect::new(0, 0, width, 20);
+            let row_widths = prompt_table_widths(width);
+            let stack_widths = prompt_stack_widths(area);
+            let line = prompt_row_line(&row, area);
+            let rendered_width = line
+                .spans
+                .iter()
+                .map(|span| display_width(span.content.as_ref()))
+                .sum::<usize>();
+
+            assert_eq!(
+                PROMPT_TABLE_GUTTER + table_width(&row_widths),
+                width as usize
+            );
+            assert_eq!(
+                PROMPT_TABLE_GUTTER + table_width(&stack_widths),
+                width as usize
+            );
+            assert!(rendered_width <= width as usize);
+        }
+    }
 }
 
 pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -277,7 +365,7 @@ fn append_prompts_header(lines: &mut Vec<Line<'static>>, module: &str, width: u1
         Span::styled(
             table_text(
                 &["role", "verb", "override", "override path"],
-                &[20, 14, 10, 24],
+                &prompt_table_widths(width),
             ),
             theme::subtle(),
         ),
@@ -298,17 +386,22 @@ fn prompt_row_line(row: &PromptRow, area: Rect) -> Line<'static> {
         theme::primary()
     };
     Line::styled(
-        fit(
-            &format!(
-                "{marker} {}",
-                table_text(
-                    &[&row.role, &row.verb, &row.source, &row.path],
-                    &[20, 14, 10, value_width(area, 24)],
-                )
-            ),
-            area.width as usize,
+        format!(
+            "{marker} {}",
+            table_text(
+                &[&row.role, &row.verb, &row.source, &row.path],
+                &prompt_table_widths(area.width),
+            )
         ),
         style,
+    )
+}
+
+fn prompt_table_widths(width: u16) -> [usize; 4] {
+    fit_table_widths(
+        (width as usize).saturating_sub(PROMPT_TABLE_GUTTER),
+        [20, 14, 10, 24],
+        [6, 4, 4, 6],
     )
 }
 
@@ -350,6 +443,10 @@ fn prompt_stack_layer_line(layer: &PromptStackLayer, area: Rect) -> Line<'static
 }
 
 fn prompt_stack_widths(area: Rect) -> Vec<usize> {
-    let path_width = value_width(area, 62).max(16);
-    vec![18, 16, 22, path_width]
+    fit_table_widths(
+        (area.width as usize).saturating_sub(PROMPT_TABLE_GUTTER),
+        [18, 16, 22, 36],
+        [5, 5, 6, 4],
+    )
+    .to_vec()
 }

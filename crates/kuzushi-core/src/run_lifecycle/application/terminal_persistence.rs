@@ -63,9 +63,12 @@ fn record_coverage_baseline(target: &Path, summary: &crate::run_artifacts::RunSu
     if let Err(error) =
         crate::workspace::coverage_ledger::record_baseline_from_summary(target, summary)
     {
-        eprintln!(
-            "kuzushi: coverage baseline not recorded for run {}: {error:#}",
-            summary.run_id
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "coverage",
+            format!(
+                "coverage baseline not recorded for run {}: {error:#}",
+                summary.run_id
+            ),
         );
     }
 }

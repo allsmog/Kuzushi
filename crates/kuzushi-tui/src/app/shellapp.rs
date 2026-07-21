@@ -180,6 +180,12 @@ impl ShellApp {
         }
     }
 
+    /// Add an operational diagnostic to the live activity view without
+    /// persisting arbitrary worker stderr into the durable session transcript.
+    pub(crate) fn log_ephemeral(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
+        self.domain.push_log(prefix, body);
+    }
+
     pub fn log_lines(&self) -> &[LogLine] {
         self.domain.log_lines()
     }

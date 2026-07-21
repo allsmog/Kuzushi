@@ -42,10 +42,13 @@ pub(crate) fn heal_torn_jsonl_tail(
             path.display()
         ),
     };
-    eprintln!(
-        "kuzushi: warning: truncating {} torn tail byte(s) from {} (previous writer died mid-append)",
-        len - keep,
-        path.display()
+    crate::runtime_diagnostics::record_runtime_diagnostic(
+        "jsonl",
+        format!(
+            "truncating {} torn tail byte(s) from {} (previous writer died mid-append)",
+            len - keep,
+            path.display()
+        ),
     );
     file.set_len(keep)
         .with_context(|| format!("Could not truncate torn tail of {}", path.display()))?;

@@ -106,16 +106,40 @@ fn push_tool_rows(lines: &mut Vec<Line<'static>>, widths: &[usize], rows: &[Tool
 }
 
 fn tool_widths(area: Rect) -> [usize; 3] {
-    let width = area.width as usize;
-    let tool = 28usize.min(width.saturating_div(3).max(20));
-    let next = 28usize.min(width.saturating_div(3).max(18));
-    let purpose = width.saturating_sub(tool + next + 6).max(24);
-    [tool, purpose, next]
+    fit_table_widths(area.width as usize, [28, 50, 28], [12, 10, 6])
 }
 
 fn tools_title(filter: Option<&str>, total_count: usize) -> String {
     match filter {
         Some(query) => format!("TOOLS · {query}"),
         None => format!("TOOLS · {total_count}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_columns_fit_narrow_area_budgets() {
+        let row = ToolRow {
+            cells: [
+                "sast:日本語-scan".to_string(),
+                "finds a long class of security defects".to_string(),
+                "run with explicit options".to_string(),
+            ],
+        };
+        for width in [40, 60, 80] {
+            let widths = tool_widths(Rect::new(0, 0, width, 20));
+            let line = aligned_row(&row.cells, &widths);
+            let rendered_width = line
+                .spans
+                .iter()
+                .map(|span| display_width(span.content.as_ref()))
+                .sum::<usize>();
+
+            assert_eq!(table_width(&widths), width as usize);
+            assert!(rendered_width <= width as usize);
+        }
     }
 }

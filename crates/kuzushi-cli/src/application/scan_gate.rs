@@ -74,7 +74,7 @@ fn enforce_fail_on(store: &FindingStore, run_ids: &[String], threshold: Severity
         severity_gate_label(threshold),
         run_ids.join(","),
     );
-    std::process::exit(FAIL_ON_EXIT_CODE);
+    super::config_diagnostics::exit_after_runtime_diagnostics(FAIL_ON_EXIT_CODE);
 }
 
 #[cfg(test)]

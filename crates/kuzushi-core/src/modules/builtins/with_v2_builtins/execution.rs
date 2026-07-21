@@ -407,8 +407,8 @@ impl ModuleRegistry {
     /// show up on the YOUR TOOLS shelf); only visible tools (matching the same
     /// hidden-tool/hidden-module policy as `tools_with_modules`) with a
     /// workspace are recorded. A shelf-write failure never fails the tool run,
-    /// but it is reported on stderr so a corrupt shelf file is diagnosable
-    /// instead of silently no-op'ing recents forever.
+    /// but it is routed through mode-aware diagnostics so a corrupt shelf file
+    /// is visible without bypassing an interactive renderer.
     fn record_recent_tool_use(&self, name: &str, ctx: &ToolExecutionContext<'_>) {
         let Some(workspace) = ctx.workspace else {
             return;
@@ -424,7 +424,10 @@ impl ModuleRegistry {
         // but it must not be silent either: a corrupt tool-shelf.json should
         // be observable instead of making recents quietly no-op forever.
         if let Err(error) = crate::workspace::record_tool_use(workspace, name, &at) {
-            eprintln!("kuzushi: failed to record recent tool use for {name:?}: {error:#}");
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                "tool-shelf",
+                format!("failed to record recent tool use for {name:?}: {error:#}"),
+            );
         }
     }
 

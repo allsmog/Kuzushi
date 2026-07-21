@@ -174,8 +174,13 @@ pub(crate) fn run_plain_shell(
     registry: ModuleRegistry,
     transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
     transcript_warning: Option<String>,
+    config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
 ) -> Result<()> {
     let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
+    for diagnostic in &config_diagnostics {
+        eprintln!("{diagnostic}"); // terminal-output: plain-mode
+    }
+    app.log_config_diagnostics(&config_diagnostics);
     if let Some(warning) = transcript_warning {
         app.surface_session_start_warning(warning);
     }
@@ -209,12 +214,12 @@ fn run_plain_shell_session(
         .collect::<Vec<_>>();
 
     if commands.is_empty() {
-        print!("{}", plain_launch_summary(app));
+        print!("{}", plain_launch_summary(app)); // terminal-output: plain-mode
         return Ok(());
     }
 
     let report = execute_plain_scripted_session(app, &commands, 80);
-    print!("{}", report.output);
+    print!("{}", report.output); // terminal-output: plain-mode
     if report.outcome.exit_code() != 0 {
         anyhow::bail!("plain scripted session failed; see the result above");
     }

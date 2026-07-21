@@ -1269,6 +1269,8 @@ fn report_absolute_path(target: Option<&PathBuf>, output: &Path) -> Option<PathB
 fn reveal_destination(path: &Path) -> anyhow::Result<()> {
     let mut command = reveal_destination_command(path)?;
     let status = command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .with_context(|| format!("could not reveal {}", path.display()))?;
     anyhow::ensure!(
@@ -1499,7 +1501,7 @@ mod tests {
         index_workspace_snapshot(&workspace).unwrap();
         std::fs::write(
             temp.path().join("src/app.rs"),
-            "fn main() { println!(\"changed\"); }\n",
+            "fn main() { println!(\"changed\"); }\n", // terminal-output: inline fixture
         )
         .unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));

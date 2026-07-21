@@ -69,7 +69,7 @@ impl ShellApp {
             outcome.time_slice_exhausted = inspected + 1 == JOB_DRAIN_LIMIT;
         }
         let dropped = self.jobs().take_dropped_live_trace_count();
-        outcome.changed |= self.degrade_dropped_live_trace_cost(dropped);
+        outcome.changed |= self.report_dropped_live_trace(dropped);
         outcome
     }
 
@@ -712,15 +712,19 @@ impl ShellApp {
         }
     }
 
-    fn degrade_dropped_live_trace_cost(&mut self, dropped: usize) -> bool {
+    fn report_dropped_live_trace(&mut self, dropped: usize) -> bool {
         if dropped == 0 {
             return false;
         }
+        self.log(
+            "activity",
+            format!("dropped {dropped} live trace UI frame(s); trace.jsonl remains authoritative"),
+        );
         let Some(run_id) = self.activity().map(|activity| activity.run_id.clone()) else {
-            return false;
+            return true;
         };
         if !self.session().run_may_call_provider(&run_id) {
-            return false;
+            return true;
         }
         self.mark_run_cost_incomplete(&run_id);
         self.log(

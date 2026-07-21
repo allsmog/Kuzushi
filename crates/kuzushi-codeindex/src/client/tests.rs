@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::client::spawn::spawn_stderr_drain;
     use serde_json::{json, Value};
 
     /// Spawning a non-existent binary errors actionably.
@@ -11,6 +12,19 @@ mod tests {
             .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("kuzushi-no-such-mcp-binary-zzz") || msg.contains("could not spawn"));
+    }
+
+    #[tokio::test]
+    async fn stderr_drain_consumes_every_byte_before_closing() {
+        use tokio::io::{duplex, AsyncWriteExt};
+
+        let (mut writer, reader) = duplex(32);
+        let drain = spawn_stderr_drain(reader);
+        let bytes = vec![b'x'; 16 * 1024];
+        writer.write_all(&bytes).await.unwrap();
+        drop(writer);
+
+        assert_eq!(drain.await.unwrap(), bytes.len() as u64);
     }
 
     #[test]

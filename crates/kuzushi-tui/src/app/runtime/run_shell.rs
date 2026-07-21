@@ -72,6 +72,27 @@ pub fn run_shell_with_context(
     registry: ModuleRegistry,
     launch: ShellLaunchContext,
 ) -> Result<()> {
+    run_shell_with_context_and_config_diagnostics(
+        config,
+        target,
+        force_plain,
+        registry,
+        launch,
+        Vec::new(),
+    )
+}
+
+/// CLI-aware shell entry point that preserves the stable `ShellLaunchContext`
+/// construction contract while handing typed config notices to the selected
+/// presentation mode.
+pub fn run_shell_with_context_and_config_diagnostics(
+    config: V2Config,
+    target: Option<&WorkspaceTarget>,
+    force_plain: bool,
+    registry: ModuleRegistry,
+    launch: ShellLaunchContext,
+    config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
+) -> Result<()> {
     let mut stdin = io::stdin();
     let stdin_is_terminal = stdin.is_terminal();
     let stdout_is_terminal = io::stdout().is_terminal();
@@ -88,10 +109,18 @@ pub fn run_shell_with_context(
             registry,
             transcript,
             transcript_warning,
+            config_diagnostics,
         );
     }
 
-    run_terminal_shell(config, target, registry, transcript, transcript_warning)
+    run_terminal_shell(
+        config,
+        target,
+        registry,
+        transcript,
+        transcript_warning,
+        config_diagnostics,
+    )
 }
 
 pub(crate) fn shell_mode_label(plain: bool, stdin_is_terminal: bool) -> &'static str {
@@ -159,8 +188,10 @@ pub(crate) fn run_terminal_shell(
     registry: ModuleRegistry,
     transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
     transcript_warning: Option<String>,
+    config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
 ) -> Result<()> {
     let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
+    app.log_config_diagnostics(&config_diagnostics);
     if let Some(warning) = transcript_warning {
         app.surface_session_start_warning(warning);
     }

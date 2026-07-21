@@ -2085,15 +2085,18 @@ impl Drop for McpStdioClient {
             Ok(()) => {
                 if let Some(stderr) = self.stderr.take() {
                     if let Err(error) = stderr.join() {
-                        eprintln!("[kwp:mcp:{}:stderr] {error}", self.alias);
+                        crate::runtime_diagnostics::record_runtime_diagnostic(
+                            format!("kwp:mcp:{}:stderr", self.alias),
+                            error.to_string(),
+                        );
                     }
                 }
             }
             Err(error) => {
                 drop(self.stderr.take());
-                eprintln!(
-                    "[kwp:mcp:{}:stderr] detached drain after wait failure: {error}",
-                    self.alias
+                crate::runtime_diagnostics::record_runtime_diagnostic(
+                    format!("kwp:mcp:{}:stderr", self.alias),
+                    format!("detached drain after wait failure: {error}"),
                 );
             }
         }
@@ -4481,7 +4484,10 @@ fn join_supervised_stderr(stderr: Option<SupervisedStderr>) -> Result<(), KwpErr
 
 fn log_stderr_cleanup_error(stderr: Option<SupervisedStderr>) {
     if let Err(error) = join_supervised_stderr(stderr) {
-        eprintln!("[kwp:stderr] cleanup diagnostic: {error}");
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "kwp:stderr",
+            format!("cleanup diagnostic: {error}"),
+        );
     }
 }
 

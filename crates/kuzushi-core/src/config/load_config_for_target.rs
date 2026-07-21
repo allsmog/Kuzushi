@@ -51,7 +51,70 @@ pub(crate) struct PartialPhaseTemplateConfig {
 }
 
 pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
-    load_config(ConfigPaths::from_target(target)?)
+    Ok(load_config_for_target_with_diagnostics(target)?.config)
+}
+
+/// The effective configuration and non-fatal diagnostics discovered while
+/// loading it. Callers decide how to present diagnostics for their own output
+/// mode; configuration loading itself must remain free of terminal I/O.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LoadedConfig {
+    pub config: V2Config,
+    pub diagnostics: Vec<ConfigDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum ConfigDiagnosticSource {
+    Global,
+    Target,
+}
+
+impl ConfigDiagnosticSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Global => "global config",
+            Self::Target => "target config",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum DeprecatedPhaseSetting {
+    Table,
+    StopAfter,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConfigDiagnostic {
+    source: ConfigDiagnosticSource,
+    setting: DeprecatedPhaseSetting,
+    deprecated: &'static str,
+    replacement: &'static str,
+}
+
+impl std::fmt::Display for ConfigDiagnostic {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.setting {
+            DeprecatedPhaseSetting::Table => write!(
+                formatter,
+                "warning: {} uses deprecated [phases.{}]; use [phases.{}]",
+                self.source.label(),
+                self.deprecated,
+                self.replacement
+            ),
+            DeprecatedPhaseSetting::StopAfter => write!(
+                formatter,
+                "warning: {} uses deprecated stop_after = {:?}; use {:?}",
+                self.source.label(),
+                self.deprecated,
+                self.replacement
+            ),
+        }
+    }
+}
+
+pub fn load_config_for_target_with_diagnostics(target: Option<&Path>) -> Result<LoadedConfig> {
+    load_config_with_diagnostics(ConfigPaths::from_target(target)?)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,18 +128,27 @@ pub(crate) enum ConfigSource {
 }
 
 pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
+    Ok(load_config_with_diagnostics(paths)?.config)
+}
+
+pub fn load_config_with_diagnostics(paths: ConfigPaths) -> Result<LoadedConfig> {
     let mut config = V2Config::default();
+    let mut diagnostics = Vec::new();
 
     merge_existing_file(
         &mut config,
         paths.global_config_path(),
         ConfigSource::Global,
+        &mut diagnostics,
     )?;
-    merge_project_file(&mut config, paths.project_config_path())?;
+    merge_project_file(&mut config, paths.project_config_path(), &mut diagnostics)?;
     apply_env_overrides(&mut config);
     normalize_config(&mut config)?;
     validate_config(&config)?;
-    Ok(config)
+    Ok(LoadedConfig {
+        config,
+        diagnostics,
+    })
 }
 
 pub fn load_anthropic_oauth_config(paths: &ConfigPaths) -> Result<Option<AnthropicOauthConfig>> {
@@ -128,18 +200,27 @@ pub(crate) fn default_config_body() -> Result<String> {
     ))
 }
 
-fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()> {
+fn merge_project_file(
+    config: &mut V2Config,
+    path: Option<PathBuf>,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> Result<()> {
     match path {
-        Some(path) => merge_existing_file(config, path, ConfigSource::Project),
+        Some(path) => merge_existing_file(config, path, ConfigSource::Project, diagnostics),
         None => Ok(()),
     }
 }
 
-fn merge_existing_file(config: &mut V2Config, path: PathBuf, source: ConfigSource) -> Result<()> {
+fn merge_existing_file(
+    config: &mut V2Config,
+    path: PathBuf,
+    source: ConfigSource,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
+) -> Result<()> {
     let Some(raw) = read_optional_config(&path)? else {
         return Ok(());
     };
-    merge_config_body(config, &path, source, &raw)
+    merge_config_body(config, &path, source, &raw, diagnostics)
 }
 
 fn merge_config_body(
@@ -147,35 +228,68 @@ fn merge_config_body(
     path: &Path,
     source: ConfigSource,
     raw: &str,
+    diagnostics: &mut Vec<ConfigDiagnostic>,
 ) -> Result<()> {
     let patch: PartialConfig =
         toml::from_str(raw).with_context(|| format!("Could not parse {}", path.display()))?;
-    warn_deprecated_phase_config(path, raw);
+    diagnostics.extend(deprecated_phase_config_diagnostics(source, raw));
     reject_untrusted_runtime_overrides(path, &patch, source)?;
     merge_config(config, patch);
     Ok(())
 }
 
-fn warn_deprecated_phase_config(path: &Path, raw: &str) {
+fn deprecated_phase_config_diagnostics(source: ConfigSource, raw: &str) -> Vec<ConfigDiagnostic> {
     let Ok(value) = toml::from_str::<toml::Value>(raw) else {
-        return;
+        return Vec::new();
     };
     let Some(phases) = value.get("phases").and_then(toml::Value::as_table) else {
-        return;
+        return Vec::new();
     };
-    for (old, replacement) in [("hunt", "scan"), ("confirm", "prove")] {
-        if phases.contains_key(old)
-            || phases
-                .get("stop_after")
-                .and_then(toml::Value::as_str)
-                .is_some_and(|value| value.eq_ignore_ascii_case(old))
-        {
-            eprintln!(
-                "warning: {} uses deprecated phases.{old}/{old}; use phases.{replacement}/{replacement}",
-                path.display()
-            );
+    let source = match source {
+        ConfigSource::Global => ConfigDiagnosticSource::Global,
+        ConfigSource::Project => ConfigDiagnosticSource::Target,
+    };
+    let mut diagnostics = Vec::new();
+    for (deprecated, replacement) in [("hunt", "scan"), ("confirm", "prove")] {
+        if phases.contains_key(deprecated) {
+            diagnostics.push(phase_diagnostic(
+                source,
+                DeprecatedPhaseSetting::Table,
+                deprecated,
+                replacement,
+            ));
+        }
+        if stop_after_uses_alias(phases, deprecated) {
+            diagnostics.push(phase_diagnostic(
+                source,
+                DeprecatedPhaseSetting::StopAfter,
+                deprecated,
+                replacement,
+            ));
         }
     }
+    diagnostics
+}
+
+fn phase_diagnostic(
+    source: ConfigDiagnosticSource,
+    setting: DeprecatedPhaseSetting,
+    deprecated: &'static str,
+    replacement: &'static str,
+) -> ConfigDiagnostic {
+    ConfigDiagnostic {
+        source,
+        setting,
+        deprecated,
+        replacement,
+    }
+}
+
+fn stop_after_uses_alias(phases: &toml::map::Map<String, toml::Value>, alias: &str) -> bool {
+    phases
+        .get("stop_after")
+        .and_then(toml::Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case(alias))
 }
 
 /// A target repository's `.kuzushi/v3/config.toml` is loaded as part of the

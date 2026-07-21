@@ -19,8 +19,9 @@ pub use crate::concurrency::{
 };
 pub use crate::config::{
     config_hash, load_anthropic_oauth_config, load_config, load_config_for_target,
-    AnthropicOauthConfig, ConfigPaths, GuidedPhase, GuidedPhaseConfig, PhaseTemplateConfig,
-    RuntimeConfig, RuntimeKind, V2Config,
+    load_config_for_target_with_diagnostics, load_config_with_diagnostics, AnthropicOauthConfig,
+    ConfigDiagnostic, ConfigPaths, GuidedPhase, GuidedPhaseConfig, LoadedConfig,
+    PhaseTemplateConfig, RuntimeConfig, RuntimeKind, V2Config,
 };
 pub use crate::context::context_snapshot_path;
 pub use crate::events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};

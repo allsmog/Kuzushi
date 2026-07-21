@@ -59,6 +59,17 @@ mod tests {
         assert!(symbol_matches(&serde_json::json!({"matches": {"bad": true}})).is_empty());
     }
 
+    #[test]
+    fn backend_failures_are_data_instead_of_terminal_writes() {
+        let error = anyhow::anyhow!("connection reset");
+        let diagnostic = backend_failure_diagnostic(Backend::Joern, "callers", "parse", &error);
+
+        assert_eq!(
+            diagnostic,
+            "kuzushi-mcp-joern backend failed for callers(parse): connection reset"
+        );
+    }
+
     #[tokio::test]
     async fn taint_paths_reports_backend_unavailable_without_joern() {
         let mut facade = IndexFacade::new();

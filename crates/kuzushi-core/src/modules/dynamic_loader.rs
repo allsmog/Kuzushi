@@ -620,8 +620,11 @@ fn warn_deprecated_dynamic_phases(output: &[u8], specifier: &str) {
             .get("name")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("<unnamed>");
-        eprintln!(
-            "warning: dynamic module {specifier:?} tool {name:?} uses deprecated phase {phase:?}; use {replacement:?}"
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "module",
+            format!(
+                "dynamic module {specifier:?} tool {name:?} uses deprecated phase {phase:?}; use {replacement:?}"
+            ),
         );
     }
 }

@@ -29,7 +29,9 @@ pub(crate) fn health_mcp_backend(backend: McpBackend) -> Result<()> {
 }
 
 fn exit_with_mcp_status(status: std::process::ExitStatus, binary: &Path) -> ! {
-    std::process::exit(mcp_exit_code(status, binary))
+    crate::application::config_diagnostics::exit_after_runtime_diagnostics(mcp_exit_code(
+        status, binary,
+    ))
 }
 
 fn mcp_exit_code(status: std::process::ExitStatus, binary: &Path) -> i32 {

@@ -403,30 +403,41 @@ fn read_segment_events(
         "Event log segment exceeds the {MAX_EVENT_LOG_SEGMENT_BYTES}-byte limit"
     );
     let (complete, torn) = split_torn_tail(&bytes);
-    if !torn.is_empty() {
-        // A real interrupted append is at most one line; anything larger is
-        // corruption, not a torn tail.
-        anyhow::ensure!(
-            torn.len() <= MAX_EVENT_LOG_LINE_BYTES,
-            "Event log line {} exceeds the {MAX_EVENT_LOG_LINE_BYTES}-byte limit in {}",
-            complete.iter().filter(|byte| **byte == b'\n').count() + 1,
-            path.display()
-        );
-        anyhow::ensure!(
-            allow_torn_tail,
-            "Event log segment {} has a torn, newline-less tail outside the active segment",
-            path.display()
-        );
-        eprintln!(
-            "kuzushi: warning: dropping {} torn tail byte(s) from {} (process died mid-append); \
-             the next append will truncate them",
-            torn.len(),
-            path.display()
-        );
-    }
+    validate_torn_tail(path, complete, torn, allow_torn_tail)?;
     let body = std::str::from_utf8(complete)
         .context("Could not read event log segment as UTF-8")?;
     parse_segment_body(path, body, event_limit)
+}
+
+fn validate_torn_tail(
+    path: &Path,
+    complete: &[u8],
+    torn: &[u8],
+    allow_torn_tail: bool,
+) -> Result<()> {
+    if torn.is_empty() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        torn.len() <= MAX_EVENT_LOG_LINE_BYTES,
+        "Event log line {} exceeds the {MAX_EVENT_LOG_LINE_BYTES}-byte limit in {}",
+        complete.iter().filter(|byte| **byte == b'\n').count() + 1,
+        path.display()
+    );
+    anyhow::ensure!(
+        allow_torn_tail,
+        "Event log segment {} has a torn, newline-less tail outside the active segment",
+        path.display()
+    );
+    crate::runtime_diagnostics::record_runtime_diagnostic(
+        "event-log",
+        format!(
+            "dropping {} torn tail byte(s) from {} (process died mid-append); the next append will truncate them",
+            torn.len(),
+            path.display()
+        ),
+    );
+    Ok(())
 }
 
 /// Split segment bytes into the complete-line region (up to and including

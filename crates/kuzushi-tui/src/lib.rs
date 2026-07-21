@@ -20,14 +20,17 @@ pub mod scene3d;
 #[cfg(test)]
 mod test_support;
 mod theme;
+#[cfg(test)]
+mod terminal_output_lint;
 pub mod ui_theme;
 pub mod ui_view_models;
 pub mod ui_views;
 
 pub use app::{
-    run_shell, run_shell_with_context, run_shell_with_plain, ActivityRouteState, ActivitySession,
-    AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus, BootSplashCheck, BootSplashCheckState,
-    BootSplashSnapshot, ChatTurn, CommandPaletteFooter, CommandPaletteSnapshot,
+    run_shell, run_shell_with_context, run_shell_with_context_and_config_diagnostics,
+    run_shell_with_plain, ActivityRouteState, ActivitySession, AuthScreenFooter,
+    AuthScreenSnapshot, AuthScreenStatus, BootSplashCheck, BootSplashCheckState, BootSplashSnapshot,
+    ChatTurn, CommandPaletteFooter, CommandPaletteSnapshot,
     CommandPaletteStatus, ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus,
     ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus, ContextScreenFooter,
     ContextScreenSnapshot, ContextScreenStatus, CostScreenFooter, CostScreenSnapshot,

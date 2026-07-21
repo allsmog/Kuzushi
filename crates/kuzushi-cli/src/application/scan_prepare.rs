@@ -7,8 +7,7 @@ use kuzushi_core::run_artifacts::{
     ToolRunRecord,
 };
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
-    ToolExecutionContext, WorkspaceTarget,
+    config_hash, new_run_id, FindingStore, ModuleRegistry, ToolExecutionContext, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::PathBuf;
@@ -117,7 +116,7 @@ impl ScanCommandBootstrap {
     }
 
     fn load_config_or_record_failure(&self) -> Result<kuzushi_core::V2Config> {
-        load_config_for_target(Some(self.workspace.root())).map_err(|error| {
+        super::config_diagnostics::load_cli_config(Some(self.workspace.root())).map_err(|error| {
             self.recorded_error(
                 error,
                 &kuzushi_core::V2Config::default(),

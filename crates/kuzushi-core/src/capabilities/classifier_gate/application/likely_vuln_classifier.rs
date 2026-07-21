@@ -137,8 +137,9 @@ fn classifier_response_score(response: ClassifierResponse) -> Score {
 }
 
 fn neutral_classifier_score() -> Score {
-    eprintln!(
-        "classifier gate response was unparseable; using neutral score without training quantile"
+    crate::runtime_diagnostics::record_runtime_diagnostic(
+        "classifier",
+        "classifier gate response was unparseable; using neutral score without training quantile",
     );
     // Conservative fallback: if we can't parse, score in the middle so the
     // gate doesn't reject a real bug just because the model burped.

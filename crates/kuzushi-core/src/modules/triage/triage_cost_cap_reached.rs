@@ -165,9 +165,12 @@ pub(in crate::modules) fn persist_triage_outcome(
     if let Err(error) =
         store.record_auto_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome)
     {
-        eprintln!(
-            "[triage:run] could not persist triage for finding {}: {error}",
-            finding.fingerprint
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "triage:run",
+            format!(
+                "could not persist triage for finding {}: {error}",
+                finding.fingerprint
+            ),
         );
     }
     if runtime_outcome.cached {
@@ -198,9 +201,12 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
         ..representative_outcome.clone()
     };
     if let Err(error) = store.record_auto_triage_for_fingerprint(&finding.fingerprint, &inherited) {
-        eprintln!(
-            "[triage:run] could not persist inherited triage for finding {}: {error}",
-            finding.fingerprint
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "triage:run",
+            format!(
+                "could not persist inherited triage for finding {}: {error}",
+                finding.fingerprint
+            ),
         );
     }
     stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);

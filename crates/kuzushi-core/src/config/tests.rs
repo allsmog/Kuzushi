@@ -81,11 +81,15 @@ confirmation_depth = "empirical"
         )
         .unwrap();
 
-        let config = load_config(ConfigPaths {
+        let loaded_config = load_config_with_diagnostics(ConfigPaths {
             home_dir: home,
             target_dir: None,
         })
         .unwrap();
+        let LoadedConfig {
+            config,
+            diagnostics,
+        } = loaded_config;
 
         assert_eq!(config.phases.stop_after, Some(GuidedPhase::Prove));
         assert_eq!(config.phases.scan.concurrency, Some(2));
@@ -100,6 +104,19 @@ confirmation_depth = "empirical"
         assert!(serialized.contains("[phases.prove]"));
         assert!(!serialized.contains("[phases.hunt]"));
         assert!(!serialized.contains("[phases.confirm]"));
+        assert_eq!(diagnostics.len(), 3);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic
+            .to_string()
+            .contains("global config uses deprecated [phases.hunt]; use [phases.scan]")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic
+            .to_string()
+            .contains("global config uses deprecated [phases.confirm]; use [phases.prove]")));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic
+            .to_string()
+            .contains("global config uses deprecated stop_after = \"confirm\"; use \"prove\"")));
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic
+            .to_string()
+            .contains(tmp.path().to_string_lossy().as_ref())));
     }
 
     #[test]
@@ -125,6 +142,31 @@ concurrency = 2
         })
         .unwrap_err();
         assert!(format!("{error:#}").contains("duplicate field"));
+    }
+
+    #[test]
+    fn target_deprecation_diagnostic_uses_stable_source_label() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            "[phases.confirm]\nconfirmation_depth = \"empirical\"\n",
+        )
+        .unwrap();
+
+        let loaded = load_config_with_diagnostics(ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: Some(target),
+        })
+        .unwrap();
+        let message = loaded.diagnostics[0].to_string();
+
+        assert_eq!(
+            message,
+            "warning: target config uses deprecated [phases.confirm]; use [phases.prove]"
+        );
+        assert!(!message.contains(tmp.path().to_string_lossy().as_ref()));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use kuzushi_core::run_artifacts::{
 };
 use kuzushi_core::run_lifecycle::{RunItemStatus, RunObservationHandle};
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, tool_wants_runtime, AgentRuntime,
+    config_hash, new_run_id, tool_wants_runtime, AgentRuntime,
     FindingStore, ModuleRegistry, PreparedToolInput, ToolOptionStore, ToolResultStatus,
     TraceHandle, WorkspaceTarget,
 };
@@ -652,7 +652,7 @@ fn is_apk_file(target: &Path) -> bool {
 async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePolicy) -> Result<()> {
     let workspace_dir = apk_workspace_dir(&apk)?;
     let workspace = WorkspaceTarget::new(&workspace_dir)?;
-    let config = load_config_for_target(Some(workspace.root()))?;
+    let config = super::config_diagnostics::load_cli_config(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
     let run_id = new_run_id("scan");

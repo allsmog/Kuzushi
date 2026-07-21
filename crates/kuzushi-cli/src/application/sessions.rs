@@ -5,7 +5,7 @@ use kuzushi_core::session_transcript::{
     render_session_markdown, SessionListOptions, SessionPruneOptions, SessionReadResult,
     SessionTranscriptStore,
 };
-use kuzushi_core::{load_config_for_target, ConfigPaths};
+use kuzushi_core::ConfigPaths;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -188,7 +188,7 @@ fn configured_retention_days(override_days: Option<u64>) -> Result<u64> {
         }
         return Ok(days);
     }
-    Ok(load_config_for_target(None)?
+    Ok(super::config_diagnostics::load_cli_config(None)?
         .operator
         .session_retention_days)
 }

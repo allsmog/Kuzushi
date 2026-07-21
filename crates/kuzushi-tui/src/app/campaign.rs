@@ -320,6 +320,8 @@ fn kill_and_reap_dispatcher(mut child: std::process::Child, pid: u32) -> String 
     }
     let killed = std::process::Command::new("/bin/kill")
         .args(["-9", "--", &format!("-{pid}")])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status();
     let _ = child.wait();
     match killed {

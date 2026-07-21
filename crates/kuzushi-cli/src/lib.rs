@@ -32,6 +32,7 @@ pub async fn run() -> Result<()> {
         argv,
     )
     .await;
+    application::config_diagnostics::emit_runtime_diagnostics();
     exit_with_batch_code_on_typed_run_failure(result)
 }
 

@@ -5,7 +5,7 @@ pub(crate) fn finalize_width_safe_plain_lines(lines: Vec<String>, width: usize) 
     for line in lines {
         let line = sanitize_for_plain_output(&line);
         let trimmed = line.trim_end().to_string();
-        if trimmed.chars().count() <= width {
+        if display_width(&trimmed) <= width {
             out.push(trimmed);
         } else if should_truncate_plain_line(&trimmed) {
             out.push(sanitize_for_plain_output(&fit(&trimmed, width)));
@@ -32,10 +32,7 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
         "plan route",
         "run route",
     ];
-    if route_prefixes
-        .iter()
-        .any(|prefix| line.starts_with(prefix))
-    {
+    if route_prefixes.iter().any(|prefix| line.starts_with(prefix)) {
         return true;
     }
     if trimmed.chars().all(|ch| {
@@ -125,6 +122,13 @@ mod tests {
     fn finalize_strips_controls_even_on_width_safe_lines() {
         let lines = finalize_width_safe_plain_lines(vec!["a\x1b[2Jb".to_string()], 80);
         assert_eq!(lines, vec!["a[2Jb".to_string()]);
+    }
+
+    #[test]
+    fn finalize_measures_wide_text_in_terminal_cells() {
+        let lines = finalize_width_safe_plain_lines(vec!["日本".to_string()], 3);
+
+        assert!(lines.iter().all(|line| display_width(line) <= 3));
     }
 
     #[test]

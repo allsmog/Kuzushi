@@ -175,9 +175,12 @@ pub(crate) fn try_parse_typed_from_agent_text<T: serde::de::DeserializeOwned>(
 ) -> Option<T> {
     let parsed = parse_json_value_from_agent_text_with_strategy(text).ok()?;
     if parsed.strategy.is_balanced() {
-        eprintln!(
-            "refusing typed verdict parse from {:?} extraction; response needs explicit JSON",
-            parsed.strategy
+        crate::runtime_diagnostics::record_runtime_diagnostic(
+            "structured-output",
+            format!(
+                "refusing typed verdict parse from {:?} extraction; response needs explicit JSON",
+                parsed.strategy
+            ),
         );
         return None;
     }

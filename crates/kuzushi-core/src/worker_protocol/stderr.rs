@@ -16,11 +16,12 @@ impl SupervisedStderr {
         let thread_label = label.clone();
         let drain = thread::spawn(move || {
             drain_stderr(reader, |line, truncated| {
-                if truncated {
-                    eprintln!("{thread_label} {line}… [line truncated]");
+                let message = if truncated {
+                    format!("{line}… [line truncated]")
                 } else {
-                    eprintln!("{thread_label} {line}");
-                }
+                    line.to_string()
+                };
+                crate::runtime_diagnostics::record_runtime_diagnostic(&thread_label, message);
             })
         });
         Self { label, drain }
@@ -33,9 +34,12 @@ impl SupervisedStderr {
             .map_err(|_| KwpError::Internal(format!("{} drain thread panicked", self.label)))?
             .map_err(|error| KwpError::Internal(format!("{} drain failed: {error}", self.label)))?;
         if summary.total_truncated {
-            eprintln!(
-                "{} preview truncated after {} bytes; drained {} bytes total",
-                self.label, STDERR_TOTAL_PREVIEW_BYTES, summary.drained_bytes
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                &self.label,
+                format!(
+                    "preview truncated after {} bytes; drained {} bytes total",
+                    STDERR_TOTAL_PREVIEW_BYTES, summary.drained_bytes
+                ),
             );
         }
         Ok(())

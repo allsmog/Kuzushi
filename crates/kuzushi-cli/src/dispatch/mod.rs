@@ -4,10 +4,10 @@ use crate::mcp::mcp_command;
 use crate::presentation::{shell_startup_progress_messages, should_emit_shell_startup_progress};
 use crate::support::{require_cli_target, target_or_global};
 use anyhow::{Context, Result};
-use kuzushi_core::{
-    load_config_for_target, DynamicModuleLoadOptions, ModuleRegistry, WorkspaceTarget,
+use kuzushi_core::{DynamicModuleLoadOptions, ModuleRegistry, WorkspaceTarget};
+use kuzushi_tui::{
+    run_shell_with_context_and_config_diagnostics, ShellLaunchContext, ShellTargetSource,
 };
-use kuzushi_tui::{run_shell_with_context, ShellLaunchContext, ShellTargetSource};
 use std::path::PathBuf;
 
 mod catalog;
@@ -255,10 +255,13 @@ fn dispatch_shell_command(
             eprintln!("{line}");
         }
     }
-    let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
+    let loaded_config = crate::application::config_diagnostics::load_cli_config_with_diagnostics(
+        workspace.as_ref().map(WorkspaceTarget::root),
+    )?;
+    let config = loaded_config.config;
     let mut registry = ModuleRegistry::with_v2_builtins();
     load_dynamic_modules(&mut registry, &config, &load)?;
-    run_shell_with_context(
+    run_shell_with_context_and_config_diagnostics(
         config,
         workspace.as_ref(),
         plain,
@@ -268,6 +271,7 @@ fn dispatch_shell_command(
             target_source,
             session_persistence: !no_session_persistence,
         },
+        loaded_config.diagnostics,
     )
 }
 
@@ -303,7 +307,7 @@ fn dispatch_ci_command(
         .and_then(|target| crate::application::ci::ci_command(target, options));
     let code = crate::application::ci::ci_process_exit(result);
     if code != 0 {
-        std::process::exit(code);
+        crate::application::config_diagnostics::exit_after_runtime_diagnostics(code);
     }
     Ok(())
 }

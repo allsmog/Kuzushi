@@ -16,4 +16,6 @@ pub use index_facade::IndexFacade;
 pub use router::{Backend, BackendCapability, Query, RoutingTable};
 
 #[cfg(test)]
-pub(crate) use backend_calls::{callees_call, callers_call, definition_call, symbol_matches};
+pub(crate) use backend_calls::{
+    backend_failure_diagnostic, callees_call, callers_call, definition_call, symbol_matches,
+};

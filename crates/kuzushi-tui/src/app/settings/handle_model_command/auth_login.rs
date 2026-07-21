@@ -1,7 +1,7 @@
 use super::super::{
     auth_login_status_message, auth_provider_display_name, normalize_auth_method,
-    normalize_auth_provider, oauth_credentials_path_display, pause_raw_mode_for_auth_login,
-    repaint_after_auth_login, restore_raw_mode_after_auth_login, spawn_auth_login_process,
+    normalize_auth_provider, oauth_credentials_path_display, repaint_after_auth_login,
+    spawn_auth_login_process,
 };
 use super::*;
 
@@ -215,12 +215,10 @@ impl ShellApp {
             return;
         };
 
-        let raw_mode_was_disabled = pause_raw_mode_for_auth_login();
         if let Some(login) = self.router.auth_mut().login_mut() {
             login.status = "waiting".to_string();
         }
         let status = spawn_auth_login_process(program, &command[1..], provider, method);
-        restore_raw_mode_after_auth_login(raw_mode_was_disabled);
         repaint_after_auth_login(self.ui_mut());
         self.log_auth_login_status(provider, method, status);
     }

@@ -60,6 +60,67 @@ fn phase_presentation_plan_rectangles_are_bounded_and_non_overlapping() {
 }
 
 #[test]
+fn automatic_density_changes_at_the_documented_width_boundaries() {
+    let specs = test_specs();
+    let cases = [
+        (77, LayoutDensity::Sparse, 1),
+        (78, LayoutDensity::MasterDetail, 2),
+        (119, LayoutDensity::MasterDetail, 2),
+        (120, LayoutDensity::Dense, 3),
+    ];
+
+    for (width, expected_density, expected_count) in cases {
+        let (density, visible) = automatic_specs(&specs, Rect::new(0, 0, width, 30));
+        assert_eq!(
+            density, expected_density,
+            "unexpected density at {width} columns"
+        );
+        assert_eq!(
+            visible.len(),
+            expected_count,
+            "unexpected surface count at {width} columns"
+        );
+    }
+}
+
+#[test]
+fn automatic_density_changes_at_the_documented_height_boundaries() {
+    let specs = test_specs();
+    let cases = [
+        (119, 9, LayoutDensity::Sparse, 1),
+        (119, 10, LayoutDensity::MasterDetail, 2),
+        (120, 15, LayoutDensity::MasterDetail, 2),
+        (120, 16, LayoutDensity::Dense, 3),
+    ];
+
+    for (width, height, expected_density, expected_count) in cases {
+        let (density, visible) = automatic_specs(&specs, Rect::new(0, 0, width, height));
+        assert_eq!(
+            density, expected_density,
+            "unexpected density at {width}x{height}"
+        );
+        assert_eq!(
+            visible.len(),
+            expected_count,
+            "unexpected surface count at {width}x{height}"
+        );
+    }
+}
+
+#[test]
+fn reported_warp_viewport_surface_rectangles_tile_without_overlap() {
+    let area = Rect::new(0, 8, 104, 48);
+    let rects = surface_rects(area, 2);
+
+    assert_eq!(
+        rects,
+        vec![Rect::new(0, 8, 45, 48), Rect::new(45, 8, 59, 48)]
+    );
+    assert_eq!(rects[0].right(), rects[1].x);
+    assert_eq!(rects[1].right(), area.right());
+}
+
+#[test]
 fn phase_presentation_plan_guided_mode_has_one_attention_surface() {
     let specs = test_specs();
     let (density, visible) = visible_specs(

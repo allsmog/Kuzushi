@@ -7,7 +7,7 @@ pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUN TIMELINE", area.width));
-    let widths = [14usize, 12, 9, 13, value_width(area, 34)];
+    let widths = run_column_widths(area.width as usize);
     lines.push(aligned_header(
         &["runId", "status", "findings", "revision", "target"],
         &widths,
@@ -18,6 +18,10 @@ pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let emitted = model.rows.len();
     append_runs_footer(&mut lines, emitted, area);
     lines
+}
+
+fn run_column_widths(width: usize) -> [usize; 5] {
+    fit_table_widths(width, [14, 12, 9, 13, 40], [8, 6, 2, 6, 6])
 }
 
 fn append_run_timeline_rows(
@@ -86,5 +90,34 @@ fn run_timeline_status_style(status: PastRunStatus) -> Style {
         PastRunStatus::Canceled => theme::warn(),
         PastRunStatus::Failed | PastRunStatus::Malformed => theme::danger(),
         PastRunStatus::Unknown => theme::muted(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_columns_fit_narrow_area_budgets() {
+        for width in [40, 60, 80] {
+            let widths = run_column_widths(width);
+            let line = runs_row(
+                "run-日本語-123",
+                "completed",
+                theme::success(),
+                "42",
+                "abcdef123",
+                "/long/日本語/target",
+                &widths,
+            );
+            let rendered_width = line
+                .spans
+                .iter()
+                .map(|span| display_width(span.content.as_ref()))
+                .sum::<usize>();
+
+            assert_eq!(table_width(&widths), width);
+            assert!(rendered_width <= width);
+        }
     }
 }

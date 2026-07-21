@@ -11945,6 +11945,9 @@ fn target_activation_reloads_safe_target_phase_config() {
     )
     .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&first_workspace));
+    let startup = kuzushi_core::load_config_for_target_with_diagnostics(Some(second.path()))
+        .unwrap();
+    app.log_config_diagnostics(&startup.diagnostics);
 
     app.activate_target(second_workspace);
 
@@ -11952,6 +11955,54 @@ fn target_activation_reloads_safe_target_phase_config() {
         app.config().phases.stop_after,
         Some(kuzushi_core::GuidedPhase::Scan)
     );
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "config"
+            && line
+                .body
+                .contains("target config uses deprecated stop_after = \"hunt\"; use \"scan\"")
+    }));
+
+    app.reload_external_target_settings(second.path(), true, false);
+    assert_eq!(
+        app.log_lines()
+            .iter()
+            .filter(|line| line.prefix == "config")
+            .count(),
+        1,
+        "the same target diagnostic is transcribed once per shell session"
+    );
+}
+
+#[test]
+fn global_config_reload_routes_deprecation_once_through_transcript() {
+    let _env_lock = env_test_lock();
+    let home = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let config_path = home.path().join(".kuzushi/v3/config.toml");
+    fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+    fs::write(&config_path, "[phases]\nstop_after = \"confirm\"\n").unwrap();
+
+    let now = Instant::now();
+    assert!(app.tick_at(now));
+    fs::write(
+        &config_path,
+        "[phases]\nstop_after = \"confirm\"\n# touched\n",
+    )
+    .unwrap();
+    assert!(app.tick_at(now + Duration::from_secs(2)));
+
+    let matching = app
+        .log_lines()
+        .iter()
+        .filter(|line| {
+            line.prefix == "config"
+                && line.body.contains(
+                    "global config uses deprecated stop_after = \"confirm\"; use \"prove\"",
+                )
+        })
+        .count();
+    assert_eq!(matching, 1, "reload diagnostics are transcribed once");
 }
 
 #[test]

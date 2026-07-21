@@ -4,7 +4,7 @@ pub(crate) use super::*;
 use self::{ShellApp, ShellView};
 use crossterm::cursor::MoveTo;
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
+use crossterm::terminal::{Clear, ClearType};
 pub(crate) use handle_model_command::*;
 use kuzushi_core::{OptionScope, OptionTarget, RuntimeKind, V2Config};
 use kuzushi_openai::LangGraphRuntime;

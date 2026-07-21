@@ -55,7 +55,7 @@ pub(crate) fn run_auth_ping_bridge(
             log.record(false, format!("bridge returned non-JSON output: {e}"));
             eprintln!("    stdout: {}", String::from_utf8_lossy(&output.stdout));
             eprintln!("    stderr: {}", String::from_utf8_lossy(&output.stderr));
-            std::process::exit(1);
+            crate::application::config_diagnostics::exit_after_runtime_diagnostics(1);
         }
     }
 }

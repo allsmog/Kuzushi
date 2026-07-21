@@ -377,8 +377,9 @@ impl TraceHandle {
                 .rejected_invalid_steps
                 .fetch_add(1, Ordering::Relaxed)
                 + 1;
-            eprintln!(
-                "kuzushi: rejected invalid trace step #{rejected} before sink dispatch: {error:#}"
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                "trace",
+                format!("rejected invalid trace step #{rejected} before sink dispatch: {error:#}"),
             );
             return 0;
         }
@@ -526,14 +527,17 @@ impl JsonlSink {
 impl TraceSink for JsonlSink {
     fn record(&self, step: &RunTraceStep) {
         if let Err(error) = append_run_trace_step(&self.target, &self.run_id, step) {
-            // Do not silently discard a failed ledger write: count it and warn
-            // on stderr. The trace is diagnostic, so we don't unwind the caller,
-            // but the failure must be observable rather than invisible.
+            // Do not silently discard a failed ledger write. The trace is
+            // diagnostic, so we don't unwind the caller, but the failure is
+            // routed to the mode-aware diagnostic queue.
             self.append_failures.fetch_add(1, Ordering::Relaxed);
-            eprintln!(
-                "kuzushi: failed to append run trace step to {} (run {}): {error:#}",
-                self.target.display(),
-                self.run_id
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                "trace",
+                format!(
+                    "failed to append run trace step to {} (run {}): {error:#}",
+                    self.target.display(),
+                    self.run_id
+                ),
             );
         }
     }
@@ -573,8 +577,11 @@ impl TraceSink for BroadcastSink {
     fn record(&self, step: &RunTraceStep) {
         if let Err(error) = super::write_run_artifact_json::validate_trace_step_cost(step) {
             let rejected = self.rejected_invalid_steps.fetch_add(1, Ordering::Relaxed) + 1;
-            eprintln!(
-                "kuzushi: rejected invalid live trace step #{rejected} before durable or broadcast dispatch: {error:#}"
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                "trace",
+                format!(
+                    "rejected invalid live trace step #{rejected} before durable or broadcast dispatch: {error:#}"
+                ),
             );
             return;
         }
@@ -582,8 +589,11 @@ impl TraceSink for BroadcastSink {
         if self.tx.send(step.clone()).is_err() {
             let dropped = self.dropped_live_sends.fetch_add(1, Ordering::Relaxed) + 1;
             if dropped == 1 || dropped.is_power_of_two() {
-                eprintln!(
-                    "kuzushi: dropped {dropped} live trace broadcast(s); durable trace sink remains authoritative"
+                crate::runtime_diagnostics::record_runtime_diagnostic(
+                    "trace",
+                    format!(
+                        "dropped {dropped} live trace broadcast(s); durable trace sink remains authoritative"
+                    ),
                 );
             }
         }

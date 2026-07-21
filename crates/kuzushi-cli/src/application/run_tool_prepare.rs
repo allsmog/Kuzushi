@@ -7,8 +7,8 @@ use kuzushi_core::run_artifacts::{
     ToolRunRecord,
 };
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, AutonomyPosture, FindingStore, ModuleRegistry,
-    PreparedToolInput, ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
+    config_hash, new_run_id, AutonomyPosture, FindingStore, ModuleRegistry, PreparedToolInput,
+    ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
 };
 use std::path::{Path, PathBuf};
 
@@ -179,12 +179,13 @@ impl CliToolRunBootstrap {
     }
 
     fn load_config_or_record_failure(&self, raw_input: &str) -> Result<kuzushi_core::V2Config> {
-        load_config_for_target(self.workspace.as_ref().map(WorkspaceTarget::root)).map_err(
-            |error| {
-                let message = error.to_string();
-                error_with_persistence(error, self.record_pre_config_failure(raw_input, &message))
-            },
+        super::config_diagnostics::load_cli_config(
+            self.workspace.as_ref().map(WorkspaceTarget::root),
         )
+        .map_err(|error| {
+            let message = error.to_string();
+            error_with_persistence(error, self.record_pre_config_failure(raw_input, &message))
+        })
     }
 
     fn resolve_autonomy_or_record_failure(

@@ -118,3 +118,68 @@ pub(crate) fn cost_cap_halt_height(app: &ShellApp, area: Rect) -> u16 {
         1
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn slot(kind: RenderSection, height: u16) -> RenderSectionSlot {
+        RenderSectionSlot { kind, height }
+    }
+
+    #[test]
+    fn compact_allocation_sheds_passive_throttle_before_decision_gates() {
+        let sections = vec![
+            slot(RenderSection::Confirm, 4),
+            slot(RenderSection::PrereqPrompt, 4),
+            slot(RenderSection::Throttle, 1),
+        ];
+
+        let fitted = fit_sections_to_height(sections, 12, 1);
+        let kinds = fitted
+            .iter()
+            .map(|slot| slot.kind as usize)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            kinds,
+            vec![
+                RenderSection::Confirm as usize,
+                RenderSection::PrereqPrompt as usize
+            ]
+        );
+    }
+
+    #[test]
+    fn each_interactive_gate_survives_a_40_by_12_allocation() {
+        for gate in [
+            RenderSection::ThreatPatch,
+            RenderSection::Confirm,
+            RenderSection::PrereqPrompt,
+        ] {
+            let fitted = fit_sections_to_height(
+                vec![
+                    slot(
+                        gate,
+                        if matches!(gate, RenderSection::ThreatPatch) {
+                            5
+                        } else {
+                            4
+                        },
+                    ),
+                    slot(RenderSection::Status, 1),
+                    slot(RenderSection::Throttle, 1),
+                    slot(RenderSection::Transcript, 3),
+                ],
+                12,
+                1,
+            );
+            assert!(
+                fitted
+                    .iter()
+                    .any(|slot| slot.kind as usize == gate as usize),
+                "interactive gate was hidden while its keys remain active"
+            );
+        }
+    }
+}

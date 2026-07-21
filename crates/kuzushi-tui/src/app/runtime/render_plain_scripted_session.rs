@@ -16,6 +16,45 @@ pub(crate) fn take_terminal_guard() -> bool {
     TERMINAL_GUARD_ACTIVE.swap(false, Ordering::SeqCst)
 }
 
+pub(crate) fn terminal_guard_active() -> bool {
+    TERMINAL_GUARD_ACTIVE.load(Ordering::SeqCst)
+}
+
+/// Temporarily returns the real terminal to an interactive child. Resuming
+/// re-enters Kuzushi's alternate screen; the caller then requests a complete
+/// Ratatui redraw so no child-controlled cells survive.
+pub(crate) struct ExternalTerminalSuspension {
+    active: bool,
+}
+
+impl ExternalTerminalSuspension {
+    pub(crate) fn begin() -> Result<Self> {
+        if !terminal_guard_active() {
+            return Ok(Self { active: false });
+        }
+        leave_terminal_for_external_process()?;
+        take_terminal_guard();
+        Ok(Self { active: true })
+    }
+
+    pub(crate) fn resume(mut self) -> Result<()> {
+        if !self.active {
+            return Ok(());
+        }
+        setup_terminal_stdout()?;
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Drop for ExternalTerminalSuspension {
+    fn drop(&mut self) {
+        if self.active && setup_terminal_stdout().is_ok() {
+            self.active = false;
+        }
+    }
+}
+
 /// Without this hook a panic prints its message into the alternate screen
 /// while raw mode is still active: the terminal is wiped on unwind and the
 /// operator never sees why Kuzushi died. Restore the terminal FIRST, then
@@ -98,6 +137,23 @@ fn rollback_terminal_mode() {
         crossterm::cursor::Show
     );
     let _ = disable_raw_mode();
+}
+
+fn leave_terminal_for_external_process() -> Result<()> {
+    execute!(
+        io::stdout(),
+        DisableMouseCapture,
+        DisableBracketedPaste,
+        LeaveAlternateScreen,
+        crossterm::cursor::Show
+    )
+    .context("Could not suspend Kuzushi's terminal screen")?;
+    if let Err(error) = disable_raw_mode() {
+        take_terminal_guard();
+        let _ = setup_terminal_stdout();
+        return Err(error).context("Could not disable raw mode for external process");
+    }
+    Ok(())
 }
 
 pub(crate) fn reset_terminal_viewport() -> Result<Stdout> {

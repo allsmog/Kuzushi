@@ -41,7 +41,7 @@ fn config_model_table_title(table: &ConfigModelTable, width: u16) -> Line<'stati
 }
 
 fn config_model_widths(area: Rect) -> [usize; 5] {
-    [2usize, 2, 28, 6, value_width(area, 28)]
+    fit_table_widths(area.width as usize, [2, 2, 28, 6, 40], [1, 1, 10, 3, 6])
 }
 
 fn config_model_row(row: &ConfigModelRow, widths: &[usize]) -> Line<'static> {
@@ -51,4 +51,34 @@ fn config_model_row(row: &ConfigModelRow, widths: &[usize]) -> Line<'static> {
 fn push_config_commands(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
     lines.push(command_list_line(&model.commands, area.width as usize));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_columns_fit_narrow_area_budgets() {
+        let row = ConfigModelRow {
+            cells: [
+                ">".to_string(),
+                "1".to_string(),
+                "openai:日本語-model".to_string(),
+                "xhigh".to_string(),
+                "authenticated through a long credential label".to_string(),
+            ],
+        };
+        for width in [40, 60, 80] {
+            let widths = config_model_widths(Rect::new(0, 0, width, 20));
+            let line = config_model_row(&row, &widths);
+            let rendered_width = line
+                .spans
+                .iter()
+                .map(|span| display_width(span.content.as_ref()))
+                .sum::<usize>();
+
+            assert_eq!(table_width(&widths), width as usize);
+            assert!(rendered_width <= width as usize);
+        }
+    }
 }

@@ -631,9 +631,12 @@ fn publish_staged_directory(
     }
     if had_previous {
         if let Err(error) = fs::remove_dir_all(&backup) {
-            eprintln!(
-                "kuzushi: Android output committed, but old backup {} could not be removed: {error}",
-                backup.display()
+            crate::runtime_diagnostics::record_runtime_diagnostic(
+                "android-apk",
+                format!(
+                    "Android output committed, but old backup {} could not be removed: {error}",
+                    backup.display()
+                ),
             );
         }
     }

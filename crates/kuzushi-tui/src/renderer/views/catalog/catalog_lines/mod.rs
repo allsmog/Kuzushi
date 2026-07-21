@@ -69,7 +69,7 @@ fn append_module_groups(lines: &mut Vec<Line<'static>>, model: &CatalogModel, wi
 
 fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGroup, width: u16) {
     let (label, blurb) = module_category_blurb(group.category);
-    let widths = module_table_widths(width);
+    let widths = module_table_widths(width.saturating_sub(2));
     lines.push(category_divider(label, blurb, width));
     for module in &group.rows {
         lines.push(catalog_module_row(
@@ -97,5 +97,30 @@ mod tests {
 
         assert!(text.contains("target <path>"), "{text}");
         assert!(text.contains("demo"), "{text}");
+    }
+
+    #[test]
+    fn module_rows_include_their_gutter_in_narrow_width_budgets() {
+        for width in [40, 60, 80] {
+            let widths = module_table_widths(width - 2);
+            for focused in [false, true] {
+                let line = catalog_module_row(
+                    "日本語-module-id",
+                    "A long module description that must shrink",
+                    focused,
+                    &widths,
+                );
+                let rendered_width = line
+                    .spans
+                    .iter()
+                    .map(|span| display_width(span.content.as_ref()))
+                    .sum::<usize>();
+
+                assert!(
+                    rendered_width <= width as usize,
+                    "{rendered_width} > {width}"
+                );
+            }
+        }
     }
 }
