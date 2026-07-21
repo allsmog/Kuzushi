@@ -61,8 +61,7 @@ fn summary_with_threat_model_digest(target: &Path, summary: RunSummary) -> RunSu
 /// (scope file, ancestor file, or the persistent model), so review can
 /// answer "which model seeded this run".
 fn summary_with_threat_model_provenance(target: &Path, summary: RunSummary) -> RunSummary {
-    let Some(resolved) =
-        crate::capabilities::threat_model::resolve_threat_model(target, ".")
+    let Some(resolved) = crate::capabilities::threat_model::resolve_threat_model(target, ".")
     else {
         return summary;
     };

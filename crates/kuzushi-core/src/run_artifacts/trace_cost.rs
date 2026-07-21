@@ -15,7 +15,7 @@ pub fn trace_cost_report(target: impl AsRef<Path>, run_id: &str) -> Result<Runti
             return Err(anyhow::anyhow!(
                 "could not read bounded canonical trace for run {run_id}: {}",
                 other.display_path()
-            ))
+            ));
         }
     };
     model_call_cost_report_from_jsonl(&body)

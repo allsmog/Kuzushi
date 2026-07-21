@@ -55,6 +55,13 @@ pub struct ScanFindingDelta {
     pub updated: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScanSeverityCount {
+    pub severity: crate::findings::Severity,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScanArtifactDelta {
@@ -76,6 +83,11 @@ pub struct ScanStageData {
     pub plan: ScanStagePlan,
     pub engines: Vec<ScanStageEngine>,
     pub finding_delta: ScanFindingDelta,
+    /// Findings this attempt produced, bucketed by severity, highest band
+    /// first. Empty when the attempt found nothing or the receipt predates
+    /// severity recording — the cockpit renders no chips rather than zeros.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub severity_counts: Vec<ScanSeverityCount>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifact_delta: Vec<ScanArtifactDelta>,
     pub duration_ms: u64,

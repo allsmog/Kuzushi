@@ -350,7 +350,7 @@ fn next_event_number_from_path(path: &Path) -> Result<usize> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(1),
         Err(error) => {
             return Err(error)
-                .with_context(|| format!("Could not read run event log {}", path.display()))
+                .with_context(|| format!("Could not read run event log {}", path.display()));
         }
     };
     Ok(crate::run_artifacts::jsonl_numbering::next_jsonl_number::<

@@ -1516,11 +1516,13 @@ mod run_focus_completion_tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(records.len(), 2);
-        assert!(records.iter().all(|record| record
-            .payload
-            .get("prompt")
-            .or_else(|| record.payload.get("answer"))
-            .is_none_or(serde_json::Value::is_null)));
+        assert!(records.iter().all(|record| {
+            record
+                .payload
+                .get("prompt")
+                .or_else(|| record.payload.get("answer"))
+                .is_none_or(serde_json::Value::is_null)
+        }));
     }
 
     #[test]
@@ -1717,6 +1719,7 @@ mod run_focus_completion_tests {
                 },
                 engines: Vec::new(),
                 finding_delta: ScanFindingDelta::default(),
+                severity_counts: Vec::new(),
                 artifact_delta: Vec::new(),
                 duration_ms: 1,
                 cost: None,

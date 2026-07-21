@@ -89,6 +89,9 @@ fn fixture_scan_attempt(richness: usize, state: SemanticFixture) -> ScanAttemptM
         findings: Some(1),
         findings_added: (richness >= 3).then_some(1),
         findings_updated: Some(0),
+        severity_counts: (richness >= 3)
+            .then(|| vec![("high".to_string(), 1)])
+            .unwrap_or_default(),
         artifact_count: usize::from(richness >= 3),
         artifact_paths: Vec::new(),
         duration_secs: Some(1),

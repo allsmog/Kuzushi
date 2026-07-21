@@ -6000,12 +6000,8 @@ mod tests {
     #[test]
     fn latest_pointer_uses_generated_milliseconds_for_same_second_runs() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut older = RunSummary::running(
-            "zscan-1784252228000-ffffffffffff",
-            "scan",
-            None,
-            "target",
-        );
+        let mut older =
+            RunSummary::running("zscan-1784252228000-ffffffffffff", "scan", None, "target");
         older.started_at_unix = 1_784_252_228;
         let mut newer = RunSummary::running(
             "areport-1784252228001-000000000000",

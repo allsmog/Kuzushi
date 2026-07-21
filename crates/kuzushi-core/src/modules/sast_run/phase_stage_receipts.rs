@@ -85,10 +85,7 @@ fn parse_phase_stage_receipts(body: &str) -> Result<Vec<PhaseStageReceipt>> {
         .collect()
 }
 
-fn aggregate_phase_receipts(
-    phase: WorkflowPhase,
-    receipts: &[PhaseStageReceipt],
-) -> Option<Value> {
+fn aggregate_phase_receipts(phase: WorkflowPhase, receipts: &[PhaseStageReceipt]) -> Option<Value> {
     let matching = receipts
         .iter()
         .filter(|receipt| receipt.phase == phase)
@@ -104,7 +101,10 @@ fn aggregate_phase_receipts(
         .iter()
         .flat_map(|receipt| receipt.run_refs.iter().cloned())
         .collect();
-    let scan = matching.iter().rev().find_map(|receipt| receipt.scan.clone());
+    let scan = matching
+        .iter()
+        .rev()
+        .find_map(|receipt| receipt.scan.clone());
     Some(json!(PhaseStageReceipt {
         phase,
         outcome,
@@ -150,7 +150,7 @@ mod tests {
     use super::*;
     use crate::run_artifacts::{
         load_scan_stage_data, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta,
-        ScanStageCost, ScanStageEngine, ScanStagePlan, ScanStageScope,
+        ScanSeverityCount, ScanStageCost, ScanStageEngine, ScanStagePlan, ScanStageScope,
     };
     use crate::workflow_attempts::PhaseTargetSnapshot;
 
@@ -240,6 +240,16 @@ mod tests {
                 added: 2,
                 updated: 1,
             },
+            severity_counts: vec![
+                ScanSeverityCount {
+                    severity: crate::findings::Severity::Critical,
+                    count: 1,
+                },
+                ScanSeverityCount {
+                    severity: crate::findings::Severity::Medium,
+                    count: 2,
+                },
+            ],
             artifact_delta: vec![ScanArtifactDelta {
                 run_ref: "native-run".to_string(),
                 path: "result.json".to_string(),
@@ -251,6 +261,29 @@ mod tests {
             }),
             target_snapshot: PhaseTargetSnapshot::capture(target),
         }
+    }
+
+    /// Receipts written before severity recording carry no severityCounts
+    /// key; they must keep deserializing with empty buckets, not fail or
+    /// invent zeros.
+    #[test]
+    fn receipts_predating_severity_recording_deserialize_with_empty_buckets() {
+        let target = tempfile::tempdir().unwrap();
+        let mut receipt = json!(PhaseStageReceipt {
+            phase: WorkflowPhase::Scan,
+            outcome: PhaseStageOutcome::Completed,
+            run_refs: vec!["legacy-run".to_string()],
+            scan: Some(typed_scan_stage(target.path())),
+        });
+        receipt["scan"]
+            .as_object_mut()
+            .unwrap()
+            .remove("severityCounts")
+            .expect("fixture must have recorded severity counts");
+
+        let parsed: PhaseStageReceipt = serde_json::from_value(receipt).unwrap();
+
+        assert!(parsed.scan.unwrap().severity_counts.is_empty());
     }
 
     fn typed_scan_engines() -> Vec<ScanStageEngine> {

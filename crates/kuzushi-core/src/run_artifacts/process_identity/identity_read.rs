@@ -59,7 +59,7 @@ pub(super) fn read(
             return invalid(
                 ProcessIdentityReadIssueKind::UnsafePath,
                 unsafe_path_detail(&error.to_string()),
-            )
+            );
         }
     };
     read_path(&path, expected_process_id, observed_identity)

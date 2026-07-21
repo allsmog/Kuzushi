@@ -82,8 +82,8 @@ pub use running::{
 };
 pub use scan_stage::{
     load_scan_stage_data, PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta,
-    ScanEngineStageOutcome, ScanFindingDelta, ScanStageCost, ScanStageData, ScanStageEngine,
-    ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
+    ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost, ScanStageData,
+    ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
 pub use tool_output_cost::tool_run_output_cost_report;
 pub(crate) use tool_run_record::terminal_result_digest;
@@ -93,15 +93,14 @@ pub use tool_run_record::{
     record_tool_run_started_with_metadata, record_tool_run_started_with_reproducibility,
     tool_run_output_cost_usd, tool_run_output_findings_count, tool_run_terminal_digest,
     try_record_tool_run_canceled, try_record_tool_run_canceled_observed,
-    try_record_tool_run_canceled_settled,
-    try_record_tool_run_complete, try_record_tool_run_complete_observed,
-    try_record_tool_run_complete_settled, try_record_tool_run_failed,
-    try_record_tool_run_failed_observed, try_record_tool_run_failed_observed_with_execution,
-    try_record_tool_run_failed_settled, try_record_tool_run_interrupted,
-    try_record_tool_run_interrupted_observed, try_record_tool_run_interrupted_settled,
-    try_record_tool_run_refused, try_record_tool_run_refused_observed,
-    try_record_tool_run_refused_settled, try_record_tool_run_started_with_reproducibility,
-    ToolRunRecord,
+    try_record_tool_run_canceled_settled, try_record_tool_run_complete,
+    try_record_tool_run_complete_observed, try_record_tool_run_complete_settled,
+    try_record_tool_run_failed, try_record_tool_run_failed_observed,
+    try_record_tool_run_failed_observed_with_execution, try_record_tool_run_failed_settled,
+    try_record_tool_run_interrupted, try_record_tool_run_interrupted_observed,
+    try_record_tool_run_interrupted_settled, try_record_tool_run_refused,
+    try_record_tool_run_refused_observed, try_record_tool_run_refused_settled,
+    try_record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
 pub use trace_cost::{
     reconcile_terminal_cost_reports, terminal_model_call_cost_report, trace_cost_report,

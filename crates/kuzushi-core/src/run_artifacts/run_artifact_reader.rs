@@ -68,7 +68,7 @@ pub fn read_run_artifact_bytes(
         Err(error) => {
             return RunArtifactRead::Unsafe {
                 error: escape_terminal_controls(&error.to_string()),
-            }
+            };
         }
     };
     read_checked_artifact(path)

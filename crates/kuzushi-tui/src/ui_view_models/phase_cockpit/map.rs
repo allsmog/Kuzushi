@@ -46,9 +46,7 @@ fn next_scans_state(app: &ShellApp) -> NextScansState {
                 .map(next_scan_row)
                 .collect(),
         ),
-        crate::app::ScanRecommendationsState::Failed(error) => {
-            NextScansState::Unavailable(error)
-        }
+        crate::app::ScanRecommendationsState::Failed(error) => NextScansState::Unavailable(error),
     }
 }
 
@@ -158,15 +156,14 @@ mod tests {
         app.set_target(Some(target.clone()));
         assert_eq!(map_phase_model(&app).next_scans, NextScansState::Pending);
 
-        let recommendation =
-            kuzushi_core::capabilities::scan_recommender::ScanRecommendation {
-                scope_id: "root".to_string(),
-                phase: kuzushi_core::WorkflowPhase::Scan,
-                reason: kuzushi_core::capabilities::scan_recommender::ReasonTag::Changed,
-                score: 0.7,
-                evidence: "14 files changed since a1b2c3d4".to_string(),
-                suggested_mode: None,
-            };
+        let recommendation = kuzushi_core::capabilities::scan_recommender::ScanRecommendation {
+            scope_id: "root".to_string(),
+            phase: kuzushi_core::WorkflowPhase::Scan,
+            reason: kuzushi_core::capabilities::scan_recommender::ReasonTag::Changed,
+            score: 0.7,
+            evidence: "14 files changed since a1b2c3d4".to_string(),
+            suggested_mode: None,
+        };
         app.workbench_cache()
             .borrow_mut()
             .apply_view_hydration(crate::app::ViewHydrationResult {

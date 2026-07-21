@@ -27,6 +27,11 @@ pub(super) fn scan_attempt_from_stage(
         findings: Some(findings),
         findings_added: Some(scan.finding_delta.added),
         findings_updated: Some(scan.finding_delta.updated),
+        severity_counts: scan
+            .severity_counts
+            .iter()
+            .map(|bucket| (bucket.severity.as_str().to_string(), bucket.count))
+            .collect(),
         artifact_count: scan.artifact_delta.len(),
         artifact_paths: typed_artifact_paths(scan),
         duration_secs: Some(scan.duration_ms.saturating_add(999) / 1_000),
@@ -91,6 +96,7 @@ pub(super) fn scan_attempt_from_record(
         findings: sum_recorded_findings(summaries),
         findings_added: None,
         findings_updated: None,
+        severity_counts: severity_counts_from_store(app, &record.completed.run_refs),
         artifact_count: summaries
             .iter()
             .map(|summary| summary.artifacts.len())
@@ -117,6 +123,7 @@ pub(super) fn scan_attempt_from_legacy_summary(
         findings: summary.findings.or_else(|| findings_for_run(app, summary)),
         findings_added: None,
         findings_updated: None,
+        severity_counts: severity_counts_from_store(app, std::slice::from_ref(&summary.run_id)),
         artifact_count: summary.artifacts.len(),
         artifact_paths: Vec::new(),
         duration_secs: summary
@@ -193,6 +200,27 @@ fn normalized_outcome(status: &str) -> String {
     } else {
         status
     }
+}
+
+/// Fallback for attempts whose receipts predate severity recording: bucket
+/// the findings the store attributes to this attempt's runs. The typed
+/// receipt path never consults the store — its counts are the durable truth.
+fn severity_counts_from_store(app: &ShellApp, run_refs: &[String]) -> Vec<(String, u64)> {
+    let mut counts = std::collections::BTreeMap::new();
+    for finding in app.findings() {
+        let attributed = finding
+            .scan_id
+            .as_deref()
+            .is_some_and(|scan_id| run_refs.iter().any(|run_ref| run_ref == scan_id));
+        if attributed {
+            *counts.entry(finding.severity).or_insert(0u64) += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .rev()
+        .map(|(severity, count)| (severity.as_str().to_string(), count))
+        .collect()
 }
 
 fn findings_for_run(app: &ShellApp, summary: &RunSummary) -> Option<u64> {

@@ -14,7 +14,7 @@ pub(super) fn observe(process_id: u32) -> ProcessObservation {
     let stat = match crate::bounded_file::read_utf8_text(&path, MAX_PROC_STAT_BYTES) {
         Ok(stat) => stat,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ProcessObservation::Dead
+            return ProcessObservation::Dead;
         }
         Err(_) => return ProcessObservation::Unknown,
     };

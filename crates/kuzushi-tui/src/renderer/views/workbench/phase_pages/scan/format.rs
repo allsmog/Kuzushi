@@ -98,24 +98,32 @@ fn compact_result_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'stati
             theme::muted(),
         )];
     };
-    vec![
-        Line::styled(
-            fit(
-                &format!(
-                    "engines {} · {}",
-                    model.engine_outcomes.len(),
-                    compact_finding_delta(attempt),
-                ),
-                width,
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "engines {} · {}",
+                model.engine_outcomes.len(),
+                compact_finding_delta(attempt),
             ),
-            theme::primary(),
+            width,
         ),
-        Line::styled(fit(&attempt_reference_line(attempt), width), theme::muted()),
-        Line::styled(
-            fit(&format!("result {}", attempt.disposition), width),
-            disposition_style(&attempt.disposition),
-        ),
-    ]
+        theme::primary(),
+    )];
+    if !attempt.severity_counts.is_empty() {
+        lines.push(Line::styled(
+            fit(&severity_chip_label(&attempt.severity_counts), width),
+            severity_chip_style(&attempt.severity_counts),
+        ));
+    }
+    lines.push(Line::styled(
+        fit(&attempt_reference_line(attempt), width),
+        theme::muted(),
+    ));
+    lines.push(Line::styled(
+        fit(&format!("result {}", attempt.disposition), width),
+        disposition_style(&attempt.disposition),
+    ));
+    lines
 }
 
 fn compact_attempt_lines(attempt: Option<&ScanAttemptModel>, width: usize) -> Vec<Line<'static>> {
@@ -148,6 +156,26 @@ fn optional_cost(value: Option<f64>, complete: Option<bool>) -> String {
         (Some(cost), Some(false)) => format!(">=${cost:.4} incomplete"),
         (Some(cost), _) => format!("${cost:.4}"),
         (None, _) => "not recorded".to_string(),
+    }
+}
+
+/// One chip per recorded severity band, highest first: "1 critical · 2 high".
+pub(super) fn severity_chip_label(counts: &[(String, u64)]) -> String {
+    counts
+        .iter()
+        .map(|(severity, count)| format!("{count} {severity}"))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// The line inherits the urgency of the worst band present.
+pub(super) fn severity_chip_style(counts: &[(String, u64)]) -> ratatui::style::Style {
+    if counts.iter().any(|(severity, _)| severity == "critical") {
+        theme::danger()
+    } else if counts.iter().any(|(severity, _)| severity == "high") {
+        theme::warn()
+    } else {
+        theme::muted()
     }
 }
 

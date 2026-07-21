@@ -2,8 +2,8 @@ use super::scan_phase_model;
 use crate::{ShellApp, ViewHydrationKey};
 use kuzushi_core::run_artifacts::{
     PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta, ScanEngineStageOutcome,
-    ScanFindingDelta, ScanStageCost, ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope,
-    SAST_PHASE_STAGES_JSONL_FILE,
+    ScanFindingDelta, ScanSeverityCount, ScanStageCost, ScanStageData, ScanStageEngine,
+    ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, append_phase_attempt_disposition, PhaseAttemptCompleted,
@@ -117,6 +117,15 @@ fn durable_scan_stage_projects_typed_scope_plan_engine_and_deltas() {
     );
     assert_eq!(attempt.duration_secs, Some(2));
     assert_eq!(attempt.cost_complete, Some(false));
+    assert_eq!(
+        attempt.severity_counts,
+        vec![
+            ("critical".to_string(), 1),
+            ("high".to_string(), 2),
+            ("medium".to_string(), 3),
+        ],
+        "typed receipt severity buckets must reach the cockpit highest-first"
+    );
 }
 
 /// Regression: an external workspace refresh invalidates the run-summary
@@ -134,7 +143,9 @@ fn typed_projection_survives_external_cache_invalidation_without_hint_flap() {
     assert!(before.attempt.is_some(), "typed attempt before refresh");
     assert_eq!(before.empty_hint, None);
 
-    app.workbench_cache().borrow_mut().invalidate_workspace_files();
+    app.workbench_cache()
+        .borrow_mut()
+        .invalidate_workspace_files();
     app.workbench_cache()
         .borrow_mut()
         .invalidate_state_artifact_paths(
@@ -220,6 +231,20 @@ fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
                 added: 4,
                 updated: 2,
             },
+            severity_counts: vec![
+                ScanSeverityCount {
+                    severity: kuzushi_core::findings::Severity::Critical,
+                    count: 1,
+                },
+                ScanSeverityCount {
+                    severity: kuzushi_core::findings::Severity::High,
+                    count: 2,
+                },
+                ScanSeverityCount {
+                    severity: kuzushi_core::findings::Severity::Medium,
+                    count: 3,
+                },
+            ],
             artifact_delta: vec![ScanArtifactDelta {
                 run_ref: "semgrep-child".to_string(),
                 path: "result.json".to_string(),
@@ -232,8 +257,8 @@ fn record_typed_scan_attempt(target: &std::path::Path, run_id: &str) {
             target_snapshot: snapshot.clone(),
         }),
     };
-    let stage_path = kuzushi_core::run_artifacts::run_dir(target, run_id)
-        .join(SAST_PHASE_STAGES_JSONL_FILE);
+    let stage_path =
+        kuzushi_core::run_artifacts::run_dir(target, run_id).join(SAST_PHASE_STAGES_JSONL_FILE);
     std::fs::create_dir_all(stage_path.parent().unwrap()).unwrap();
     std::fs::write(
         &stage_path,

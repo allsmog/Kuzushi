@@ -200,7 +200,7 @@ pub fn read_latest_run_pointer(target: impl AsRef<Path>) -> Result<LatestRunPoin
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(LatestRunPointerState::Missing)
+            return Ok(LatestRunPointerState::Missing);
         }
         Err(error) => return Ok(latest_pointer_unreadable(error)),
     };
@@ -229,7 +229,7 @@ fn read_latest_run_pointer_file(target: &Path, path: &Path) -> Result<LatestRunP
         Err(error) => {
             return Ok(LatestRunPointerState::Invalid(
                 LatestRunPointerIssue::InvalidRunId(error.to_string()),
-            ))
+            ));
         }
     };
     let metadata = match checked_run_artifact_path(target, run_id.as_str(), "run.json") {
@@ -788,7 +788,9 @@ fn compare_run_recency(left: &RunSummary, right: &RunSummary) -> std::cmp::Order
     // the finer tie-break needed by consecutive runs in the same second.
     left.started_at_unix
         .cmp(&right.started_at_unix)
-        .then_with(|| run_id_timestamp_millis(&left.run_id).cmp(&run_id_timestamp_millis(&right.run_id)))
+        .then_with(|| {
+            run_id_timestamp_millis(&left.run_id).cmp(&run_id_timestamp_millis(&right.run_id))
+        })
         .then_with(|| left.run_id.cmp(&right.run_id))
 }
 

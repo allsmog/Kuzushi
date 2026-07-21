@@ -1,6 +1,7 @@
 use super::format::{
     compact_summary_lines as formatted_compact_summary_lines, optional_count, outcome_style,
     outcome_symbol, receipt_metrics_lines, receipt_reference_lines, receipt_status_lines,
+    severity_chip_label, severity_chip_style,
 };
 use super::*;
 use crate::ui_view_models::{ScanEngineOutcomeModel, ScanPhaseModel};
@@ -131,25 +132,33 @@ pub(super) fn finding_delta_lines(model: &ScanPhaseModel, width: usize) -> Vec<L
             theme::muted(),
         )];
     };
-    vec![
-        Line::styled(fit(&finding_delta_label(attempt), width), theme::primary()),
-        Line::styled(
-            fit(
-                &format!("artifacts {} recorded", attempt.artifact_count),
-                width,
-            ),
-            theme::muted(),
+    let mut lines = vec![Line::styled(
+        fit(&finding_delta_label(attempt), width),
+        theme::primary(),
+    )];
+    if !attempt.severity_counts.is_empty() {
+        lines.push(Line::styled(
+            fit(&severity_chip_label(&attempt.severity_counts), width),
+            severity_chip_style(&attempt.severity_counts),
+        ));
+    }
+    lines.push(Line::styled(
+        fit(
+            &format!("artifacts {} recorded", attempt.artifact_count),
+            width,
         ),
-    ]
-    .into_iter()
-    .chain(
-        attempt
-            .artifact_paths
-            .iter()
-            .take(2)
-            .map(|path| Line::styled(fit(&format!("+ {path}"), width), theme::muted())),
-    )
-    .collect()
+        theme::muted(),
+    ));
+    lines
+        .into_iter()
+        .chain(
+            attempt
+                .artifact_paths
+                .iter()
+                .take(2)
+                .map(|path| Line::styled(fit(&format!("+ {path}"), width), theme::muted())),
+        )
+        .collect()
 }
 
 fn finding_delta_label(attempt: &crate::ui_view_models::ScanAttemptModel) -> String {
@@ -166,6 +175,58 @@ fn short_ref(run_ref: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delta_pane_renders_severity_chips_between_delta_and_artifacts() {
+        let model = ScanPhaseModel {
+            scope: "target".to_string(),
+            plan: "manual".to_string(),
+            attempt: Some(crate::ui_view_models::ScanAttemptModel {
+                attempt_id: None,
+                run_id: "run-1".to_string(),
+                run_refs: vec!["run-1".to_string()],
+                outcome: "completed".to_string(),
+                disposition: "selected".to_string(),
+                freshness: "current revision".to_string(),
+                findings: Some(3),
+                findings_added: Some(3),
+                findings_updated: Some(0),
+                severity_counts: vec![("critical".to_string(), 1), ("medium".to_string(), 2)],
+                artifact_count: 0,
+                artifact_paths: Vec::new(),
+                duration_secs: None,
+                cost_usd: None,
+                cost_complete: None,
+                error: None,
+            }),
+            engine_outcomes: Vec::new(),
+            empty_hint: None,
+        };
+
+        let text = finding_delta_lines(&model, 60)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("1 critical · 2 medium"), "{text}");
+        let empty_model = ScanPhaseModel {
+            attempt: model.attempt.clone().map(|mut attempt| {
+                attempt.severity_counts.clear();
+                attempt
+            }),
+            ..model
+        };
+        let quiet = finding_delta_lines(&empty_model, 60)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !quiet.contains("critical"),
+            "no chips may be invented when severity was never recorded: {quiet}"
+        );
+    }
 
     #[test]
     fn engine_row_retains_compact_run_reference_at_eighty_column_pane_width() {

@@ -209,7 +209,9 @@ impl ObservedTerminalFixture {
     }
 
     fn take_completion(&mut self) -> crate::modules::PendingToolCallCompletion {
-        self.completion.take().expect("fixture completion is available")
+        self.completion
+            .take()
+            .expect("fixture completion is available")
     }
 }
 

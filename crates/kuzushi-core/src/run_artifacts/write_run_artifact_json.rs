@@ -116,7 +116,7 @@ fn next_trace_step_number_from_path(path: &Path) -> Result<usize> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(1),
         Err(error) => {
             return Err(error)
-                .with_context(|| format!("Could not read run trace {}", path.display()))
+                .with_context(|| format!("Could not read run trace {}", path.display()));
         }
     };
     Ok(crate::run_artifacts::jsonl_numbering::next_jsonl_number::<

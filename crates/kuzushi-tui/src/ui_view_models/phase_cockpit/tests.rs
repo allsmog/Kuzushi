@@ -673,14 +673,17 @@ fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
             "1 canonical run reference(s)".to_string(),
             "next: open the failed run, adjust its input, or run it again".to_string(),
         ],
-        detail_rows: ["1 canonical run reference(s)", "next: open the failed run, adjust its input, or run it again"]
-            .into_iter()
-            .map(|text| crate::app::PhaseResultDetailRow {
-                key: None,
-                disclosed_keys: std::collections::BTreeSet::new(),
-                text: text.to_string(),
-            })
-            .collect(),
+        detail_rows: [
+            "1 canonical run reference(s)",
+            "next: open the failed run, adjust its input, or run it again",
+        ]
+        .into_iter()
+        .map(|text| crate::app::PhaseResultDetailRow {
+            key: None,
+            disclosed_keys: std::collections::BTreeSet::new(),
+            text: text.to_string(),
+        })
+        .collect(),
         semantic_keys: std::collections::BTreeSet::new(),
         actions: vec![PhaseResultAction::Open],
         recommended_next: "open the failed run, adjust its input, or run it again".to_string(),

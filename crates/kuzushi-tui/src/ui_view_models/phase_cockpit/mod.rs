@@ -91,6 +91,10 @@ pub(crate) struct ScanAttemptModel {
     pub(crate) findings: Option<u64>,
     pub(crate) findings_added: Option<u64>,
     pub(crate) findings_updated: Option<u64>,
+    /// Severity buckets for the attempt's findings, highest band first,
+    /// zero buckets omitted. Empty when severity was never recorded — the
+    /// page renders no chips rather than inventing zeros.
+    pub(crate) severity_counts: Vec<(String, u64)>,
     pub(crate) artifact_count: usize,
     pub(crate) artifact_paths: Vec<String>,
     pub(crate) duration_secs: Option<u64>,

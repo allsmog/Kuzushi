@@ -1,7 +1,8 @@
 use super::*;
 use crate::run_artifacts::{
-    PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta, ScanStageCost,
-    ScanStageData, ScanStageEngine, ScanStagePlan, ScanStageScope,
+    PhaseStageOutcome, ScanArtifactDelta, ScanEngineStageOutcome, ScanFindingDelta,
+    ScanSeverityCount, ScanStageCost, ScanStageData, ScanStageEngine, ScanStagePlan,
+    ScanStageScope,
 };
 use crate::WorkspaceTarget;
 use std::collections::BTreeSet;
@@ -474,6 +475,7 @@ impl SastScanExecutionInput<'_> {
             plan: scan_stage_plan(self.input, selected),
             engines: scan_stage_engines(reports, &run_ids)?,
             finding_delta,
+            severity_counts: scan_severity_counts(core_findings),
             artifact_delta: scan_artifact_delta(
                 self.workspace.root(),
                 &run_refs,
@@ -539,6 +541,7 @@ impl SastScanExecutionInput<'_> {
                 )),
             }],
             finding_delta: ScanFindingDelta::default(),
+            severity_counts: Vec::new(),
             artifact_delta: Vec::new(),
             duration_ms: elapsed_millis(started),
             cost: None,
@@ -899,6 +902,20 @@ fn scan_engine_run_ref(engine: &str, run_ids: &SastRunIds) -> Option<String> {
         "systems-hunt" => run_ids.systems_hunt.clone(),
         _ => run_ids.native.clone(),
     }
+}
+
+/// Buckets the attempt's findings by severity, highest band first, zero
+/// buckets omitted — the shape the Scan cockpit renders as chips.
+fn scan_severity_counts(findings: &[crate::findings::Finding]) -> Vec<ScanSeverityCount> {
+    let mut counts = std::collections::BTreeMap::new();
+    for finding in findings {
+        *counts.entry(finding.severity).or_insert(0u64) += 1;
+    }
+    counts
+        .into_iter()
+        .rev()
+        .map(|(severity, count)| ScanSeverityCount { severity, count })
+        .collect()
 }
 
 fn scan_finding_delta(
@@ -1358,5 +1375,48 @@ mod scan_result_outcome_tests {
             engine_outcomes: outcomes.iter().copied().collect::<BTreeMap<_, _>>(),
             skipped_engines: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod scan_severity_count_tests {
+    use super::*;
+    use crate::findings::{Finding, Severity};
+
+    #[test]
+    fn buckets_order_highest_band_first_and_omit_empty_bands() {
+        let findings = [
+            Severity::Medium,
+            Severity::Critical,
+            Severity::Medium,
+            Severity::Unknown,
+        ]
+        .into_iter()
+        .map(|severity| Finding {
+            severity,
+            ..Finding::default()
+        })
+        .collect::<Vec<_>>();
+
+        let counts = scan_severity_counts(&findings);
+
+        assert_eq!(
+            counts,
+            vec![
+                ScanSeverityCount {
+                    severity: Severity::Critical,
+                    count: 1,
+                },
+                ScanSeverityCount {
+                    severity: Severity::Medium,
+                    count: 2,
+                },
+                ScanSeverityCount {
+                    severity: Severity::Unknown,
+                    count: 1,
+                },
+            ]
+        );
+        assert!(scan_severity_counts(&[]).is_empty());
     }
 }

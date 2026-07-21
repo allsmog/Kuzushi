@@ -299,7 +299,7 @@ fn lock_and_prepare_terminal_result<T>(
                 completion,
                 execution_may_have_occurred_without_completion,
                 error,
-            )
+            );
         }
     };
     let prepared = match prepare() {
@@ -311,7 +311,7 @@ fn lock_and_prepare_terminal_result<T>(
                 completion,
                 execution_may_have_occurred_without_completion,
                 error,
-            )
+            );
         }
     };
     Ok((guard, prepared, completion))
@@ -512,10 +512,12 @@ fn reason_terminal_summary(
     } else {
         seed.interrupted(reason)
     };
-    Ok(summary.with_cost_report(super::trace_cost::trace_cost_report(
-        record.target,
-        record.run_id,
-    )?))
+    Ok(
+        summary.with_cost_report(super::trace_cost::trace_cost_report(
+            record.target,
+            record.run_id,
+        )?),
+    )
 }
 
 fn settle_call_without_result(
