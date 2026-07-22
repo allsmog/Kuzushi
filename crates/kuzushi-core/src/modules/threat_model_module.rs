@@ -73,6 +73,13 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
         opt("designDoc", OptionType::Path, "Architecture document source.")
             .aliases(&["design_doc", "design"])
             .workspace_read(),
+        opt(
+            "vulnsFile",
+            OptionType::Path,
+            "Known-vulnerability list joined into research evidence: newline CVE ids, CSV (id,title,component,description), or a JSON array with id+description.",
+        )
+        .aliases(&["vulns_file", "vulns"])
+        .workspace_read(),
         opt("outputDir", OptionType::Path, "Normalized artifact directory.")
             .aliases(&["output_dir"])
             .state_write()

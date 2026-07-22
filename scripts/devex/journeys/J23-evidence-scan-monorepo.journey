@@ -27,6 +27,13 @@ wait-for: 30 KUZUSHI
 # markers, so no fixed settle delay is needed after the header appears.
 submit: setg ui.auto_open_activity false
 wait: 2
+# threat-model:build is model-backed by default and refuses on this modelless
+# box; opt the Map plan's threat-model task into the runtime-free
+# deterministic fold explicitly (session-scoped — never a silent fallback).
+submit: options threat-model:build
+wait: 1
+submit: set pipeline deterministic
+wait: 1
 submit: scan
 wait-for: 15 MAP · ROUTE
 snap: map-route

@@ -21,6 +21,7 @@ pub(crate) fn threat_model_document_schema() -> Value {
                 }
             },
             "threats": {"type": "array", "items": {"type": "object"}},
+            "assets": {"type": "array", "items": {"type": "object"}},
             "deprioritized": {"type": "array", "items": {"type": "object"}},
             "openQuestions": {"type": "array", "items": {"type": "object"}},
             "recommendedMitigations": {"type": "array", "items": {"type": "object"}},
@@ -47,6 +48,7 @@ pub(crate) fn build_agent_prompt(
             manifest_section(&manifest_summary),
             attack_surface_section(&grounding.surfaces),
             confirmed_findings_section(&grounding.confirmed_findings),
+            operator_vulns_section(&input.vulns),
             previous_model_section(previous_model),
             source_bundle_section(source_bundle),
             source_rules_section().to_string(),
@@ -154,10 +156,16 @@ fn output_contract_section() -> &'static str {
 - dfd.flows with id, description, sourceId, targetId, trustBoundaryIds
 - dfd.trustBoundaries with id, name, innerZone, outerZone, crossingFlowIds
 - threats with id, targetElementIds, category, title, description, actor, surface, asset, attackVector, preconditions, impact, likelihood, status, existingMitigations, missingMitigations, recommendedMitigation, relatedCwe, affectedFiles, evidence
+  - actor is your judgment from the closed set: remote_unauth | remote_auth | adjacent_network | local_user | local_admin | supply_chain | insider
+  - impact from: low | medium | high | critical | existential
+  - likelihood from: very_rare | rare | possible | likely | almost_certain — score the residual likelihood after existing controls; evidence raises likelihood, it is not the threat
+  - status from: unmitigated | partially_mitigated | mitigated | risk_accepted
+  - do not emit displayId; display ids are assigned deterministically and persist across refines
+- assets with asset, description, sensitivity (low | medium | high | critical) for the data and capabilities an attacker would target
 - deprioritized with entryPoint or boundary, reason, and evidence when a covered surface has no material threat
 - openQuestions for uncertain architecture/security facts
 - provenance with source labels used and any source confidence notes
-- recommendedMitigations for class-level controls across related threats
+- recommendedMitigations as structured rows {mitigation, threatIds, closesClass: yes|partial, effort: S|M|L} for class-level controls across related threats
 - coverage with entryPointsConsidered, entryPointsCovered, and gapFillMethod
 - attackSurface with the structured handoff to the taint-hunting pipeline (taint-iris-next consumes this directly):
     - entryPoints: [{name (concrete function/handler symbol), trustZone, evidence (file:line or filename), description}]

@@ -13,6 +13,7 @@ pub(crate) use read_manifest_summary::*;
 pub(crate) use read_methodology::*;
 pub(crate) use read_randori_artifacts::*;
 pub(crate) use read_threat_model::*;
+pub(crate) use schema_markdown::*;
 pub(crate) use source_bundle::*;
 pub(crate) use staged::*;
 
@@ -33,5 +34,6 @@ mod read_manifest_summary;
 mod read_methodology;
 mod read_randori_artifacts;
 mod read_threat_model;
+mod schema_markdown;
 mod source_bundle;
 mod staged;

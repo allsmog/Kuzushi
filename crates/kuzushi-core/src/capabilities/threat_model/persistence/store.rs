@@ -113,6 +113,20 @@ pub(crate) fn write_stage_artifact(
     Ok(path)
 }
 
+/// Write a rendered text artifact (THREAT_MODEL.md) next to the normalized
+/// artifact, under the same workspace-containment checks.
+pub(crate) fn write_markdown_artifact(
+    root: &Path,
+    output_dir: &str,
+    file_name: &str,
+    body: &str,
+) -> Result<PathBuf> {
+    let path = checked_output_artifact_path(root, output_dir, file_name)?;
+    crate::fs_atomic::write_atomic(&path, body)
+        .with_context(|| format!("Could not write {}", path.display()))?;
+    Ok(path)
+}
+
 pub(crate) fn read_json_optional(path: &Path) -> Option<Value> {
     let read = crate::bounded_file::read_utf8_text_prefix(path, MAX_THREAT_MODEL_JSON_BYTES).ok()?;
     if read.truncated {

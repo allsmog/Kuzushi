@@ -201,7 +201,7 @@ mod tests {
         assert_eq!(outcome.likelihood_raised, 1, "3 siblings bumps one band");
         let scan = &document["threats"][0]["variantScan"];
         assert_eq!(scan["siblingCount"], json!(3));
-        assert_eq!(document["threats"][0]["likelihood"], json!("medium"));
+        assert_eq!(document["threats"][0]["likelihood"], json!("possible"));
     }
 
     #[test]

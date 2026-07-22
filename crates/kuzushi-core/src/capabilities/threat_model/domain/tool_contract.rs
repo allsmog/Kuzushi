@@ -33,6 +33,39 @@ pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
     "elevation-of-privilege",
 ];
 
+/// Closed actor vocabulary from the harness schema contract. The model
+/// chooses the value during synthesis; normalization only canonicalizes
+/// spelling and synonyms afterwards.
+pub(crate) const VALID_ACTORS: &[&str] = &[
+    "remote_unauth",
+    "remote_auth",
+    "adjacent_network",
+    "local_user",
+    "local_admin",
+    "supply_chain",
+    "insider",
+];
+
+/// Five-band likelihood ladder, least to most likely.
+pub(crate) const LIKELIHOOD_BANDS: &[&str] = &[
+    "very_rare",
+    "rare",
+    "possible",
+    "likely",
+    "almost_certain",
+];
+
+/// Mitigation status of a threat after existing controls are considered.
+pub(crate) const VALID_STATUSES: &[&str] = &[
+    "unmitigated",
+    "partially_mitigated",
+    "mitigated",
+    "risk_accepted",
+];
+
+/// Asset sensitivity tiers for the document-level assets table.
+pub(crate) const VALID_SENSITIVITIES: &[&str] = &["low", "medium", "high", "critical"];
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum BuildFlavor {
     ThreatModel,
@@ -93,6 +126,15 @@ impl ReadFlavor {
     }
 }
 
+/// One operator-supplied known-vulnerability row from `vulnsFile`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OperatorVulnRow {
+    pub(crate) id: String,
+    pub(crate) title: String,
+    pub(crate) component: String,
+    pub(crate) description: String,
+}
+
 #[derive(Debug)]
 pub(crate) struct BuildInput {
     pub(crate) target: PathBuf,
@@ -121,6 +163,7 @@ pub(crate) struct BuildInput {
     pub(crate) advisories: String,
     pub(crate) offline: bool,
     pub(crate) advisory_fixtures: Option<Value>,
+    pub(crate) vulns: Vec<OperatorVulnRow>,
 }
 
 impl BuildInput {

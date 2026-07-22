@@ -93,6 +93,7 @@ pub(crate) fn complete_threat_model_build(
     mut generated: GeneratedThreatModel,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
+    finalize_document_identity(&mut generated.document, &input.target)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
     let cost = generated_threat_model_cost(&generated)?;
@@ -124,6 +125,22 @@ pub(crate) fn complete_threat_model_build(
     )
 }
 
+/// Contract identity pass on the finished document: content-addressed
+/// stableIds, the harness (impact desc, likelihood desc) ordering over the
+/// final threat set (gap-fill and the variant scan may have added or
+/// re-scored rows after normalization), and persisted `T1..Tn` displayIds
+/// carried forward from the previously persisted model so references never
+/// renumber across refines.
+fn finalize_document_identity(document: &mut Value, target: &Path) -> Result<()> {
+    assign_stable_ids(document);
+    if let Some(threats) = document.get_mut("threats").and_then(Value::as_array_mut) {
+        sort_threats_by_risk(threats);
+    }
+    let previous = try_load_persistent_threat_model(target)?;
+    assign_display_ids(document, previous.as_ref());
+    Ok(())
+}
+
 fn take_threat_model_findings(
     input: &BuildInput,
     generated: &mut GeneratedThreatModel,
@@ -152,6 +169,7 @@ fn reject_model_only_options_for_deterministic_pipeline(
 
 fn has_runtime_only_source_option(input: &Value, ctx: &ToolExecutionContext<'_>) -> bool {
     has_nonempty_list(input, "seed")
+        || read_string(input, &["vulnsFile", "vulns_file", "vulns"]).is_some()
         || staged_pipeline_options_requested(input)
         || read_string(input, &["designDoc", "design_doc", "design"]).is_some()
         || explicit_prompt_override_requested(input, ctx)
@@ -459,6 +477,7 @@ pub(crate) fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Resul
 
 struct ThreatModelArtifacts {
     normalized_artifact: PathBuf,
+    markdown_artifact: PathBuf,
     persisted: bool,
 }
 
@@ -470,9 +489,21 @@ fn write_threat_model_outputs(
 ) -> Result<ThreatModelArtifacts> {
     let normalized_artifact =
         write_normalized_artifact(&input.target, &input.output_dir, document)?;
+    let markdown = render_schema_markdown(
+        document,
+        &input.repo_name,
+        &input.target.display().to_string(),
+    );
+    let markdown_artifact = write_markdown_artifact(
+        &input.target,
+        &input.output_dir,
+        "THREAT_MODEL.md",
+        &markdown,
+    )?;
     let persisted = persist_threat_model_document(flavor, input, document, has_concrete_content)?;
     Ok(ThreatModelArtifacts {
         normalized_artifact,
+        markdown_artifact,
         persisted,
     })
 }
@@ -517,6 +548,7 @@ fn threat_model_response(
     let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
+        &artifacts.markdown_artifact,
         &persistent_artifact,
         artifacts.persisted,
     );
@@ -586,6 +618,7 @@ fn threat_model_result_data(
         "repoName": input.repo_name,
         "artifactDir": input.output_dir,
         "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
+        "markdownArtifact": artifacts.markdown_artifact.display().to_string(),
         "threatModelPath": persistent_artifact.display().to_string(),
         "provider": flavor.provider(),
         "methodology": input.methodology,

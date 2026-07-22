@@ -10,6 +10,7 @@ mod evidence;
 mod gap_fill;
 mod pipeline;
 mod provenance;
+mod question_closer;
 mod refine;
 mod research;
 mod synthesis;

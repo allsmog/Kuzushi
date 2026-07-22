@@ -23,6 +23,17 @@ pub(crate) fn build_deterministic_threat_model(
         crate::workflow_attempts::threat_model_has_concrete_content(&document);
     let normalized_artifact =
         write_normalized_artifact(&input.target, &input.output_dir, &document)?;
+    let markdown = render_schema_markdown(
+        &document,
+        &input.repo_name,
+        &input.target.display().to_string(),
+    );
+    let markdown_artifact = write_markdown_artifact(
+        &input.target,
+        &input.output_dir,
+        "THREAT_MODEL.md",
+        &markdown,
+    )?;
     let persisted =
         persist_deterministic_document(flavor, &input, &document, has_concrete_content)?;
     Ok(deterministic_response(
@@ -30,6 +41,7 @@ pub(crate) fn build_deterministic_threat_model(
         flavor,
         document,
         normalized_artifact,
+        markdown_artifact,
         persisted,
         has_concrete_content,
     ))
@@ -122,6 +134,8 @@ fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
         AttackSurfaceKind::SessionStateBoundary => &["session-state"],
         AttackSurfaceKind::RequestTrustBoundary => &["request-trust-control"],
         AttackSurfaceKind::TenantIsolationBoundary => &["tenant-isolation-control"],
+        AttackSurfaceKind::InfraConfig => &["infra-config"],
+        AttackSurfaceKind::SupplyChain => &["supply-chain"],
     }
 }
 
@@ -274,24 +288,32 @@ fn persist_deterministic_document(
     save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn deterministic_response(
     input: DeterministicBuildInput,
     flavor: BuildFlavor,
     document: Value,
     normalized_artifact: PathBuf,
+    markdown_artifact: PathBuf,
     persisted: bool,
     has_concrete_content: bool,
 ) -> Value {
     let threat_count = array_len(document.pointer("/threats"));
     let target = input.target.clone();
     let persistent_artifact = persistent_threat_model_path(&input.target);
-    let artifacts = threat_model_artifacts(&normalized_artifact, &persistent_artifact, persisted);
+    let artifacts = threat_model_artifacts(
+        &normalized_artifact,
+        &markdown_artifact,
+        &persistent_artifact,
+        persisted,
+    );
     let summary = deterministic_summary(&input.repo_name);
     let output = deterministic_output(flavor, &input.repo_name, threat_count);
     let data = deterministic_response_data(
         input,
         document,
         normalized_artifact,
+        markdown_artifact,
         persistent_artifact,
         persisted,
     );
@@ -329,6 +351,7 @@ fn deterministic_response_data(
     input: DeterministicBuildInput,
     document: Value,
     normalized_artifact: PathBuf,
+    markdown_artifact: PathBuf,
     persistent_artifact: PathBuf,
     persisted: bool,
 ) -> Value {
@@ -337,6 +360,7 @@ fn deterministic_response_data(
         "repoName": input.repo_name,
         "artifactDir": input.output_dir,
         "normalizedArtifact": normalized_artifact.display().to_string(),
+        "markdownArtifact": markdown_artifact.display().to_string(),
         "threatModelPath": persistent_artifact.display().to_string(),
         "provider": "deterministic",
         "methodology": input.methodology,

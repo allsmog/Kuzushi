@@ -64,6 +64,9 @@ fn surface_reachability_score(surface: &AttackSurface) -> i32 {
         | AttackSurfaceKind::SessionStateBoundary
         | AttackSurfaceKind::RequestTrustBoundary => 14,
         AttackSurfaceKind::BackgroundJob => 10,
+        // Config/dependency surfaces are grounding rows for the threat
+        // model, not runtime-reachable code paths for finding ranking.
+        AttackSurfaceKind::InfraConfig | AttackSurfaceKind::SupplyChain => 0,
     }
 }
 

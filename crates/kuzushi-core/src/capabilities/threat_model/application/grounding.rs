@@ -1,5 +1,5 @@
 use super::*;
-use crate::attack_surface::AttackSurface;
+use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceRisk};
 use crate::findings::{Finding, FindingListFilter, ProofConfidence};
 
 /// Deterministic evidence handed to the agentic build so the model reasons
@@ -23,10 +23,110 @@ pub(crate) fn load_prompt_grounding(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PromptGrounding> {
+    let mut surfaces = top_ranked_surfaces(&input.target, input.max_elements)?;
+    surfaces.extend(infra_surface_rows(&input.target));
     Ok(PromptGrounding {
-        surfaces: top_ranked_surfaces(&input.target, input.max_elements)?,
+        surfaces,
         confirmed_findings: confirmed_finding_rows(ctx)?,
     })
+}
+
+const MAX_INFRA_SURFACE_ROWS: usize = 24;
+const MAX_ROWS_PER_MANIFEST_DIR: usize = 8;
+const MANIFEST_DIRS: &[&str] = &["k8s", "deploy", "deployment", "manifests", "helm", "infra", "terraform"];
+const LOCKFILES: &[&str] = &[
+    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "go.sum",
+    "poetry.lock", "Pipfile.lock", "Gemfile.lock", "composer.lock", "packages.lock.json",
+];
+
+/// Deterministic infra/IAM and supply-chain grounding rows: container
+/// builds, deployment manifests, IaC, CI workflows, lockfiles, and vendored
+/// trees become candidate entry points, so the measured coverage invariant
+/// forces the model to threat-model them or park them with a reason.
+pub(crate) fn infra_surface_rows(target: &Path) -> Vec<AttackSurface> {
+    let mut rows = Vec::new();
+    scan_root_entries(target, &mut rows);
+    scan_manifest_dirs(target, &mut rows);
+    scan_ci_workflows(target, &mut rows);
+    rows.sort_by(|a, b| a.path.cmp(&b.path));
+    rows.truncate(MAX_INFRA_SURFACE_ROWS);
+    rows
+}
+
+fn scan_root_entries(target: &Path, rows: &mut Vec<AttackSurface>) {
+    for name in sorted_dir_names(target) {
+        if name.starts_with("Dockerfile") {
+            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Container build: {name}")));
+        } else if name.starts_with("docker-compose") && has_yaml_extension(&name) {
+            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Container orchestration: {name}")));
+        } else if name.ends_with(".tf") {
+            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Infrastructure as code: {name}")));
+        } else if LOCKFILES.contains(&name.as_str()) {
+            rows.push(infra_row(AttackSurfaceKind::SupplyChain, &name, format!("Dependency lockfile: {name}")));
+        } else if (name == "vendor" || name == "third_party") && target.join(&name).is_dir() {
+            rows.push(infra_row(AttackSurfaceKind::SupplyChain, &name, format!("Vendored dependencies: {name}/")));
+        }
+    }
+}
+
+fn scan_manifest_dirs(target: &Path, rows: &mut Vec<AttackSurface>) {
+    for dir in MANIFEST_DIRS {
+        let names = sorted_dir_names(&target.join(dir));
+        for name in names
+            .iter()
+            .filter(|name| has_yaml_extension(name) || name.ends_with(".tf"))
+            .take(MAX_ROWS_PER_MANIFEST_DIR)
+        {
+            let path = format!("{dir}/{name}");
+            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &path, format!("Deployment manifest: {path}")));
+        }
+    }
+}
+
+fn scan_ci_workflows(target: &Path, rows: &mut Vec<AttackSurface>) {
+    let names = sorted_dir_names(&target.join(".github/workflows"));
+    for name in names
+        .iter()
+        .filter(|name| has_yaml_extension(name))
+        .take(MAX_ROWS_PER_MANIFEST_DIR)
+    {
+        let path = format!(".github/workflows/{name}");
+        rows.push(infra_row(AttackSurfaceKind::SupplyChain, &path, format!("CI workflow: {path}")));
+    }
+}
+
+fn sorted_dir_names(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names = entries
+        .flatten()
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+fn has_yaml_extension(name: &str) -> bool {
+    name.ends_with(".yml") || name.ends_with(".yaml")
+}
+
+fn infra_row(kind: AttackSurfaceKind, path: &str, title: String) -> AttackSurface {
+    AttackSurface {
+        id: format!("infra-{path}"),
+        kind,
+        path: path.to_string(),
+        line: None,
+        language: "config".to_string(),
+        framework: None,
+        title,
+        evidence: "deterministic infra/supply-chain scan".to_string(),
+        method: None,
+        route: None,
+        boundary: None,
+        risk: AttackSurfaceRisk::default(),
+        metadata: serde_json::Value::Null,
+    }
 }
 
 fn top_ranked_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackSurface>> {
@@ -126,6 +226,31 @@ pub(crate) fn confirmed_findings_section(rows: &[ConfirmedFindingRow]) -> String
     )
 }
 
+pub(crate) fn operator_vulns_section(rows: &[OperatorVulnRow]) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+    let body = rows
+        .iter()
+        .map(operator_vuln_line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "Operator-supplied known vulnerabilities (map each to the entry point it traversed, cluster into patch-surviving threat classes, cite the ids as evidence refs — evidence raises likelihood, it is not the threat):\n{}",
+        untrusted_derived_source_block("operator-vulns", &body)
+    )
+}
+
+fn operator_vuln_line(row: &OperatorVulnRow) -> String {
+    let mut parts = vec![row.id.clone()];
+    for field in [&row.component, &row.title, &row.description] {
+        if !field.is_empty() {
+            parts.push(field.clone());
+        }
+    }
+    format!("- {}", parts.join(" · "))
+}
+
 fn finding_line(row: &ConfirmedFindingRow) -> String {
     format!(
         "- {fingerprint} · {severity} · {file}:{line} · {title}",
@@ -164,6 +289,54 @@ mod tests {
         assert!(section.contains("src/routes.py:88"));
         assert!(section.contains("GET /admin/debug"));
         assert!(section.contains("deprioritized"), "coverage rule stated");
+    }
+
+    #[test]
+    fn infra_scan_grounds_container_ci_manifest_and_supply_chain_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        std::fs::write(root.join("Dockerfile"), "FROM scratch").unwrap();
+        std::fs::write(root.join("Cargo.lock"), "# lock").unwrap();
+        std::fs::create_dir_all(root.join(".github/workflows")).unwrap();
+        std::fs::write(root.join(".github/workflows/ci.yml"), "on: push").unwrap();
+        std::fs::create_dir_all(root.join("k8s")).unwrap();
+        std::fs::write(root.join("k8s/deploy.yaml"), "kind: Deployment").unwrap();
+        std::fs::create_dir_all(root.join("vendor")).unwrap();
+
+        let rows = infra_surface_rows(root);
+        let by_path = |path: &str| {
+            rows.iter()
+                .find(|row| row.path == path)
+                .unwrap_or_else(|| panic!("missing infra row for {path}"))
+        };
+        assert_eq!(by_path("Dockerfile").kind, AttackSurfaceKind::InfraConfig);
+        assert_eq!(by_path("Cargo.lock").kind, AttackSurfaceKind::SupplyChain);
+        assert_eq!(
+            by_path(".github/workflows/ci.yml").kind,
+            AttackSurfaceKind::SupplyChain
+        );
+        assert_eq!(by_path("k8s/deploy.yaml").kind, AttackSurfaceKind::InfraConfig);
+        assert_eq!(by_path("vendor").title, "Vendored dependencies: vendor/");
+        assert!(rows.len() <= 24);
+        assert!(
+            infra_surface_rows(tempfile::tempdir().unwrap().path()).is_empty(),
+            "bare repo grounds no infra rows"
+        );
+    }
+
+    #[test]
+    fn operator_vulns_section_lists_rows_and_evidence_rule() {
+        let rows = vec![OperatorVulnRow {
+            id: "CVE-2026-1234".to_string(),
+            title: "heap overflow".to_string(),
+            component: "decoder".to_string(),
+            description: String::new(),
+        }];
+        let section = operator_vulns_section(&rows);
+        assert!(section.contains("CVE-2026-1234 · decoder · heap overflow"));
+        assert!(section.contains("operator-vulns"));
+        assert!(section.contains("evidence raises likelihood"));
+        assert_eq!(operator_vulns_section(&[]), "");
     }
 
     #[test]

@@ -49,6 +49,8 @@ fn cwe_for_kind(kind: AttackSurfaceKind) -> Vec<&'static str> {
         AttackSurfaceKind::SessionStateBoundary => vec!["CWE-384"],
         AttackSurfaceKind::RequestTrustBoundary => vec!["CWE-352"],
         AttackSurfaceKind::TenantIsolationBoundary => vec!["CWE-639"],
+        AttackSurfaceKind::InfraConfig => vec!["CWE-16"],
+        AttackSurfaceKind::SupplyChain => vec!["CWE-1357"],
     }
 }
 

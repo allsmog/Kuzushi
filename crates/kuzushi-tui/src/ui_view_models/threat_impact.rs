@@ -2,7 +2,7 @@ use kuzushi_core::Severity;
 
 pub(super) fn impact_to_severity(value: &str) -> Severity {
     match value.to_lowercase().as_str() {
-        "critical" => Severity::Critical,
+        "critical" | "existential" => Severity::Critical,
         "high" => Severity::High,
         "low" => Severity::Low,
         "info" => Severity::Info,

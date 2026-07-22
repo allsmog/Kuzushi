@@ -253,6 +253,7 @@ mod tests {
             advisories: advisories.to_string(),
             offline,
             advisory_fixtures: fixtures,
+            vulns: Vec::new(),
         }
     }
 

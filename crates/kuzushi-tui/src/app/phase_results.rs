@@ -935,6 +935,32 @@ mod tests {
         );
     }
 
+    #[test]
+    fn receipt_result_lines_surface_the_harness_markdown_artifact_label() {
+        let lines = semantic_result_lines(
+            "threat-model:build",
+            "ok",
+            "threat model built",
+            std::iter::empty(),
+            None,
+            [
+                "normalized threat model",
+                "harness-schema threat model (markdown)",
+                "persistent threat model",
+            ]
+            .into_iter(),
+        );
+
+        let artifacts_line = lines
+            .iter()
+            .find(|line| line.starts_with("artifacts:"))
+            .expect("receipt lines include an artifacts row");
+        assert!(
+            artifacts_line.contains("harness-schema threat model (markdown)"),
+            "markdown artifact label must be visible in the receipt: {artifacts_line}"
+        );
+    }
+
     fn assert_contains_detail(presentation: &PhaseResultPresentation, expected: &str) {
         assert!(
             presentation

@@ -889,6 +889,30 @@ authorization: Default::default(),
             Some("stride")
         );
         assert!(has_artifact_label(&degraded, "normalized threat model"));
+        assert!(has_artifact_label(
+            &degraded,
+            "harness-schema threat model (markdown)"
+        ));
+        let markdown_path = degraded
+            .pointer("/data/markdownArtifact")
+            .and_then(Value::as_str)
+            .expect("markdownArtifact path in result data");
+        let markdown = fs::read_to_string(markdown_path).expect("THREAT_MODEL.md written");
+        for heading in [
+            "## 1. System context",
+            "## 2. Assets",
+            "## 3. Entry points & trust boundaries",
+            "## 4. Threats",
+            "## 5. Deprioritized",
+            "## 6. Open questions",
+            "## 7. Provenance",
+            "## 8. Recommended mitigations",
+        ] {
+            assert!(markdown.contains(heading), "missing {heading}");
+        }
+        assert!(markdown.contains(
+            "| id | threat | actor | surface | asset | impact | likelihood | status | controls | evidence |"
+        ));
         assert!(
             degraded
                 .pointer("/data/document/threats")

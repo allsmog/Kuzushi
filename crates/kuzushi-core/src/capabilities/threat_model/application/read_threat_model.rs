@@ -220,6 +220,21 @@ downstream scan findings are: name the attacker-controlled entry, the asset or s
 trust boundary crossed, and the concrete files that implement the path. Do not emit generic \
 checklist threats that no file in this repository realizes.";
 
+const THREAT_MODEL_SCORING_GUIDE: &str = "Scoring guide (closed vocabularies; you choose the value, \
+normalization only fixes spelling):
+- actor: remote_unauth (no credentials, reachable entry) | remote_auth (any authenticated \
+  principal) | adjacent_network (same segment / on-path) | local_user (unprivileged local) | \
+  local_admin (privileged local/operator) | supply_chain (dependency, build, or vendor channel) | \
+  insider (trusted human abusing legitimate access).
+- impact: low (nuisance) | medium (limited data or service loss) | high (major data or service \
+  loss) | critical (full compromise of the system or its data) | existential (destroys the \
+  product's core security promise or the business).
+- likelihood: very_rare | rare | possible | likely | almost_certain. Score the residual \
+  likelihood after existing controls. Evidence raises likelihood; it is not the threat. A patched \
+  historical vuln is evidence the class recurs, not an open threat row.
+- status: unmitigated | partially_mitigated | mitigated | risk_accepted — judged against controls \
+  you can cite, not controls that should exist.";
+
 pub(crate) fn threat_model_system_prompt() -> String {
     crate::prompts::assemble_system_prompt(
         THREAT_MODEL_HEADER,
@@ -228,6 +243,7 @@ pub(crate) fn threat_model_system_prompt() -> String {
             crate::prompts::ATTACKER_METHODOLOGY,
             crate::prompts::CONFIDENCE_CALIBRATION,
             THREAT_MODEL_EVIDENCE_RULES,
+            THREAT_MODEL_SCORING_GUIDE,
             crate::prompts::OUTPUT_CONTRACT,
         ],
     )

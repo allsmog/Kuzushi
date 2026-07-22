@@ -83,6 +83,8 @@ fn kind_base_score(kind: AttackSurfaceKind) -> u16 {
         AttackSurfaceKind::HttpRoute => 50,
         AttackSurfaceKind::CliEntrypoint => 42,
         AttackSurfaceKind::BackgroundJob => 35,
+        AttackSurfaceKind::SupplyChain => 30,
+        AttackSurfaceKind::InfraConfig => 25,
     }
 }
 

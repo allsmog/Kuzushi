@@ -1,5 +1,6 @@
 use super::super::*;
 use super::gap_fill::run_gap_fill;
+use super::question_closer::{open_question_texts, run_question_closer, QuestionCloserOutcome};
 use crate::attack_surface::AttackSurface;
 use crate::workspace::changed_files_since;
 use std::time::Duration;
@@ -38,8 +39,9 @@ pub(crate) fn refine_threat_model(
     emit_refine_delta(ctx, verb, &delta);
     let attach = attach_new_evidence(&mut generated.document, &delta.new_findings);
     let gap_method = cover_changed_surfaces(runtime, ctx, verb, &input, &delta, &mut generated)?;
+    let closer = close_open_questions(runtime, ctx, verb, &input, &delta, &mut generated)?;
     record_unmatched_findings(&mut generated.document, &attach.unmatched);
-    finalize_refined_document(&input, &mut generated.document, &delta, &attach, gap_method);
+    finalize_refined_document(&input, &mut generated.document, &delta, &attach, gap_method, &closer);
     complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
 }
 
@@ -48,6 +50,9 @@ pub(crate) struct RefineDelta {
     pub(crate) changed_files: Option<Vec<String>>,
     pub(crate) new_findings: Vec<ConfirmedFindingRow>,
     pub(crate) changed_surfaces: Vec<AttackSurface>,
+    /// Citable anchors for the question closer: surfaces, confirmed
+    /// findings, and operator vuln ids known at refine time.
+    pub(crate) evidence_index: BTreeSet<String>,
 }
 
 fn collect_refine_delta(
@@ -57,6 +62,8 @@ fn collect_refine_delta(
 ) -> Result<RefineDelta> {
     let changed_files = delta_changed_files(input, document)?;
     let grounding = load_prompt_grounding(input, ctx)?;
+    let mut evidence_index = super::research::build_evidence_index(&grounding, &[]);
+    evidence_index.extend(input.vulns.iter().map(|row| row.id.clone()));
     let cited = existing_evidence_refs(document);
     let new_findings = grounding
         .confirmed_findings
@@ -68,6 +75,7 @@ fn collect_refine_delta(
         changed_files,
         new_findings,
         changed_surfaces,
+        evidence_index,
     })
 }
 
@@ -259,6 +267,44 @@ fn cover_changed_surfaces(
 /// Unmatched corroborated findings are surfaced honestly instead of being
 /// force-fitted onto an unrelated threat: each becomes an open question for
 /// the next full build or a human pass.
+/// Refine stage R2 driver: skip honestly when there is nothing to close or
+/// no budget left; otherwise one bounded structured call answers what the
+/// evidence supports.
+fn close_open_questions(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    delta: &RefineDelta,
+    generated: &mut GeneratedThreatModel,
+) -> Result<QuestionCloserOutcome> {
+    let open = open_question_texts(&generated.document);
+    if open.is_empty() {
+        return Ok(QuestionCloserOutcome::skipped("none-needed", 0));
+    }
+    if input
+        .budget_usd
+        .is_some_and(|budget| generated.cost_usd >= budget)
+    {
+        return Ok(QuestionCloserOutcome::skipped("budget-exhausted", open.len()));
+    }
+    let outcome = run_question_closer(
+        runtime,
+        ctx,
+        verb,
+        input,
+        &delta.evidence_index,
+        &mut generated.document,
+    )?;
+    generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
+        [generated.cost_usd, outcome.cost_usd],
+        "refine question-closer cost",
+    )?
+    .usd();
+    generated.cost_usd_exact &= outcome.cost_usd_exact;
+    Ok(outcome)
+}
+
 fn record_unmatched_findings(document: &mut Value, unmatched: &[ConfirmedFindingRow]) {
     if unmatched.is_empty() {
         return;
@@ -288,6 +334,7 @@ fn finalize_refined_document(
     delta: &RefineDelta,
     attach: &EvidenceAttachment,
     gap_method: &str,
+    closer: &QuestionCloserOutcome,
 ) {
     assign_stable_ids(document);
     stamp_provenance(document, &input.target, "staged");
@@ -303,6 +350,9 @@ fn finalize_refined_document(
                 "unmatchedFindings": attach.unmatched.len(),
                 "changedSurfaces": delta.changed_surfaces.len(),
                 "gapFillMethod": gap_method,
+                "questionsClosed": closer.questions_closed,
+                "questionsOpen": closer.questions_open,
+                "questionCloserMethod": closer.method,
             }),
         );
     }
@@ -361,7 +411,7 @@ mod tests {
         assert_eq!(attach.likelihood_raised, 1, "2→3 evidence rows crosses the bump threshold");
         assert!(attach.unmatched.is_empty());
         let threat = &document["threats"][0];
-        assert_eq!(threat["likelihood"], json!("high"));
+        assert_eq!(threat["likelihood"], json!("likely"));
         assert_eq!(threat["evidence"][2]["ref"], json!("fp3_new"));
         assert_eq!(threat["evidence"][2]["addedBy"], json!("refine"));
     }

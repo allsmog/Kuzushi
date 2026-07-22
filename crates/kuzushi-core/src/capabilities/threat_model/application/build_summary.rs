@@ -79,14 +79,22 @@ fn threat_model_terminal_label(
 
 pub(super) fn threat_model_artifacts(
     normalized_artifact: &Path,
+    markdown_artifact: &Path,
     persistent_artifact: &Path,
     persisted: bool,
 ) -> Vec<Value> {
-    let mut artifacts = vec![json!({
-        "label": "normalized threat model",
-        "path": normalized_artifact.display().to_string(),
-        "kind": "json",
-    })];
+    let mut artifacts = vec![
+        json!({
+            "label": "normalized threat model",
+            "path": normalized_artifact.display().to_string(),
+            "kind": "json",
+        }),
+        json!({
+            "label": "harness-schema threat model (markdown)",
+            "path": markdown_artifact.display().to_string(),
+            "kind": "markdown",
+        }),
+    ];
     if persisted {
         artifacts.push(json!({
             "label": "persistent threat model",

@@ -1,6 +1,6 @@
 use super::super::*;
 use super::advisories::advisories_section;
-use super::research::{vuln_commits_section, ResearchDossier};
+use super::research::{project_docs_section, vuln_commits_section, ResearchDossier};
 
 /// Stage S prompt: the grounded single-call prompt plus the mined vuln
 /// history and the synthesis contract (reference stages 2+3 — map vulns to
@@ -20,6 +20,7 @@ pub(crate) fn staged_synthesis_prompt(
     )?;
     Ok([
         base,
+        project_docs_section(&dossier.docs),
         vuln_commits_section(&dossier.vuln_commits),
         advisories_section(&dossier.advisories),
         SYNTHESIS_CONTRACT.to_string(),

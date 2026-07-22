@@ -42,8 +42,111 @@ pub(crate) fn parse_build_input(
             .get("advisoryFixtures")
             .or_else(|| input.get("advisory_fixtures"))
             .cloned(),
+        vulns: read_operator_vulns(input, &target)?,
         target,
     })
+}
+
+const MAX_VULNS_FILE_BYTES: usize = 512 * 1024;
+
+/// Operator-supplied known-vulnerability intake (`vulnsFile`): newline CVE-id
+/// list, CSV (`id,title,component,description`), or a JSON array of ids /
+/// objects. Read at this adapter boundary so the pipelines receive parsed
+/// rows, never a path.
+fn read_operator_vulns(input: &Value, target: &Path) -> Result<Vec<OperatorVulnRow>> {
+    let Some(path) = read_string(input, &["vulnsFile", "vulns_file", "vulns"]) else {
+        return Ok(Vec::new());
+    };
+    let resolved = if Path::new(&path).is_absolute() {
+        PathBuf::from(&path)
+    } else {
+        target.join(&path)
+    };
+    let text = crate::bounded_file::read_utf8_text(&resolved, MAX_VULNS_FILE_BYTES)
+        .with_context(|| format!("threat-model:build vulnsFile {path} could not be read"))?;
+    let rows = parse_vulns_text(&text)?;
+    anyhow::ensure!(
+        !rows.is_empty(),
+        "threat-model:build vulnsFile {path} contained no vulnerability rows"
+    );
+    Ok(rows)
+}
+
+fn parse_vulns_text(text: &str) -> Result<Vec<OperatorVulnRow>> {
+    if text.trim_start().starts_with('[') {
+        return parse_vulns_json(text);
+    }
+    let lines = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    if lines.iter().any(|line| line.contains(',')) {
+        return Ok(parse_vulns_csv(&lines));
+    }
+    Ok(lines
+        .iter()
+        .map(|id| OperatorVulnRow {
+            id: id.to_string(),
+            ..Default::default()
+        })
+        .collect())
+}
+
+fn parse_vulns_json(text: &str) -> Result<Vec<OperatorVulnRow>> {
+    let rows: Vec<Value> = serde_json::from_str(text)
+        .context("threat-model:build vulnsFile JSON must be an array")?;
+    rows.iter()
+        .map(|row| match row {
+            Value::String(id) => Ok(OperatorVulnRow {
+                id: id.clone(),
+                ..Default::default()
+            }),
+            Value::Object(fields) => json_vuln_row(fields),
+            other => anyhow::bail!(
+                "threat-model:build vulnsFile JSON rows must be strings or objects, got {other}"
+            ),
+        })
+        .collect()
+}
+
+fn json_vuln_row(fields: &Map<String, Value>) -> Result<OperatorVulnRow> {
+    let get = |keys: &[&str]| -> String {
+        keys.iter()
+            .find_map(|key| fields.get(*key).and_then(Value::as_str))
+            .unwrap_or("")
+            .to_string()
+    };
+    let id = get(&["id", "cve", "advisory"]);
+    anyhow::ensure!(
+        !id.is_empty(),
+        "threat-model:build vulnsFile JSON object rows require an id"
+    );
+    Ok(OperatorVulnRow {
+        id,
+        title: get(&["title", "summary"]),
+        component: get(&["component", "package", "module"]),
+        description: get(&["description", "details"]),
+    })
+}
+
+/// Simple comma CSV: `id,title,component,description`; the description keeps
+/// embedded commas. A header row whose first field is `id` is skipped.
+fn parse_vulns_csv(lines: &[&str]) -> Vec<OperatorVulnRow> {
+    lines
+        .iter()
+        .filter(|line| line.splitn(2, ',').next().map(str::trim) != Some("id"))
+        .map(|line| {
+            let mut fields = line.splitn(4, ',').map(str::trim);
+            OperatorVulnRow {
+                id: fields.next().unwrap_or("").to_string(),
+                title: fields.next().unwrap_or("").to_string(),
+                component: fields.next().unwrap_or("").to_string(),
+                description: fields.next().unwrap_or("").to_string(),
+            }
+        })
+        .filter(|row| !row.id.is_empty())
+        .collect()
 }
 
 fn read_pipeline(input: &Value) -> Result<String> {
@@ -253,4 +356,48 @@ pub(crate) fn read_string_list(input: &Value, keys: &[&str]) -> Vec<String> {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod vulns_file_tests {
+    use super::*;
+
+    #[test]
+    fn newline_cve_list_parses_to_id_only_rows() {
+        let rows = parse_vulns_text("# known vulns\nCVE-2026-1234\n\nCVE-2025-9\n").unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "CVE-2026-1234");
+        assert!(rows[0].title.is_empty());
+    }
+
+    #[test]
+    fn csv_rows_parse_and_header_is_skipped() {
+        let text = "id,title,component,description\n\
+                    CVE-2026-1,heap overflow,decoder,write past end, with commas\n";
+        let rows = parse_vulns_text(text).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "CVE-2026-1");
+        assert_eq!(rows[0].title, "heap overflow");
+        assert_eq!(rows[0].component, "decoder");
+        assert_eq!(rows[0].description, "write past end, with commas");
+    }
+
+    #[test]
+    fn json_array_accepts_strings_and_objects() {
+        let text = r#"[
+            "CVE-2026-2",
+            {"id": "GHSA-x", "summary": "ssrf", "package": "reqlib", "description": "long form"}
+        ]"#;
+        let rows = parse_vulns_text(text).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "CVE-2026-2");
+        assert_eq!(rows[1].id, "GHSA-x");
+        assert_eq!(rows[1].title, "ssrf");
+        assert_eq!(rows[1].component, "reqlib");
+    }
+
+    #[test]
+    fn json_object_row_without_id_is_rejected() {
+        assert!(parse_vulns_text(r#"[{"summary": "no id"}]"#).is_err());
+    }
 }

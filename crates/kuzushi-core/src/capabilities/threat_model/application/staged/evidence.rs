@@ -118,15 +118,73 @@ pub(crate) fn stable_threat_id(key: &str) -> String {
 
 /// "Evidence raises likelihood; it is not the threat": ≥3 corroborated
 /// evidence rows bump one band, ≥3 variant siblings bump one more, capped at
-/// high. Vocabulary outside the closed band set passes through unchanged —
-/// no fabricated confidence.
+/// almost_certain on the five-band ladder. Legacy three-band values are
+/// canonicalized first (low->rare, medium->possible, high->likely).
+/// Vocabulary outside the closed band set passes through unchanged — no
+/// fabricated confidence.
 pub(crate) fn adjusted_likelihood(base: &str, evidence_rows: usize, sibling_count: usize) -> String {
-    const BANDS: [&str; 3] = ["low", "medium", "high"];
-    let Some(position) = BANDS.iter().position(|band| *band == base.to_lowercase()) else {
+    const BANDS: [&str; 5] = ["very_rare", "rare", "possible", "likely", "almost_certain"];
+    let Some(canonical) = crate::capabilities::threat_model::normalize_likelihood(base) else {
         return base.to_string();
     };
+    let position = BANDS
+        .iter()
+        .position(|band| *band == canonical)
+        .expect("normalize_likelihood only returns ladder bands");
     let bumps = usize::from(evidence_rows >= 3) + usize::from(sibling_count >= 3);
     BANDS[(position + bumps).min(BANDS.len() - 1)].to_string()
+}
+
+/// Persisted display ids (`T1..Tn`) keyed by `stableId`: assigned once on
+/// first appearance in document order, then carried forward verbatim across
+/// refines — never renumbered, so cross-session references stay valid.
+pub(crate) fn assign_display_ids(document: &mut Value, previous: Option<&Value>) {
+    let mut by_stable_id = std::collections::BTreeMap::new();
+    let mut next_index = 1usize;
+    for source in [previous, Some(&*document)].into_iter().flatten() {
+        collect_display_ids(source, &mut by_stable_id, &mut next_index);
+    }
+    let Some(threats) = document.get_mut("threats").and_then(Value::as_array_mut) else {
+        return;
+    };
+    for threat in threats {
+        let Some(stable_id) = threat.get("stableId").and_then(Value::as_str) else {
+            continue;
+        };
+        let display_id = by_stable_id
+            .entry(stable_id.to_string())
+            .or_insert_with(|| {
+                let assigned = format!("T{next_index}");
+                next_index += 1;
+                assigned
+            })
+            .clone();
+        threat["displayId"] = json!(display_id);
+    }
+}
+
+fn collect_display_ids(
+    document: &Value,
+    by_stable_id: &mut std::collections::BTreeMap<String, String>,
+    next_index: &mut usize,
+) {
+    let Some(threats) = document.get("threats").and_then(Value::as_array) else {
+        return;
+    };
+    for threat in threats {
+        let (Some(stable_id), Some(display_id)) = (
+            threat.get("stableId").and_then(Value::as_str),
+            threat.get("displayId").and_then(Value::as_str),
+        ) else {
+            continue;
+        };
+        by_stable_id
+            .entry(stable_id.to_string())
+            .or_insert_with(|| display_id.to_string());
+        if let Some(index) = display_id.strip_prefix('T').and_then(|n| n.parse::<usize>().ok()) {
+            *next_index = (*next_index).max(index + 1);
+        }
+    }
 }
 
 /// Apply the likelihood rule over every threat using its (already validated)
@@ -195,11 +253,44 @@ mod tests {
     }
 
     #[test]
-    fn likelihood_bumps_one_band_at_three_evidence_rows_and_caps_at_high() {
-        assert_eq!(adjusted_likelihood("low", 2, 0), "low");
-        assert_eq!(adjusted_likelihood("low", 3, 0), "medium");
-        assert_eq!(adjusted_likelihood("medium", 3, 3), "high");
-        assert_eq!(adjusted_likelihood("high", 9, 9), "high");
+    fn likelihood_bumps_one_band_at_three_evidence_rows_and_caps_at_almost_certain() {
+        assert_eq!(adjusted_likelihood("very_rare", 2, 0), "very_rare");
+        assert_eq!(adjusted_likelihood("rare", 3, 0), "possible");
+        assert_eq!(adjusted_likelihood("possible", 3, 3), "almost_certain");
+        assert_eq!(adjusted_likelihood("likely", 9, 9), "almost_certain");
         assert_eq!(adjusted_likelihood("almost_certain", 9, 9), "almost_certain");
+    }
+
+    #[test]
+    fn legacy_three_band_likelihood_canonicalizes_onto_the_ladder() {
+        assert_eq!(adjusted_likelihood("low", 0, 0), "rare");
+        assert_eq!(adjusted_likelihood("medium", 0, 0), "possible");
+        assert_eq!(adjusted_likelihood("high", 0, 0), "likely");
+        assert_eq!(adjusted_likelihood("out-of-vocabulary", 9, 9), "out-of-vocabulary");
+    }
+
+    #[test]
+    fn display_ids_assign_in_document_order_and_survive_refines() {
+        let mut first = json!({
+            "threats": [
+                {"stableId": "tm-aaaaaaaaaaaa", "title": "A"},
+                {"stableId": "tm-bbbbbbbbbbbb", "title": "B"}
+            ]
+        });
+        assign_display_ids(&mut first, None);
+        assert_eq!(first["threats"][0]["displayId"], "T1");
+        assert_eq!(first["threats"][1]["displayId"], "T2");
+
+        // Refine drops A, keeps B, adds C: B keeps T2, C continues at T3 —
+        // T1 is never reused.
+        let mut refined = json!({
+            "threats": [
+                {"stableId": "tm-cccccccccccc", "title": "C"},
+                {"stableId": "tm-bbbbbbbbbbbb", "title": "B"}
+            ]
+        });
+        assign_display_ids(&mut refined, Some(&first));
+        assert_eq!(refined["threats"][0]["displayId"], "T3");
+        assert_eq!(refined["threats"][1]["displayId"], "T2");
     }
 }

@@ -119,12 +119,18 @@ fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
 
 fn story_from_threat(threat: &serde_json::Value) -> Option<ThreatStoryRow> {
     Some(threat_story_row(
-        string_field(threat, "id")?,
+        threat_listing_id(threat)?,
         threat_severity(threat),
         string_field(threat, "title").unwrap_or_else(|| "untitled".to_string()),
         string_field(threat, "attackVector").unwrap_or_default(),
         first_affected_file_location(threat),
     ))
+}
+
+/// Harness display ids (T1..Tn) are stable across refines; prefer them over
+/// the model-emitted id whenever the document carries one.
+fn threat_listing_id(threat: &serde_json::Value) -> Option<String> {
+    string_field(threat, "displayId").or_else(|| string_field(threat, "id"))
 }
 
 fn threat_severity(threat: &serde_json::Value) -> Severity {
@@ -265,6 +271,37 @@ mod tests {
         assert_eq!(model.header, "ATTACKER STORIES · 9");
         assert_eq!(model.rows.len(), 8);
         assert_eq!(model.rows[7].cells[0], "T-008");
+    }
+
+    #[test]
+    fn threat_story_rows_prefer_harness_display_ids_and_read_new_contract_docs() {
+        let doc = json!({
+            "assets": [{"asset": "backup catalog", "sensitivity": "critical"}],
+            "recommendedMitigations": [
+                {"mitigation": "pin CI actions", "threatIds": ["tm-abc"], "closesClass": "yes", "effort": "S"}
+            ],
+            "threats": [
+                {"id": "model-emitted-1", "displayId": "T7", "stableId": "tm-abc",
+                 "title": "wipeout", "impact": "existential"},
+                {"id": "model-emitted-2", "title": "no display id yet", "impact": "low"}
+            ]
+        });
+
+        let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+
+        assert_eq!(
+            model.rows[0].cells[0], "T7",
+            "displayId wins over the model id"
+        );
+        assert_eq!(
+            model.rows[0].tone,
+            ThreatStoryTone::Critical,
+            "existential renders critical"
+        );
+        assert_eq!(
+            model.rows[1].cells[0], "model-emitted-2",
+            "id fallback when displayId absent"
+        );
     }
 
     #[test]

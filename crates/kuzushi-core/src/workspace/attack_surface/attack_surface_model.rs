@@ -38,6 +38,8 @@ pub enum AttackSurfaceKind {
     TenantIsolationBoundary,
     DbQueryBoundary,
     CommandExecutionBoundary,
+    InfraConfig,
+    SupplyChain,
 }
 
 impl AttackSurfaceKind {
@@ -56,6 +58,8 @@ impl AttackSurfaceKind {
             Self::TenantIsolationBoundary => "tenant_isolation_boundary",
             Self::DbQueryBoundary => "db_query_boundary",
             Self::CommandExecutionBoundary => "command_execution_boundary",
+            Self::InfraConfig => "infra_config",
+            Self::SupplyChain => "supply_chain",
         }
     }
 }
