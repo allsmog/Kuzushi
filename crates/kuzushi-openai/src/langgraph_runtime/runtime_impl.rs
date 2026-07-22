@@ -41,6 +41,7 @@ impl AgentRuntime for LangGraphRuntime {
             &self.command,
             bridge_request,
             self.cancellation.as_ref(),
+            self.retry,
         )?;
         observed_agent_response_from_bridge(response).try_map(AgentQueryResponse::validate_cost)
     }
@@ -215,20 +216,21 @@ fn run_bridge_with_transport_retries(
     command: &[String],
     request: BridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
+    retry: super::runtime_config::BridgeRetryPolicy,
 ) -> Result<BridgeResponse> {
-    const ATTEMPTS: usize = 3;
+    let attempts = retry.attempts();
     let mut last_error: Option<anyhow::Error> = None;
-    for attempt in 1..=ATTEMPTS {
+    for attempt in 1..=attempts {
         ensure_not_cancelled(cancellation)?;
         match bridge_attempt_outcome(
             run_bridge(command, &request, cancellation),
-            attempt == ATTEMPTS,
+            attempt == attempts,
         )? {
             BridgeAttempt::Success(response) => return Ok(response),
             BridgeAttempt::Retry(error) => last_error = Some(error),
         }
         ensure_not_cancelled(cancellation)?;
-        thread::sleep(Duration::from_millis(retry_delay_ms(attempt)));
+        thread::sleep(Duration::from_millis(retry.delay_ms(attempt)));
     }
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LangGraph bridge failed")))
 }
@@ -292,14 +294,6 @@ fn bridge_transport_error(error: anyhow::Error, final_attempt: bool) -> Result<B
         "{}",
         public_bridge_error(&message)
     )))
-}
-
-pub(super) fn retry_delay_ms(attempt: usize) -> u64 {
-    match attempt {
-        0 | 1 => 250,
-        2 => 500,
-        _ => 1_000,
-    }
 }
 
 pub(super) fn is_transient_bridge_error(message: &str) -> bool {

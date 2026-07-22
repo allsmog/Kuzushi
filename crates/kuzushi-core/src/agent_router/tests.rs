@@ -117,7 +117,7 @@ mod tests {
 
         fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
             *self.last_triage_model.lock().unwrap() = Some(request.model.clone());
-            Ok(TriageOutcome {
+            Ok(TriageOutcome { first_link: None, refute_reason: None,
                 verdict: crate::findings::TriageVerdict::NeedsReview,
                 confidence: 0.0,
                 rationale: "test".to_string(),

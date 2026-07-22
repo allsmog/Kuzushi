@@ -52,6 +52,9 @@ fn prepare_triage_run<'a>(
 
 struct TriageExecution<'a> {
     runtime: &'a dyn AgentRuntime,
+    /// Router-wrapped runtime for the deep (code-reading) classify path;
+    /// built only when the run resolved `deep: true`.
+    routed: Option<crate::agent_router::RoutedRuntime<'a>>,
     config: TriageExecutionConfig,
 }
 
@@ -62,8 +65,18 @@ fn resolve_triage_execution<'a>(
 ) -> Result<TriageExecution<'a>> {
     let runtime = require_triage_runtime(runtime)?;
     let stage2_model = resolve_triage_model(ctx, runtime, &run.input)?;
+    let routed = if run.input.deep {
+        Some(routed_runtime_for_tool_context(
+            runtime,
+            ctx,
+            Some(run.workspace.root()),
+        )?)
+    } else {
+        None
+    };
     Ok(TriageExecution {
         runtime,
+        routed,
         config: TriageExecutionConfig::new(run.workspace.root().to_path_buf(), stage2_model),
     })
 }
@@ -94,13 +107,18 @@ fn run_triage_stage2_with_scope(
     kept: Vec<Finding>,
 ) -> Result<TriageRunStats> {
     let _llm_scope = begin_triage_llm_scope(ctx, evidence_phase);
-    let stats = run_triage_stage2(
-        run.store,
-        execution.runtime,
-        &run.input,
-        &execution.config,
-        kept,
-    )?;
+    let stats = match &execution.routed {
+        Some(routed) => {
+            run_triage_stage2_deep(run.store, routed, &run.input, &execution.config, kept)?
+        }
+        None => run_triage_stage2(
+            run.store,
+            execution.runtime,
+            &run.input,
+            &execution.config,
+            kept,
+        )?,
+    };
     drop(_llm_scope);
     Ok(stats)
 }

@@ -63,6 +63,15 @@ fn findings_chains_options() -> Vec<OptionSpec> {
         )
         .state_write()
         .advanced(),
+        opt(
+            "persistFindings",
+            OptionType::Bool,
+            "Persist each chain candidate as a triageable finding (tool \
+             `chains`, rule `chains/candidate`) so a follow-up triage:run \
+             can verdict the chain itself. Re-folds are idempotent.",
+        )
+        .aliases(&["persist_findings"])
+        .default(json!(false)),
     ]
 }
 

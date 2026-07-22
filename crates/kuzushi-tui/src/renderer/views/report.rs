@@ -117,6 +117,7 @@ fn format_description(format: kuzushi_core::WorkspaceExportFormat) -> &'static s
         kuzushi_core::WorkspaceExportFormat::Jsonl => "streaming records",
         kuzushi_core::WorkspaceExportFormat::Json => "structured document",
         kuzushi_core::WorkspaceExportFormat::Csv => "flat spreadsheet",
+        kuzushi_core::WorkspaceExportFormat::VulnFindings => "external triage schema",
     }
 }
 

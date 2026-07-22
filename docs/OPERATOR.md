@@ -358,8 +358,15 @@ extraction `entry-points:extract`.
 
 **Findings lifecycle** — `triage:run` (prefilter → structured dedupe —
 same tool+rule within 15 lines inherits the representative verdict with
-a duplicate-of rationale — → per-cluster LLM verdicts, weighing the
-persisted threat-model digest when one exists), `verify:finding`,
+a duplicate-of rationale; attack-chain findings are exempt and never
+cluster — → per-cluster LLM verdicts, weighing the persisted
+threat-model digest when one exists; `scope=all` triages every
+untriaged finding across all runs and tools in one pass and defaults
+the strategy to the code-reading deep auditor), `triage:chain-hunt`
+(model-backed attack-chain composition over confirmed findings — two or
+more findings where one enables or escalates another, validated against
+real fingerprints and persisted as open `chains/model` findings for the
+next triage pass), `verify:finding`,
 `verify:exploit`, `patch:finding` (then `patch:reverify`),
 `trace:expand` (bounded read-only agent that deepens a finding's
 data-flow path and appends the recovered hops to the static-evidence

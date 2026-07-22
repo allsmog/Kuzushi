@@ -168,7 +168,7 @@ pub(crate) enum Command {
     },
     /// Export persisted workspace findings.
     Export {
-        /// Export format: json, jsonl, sarif, csv, or markdown-bundle.
+        /// Export format: json, jsonl, sarif, csv, markdown-bundle, or vuln-findings.
         #[arg(long)]
         format: Option<String>,
         /// Export findings by review-decision completeness: all, open, or complete.

@@ -30,6 +30,14 @@ struct CompactTriageFinding {
     message: String,
     tool: String,
     static_proof_state: Option<String>,
+    /// Producer-claimed attacker preconditions — cross-check the claimed
+    /// severity against these; the write-time ceiling already capped it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    preconditions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    impact: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exploit_scenario: Option<String>,
     evidence: Vec<CompactFindingEvidence>,
 }
 
@@ -46,6 +54,15 @@ impl CompactTriageFinding {
             static_proof_state: finding
                 .static_proof_state
                 .map(|state| state.as_str().to_string()),
+            preconditions: finding.preconditions.clone(),
+            impact: finding
+                .impact
+                .as_deref()
+                .map(|impact| cap_chars(impact, TRIAGE_EVIDENCE_TEXT_LIMIT)),
+            exploit_scenario: finding
+                .exploit_scenario
+                .as_deref()
+                .map(|scenario| cap_chars(scenario, TRIAGE_EVIDENCE_TEXT_LIMIT)),
             evidence: finding
                 .evidence
                 .iter()

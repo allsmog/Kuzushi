@@ -703,6 +703,8 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
         .record_auto_triage(
             finding_id,
             &TriageOutcome {
+                first_link: None,
+                refute_reason: None,
                 verdict: TriageVerdict::TruePositive,
                 confidence: 0.88,
                 rationale: "source and sink are linked".to_string(),

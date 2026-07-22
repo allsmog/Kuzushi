@@ -250,6 +250,7 @@ fn export_format_label(format: WorkspaceExportFormat) -> &'static str {
         WorkspaceExportFormat::Sarif => "sarif",
         WorkspaceExportFormat::Csv => "csv",
         WorkspaceExportFormat::MarkdownBundle => "markdown-bundle",
+        WorkspaceExportFormat::VulnFindings => "vuln-findings",
     }
 }
 

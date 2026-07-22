@@ -93,6 +93,8 @@ fn findings_model_projects_counts_rows_and_selection() {
         "SQL injection\nEvidence: query reaches db.query\nCWE: CWE-89",
     );
     high.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
@@ -273,6 +275,8 @@ fn findings_model_applies_active_filter_to_visible_rows() {
         "confirmed finding",
     );
     confirmed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.86,
         rationale: "reviewed".to_string(),
@@ -333,6 +337,8 @@ fn findings_model_counts_reviewed_by_durable_identity() {
     );
     reviewed.identity_id = Some(identity_id.clone());
     reviewed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "reviewed".to_string(),
@@ -380,6 +386,8 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
     reviewed.id = Some(1);
     reviewed.identity_id = Some(identity_id.clone());
     reviewed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "operator confirmed this identity".to_string(),
@@ -943,6 +951,8 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
     )
     .with_static_proof_state(StaticProofState::SignalOnly);
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),

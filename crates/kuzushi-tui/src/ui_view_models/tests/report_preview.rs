@@ -13,6 +13,8 @@ fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
 
 fn confirmed(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.88,
         rationale: "reviewed".to_string(),
@@ -24,6 +26,8 @@ fn confirmed(mut finding: Finding) -> Finding {
 
 fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence,
         rationale: "human reviewed".to_string(),

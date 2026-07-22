@@ -4,7 +4,7 @@ mod tests {
     use crate::FindingEvidence;
 
     fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
-        Finding {
+        Finding { impact: None, category: None, exploit_scenario: None, preconditions: Vec::new(),
             id: None,
             scan_id: None,
             identity_id: None,

@@ -576,12 +576,13 @@ impl Default for ReportRouteState {
 }
 
 impl ReportRouteState {
-    pub(crate) const FORMATS: [kuzushi_core::WorkspaceExportFormat; 5] = [
+    pub(crate) const FORMATS: [kuzushi_core::WorkspaceExportFormat; 6] = [
         kuzushi_core::WorkspaceExportFormat::Sarif,
         kuzushi_core::WorkspaceExportFormat::MarkdownBundle,
         kuzushi_core::WorkspaceExportFormat::Jsonl,
         kuzushi_core::WorkspaceExportFormat::Json,
         kuzushi_core::WorkspaceExportFormat::Csv,
+        kuzushi_core::WorkspaceExportFormat::VulnFindings,
     ];
 
     pub(crate) fn format(&self) -> kuzushi_core::WorkspaceExportFormat {
@@ -677,6 +678,7 @@ fn default_report_path(format: kuzushi_core::WorkspaceExportFormat) -> &'static 
         kuzushi_core::WorkspaceExportFormat::Jsonl => "findings.jsonl",
         kuzushi_core::WorkspaceExportFormat::Json => "findings.json",
         kuzushi_core::WorkspaceExportFormat::Csv => "findings.csv",
+        kuzushi_core::WorkspaceExportFormat::VulnFindings => "VULN-FINDINGS.json",
     }
 }
 
@@ -694,6 +696,7 @@ mod report_route_tests {
             (WorkspaceExportFormat::Jsonl, "findings.jsonl"),
             (WorkspaceExportFormat::Json, "findings.json"),
             (WorkspaceExportFormat::Csv, "findings.csv"),
+            (WorkspaceExportFormat::VulnFindings, "VULN-FINDINGS.json"),
         ];
 
         for (index, (format, path)) in expected.into_iter().enumerate() {

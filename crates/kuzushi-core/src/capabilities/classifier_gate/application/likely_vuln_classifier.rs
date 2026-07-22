@@ -97,6 +97,8 @@ impl<'a> LikelyVulnClassifier<'a> {
                 self.current_threshold(),
                 self.quantile.lock().unwrap().count
             ),
+            refute_reason: None,
+            first_link: None,
             cost_usd: cost.observed_usd(),
             cost_usd_exact: cost.is_complete(),
         }

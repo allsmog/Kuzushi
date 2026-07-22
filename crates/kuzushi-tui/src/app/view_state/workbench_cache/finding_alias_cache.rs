@@ -65,6 +65,8 @@ mod tests {
 
         let aliases = cache.sorted_indices(&findings, 1);
         findings[1].triage = Some(kuzushi_core::TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: kuzushi_core::TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "confirmed".to_string(),

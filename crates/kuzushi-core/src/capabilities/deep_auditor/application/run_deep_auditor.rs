@@ -232,29 +232,14 @@ fn consensus_outcome(outcomes: Vec<DeepAuditOutcome>) -> Result<DeepAuditOutcome
     let best_winning = highest_confidence_pass(&winning_passes);
     let mean_confidence = mean_consensus_confidence(&outcomes, &winning_passes, vote.is_tie);
 
-    let triage_cost = outcomes.iter().try_fold(
-        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
-        |total, outcome| {
-            total.checked_add(
-                crate::runtime::triage_cost_report(&outcome.triage)?,
-                "deep-audit consensus triage cost",
-            )
-        },
-    )?;
-    let total_cost = outcomes.iter().try_fold(
-        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
-        |total, outcome| {
-            total.checked_add(
-                deep_audit_cost_report(outcome)?,
-                "deep-audit consensus cost",
-            )
-        },
-    )?;
+    let (triage_cost, total_cost) = consensus_cost_reports(&outcomes)?;
     Ok(DeepAuditOutcome {
         triage: crate::findings::TriageOutcome {
             verdict: consensus_verdict(vote.is_tie, best_winning),
             confidence: mean_confidence,
             rationale: consensus_rationale(&vote, outcomes.len(), best_winning),
+            refute_reason: best_winning.and_then(|pass| pass.triage.refute_reason),
+            first_link: best_winning.and_then(|pass| pass.triage.first_link.clone()),
             cost_usd: triage_cost.observed_usd(),
             cost_usd_exact: triage_cost.is_complete(),
         },
@@ -264,6 +249,26 @@ fn consensus_outcome(outcomes: Vec<DeepAuditOutcome>) -> Result<DeepAuditOutcome
         steps_used: outcomes.iter().map(|o| o.steps_used).max().unwrap_or(0),
         truncated: outcomes.iter().any(|o| o.truncated),
     })
+}
+
+/// Sum (triage cost, total deep-audit cost) across every consensus pass.
+fn consensus_cost_reports(
+    outcomes: &[DeepAuditOutcome],
+) -> Result<(
+    crate::runtime::RuntimeCostReport,
+    crate::runtime::RuntimeCostReport,
+)> {
+    let zero = || crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO);
+    let triage_cost = outcomes.iter().try_fold(zero(), |total, outcome| {
+        total.checked_add(
+            crate::runtime::triage_cost_report(&outcome.triage)?,
+            "deep-audit consensus triage cost",
+        )
+    })?;
+    let total_cost = outcomes.iter().try_fold(zero(), |total, outcome| {
+        total.checked_add(deep_audit_cost_report(outcome)?, "deep-audit consensus cost")
+    })?;
+    Ok((triage_cost, total_cost))
 }
 
 fn deep_audit_cost_report(outcome: &DeepAuditOutcome) -> Result<crate::runtime::RuntimeCostReport> {
@@ -608,7 +613,7 @@ mod consensus_tests {
 
     fn outcome(verdict: TriageVerdict, conf: f32, rationale: &str) -> DeepAuditOutcome {
         DeepAuditOutcome {
-            triage: TriageOutcome {
+            triage: TriageOutcome { first_link: None, refute_reason: None,
                 verdict,
                 confidence: conf,
                 rationale: rationale.to_string(),

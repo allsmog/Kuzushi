@@ -149,6 +149,11 @@ pub enum WorkspaceExportFormat {
     Sarif,
     Csv,
     MarkdownBundle,
+    /// External orchestration schema: `{"scan_completed":…,"findings":[…]}`
+    /// with title/impact/file/line/description/exploit_scenario/
+    /// preconditions/category/severity/confidence/recommendation per row.
+    /// Explicit-only — never inferred from an output path.
+    VulnFindings,
 }
 
 impl WorkspaceExportFormat {
@@ -159,9 +164,10 @@ impl WorkspaceExportFormat {
             "sarif" => Ok(Self::Sarif),
             "csv" => Ok(Self::Csv),
             "markdown-bundle" | "markdown_bundle" | "bundle" => Ok(Self::MarkdownBundle),
+            "vuln-findings" | "vuln_findings" => Ok(Self::VulnFindings),
             other => anyhow::bail!(
                 "unsupported workspace findings export format {other:?}. \
-                 Supported formats: json, jsonl, sarif, csv, markdown-bundle"
+                 Supported formats: json, jsonl, sarif, csv, markdown-bundle, vuln-findings"
             ),
         }
     }
@@ -191,6 +197,7 @@ impl WorkspaceExportFormat {
             Self::Sarif => "sarif",
             Self::Csv => "csv",
             Self::MarkdownBundle => "markdown-bundle",
+            Self::VulnFindings => "vuln-findings",
         }
     }
 }

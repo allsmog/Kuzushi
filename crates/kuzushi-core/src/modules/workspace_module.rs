@@ -67,7 +67,7 @@ fn workspace_export_findings_options() -> Vec<OptionSpec> {
     vec![
         workspace_export_output_option(),
         opt("format", OptionType::Enum, "Export format.")
-            .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle"]),
+            .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle", "vuln-findings"]),
         opt(
             "completeness",
             OptionType::Enum,

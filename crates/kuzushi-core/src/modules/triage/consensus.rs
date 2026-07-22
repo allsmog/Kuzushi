@@ -62,6 +62,8 @@ fn majority_outcome(votes: &[TriageOutcome], verdict: TriageVerdict, total: usiz
             verdict.as_str(),
             winners[0].rationale
         ),
+        refute_reason: winners[0].refute_reason,
+        first_link: winners[0].first_link.clone(),
         cost_usd: 0.0,
         cost_usd_exact: true,
     }
@@ -79,6 +81,8 @@ fn split_outcome(votes: &[TriageOutcome], total: usize) -> TriageOutcome {
         rationale: format!(
             "no consensus across {total} votes ({breakdown}); disagreement between independent passes means the evidence is ambiguous"
         ),
+        refute_reason: None,
+        first_link: None,
         cost_usd: 0.0,
         cost_usd_exact: true,
     }
@@ -89,7 +93,7 @@ mod tests {
     use super::*;
 
     fn vote(verdict: TriageVerdict, confidence: f32, cost: f64) -> TriageOutcome {
-        TriageOutcome {
+        TriageOutcome { first_link: None, refute_reason: None,
             verdict,
             confidence,
             rationale: format!("{} rationale", verdict.as_str()),

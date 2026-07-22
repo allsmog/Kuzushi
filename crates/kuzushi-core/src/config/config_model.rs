@@ -218,6 +218,14 @@ pub struct RuntimeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
     pub worker_watchdog_timeout_ms: Option<u64>,
+    /// Total bridge attempts per model call (first try + retries) on
+    /// transient provider failures (429/5xx/transport). None = engine default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bridge_retry_attempts: Option<u32>,
+    /// Base backoff before the first retry; doubles each attempt (capped).
+    /// Raise this for per-minute provider quotas. None = engine default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bridge_retry_backoff_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic_oauth: Option<AnthropicOauthConfig>,
 }
@@ -231,6 +239,8 @@ impl Default for RuntimeConfig {
             langgraph_bridge_command: None,
             thinking_level: None,
             worker_watchdog_timeout_ms: Some(DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         }
     }

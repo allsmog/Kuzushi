@@ -27,6 +27,17 @@ pub(crate) fn build_triage_outcome(
         verdict,
         confidence: analysis.confidence,
         rationale,
+        // Refute reason only accompanies a refuting verdict; a model that
+        // emits one alongside triggerable=true is discarded as noise.
+        refute_reason: analysis
+            .refute_reason
+            .filter(|_| verdict == TriageVerdict::FalsePositive),
+        first_link: analysis
+            .first_link
+            .as_deref()
+            .map(str::trim)
+            .filter(|link| !link.is_empty())
+            .map(str::to_string),
         cost_usd: outcome.cost_usd,
         cost_usd_exact: outcome.cost_usd_exact,
     }

@@ -79,10 +79,21 @@ the evidence bar. False negatives are preferable to fabricated positives."#;
 pub const PROMPT_SPINE_OUTPUT_CONTRACT: &str = r#"Return only the enforced structured output for this task. Do not include markdown fences, prose,
 schema text, tool-call preambles, or trailing commentary."#;
 
+/// Numbered exclusion rules and severity/coverage discipline are shared
+/// verbatim with the prompt spine — one wording, one place to update.
+pub use crate::prompts::{
+    EXCLUSION_RULES as PROMPT_SPINE_EXCLUSION_RULES,
+    EXHAUSTIVENESS as PROMPT_SPINE_EXHAUSTIVENESS,
+    SEVERITY_FROM_PRECONDITIONS as PROMPT_SPINE_SEVERITY_PRECONDITIONS,
+};
+
 pub fn finding_producer_spine() -> String {
     [
         PROMPT_SPINE_ATTACKER_METHOD,
         PROMPT_SPINE_FP_TAXONOMY,
+        PROMPT_SPINE_EXCLUSION_RULES,
+        PROMPT_SPINE_SEVERITY_PRECONDITIONS,
+        PROMPT_SPINE_EXHAUSTIVENESS,
         PROMPT_SPINE_CONFIDENCE,
         PROMPT_SPINE_EMPTY_FINDINGS_OK,
         PROMPT_SPINE_OUTPUT_CONTRACT,

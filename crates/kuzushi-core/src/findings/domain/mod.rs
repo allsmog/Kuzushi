@@ -41,5 +41,5 @@ pub use review_decision::{
 };
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::{StaticProofState, StaticProofStateEvent};
-pub use triage_outcome::TriageOutcome;
+pub use triage_outcome::{RefuteReason, TriageOutcome};
 pub use triage_state::{derive_triage_state, FindingTriageState, StableLifecycleStatus};

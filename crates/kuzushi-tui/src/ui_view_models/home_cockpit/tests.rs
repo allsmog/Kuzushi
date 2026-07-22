@@ -17,6 +17,8 @@ fn finding(rule: &str, severity: kuzushi_core::Severity, line: u32) -> Finding {
 
 fn reviewed(mut finding: Finding) -> Finding {
     finding.triage = Some(kuzushi_core::TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: kuzushi_core::TriageVerdict::TruePositive,
         confidence: 0.9,
         rationale: "reviewed".to_string(),

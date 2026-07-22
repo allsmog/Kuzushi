@@ -28,6 +28,13 @@ pub struct VulnAnalysis {
     /// Evidence citations the model relied on.
     #[serde(default)]
     pub evidence: Vec<EvidenceCitation>,
+    /// `file:line` of the first caller/call-site actually read while tracing
+    /// reachability (method step 2). Absent when no caller was read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_link: Option<String>,
+    /// Closed refutation vocabulary on `triggerable=false` verdicts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refute_reason: Option<crate::findings::RefuteReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -94,7 +101,8 @@ beyond what you read.";
 const DEEP_AUDITOR_METHOD: &str = "Method, with a target budget of 3-8 tool calls:
 1. Read the function or block containing the alleged sink.
 2. Read the immediate caller(s), dispatcher, route, handler, or job entry point that controls \
-   reachability.
+   reachability. Record the file:line of the first call site you actually read as first_link — \
+   a plausible-sounding chain is not enough; the first link must be a location you inspected.
 3. Trace attacker-controlled values from entry point to sink, naming source, transformations, \
    guards, and sink.
 4. Before voting triggerable=true on a missing-local-check claim, check whether a centralized \
@@ -108,6 +116,8 @@ const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schem
   \"triggerable\": bool,
   \"rationale\": \"one or two sentences naming the guard or missing guard and citing file:line\",
   \"confidence\": 0.0..=1.0,
+  \"first_link\": \"file:line of the first call site you actually read, or null\",
+  \"refute_reason\": \"only when triggerable=false: doesnt_exist|already_handled|implausible_trigger|intentional_behavior|misread_code|duplicate|not_actionable, else null\",
   \"evidence\": [
     {\"file\": \"path/relative/to/root\", \"start_line\": int, \"end_line\": int,
      \"note\": \"short evidence note\", \"kind\": \"source|sink|guard|context\"}

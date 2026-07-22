@@ -193,31 +193,29 @@ where
     parse_bridge_output(output, label)
 }
 
-/// Hard wall-clock ceiling for one bridge invocation. A wedged Node process
-/// (MCP server hang, stdin deadlock, provider stall) previously blocked the
-/// caller forever via `wait_with_output()`; every bridge call now surfaces as
-/// a timeout error instead. Generous default: a single invocation can span a
-/// long agent step with MCP tool calls.
-const DEFAULT_BRIDGE_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_BRIDGE_STDOUT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_BRIDGE_STDERR_BYTES: usize = 1024 * 1024;
 
-fn bridge_timeout() -> Duration {
+/// Optional wall-clock ceiling for one bridge invocation. Off by default: a
+/// single invocation can legitimately run for a very long time (large-monorepo
+/// synthesis prompts, long agent steps with MCP tool calls), and the wait loop
+/// still kills a wedged child on cancellation or pipe failure. Operators who
+/// want a hard ceiling opt in with `KUZUSHI_BRIDGE_TIMEOUT_MS`.
+fn bridge_timeout() -> Option<Duration> {
     std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
         .ok()
         .and_then(|raw| raw.trim().parse::<u64>().ok())
         .filter(|ms| *ms > 0)
         .map(Duration::from_millis)
-        .unwrap_or(DEFAULT_BRIDGE_TIMEOUT)
 }
 
-/// `wait_with_output` with a deadline: drains stdout/stderr on reader threads
-/// (so a full pipe can't deadlock the child), polls for exit, and kills the
-/// process when the deadline passes.
+/// `wait_with_output` with an optional deadline: drains stdout/stderr on
+/// reader threads (so a full pipe can't deadlock the child), polls for exit
+/// and cancellation, and kills the process if a configured deadline passes.
 fn wait_with_output_deadline(
     child: Child,
     label: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<Output> {
     wait_with_output_deadline_limits(
@@ -233,7 +231,7 @@ fn wait_with_output_deadline(
 pub(super) fn wait_with_output_deadline_limits(
     mut child: Child,
     label: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     stdout_limit: usize,
     stderr_limit: usize,
@@ -330,18 +328,18 @@ fn join_pipe_reader(handle: BridgePipeReader, stream: &str) -> Result<Vec<u8>> {
 fn wait_status_deadline(
     child: &kuzushi_core::scan::RegisteredChild,
     label: &str,
-    timeout: Duration,
+    timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
     pipe_failure: &BridgePipeFailure,
 ) -> Result<ExitStatus> {
-    let deadline = Instant::now() + timeout;
+    let deadline = timeout.map(|timeout| (Instant::now() + timeout, timeout));
     loop {
         kill_cancelled_bridge(child, label, cancellation)?;
         kill_bridge_on_pipe_failure(child, pipe_failure)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
-        kill_expired_bridge(child, label, deadline, timeout)?;
+        kill_expired_bridge(child, label, deadline)?;
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -385,16 +383,17 @@ fn kill_cancelled_bridge(
 fn kill_expired_bridge(
     child: &kuzushi_core::scan::RegisteredChild,
     label: &str,
-    deadline: Instant,
-    timeout: Duration,
+    deadline: Option<(Instant, Duration)>,
 ) -> Result<()> {
+    let Some((deadline, timeout)) = deadline else {
+        return Ok(());
+    };
     if Instant::now() < deadline {
         return Ok(());
     }
     kill_child(child);
     anyhow::bail!(
-        "{label} timed out after {}s and was killed; raise KUZUSHI_BRIDGE_TIMEOUT_MS \
-         only if the call is legitimately long-running",
+        "{label} exceeded the configured KUZUSHI_BRIDGE_TIMEOUT_MS ceiling ({}s) and was killed",
         timeout.as_secs()
     );
 }

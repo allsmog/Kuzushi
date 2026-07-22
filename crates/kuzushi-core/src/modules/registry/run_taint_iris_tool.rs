@@ -205,7 +205,7 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
-        "triage:run" if triage_strategy(input, "deep") => {
+        "triage:run" if triage_strategy(input, "deep") && deep_triage_target(input) => {
             Some(run_deep_audit_tool(deep_triage_input(input), ctx, runtime))
         }
         "triage:run" if triage_strategy(input, "gate-deep") => Some(run_classifier_score_tool(
@@ -214,6 +214,11 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
             runtime,
         )),
         "triage:run" => Some(run_triage(input.clone(), ctx, runtime)),
+        "triage:chain-hunt" => Some(crate::capabilities::chain_hunt::execute_triage_chain_hunt(
+            input.clone(),
+            ctx,
+            runtime,
+        )),
         "verify:finding" if verify_empirical_mode(input) => {
             Some(run_verify_exploit(input.clone(), ctx))
         }
@@ -223,6 +228,15 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
         "patch:finding" => Some(run_patch_finding(input.clone(), ctx, runtime)),
         _ => None,
     }
+}
+
+/// The single-finding deep-audit tool needs an explicit fingerprint; a
+/// `strategy=deep` run without one falls through to `run_triage`, which
+/// classifies every selected finding through the deep auditor.
+fn deep_triage_target(input: &Value) -> bool {
+    ["findingFingerprint", "fingerprint"]
+        .iter()
+        .any(|key| input.get(*key).and_then(Value::as_str).is_some_and(|v| !v.trim().is_empty()))
 }
 
 fn triage_strategy(input: &Value, expected: &str) -> bool {

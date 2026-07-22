@@ -9,6 +9,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptLanguage {
     CorCpp,
+    Rust,
     Go,
     TypeScript,
     Python,
@@ -24,6 +25,7 @@ impl PromptLanguage {
     pub fn from_language_str(language: &str) -> Self {
         match language.trim().to_ascii_lowercase().as_str() {
             "c" | "cpp" | "c++" | "cxx" | "cc" | "kernel" => Self::CorCpp,
+            "rust" | "rs" => Self::Rust,
             "go" | "golang" => Self::Go,
             "ts" | "tsx" | "typescript" | "js" | "jsx" | "javascript" | "node" | "nodejs" => {
                 Self::TypeScript
@@ -44,6 +46,7 @@ impl PromptLanguage {
             .unwrap_or("");
         match ext.to_ascii_lowercase().as_str() {
             "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" => Self::CorCpp,
+            "rs" => Self::Rust,
             "go" => Self::Go,
             "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Self::TypeScript,
             "py" | "pyi" => Self::Python,
@@ -55,6 +58,8 @@ impl PromptLanguage {
     fn specific_catalog(self) -> &'static str {
         match self {
             Self::CorCpp => KERNEL_C_CATALOG,
+            // No dedicated validator catalog yet; hunters get RUST_HUNT_HINTS.
+            Self::Rust => "",
             Self::Go => GO_CATALOG,
             Self::TypeScript => TYPESCRIPT_CATALOG,
             Self::Python => PYTHON_CATALOG,
@@ -145,6 +150,10 @@ mod tests {
         );
         assert_eq!(
             PromptLanguage::from_language_str("rust"),
+            PromptLanguage::Rust
+        );
+        assert_eq!(
+            PromptLanguage::from_language_str("cobol"),
             PromptLanguage::Other
         );
     }

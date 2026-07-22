@@ -57,6 +57,18 @@ pub struct WorkspaceFindingExportRecord {
     pub provenance: WorkspaceFindingProvenanceSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<WorkspaceRemediationExportSummary>,
+    /// Producer-supplied fix prose (`Finding.remediation`), distinct from the
+    /// patch-lifecycle `remediation` summary above.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exploit_scenario: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub preconditions: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<String>,
     pub message: String,

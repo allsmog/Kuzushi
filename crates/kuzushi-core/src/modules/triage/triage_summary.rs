@@ -131,6 +131,11 @@ fn effective_triage_scan_id(
     store: &FindingStore,
     input: &TriageRunInput,
 ) -> Result<Option<String>> {
+    if input.scope == TriageScope::All {
+        // `None` matches every run: one bulk pass over all untriaged
+        // findings regardless of which hunt module or run produced them.
+        return Ok(None);
+    }
     match &input.scan_id {
         Some(scan_id) => Ok(Some(scan_id.clone())),
         None => store.latest_run_id(),

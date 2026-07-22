@@ -12,7 +12,7 @@ pub(crate) fn triage_module() -> BuiltinModule {
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),
-            vec![triage_run_tool()],
+            vec![triage_run_tool(), triage_chain_hunt_tool()],
         ),
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
     )
@@ -33,9 +33,34 @@ fn triage_run_tool() -> ToolDescriptor {
     ))
 }
 
+fn triage_chain_hunt_tool() -> ToolDescriptor {
+    tool_with_options(
+        "triage:chain-hunt",
+        "Compose confirmed findings into attack chains (two or more findings where one \
+         enables or escalates another) with an ordered attack path, cumulative impact, and \
+         detection-difficulty narrative; each validated chain persists as an open finding \
+         (tool `chains`, rule `chains/model`) for the next triage pass.",
+        chain_hunt_options(),
+    )
+}
+
+fn chain_hunt_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "maxChains",
+            OptionType::Int,
+            "Maximum validated chains to persist per hunt.",
+        )
+        .aliases(&["max_chains"])
+        .default(json!(8)),
+        model_option(),
+    ]
+}
+
 fn triage_run_options() -> Vec<OptionSpec> {
     let mut options = vec![
         opt("scanId", OptionType::String, "Scan run id to triage.").aliases(&["scan_id"]),
+        triage_scope_option(),
         triage_fingerprint_option(),
         triage_fingerprints_option(),
         triage_concurrency_option(),
@@ -51,6 +76,17 @@ fn triage_run_options() -> Vec<OptionSpec> {
     ];
     options.extend(deep_triage_advanced_options());
     options
+}
+
+fn triage_scope_option() -> OptionSpec {
+    opt(
+        "scope",
+        OptionType::Enum,
+        "Finding selection scope: `latest` triages the newest scan run only; `all` triages every \
+untriaged finding across all runs and tools in the store (and defaults the strategy to `deep`).",
+    )
+    .choices(&["latest", "all"])
+    .default(json!("latest"))
 }
 
 fn triage_fingerprint_option() -> OptionSpec {
@@ -134,10 +170,16 @@ fn triage_stage2_tier_option() -> OptionSpec {
 }
 
 fn triage_strategy_option() -> OptionSpec {
-    opt("strategy", OptionType::Enum, "Triage strategy.")
-        .choices(&["standard", "deep", "gate-deep"])
-        .default(json!("standard"))
-        .advanced()
+    // No declared default: absence is meaningful — an unset strategy resolves
+    // to `standard` for latest-scope runs and `deep` for scope=all bulk runs;
+    // an explicit value always wins.
+    opt(
+        "strategy",
+        OptionType::Enum,
+        "Triage strategy. Unset defaults to standard (latest scope) or deep (scope=all).",
+    )
+    .choices(&["standard", "deep", "gate-deep"])
+    .advanced()
 }
 
 fn deep_triage_options() -> OptionSpec {

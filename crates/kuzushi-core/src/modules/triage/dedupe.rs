@@ -13,8 +13,21 @@ pub(in crate::modules) struct TriageCluster {
 /// representative is triaged; members inherit its verdict with a
 /// duplicate-of rationale instead of burning independent LLM calls.
 pub(in crate::modules) fn cluster_triage_findings(findings: Vec<Finding>) -> Vec<TriageCluster> {
+    // Attack-chain exemption: a chain composes multiple component bugs, and
+    // its entry location intentionally collides with a component finding (or
+    // another chain sharing the entry). Line proximity is therefore not a
+    // duplication signal — chains never absorb and are never absorbed.
+    let (chains, ordinary): (Vec<Finding>, Vec<Finding>) =
+        findings.into_iter().partition(is_attack_chain_finding);
+    let mut result: Vec<TriageCluster> = chains
+        .into_iter()
+        .map(|finding| TriageCluster {
+            representative: finding,
+            duplicates: Vec::new(),
+        })
+        .collect();
     let mut clusters: BTreeMap<(String, String, String), Vec<Finding>> = BTreeMap::new();
-    for (finding, cluster_id) in with_cluster_ids(findings) {
+    for (finding, cluster_id) in with_cluster_ids(ordinary) {
         let key = (
             finding.tool.trim().to_ascii_lowercase(),
             finding.rule_id.trim().to_ascii_lowercase(),
@@ -22,7 +35,17 @@ pub(in crate::modules) fn cluster_triage_findings(findings: Vec<Finding>) -> Vec
         );
         clusters.entry(key).or_default().push(finding);
     }
-    clusters.into_values().map(into_triage_cluster).collect()
+    result.extend(clusters.into_values().map(into_triage_cluster));
+    result
+}
+
+pub(in crate::modules) fn is_attack_chain_finding(finding: &Finding) -> bool {
+    finding.tool.trim().eq_ignore_ascii_case("chains")
+        || finding
+            .rule_id
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("exploit-chain/")
 }
 
 fn with_cluster_ids(findings: Vec<Finding>) -> Vec<(Finding, String)> {

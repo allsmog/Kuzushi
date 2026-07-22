@@ -46,6 +46,7 @@ function anthropicModelForProvider(request, provider, modelName, options) {
     return new ChatAnthropic({
       model: modelName,
       apiKey: credentialForRequest(request, provider, "ANTHROPIC_API_KEY"),
+      ...anthropicStreamingOptions(options),
       ...options,
     });
   }
@@ -53,10 +54,19 @@ function anthropicModelForProvider(request, provider, modelName, options) {
     return new ChatAnthropic({
       model: modelName,
       createClient: (clientOptions) => vertexAnthropicClient(request, clientOptions),
+      ...anthropicStreamingOptions(options),
       ...options,
     });
   }
   return undefined;
+}
+
+// The Anthropic SDK rejects non-streaming requests whose max_tokens implies a
+// response that could outlive its 10-minute non-streaming ceiling, so large
+// output budgets must go over the streaming transport (invoke() still returns
+// one final message).
+function anthropicStreamingOptions(options) {
+  return options.maxTokens > 8192 ? { streaming: true } : {};
 }
 
 // Claude on Google Vertex AI. The credential is GCP Application Default

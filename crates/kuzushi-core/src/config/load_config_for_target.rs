@@ -10,6 +10,8 @@ pub(crate) struct PartialRuntimeConfig {
     pub(crate) langgraph_bridge_command: Option<Option<Vec<String>>>,
     pub(crate) thinking_level: Option<Option<String>>,
     pub(crate) worker_watchdog_timeout_ms: Option<Option<u64>>,
+    pub(crate) bridge_retry_attempts: Option<Option<u32>>,
+    pub(crate) bridge_retry_backoff_ms: Option<Option<u64>>,
     pub(crate) anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
 
@@ -349,6 +351,14 @@ fn forbidden_runtime_fields(runtime: Option<&PartialRuntimeConfig>) -> Vec<&'sta
             "runtime.worker_watchdog_timeout_ms",
             runtime.worker_watchdog_timeout_ms.is_some(),
         ),
+        (
+            "runtime.bridge_retry_attempts",
+            runtime.bridge_retry_attempts.is_some(),
+        ),
+        (
+            "runtime.bridge_retry_backoff_ms",
+            runtime.bridge_retry_backoff_ms.is_some(),
+        ),
         ("runtime.anthropic_oauth", runtime.anthropic_oauth.is_some()),
     ]
     .into_iter()
@@ -416,6 +426,14 @@ fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig)
     apply_patch_field(
         &mut config.worker_watchdog_timeout_ms,
         patch.worker_watchdog_timeout_ms,
+    );
+    apply_patch_field(
+        &mut config.bridge_retry_attempts,
+        patch.bridge_retry_attempts,
+    );
+    apply_patch_field(
+        &mut config.bridge_retry_backoff_ms,
+        patch.bridge_retry_backoff_ms,
     );
     apply_patch_field(&mut config.anthropic_oauth, patch.anthropic_oauth);
 }

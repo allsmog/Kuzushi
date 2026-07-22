@@ -87,6 +87,8 @@ mod tests {
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
 
@@ -108,6 +110,8 @@ mod tests {
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -150,6 +154,8 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -201,6 +207,8 @@ while :; do :; done
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let cancel = ScanCancellation::default();
@@ -258,6 +266,8 @@ while :; do :; done
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             worker_watchdog_timeout_ms: Some(100),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
@@ -307,6 +317,8 @@ while :; do sleep 1; done
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let cancel = ScanCancellation::default();
@@ -376,6 +388,8 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -427,6 +441,8 @@ printf '%s' '{"ok":true,"text":"needs review because the model did not return JS
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -490,6 +506,8 @@ fi
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -559,6 +577,8 @@ fi
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -601,6 +621,8 @@ fi
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -642,6 +664,8 @@ fi
                     .to_string(),
             ]),
             worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -685,6 +709,8 @@ fi
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -725,6 +751,8 @@ fi
                     .to_string(),
             ]),
             worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -782,6 +810,8 @@ fi
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -829,6 +859,8 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             worker_watchdog_timeout_ms: Some(
                 kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
             ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();

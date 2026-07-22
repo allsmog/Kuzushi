@@ -147,6 +147,21 @@ pub struct Finding {
     pub snoozed_until: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remediation: Option<String>,
+    /// Producer-supplied plain-language statement of attacker gain and who
+    /// is affected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    /// Producer-supplied category label (freeform; the closed class enum is
+    /// derived separately at ingest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Producer-supplied concrete exploitation walkthrough.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploit_scenario: Option<String>,
+    /// Attacker preconditions. Entries matching the closed `Precondition`
+    /// vocabulary drive the mechanical severity ceiling.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preconditions: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -184,6 +199,10 @@ impl Default for Finding {
             suppressed: false,
             snoozed_until: None,
             remediation: None,
+            impact: None,
+            category: None,
+            exploit_scenario: None,
+            preconditions: Vec::new(),
             references: Vec::new(),
             evidence: Vec::new(),
             sources: Vec::new(),

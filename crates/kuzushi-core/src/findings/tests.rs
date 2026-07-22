@@ -1069,7 +1069,7 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.95,
                     rationale: "operator confirmed source-to-sink evidence".to_string(),
@@ -1952,7 +1952,7 @@ mod tests {
 
     #[test]
     fn review_decision_projection_keeps_author_confidence_and_rationale() {
-        let triage = TriageOutcome {
+        let triage = TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::FalsePositive,
             confidence: 0.8,
             rationale: "model signal did not match reachable code".to_string(),
@@ -2428,7 +2428,7 @@ mod tests {
             "Request query data is rendered into HTML without escaping",
         )
         .with_static_proof_state(StaticProofState::SourceSinkLinked);
-        finding.triage = Some(TriageOutcome {
+        finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.91,
             rationale: "source and sink are linked".to_string(),
@@ -2627,7 +2627,7 @@ mod tests {
             "high confirmed",
         );
         confirmed.fingerprint = "zzzz1111".to_string();
-        confirmed.triage = Some(TriageOutcome {
+        confirmed.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.72,
             rationale: "source reaches sink".to_string(),
@@ -2683,7 +2683,7 @@ mod tests {
             "http",
         );
         finding.set_static_proof_state(StaticProofState::SourceSinkLinked);
-        finding.triage = Some(TriageOutcome {
+        finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "reviewed source-linked evidence".to_string(),
@@ -3407,7 +3407,7 @@ mod tests {
             .record_run_started("run-fk", Path::new("/repo"), "running")
             .unwrap();
         let stale_id: i64 = 9_999_999;
-        let outcome = TriageOutcome {
+        let outcome = TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.5,
             rationale: "synthetic".to_string(),
@@ -3448,7 +3448,7 @@ mod tests {
         store
             .record_auto_triage(
                 id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.7,
                     rationale: "ok".to_string(),

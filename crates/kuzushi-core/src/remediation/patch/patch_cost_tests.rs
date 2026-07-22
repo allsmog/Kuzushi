@@ -120,7 +120,7 @@ fn synthesize_for_test(runtime: &ScriptedPatchRuntime) -> Result<PatchSynthesis>
         crate::findings::Severity::High,
         "vulnerable",
     );
-    let triage = TriageOutcome {
+    let triage = TriageOutcome { first_link: None, refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 1.0,
         rationale: "confirmed".to_string(),

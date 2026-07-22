@@ -10,7 +10,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::findings::{Finding, Severity};
 
@@ -96,6 +96,7 @@ pub struct ChainLink {
     pub title: String,
     pub severity: String,
     pub file_path: String,
+    pub start_line: u32,
     pub role: ChainRole,
 }
 
@@ -194,6 +195,7 @@ fn chain_link(finding: &Finding, role: ChainRole) -> ChainLink {
         title: finding.title.clone(),
         severity: format!("{:?}", finding.severity).to_lowercase(),
         file_path: finding.file_path.clone(),
+        start_line: finding.start_line,
         role,
     }
 }
@@ -205,13 +207,38 @@ pub fn fold_chains(confirmed: &[Finding], max_chains: usize) -> ChainReport {
         .iter()
         .flat_map(|(surface, members)| surface_chains(surface, members))
         .collect();
-    chains.sort_by_key(|chain| std::cmp::Reverse(chain.score));
+    chains.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.entry.fingerprint.cmp(&b.entry.fingerprint))
+            .then_with(|| a.impact.fingerprint.cmp(&b.impact.fingerprint))
+    });
+    let mut chains = dedupe_mirrored_pairs(chains);
     chains.truncate(max_chains);
     ChainReport {
         confirmed_count: confirmed.len(),
         surface_count: surfaces.len(),
         chains,
     }
+}
+
+/// When two findings each classify as both entry and impact, the pair folds
+/// once per orientation; the mirrored duplicate carries no new information,
+/// so only the highest-ranked orientation survives (the sort above makes the
+/// survivor deterministic on score ties).
+fn dedupe_mirrored_pairs(chains: Vec<ChainCandidate>) -> Vec<ChainCandidate> {
+    let mut seen: BTreeSet<[String; 2]> = BTreeSet::new();
+    chains
+        .into_iter()
+        .filter(|chain| {
+            let mut pair = [
+                chain.entry.fingerprint.clone(),
+                chain.impact.fingerprint.clone(),
+            ];
+            pair.sort();
+            seen.insert(pair)
+        })
+        .collect()
 }
 
 fn group_by_surface(confirmed: &[Finding]) -> BTreeMap<String, Vec<&Finding>> {
@@ -349,8 +376,9 @@ pub fn execute_findings_chains(
     let confirmed = confirmed_findings(store)?;
     let max_chains = max_chains_from_input(input)?;
     let report = fold_chains(&confirmed, max_chains);
-    let report_json = serde_json::to_value(&report)?;
+    let mut report_json = serde_json::to_value(&report)?;
     persist_chain_artifacts(ctx, &report, &report_json)?;
+    persist_chain_findings_when_enabled(input, ctx, &report, &mut report_json)?;
     write_optional_report(input, ctx, &report_json)?;
     let output = report_summary(&report);
     Ok(crate::module_result::completed_output_result(
@@ -360,7 +388,116 @@ pub fn execute_findings_chains(
     ))
 }
 
-fn confirmed_findings(store: &crate::findings::FindingStore) -> Result<Vec<Finding>> {
+/// Opt-in: persist each chain candidate as an ordinary finding (tool
+/// `chains`, rule `chains/candidate`) so `triage:run` can triage the chain
+/// itself. The deterministic message keeps the fingerprint stable across
+/// re-folds, so an already-triaged chain is not re-billed.
+fn persist_chain_findings_when_enabled(
+    input: &Value,
+    ctx: &crate::modules::ToolExecutionContext<'_>,
+    report: &ChainReport,
+    report_json: &mut Value,
+) -> Result<()> {
+    if !chain_persist_findings_enabled(input) || report.chains.is_empty() {
+        return Ok(());
+    }
+    let workspace = ctx
+        .workspace
+        .context("findings:chains: persistFindings requires an active workspace target")?;
+    let findings: Vec<Finding> = report.chains.iter().map(chain_candidate_finding).collect();
+    let persisted = crate::findings::persist_tool_findings(
+        ctx.finding_run_id(),
+        workspace.root(),
+        &findings,
+        ctx.workspace,
+        ctx.findings_store,
+    )?;
+    if let Some(object) = report_json.as_object_mut() {
+        object.insert(
+            "persistedRunId".to_string(),
+            match persisted {
+                Some(run) => Value::String(run.run_id),
+                None => Value::Null,
+            },
+        );
+        object.insert("persistedCount".to_string(), Value::from(findings.len()));
+    }
+    Ok(())
+}
+
+fn chain_persist_findings_enabled(input: &Value) -> bool {
+    input
+        .get("persistFindings")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Map a chain candidate onto a triageable finding. Location is the entry
+/// link (where the attacker enters); the message is a deterministic ordered
+/// narrative naming every constituent fingerprint, so the chain's identity
+/// is a pure function of its members.
+pub fn chain_candidate_finding(candidate: &ChainCandidate) -> Finding {
+    Finding::new_tool(
+        "chains",
+        "chains/candidate",
+        candidate.entry.file_path.clone(),
+        candidate.entry.start_line,
+        None,
+        Severity::from_label(&candidate.impact.severity),
+        chain_finding_message(candidate),
+    )
+    .with_dedup_key(format!("chain:{}", candidate.id))
+    .with_source_signature(candidate.id.clone())
+}
+
+fn chain_finding_message(candidate: &ChainCandidate) -> String {
+    let mut lines = vec![
+        format!(
+            "Attack chain {}: {} -> {}",
+            candidate.id, candidate.entry.title, candidate.impact.title
+        ),
+        String::new(),
+        format!("Surface: {}", candidate.surface),
+        format!("Rationale: {}", candidate.rationale),
+        String::new(),
+        "Attack path:".to_string(),
+        chain_step_line(1, &candidate.entry),
+    ];
+    let mut step = 2;
+    for pivot in &candidate.pivots {
+        lines.push(chain_step_line(step, pivot));
+        step += 1;
+    }
+    lines.push(chain_step_line(step, &candidate.impact));
+    lines.push(String::new());
+    lines.push(format!(
+        "Members: {}",
+        chain_member_fingerprints(candidate).join(", ")
+    ));
+    lines.join("\n")
+}
+
+fn chain_step_line(step: usize, link: &ChainLink) -> String {
+    format!(
+        "{step}. [{role:?}] {title} at {file}:{line} [finding {fp}]",
+        role = link.role,
+        title = link.title,
+        file = link.file_path,
+        line = link.start_line,
+        fp = link.fingerprint,
+    )
+}
+
+fn chain_member_fingerprints(candidate: &ChainCandidate) -> Vec<String> {
+    let mut members = vec![candidate.entry.fingerprint.clone()];
+    members.extend(candidate.pivots.iter().map(|p| p.fingerprint.clone()));
+    members.push(candidate.impact.fingerprint.clone());
+    members
+}
+
+pub(crate) fn confirmed_findings(
+    store: &crate::findings::FindingStore,
+) -> Result<Vec<Finding>> {
     let findings = store.list_all_findings()?;
     let decisions = store.list_review_decisions_for_findings(&findings)?;
     let confirmed_ids =
@@ -395,12 +532,23 @@ fn persist_chain_artifacts(
     let Some(workspace) = ctx.workspace else {
         return Ok(());
     };
+    let pretty = format!("{}\n", serde_json::to_string_pretty(report_json)?);
     crate::workspace::write_workspace_state_file(
         workspace.root(),
         std::path::Path::new(crate::workspace::KUZUSHI_STATE_DIR)
             .join("v3/reports/chains.json"),
-        format!("{}\n", serde_json::to_string_pretty(report_json)?).as_bytes(),
+        pretty.as_bytes(),
     )?;
+    // Per-run archive: the canonical chains.json is overwritten on every
+    // fold, so repeated folds at the same SHA keep their own snapshots.
+    if let Some(run_id) = ctx.run_id() {
+        crate::workspace::write_workspace_state_file(
+            workspace.root(),
+            std::path::Path::new(crate::workspace::KUZUSHI_STATE_DIR)
+                .join(format!("v3/reports/chains/{run_id}.json")),
+            pretty.as_bytes(),
+        )?;
+    }
     crate::capabilities::save_persistent_exploit_chains(
         workspace.root(),
         &scene_chain_payload(report),
@@ -436,7 +584,7 @@ fn scene_chain_step(link: &ChainLink) -> Value {
         "role": format!("{:?}", link.role).to_lowercase(),
         "description": format!("{} · finding {}", link.title, link.fingerprint),
         "filePath": link.file_path,
-        "startLine": 0,
+        "startLine": link.start_line,
     })
 }
 
@@ -502,6 +650,49 @@ mod tests {
             "src/svc/a/notes.cpp",
         ))
         .is_empty());
+    }
+
+    #[test]
+    fn mirrored_pair_folds_to_a_single_chain() {
+        // Both findings classify as entry AND impact (peer-supplied input
+        // that is itself a write primitive), so the naive fold emits the
+        // pair in both orientations; only one may survive.
+        let a = finding(
+            "fp-a",
+            "handlePullContent peer-supplied patch file path arbitrary write",
+            Severity::High,
+            "src/svc/transfer/pull.cpp",
+        );
+        let b = finding(
+            "fp-b",
+            "Replication pull trusts peer-returned extent count: OOB vector index + write",
+            Severity::High,
+            "src/svc/transfer/extent.cpp",
+        );
+        let roles_a = chain_roles(&a);
+        let roles_b = chain_roles(&b);
+        assert!(
+            roles_a.contains(&ChainRole::Entry) && roles_a.contains(&ChainRole::Impact),
+            "fixture must be dual-role: {roles_a:?}"
+        );
+        assert!(
+            roles_b.contains(&ChainRole::Entry) && roles_b.contains(&ChainRole::Impact),
+            "fixture must be dual-role: {roles_b:?}"
+        );
+
+        let report = fold_chains(&[a, b], 16);
+        assert_eq!(
+            report.chains.len(),
+            1,
+            "mirrored orientations must dedupe: {:?}",
+            report
+                .chains
+                .iter()
+                .map(|c| (c.entry.fingerprint.clone(), c.impact.fingerprint.clone()))
+                .collect::<Vec<_>>()
+        );
+        // Deterministic survivor on tied score: lowest entry fingerprint.
+        assert_eq!(report.chains[0].entry.fingerprint, "fp-a");
     }
 
     #[test]

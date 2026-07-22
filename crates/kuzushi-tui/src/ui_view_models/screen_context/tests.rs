@@ -24,6 +24,8 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         "screen context item",
     );
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::NeedsReview,
         confidence: 0.75,
         rationale: "needs human review".to_string(),

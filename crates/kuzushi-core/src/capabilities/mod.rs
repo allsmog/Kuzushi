@@ -1,6 +1,7 @@
 pub mod agentic_sast;
 pub mod campaign;
 pub mod carlini_threat_hunt;
+pub mod chain_hunt;
 pub mod chains;
 pub mod chrome_rce;
 pub mod classifier_gate;

@@ -43,7 +43,7 @@ fn bridge_output_overflow_kills_the_registered_process_tree() {
     let error = wait_with_output_deadline_limits(
         child,
         "bridge fixture",
-        Duration::from_secs(5),
+        Some(Duration::from_secs(5)),
         None,
         16,
         16,
@@ -53,6 +53,51 @@ fn bridge_output_overflow_kills_the_registered_process_tree() {
 
     assert!(started.elapsed() < Duration::from_secs(2));
     assert!(error.contains("capture limit"), "{error}");
+}
+
+#[test]
+fn bridge_without_configured_ceiling_waits_for_natural_exit() {
+    let mut command = Command::new("node");
+    command
+        .args(["-e", "process.stdout.write('done')"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_bridge_process_group(&mut command);
+    let child = command.spawn().unwrap();
+
+    let output =
+        wait_with_output_deadline_limits(child, "bridge fixture", None, None, 1024, 1024).unwrap();
+
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"done");
+}
+
+#[test]
+fn bridge_configured_ceiling_kills_overrunning_process() {
+    let mut command = Command::new("node");
+    command
+        .args(["-e", "setTimeout(() => {}, 30000)"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_bridge_process_group(&mut command);
+    let child = command.spawn().unwrap();
+    let started = Instant::now();
+
+    let error = wait_with_output_deadline_limits(
+        child,
+        "bridge fixture",
+        Some(Duration::from_millis(200)),
+        None,
+        1024,
+        1024,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(error.contains("KUZUSHI_BRIDGE_TIMEOUT_MS"), "{error}");
 }
 
 #[test]

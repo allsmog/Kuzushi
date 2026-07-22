@@ -30,7 +30,7 @@ impl AgentRuntime for FakeRuntime {
     }
 
     fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
-        Ok(TriageOutcome {
+        Ok(TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.8,
             rationale: "evidence matches".to_string(),

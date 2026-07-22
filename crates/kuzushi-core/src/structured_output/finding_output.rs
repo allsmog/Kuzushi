@@ -35,6 +35,26 @@ pub(crate) struct FindingCandidate {
     pub evidence: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cwe: Vec<String>,
+    /// Short conceptual title (under 12 words).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Plain-language statement of attacker gain and who is affected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub impact: Option<String>,
+    /// Vulnerability category label, e.g. `sql_injection`, `buffer_overflow`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Concrete exploitation walkthrough: the specific input and the effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exploit_scenario: Option<String>,
+    /// Every condition an attacker must satisfy; the first entry names the
+    /// weakest credible attacker position from the closed precondition
+    /// vocabulary (unauth-network, authed-role, local-uid, ...).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preconditions: Vec<String>,
+    /// The security property that must hold plus the specific change, in prose.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
 }
 
 /// The enforced top-level output of a finding producer.

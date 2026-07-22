@@ -22,6 +22,8 @@ fn review_state_separates_terminal_decisions_from_needs_review() {
     assert_eq!(review_author_label(&finding), "-");
 
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::ByDesign,
         confidence: 0.71,
         rationale: "accepted by owner".to_string(),
@@ -65,6 +67,8 @@ fn effective_review_index_uses_loaded_durable_identity_decision() {
     reviewed.created_at = "2026-07-01T00:00:00Z".to_string();
     reviewed.identity_id = Some(identity_id.clone());
     reviewed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "operator confirmed".to_string(),
@@ -140,6 +144,8 @@ fn carried_rejected_decision_conflicts_with_new_scanner_signal() {
     reviewed.id = Some(1);
     reviewed.identity_id = Some(identity_id.clone());
     reviewed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::FalsePositive,
         confidence: 0.91,
         rationale: "operator rejected prior occurrence".to_string(),
@@ -175,6 +181,8 @@ fn carried_rejected_decision_does_not_conflict_with_rejected_scanner_signal() {
     reviewed.id = Some(1);
     reviewed.identity_id = Some(identity_id.clone());
     reviewed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::FalsePositive,
         confidence: 0.91,
         rationale: "operator rejected prior occurrence".to_string(),

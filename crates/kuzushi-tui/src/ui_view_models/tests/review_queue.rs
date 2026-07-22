@@ -22,6 +22,8 @@ fn finding(rule: &str, severity: Severity, line: u32) -> Finding {
 
 fn confirmed(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.93,
         rationale: "reviewed".to_string(),
@@ -33,6 +35,8 @@ fn confirmed(mut finding: Finding) -> Finding {
 
 fn human_confirmed(mut finding: Finding, confidence: f32) -> Finding {
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence,
         rationale: "human reviewed".to_string(),
@@ -189,6 +193,8 @@ fn review_queue_cursor_identity_wins_over_a_stale_pinned_finding() {
 fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
     let mut confirmed = finding("confirmed", Severity::Critical, 3);
     confirmed.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.99,
         rationale: "runtime confirmed".to_string(),
@@ -630,6 +636,8 @@ fn review_decision_record(
 
 fn human_rejected(mut finding: Finding) -> Finding {
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::FalsePositive,
         confidence: 0.91,
         rationale: "operator rejected prior occurrence".to_string(),

@@ -1243,7 +1243,7 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.8,
                     rationale: "model believes this is a false positive".to_string(),
@@ -1281,7 +1281,7 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "reviewed source-linked evidence".to_string(),
@@ -1375,7 +1375,7 @@ mod tests {
         store
             .record_triage_with_author(
                 confirmed_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed evidence".to_string(),
@@ -1388,7 +1388,7 @@ mod tests {
         store
             .record_auto_triage(
                 needs_review_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.5,
                     rationale: "more evidence required".to_string(),
@@ -1449,7 +1449,7 @@ mod tests {
             store
                 .record_triage_with_author(
                     finding_id,
-                    &TriageOutcome {
+                    &TriageOutcome { first_link: None, refute_reason: None,
                         verdict: TriageVerdict::TruePositive,
                         confidence: 0.95,
                         rationale: "operator confirmed the evidence".to_string(),
@@ -1556,7 +1556,7 @@ mod tests {
         store
             .record_triage_with_author(
                 first_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed the durable finding".to_string(),
@@ -1631,7 +1631,7 @@ mod tests {
         store
             .record_triage_with_author(
                 first_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.91,
                     rationale: "operator rejected prior occurrence".to_string(),
@@ -1753,7 +1753,7 @@ mod tests {
         store
             .record_auto_triage(
                 confirmed_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),
@@ -1854,7 +1854,7 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "human confirmed this is real".to_string(),
@@ -1870,7 +1870,7 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.7,
                     rationale: "auto re-triage thinks this is fp".to_string(),

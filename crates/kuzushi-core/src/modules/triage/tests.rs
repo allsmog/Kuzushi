@@ -453,7 +453,7 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome {
+                TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -480,7 +480,7 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome {
+                TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -515,7 +515,7 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome {
+                TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -583,7 +583,7 @@ mod tests {
     }
 
     fn true_positive_outcome() -> TriageOutcome {
-        TriageOutcome {
+        TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "confirmed once".to_string(),
@@ -608,7 +608,7 @@ mod tests {
             } else {
                 TriageVerdict::TruePositive
             };
-            Ok(TriageOutcome {
+            Ok(TriageOutcome { first_link: None, refute_reason: None,
                 verdict,
                 confidence: 0.8,
                 rationale: format!("vote {}", *calls),
@@ -672,7 +672,7 @@ mod tests {
             } else {
                 TriageVerdict::TruePositive
             };
-            Ok(TriageOutcome {
+            Ok(TriageOutcome { first_link: None, refute_reason: None,
                 verdict,
                 confidence: 0.9,
                 rationale: format!("vote {}", *calls),

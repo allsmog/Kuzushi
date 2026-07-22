@@ -543,6 +543,9 @@ fn render_workspace_findings_export(
         WorkspaceExportFormat::Jsonl => findings_to_jsonl(records, options, total_count),
         WorkspaceExportFormat::Sarif => findings_to_sarif(workspace, records, options, total_count),
         WorkspaceExportFormat::Csv => findings_to_csv(records, options, total_count),
+        WorkspaceExportFormat::VulnFindings => {
+            super::export_vuln_findings::findings_to_vuln_findings(records)
+        }
         WorkspaceExportFormat::MarkdownBundle => {
             anyhow::bail!("markdown-bundle is a directory output; routed via write_markdown_bundle")
         }

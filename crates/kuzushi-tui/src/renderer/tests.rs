@@ -1528,6 +1528,8 @@ fn module_run_findings_preview_uses_projected_finding_rows() {
         "SQL injection in search",
     );
     triaged.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "source and sink are linked".to_string(),
@@ -6741,6 +6743,8 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
     }];
     finding.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.95,
         rationale: "Operator confirmed the source-to-sink path.".to_string(),

@@ -156,6 +156,7 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("tob:audit", "Run Trail of Bits audit checklist"),
     ("tob:skills", "List Trail of Bits skills"),
     ("trace:expand", "Expand trace"),
+    ("triage:chain-hunt", "Hunt attack chains"),
     ("triage:run", "Triage findings"),
     ("uaf-hunt:hunt", "Hunt use-after-free bugs"),
     ("variant:hunt", "Hunt bug variants"),

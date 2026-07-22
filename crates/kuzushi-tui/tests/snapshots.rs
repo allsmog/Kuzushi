@@ -302,6 +302,8 @@ fn workbench_list_view_with_two_findings() {
         "sql injection via order_id concatenation",
     );
     critical.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.91,
         rationale: "concatenated input".to_string(),
@@ -405,6 +407,8 @@ fn module_run_view_with_findings_and_active_scan() {
         "sql injection via order_id concatenation",
     );
     finding.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.92,
         rationale: "input concatenated".to_string(),

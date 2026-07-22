@@ -25,7 +25,7 @@ pub use domain::{
     PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
     ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
-    StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
+    RefuteReason, StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
     VulnSource,
 };
 pub use persistence::{

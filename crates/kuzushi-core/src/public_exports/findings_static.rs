@@ -10,8 +10,8 @@ pub use crate::findings::{
     FindingVerdictFilter, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
     PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
-    ProofLadderState, RuntimeValidationSummary, Severity, StaticProofState, StaticProofSummary,
-    TriageOutcome, TriageVerdict, VulnSource,
+    ProofLadderState, RefuteReason, RuntimeValidationSummary, Severity, StaticProofState,
+    StaticProofSummary, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use crate::pr_comment::{
     build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,

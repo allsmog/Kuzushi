@@ -32,6 +32,8 @@ fn fallback_vuln_analysis(outcome: &AgentLoopOutcome) -> VulnAnalysis {
         rationale: synthesized_fallback_rationale(&outcome.text),
         confidence: 0.25,
         evidence: collect_implicit_evidence(&outcome.transcript),
+        first_link: None,
+        refute_reason: None,
     }
 }
 

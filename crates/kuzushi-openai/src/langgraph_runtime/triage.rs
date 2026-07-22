@@ -33,10 +33,15 @@ const TRIAGE_VERDICT_RULES: &str = "Verdict rules:
   a decisive validator/sanitizer/guard, or intended privileged functionality.
 - needs_review: evidence is incomplete, mixed, or requires runtime/context not available.
 
+On false_positive, also set refute_reason to exactly one of: doesnt_exist, already_handled, \
+implausible_trigger, intentional_behavior, misread_code, duplicate, not_actionable. On other \
+verdicts set it null. When the supplied evidence names a caller/call-site you relied on for \
+reachability, set first_link to that file:line; otherwise null — never invent one.
+
 Assign confidence by evidence, not by how sure you feel. Return a confidence band \
 (high/medium/low), not an invented numeric probability; the ingestion layer maps the band to a \
 numeric midpoint. Return only JSON matching:
-{\"verdict\":\"true_positive|false_positive|needs_review\",\"confidence\":\"high|medium|low\",\"rationale\":\"short cited-evidence reason\"}.
+{\"verdict\":\"true_positive|false_positive|needs_review\",\"confidence\":\"high|medium|low\",\"rationale\":\"short cited-evidence reason\",\"refute_reason\":\"...|null\",\"first_link\":\"file:line|null\"}.
 Do not include markdown fences, prose, or schema text.";
 
 pub(crate) fn triage_system_prompt() -> String {

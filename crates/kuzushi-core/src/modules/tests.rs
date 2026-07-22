@@ -1929,7 +1929,7 @@ OUT
         let finding = Finding::new_tool("test", "rule", "src/x.c", 1, None, Severity::High, "msg");
         let finding_id = store.insert_finding("run-cost-test", &finding).unwrap();
 
-        let outcome = TriageOutcome {
+        let outcome = TriageOutcome { first_link: None, refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "test".to_string(),

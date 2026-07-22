@@ -87,7 +87,7 @@ fn export_record_does_not_serialize_raw_http_blobs() {
 #[test]
 fn export_record_labels_automated_reasoning_without_calling_it_observed_evidence() {
     let mut finding = basic_finding(Severity::High);
-    finding.triage = Some(TriageOutcome {
+    finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
         verdict: TriageVerdict::NeedsReview,
         confidence: 0.6,
         rationale: "automated review needs operator validation".to_string(),
@@ -236,7 +236,7 @@ fn export_record_uses_run_context_when_available() {
 fn reviewed_source_linked_finding() -> Finding {
     let mut finding = basic_finding(Severity::High);
     finding.scan_id = Some("run-1".to_string());
-    finding.triage = Some(TriageOutcome {
+    finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.9,
         rationale: "operator reviewed source-linked evidence".to_string(),

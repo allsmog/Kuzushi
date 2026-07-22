@@ -10,38 +10,71 @@ pub(crate) fn build_agentic_sast_prompt(
     whitebox_static: bool,
     enrichment: &PromptEnrichment,
 ) -> String {
-    let mut prompt = vec![
+    let mut prompt = prompt_header(target, options);
+    push_hunt_guidance(&mut prompt, options, inventory, whitebox_static);
+    push_enrichment_blocks(&mut prompt, enrichment, review_context);
+    prompt.push(String::new());
+    prompt.push(PROMPT_SPINE_UNTRUSTED_REPO.to_string());
+    prompt.push(String::new());
+    prompt.push("Repository inventory and snippets:".to_string());
+    prompt.push(render_untrusted_repo_blocks(inventory));
+    prompt.join("\n")
+}
+
+fn prompt_header(target: &Path, options: &AgenticSastInput) -> Vec<String> {
+    vec![
         "Scan this repository for concrete application-security vulnerabilities.".to_string(),
         format!("Target: {}", target.display()),
         format!("Severity filter: {}", options.severity.join(", ")),
         format!("Max findings: {}", options.max_findings),
         format!(
             "Include paths/globs: {}",
-            if options.include_patterns.is_empty() {
-                "(all readable source)".to_string()
-            } else {
-                options.include_patterns.join(", ")
-            }
+            patterns_line(&options.include_patterns, "(all readable source)")
         ),
         format!(
             "Exclude paths/globs: {}",
-            if options.exclude_patterns.is_empty() {
-                "(none)".to_string()
-            } else {
-                options.exclude_patterns.join(", ")
-            }
+            patterns_line(&options.exclude_patterns, "(none)")
         ),
         String::new(),
         "Evidence requirements: name the attacker-controlled source, sink, missing guard, and exact file:line. Omit uncertain or hypothetical findings.".to_string(),
-    ];
+    ]
+}
+
+fn patterns_line(patterns: &[String], when_empty: &str) -> String {
+    if patterns.is_empty() {
+        when_empty.to_string()
+    } else {
+        patterns.join(", ")
+    }
+}
+
+fn push_hunt_guidance(
+    prompt: &mut Vec<String>,
+    options: &AgenticSastInput,
+    inventory: &[(String, String)],
+    whitebox_static: bool,
+) {
     if let Some(focus) = &options.focus {
         prompt.push(String::new());
         prompt.push(format!("Hunt focus: {focus}"));
+    }
+    if let Some(hints) =
+        crate::prompts::hunt_hints_for_paths(inventory.iter().map(|(path, _)| path.as_str()))
+    {
+        prompt.push(String::new());
+        prompt.push(hints);
     }
     if whitebox_static {
         prompt.push(String::new());
         prompt.push(whitebox_static_triage_prompt_block().to_string());
     }
+}
+
+fn push_enrichment_blocks(
+    prompt: &mut Vec<String>,
+    enrichment: &PromptEnrichment,
+    review_context: Option<&str>,
+) {
     if let Some(threat_context) = &enrichment.threat_context {
         prompt.push(String::new());
         prompt.push(
@@ -66,12 +99,6 @@ ground truth — verify against source before reporting."
             review_context,
         ));
     }
-    prompt.push(String::new());
-    prompt.push(PROMPT_SPINE_UNTRUSTED_REPO.to_string());
-    prompt.push(String::new());
-    prompt.push("Repository inventory and snippets:".to_string());
-    prompt.push(render_untrusted_repo_blocks(inventory));
-    prompt.join("\n")
 }
 
 /// Advertise only the MCP servers the tool policy actually attached, with

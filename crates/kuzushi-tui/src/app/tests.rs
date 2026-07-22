@@ -8160,6 +8160,8 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
     let mut app = ShellApp::new(config, None);
@@ -8571,6 +8573,8 @@ fn run_command_dispatches_agentic_sast_through_langgraph_runtime_bridge_and_pers
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8617,6 +8621,8 @@ fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_pers
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8663,6 +8669,8 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8706,6 +8714,8 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8776,6 +8786,8 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8836,6 +8848,8 @@ fn run_command_dispatches_carlini_threat_hunt_through_langgraph_runtime_bridge_a
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -8880,6 +8894,8 @@ fn run_command_dispatches_systems_hunt_through_langgraph_runtime_bridge_and_pers
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -9234,6 +9250,8 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -9304,6 +9322,8 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -9376,6 +9396,8 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -9436,6 +9458,8 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -9488,6 +9512,8 @@ fn run_command_dispatches_x_ray_run_through_langgraph_runtime_bridge() {
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
         worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
+        bridge_retry_attempts: None,
+        bridge_retry_backoff_ms: None,
         anthropic_oauth: None,
     };
 
@@ -10557,6 +10583,8 @@ fn next_command_opens_phase_picker_at_derived_phase() {
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
 
     app.findings_mut()[0].triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: TriageVerdict::TruePositive,
         confidence: 0.9,
         rationale: "confirmed".to_string(),
@@ -19578,6 +19606,8 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let confirmed = |finding: &mut Finding| {
         finding.triage = Some(TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "reviewed".to_string(),
@@ -20286,6 +20316,8 @@ fn backlog_preset_filters_untriaged_and_keeps_severity_first_order() {
         "confirmed critical",
     );
     confirmed_critical.triage = Some(kuzushi_core::TriageOutcome {
+        first_link: None,
+        refute_reason: None,
         verdict: kuzushi_core::TriageVerdict::TruePositive,
         confidence: 0.9,
         rationale: "reviewed".to_string(),

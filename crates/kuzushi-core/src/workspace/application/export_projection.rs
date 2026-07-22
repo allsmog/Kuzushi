@@ -124,7 +124,7 @@ fn base_export_record(
     vuln_source: String,
     provenance: WorkspaceFindingProvenanceSummary,
 ) -> WorkspaceFindingExportRecord {
-    WorkspaceFindingExportRecord {
+    let mut record = WorkspaceFindingExportRecord {
         alias,
         identity_id: finding.identity_id.clone(),
         fingerprint: finding.fingerprint.clone(),
@@ -151,10 +151,24 @@ fn base_export_record(
         corroboration_count: finding.corroboration_count,
         run_id: finding.scan_id.clone(),
         provenance,
-        references: finding.references.clone(),
-        message: finding.message.clone(),
         ..WorkspaceFindingExportRecord::default()
-    }
+    };
+    apply_hunt_enrichment(&mut record, &finding);
+    record
+}
+
+/// The hunt-authored plain-language fields (recommendation from remediation,
+/// impact, category, exploit scenario, preconditions) ride the finding blob
+/// and pass through unmodified — honest-empty when the producer never
+/// supplied them.
+fn apply_hunt_enrichment(record: &mut WorkspaceFindingExportRecord, finding: &Finding) {
+    record.recommendation = finding.remediation.clone();
+    record.impact = finding.impact.clone();
+    record.category = finding.category.clone();
+    record.exploit_scenario = finding.exploit_scenario.clone();
+    record.preconditions = finding.preconditions.clone();
+    record.references = finding.references.clone();
+    record.message = finding.message.clone();
 }
 
 fn apply_review_summary(

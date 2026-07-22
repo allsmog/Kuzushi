@@ -42,6 +42,72 @@ pub const CONFIDENCE_CALIBRATION: &str = "Assign confidence by evidence, not by 
 Your rationale must cite the file:line evidence that justifies the confidence band. Return \
 a confidence band (high/medium/low), not an invented numeric probability.";
 
+/// Numbered do-not-report exclusion rules. Complements FALSE_POSITIVE_TAXONOMY:
+/// the taxonomy governs how to judge evidence; these rules exclude whole
+/// finding shapes regardless of evidence quality.
+pub const EXCLUSION_RULES: &str = "DO NOT REPORT, even when technically accurate:
+1. Volumetric denial of service or missing rate limiting (infrastructure-layer concerns). \
+   EXCEPTIONS that ARE valid findings: ReDoS, algorithmic complexity, hash-collision DoS, \
+   and unbounded recursion or allocation triggered by specific crafted input.
+2. Test-only code, dead code, example/fixture code, or crashes with no security impact.
+3. Behavior that is the intended design of the software (compression middleware, a \
+   backward-compatible weak algorithm offered alongside a strong one for migration).
+4. Memory-safety concerns in memory-safe-language code — flag only unsafe/FFI blocks or \
+   safe APIs wrapping unsound unsafe internals.
+5. SSRF where the attacker controls only the request path — the finding requires control \
+   of the host or protocol.
+6. User input flowing into an AI/LLM prompt (prompt injection is not a code vulnerability \
+   in the scanned target).
+7. Path traversal inside object-storage keys (S3, GCS) where `../` does not escape a \
+   trust boundary.
+8. Trusted operator inputs used as the attack vector (environment variables, CLI flags \
+   set by the operator) — unless the stated environment marks them attacker-controlled.
+9. Client-side code flagged for server-side vulnerability classes (SSRF, path traversal, \
+   missing auth — the server is responsible).
+10. Outdated third-party dependency versions (managed by a separate process).
+11. Weak randomness or hardcoded defaults used for non-security purposes (jitter, \
+    shuffling, load balancing, dev-only fallbacks replaced from secure sources in \
+    production).
+12. Low-impact nuisance issues: log spoofing, CSRF on logout, self-XSS where the user is \
+    sole source and sole consumer, and best-practice violations without a concrete \
+    exploit path.
+When an exclusion rule drives a rejection or omission, cite the rule number in the \
+rationale.";
+
+/// Derive severity mechanically from attacker preconditions instead of the
+/// vulnerability category. Vocabulary matches the closed `Precondition` enum
+/// in `findings::ingest_contract` so the write-time ceiling can be enforced
+/// in code.
+pub const SEVERITY_FROM_PRECONDITIONS: &str =
+    "Derive severity from exploitability, not from the vulnerability category.
+
+Before assigning severity, enumerate every precondition an attacker must satisfy \
+(auth state, configuration, prior requests, race windows, attacker position). Name the \
+weakest credible attacker position using exactly one of: unauth-network, protected-host, \
+cross-tenant, paired-peer, authed-role, local-uid, mitm, insider, supply-chain, physical.
+
+Ceilings: unauth-network / cross-tenant / protected-host findings may reach critical; \
+paired-peer / authed-role / local-uid / mitm / insider / supply-chain cap at high; \
+physical caps at medium. Within the ceiling, more preconditions mean lower severity: \
+zero preconditions justifies the ceiling itself; one or two justify one step below; \
+three or more (or no demonstrated attack path) justify at most medium.
+
+Cross-check before emitting: if the precondition list has three or more entries, \
+critical or high is almost certainly wrong. If the code is a test, example, or \
+debug-only path, do not report it at all (exclusion rule 2). When torn between two \
+levels, choose the lower — an inflated severity costs reviewer trust.";
+
+/// Coverage must be exhaustive even though reporting stays evidence-gated.
+pub const EXHAUSTIVENESS: &str =
+    "Be exhaustive in COVERAGE while staying evidence-gated in REPORTING. Do not stop at \
+the first finding: a single file often contains multiple independent vulnerabilities, and \
+an assigned scope usually contains several. After recording a finding, continue analyzing \
+the remaining files in scope; one finding is a floor, not a goal. If the scope is dense \
+and the output budget nears its limit, prioritize the highest-severity findings and state \
+how many lower-severity candidates were left unreported so the operator can re-scope. \
+Exhaustive coverage never lowers the evidence bar: every reported finding still requires \
+cited code evidence.";
+
 /// Empty findings are a correct, valued outcome.
 pub const EMPTY_FINDINGS_OK: &str =
     "Reporting zero findings is a correct, valued outcome. Return {\"findings\":[]} rather than \
@@ -71,5 +137,40 @@ mod tests {
     #[test]
     fn empty_findings_line_is_present() {
         assert!(EMPTY_FINDINGS_OK.contains("{\"findings\":[]}"));
+    }
+
+    #[test]
+    fn exclusion_rules_number_twelve_and_keep_the_redos_carve_out() {
+        assert!(EXCLUSION_RULES.contains("12."));
+        assert!(EXCLUSION_RULES.contains("ReDoS"));
+        assert!(EXCLUSION_RULES.contains("cite the rule number"));
+    }
+
+    #[test]
+    fn severity_block_uses_the_closed_precondition_vocabulary() {
+        for token in [
+            "unauth-network",
+            "protected-host",
+            "cross-tenant",
+            "paired-peer",
+            "authed-role",
+            "local-uid",
+            "mitm",
+            "insider",
+            "supply-chain",
+            "physical",
+        ] {
+            assert!(
+                SEVERITY_FROM_PRECONDITIONS.contains(token),
+                "missing precondition token {token}"
+            );
+        }
+        assert!(SEVERITY_FROM_PRECONDITIONS.contains("three or more"));
+    }
+
+    #[test]
+    fn exhaustiveness_keeps_the_evidence_bar() {
+        assert!(EXHAUSTIVENESS.contains("one finding is a floor"));
+        assert!(EXHAUSTIVENESS.contains("never lowers the evidence bar"));
     }
 }

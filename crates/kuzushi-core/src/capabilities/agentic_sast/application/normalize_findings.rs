@@ -53,8 +53,67 @@ fn agentic_finding_from_object(
     let mut finding = Finding::new_tool(
         "agentic", rule_id, file_path, start_line, end_line, severity, message,
     );
+    apply_agentic_enrichment(&mut finding, &object);
     apply_agentic_static_policy(&mut finding, target, &raw_item, whitebox_static)?;
     Ok(finding)
+}
+
+/// Producer-supplied enrichment (title/impact/category/exploit scenario/
+/// preconditions/recommendation) rides the finding record so triage, chains,
+/// and exports see it. The precondition severity ceiling is enforced in code
+/// at this chokepoint, mirroring the ledger-import ingest contract.
+fn apply_agentic_enrichment(finding: &mut Finding, object: &Map<String, Value>) {
+    if let Some(title) = read_object_string(object, &["title"]).filter(|t| !t.trim().is_empty()) {
+        finding.title = title.trim().to_string();
+    }
+    finding.impact = read_object_string(object, &["impact"]);
+    finding.category = read_object_string(object, &["category"]);
+    finding.exploit_scenario = read_object_string(object, &["exploitScenario", "exploit_scenario"]);
+    if let Some(recommendation) =
+        read_object_string(object, &["recommendation", "recommendedFix", "recommended_fix"])
+    {
+        finding.remediation = Some(recommendation);
+    }
+    finding.preconditions = agentic_preconditions(object);
+    apply_precondition_ceiling(finding);
+}
+
+fn agentic_preconditions(object: &Map<String, Value>) -> Vec<String> {
+    let Some(Value::Array(items)) = object.get("preconditions") else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Mechanical ceiling from the closed precondition vocabulary; the cap is
+/// recorded in the message, never silently applied.
+fn apply_precondition_ceiling(finding: &mut Finding) {
+    use crate::findings::ingest_contract::{enforce_severity_ceiling, Precondition};
+    let mut capped_by: Option<Precondition> = None;
+    let parsed: Vec<Precondition> = finding
+        .preconditions
+        .iter()
+        .filter_map(|entry| Precondition::parse(entry))
+        .collect();
+    for precondition in parsed {
+        let result = enforce_severity_ceiling(finding.severity, Some(precondition));
+        if result.tier_capped {
+            finding.severity = result.severity;
+            capped_by = Some(precondition);
+        }
+    }
+    if let Some(precondition) = capped_by {
+        finding.message.push_str(&format!(
+            "\nSeverity capped by precondition ceiling ({}).",
+            precondition.as_str()
+        ));
+    }
 }
 
 fn agentic_location(object: &Map<String, Value>, target: &Path) -> (String, u32, Option<u32>) {

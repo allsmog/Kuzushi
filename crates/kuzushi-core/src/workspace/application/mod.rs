@@ -12,6 +12,7 @@ mod export_projection;
 mod export_projection_model;
 mod export_review_context;
 mod export_sarif;
+mod export_vuln_findings;
 mod export_workspace_findings;
 mod load_program_scope;
 mod nested_scope;

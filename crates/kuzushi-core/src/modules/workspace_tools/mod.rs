@@ -178,7 +178,7 @@ authorization: Default::default(),
         store
             .record_auto_triage(
                 finding_id,
-                &TriageOutcome {
+                &TriageOutcome { first_link: None, refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),

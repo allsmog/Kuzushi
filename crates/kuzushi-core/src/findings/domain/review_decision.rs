@@ -148,7 +148,7 @@ impl ReviewDecision {
             verdict: ReviewDecisionVerdict::from_triage_verdict(triage.verdict),
             author: author.unwrap_or(TriageAuthor::Auto),
             confidence: triage.confidence,
-            rationale: triage.rationale.clone(),
+            rationale: triage.rationale_with_annotations(),
             dismiss_reason: None,
             actor: None,
         }

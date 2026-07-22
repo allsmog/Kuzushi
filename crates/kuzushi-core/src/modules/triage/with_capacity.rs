@@ -185,22 +185,65 @@ pub(in crate::modules) fn run_triage_stage2(
     config: &TriageExecutionConfig,
     findings: Vec<Finding>,
 ) -> Result<TriageRunStats> {
+    run_triage_stage2_with(store, input, findings, &|finding| {
+        collect_triage_votes(runtime, config, input, finding)
+    })
+}
+
+/// Deep bulk classification: every cluster representative goes through the
+/// code-reading deep auditor instead of the single-shot evidence-only call.
+/// Cost cap, clustering, and duplicate propagation are identical to the
+/// standard path; `votes` maps onto deep-auditor consensus passes.
+pub(in crate::modules) fn run_triage_stage2_deep(
+    store: &FindingStore,
+    routed: &crate::agent_router::RoutedRuntime<'_>,
+    input: &TriageRunInput,
+    config: &TriageExecutionConfig,
+    findings: Vec<Finding>,
+) -> Result<TriageRunStats> {
+    run_triage_stage2_with(store, input, findings, &|finding| {
+        deep_triage_outcome(routed, config, input, finding)
+    })
+}
+
+fn run_triage_stage2_with(
+    store: &FindingStore,
+    input: &TriageRunInput,
+    findings: Vec<Finding>,
+    classify: &dyn Fn(&Finding) -> Result<TriageRuntimeOutcome>,
+) -> Result<TriageRunStats> {
     let clusters = cluster_triage_findings(findings);
     let mut stats = TriageRunStats::with_capacity(clusters.len());
     stats.clusters = clusters.len();
     for cluster in clusters {
-        triage_one_cluster(store, runtime, input, config, &mut stats, cluster)?;
+        triage_one_cluster(store, input, &mut stats, cluster, classify)?;
     }
     Ok(stats)
 }
 
+fn deep_triage_outcome(
+    routed: &crate::agent_router::RoutedRuntime<'_>,
+    config: &TriageExecutionConfig,
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> Result<TriageRuntimeOutcome> {
+    let cfg = crate::capabilities::deep_auditor::DeepAuditConfig {
+        passes: input.votes as u32,
+        ..crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone())
+    };
+    let outcome = crate::capabilities::deep_auditor::run_deep_auditor(routed, None, &cfg, finding)?;
+    Ok(TriageRuntimeOutcome {
+        outcome: outcome.triage,
+        cached: false,
+    })
+}
+
 fn triage_one_cluster(
     store: &FindingStore,
-    runtime: &dyn AgentRuntime,
     input: &TriageRunInput,
-    config: &TriageExecutionConfig,
     stats: &mut TriageRunStats,
     cluster: TriageCluster,
+    classify: &dyn Fn(&Finding) -> Result<TriageRuntimeOutcome>,
 ) -> Result<()> {
     if triage_cost_cap_reached(input.cost_cap_usd, stats.cost_report()) {
         for _ in 0..(1 + cluster.duplicates.len()) {
@@ -210,7 +253,7 @@ fn triage_one_cluster(
     }
 
     let representative = cluster.representative;
-    let runtime_outcome = match collect_triage_votes(runtime, config, input, &representative) {
+    let runtime_outcome = match classify(&representative) {
         Ok(runtime_outcome) => runtime_outcome,
         Err(error) if is_cancelled_runtime_error(&error) => {
             return Err(error).context("triage:run cancelled");
