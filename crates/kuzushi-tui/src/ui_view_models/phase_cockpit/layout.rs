@@ -218,6 +218,12 @@ fn screen_composition(
                 verification: PhaseSurfaceId::FixVerification,
             }
         }
+        PhaseCockpitBody::Scan(model) if model.live.is_some() => Composition::OperationalColumns {
+            left: PhaseSurfaceId::ScanScope,
+            center: PhaseSurfaceId::ScanEngines,
+            right: PhaseSurfaceId::ScanDelta,
+            log_strip: Some(PhaseSurfaceId::ScanReceipt),
+        },
         PhaseCockpitBody::Review(model) if visible.len() >= 2 => Composition::ListDetail {
             list: PhaseSurfaceId::ReviewQueue,
             detail: PhaseSurfaceId::ReviewDetail,

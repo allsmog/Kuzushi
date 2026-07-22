@@ -80,6 +80,17 @@ pub(crate) struct ScanPhaseModel {
     pub(crate) attempt: Option<ScanAttemptModel>,
     pub(crate) engine_outcomes: Vec<ScanEngineOutcomeModel>,
     pub(crate) empty_hint: Option<String>,
+    /// Present while a scan run is in flight. Drives the operational-columns
+    /// dashboard; live trace output stays in Run Focus, this only names the
+    /// run so the resting panes read as "in progress", not stale.
+    pub(crate) live: Option<LiveScanModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveScanModel {
+    pub(crate) run_id: Option<String>,
+    pub(crate) stage: String,
+    pub(crate) findings: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]

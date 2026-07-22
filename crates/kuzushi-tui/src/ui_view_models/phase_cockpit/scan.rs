@@ -1,4 +1,4 @@
-use super::{ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel};
+use super::{LiveScanModel, ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel};
 use crate::ui_view_models::scoped_target_path_label;
 use crate::{RunSummaryEntriesState, ScanStageReceiptState, ShellApp, ViewDataState};
 use kuzushi_core::run_artifacts::{PhaseStageReceipt, ScanEngineStageOutcome};
@@ -40,7 +40,19 @@ pub(super) fn scan_phase_model(app: &ShellApp) -> ScanPhaseModel {
             .map(|projection| projection.engine_outcomes)
             .unwrap_or_default(),
         empty_hint: scan_page_hint(&summary_index, has_projection),
+        live: live_scan_model(app),
     }
+}
+
+/// The in-flight scan run, when one exists. Only identity and coarse stage
+/// come from the scan panel; the trace itself remains Run Focus territory.
+fn live_scan_model(app: &ShellApp) -> Option<LiveScanModel> {
+    let scan = app.scan()?;
+    scan.running.then(|| LiveScanModel {
+        run_id: scan.run_id.clone(),
+        stage: scan.stage.clone(),
+        findings: scan.findings_count,
+    })
 }
 
 /// The run-summary index reloads on every external workspace refresh. While

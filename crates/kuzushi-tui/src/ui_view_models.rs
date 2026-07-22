@@ -224,7 +224,7 @@ pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
     phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
     Composition, DrawerSize, DrawerSpec, EngagementHeaderModel, FixPhaseModel, LayoutDensity,
-    MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
+    LiveScanModel, MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
     PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
     ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
     RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,

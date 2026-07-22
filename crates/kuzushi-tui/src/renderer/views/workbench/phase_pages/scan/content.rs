@@ -50,12 +50,22 @@ pub(super) fn render_engines(
 }
 
 pub(super) fn engine_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let mut live = live_scan_lines(model, width);
     if model.engine_outcomes.is_empty() {
-        return vec![Line::styled(
+        live.push(Line::styled(
             fit("no terminal scanner outcome recorded", width),
             theme::muted(),
-        )];
+        ));
+        return live;
     }
+    if !live.is_empty() {
+        live.extend(engine_outcome_lines(model, width));
+        return live;
+    }
+    engine_outcome_lines(model, width)
+}
+
+fn engine_outcome_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
     model
         .engine_outcomes
         .iter()
@@ -70,6 +80,25 @@ pub(super) fn engine_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'st
             lines
         })
         .collect()
+}
+
+/// One status line while a scan run is in flight. The dashboard names the
+/// run and its coarse stage; the trace itself belongs to Run Focus.
+fn live_scan_lines(model: &ScanPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let Some(live) = model.live.as_ref() else {
+        return Vec::new();
+    };
+    let run = live.run_id.as_deref().unwrap_or("run pending");
+    vec![Line::styled(
+        fit(
+            &format!(
+                "⟳ scan in flight · {run} · stage {} · {} finding(s) so far — live output: `activity`",
+                live.stage, live.findings
+            ),
+            width,
+        ),
+        theme::warn(),
+    )]
 }
 
 fn engine_line(outcome: &ScanEngineOutcomeModel, width: usize) -> Line<'static> {
@@ -177,6 +206,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn live_scan_line_names_the_run_and_defers_output_to_run_focus() {
+        let model = ScanPhaseModel {
+            scope: "target".to_string(),
+            plan: "manual".to_string(),
+            attempt: None,
+            engine_outcomes: Vec::new(),
+            empty_hint: None,
+            live: Some(crate::ui_view_models::LiveScanModel {
+                run_id: Some("run-live".to_string()),
+                stage: "scanning".to_string(),
+                findings: 2,
+            }),
+        };
+
+        let text = engine_lines(&model, 120)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("scan in flight"), "{text}");
+        assert!(text.contains("run-live"), "{text}");
+        assert!(text.contains("`activity`"), "{text}");
+    }
+
+    #[test]
     fn delta_pane_renders_severity_chips_between_delta_and_artifacts() {
         let model = ScanPhaseModel {
             scope: "target".to_string(),
@@ -201,6 +256,7 @@ mod tests {
             }),
             engine_outcomes: Vec::new(),
             empty_hint: None,
+            live: None,
         };
 
         let text = finding_delta_lines(&model, 60)

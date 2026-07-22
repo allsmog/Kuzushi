@@ -1,4 +1,5 @@
 use super::scan_phase_model;
+use super::LiveScanModel;
 use crate::{ShellApp, ViewHydrationKey};
 use kuzushi_core::run_artifacts::{
     PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta, ScanEngineStageOutcome,
@@ -322,4 +323,31 @@ fn hydrated_app(workspace: &WorkspaceTarget) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), Some(workspace));
     app.hydrate_view_keys_blocking(workspace.root(), vec![ViewHydrationKey::RunSummaryEntries]);
     app
+}
+
+#[test]
+fn scan_panel_running_state_projects_the_live_run() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    assert_eq!(scan_phase_model(&app).live, None);
+
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
+        run_id: Some("run-live".to_string()),
+        target: std::path::PathBuf::from("."),
+        stage: "scanning".to_string(),
+        findings_count: 2,
+        running: true,
+        abort_requested: false,
+        error: None,
+    }));
+    assert_eq!(
+        scan_phase_model(&app).live,
+        Some(LiveScanModel {
+            run_id: Some("run-live".to_string()),
+            stage: "scanning".to_string(),
+            findings: 2,
+        })
+    );
+
+    app.scan_mut().unwrap().running = false;
+    assert_eq!(scan_phase_model(&app).live, None);
 }

@@ -75,6 +75,7 @@ fn scan_fixture(state: SemanticFixture) -> ScanPhaseModel {
         attempt: (richness >= 2).then(|| fixture_scan_attempt(richness, state)),
         engine_outcomes: fixture_engine_outcomes(richness, state),
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),
+        live: None,
     }
 }
 

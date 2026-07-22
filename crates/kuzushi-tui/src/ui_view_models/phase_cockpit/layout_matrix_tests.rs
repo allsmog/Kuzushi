@@ -320,3 +320,66 @@ fn review_next_plan_drawer_appears_sizes_and_sheds_with_the_recommendations() {
         .iter()
         .any(|surface| surface.id == PhaseSurfaceId::ReviewNextPlan));
 }
+
+/// While a scan run is in flight the Scan page becomes the operational
+/// dashboard: scope | engines | delta over a receipt log strip. Small
+/// terminals shed the strip first, then degrade to the center column.
+#[test]
+fn live_scan_composes_the_operational_dashboard_and_degrades_to_center() {
+    let mut body = fixture_body(WorkflowPhase::Scan, SemanticFixture::Dense);
+    let PhaseCockpitBody::Scan(model) = &mut body else {
+        panic!("scan fixture body");
+    };
+    model.live = Some(LiveScanModel {
+        run_id: Some("run-live".to_string()),
+        stage: "scanning".to_string(),
+        findings: 2,
+    });
+
+    let wide = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 48),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    let ids = wide
+        .surfaces
+        .iter()
+        .map(|surface| surface.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        ids,
+        vec![
+            PhaseSurfaceId::ScanScope,
+            PhaseSurfaceId::ScanEngines,
+            PhaseSurfaceId::ScanDelta,
+            PhaseSurfaceId::ScanReceipt,
+        ]
+    );
+
+    let short = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 12),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    assert!(!short
+        .surfaces
+        .iter()
+        .any(|surface| surface.id == PhaseSurfaceId::ScanReceipt));
+
+    let PhaseCockpitBody::Scan(model) = &mut body else {
+        panic!("scan fixture body");
+    };
+    model.live = None;
+    let resting = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 48),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    assert!(matches!(resting.composition, Composition::Columns(_)));
+}
