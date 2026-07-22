@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 69
 ---
- KUZUSHI › tools · route:module · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › tools · module route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
 
  -- TOOLS · module:sast ------------------------------------------------------------------------------------------------
-filter: module:sast · showing 2 of 70 tools
+filter: module:sast · showing 2 of 71 tools
 
 SCAN find candidate vulnerabilities and security signals
 tool                          purpose                                                     next

@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI › workbench · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
- type Enter open in Prove · type findings clear projection · press z open heatmap · type scan again
+ type Enter open in Prove · type findings show full queue · press z open heatmap · type scan again
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
 ∅ review queue empty

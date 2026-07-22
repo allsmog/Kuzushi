@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::WorkbenchPaneScroll;
+use crate::app::WorkbenchSurfaceScroll;
 use crate::ui_view_models::{
     LayoutDensity, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan, PhaseSurfaceId,
     SurfaceRole,
@@ -26,7 +26,7 @@ pub(in crate::renderer::views) struct PhaseRenderState<'a> {
     /// The composition role of `surface` — canvas and drawer regions render
     /// with screen-specific chrome instead of the classic pane block.
     pub(super) role: SurfaceRole,
-    pub(super) scroll: &'a WorkbenchPaneScroll,
+    pub(super) scroll: &'a WorkbenchSurfaceScroll,
     pub(super) density: LayoutDensity,
 }
 

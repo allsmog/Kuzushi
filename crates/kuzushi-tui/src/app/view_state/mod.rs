@@ -116,7 +116,7 @@ pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;
 pub use sast_task_row::ThreatView;
 pub use sast_task_row::WorkbenchPage;
-pub use sast_task_row::WorkbenchPaneScroll;
+pub use sast_task_row::WorkbenchSurfaceScroll;
 pub use sast_task_row::WorkspaceView;
 pub use sast_tasks_snapshot::{SastTasksFooter, SastTasksSnapshot, SastTasksStatus};
 pub use theme_picker::{

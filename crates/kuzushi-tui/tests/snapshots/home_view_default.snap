@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › home · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › home · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
 
  -- HOME ---------------------------------------------------------------------------------------------------------------
 
@@ -17,6 +17,6 @@ assertion_line: 89
         failures ■  report ■  manifest ■
         .kuzushi/v3/runs/latest · `show runs` for detail
 
-  WORKSPACE   target none · modules 38 · context not built
+  WORKSPACE   target none · modules 39 · context not built
 
 > try: target . · options sast:scan · tasks · next · quickstart · Ctrl+G

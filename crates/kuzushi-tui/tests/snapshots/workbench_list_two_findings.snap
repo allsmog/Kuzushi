@@ -2,16 +2,17 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
- KUZUSHI › workbench · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › workbench · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
 
 Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
- type Enter open in Prove · type findings clear projection · press z open heatmap · type scan again
+ type Enter open in Prove · type findings show full queue · press z open heatmap · type scan again
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
 REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:completeness:all
 >F-0001  C [*oo] s1 @A unverified unassigned review-order:1 decision:confirmed...  sql injection via order_id...
  F-0002  H [*oo] s1 @? unverified unassigned review-order:2 decision:needs_revi... path traversal in /assets/<file>...
  -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
+* candidate - o corroborated - o reproduced - o proven
 sql injection via order_id concatenation
 
 -- STATUS --
@@ -57,4 +58,4 @@ revision: rev:unknown
 source signature: orders.rs:142:sql-injection-via-order-id-concatenation
 corroboration: 1
 identity: unassigned
-fingerprint: fp3_1830c2feac278d109cb914b7eec9844d1e15dd48b57ce1e494f4b3c621f5d4b1
+fingerprint: fp3_1830c2feac278d10…

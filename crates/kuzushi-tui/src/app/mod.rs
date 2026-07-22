@@ -211,7 +211,7 @@ pub use view_state::{
     PlanChange, PlanProposal, PromptDocumentMode, PromptDocumentState, PromptsAction, PwnView,
     ReconSnapshot, RecordedTraceEvent, SastTasksFooter, SastTasksSnapshot, SastTasksStatus,
     ScanPanelState, SetupEditor, SetupRouteState, SetupRowId, ShellView, SubsystemAggregate,
-    ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchPaneScroll,
+    ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchSurfaceScroll,
     WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

@@ -762,7 +762,7 @@ pub struct WorkbenchRouteState {
     focus: Option<crate::ui_view_models::PhaseSurfaceId>,
     zoom: crate::app::WorkbenchZoom,
     page: Option<crate::app::WorkbenchPage>,
-    scroll: crate::app::WorkbenchPaneScroll,
+    scroll: crate::app::WorkbenchSurfaceScroll,
     review: crate::app::WorkbenchReviewState,
     investigation: Option<InvestigationBoundary>,
     chains_open: bool,
@@ -775,7 +775,7 @@ impl Default for WorkbenchRouteState {
             focus: None,
             zoom: crate::app::WorkbenchZoom::default(),
             page: None,
-            scroll: crate::app::WorkbenchPaneScroll::default(),
+            scroll: crate::app::WorkbenchSurfaceScroll::default(),
             review: crate::app::WorkbenchReviewState::default(),
             investigation: None,
             chains_open: false,
@@ -867,11 +867,11 @@ impl WorkbenchRouteState {
         self.page = page;
     }
 
-    pub(crate) fn scroll(&self) -> &crate::app::WorkbenchPaneScroll {
+    pub(crate) fn scroll(&self) -> &crate::app::WorkbenchSurfaceScroll {
         &self.scroll
     }
 
-    pub(crate) fn scroll_mut(&mut self) -> &mut crate::app::WorkbenchPaneScroll {
+    pub(crate) fn scroll_mut(&mut self) -> &mut crate::app::WorkbenchSurfaceScroll {
         &mut self.scroll
     }
 

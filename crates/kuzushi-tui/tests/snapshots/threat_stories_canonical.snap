@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 45
 ---
- KUZUSHI › threats:stories · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+KUZUSHI shell route · view:threats:stories · target:none · model:unconfigured · context not built · cost:$0.00 (no...
 
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY
 

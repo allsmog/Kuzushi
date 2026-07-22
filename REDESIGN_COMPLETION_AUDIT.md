@@ -182,3 +182,29 @@ proved by source inspection and test output.
   worktree. They do not fail the final full-suite run or quality gates.
 - The worktree is large and dirty; human review is still required before
   committing to ensure unrelated changes are intentional.
+
+## Screen-Composition Redesign (recommend-then-authorize IDE)
+
+The Workbench was converted from the retired uniform four-pane split into
+per-screen compositions on branch `feat/tui-screen-compositions`. Kuzushi
+recommends; the operator authorizes: every recommendation surface states why,
+what it will execute, the evidence it should produce, cost, and the safety
+boundary before any launch.
+
+| Requirement | Current Evidence | Status |
+| --- | --- | --- |
+| `WorkbenchPane` retired as the product abstraction; focus/zoom/Tab/mouse keyed by `PhaseSurfaceId` | `WorkbenchRouteState` per-page focus map, `WorkbenchZoom::Surface`, `WorkbenchSurfaceScroll`; `rg WorkbenchPane` is empty; `cargo test -p kuzushi-tui workbench` | Proven by focused route/keybind tests |
+| Composition layer replaces uniform surface splitting | `ui_view_models/phase_cockpit/composition.rs` (`CanvasWithDrawer`, `CenteredForm`, `QuestionCard`, `OperationalColumns`, `ListDetail`, `FocusDetail`, `FullScreen`, `Triptych` + drawer sizes and small-terminal degradation); `layout_matrix_tests` assert composition per (page, state, area) | Proven by layout-matrix tests |
+| Ten screens landed over the composition layer (Map card, Configure, Clarify, Run dashboard, Findings + plan drawer, Triage action menu, Investigate config, Attack Chain, Patch triptych, Trace) | one conventional commit per screen on the branch; per-screen view-model + renderer tests in `app/tests.rs`, `phase_cockpit/*`, `renderer/views/workbench/phase_pages/*` | Proven by focused tests per screen |
+| Recommendation cards trace to recorded evidence (scan_recommender ReasonTags, chains fold, threat-model provenance) | drawer/card view models cite reason tags and threat/boundary identity; seeding line names the stamped threat-model revision (`seed_context.rs` tests) | Proven by focused tests |
+| Deeper-trace core capability (`trace:expand`) with durable evidence store re-render | `capabilities/trace_expansion` contract + store append/list tests; TUI hydrates from `StaticEvidenceStore` on view open and caches tool snapshots (`trace_screen_hydrates_operator_steps_from_the_durable_store`) | Proven by core + TUI integration tests |
+| Chains vs traces are distinct artifacts; proof subject labeled | chain artifacts screen (constituent finding refs, prerequisites, triage-mutation advisory) and full-screen trace (recorded vs operator-requested path); `PROOF SUBJECT` line in Prove status; phase snapshot contract regenerated and reviewed | Proven by renderer + snapshot tests |
+
+DevEx verification: journey `J21-recommend-authorize-screens` drives the new
+screens over the offline demo + phase fixture end-to-end (Prove investigation
+card, full-screen trace, attack-chain artifacts, Map-first guided route, Map
+RESULT READY gate, threat-model-seeded Scan configure) — 29 machine checks
+pass with zero failures; six review items remain deliberate human judgments.
+`J17` still encodes the pre-redesign chrome ("VIEW MAP" headers, `d` demo
+hotkey) and fails at the branch base as well; refreshing it is baseline-audit
+work for the evidence-loop campaign, not part of this branch.

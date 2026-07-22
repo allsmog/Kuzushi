@@ -104,9 +104,10 @@ pub enum ShellView {
     Module,
     ModuleRun,
     /// Canonical phase-native cockpit for Map, Scan, Review, Prove, and Fix. The
-    /// active page owns its semantic panes while DFD, terrain, heatmap, attack
-    /// tree, replay, and trace open as contextual surfaces that restore this
-    /// route exactly. Pane focus lives on `app.router.workbench().focus()`.
+    /// active page owns a screen composition of semantic surfaces while DFD,
+    /// terrain, heatmap, attack tree, replay, chains, and trace open as
+    /// contextual surfaces that restore this route exactly. Surface focus lives
+    /// on `app.router.workbench().focus()`, keyed by `PhaseSurfaceId`.
     Workbench,
     /// Aggregate pre-engagement readiness surface. Target selection remains
     /// an explicit gate; once a target is active, Setup owns the Map plan,
@@ -360,11 +361,11 @@ impl WorkbenchPage {
 /// so an offset never leaks across pages the way the retired four-pane slots
 /// shared scroll state between phases.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct WorkbenchPaneScroll {
+pub struct WorkbenchSurfaceScroll {
     offsets: std::collections::BTreeMap<PhaseSurfaceId, u16>,
 }
 
-impl WorkbenchPaneScroll {
+impl WorkbenchSurfaceScroll {
     pub fn get(&self, surface: PhaseSurfaceId) -> u16 {
         self.offsets.get(&surface).copied().unwrap_or(0)
     }
@@ -451,7 +452,7 @@ mod workbench_page_tests {
 
     #[test]
     fn surface_scroll_is_keyed_per_surface() {
-        let mut scroll = WorkbenchPaneScroll::default();
+        let mut scroll = WorkbenchSurfaceScroll::default();
         scroll.shift(PhaseSurfaceId::ReviewQueue, 3);
         scroll.shift(PhaseSurfaceId::FixRemediation, 5);
         assert_eq!(scroll.get(PhaseSurfaceId::ReviewQueue), 3);

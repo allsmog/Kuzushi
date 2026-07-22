@@ -2,15 +2,15 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI › activity · route:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
+ KUZUSHI › activity · shell route · target:none · ctx:not built · model:unconfigured · cost:$0.00 (no model calls)
 
  -- RUN FOCUS  run r-snapshot  ·  2/3 done  ·  1 running ---------------------------------------------------------------
-target:none  ·  ctx:not built  ·  execution:none · receipt pending  ·  0 findings
+target:none  ·  context not built  ·  execution:none · receipt pending  ·  0 findings
  * LIVE · current triage:run · last progress 0s ago · task-selector ran
  -- STEPS --------------------------------------------------------------------------------------------------------------
-# + context:build                                                                                                   <…
-  + semgrep:scan                                                                                                    <…
-  * triage:run                                                                                                      <…
+# + Build project context                                                                                           <…
+  + Run Semgrep scan                                                                                                <…
+  * Triage findings                                                                                                 <…
      + triage start
      + evidence-collect
      + stage1 kept 14/14

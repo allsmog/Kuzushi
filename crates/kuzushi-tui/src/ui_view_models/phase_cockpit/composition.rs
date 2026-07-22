@@ -123,19 +123,6 @@ impl Composition {
         }
     }
 
-    /// The surface a degraded (single-region) rendering keeps.
-    pub(crate) fn primary(&self) -> Option<PhaseSurfaceId> {
-        match self {
-            Self::Columns(ids) => ids.first().copied(),
-            Self::CanvasWithDrawer { canvas, .. } => Some(*canvas),
-            Self::CenteredForm(id) | Self::QuestionCard(id) | Self::FullScreen(id) => Some(*id),
-            Self::OperationalColumns { center, .. } => Some(*center),
-            Self::ListDetail { list, .. } => Some(*list),
-            Self::FocusDetail { body, .. } => Some(*body),
-            Self::Triptych { diff, .. } => Some(*diff),
-        }
-    }
-
     /// Solve this composition into per-surface rects inside `area`, applying
     /// the small-terminal degradation rules: auxiliary regions (drawer, log
     /// strip, action menu) collapse first, then side regions, leaving the
