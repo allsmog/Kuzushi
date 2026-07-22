@@ -1,14 +1,7 @@
-# The cpg-rs git dependencies live in a private repo reachable over SSH only;
-# Cargo's built-in git transport cannot use the system SSH agent/keys, so
-# fetch with the git CLI instead.
+# Fetch git dependencies through the system git binary so its credential helper
+# is used (e.g. the gh CLI locally, or GITHUB_TOKEN/PAT-backed HTTPS auth in
+# CI). Required for the private oxidized-joern (cpg-*) dependency pinned in the
+# workspace Cargo.toml. Without this, cargo's built-in libgit2 fetch does not
+# consult the git credential helper and the private clone fails.
 [net]
 git-fetch-with-cli = true
-
-# Local development on this box: resolve the cpg-rs crates from the live
-# oxidized-joern checkout instead of fetching over SSH. Machines with repo
-# access can delete this block and build from the pinned rev directly.
-[patch."ssh://git@github.com/allsmog/oxidized-joern.git"]
-cpg-analysis = { path = "/home/ci/oxidized-joern/cpg-rs/cpg-analysis" }
-cpg-cli = { path = "/home/ci/oxidized-joern/cpg-rs/cpg-cli" }
-cpg-core = { path = "/home/ci/oxidized-joern/cpg-rs/cpg-core" }
-cpg-incremental = { path = "/home/ci/oxidized-joern/cpg-rs/cpg-incremental" }

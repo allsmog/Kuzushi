@@ -429,7 +429,7 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 [[package]]
 name = "cpg-analysis"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-core",
  "rayon",
@@ -440,7 +440,7 @@ dependencies = [
 [[package]]
 name = "cpg-cli"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-analysis",
  "cpg-core",
@@ -456,12 +456,12 @@ dependencies = [
 [[package]]
 name = "cpg-core"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 
 [[package]]
 name = "cpg-frontend"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-core",
 ]
@@ -469,7 +469,7 @@ dependencies = [
 [[package]]
 name = "cpg-incremental"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-analysis",
  "cpg-core",
@@ -480,7 +480,7 @@ dependencies = [
 [[package]]
 name = "cpg-lang-c"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
@@ -491,7 +491,7 @@ dependencies = [
 [[package]]
 name = "cpg-lang-python"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
@@ -502,7 +502,7 @@ dependencies = [
 [[package]]
 name = "cpg-lang-ts"
 version = "0.1.0"
-source = "git+ssh://git@github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
