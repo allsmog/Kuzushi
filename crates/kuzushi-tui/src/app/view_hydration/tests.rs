@@ -142,7 +142,6 @@ fn cold_artifact_backed_views_do_not_touch_the_reader_during_render() {
         ShellView::ProjectModel,
         ShellView::StrategyQueue,
         ShellView::FailureHandoff,
-        ShellView::AgentChat,
         ShellView::Activity,
         ShellView::PlanningPicker,
         ShellView::Scene,

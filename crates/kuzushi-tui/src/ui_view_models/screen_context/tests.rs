@@ -145,7 +145,7 @@ fn prompt_json_is_structured_and_bounded() {
 #[test]
 fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
     let context = ScreenContext {
-        view: "AgentChat".to_string(),
+        view: "Workbench".to_string(),
         focused_pane: None,
         selected_item: Some(ScreenSelectedItem {
             alias: Some("F-0001".to_string()),

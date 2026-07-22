@@ -265,10 +265,6 @@ impl ShellApp {
                 self.open_failure_handoff();
                 Some(Vec::new())
             }
-            ShellCommand::AgentChat => {
-                self.open_agent_chat();
-                Some(Vec::new())
-            }
             ShellCommand::Logs => {
                 self.show_logs();
                 Some(Vec::new())
@@ -782,15 +778,6 @@ impl ShellApp {
             self.log("handoff", "latest bounded failure handoff");
         } else {
             self.log("handoff", "no failure handoff is loaded");
-        }
-    }
-
-    fn open_agent_chat(&mut self) {
-        self.set_shell_view(ShellView::AgentChat);
-        if self.agent_chat().is_some() {
-            self.log("chat", "agent conversation");
-        } else {
-            self.log("chat", "no questions asked yet. Next: ask <question>");
         }
     }
 

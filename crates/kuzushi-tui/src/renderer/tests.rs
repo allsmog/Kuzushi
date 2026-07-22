@@ -3061,44 +3061,6 @@ fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
 }
 
 #[test]
-fn renders_agent_chat_mode_while_question_is_active() {
-    let backend = TestBackend::new(80, 22);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(
-        V2Config {
-            model: Some("openai:gpt-4.1".to_string()),
-            ..V2Config::default()
-        },
-        None,
-    );
-    app.set_agent_chat(Some(crate::app::AgentChatView {
-        question: "What should I run first?".to_string(),
-        answer: None,
-        running: true,
-        abort_requested: false,
-        error: None,
-        history: Vec::new(),
-        run_id: None,
-        started_secs: 0,
-        screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
-        failure_context: None,
-        pending_failure_context: None,
-    }));
-    app.set_shell_view(ShellView::AgentChat);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("AGENT"));
-    assert!(rendered.contains("running"));
-    assert!(rendered.contains("agent route"));
-    assert!(rendered.contains("agent: active"));
-    assert!(rendered.contains("scope: F-0001"));
-    assert!(rendered.contains("kuzushi/agent>"));
-    assert!(!rendered.contains("┌"));
-}
-
-#[test]
 fn renders_honest_abort_requested_states() {
     let backend = TestBackend::new(96, 22);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3109,31 +3071,7 @@ fn renders_honest_abort_requested_states() {
         },
         None,
     );
-    app.set_shell_view(ShellView::AgentChat);
-    app.set_agent_chat(Some(crate::app::AgentChatView {
-        question: "What changed?".to_string(),
-        answer: None,
-        running: true,
-        abort_requested: true,
-        error: None,
-        history: Vec::new(),
-        run_id: None,
-        started_secs: 0,
-        screen_context_scope: None,
-        failure_context: None,
-        pending_failure_context: None,
-    }));
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let agent_rendered = format!("{:?}", terminal.backend().buffer());
-    assert!(agent_rendered.contains("abort requested"));
-    assert!(agent_rendered.contains("Process kill is not confirmed"));
-    assert!(!agent_rendered.contains("killed"));
-
-    let backend = TestBackend::new(96, 22);
-    let mut terminal = Terminal::new(backend).unwrap();
     app.set_shell_view(ShellView::ModuleRun);
-    app.clear_agent_chat();
     app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-1".to_string()),
         target: std::path::PathBuf::from("."),
@@ -3149,54 +3087,6 @@ fn renders_honest_abort_requested_states() {
     assert!(scan_rendered.contains("abort requested"));
     assert!(scan_rendered.contains("waiting for subprocess"));
     assert!(!scan_rendered.contains("killed"));
-}
-
-#[test]
-fn agent_chat_renders_failure_handoff_panel() {
-    let backend = TestBackend::new(120, 34);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_agent_chat(Some(crate::app::AgentChatView {
-        question: "what next?".to_string(),
-        answer: None,
-        running: false,
-        abort_requested: false,
-        error: None,
-        history: Vec::new(),
-        run_id: None,
-        started_secs: 0,
-        screen_context_scope: None,
-        failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
-            failed_stage: "semgrep:scan".to_string(),
-            cause: "semgrep binary missing".to_string(),
-            what_failed: "semgrep:scan did not complete successfully".to_string(),
-            artifacts_available: vec![kuzushi_core::run_artifacts::RunArtifact {
-                label: "run".to_string(),
-                path: ui_run_artifact_relative_path("r-1", "run.json"),
-                kind: "json".to_string(),
-            }],
-            missing_artifacts: vec!["findings.json".to_string()],
-            allowed_proof_level: "artifact-review-only; runtime verification did not run"
-                .to_string(),
-            next_files_or_artifacts_to_inspect: vec![ui_run_artifact_relative_path(
-                "r-1", "run.json",
-            )],
-            recovery_options: vec!["Install semgrep and rerun semgrep:scan.".to_string()],
-            fallback_prompt: "Continue the failed Kuzushi run for semgrep:scan.".to_string(),
-            claims_forbidden: vec!["validated".to_string(), "verified".to_string()],
-        }),
-        pending_failure_context: None,
-    }));
-    app.set_shell_view(ShellView::AgentChat);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("FAILURE HANDOFF"));
-    assert!(rendered.contains("semgrep:scan"));
-    assert!(rendered.contains("artifact-review-only"));
-    assert!(rendered.contains("findings.json"));
-    assert!(rendered.contains("validated, verified"));
 }
 
 #[test]
@@ -3481,7 +3371,6 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::KnowledgeBase, "KB ATTACHMENTS", None, None),
         (ShellView::FilePicker, "ATTACH A FILE", None, None),
         (ShellView::FailureHandoff, "FAILURE HANDOFF", None, None),
-        (ShellView::AgentChat, "AGENT", None, None),
         (ShellView::History, "COMMAND HISTORY", None, None),
         (ShellView::Story, "SESSION STORY", None, None),
         (ShellView::Auth, "PROVIDERS", None, None),
@@ -5676,64 +5565,6 @@ fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
 }
 
 #[test]
-fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
-    // `design/mockups/agent-chat.jsx::bubble` paints multi-turn
-    // conversations as alternating you/agent bubbles.  Verify a
-    // history of two prior turns + an active turn all reach the
-    // buffer with their respective questions and answers visible.
-    let backend = TestBackend::new(120, 36);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(
-        V2Config {
-            model: Some("openai:gpt-4.1".to_string()),
-            ..V2Config::default()
-        },
-        None,
-    );
-    app.set_agent_chat(Some(crate::app::AgentChatView {
-        question: "now what?".to_string(),
-        answer: Some("scan first.".to_string()),
-        running: false,
-        abort_requested: false,
-        error: None,
-        history: vec![
-            crate::app::ChatTurn {
-                question: "what should I do first?".to_string(),
-                answer: Some("build context.".to_string()),
-                error: None,
-            },
-            crate::app::ChatTurn {
-                question: "did context build succeed?".to_string(),
-                answer: Some("yes, snapshot at .kuzushi/context-snapshot.json.".to_string()),
-                error: None,
-            },
-        ],
-        run_id: None,
-        started_secs: 0,
-        screen_context_scope: None,
-        failure_context: None,
-        pending_failure_context: None,
-    }));
-    app.set_shell_view(ShellView::AgentChat);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    // History turn 1
-    assert!(rendered.contains("what should I do first?"));
-    assert!(rendered.contains("build context."));
-    // History turn 2
-    assert!(rendered.contains("did context build succeed?"));
-    assert!(rendered.contains("snapshot at"));
-    // Active turn
-    assert!(rendered.contains("now what?"));
-    assert!(rendered.contains("scan first."));
-    // Both you/agent tags present at least once each.
-    assert!(rendered.matches("you").count() >= 1);
-    assert!(rendered.matches("agent").count() >= 1);
-}
-
-#[test]
 fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
     // Sanity-check the helper that backs the multi-turn UX: a
     // completed turn should fold into history; an empty initial
@@ -5762,45 +5593,6 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
     assert_eq!(next2.history.len(), 1);
     assert_eq!(next2.history[0].question, "first question");
     assert_eq!(next2.question, "second question");
-}
-
-#[test]
-fn agent_chat_renders_role_tagged_bubbles() {
-    // `design/mockups/agent-chat.jsx::bubble` paints a tag header on
-    // each turn:  `  you  ──...──`  (c-accent) for the operator side,
-    // ` agent ──...──` (c-success) for the agent side.  Verify both
-    // tags reach the buffer when an agent question is in flight.
-    let backend = TestBackend::new(120, 26);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(
-        V2Config {
-            model: Some("openai:gpt-4.1".to_string()),
-            ..V2Config::default()
-        },
-        None,
-    );
-    app.set_agent_chat(Some(crate::app::AgentChatView {
-        question: "What should I run first?".to_string(),
-        answer: Some("Run sast:scan against the active target.".to_string()),
-        running: false,
-        abort_requested: false,
-        error: None,
-        history: Vec::new(),
-        run_id: None,
-        started_secs: 0,
-        screen_context_scope: None,
-        failure_context: None,
-        pending_failure_context: None,
-    }));
-    app.set_shell_view(ShellView::AgentChat);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("you"), "missing operator tag: {rendered}");
-    assert!(rendered.contains("agent"), "missing agent tag: {rendered}");
-    assert!(rendered.contains("What should I run first?"));
-    assert!(rendered.contains("Run sast:scan against the active target."));
 }
 
 #[test]

@@ -140,8 +140,7 @@ pub(crate) fn has_run_activity(app: &ShellApp) -> bool {
 }
 
 fn has_agent_activity(app: &ShellApp) -> bool {
-    matches!(app.shell_view(), ShellView::AgentChat)
-        || app.agent_chat().is_some_and(|agent| agent.running)
+    app.agent_chat().is_some_and(|agent| agent.running)
 }
 
 fn has_plan_activity(app: &ShellApp) -> bool {

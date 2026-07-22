@@ -104,7 +104,6 @@ fn workspace_view_status(app: &ShellApp) -> String {
         ShellView::Workspace => "workspace".to_string(),
         ShellView::KnowledgeBase => "kb".to_string(),
         ShellView::FailureHandoff => "failure-handoff".to_string(),
-        ShellView::AgentChat => "agent chat".to_string(),
         ShellView::History => "history".to_string(),
         ShellView::Story => "story".to_string(),
         ShellView::Auth => "auth".to_string(),

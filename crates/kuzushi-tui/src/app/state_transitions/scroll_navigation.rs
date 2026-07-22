@@ -199,7 +199,6 @@ impl ShellApp {
             | ShellView::StrategyQueue
             | ShellView::Workspace
             | ShellView::KnowledgeBase
-            | ShellView::AgentChat
             | ShellView::History
             | ShellView::Story
             | ShellView::Threat

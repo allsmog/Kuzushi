@@ -156,7 +156,6 @@ impl ShellApp {
                 | ShellView::Setup
                 | ShellView::PromptsEditor
                 | ShellView::ThreatEditor
-                | ShellView::AgentChat
                 | ShellView::Story
                 | ShellView::FailureHandoff
                 | ShellView::Trace

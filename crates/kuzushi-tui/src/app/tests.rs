@@ -14985,7 +14985,6 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let ticket = app.jobs_mut().start(JobKind::Agent, "agent");
     let cancel = ticket.cancel.clone();
-    app.set_shell_view(ShellView::AgentChat);
     app.set_agent_cancel(Some(cancel.clone()));
     app.set_agent_chat(Some(AgentChatView {
         question: "what changed?".to_string(),

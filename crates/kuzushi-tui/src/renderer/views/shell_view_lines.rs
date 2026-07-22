@@ -222,7 +222,6 @@ fn workspace_session_shell_view_lines(
             app.router.kb().scroll(),
         ),
         ShellView::FailureHandoff => failure_handoff_lines(app, area),
-        ShellView::AgentChat => default_scrolled_lines(app, area, agent_chat_lines(app, area)),
         ShellView::History => viewport_lines(
             history_lines(app, area),
             area.height,
@@ -267,7 +266,6 @@ mod tests {
             ShellView::ProjectModel,
             ShellView::StrategyQueue,
             ShellView::Workspace,
-            ShellView::AgentChat,
             ShellView::Story,
         ] {
             let mut app = ShellApp::new(V2Config::default(), None);

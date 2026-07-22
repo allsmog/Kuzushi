@@ -776,7 +776,6 @@ mod tests {
         let expected = std::collections::BTreeSet::from([
             "activity",
             "actor",
-            "agent-chat",
             "aim",
             "attach",
             "ask",
@@ -1027,7 +1026,6 @@ mod tests {
             ShellCommand::Trace(_) => "trace",
             ShellCommand::Activity => "activity",
             ShellCommand::FailureHandoff => "failure-handoff",
-            ShellCommand::AgentChat => "agent-chat",
             ShellCommand::Plan(_) => "plan",
             ShellCommand::PhaseIntent { .. } => "phase-intent",
             ShellCommand::PlanApply => "plan-apply",

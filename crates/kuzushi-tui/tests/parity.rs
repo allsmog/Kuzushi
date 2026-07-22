@@ -2518,18 +2518,6 @@ parity_case!(actor_bind, "actor-bind.jsx", |app| view(
     ShellView::ActorDetail
 ));
 parity_case!(actor, "actor.jsx", |app| view(app, ShellView::ActorDetail));
-parity_case!(agent_chat_stream, "agent-chat-stream.jsx", |app| view(
-    app,
-    ShellView::AgentChat
-));
-parity_case!(agent_chat, "agent-chat.jsx", |app| view(
-    app,
-    ShellView::AgentChat
-));
-parity_case!(agent_refused, "agent-refused.jsx", |app| view(
-    app,
-    ShellView::AgentChat
-));
 parity_case!(agent_router, "agent-router.jsx", |app| view(
     app,
     ShellView::Tools

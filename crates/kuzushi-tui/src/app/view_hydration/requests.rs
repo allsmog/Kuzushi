@@ -36,7 +36,7 @@ fn append_view_hydration_keys(app: &ShellApp, view: ShellView, keys: &mut Vec<Vi
         ShellView::Health => append_health_keys(app, keys),
         ShellView::ProjectModel => append_project_model_keys(app, keys),
         ShellView::StrategyQueue => keys.push(ViewHydrationKey::StrategyQueue),
-        ShellView::FailureHandoff | ShellView::AgentChat => {
+        ShellView::FailureHandoff => {
             append_latest_run_keys(app, keys);
         }
         _ => {}

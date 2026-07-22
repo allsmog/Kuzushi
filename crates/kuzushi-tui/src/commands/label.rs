@@ -82,9 +82,6 @@ pub enum ShellCommand {
     Trace(String),
     Activity,
     FailureHandoff,
-    /// Open the agent conversation surface explicitly. `ask` itself is a
-    /// fallthrough that never navigates away from the current view.
-    AgentChat,
     Plan(String),
     /// Free-form prose submitted from a durable Workbench phase. The selected
     /// page is carried explicitly; it never mutates workflow reality.

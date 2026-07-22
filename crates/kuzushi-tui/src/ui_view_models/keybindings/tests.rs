@@ -408,7 +408,6 @@ fn navigate_mode_views_show_scroll_and_truthful_prompt_escape() {
         ShellView::StrategyQueue,
         ShellView::Workspace,
         ShellView::KnowledgeBase,
-        ShellView::AgentChat,
         ShellView::PromptsEditor,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -469,7 +468,6 @@ fn footers_do_not_relabel_back_as_home() {
         ShellView::Recommend,
         ShellView::Threat,
         ShellView::ModuleRun,
-        ShellView::AgentChat,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_shell_view(view);

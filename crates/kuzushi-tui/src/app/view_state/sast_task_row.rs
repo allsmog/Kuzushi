@@ -162,7 +162,6 @@ pub enum ShellView {
     Workspace,
     KnowledgeBase,
     FailureHandoff,
-    AgentChat,
     History,
     Story,
     /// `/auth` providers + model + spend surface.  See

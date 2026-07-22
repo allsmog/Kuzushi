@@ -438,13 +438,6 @@ fn knowledge_base_view_default() {
 }
 
 #[test]
-fn agent_chat_view_default() {
-    let mut app = fresh_app();
-    app.set_shell_view(ShellView::AgentChat);
-    assert_plain_snapshot("agent_chat_view_default", &render_at_120(&mut app));
-}
-
-#[test]
 fn story_view_default() {
     let mut app = fresh_app();
     app.set_shell_view(ShellView::Story);
@@ -630,7 +623,6 @@ fn every_shell_view_produces_non_empty_plain_output() {
         ("workspace", ShellView::Workspace, None, None),
         ("knowledge_base", ShellView::KnowledgeBase, None, None),
         ("failure_handoff", ShellView::FailureHandoff, None, None),
-        ("agent_chat", ShellView::AgentChat, None, None),
         ("history", ShellView::History, None, None),
         ("story", ShellView::Story, None, None),
         ("auth", ShellView::Auth, None, None),

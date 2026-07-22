@@ -83,7 +83,6 @@ fn workspace_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::Workspace => Some("Workspace"),
         ShellView::KnowledgeBase => Some("KnowledgeBase"),
         ShellView::FailureHandoff => Some("FailureHandoff"),
-        ShellView::AgentChat => Some("AgentChat"),
         ShellView::History => Some("History"),
         ShellView::Story => Some("Story"),
         ShellView::Patch => Some("Patch"),

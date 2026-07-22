@@ -20,7 +20,6 @@ mod activity_scroll;
 mod activity_view;
 mod actor_detail;
 mod advisory_chrome;
-mod agent_chat;
 mod ambient_progress;
 mod attack_surface;
 mod auth;
@@ -118,7 +117,6 @@ pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscr
 pub(crate) use advisory_chrome::{
     cost_cap_halt_model, notice_banner_model, throttle_banner_model, CostCapHaltModel,
 };
-pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
 pub(crate) use ambient_progress::ambient_progress_chip;
 pub(crate) use attack_surface::{
     attack_surface_risk_model, AttackSurfaceRiskModel, AttackSurfaceRow,

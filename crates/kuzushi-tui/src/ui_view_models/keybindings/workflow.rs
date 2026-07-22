@@ -6,7 +6,6 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::Threat => Some(threat_keybindings(app)),
         ShellView::ModuleRun => Some(module_run_keybindings(app)),
         ShellView::PromptsEditor => Some(prompts_editor_keybindings(app)),
-        ShellView::AgentChat => Some(agent_chat_keybindings(app)),
         ShellView::Activity => Some(activity_keybindings(app)),
         _ => None,
     }
@@ -48,12 +47,3 @@ fn prompts_editor_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings
 }
 
-fn agent_chat_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    let mut bindings = Vec::new();
-    push_view_keybindings(&mut bindings, app);
-    bindings.extend([
-        bind("ask <q>", "new question (?text is the shorthand)"),
-        bind("model", "runtime"),
-    ]);
-    bindings
-}

@@ -42,7 +42,10 @@ fn module_run_transcript_does_not_count_as_live_activity() {
 fn routing_mode_prioritizes_agent_over_plan() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_planner_running(true);
-    app.set_shell_view(ShellView::AgentChat);
+    app.set_agent_chat(Some(crate::app::AgentChatView {
+        running: true,
+        ..crate::app::AgentChatView::default()
+    }));
 
     assert_eq!(routing_mode(&app), RoutingMode::Agent);
 }
