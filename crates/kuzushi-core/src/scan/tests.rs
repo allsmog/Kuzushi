@@ -463,8 +463,12 @@ mod tests {
                 "auto",
                 "--config",
                 "p/security-audit",
-                "/tmp/repo",
+                ".",
             ]
+        );
+        assert_eq!(
+            command.get_current_dir(),
+            Some(std::path::Path::new("/tmp/repo"))
         );
         let metrics_env = command
             .get_envs()

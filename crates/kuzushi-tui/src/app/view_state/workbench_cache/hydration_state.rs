@@ -91,6 +91,13 @@ impl WorkbenchCache {
                     target_revision.as_deref(),
                 )
                 .is_not_requested(),
+            ViewHydrationKey::ScannedSnippet {
+                stable_fp,
+                scan_id,
+                focus_line,
+            } => self
+                .cached_scanned_snippet(target, stable_fp, scan_id.as_deref(), *focus_line)
+                .is_not_requested(),
             _ => false,
         }
     }

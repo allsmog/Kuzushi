@@ -91,8 +91,12 @@ impl SemgrepScanner {
         for config in &self.config {
             command.arg("--config").arg(config);
         }
+        // Recent semgrep releases reject absolute scanning roots ("Invalid
+        // scanning root"), so scan `.` from inside the target. This also keeps
+        // reported finding paths target-relative.
         command
-            .arg(target)
+            .arg(".")
+            .current_dir(target)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         configure_scanner_subprocess_env(&mut command);

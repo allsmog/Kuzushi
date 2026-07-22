@@ -229,3 +229,24 @@ fn scanned_snippet_hydration_reports_missing_without_a_stored_blob() {
         ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing)
     ));
 }
+
+#[test]
+fn scanned_snippet_hydration_is_needed_until_a_value_is_applied() {
+    let temp = tempfile::tempdir().unwrap();
+    let key = ViewHydrationKey::ScannedSnippet {
+        stable_fp: "fi_regression".to_string(),
+        scan_id: Some("tool-1".to_string()),
+        focus_line: 7,
+    };
+    let mut cache = WorkbenchCache::default();
+
+    assert!(cache.view_hydration_needed(temp.path(), &key));
+
+    cache.apply_view_hydration(ViewHydrationResult {
+        target: temp.path().to_path_buf(),
+        key: key.clone(),
+        value: ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing),
+    });
+
+    assert!(!cache.view_hydration_needed(temp.path(), &key));
+}
