@@ -1,6 +1,6 @@
 use super::*;
 use crate::capabilities::fuzz_engine::{
-    author, bootstrap, derived_workspace_root, engine_cli, import, rounds, FuzzPaths,
+    author, bootstrap, derived_workspace_root, engine_cli, import, provision, rounds, FuzzPaths,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -10,6 +10,7 @@ const MAX_FUZZ_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 const WORKSPACE_INIT_TIMEOUT: Duration = Duration::from_secs(300);
 const SINK_SCAN_TIMEOUT: Duration = Duration::from_secs(1800);
 const GENERATE_TIMEOUT: Duration = Duration::from_secs(1800);
+const PROVISION_STEP_TIMEOUT: Duration = Duration::from_secs(300);
 
 pub(in crate::modules) fn fuzz_module() -> BuiltinModule {
     builtin_module(
@@ -25,8 +26,8 @@ pub(in crate::modules) fn fuzz_module() -> BuiltinModule {
                 "fuzz:run",
                 "Bootstrap the engine workspace (init, sink scan, deterministic generation, \
                  builds) as needed, run bounded fuzz campaign rounds, and import verified \
-                 crashes. Returns an explicit skipped result when the engine checkout is not \
-                 configured.",
+                 crashes. Without afeRepo the pinned engine revision is auto-cloned into the \
+                 cache; a failed provision returns an explicit skipped result.",
                 fuzz_run_options(),
             )
             .with_policy(repository_execute_policy(
@@ -77,10 +78,37 @@ fn shared_engine_options() -> Vec<OptionSpec> {
             "afeRepo",
             OptionType::Path,
             "agentic-fuzz-engine checkout (must contain src/agentic_fuzz_engine/cli.py). \
-             When omitted, the tool returns an explicit skipped result.",
+             When omitted, the pinned engine revision is auto-cloned into \
+             ~/.cache/agentic-fuzz/engine-<rev8> and reused across runs.",
         )
         .external_read()
         .aliases(&["afe_repo"]),
+        opt(
+            "afeGitUrl",
+            OptionType::String,
+            "Engine git remote used for auto-provisioning when afeRepo is omitted.",
+        )
+        .aliases(&["afe_git_url"])
+        .default(json!(provision::DEFAULT_AFE_GIT_URL))
+        .advanced(),
+        opt(
+            "afeRev",
+            OptionType::String,
+            "Pinned engine commit (full 40-hex sha) for auto-provisioning. Bump deliberately; \
+             each rev gets its own cache directory.",
+        )
+        .aliases(&["afe_rev"])
+        .default(json!(provision::DEFAULT_AFE_REV))
+        .advanced(),
+        opt(
+            "afeGitSshKey",
+            OptionType::Path,
+            "ssh private key for the engine remote when the ambient ssh config cannot reach \
+             it (built into GIT_SSH_COMMAND with IdentitiesOnly/BatchMode).",
+        )
+        .external_read()
+        .aliases(&["afe_git_ssh_key"])
+        .advanced(),
         opt(
             "pythonBin",
             OptionType::Path,
@@ -310,19 +338,10 @@ fn prepare_fuzz_paths(
     input: &Value,
     target: &Path,
 ) -> Result<FuzzReadiness> {
-    let Some(afe_repo) = optional_string_input(input, &["afeRepo", "afe_repo"])? else {
-        return Ok(FuzzReadiness::Skip(
-            "no afeRepo option was provided — pass the agentic-fuzz-engine checkout path \
-             to enable fuzzing"
-                .to_string(),
-        ));
+    let afe_repo = match resolve_afe_repo(input)? {
+        RepoResolution::Ready(path) => path,
+        RepoResolution::Skip(reason) => return Ok(FuzzReadiness::Skip(reason)),
     };
-    let afe_repo = PathBuf::from(afe_repo);
-    anyhow::ensure!(
-        engine_cli::afe_repo_is_valid(&afe_repo),
-        "afeRepo {} is not an agentic-fuzz-engine checkout (missing src/agentic_fuzz_engine/cli.py)",
-        afe_repo.display()
-    );
     let explicit_python =
         optional_string_input(input, &["pythonBin", "python_bin"])?.map(PathBuf::from);
     let Some(python_bin) = engine_cli::locate_python(&afe_repo, explicit_python.as_deref())
@@ -340,6 +359,51 @@ fn prepare_fuzz_paths(
         data_root,
         source_dir: target.to_path_buf(),
     }))
+}
+
+#[derive(Debug)]
+enum RepoResolution {
+    Ready(PathBuf),
+    Skip(String),
+}
+
+/// An explicit `afeRepo` must be a valid checkout (hard error otherwise);
+/// without one, the pinned engine revision is auto-provisioned into the
+/// cache. A failed provision skips the tool with actionable guidance rather
+/// than failing a whole campaign wave on a box that cannot reach the remote.
+fn resolve_afe_repo(input: &Value) -> Result<RepoResolution> {
+    if let Some(explicit) = optional_string_input(input, &["afeRepo", "afe_repo"])? {
+        let path = PathBuf::from(explicit);
+        anyhow::ensure!(
+            engine_cli::afe_repo_is_valid(&path),
+            "afeRepo {} is not an agentic-fuzz-engine checkout (missing src/agentic_fuzz_engine/cli.py)",
+            path.display()
+        );
+        return Ok(RepoResolution::Ready(path));
+    }
+    let spec = provision_spec_from_input(input)?;
+    match provision::provision_engine(&spec) {
+        Ok(dir) => Ok(RepoResolution::Ready(dir)),
+        Err(error) => Ok(RepoResolution::Skip(format!(
+            "auto-provisioning engine rev {} from {} failed ({error:#}) — pass afeRepo \
+             (a local checkout) or afeGitSshKey (a key that can read the remote)",
+            &spec.rev[..8.min(spec.rev.len())],
+            spec.git_url,
+        ))),
+    }
+}
+
+fn provision_spec_from_input(input: &Value) -> Result<provision::ProvisionSpec> {
+    Ok(provision::ProvisionSpec {
+        git_url: optional_string_input(input, &["afeGitUrl", "afe_git_url"])?
+            .unwrap_or_else(|| provision::DEFAULT_AFE_GIT_URL.to_string()),
+        rev: optional_string_input(input, &["afeRev", "afe_rev"])?
+            .unwrap_or_else(|| provision::DEFAULT_AFE_REV.to_string()),
+        ssh_key: optional_string_input(input, &["afeGitSshKey", "afe_git_ssh_key"])?
+            .map(PathBuf::from),
+        cache_home: home_dir()?.join(".cache/agentic-fuzz"),
+        step_timeout: PROVISION_STEP_TIMEOUT,
+    })
 }
 
 fn resolve_engine_workspace_root(input: &Value, target: &Path) -> Result<PathBuf> {
@@ -462,7 +526,12 @@ struct EngineRun<'a> {
     paths: &'a FuzzPaths,
     deadline: Instant,
     steps: Vec<Value>,
+    /// Any step failed → the run reports `partial`.
     failed: bool,
+    /// A foundation step (init/scan/generate) failed or the deadline hit →
+    /// stop scheduling further engine work. One target's build failure is
+    /// NOT aborting: the other targets still deserve their rounds.
+    aborted: bool,
 }
 
 impl EngineRun<'_> {
@@ -477,6 +546,7 @@ impl EngineRun<'_> {
         if timeout < Duration::from_secs(30) {
             self.record(label, "failed", json!("whole-tool deadline reached"));
             self.failed = true;
+            self.aborted = true;
             return None;
         }
         emit_step(self.ctx, "tool", "run", format!("fuzz:run {label}"));
@@ -555,6 +625,7 @@ pub(in crate::modules) fn run_fuzz_run(input: &Value, ctx: &ToolExecutionContext
         deadline: Instant::now() + timeout,
         steps: Vec::new(),
         failed: false,
+        aborted: false,
     };
     execute_bootstrap(&mut run, &options);
     let probe = bootstrap::probe_workspace(&paths.workspace_root);
@@ -599,10 +670,17 @@ fn execute_bootstrap(run: &mut EngineRun<'_>, options: &FuzzRunOptions) {
         return;
     }
     for step in plan {
-        if run.failed {
+        if run.aborted {
             return;
         }
+        let foundation = !matches!(step, bootstrap::BootstrapStep::Build(_));
+        let failed_before = run.failed;
         execute_bootstrap_step(run, options, &step);
+        // Init/scan/generate failures poison everything downstream; a single
+        // target's build failure only costs that target its rounds.
+        if foundation && run.failed && !failed_before {
+            run.aborted = true;
+        }
     }
 }
 
@@ -693,7 +771,7 @@ fn execute_rounds(
     rounds::round_budget(options.rounds, options.fuzz_seconds, selected.len() as u64, timeout)?;
     let mut summaries = Vec::new();
     for target in selected {
-        if run.failed {
+        if run.aborted {
             break;
         }
         if let Some(summary) = execute_round_for(run, options, target) {
@@ -743,8 +821,15 @@ fn execute_import(
         run.record_skip("import", "skipImport requested");
         return Ok(None);
     }
+    // A workspace that never recorded a finding has no index yet — that is
+    // a clean zero-import, not a failure.
+    if !run.paths.data_root.join("findings-index.jsonl").is_file() {
+        run.record_skip("import", "no findings index yet (engine recorded nothing)");
+        return Ok(None);
+    }
     let Some(workspace) = run.ctx.workspace else {
         run.record("import", "failed", json!("no active workspace for the findings store"));
+        run.failed = true;
         return Ok(None);
     };
     let filter = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?;
@@ -761,6 +846,7 @@ fn execute_import(
         }
         Err(error) => {
             run.record("import", "failed", json!(format!("{error:#}")));
+            run.failed = true;
             Ok(None)
         }
     }
@@ -777,11 +863,12 @@ fn fuzz_run_response(
 ) -> Value {
     let imported = import_summary.as_ref().map(|s| s.imported).unwrap_or(0);
     let output = format!(
-        "fuzz:run · {} target(s) fuzzed · {} finding(s) imported · {} workorder(s) parked{}",
+        "fuzz:run · {}/{} selected target(s) fuzzed · {} finding(s) imported · {} workorder(s) parked{}",
+        summaries.len(),
         selected.len(),
         imported,
         probe.workorders.len(),
-        if run.failed { " · BLOCKED (see steps)" } else { "" },
+        if run.failed { " · PARTIAL (see steps)" } else { "" },
     );
     let data = json!({
         "target": target.display().to_string(),
@@ -1055,11 +1142,20 @@ mod tests {
     }
 
     #[test]
-    fn missing_afe_repo_is_an_explicit_skip_and_invalid_repo_is_an_error() {
+    fn unprovisionable_engine_is_an_explicit_skip_and_invalid_repo_is_an_error() {
         let temp = tempfile::tempdir().unwrap();
-        match prepare_fuzz_paths(&json!({}), temp.path()).unwrap() {
-            FuzzReadiness::Skip(reason) => assert!(reason.contains("afeRepo"), "{reason}"),
-            FuzzReadiness::Ready(_) => panic!("must skip without afeRepo"),
+        // No afeRepo → auto-provision; a dead remote plus an uncached rev
+        // keeps the attempt hermetic and makes it fail fast.
+        let input = json!({
+            "afeGitUrl": temp.path().join("no-remote").display().to_string(),
+            "afeRev": "b".repeat(40),
+        });
+        match prepare_fuzz_paths(&input, temp.path()).unwrap() {
+            FuzzReadiness::Skip(reason) => {
+                assert!(reason.contains("auto-provisioning"), "{reason}");
+                assert!(reason.contains("afeRepo"), "{reason}");
+            }
+            FuzzReadiness::Ready(_) => panic!("must skip when provisioning fails"),
         }
 
         let error = prepare_fuzz_paths(
@@ -1069,6 +1165,25 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(error.contains("not an agentic-fuzz-engine checkout"), "{error}");
+    }
+
+    #[test]
+    fn provision_spec_folds_options_over_the_pinned_defaults() {
+        let spec = provision_spec_from_input(&json!({})).unwrap();
+        assert_eq!(spec.git_url, provision::DEFAULT_AFE_GIT_URL);
+        assert_eq!(spec.rev, provision::DEFAULT_AFE_REV);
+        assert_eq!(spec.ssh_key, None);
+        assert!(spec.cache_home.ends_with(".cache/agentic-fuzz"), "{spec:?}");
+
+        let overridden = provision_spec_from_input(&json!({
+            "afeGitUrl": "file:///srv/afe.git",
+            "afeRev": "c".repeat(40),
+            "afeGitSshKey": "/keys/deploy",
+        }))
+        .unwrap();
+        assert_eq!(overridden.git_url, "file:///srv/afe.git");
+        assert_eq!(overridden.rev, "c".repeat(40));
+        assert_eq!(overridden.ssh_key, Some(PathBuf::from("/keys/deploy")));
     }
 
     #[test]
@@ -1163,6 +1278,7 @@ mod tests {
             initialized: true,
             sinks_present: true,
             targets: vec!["a".into(), "b".into()],
+            buildable: ["a".to_string()].into_iter().collect(),
             built: ["a".to_string()].into_iter().collect(),
             workorders: vec!["b".into()],
         };

@@ -132,7 +132,7 @@ pub(crate) fn capability_disposition(id: &str) -> Option<CapabilityDisposition> 
         | "entry-points" | "fleet" | "module-recommender" | "pack" | "randori" | "report"
         | "router" | "suppress" | "triage" | "workspace" | "x-ray" => Folded,
         "agentic-sast" | "cargo-audit" | "codeql" | "codeql-db" | "cpg" | "dep-hygiene"
-        | "govulncheck" | "iac-scan" | "license-scan" | "ndiff" | "offense-review"
+        | "fuzz" | "govulncheck" | "iac-scan" | "license-scan" | "ndiff" | "offense-review"
         | "sbom-scan" | "secret-scan" | "semgrep" | "taint-iris-next" | "threat-intel"
         | "variant" => Expert,
         "android-apk" | "prompt-armor" | "shinsa" | "tob" | "vuln-scout" | "wasm-plugin" => {

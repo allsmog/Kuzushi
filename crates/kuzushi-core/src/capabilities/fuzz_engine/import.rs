@@ -76,7 +76,7 @@ fn gate_rows(
     for row in folded {
         if request
             .target_filter
-            .is_some_and(|target| row.recorded.target != target)
+            .is_some_and(|target| !target_matches(&row.recorded.target, target))
         {
             continue;
         }
@@ -87,6 +87,12 @@ fn gate_rows(
         eligible.push(row);
     }
     (eligible, skipped_unverified)
+}
+
+/// The engine records `target` either as the bare name or in project-path
+/// form (`localfuzz/c/<name>`); a filter must match both spellings.
+fn target_matches(recorded: &str, filter: &str) -> bool {
+    recorded == filter || recorded.ends_with(&format!("/{filter}"))
 }
 
 /// Same folded content → same run id, so a re-import replays instead of
@@ -460,11 +466,12 @@ mod tests {
     }
 
     #[test]
-    fn target_filter_limits_the_import() {
+    fn target_filter_limits_the_import_and_accepts_project_path_form() {
         let (temp, workspace) = fixture_workspace();
+        // The engine writes this spelling on per-target rounds (observed live).
         let other = recorded_line("finding-bb", true, "read").replace(
             r#""target":"vhdx""#,
-            r#""target":"ntfs""#,
+            r#""target":"localfuzz/c/ntfs""#,
         );
         let body = format!("{}\n{other}\n", recorded_line("finding-aa", true, "read"));
         let data_root = write_afe_workspace(temp.path(), &body, None);
@@ -477,7 +484,10 @@ mod tests {
 
         let summary = import_afe_findings(&workspace, &request).unwrap();
 
-        assert_eq!(summary.imported, 1);
+        assert_eq!(summary.imported, 1, "project-path target spelling must match");
+        assert!(target_matches("vhdx", "vhdx"));
+        assert!(target_matches("localfuzz/c/vhdx", "vhdx"));
+        assert!(!target_matches("localfuzz/c/vhdx_meta", "vhdx"));
     }
 
     #[test]

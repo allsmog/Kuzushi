@@ -322,7 +322,7 @@ fn planning_picker_options_focus_marks_the_options_pane() {
 fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
     use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
 
-    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/9"), (60, 20, "TASKS 1-6/9")] {
+    for (width, height, expected_window) in [(80, 24, "TASKS 1-8/10"), (60, 20, "TASKS 1-6/10")] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -357,7 +357,7 @@ fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
             "{width}x{height}: {rendered}"
         );
         assert!(
-            rendered.contains("Enter: run 5 new steps · skip 4 unchecked"),
+            rendered.contains("Enter: run 5 new steps · skip 5 unchecked"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -402,7 +402,7 @@ fn compact_planning_picker_scrolls_to_keep_the_focused_task_legible() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("TASKS 4-9/9"), "{rendered}");
+    assert!(rendered.contains("TASKS 5-10/10"), "{rendered}");
     assert!(
         rendered.contains("> SKIP    Threat intel (CVEs)"),
         "{rendered}"

@@ -20,9 +20,11 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "agent_router/router_state.rs",     // KUZUSHI_MODELS_FILE (operator models file)
     "config/apply_env_overrides.rs",    // sanctioned env bootstrap tier
     // PATH / HOME / process-integration lookups.
+    "capabilities/fuzz_engine/engine_cli.rs",      // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries
     "modules/codeql_db_module.rs",                 // PATH which
     "modules/cpg_module.rs",                       // PATH which + KUZUSHI_JOERN_BIN locator
+    "modules/fuzz_module.rs",                      // HOME for the derived engine workspace
     "modules/pwn/mod.rs",                          // HOME for installed revng
     "process_lookup.rs",                           // PATH which
     "scan/engines/codeql/hex_value/codeql_binary.rs", // PATH which

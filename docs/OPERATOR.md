@@ -372,6 +372,32 @@ surface — no model calls; `C` on the Review page drafts it),
 `context:build`, `context-lite:index`, `cpg:build` (Joern CPG),
 `engagement:aim` (engagement scoping).
 
+**Fuzzing (agentic-fuzz-engine)** — drives an external
+agentic-fuzz-engine checkout (`afeRepo` option) against C/C++ targets;
+when `afeRepo` is omitted the pinned engine revision is auto-cloned
+once into `~/.cache/agentic-fuzz/engine-<rev8>` and reused (override
+the pin with `afeRev`/`afeGitUrl`; pass `afeGitSshKey` when the
+ambient ssh config cannot read the engine remote; a failed provision
+skips the tool with guidance instead of failing the run). The
+engine workspace lives outside the repo (default
+`~/.cache/agentic-fuzz/kuzushi/<target>-<hash>`, override with
+`workspaceRoot`) and the scanned tree stays read-only. `fuzz:run`
+bootstraps idempotently (workspace init → sink scan → deterministic
+generation from a `generatorSpec` → builds), runs bounded campaign
+rounds (`rounds`/`fuzzSeconds`, engine-side disk/RSS guards), then
+imports verified crashes as `vuln_source=fuzzing` findings with
+impact-derived severity (write/exec primitive → high, everything else
+capped medium). `fuzz:author` (Map phase, model-backed, `budgetUsd`)
+runs a Rust-driven tool loop that authors harnesses for the engine's
+parked workorders — writes are contained to the target's
+harness/build-spec files, builds and smoke runs are the deterministic
+verdict, and per-step model spend lands in the run trace. `fuzz:import`
+folds an existing engine ledger into the findings store without running
+the engine; `fuzz:status` is a read-only workspace probe. Campaign plan
+rows dispatch both job tools with shard names mapped to engine targets
+(`shard` → `afeTarget`); pass `seasonPrompts=false` when planning fuzz
+campaigns — seasoned rows fail preparation by design.
+
 **Coverage ledger** — `coverage:baselines` (latest receipt-backed scan
 baseline per scope and phase) and `coverage:sweep` (deterministic
 staleness verdicts — `changed`/`current`/`baseline-unreachable` — from a
