@@ -7,7 +7,7 @@ size: 80x24
 KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- Enter open in Prove · findings show full queue · z open heatmap · scan again
+ Enter open in Prove · findings show full queue · i invariant hunt
 │▸ FINDINGS · 6               │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @?       │● candidate ─ ● corroborated ─ ● reproduced ─ ○
 │  SQL injection reaches...   │proven

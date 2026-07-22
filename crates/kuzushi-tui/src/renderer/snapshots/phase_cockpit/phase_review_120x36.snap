@@ -7,7 +7,7 @@ size: 120x36
 KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- Enter open in Prove · findings show full queue · z open heatmap · scan again · report open Report
+ Enter open in Prove · findings show full queue · i invariant hunt · z open heatmap · report open Report
 │▸ FINDINGS · 6                              │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @? CFM open SQL inj...  │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven
 │  SQL injection reaches query               │claim · runtime-verified

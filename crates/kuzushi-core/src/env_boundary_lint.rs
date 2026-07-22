@@ -20,12 +20,12 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "agent_router/router_state.rs", // KUZUSHI_MODELS_FILE (operator models file)
     "config/apply_env_overrides.rs", // sanctioned env bootstrap tier
     // PATH / HOME / process-integration lookups.
-    "capabilities/fuzz_engine/engine_cli.rs",      // PATH which (python3 for the engine)
+    "capabilities/fuzz_engine/engine_cli.rs", // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries
-    "modules/codeql_db_module.rs",                 // PATH which
-    "modules/fuzz_module.rs",                      // HOME for the derived engine workspace
-    "modules/pwn/mod.rs",                          // HOME for installed revng
-    "process_lookup.rs",                           // PATH which
+    "modules/codeql_db_module.rs",            // PATH which
+    "modules/fuzz_module.rs",                 // HOME for the derived engine workspace
+    "modules/pwn/mod.rs",                     // HOME for installed revng
+    "process_lookup.rs",                      // PATH which
     "scan/engines/codeql/hex_value/codeql_binary.rs", // PATH which
     // Spawn-environment sanitizers (env_clear + selective re-add / scrub).
     "capabilities/uaf_hunt/adapters/clang_subprocess.rs", // PATH re-add + KUZUSHI_MCP_CLANG_BIN
@@ -39,10 +39,9 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Documented compatibility tool locators / debug toggles.
     "capabilities/plugin_adapters/adapters/input.rs", // plugin-root env; tool input outranks
     "capabilities/taint_iris_next/application/codeql_dataflow.rs", // KUZUSHI_CODEQL_BIN
-    "capabilities/taint_iris_next/application/joern_dataflow.rs", // KUZUSHI_JOERN_* + debug log
-    "code_nav/ripgrep/ripgrep_binary.rs", // KUZUSHI_RIPGREP_BIN
+    "code_nav/ripgrep/ripgrep_binary.rs",             // KUZUSHI_RIPGREP_BIN
     "modules/builtins/with_v2_builtins/builtin_registration.rs", // adapter env presence probe
-    "modules/plugin_resolution/mod.rs",  // plugin-root env; tool input outranks
+    "modules/plugin_resolution/mod.rs",               // plugin-root env; tool input outranks
     "semantic_cache/mod.rs", // KUZUSHI_SEMANTIC_CACHE kill switch (debug toggle)
     // Provenance / characterization.
     "run_artifacts/run_reproducibility_metadata.rs", // env fingerprint on run summaries

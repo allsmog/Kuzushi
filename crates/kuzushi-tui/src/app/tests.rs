@@ -11972,8 +11972,8 @@ fn target_activation_reloads_safe_target_phase_config() {
     )
     .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&first_workspace));
-    let startup = kuzushi_core::load_config_for_target_with_diagnostics(Some(second.path()))
-        .unwrap();
+    let startup =
+        kuzushi_core::load_config_for_target_with_diagnostics(Some(second.path())).unwrap();
     app.log_config_diagnostics(&startup.diagnostics);
 
     app.activate_target(second_workspace);
@@ -19495,7 +19495,8 @@ fn review_invariant_hunt_hotkey_drafts_a_focused_agentic_scan() {
         app.input()
     );
     assert!(
-        app.input().contains("\"focus\":\"Invariant hunt seeded from demo.invariant at src/lib.rs:7."),
+        app.input()
+            .contains("\"focus\":\"Invariant hunt seeded from demo.invariant at src/lib.rs:7."),
         "{}",
         app.input()
     );
@@ -19505,9 +19506,10 @@ fn review_invariant_hunt_hotkey_drafts_a_focused_agentic_scan() {
         app.input()
     );
     assert_eq!(app.input_mode(), crate::InputMode::Prompt);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "invariant" && line.body.contains("hunt draft loaded")
-    }));
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| { line.prefix == "invariant" && line.body.contains("hunt draft loaded") }));
 }
 
 #[test]
@@ -19527,9 +19529,10 @@ fn review_invariant_hunt_hotkey_requires_a_selected_finding() {
     );
 
     assert_eq!(app.input(), "");
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "invariant" && line.body.contains("no finding selected")
-    }));
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| { line.prefix == "invariant" && line.body.contains("no finding selected") }));
 }
 
 #[test]

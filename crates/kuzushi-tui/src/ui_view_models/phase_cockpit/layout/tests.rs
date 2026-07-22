@@ -109,7 +109,7 @@ fn automatic_density_changes_at_the_documented_height_boundaries() {
 #[test]
 fn reported_warp_viewport_surface_rectangles_tile_without_overlap() {
     let area = Rect::new(0, 8, 104, 48);
-    let rects = surface_rects(area, 2);
+    let rects = crate::ui_view_models::phase_cockpit::composition::split_columns(area, &[44, 56]);
 
     assert_eq!(
         rects,
