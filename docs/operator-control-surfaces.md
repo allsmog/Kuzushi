@@ -333,6 +333,15 @@ For descriptor-backed module tools that declare `model`, the effective model is:
 2. `KUZUSHI_MODEL` / `KUZUSHI_V2_MODEL`, canonicalized at the config boundary;
 3. global config `~/.kuzushi/v3/config.toml` `model = "provider:model"`.
 
+Supported LangGraph bridge providers: `anthropic:*` (ANTHROPIC_API_KEY or
+stored OAuth), `vertex-anthropic:*` (Claude on Google Vertex AI — the secret
+is GCP Application Default Credentials, so `runtime.api_key_env` is
+`ANTHROPIC_VERTEX_PROJECT_ID` and carries the GCP project id, which the
+bridge can also resolve from ADC; `CLOUD_ML_REGION` selects the endpoint and
+defaults to `global`), `openai:*` (OPENAI_API_KEY), and `openai-codex:*`
+(stored OAuth). Vertex model ids use the Vertex naming scheme (for example
+`vertex-anthropic:claude-sonnet-4-5@20250929`).
+
 Role-routed tools then resolve their role model with this precedence:
 
 1. the request's explicit model, when it is non-empty and different from the

@@ -71,9 +71,13 @@ fn model_provider(model: &str) -> &str {
 fn supported_bridge_api_key_env(provider: &str) -> Result<&'static str> {
     match provider {
         "anthropic" => Ok("ANTHROPIC_API_KEY"),
+        // Claude via Google Vertex AI: the secret is GCP Application Default
+        // Credentials, so the credential env carries the project id instead
+        // of a token. The bridge resolves a missing project id from ADC.
+        "vertex-anthropic" => Ok("ANTHROPIC_VERTEX_PROJECT_ID"),
         "openai" | "openai-codex" => Ok("OPENAI_API_KEY"),
         _ => anyhow::bail!(
-            "LangGraph bridge does not support model provider {provider:?}; use anthropic:*, openai:*, or openai-codex:*"
+            "LangGraph bridge does not support model provider {provider:?}; use anthropic:*, vertex-anthropic:*, openai:*, or openai-codex:*"
         ),
     }
 }

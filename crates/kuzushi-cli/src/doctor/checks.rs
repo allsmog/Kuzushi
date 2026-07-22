@@ -268,6 +268,7 @@ pub(crate) fn check_auth_env(config: &kuzushi_core::V2Config) -> DoctorCheck {
         return match provider.as_str() {
             "openai" => check_provider_api_key("OPENAI_API_KEY", "model openai:*"),
             "anthropic" => check_provider_api_key("ANTHROPIC_API_KEY", "model anthropic:*"),
+            "vertex-anthropic" => check_vertex_adc_credentials(),
             "openai-codex" => check_openai_oauth_credentials(),
             _ => check_provider_api_key(
                 config.runtime.api_key_env.trim(),
@@ -305,6 +306,51 @@ fn check_provider_api_key(name: &str, context: &str) -> DoctorCheck {
             format!("Export {name}=<token> before running model-backed tools."),
         )
     }
+}
+
+/// Vertex auth is GCP Application Default Credentials, not an env token, so
+/// the check looks for any ADC source instead of demanding an exported secret.
+fn check_vertex_adc_credentials() -> DoctorCheck {
+    if let Ok(project) = env::var("ANTHROPIC_VERTEX_PROJECT_ID") {
+        if !project.trim().is_empty() {
+            return DoctorCheck::ok(
+                "auth-env",
+                format!("Vertex project {project}; auth via GCP Application Default Credentials"),
+            );
+        }
+    }
+    if let Some(source) = google_adc_source() {
+        return DoctorCheck::ok(
+            "auth-env",
+            format!("GCP Application Default Credentials via {source}; Vertex project resolves from ADC"),
+        );
+    }
+    DoctorCheck::warn(
+        "auth-env",
+        "no GCP Application Default Credentials found for model vertex-anthropic:*",
+        "Run `gcloud auth application-default login` or export ANTHROPIC_VERTEX_PROJECT_ID (and GOOGLE_APPLICATION_CREDENTIALS off-GCP).",
+    )
+}
+
+fn google_adc_source() -> Option<&'static str> {
+    if env::var_os("GOOGLE_APPLICATION_CREDENTIALS").is_some() {
+        return Some("GOOGLE_APPLICATION_CREDENTIALS");
+    }
+    if gcloud_adc_file().is_some_and(|path| path.exists()) {
+        return Some("gcloud ADC file");
+    }
+    gce_metadata_available().then_some("GCE metadata server")
+}
+
+fn gcloud_adc_file() -> Option<PathBuf> {
+    let home = env::var_os("HOME")?;
+    Some(PathBuf::from(home).join(".config/gcloud/application_default_credentials.json"))
+}
+
+fn gce_metadata_available() -> bool {
+    std::fs::read_to_string("/sys/class/dmi/id/product_name")
+        .map(|name| name.trim() == "Google" || name.contains("Google Compute Engine"))
+        .unwrap_or(false)
 }
 
 fn check_openai_oauth_credentials() -> DoctorCheck {

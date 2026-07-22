@@ -114,6 +114,24 @@ mod tests {
             bridge_api_key_env_for_model("openai:gpt-5.5", "OPENAI_API_KEY").unwrap(),
             "OPENAI_API_KEY"
         );
+        assert!(validate_model_api_key_env(
+            "vertex-anthropic:claude-sonnet-4-6",
+            "ANTHROPIC_VERTEX_PROJECT_ID"
+        )
+        .is_ok());
+        assert_eq!(
+            bridge_api_key_env_for_model(
+                "vertex-anthropic:claude-sonnet-4-6",
+                "ANTHROPIC_VERTEX_PROJECT_ID"
+            )
+            .unwrap(),
+            "ANTHROPIC_VERTEX_PROJECT_ID"
+        );
+        let vertex_mismatch =
+            validate_model_api_key_env("vertex-anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
+                .unwrap_err()
+                .to_string();
+        assert!(vertex_mismatch.contains("requires ANTHROPIC_VERTEX_PROJECT_ID"));
         let custom = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
             .unwrap_err()
             .to_string();

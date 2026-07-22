@@ -5,7 +5,7 @@ import path from "node:path";
 
 const root = repoRoot();
 const MODEL_LITERAL =
-  "(?:(?:anthropic|openai|openai-codex):[^\"'`]+|(?:gpt|claude)-[A-Za-z0-9._:-]+)";
+  "(?:(?:vertex-anthropic|anthropic|openai|openai-codex):[^\"'`]+|(?:gpt|claude)-[A-Za-z0-9._:-]+)";
 const FORBIDDEN_MODEL_DEFAULTS = [
   [
     "hardcoded model fallback expression",

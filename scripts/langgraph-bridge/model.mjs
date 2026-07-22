@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
@@ -20,6 +21,14 @@ export function modelForRequest(request) {
   const [provider, modelName] = parseModelSpec(request.model);
   const oauthModel = oauthModelForProvider(request, provider, modelName);
   if (oauthModel) return oauthModel;
+  const model = apiModelForProvider(request, provider, modelName);
+  if (!model) {
+    throw new Error(`LangGraph bridge does not support provider ${JSON.stringify(provider)}`);
+  }
+  return model;
+}
+
+function apiModelForProvider(request, provider, modelName) {
   const options = modelOptions(request);
   if (provider === "openai" || provider === "openai-codex") {
     return new ChatOpenAI({
@@ -29,6 +38,10 @@ export function modelForRequest(request) {
       ...options,
     });
   }
+  return anthropicModelForProvider(request, provider, modelName, options);
+}
+
+function anthropicModelForProvider(request, provider, modelName, options) {
   if (provider === "anthropic") {
     return new ChatAnthropic({
       model: modelName,
@@ -36,7 +49,36 @@ export function modelForRequest(request) {
       ...options,
     });
   }
-  throw new Error(`LangGraph bridge does not support provider ${JSON.stringify(provider)}`);
+  if (provider === "vertex-anthropic") {
+    return new ChatAnthropic({
+      model: modelName,
+      createClient: (clientOptions) => vertexAnthropicClient(request, clientOptions),
+      ...options,
+    });
+  }
+  return undefined;
+}
+
+// Claude on Google Vertex AI. The credential is GCP Application Default
+// Credentials (google-auth-library), not an API key: the request's
+// apiKey/apiKeyEnv slot carries the GCP project id, and the region comes from
+// CLOUD_ML_REGION (defaulting to the global endpoint). Both stay optional —
+// AnthropicVertex resolves a missing project id from the ADC credential.
+function vertexAnthropicClient(request, clientOptions) {
+  const { apiKey, dangerouslyAllowBrowser, ...options } = clientOptions ?? {};
+  return new AnthropicVertex({
+    ...options,
+    projectId: vertexProjectId(request) ?? null,
+    region: nonEmpty(process.env.CLOUD_ML_REGION) ?? "global",
+  });
+}
+
+function vertexProjectId(request) {
+  return (
+    nonEmpty(request.apiKey) ??
+    nonEmpty(process.env[request.apiKeyEnv ?? "ANTHROPIC_VERTEX_PROJECT_ID"]) ??
+    nonEmpty(process.env.ANTHROPIC_VERTEX_PROJECT_ID)
+  );
 }
 
 function oauthModelForProvider(request, provider, modelName) {
