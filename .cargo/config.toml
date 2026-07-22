@@ -1,0 +1,7 @@
+# Fetch git dependencies through the system git binary so its credential helper
+# is used (e.g. the gh CLI locally, or GITHUB_TOKEN/PAT-backed HTTPS auth in
+# CI). Required for the private oxidized-joern (cpg-*) dependency pinned in the
+# workspace Cargo.toml. Without this, cargo's built-in libgit2 fetch does not
+# consult the git credential helper and the private clone fails.
+[net]
+git-fetch-with-cli = true

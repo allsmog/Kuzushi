@@ -117,17 +117,20 @@ while_let_on_iterator = "allow"
 
 [workspace.dependencies]
 anyhow = "1.0"
-# cpg-rs: in-process CPG engine from the oxidized-joern fork (private repo,
-# SSH access; .cargo/config.toml sets git-fetch-with-cli so the system git
-# credentialing is used). Pin ritual: bump `rev` + rerun the e2e verification
-# list in docs. NOTE: cpg-lang crates pull tree-sitter grammar crates at
-# different majors than kuzushi-mcp-treesitter's — safe while that crate stays
-# a standalone binary; linking both into one binary would collide on the
-# grammar C symbols (tree_sitter_c etc.).
-cpg-analysis = { git = "ssh://git@github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
-cpg-cli = { git = "ssh://git@github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
-cpg-core = { git = "ssh://git@github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
-cpg-incremental = { git = "ssh://git@github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
+# cpg-rs: in-process CPG engine from the oxidized-joern fork (private repo).
+# Fetched over HTTPS so token-based credentials work everywhere: the committed
+# .cargo/config.toml sets git-fetch-with-cli, so the system git credential
+# helper is used (gh CLI locally; GITHUB_TOKEN/PAT in CI). SSH-key-only
+# contributors can add their own `url."ssh://git@github.com/".insteadOf
+# "https://github.com/"` if they prefer SSH. Pin ritual: bump `rev` + rerun the
+# e2e verification list in docs. NOTE: cpg-lang crates pull tree-sitter grammar
+# crates at different majors than kuzushi-mcp-treesitter's — safe while that
+# crate stays a standalone binary; linking both into one binary would collide on
+# the grammar C symbols (tree_sitter_c etc.).
+cpg-analysis = { git = "https://github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
+cpg-cli = { git = "https://github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
+cpg-core = { git = "https://github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
+cpg-incremental = { git = "https://github.com/allsmog/oxidized-joern.git", rev = "9ab43859f0c3342c734ff38ea6366711d216c8fd" }
 async-trait = "0.1"
 blake3 = "1"
 clap = { version = "4.5", features = ["derive"] }
