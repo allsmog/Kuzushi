@@ -38,5 +38,5 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 
 shell route · 1 partial result · workbench · Map 1/5 · ⛭ fix · workbench                                      0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   Esc prompt
-▦ SCAN › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt
+ Esc prompt   Ctrl+C arm exit
+▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

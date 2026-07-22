@@ -2,7 +2,7 @@ use crate::application::scan::scan_command;
 use crate::command::Command;
 use crate::mcp::mcp_command;
 use crate::presentation::{shell_startup_progress_messages, should_emit_shell_startup_progress};
-use crate::support::{require_cli_target, target_or_global};
+use crate::support::{require_cli_target, resolve_cli_target};
 use anyhow::{Context, Result};
 use kuzushi_core::{DynamicModuleLoadOptions, ModuleRegistry, WorkspaceTarget};
 use kuzushi_tui::{
@@ -25,14 +25,9 @@ pub(crate) async fn dispatch_command(
     reject_session_persistence_flag_for_command(&command, no_session_persistence)?;
     reject_dynamic_load_for_command(&command, &load)?;
     match command {
-        Command::Shell { target } => dispatch_shell_command(
-            target,
-            default_target,
-            plain,
-            load,
-            no_session_persistence,
-            argv,
-        ),
+        Command::Shell {} => {
+            dispatch_shell_command(default_target, plain, load, no_session_persistence, argv)
+        }
         scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
         other => dispatch_non_scan_command(other, default_target, load).await,
     }
@@ -184,7 +179,7 @@ mod tests {
 
     #[test]
     fn shell_and_run_are_the_only_dynamic_load_surfaces() {
-        let shell = Command::Shell { target: None };
+        let shell = Command::Shell {};
         let run = Command::Run {
             tool: "example:run".to_string(),
             input: "{}".to_string(),
@@ -200,11 +195,7 @@ mod tests {
 
     #[test]
     fn session_persistence_opt_out_is_shell_only() {
-        assert!(reject_session_persistence_flag_for_command(
-            &Command::Shell { target: None },
-            true
-        )
-        .is_ok());
+        assert!(reject_session_persistence_flag_for_command(&Command::Shell {}, true).is_ok());
 
         let error =
             reject_session_persistence_flag_for_command(&Command::Modules { json: false }, true)
@@ -219,32 +210,26 @@ mod tests {
     }
 
     #[test]
-    fn shell_target_provenance_precedes_target_resolution() {
-        let shell = PathBuf::from("/shell");
+    fn shell_target_provenance_records_the_single_cli_target_control() {
         let global = PathBuf::from("/global");
 
         assert_eq!(
-            shell_target_source(Some(&shell), Some(&global)),
-            ShellTargetSource::ShellFlag
-        );
-        assert_eq!(
-            shell_target_source(None, Some(&global)),
+            shell_target_source(Some(&global)),
             ShellTargetSource::GlobalFlag
         );
-        assert_eq!(shell_target_source(None, None), ShellTargetSource::None);
+        assert_eq!(shell_target_source(None), ShellTargetSource::None);
     }
 }
 
 fn dispatch_shell_command(
-    target: Option<PathBuf>,
     default_target: Option<PathBuf>,
     plain: bool,
     load: Vec<String>,
     no_session_persistence: bool,
     argv: Vec<String>,
 ) -> Result<()> {
-    let target_source = shell_target_source(target.as_ref(), default_target.as_ref());
-    let target = target_or_global(target, default_target);
+    let target_source = shell_target_source(default_target.as_ref());
+    let target = resolve_cli_target(None, default_target)?;
     let workspace = target
         .as_deref()
         .map(WorkspaceTarget::new)
@@ -275,13 +260,8 @@ fn dispatch_shell_command(
     )
 }
 
-fn shell_target_source(
-    shell_target: Option<&PathBuf>,
-    global_target: Option<&PathBuf>,
-) -> ShellTargetSource {
-    if shell_target.is_some() {
-        ShellTargetSource::ShellFlag
-    } else if global_target.is_some() {
+fn shell_target_source(global_target: Option<&PathBuf>) -> ShellTargetSource {
+    if global_target.is_some() {
         ShellTargetSource::GlobalFlag
     } else {
         ShellTargetSource::None

@@ -10,11 +10,8 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let plan = workbench_plan(app);
-    if plan
-        .as_ref()
-        .is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided)
-    {
-        return vec![bind("Ctrl+C", "request abort")];
+    if let Some(bindings) = guided_workbench_keybindings(app, plan.as_ref()) {
+        return bindings;
     }
     // Keep the phase-native controls copyable at ordinary terminal widths.
     // This is presentation order only; the input dispatcher retains its own
@@ -36,6 +33,22 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     bindings.push(bind("Ctrl+C", "exit"));
     bindings
+}
+
+fn guided_workbench_keybindings(
+    app: &ShellApp,
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Option<Vec<FooterKeybinding>> {
+    let guided =
+        plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided);
+    guided.then(|| {
+        let label = if app.has_running_work() {
+            "request abort"
+        } else {
+            "arm exit"
+        };
+        vec![bind("Ctrl+C", label)]
+    })
 }
 
 fn prioritize_phase_controls(

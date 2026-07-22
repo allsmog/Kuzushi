@@ -7,12 +7,14 @@ size: 120x36
 KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- patch F-0001 patch displayed · v reverify applied patch · z chain / DFD · report open Report
+ patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report
 │▸ REMEDIATION                   │KUZUSHI · BREAKDOWN REPORT                         │VERIFICATION
 │STATE  Staged for approval      │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal ·...  │✓ patch drafted through the...
-│▸ report                        │report sarif/all · preview only · no report...     │○ applied · build and tests...
-│  choose format, completeness,  │◆ F-0001  CRITICAL  SQL injection reaches query    │○ proof fails after patch...
-│and destination                 │                                                   │defer with a reason code...
+│NEXT   patch apply · write...   │report sarif/all · preview only · no report...     │○ applied · build and tests...
+│OR patch reject · patch regen   │◆ F-0001  CRITICAL  SQL injection reaches query    │○ proof fails after patch...
+│▸ report                        │                                                   │defer with a reason code...
+│  choose format, completeness,  │                                                   │
+│and destination                 │                                                   │
 │F-0001 · pending reviewed diff  │                                                   │
 │rationale: bind the user value  │                                                   │
 │           as a query parameter │                                                   │
@@ -34,9 +36,7 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
 │                                │                                                   │
 │                                │                                                   │
 │                                │                                                   │
-│                                │                                                   │
-│                                │                                                   │
 run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build ·...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-◆ FIX › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt
+◆ FIX › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

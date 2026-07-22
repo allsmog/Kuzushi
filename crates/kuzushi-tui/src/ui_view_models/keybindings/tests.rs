@@ -90,7 +90,7 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
         .set_focus(PhaseSurfaceId::ReviewQueue);
     let prompt = footer_keybindings(&app);
     assert!(prompt.contains(&bind("Tab", "complete")));
-    assert!(prompt.contains(&bind("Shift+Tab", "mode")));
+    assert!(prompt.contains(&bind("Shift+Tab", "next phase")));
     // Review with findings: the Esc doorway must teach the findings flow the
     // Prompt-mode filter otherwise hides (j/k select, Enter opens Prove).
     assert!(prompt.contains(&bind("Esc", "nav findings · j/k move · Enter prove")));
@@ -104,7 +104,7 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     app.set_input_mode(crate::InputMode::Navigate);
     let navigate = footer_keybindings(&app);
     assert!(navigate.contains(&bind("Esc", "prompt")));
-    assert!(navigate.contains(&bind("Shift+Tab", "mode")));
+    assert!(navigate.contains(&bind("Shift+Tab", "next phase")));
     assert!(navigate.contains(&bind("n/N", "page")));
     assert!(navigate.contains(&bind("1..5", "page")));
     assert!(navigate.contains(&bind("[", "pane back")));
@@ -299,6 +299,24 @@ fn footer_keybindings_show_wait_cleanup_after_abort_request() {
     let bindings = footer_keybindings(&app);
 
     assert_eq!(bindings[0], bind("Ctrl+C", "wait cleanup"));
+}
+
+#[test]
+fn compact_idle_workbench_does_not_offer_an_abort_for_absent_work() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_viewport(crate::TerminalViewport::new(40, 15));
+    app.begin_guided_scan_questions();
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(
+        bindings.contains(&bind("Ctrl+C", "arm exit")),
+        "{bindings:?}"
+    );
+    assert!(!bindings.contains(&bind("Ctrl+C", "request abort")));
 }
 
 #[test]

@@ -9,10 +9,10 @@ KUZUSHI · Viewing Fix · now in Review
         6 of 6 ledger candidates
 │▸ REMEDIATION
 │STATE  Staged for approval
-│▸ report
-│  choose format, completeness, and
+│NEXT   patch apply · write...
+│OR patch reject · patch regen
 run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-◆ FIX › NAVIGATE · Shift+Tab mode · Tab/
+◆ FIX › NAVIGATE · Shift+Tab phase→ Tab/

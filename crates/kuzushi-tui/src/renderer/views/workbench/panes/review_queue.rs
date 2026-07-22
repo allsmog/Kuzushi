@@ -67,13 +67,31 @@ struct ReviewQueueViewport {
 }
 
 fn review_queue_chrome_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<'static>> {
-    if !should_show_reconciliation(model, width) {
-        return Vec::new();
+    let legend = "● proof · s sources · @ author";
+    let mut lines = if width >= 72 {
+        vec![Line::styled(
+            fit(
+                &format!(
+                    "{}/{} shown · filter:{} · {legend}",
+                    model.visible_count, model.total_count, model.filter_label
+                ),
+                width,
+            ),
+            theme::muted(),
+        )]
+    } else {
+        Vec::new()
+    };
+    if width < 72 && should_show_reconciliation(model, width) {
+        lines.push(Line::styled(
+            fit(&responsive_reconciliation_line(model, width), width),
+            theme::muted(),
+        ));
     }
-    vec![Line::styled(
-        fit(&responsive_reconciliation_line(model, width), width),
-        theme::muted(),
-    )]
+    if width < 72 {
+        lines.push(Line::styled(fit(legend, width), theme::muted()));
+    }
+    lines
 }
 
 fn review_queue_viewport(
@@ -229,11 +247,12 @@ fn selected_review_queue_row(
 }
 
 /// The confidence chip that sits between the severity glyph and the decision
-/// signals. Full word (`CONFIRMED`) at readable widths, a one-char marker
-/// (`✓ ◇ ? !`) when the row is too narrow to spend on a word.
+/// signals. The full evidence label appears at readable widths; compact widths
+/// use a plain-language evidence source while the adjacent legend explains the
+/// meter, source count, and decision-author markers.
 fn review_queue_confidence_chip(row: &ReviewQueueRow, width: usize) -> String {
     let confidence = if width < REVIEW_FULL_METADATA_MIN_WIDTH {
-        proof_confidence_code(row)
+        compact_proof_confidence_label(row)
     } else {
         row.proof_confidence_label.as_str()
     };
@@ -254,12 +273,12 @@ fn authority_marker(row: &ReviewQueueRow) -> &'static str {
     }
 }
 
-fn proof_confidence_code(row: &ReviewQueueRow) -> &'static str {
+fn compact_proof_confidence_label(row: &ReviewQueueRow) -> &'static str {
     match row.proof_confidence {
-        ProofConfidence::Confirmed => "CFM",
-        ProofConfidence::Likely => "LIK",
-        ProofConfidence::Unverified => "UNV",
-        ProofConfidence::Dismissed => "DIS",
+        ProofConfidence::Confirmed => "runtime",
+        ProofConfidence::Likely => "static",
+        ProofConfidence::Unverified => "signal",
+        ProofConfidence::Dismissed => "dismissed",
     }
 }
 
@@ -387,7 +406,7 @@ mod tests {
             severity_tone: SeverityTone::High,
             severity_label: "HIGH".to_string(),
             proof_confidence: ProofConfidence::Confirmed,
-            proof_confidence_label: "CONFIRMED".to_string(),
+            proof_confidence_label: "RUNTIME VERIFIED".to_string(),
             confidence_label: "91%".to_string(),
             priority_label: "review-order:1".to_string(),
             lifecycle_status: "statically_supported".to_string(),
@@ -473,16 +492,16 @@ mod tests {
         let row = review_row();
         let wide = line_text(review_queue_row_line(&row, 220));
         // At metadata widths the full band word sits right after the severity glyph.
-        assert!(wide.contains("CONFIRMED"), "{wide}");
-        assert!(wide.contains("H [●●○] s2 @? CONFIRMED"), "{wide}");
+        assert!(wide.contains("RUNTIME VERIFIED"), "{wide}");
+        assert!(wide.contains("H [●●○] s2 @? RUNTIME VERIFIED"), "{wide}");
     }
 
     #[test]
-    fn row_collapses_confidence_to_marker_when_narrow() {
+    fn row_uses_plain_language_confidence_when_narrow() {
         let row = review_row();
         let narrow = line_text(review_queue_row_line(&row, 60));
-        assert!(!narrow.contains("CONFIRMED"), "{narrow}");
-        assert!(narrow.contains("[●●○] s2 @? CFM"), "{narrow}");
+        assert!(!narrow.contains("RUNTIME VERIFIED"), "{narrow}");
+        assert!(narrow.contains("[●●○] s2 @? runtime"), "{narrow}");
         assert!(narrow.contains("open"), "{narrow}");
         assert!(!narrow.contains("review-order"), "{narrow}");
         assert!(!narrow.contains('✓'), "{narrow}");
@@ -498,6 +517,18 @@ mod tests {
 
         assert!(narrow.contains("@H"), "{narrow}");
         assert!(wide.contains("@H"), "{wide}");
+    }
+
+    #[test]
+    fn compact_queue_externalizes_metadata_codes() {
+        let text = lines_text(populated_review_queue_pane_lines(
+            &review_model(vec![review_row()]),
+            Rect::new(0, 0, 60, 6),
+        ));
+
+        assert!(text.contains("● proof"), "{text}");
+        assert!(text.contains("s sources"), "{text}");
+        assert!(text.contains("@ author"), "{text}");
     }
 
     #[test]

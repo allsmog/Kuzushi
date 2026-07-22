@@ -99,6 +99,36 @@ mod tests {
     }
 
     #[test]
+    fn parser_preserves_distinct_global_and_command_targets_for_conflict_policy() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "--target",
+            "/tmp/global-target",
+            "scan",
+            "/tmp/command-target",
+        ])
+        .unwrap();
+
+        assert_eq!(cli.target, Some(PathBuf::from("/tmp/global-target")));
+        let Some(Command::Scan { target, .. }) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert_eq!(target, Some(PathBuf::from("/tmp/command-target")));
+    }
+
+    #[test]
+    fn shell_target_flag_has_one_identity_before_or_after_the_subcommand() {
+        for argv in [
+            vec!["kuzushi", "--target", "/tmp/target", "shell"],
+            vec!["kuzushi", "shell", "--target", "/tmp/target"],
+        ] {
+            let cli = crate::cli::Cli::try_parse_from(argv).unwrap();
+            assert_eq!(cli.target, Some(PathBuf::from("/tmp/target")));
+            assert!(matches!(cli.command, Some(Command::Shell {})));
+        }
+    }
+
+    #[test]
     fn sessions_cli_parses_management_subcommands() {
         let list = crate::cli::Cli::try_parse_from([
             "kuzushi",

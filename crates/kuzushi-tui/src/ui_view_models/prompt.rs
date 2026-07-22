@@ -57,7 +57,7 @@ pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
 }
 
 pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
-    let mut text = "NAVIGATE · Shift+Tab mode · Tab/[/] pane".to_string();
+    let mut text = "NAVIGATE · Shift+Tab phase→ Tab/[/] pane".to_string();
     let keys = app
         .ui()
         .keymap_binding_labels("composer", "prompt_mode", &["Esc"]);

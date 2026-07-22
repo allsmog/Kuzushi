@@ -46,11 +46,12 @@ impl ProofConfidence {
         }
     }
 
-    /// Operator-facing chip label. Strong bands are uppercased for prominence;
-    /// weak bands stay muted/lowercase, matching the repo's signifier convention.
+    /// Operator-facing chip label. Name the evidence source instead of using
+    /// "confirmed", which operators can reasonably misread as a human review
+    /// decision. Machine-readable compatibility tokens remain unchanged.
     pub fn label(self) -> &'static str {
         match self {
-            Self::Confirmed => "CONFIRMED",
+            Self::Confirmed => "RUNTIME VERIFIED",
             Self::Likely => "LIKELY",
             Self::Unverified => "unverified",
             Self::Dismissed => "dismissed",
@@ -104,7 +105,7 @@ mod tests {
 
     #[test]
     fn labels_and_tokens_are_stable() {
-        assert_eq!(ProofConfidence::Confirmed.label(), "CONFIRMED");
+        assert_eq!(ProofConfidence::Confirmed.label(), "RUNTIME VERIFIED");
         assert_eq!(ProofConfidence::Likely.label(), "LIKELY");
         assert_eq!(ProofConfidence::Unverified.label(), "unverified");
         assert_eq!(ProofConfidence::Dismissed.label(), "dismissed");

@@ -27,4 +27,4 @@ KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · �
 run route · Review 3/5 · ⛭ fix ·...         6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-▦ SCAN › NAVIGATE · Shift+Tab mode · Tab/[/] pane · Esc prompt
+▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

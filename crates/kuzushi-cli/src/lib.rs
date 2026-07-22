@@ -20,9 +20,7 @@ pub async fn run() -> Result<()> {
     let argv = std::env::args().skip(1).collect();
     let cli = cli::Cli::parse();
     let plain = presentation::plain_output_requested(cli.plain);
-    let command = cli
-        .command
-        .unwrap_or(command::Command::Shell { target: None });
+    let command = cli.command.unwrap_or(command::Command::Shell {});
     let result = dispatch::dispatch_command(
         command,
         cli.target,

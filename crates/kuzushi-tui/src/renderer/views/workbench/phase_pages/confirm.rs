@@ -419,7 +419,7 @@ fn compact_next_line(finding: &FindingDetailModel, width: usize) -> Line<'static
 
 fn compact_confidence(label: &str) -> &str {
     match label {
-        "CONFIRMED" => "CFM",
+        "RUNTIME VERIFIED" | "CONFIRMED" => "RTV",
         "LIKELY" => "LIK",
         "DISMISSED" => "DIS",
         _ => "UNV",

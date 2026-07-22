@@ -8,7 +8,12 @@ use std::path::PathBuf;
 // release binary and a working-tree build are distinguishable at a glance.
 #[command(about = "Kuzushi security-native code agent", version = kuzushi_tui::build_version_static())]
 pub(crate) struct Cli {
-    #[arg(long, global = true, help = crate::support::TARGET_HELP)]
+    #[arg(
+        id = "global_target",
+        long = "target",
+        global = true,
+        help = crate::support::TARGET_HELP
+    )]
     pub(crate) target: Option<PathBuf>,
     /// Force line-oriented output with no ANSI, animation, or box drawing.
     #[arg(long, global = true)]

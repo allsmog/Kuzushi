@@ -70,6 +70,7 @@ fn push_plain_sast_tasks_summary(
     lines.push(String::new());
     lines.push(plain_section_divider(model.title, width));
     lines.extend(model.summary_rows.iter().cloned());
+    lines.push(model.legend.to_string());
 }
 
 fn push_plain_sast_tasks_table(lines: &mut Vec<String>, model: &PlainSastTasksModel, width: usize) {

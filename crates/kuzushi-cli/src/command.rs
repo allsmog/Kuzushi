@@ -12,10 +12,7 @@ pub(crate) use subcommands::{
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     /// Start the interactive shell.
-    Shell {
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
-    },
+    Shell {},
     /// Run configured scanners and persist findings.
     Scan {
         #[arg(help = crate::support::TARGET_HELP)]

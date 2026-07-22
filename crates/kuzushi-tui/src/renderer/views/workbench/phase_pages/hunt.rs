@@ -93,39 +93,44 @@ fn chain_artifact_lines(
         return Vec::new();
     };
     if chains.candidates.is_empty() && chains.grounded.is_empty() {
-        // The zero state is a statement about the confirmed set, not a
-        // shrug: it names how many confirmed findings were folded and why
-        // no scenario composed.
-        let mut lines = vec![Line::styled(
-            fit(
-                &format!(
-                    "no chain artifacts · {} confirmed finding(s) compose no entry→impact pair",
-                    chains.confirmed_count
-                ),
-                width,
-            ),
-            theme::muted(),
-        )];
-        lines.extend(empty_state_panel(
-            "no chain artifacts yet",
-            &[
-                "chains compose over CONFIRMED findings with entry- and impact-class roles",
-                "confirm findings in Review, then run `run exploit-chain:scan {}` for grounded chains",
-            ],
-            &[("C", "close attack chains")],
-        ));
-        return lines;
+        return empty_chain_artifact_lines(chains.confirmed_count, width);
     }
+    populated_chain_artifact_lines(chains, width)
+}
+
+fn empty_chain_artifact_lines(confirmed_count: usize, width: usize) -> Vec<Line<'static>> {
+    // The zero state is a statement about the human-confirmed set, not a
+    // shrug: it names how many reviewed findings were folded and why no
+    // scenario composed.
     let mut lines = vec![Line::styled(
         fit(
             &format!(
-                "composed over {} confirmed finding(s) · deterministic fold seeds, exploit-chain:scan grounds",
-                chains.confirmed_count
+                "no chain artifacts · {confirmed_count} human-confirmed finding(s) compose no entry→impact pair"
             ),
             width,
         ),
         theme::muted(),
     )];
+    lines.extend(empty_state_panel(
+        "no chain artifacts yet",
+        &[
+            "chains compose over human-confirmed findings with entry- and impact-class roles",
+            "record confirmed human decisions in Review, then run `run exploit-chain:scan {}` for grounded chains",
+        ],
+        &[("C", "close attack chains")],
+    ));
+    lines
+}
+
+fn populated_chain_artifact_lines(
+    chains: &crate::ui_view_models::ChainArtifactsModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let summary = format!(
+        "composed over {} human-confirmed finding(s) · deterministic fold seeds, exploit-chain:scan grounds",
+        chains.confirmed_count
+    );
+    let mut lines = vec![Line::styled(fit(&summary, width), theme::muted())];
     if let Some(identity) = chains.identity.as_ref() {
         lines.push(Line::styled(fit(identity, width), theme::muted()));
     }
@@ -502,7 +507,7 @@ mod chain_artifact_tests {
         assert!(body.contains("F-1 + F-3"), "{body}");
         assert!(body.contains("[medium]"), "{body}");
         assert!(body.contains("⚠ chain would raise F-1"), "{body}");
-        assert!(body.contains("2 confirmed finding(s)"), "{body}");
+        assert!(body.contains("2 human-confirmed finding(s)"), "{body}");
     }
 
     #[test]
@@ -540,6 +545,6 @@ mod chain_artifact_tests {
         };
         let body = text(&chain_artifact_lines(Some(&chains), 120));
         assert!(body.contains("no chain artifacts yet"), "{body}");
-        assert!(body.contains("CONFIRMED findings"), "{body}");
+        assert!(body.contains("human-confirmed findings"), "{body}");
     }
 }

@@ -363,7 +363,7 @@ fn workbench_page_navigation_keybindings() -> Vec<ViewKeybinding> {
         bind(
             HotkeyTrigger::BackTab,
             "Shift+Tab",
-            "mode",
+            "next phase",
             ViewHotkeyAction::WorkbenchPageNext,
         ),
         bind_char('n', "n/N", "page", ViewHotkeyAction::WorkbenchPageNext),

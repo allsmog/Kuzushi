@@ -2314,6 +2314,17 @@ fn renders_sast_task_picker_readably_at_80_columns() {
 }
 
 #[test]
+fn plain_sast_tasks_explains_task_state_markers() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::SastTasks);
+
+    let rendered = render_plain_app(&app, 80);
+
+    assert!(rendered.contains("[A] advanced"), "{rendered}");
+    assert!(rendered.contains("[B] blocked"), "{rendered}");
+}
+
+#[test]
 fn renders_kb_attachments_readably_at_80_columns() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3017,7 +3028,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
 
     assert!(rendered.contains("Enter review"), "{rendered}");
     assert!(rendered.contains("j/k/↑/↓ move"), "{rendered}");
-    assert!(rendered.contains("Shift+Tab mode"), "{rendered}");
+    assert!(rendered.contains("Shift+Tab phase→"), "{rendered}");
     assert!(rendered.contains("] pane"), "{rendered}");
     assert!(rendered.contains("Tab/[/] pane"), "{rendered}");
     assert!(rendered.contains("/keys all"), "{rendered}");

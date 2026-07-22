@@ -7,6 +7,7 @@ use crate::ui_view_models::{
 pub(super) fn remediation_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
     lines.extend(lifecycle_lines(&model.remediation, width));
+    lines.extend(approval_action_lines(&model.remediation, width));
     lines.extend(export_command_lines(&model.export_command, width));
     lines.extend(remediation_detail_lines(model, width));
     if let Some(threat_patch) = model.threat_patch.as_ref() {
@@ -22,12 +23,39 @@ pub(super) fn compact_remediation_lines(model: &FixPhaseModel, width: usize) -> 
             .into_iter()
             .take(2),
     );
+    lines.extend(approval_action_lines(&model.remediation, width));
     lines.extend(
         export_command_lines(&model.export_command, width)
             .into_iter()
             .take(1),
     );
     lines
+}
+
+fn approval_action_lines(model: &RemediationLifecycleModel, width: usize) -> Vec<Line<'static>> {
+    if model.stage != RemediationLifecycleStage::StagedForApproval {
+        return Vec::new();
+    }
+    let (alternate_lead, alternate_actions) = if width < 48 {
+        ("OR ", "patch reject · patch regen")
+    } else {
+        ("OR     ", "patch reject (discard) · patch regen")
+    };
+    [
+        ("NEXT   ", "patch apply · write reviewed diff"),
+        (alternate_lead, alternate_actions),
+    ]
+    .into_iter()
+    .map(|(lead, action)| {
+        Line::from(vec![
+            Span::styled(lead, theme::warn()),
+            Span::styled(
+                fit(action, width.saturating_sub(display_width(lead))),
+                theme::accent(),
+            ),
+        ])
+    })
+    .collect()
 }
 
 fn remediation_detail_lines(model: &FixPhaseModel, width: usize) -> Vec<Line<'static>> {
@@ -326,6 +354,23 @@ mod tests {
 
         assert!(rendered.contains("remediation truth unavailable"));
         assert!(rendered.contains("database is unavailable"));
+    }
+
+    #[test]
+    fn staged_patch_names_each_available_approval_action() {
+        let mut model = remediation_model(RemediationLoadState::Ready, None);
+        model.stage = RemediationLifecycleStage::StagedForApproval;
+
+        for width in [31, 80] {
+            let rendered = approval_action_lines(&model, width)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<String>();
+
+            assert!(rendered.contains("patch apply"), "{width}: {rendered}");
+            assert!(rendered.contains("patch reject"), "{width}: {rendered}");
+            assert!(rendered.contains("patch regen"), "{width}: {rendered}");
+        }
     }
 
     #[test]

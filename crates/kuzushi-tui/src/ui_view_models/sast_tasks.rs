@@ -30,6 +30,7 @@ pub(crate) struct SastTaskDisplayRow {
 pub(crate) struct PlainSastTasksModel {
     pub(crate) title: &'static str,
     pub(crate) summary_rows: Vec<String>,
+    pub(crate) legend: &'static str,
     pub(crate) headers: [&'static str; 5],
     pub(crate) rows: Vec<PlainSastTaskRow>,
     pub(crate) next_hint: &'static str,
@@ -100,6 +101,7 @@ impl PlainSastTasksModel {
                 .into_iter()
                 .map(plain_sast_task_summary_row)
                 .collect(),
+            legend: model.legend,
             headers: model.headers,
             rows: model.rows.into_iter().map(plain_sast_task_row).collect(),
             next_hint:
@@ -155,6 +157,16 @@ mod tests {
             .any(|row| row.cells[0] == "selected" && row.cells[1].contains("enabled")));
         assert!(model.rows.iter().any(|row| row.task_id == "semgrep"));
         assert!(model.rows.iter().any(|row| row.task_id == "cargo-audit"));
+    }
+
+    #[test]
+    fn plain_model_preserves_the_task_state_legend() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let model = plain_sast_tasks_model(&app);
+
+        assert!(model.legend.contains("[A] advanced"));
+        assert!(model.legend.contains("[B] blocked"));
     }
 
     #[test]

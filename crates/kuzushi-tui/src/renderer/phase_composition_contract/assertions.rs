@@ -99,7 +99,7 @@ impl PhaseCompositionContract {
             "Ctrl+C request abort",
             "Esc prompt",
             "NAVIGATE",
-            "Shift+Tab mode",
+            "Shift+Tab phase→",
         ] {
             assert!(
                 flattened.contains(control),
@@ -129,7 +129,9 @@ impl PhaseCompositionContract {
             kuzushi_core::WorkflowPhase::Scan => &["Viewing Scan", "complete", "scan-phase"],
             kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
             kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
-            kuzushi_core::WorkflowPhase::Fix => &["REMEDIATION", "Staged", "report"],
+            kuzushi_core::WorkflowPhase::Fix => {
+                &["REMEDIATION", "Staged", "patch apply", "patch reject"]
+            }
         }
     }
 }

@@ -92,8 +92,8 @@ static PROVE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 static MAP_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("next", "continue Map"),
     hint("context build", "build context"),
+    hint("jobs", "inspect prior runs"),
     hint("z", "open visualization"),
-    hint("attach <path>", "seed materials"),
 ];
 
 static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
@@ -104,9 +104,9 @@ static SCAN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 ];
 
 static REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
+    hint("B", "review decision backlog"),
     hint("Enter", "open in Prove"),
     hint("findings", "show full queue"),
-    hint("i", "invariant hunt"),
     hint("z", "open heatmap"),
 ];
 
@@ -265,10 +265,7 @@ fn command_bar_hints(
     finding_reference: Option<&str>,
 ) -> Vec<WorkbenchHint> {
     let mut hints = page_command_bar_hint_slice(page).to_vec();
-    if page == WorkbenchPage::Fix {
-        replace_patch_hint(&mut hints, finding_reference);
-        replace_reverify_hint(&mut hints, app);
-    }
+    customize_phase_hints(&mut hints, app, page, finding_reference);
     if page == WorkbenchPage::Prove && !has_detail {
         hints[0] = hint("2", "choose a finding in Review");
     }
@@ -276,9 +273,32 @@ fn command_bar_hints(
     hints
 }
 
+fn customize_phase_hints(
+    hints: &mut [WorkbenchHint],
+    app: &ShellApp,
+    page: WorkbenchPage,
+    finding_reference: Option<&str>,
+) {
+    match page {
+        WorkbenchPage::Fix if app.engagement.pending_patch().is_some() => {
+            expose_pending_patch_actions(hints);
+        }
+        WorkbenchPage::Fix => {
+            replace_patch_hint(hints, finding_reference);
+            replace_reverify_hint(hints, app);
+        }
+        WorkbenchPage::Review => replace_review_decision_hint(hints, app),
+        WorkbenchPage::Map | WorkbenchPage::Scan | WorkbenchPage::Prove => {}
+    }
+}
+
 pub(crate) fn workbench_reverify_control_hint(app: &ShellApp) -> String {
+    workbench_navigate_control_hint(app, WORKBENCH_REVERIFY_ACTION_KEY)
+}
+
+fn workbench_navigate_control_hint(app: &ShellApp, action_key: &str) -> String {
     if app.input_mode() == crate::InputMode::Navigate {
-        return WORKBENCH_REVERIFY_ACTION_KEY.to_string();
+        return action_key.to_string();
     }
     let bindings = app
         .ui()
@@ -288,7 +308,7 @@ pub(crate) fn workbench_reverify_control_hint(app: &ShellApp) -> String {
     }
     let prefix = (!app.input().is_empty()).then_some("clear prompt then ");
     format!(
-        "{}{bindings} then {WORKBENCH_REVERIFY_ACTION_KEY}",
+        "{}{bindings} then {action_key}",
         prefix.unwrap_or_default(),
         bindings = bindings.join("/")
     )
@@ -302,6 +322,27 @@ fn replace_reverify_hint(hints: &mut [WorkbenchHint], app: &ShellApp) {
         return;
     };
     hint.verb = Cow::Owned(workbench_reverify_control_hint(app));
+}
+
+fn replace_review_decision_hint(hints: &mut [WorkbenchHint], app: &ShellApp) {
+    let Some(hint) = hints
+        .iter_mut()
+        .find(|hint| hint.label == "review decision backlog")
+    else {
+        return;
+    };
+    hint.verb = Cow::Owned(workbench_navigate_control_hint(app, "B"));
+}
+
+fn expose_pending_patch_actions(hints: &mut [WorkbenchHint]) {
+    let replacements = [
+        hint("patch apply", "write reviewed diff"),
+        hint("patch reject", "discard candidate"),
+        hint("patch regen", "replace candidate"),
+    ];
+    for (slot, replacement) in hints.iter_mut().zip(replacements) {
+        *slot = replacement;
+    }
 }
 
 fn append_report_hint(hints: &mut Vec<WorkbenchHint>, report_cta: Option<WorkbenchHint>) {
@@ -472,6 +513,57 @@ mod tests {
         assert!(hints.iter().any(|hint| {
             hint.verb == "ctrl+x then v" && hint.label == "reverify applied patch"
         }));
+    }
+
+    #[test]
+    fn phase_hints_externalize_review_decisions_and_prior_runs() {
+        let prompt_app = app();
+
+        let review = command_bar_hints(&prompt_app, WorkbenchPage::Review, None, false, None);
+        assert!(review
+            .iter()
+            .any(|hint| { hint.verb == "Esc then B" && hint.label == "review decision backlog" }));
+
+        let mut navigate = app();
+        navigate.set_input_mode(crate::InputMode::Navigate);
+        let review = command_bar_hints(&navigate, WorkbenchPage::Review, None, false, None);
+        assert!(review
+            .iter()
+            .any(|hint| hint.verb == "B" && hint.label == "review decision backlog"));
+
+        let map = command_bar_hints(&prompt_app, WorkbenchPage::Map, None, false, None);
+        assert!(map
+            .iter()
+            .any(|hint| hint.verb == "jobs" && hint.label == "inspect prior runs"));
+    }
+
+    #[test]
+    fn staged_fix_hints_replace_the_unavailable_reverify_action() {
+        let mut app = app();
+        app.engagement.set_pending_patch(crate::app::PendingPatch {
+            alias: "F-0001".to_string(),
+            patch_run_id: "patch-run".to_string(),
+            status: kuzushi_core::PatchStatus::Sound,
+            rationale: "bind the value".to_string(),
+            side_effect: None,
+            diff: "--- a/x\n+++ b/x\n".to_string(),
+            tests: Vec::new(),
+            guardrail: None,
+            staged_at: None,
+        });
+
+        let hints = command_bar_hints(&app, WorkbenchPage::Fix, None, true, Some("F-0001"));
+
+        assert!(hints
+            .iter()
+            .any(|hint| hint.verb == "patch apply" && hint.label == "write reviewed diff"));
+        assert!(hints
+            .iter()
+            .any(|hint| hint.verb == "patch reject" && hint.label == "discard candidate"));
+        assert!(hints
+            .iter()
+            .any(|hint| hint.verb == "patch regen" && hint.label == "replace candidate"));
+        assert!(!hints.iter().any(|hint| hint.label.contains("reverify")));
     }
 
     #[test]
