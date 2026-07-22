@@ -129,6 +129,10 @@ pub(in crate::modules) fn collect_context_files(
     )
 }
 
+/// Breadth-first so the entry budget spreads across every subtree: a
+/// depth-first walk spends the whole cap inside the alphabetically-first
+/// directories on monorepo-scale targets, leaving late-sorting roots
+/// (`src/`, `tools/`) entirely unsampled.
 fn collect_context_files_with_limit(
     root: &Path,
     dir: &Path,
@@ -139,21 +143,29 @@ fn collect_context_files_with_limit(
 ) -> Result<bool> {
     let mut entries_seen = 0usize;
     let mut truncated = false;
-    collect_context_files_inner(
-        root,
-        dir,
-        sample_limit,
-        files_indexed,
-        files_sample,
-        &mut entries_seen,
-        entry_limit,
-        &mut truncated,
-    )?;
+    let mut pending = std::collections::VecDeque::from([dir.to_path_buf()]);
+    while let Some(dir) = pending.pop_front() {
+        if entries_seen >= entry_limit {
+            truncated = true;
+            break;
+        }
+        collect_context_level(
+            root,
+            &dir,
+            sample_limit,
+            files_indexed,
+            files_sample,
+            &mut entries_seen,
+            entry_limit,
+            &mut truncated,
+            &mut pending,
+        )?;
+    }
     Ok(truncated)
 }
 
 #[allow(clippy::too_many_arguments)]
-fn collect_context_files_inner(
+fn collect_context_level(
     root: &Path,
     dir: &Path,
     sample_limit: usize,
@@ -162,11 +174,8 @@ fn collect_context_files_inner(
     entries_seen: &mut usize,
     entry_limit: usize,
     truncated: &mut bool,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
-    if *entries_seen >= entry_limit {
-        *truncated = true;
-        return Ok(());
-    }
     let read_dir = fs::read_dir(dir)
         .with_context(|| format!("Could not read context directory {}", dir.display()))?;
     let remaining = entry_limit.saturating_sub(*entries_seen);
@@ -187,42 +196,32 @@ fn collect_context_files_inner(
             sample_limit,
             files_indexed,
             files_sample,
-            entries_seen,
-            entry_limit,
-            truncated,
+            pending,
         )?;
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collect_context_entry(
     root: &Path,
     entry: fs::DirEntry,
     sample_limit: usize,
     files_indexed: &mut usize,
     files_sample: &mut Vec<String>,
-    entries_seen: &mut usize,
-    entry_limit: usize,
-    truncated: &mut bool,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
-    if should_skip_path(&entry.file_name().to_string_lossy()) {
+    let name = entry.file_name().to_string_lossy().to_string();
+    if should_skip_path(&name) {
         return Ok(());
     }
     let file_type = entry.file_type()?;
     let path = entry.path();
     if file_type.is_dir() {
-        return collect_context_files_inner(
-            root,
-            &path,
-            sample_limit,
-            files_indexed,
-            files_sample,
-            entries_seen,
-            entry_limit,
-            truncated,
-        );
+        if !should_skip_hidden_dir(&name) {
+            pending.push_back(path);
+        }
+        return Ok(());
     }
     if file_type.is_file() {
         collect_context_file(root, &path, sample_limit, files_indexed, files_sample);

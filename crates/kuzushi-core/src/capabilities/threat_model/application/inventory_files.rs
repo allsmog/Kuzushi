@@ -9,14 +9,23 @@ pub(crate) fn inventory_files(root: &Path, limit: usize) -> Result<Vec<String>> 
     Ok(out)
 }
 
+/// Breadth-first so the row limit samples every subtree: a depth-first walk
+/// spends the whole budget inside the alphabetically-first directories on
+/// monorepo-scale targets, leaving late-sorting roots (`src/`) unlisted.
 pub(crate) fn collect_inventory(
     root: &Path,
     dir: &Path,
     limit: usize,
     out: &mut Vec<String>,
 ) -> Result<()> {
-    for entry in sorted_inventory_entries(dir) {
-        collect_inventory_entry_if_room(root, entry, limit, out)?;
+    let mut pending = std::collections::VecDeque::from([dir.to_path_buf()]);
+    while let Some(dir) = pending.pop_front() {
+        if inventory_limit_reached(out, limit) {
+            return Ok(());
+        }
+        for entry in sorted_inventory_entries(&dir) {
+            collect_inventory_entry_if_room(root, entry, limit, out, &mut pending)?;
+        }
     }
     Ok(())
 }
@@ -39,24 +48,25 @@ fn collect_inventory_entry_if_room(
     entry: fs::DirEntry,
     limit: usize,
     out: &mut Vec<String>,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
     if inventory_limit_reached(out, limit) {
         return Ok(());
     }
-    collect_inventory_entry(root, entry, limit, out)
+    collect_inventory_entry(root, entry, out, pending)
 }
 
 fn collect_inventory_entry(
     root: &Path,
     entry: fs::DirEntry,
-    limit: usize,
     out: &mut Vec<String>,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
     let Some(kind) = inventory_entry_kind(&entry) else {
         return Ok(());
     };
     let path = entry.path();
-    collect_inventory_path(root, &path, kind, limit, out)
+    collect_inventory_path(root, &path, kind, out, pending)
 }
 
 #[derive(Clone, Copy)]
@@ -84,11 +94,14 @@ fn collect_inventory_path(
     root: &Path,
     path: &Path,
     kind: InventoryEntryKind,
-    limit: usize,
     out: &mut Vec<String>,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
     match kind {
-        InventoryEntryKind::Directory => collect_inventory(root, path, limit, out),
+        InventoryEntryKind::Directory => {
+            pending.push_back(path.to_path_buf());
+            Ok(())
+        }
         InventoryEntryKind::File => {
             push_inventory_path(root, path, out);
             Ok(())
@@ -97,8 +110,11 @@ fn collect_inventory_path(
 }
 
 fn skipped_inventory_entry(entry: &fs::DirEntry) -> bool {
-    let name = entry.file_name();
-    should_skip_path(&name.to_string_lossy())
+    let name = entry.file_name().to_string_lossy().to_string();
+    if should_skip_path(&name) {
+        return true;
+    }
+    entry.file_type().is_ok_and(|kind| kind.is_dir()) && should_skip_hidden_dir(&name)
 }
 
 fn push_inventory_path(root: &Path, path: &Path, out: &mut Vec<String>) {

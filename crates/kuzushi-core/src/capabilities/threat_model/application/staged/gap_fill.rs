@@ -45,7 +45,8 @@ fn query_gap_fill(
             input.target.clone(),
             threat_model_system_prompt(),
             prompt,
-        ),
+        )
+        .with_max_output_tokens(input.max_output_tokens),
         StructuredJsonContract::new("threat-model:build", "ThreatModelGapFill", gap_fill_schema()),
         Ok,
     )

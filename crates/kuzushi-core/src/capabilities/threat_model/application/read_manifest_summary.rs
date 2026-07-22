@@ -41,6 +41,13 @@ pub(crate) fn should_skip_path(name: &str) -> bool {
     )
 }
 
+/// Directory-only companion to [`should_skip_path`]: hidden directories hold
+/// VCS, editor, and agent state, never product code. `.github` stays — CI
+/// workflows are attack surface.
+pub(crate) fn should_skip_hidden_dir(name: &str) -> bool {
+    name.starts_with('.') && name != ".github"
+}
+
 pub(crate) fn records(raw: Option<&Value>) -> Vec<&Map<String, Value>> {
     raw.and_then(Value::as_array)
         .map(|items| items.iter().filter_map(Value::as_object).collect())

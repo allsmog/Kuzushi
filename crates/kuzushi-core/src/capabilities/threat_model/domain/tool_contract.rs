@@ -151,6 +151,7 @@ pub(crate) struct BuildInput {
     pub(crate) max_source_bytes: usize,
     pub(crate) max_elements: usize,
     pub(crate) max_threats: usize,
+    pub(crate) max_output_tokens: u32,
     pub(crate) emit_findings: bool,
     pub(crate) preserve_user_edits: bool,
     pub(crate) prompt_override: Option<String>,

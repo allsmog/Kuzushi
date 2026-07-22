@@ -66,6 +66,15 @@ pub(in crate::modules) fn should_skip_path(name: &str) -> bool {
     )
 }
 
+/// Directory-only companion to [`should_skip_path`]: hidden directories hold
+/// VCS, editor, and agent state (`.claude`, `.ccsec-*`), never product code,
+/// and on tool-heavy monorepos they eat the walk budget before real source
+/// roots. Hidden FILES (`.env`, `.bazelrc`) stay — they are evidence.
+/// `.github` stays too: CI workflows are attack surface.
+pub(in crate::modules) fn should_skip_hidden_dir(name: &str) -> bool {
+    name.starts_with('.') && name != ".github"
+}
+
 pub(in crate::modules) fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

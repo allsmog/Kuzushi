@@ -59,6 +59,8 @@ fn risk_for_surface(surface: &AttackSurface) -> AttackSurfaceRisk {
     add_boundary_risk(surface, &mut score, &mut reasons);
     add_route_risk(surface, &mut score, &mut reasons);
     add_evidence_risk(surface, &mut score, &mut reasons);
+    add_native_wire_risk(surface, &mut score, &mut reasons);
+    subtract_non_production_risk(surface, &mut score, &mut reasons);
     score = score.min(100);
     AttackSurfaceRisk {
         rank: 0,
@@ -262,6 +264,105 @@ const REQUEST_CONTROLLED_EVIDENCE: &[&str] = &[
     "[fromquery",
 ];
 
+/// External input reaching a parser in a memory-unsafe language carries a
+/// memory-corruption blast radius on top of the injection class; a Thrift IDL
+/// `service` declaration is a remote wire contract by construction. Both must
+/// outrank same-kind rows in memory-safe web code, which otherwise win on
+/// framework-specific evidence bonuses.
+fn add_native_wire_risk(surface: &AttackSurface, score: &mut u16, reasons: &mut Vec<String>) {
+    if !external_input_kind(surface.kind) {
+        return;
+    }
+    if matches!(surface.language.as_str(), "C" | "C++") {
+        *score += 12;
+        reasons.push("external input parsed in a memory-unsafe language".to_string());
+    }
+    if surface.language == "Thrift" {
+        *score += 12;
+        reasons.push("declared remote wire-service contract".to_string());
+    }
+}
+
+fn external_input_kind(kind: AttackSurfaceKind) -> bool {
+    matches!(
+        kind,
+        AttackSurfaceKind::RpcHandler
+            | AttackSurfaceKind::DeserializationPoint
+            | AttackSurfaceKind::RequestTrustBoundary
+            | AttackSurfaceKind::FileUploadParsePath
+            | AttackSurfaceKind::HttpRoute
+    )
+}
+
+/// Dev tooling, test suites, and build scripts sit behind the repository
+/// trust boundary — their inputs come from operators and CI, not attackers —
+/// so a subprocess call there must not outrank a production listener.
+fn subtract_non_production_risk(
+    surface: &AttackSurface,
+    score: &mut u16,
+    reasons: &mut Vec<String>,
+) {
+    if !non_production_path(&surface.path) {
+        return;
+    }
+    *score = score.saturating_sub(NON_PRODUCTION_PATH_PENALTY);
+    reasons.push("test/tooling path: operator-invoked, not production-exposed".to_string());
+}
+
+const NON_PRODUCTION_PATH_PENALTY: u16 = 30;
+
+const NON_PRODUCTION_PATH_SEGMENTS: &[&str] = &[
+    "bench",
+    "benches",
+    "benchmark",
+    "benchmarks",
+    "ci",
+    "contrib",
+    "debug",
+    "demo",
+    "demos",
+    "devtools",
+    "docs",
+    "e2e",
+    "example",
+    "examples",
+    "fixture",
+    "fixtures",
+    "hack",
+    "hacks",
+    "jenkins",
+    "mock",
+    "mocks",
+    "playground",
+    "sample",
+    "samples",
+    "scripts",
+    "spec",
+    "specs",
+    "test",
+    "testing",
+    "tests",
+    "tooling",
+    "tools",
+];
+
+pub(crate) fn non_production_path(path: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|segment| non_production_segment(segment))
+}
+
+fn non_production_segment(segment: &str) -> bool {
+    let lower = segment.to_ascii_lowercase();
+    NON_PRODUCTION_PATH_SEGMENTS.contains(&lower.as_str()) || test_file_name(&lower)
+}
+
+fn test_file_name(lower: &str) -> bool {
+    lower.starts_with("test_")
+        || lower.contains("_test.")
+        || lower.contains(".test.")
+        || lower.contains(".spec.")
+}
+
 fn mutating_method(method: Option<&str>) -> bool {
     matches!(method, Some("POST" | "PUT" | "PATCH" | "DELETE"))
 }
@@ -377,4 +478,79 @@ fn non_empty_quoted_value(candidate: &str) -> Option<String> {
 
 fn is_quote(ch: char) -> bool {
     matches!(ch, '"' | '\'' | '`')
+}
+
+#[cfg(test)]
+mod non_production_path_tests {
+    use super::*;
+
+    #[test]
+    fn tooling_and_test_paths_are_demoted() {
+        for path in [
+            "tools/repave/run.py",
+            "lab/scripts/deploy.sh",
+            "app/tests/test_upload.py",
+            "e2e/shield/boundary.py",
+            "pkg/handler.test.ts",
+            "src/py/test_util.py",
+        ] {
+            assert!(non_production_path(path), "{path} should be non-production");
+        }
+    }
+
+    fn scored_surface(kind: AttackSurfaceKind, language: &str, path: &str) -> AttackSurfaceRisk {
+        let surface = AttackSurface {
+            id: "s".to_string(),
+            kind,
+            path: path.to_string(),
+            line: Some(1),
+            language: language.to_string(),
+            framework: None,
+            title: "t".to_string(),
+            evidence: "e".to_string(),
+            method: None,
+            route: None,
+            boundary: None,
+            risk: AttackSurfaceRisk::default(),
+            metadata: serde_json::Value::Null,
+        };
+        risk_for_surface(&surface)
+    }
+
+    #[test]
+    fn native_wire_surfaces_outrank_same_kind_memory_safe_rows() {
+        let cpp = scored_surface(AttackSurfaceKind::RpcHandler, "C++", "src/rpc/server.cpp");
+        let go = scored_surface(AttackSurfaceKind::RpcHandler, "Go", "svc/rpc/server.go");
+        let thrift = scored_surface(
+            AttackSurfaceKind::RpcHandler,
+            "Thrift",
+            "src/thrift/agent.thrift",
+        );
+
+        assert!(cpp.score > go.score);
+        assert!(thrift.score > go.score);
+        assert!(cpp
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("memory-unsafe")));
+    }
+
+    #[test]
+    fn native_bonus_skips_non_input_kinds() {
+        let job = scored_surface(AttackSurfaceKind::BackgroundJob, "C++", "src/jobs/gc.cpp");
+
+        assert!(!job.reasons.iter().any(|r| r.contains("memory-unsafe")));
+    }
+
+    #[test]
+    fn production_paths_keep_full_risk() {
+        for path in [
+            "src/cpp/code/sdfs/server.cpp",
+            "src/rpc/agent_service.thrift",
+            "app/routes/upload.py",
+            "src/latest/contest_result.py",
+        ] {
+            assert!(!non_production_path(path), "{path} should be production");
+        }
+    }
 }

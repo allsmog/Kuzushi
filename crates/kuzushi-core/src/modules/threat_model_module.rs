@@ -167,6 +167,14 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         int_option("maxSourceBytes", &["max_source_bytes"], 200000),
         int_option("maxElements", &["max_elements"], 40),
         int_option("maxThreats", &["max_threats"], 30),
+        opt(
+            "maxOutputTokens",
+            OptionType::Int,
+            "Output-token budget for synthesis model calls; the full ThreatModelDocument JSON must fit or the structured contract fails on truncation.",
+        )
+        .aliases(&["max_output_tokens"])
+        .default(json!(32000))
+        .advanced(),
         bool_option("emitFindings", &["emit_findings"], false),
         bool_option("preserveUserEdits", &["preserve_user_edits"], true),
         opt("THREAT_MODEL_PROMPT", OptionType::String, "Prompt guidance or workspace file.")

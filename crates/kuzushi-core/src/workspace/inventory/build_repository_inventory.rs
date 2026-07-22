@@ -1,4 +1,5 @@
 use super::*;
+use std::path::PathBuf;
 
 const MAX_REPOSITORY_ENTRIES: usize = 100_000;
 const MAX_REPOSITORY_INSPECTED_BYTES: usize = 512 * 1024 * 1024;
@@ -118,26 +119,44 @@ impl<'p> InventoryBudget<'p> {
     }
 }
 
+/// Breadth-first so the entry budget spreads across every subtree: a
+/// depth-first walk spends the whole cap inside the alphabetically-first
+/// directories on monorepo-scale targets, leaving late-sorting roots
+/// (`src/`, `tools/`) entirely unmapped.
 fn walk_repository(
     root: &Path,
     dir: &Path,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
-    if budget.entries_exhausted() {
-        budget.mark_truncated(format!(
-            "entry cap reached before walking {}; inventory covers the walked prefix only",
-            dir.display()
-        ));
-        return Ok(());
+    let mut pending = std::collections::VecDeque::from([dir.to_path_buf()]);
+    while let Some(dir) = pending.pop_front() {
+        if budget.entries_exhausted() {
+            budget.mark_truncated(format!(
+                "entry cap reached before walking {}; inventory covers the breadth-first walked prefix only",
+                dir.display()
+            ));
+            return Ok(());
+        }
+        walk_repository_level(root, &dir, builder, budget, &mut pending)?;
     }
+    Ok(())
+}
+
+fn walk_repository_level(
+    root: &Path,
+    dir: &Path,
+    builder: &mut InventoryBuilder,
+    budget: &mut InventoryBudget<'_>,
+    pending: &mut std::collections::VecDeque<PathBuf>,
+) -> Result<()> {
     let read_dir = fs::read_dir(dir)
         .with_context(|| format!("Could not read repository directory {}", dir.display()))?;
     let mut entries = budget.collect_dir(read_dir, dir)?;
     entries.sort_by_key(|entry| entry.path());
 
     for entry in entries {
-        walk_repository_entry(root, entry, builder, budget)?;
+        walk_repository_entry(root, entry, builder, budget, pending)?;
     }
 
     Ok(())
@@ -148,6 +167,7 @@ fn walk_repository_entry(
     entry: fs::DirEntry,
     builder: &mut InventoryBuilder,
     budget: &mut InventoryBudget<'_>,
+    pending: &mut std::collections::VecDeque<PathBuf>,
 ) -> Result<()> {
     let path = entry.path();
     let file_type = entry
@@ -157,7 +177,8 @@ fn walk_repository_entry(
     let relative = repo_relative(root, &path);
 
     if file_type.is_dir() {
-        return walk_repository_dir(root, &path, &relative, &name, builder, budget);
+        walk_repository_dir(&path, &relative, &name, builder, pending);
+        return Ok(());
     }
     if file_type.is_file() {
         walk_repository_file(&path, &relative, &name, builder, budget)?;
@@ -166,21 +187,20 @@ fn walk_repository_entry(
 }
 
 fn walk_repository_dir(
-    root: &Path,
     path: &Path,
     relative: &str,
     name: &str,
     builder: &mut InventoryBuilder,
-    budget: &mut InventoryBudget<'_>,
-) -> Result<()> {
+    pending: &mut std::collections::VecDeque<PathBuf>,
+) {
     if ignored_dir(name) {
-        return Ok(());
+        return;
     }
     if let Some(classification) = generated_vendor_path(relative, name, true) {
         builder.add_generated_vendor_path(classification);
-        return Ok(());
+        return;
     }
-    walk_repository(root, path, builder, budget)
+    pending.push_back(path.to_path_buf());
 }
 
 fn walk_repository_file(

@@ -57,7 +57,11 @@ pub(crate) fn inspect_line(
         "Python" => inspect_python_line(source_file, framework, line_number, line, builder),
         "Go" => inspect_go_line(source_file, framework, line_number, line, builder),
         "Rust" => inspect_rust_line(source_file, framework, line_number, line, builder),
-        "Java" | "Kotlin" => inspect_jvm_line(source_file, framework, line_number, line, builder),
+        "Java" | "Kotlin" | "Scala" => {
+            inspect_jvm_line(source_file, framework, line_number, line, builder);
+        }
+        "C" | "C++" => inspect_cpp_line(source_file, framework, line_number, line, builder),
+        "Thrift" => inspect_thrift_line(source_file, framework, line_number, line, builder),
         "C#" => inspect_dotnet_line(source_file, framework, line_number, line, builder),
         "Ruby" => inspect_ruby_line(source_file, framework, line_number, line, builder),
         "PHP" => inspect_php_line(source_file, framework, line_number, line, builder),

@@ -24,6 +24,7 @@ pub(crate) fn parse_build_input(
         max_source_bytes: max_source_bytes(input),
         max_elements: read_usize(input, &["maxElements", "max_elements"], 40, 5),
         max_threats: read_usize(input, &["maxThreats", "max_threats"], 30, 1),
+        max_output_tokens: read_max_output_tokens(input),
         emit_findings: read_bool(input, &["emitFindings", "emit_findings"], false),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
         prompt_override: Some(
@@ -147,6 +148,11 @@ fn parse_vulns_csv(lines: &[&str]) -> Vec<OperatorVulnRow> {
         })
         .filter(|row| !row.id.is_empty())
         .collect()
+}
+
+fn read_max_output_tokens(input: &Value) -> u32 {
+    read_usize(input, &["maxOutputTokens", "max_output_tokens"], 32_000, 1_024)
+        .min(u32::MAX as usize) as u32
 }
 
 fn read_pipeline(input: &Value) -> Result<String> {

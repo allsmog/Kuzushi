@@ -241,6 +241,7 @@ mod tests {
             max_source_bytes: 200_000,
             max_elements: 40,
             max_threats: 30,
+            max_output_tokens: 32_000,
             emit_findings: false,
             preserve_user_edits: true,
             prompt_override: None,

@@ -24,11 +24,12 @@ pub(crate) fn generated_vendor_path(
     })
 }
 
+/// Hidden directories hold VCS, editor, and agent state (`.git`, `.claude`,
+/// `.ccsec-*`) — never product code — and on tool-heavy monorepos they eat
+/// the walk budget before real source roots. `.github` stays: CI workflows
+/// are attack surface.
 pub(crate) fn ignored_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git" | ".hg" | ".svn" | ".kuzushi" | ".codex-active" | ".ruff_cache" | ".pytest_cache"
-    )
+    name.starts_with('.') && name != ".github"
 }
 
 pub(crate) fn vendor_dir(name: &str) -> bool {

@@ -132,10 +132,92 @@ fn infra_row(kind: AttackSurfaceKind, path: &str, title: String) -> AttackSurfac
 fn top_ranked_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackSurface>> {
     let map = crate::attack_surface::build_attack_surface_map(target)
         .context("threat-model grounding: attack-surface map failed")?;
-    let mut surfaces = map.surfaces;
+    Ok(stratified_top_surfaces(map.surfaces, max_elements.max(1)))
+}
+
+/// Maximum grounding rows drawn from one file, so a single hot spot cannot
+/// occupy the whole evidence budget.
+const MAX_GROUNDING_ROWS_PER_FILE: usize = 2;
+
+/// Kind-stratified top-N. A pure score cut returns a monoculture on monorepo
+/// targets — dozens of same-kind rows from adjacent tooling files — leaving
+/// the model blind to listeners, RPC handlers, and parsers that a human
+/// threat modeler would rank first. Round-robin across kinds (each kind's
+/// rows in score order) keeps every detected surface class represented.
+fn stratified_top_surfaces(
+    mut surfaces: Vec<AttackSurface>,
+    max_elements: usize,
+) -> Vec<AttackSurface> {
     surfaces.sort_by_key(|surface| std::cmp::Reverse(surface.risk.score));
-    surfaces.truncate(max_elements.max(1));
-    Ok(surfaces)
+    let mut selected = round_robin_by_kind(kind_buckets(surfaces), max_elements);
+    selected.sort_by_key(|surface| std::cmp::Reverse(surface.risk.score));
+    selected
+}
+
+fn kind_buckets(surfaces: Vec<AttackSurface>) -> Vec<std::collections::VecDeque<AttackSurface>> {
+    let mut buckets: Vec<std::collections::VecDeque<AttackSurface>> = Vec::new();
+    let mut index_by_kind = std::collections::BTreeMap::new();
+    for surface in surfaces {
+        let index = *index_by_kind.entry(surface.kind).or_insert_with(|| {
+            buckets.push(std::collections::VecDeque::new());
+            buckets.len() - 1
+        });
+        buckets[index].push_back(surface);
+    }
+    buckets.sort_by_key(|bucket| std::cmp::Reverse(bucket_top_score(bucket)));
+    buckets
+}
+
+fn bucket_top_score(bucket: &std::collections::VecDeque<AttackSurface>) -> u16 {
+    bucket
+        .front()
+        .map(|surface| surface.risk.score)
+        .unwrap_or_default()
+}
+
+fn round_robin_by_kind(
+    mut buckets: Vec<std::collections::VecDeque<AttackSurface>>,
+    max_elements: usize,
+) -> Vec<AttackSurface> {
+    let mut selected = Vec::new();
+    let mut rows_per_file = std::collections::BTreeMap::new();
+    loop {
+        let before = selected.len();
+        take_one_round(&mut buckets, max_elements, &mut selected, &mut rows_per_file);
+        if selected.len() >= max_elements || selected.len() == before {
+            return selected;
+        }
+    }
+}
+
+fn take_one_round(
+    buckets: &mut [std::collections::VecDeque<AttackSurface>],
+    max_elements: usize,
+    selected: &mut Vec<AttackSurface>,
+    rows_per_file: &mut std::collections::BTreeMap<String, usize>,
+) {
+    for bucket in buckets.iter_mut() {
+        if selected.len() >= max_elements {
+            return;
+        }
+        if let Some(surface) = next_within_file_cap(bucket, rows_per_file) {
+            selected.push(surface);
+        }
+    }
+}
+
+fn next_within_file_cap(
+    bucket: &mut std::collections::VecDeque<AttackSurface>,
+    rows_per_file: &mut std::collections::BTreeMap<String, usize>,
+) -> Option<AttackSurface> {
+    while let Some(surface) = bucket.pop_front() {
+        let taken = rows_per_file.entry(surface.path.clone()).or_insert(0);
+        if *taken < MAX_GROUNDING_ROWS_PER_FILE {
+            *taken += 1;
+            return Some(surface);
+        }
+    }
+    None
 }
 
 fn confirmed_finding_rows(ctx: &ToolExecutionContext<'_>) -> Result<Vec<ConfirmedFindingRow>> {
@@ -266,6 +348,78 @@ fn finding_line(row: &ConfirmedFindingRow) -> String {
 mod tests {
     use super::*;
     use crate::attack_surface::{AttackSurfaceKind, AttackSurfaceRisk};
+
+    fn surface_row(id: &str, kind: AttackSurfaceKind, path: &str, score: u16) -> AttackSurface {
+        AttackSurface {
+            id: id.to_string(),
+            kind,
+            path: path.to_string(),
+            line: Some(1),
+            language: "python".to_string(),
+            framework: None,
+            title: format!("{id} surface"),
+            evidence: "evidence".to_string(),
+            method: None,
+            route: None,
+            boundary: None,
+            risk: AttackSurfaceRisk {
+                score,
+                ..AttackSurfaceRisk::default()
+            },
+            metadata: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn stratified_selection_keeps_minority_kinds_out_of_a_monoculture() {
+        let mut surfaces: Vec<AttackSurface> = (0..30)
+            .map(|index| {
+                surface_row(
+                    &format!("cmd{index}"),
+                    AttackSurfaceKind::CommandExecutionBoundary,
+                    &format!("tools/script{index}.py"),
+                    90,
+                )
+            })
+            .collect();
+        surfaces.push(surface_row(
+            "rpc1",
+            AttackSurfaceKind::RpcHandler,
+            "src/rpc/server.cpp",
+            60,
+        ));
+        surfaces.push(surface_row(
+            "deser1",
+            AttackSurfaceKind::DeserializationPoint,
+            "src/proto/decode.cpp",
+            78,
+        ));
+
+        let selected = stratified_top_surfaces(surfaces, 10);
+
+        let kinds: Vec<_> = selected.iter().map(|surface| surface.kind).collect();
+        assert!(kinds.contains(&AttackSurfaceKind::RpcHandler));
+        assert!(kinds.contains(&AttackSurfaceKind::DeserializationPoint));
+        assert_eq!(selected.len(), 10);
+    }
+
+    #[test]
+    fn stratified_selection_caps_rows_per_file() {
+        let surfaces: Vec<AttackSurface> = (0..8)
+            .map(|index| {
+                surface_row(
+                    &format!("hot{index}"),
+                    AttackSurfaceKind::CommandExecutionBoundary,
+                    "src/hot_spot.py",
+                    90,
+                )
+            })
+            .collect();
+
+        let selected = stratified_top_surfaces(surfaces, 8);
+
+        assert_eq!(selected.len(), MAX_GROUNDING_ROWS_PER_FILE);
+    }
 
     #[test]
     fn attack_surface_section_renders_ground_truth_rows_in_untrusted_block() {
