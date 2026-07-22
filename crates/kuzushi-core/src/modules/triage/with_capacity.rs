@@ -227,9 +227,14 @@ fn deep_triage_outcome(
     input: &TriageRunInput,
     finding: &Finding,
 ) -> Result<TriageRuntimeOutcome> {
+    let base = crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone());
+    let tuning = input.deep_tuning;
     let cfg = crate::capabilities::deep_auditor::DeepAuditConfig {
         passes: input.votes as u32,
-        ..crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone())
+        max_steps: tuning.max_steps.unwrap_or(base.max_steps),
+        deposit_usd: tuning.deposit_usd.unwrap_or(base.deposit_usd),
+        temperature: tuning.temperature.unwrap_or(base.temperature),
+        ..base
     };
     let outcome = crate::capabilities::deep_auditor::run_deep_auditor(routed, None, &cfg, finding)?;
     Ok(TriageRuntimeOutcome {

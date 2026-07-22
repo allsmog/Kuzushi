@@ -25,6 +25,31 @@ pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) model: Option<String>,
     pub(in crate::modules) retriage: bool,
     pub(in crate::modules) votes: usize,
+    pub(in crate::modules) deep_tuning: DeepTriageTuning,
+}
+
+/// Optional deep-auditor tuning for bulk deep triage, read from the same
+/// `maxSteps` / `depositUsd` / `temperature` options the single-finding deep
+/// arm consumes; unset values keep the `DeepAuditConfig` defaults.
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::modules) struct DeepTriageTuning {
+    pub(in crate::modules) max_steps: Option<u32>,
+    pub(in crate::modules) deposit_usd: Option<f64>,
+    pub(in crate::modules) temperature: Option<f32>,
+}
+
+fn parse_deep_triage_tuning(input: &Value) -> DeepTriageTuning {
+    DeepTriageTuning {
+        max_steps: input
+            .get("maxSteps")
+            .and_then(Value::as_u64)
+            .map(|value| u32::try_from(value).unwrap_or(u32::MAX)),
+        deposit_usd: input.get("depositUsd").and_then(Value::as_f64),
+        temperature: input
+            .get("temperature")
+            .and_then(Value::as_f64)
+            .map(|value| value.clamp(0.0, 2.0) as f32),
+    }
 }
 
 impl TriageRunInput {
@@ -48,6 +73,7 @@ impl TriageRunInput {
             model: optional_nonempty_string(input, "model")?,
             retriage: parse_triage_retriage(input),
             votes: parse_triage_votes(input)?,
+            deep_tuning: parse_deep_triage_tuning(input),
         })
     }
 }

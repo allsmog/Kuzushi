@@ -68,10 +68,21 @@ function errorClassFromShape(error) {
   const message = boundedLower(error?.message);
   return (
     cancellationClass(name, message) ??
+    rateLimitClass(name, message) ??
     timeoutClass(code, message) ??
     transportClass(name, code, message) ??
     "bridge_internal"
   );
+}
+
+// Some SDK layers wrap provider 429s (e.g. `RateLimitCapacityError`) without
+// exposing an HTTP status field; classify by shape so the runtime's
+// transient-failure retry policy still engages.
+function rateLimitClass(name, message) {
+  const rateLimitedName = name.includes("ratelimit");
+  const rateLimitedMessage =
+    message.includes("resource_exhausted") || message.startsWith("429 ") || message.includes(" 429 ");
+  return rateLimitedName || rateLimitedMessage ? "rate_limited" : undefined;
 }
 
 function cancellationClass(name, message) {

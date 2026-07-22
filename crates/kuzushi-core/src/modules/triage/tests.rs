@@ -207,6 +207,23 @@ mod tests {
     }
 
     #[test]
+    fn deep_tuning_options_ride_the_triage_input() {
+        let input = TriageRunInput::from_tool_input(
+            &json!({"maxSteps": 12, "depositUsd": 0.5, "temperature": 1.0}),
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(input.deep_tuning.max_steps, Some(12));
+        assert_eq!(input.deep_tuning.deposit_usd, Some(0.5));
+        assert_eq!(input.deep_tuning.temperature, Some(1.0));
+
+        let unset = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        assert_eq!(unset.deep_tuning.max_steps, None);
+        assert_eq!(unset.deep_tuning.deposit_usd, None);
+        assert_eq!(unset.deep_tuning.temperature, None);
+    }
+
+    #[test]
     fn select_triage_findings_defaults_to_latest_scan() {
         let store = store_with_scan_findings(&[
             ("scan-a", finding_with(Severity::High, "semgrep", "old sql")),
