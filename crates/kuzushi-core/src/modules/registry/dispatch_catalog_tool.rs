@@ -380,6 +380,9 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         "fuzz:run" => Some(run_fuzz_run(input, ctx)),
         "fuzz:author" => Some(run_fuzz_author(input, ctx, runtime)),
         "fuzz:import" => Some(run_fuzz_import(input, ctx)),
+        "fuzz:prove" => Some(run_fuzz_prove(input, ctx)),
+        "fuzz:sweep" => Some(run_fuzz_sweep(input, ctx)),
+        "fuzz:differential" => Some(run_fuzz_differential(input, ctx)),
         "fuzz:status" => Some(run_fuzz_status(input, ctx)),
         _ => None,
     }

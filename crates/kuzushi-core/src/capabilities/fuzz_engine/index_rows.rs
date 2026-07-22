@@ -171,7 +171,7 @@ fn impact_event(object: &serde_json::Map<String, Value>) -> Option<IndexEvent> {
 
 /// The impact pass reports write evidence as a descriptive string (`"none"`
 /// when the oracle saw nothing); older payloads used a bool.
-fn write_evidence_flag(value: &Value) -> bool {
+pub(crate) fn write_evidence_flag(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,
         Value::String(text) => !text.trim().is_empty() && text.trim() != "none",

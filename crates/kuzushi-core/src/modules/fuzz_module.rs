@@ -1,6 +1,7 @@
 use super::*;
 use crate::capabilities::fuzz_engine::{
-    author, bootstrap, derived_workspace_root, engine_cli, import, provision, rounds, FuzzPaths,
+    author, bootstrap, derived_workspace_root, engine_cli, import, index_rows, prove, provision,
+    rounds, FuzzPaths,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -58,6 +59,45 @@ pub(in crate::modules) fn fuzz_module() -> BuiltinModule {
                 ToolPhase::Scan,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,
+            )),
+            tool_with_options(
+                "fuzz:prove",
+                "Run the engine's per-finding impact pass (PoV replay for the ASAN primitive, \
+                 UBSan wrap evidence, flag-profile matrix, adjacency leads) over verified \
+                 findings that lack an impact verdict, then refresh the import so \
+                 impact-derived severity lands in the findings store.",
+                fuzz_prove_options(),
+            )
+            .with_policy(repository_execute_policy(
+                ToolPhase::Prove,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            )),
+            tool_with_options(
+                "fuzz:sweep",
+                "Build a sanitizer-variant fuzzer (MSan uninitialized-read or TSan race \
+                 oracle) for one engine target and replay its corpus in keep-going mode with \
+                 benign-input baseline subtraction, reporting input-dependent signature \
+                 groups ranked write-first.",
+                fuzz_sweep_options(),
+            )
+            .with_policy(repository_execute_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
+            )),
+            tool_with_options(
+                "fuzz:differential",
+                "Replay one engine target's corpus through N implementations (fork vs \
+                 upstream, or one command as a metamorphic self-check) and rank the \
+                 divergences: crash-split first, then validity- and output-splits — the \
+                 silent-wrong-data oracle the crash lane never fires on.",
+                fuzz_differential_options(),
+            )
+            .with_policy(repository_execute_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Optional,
             )),
             tool_with_options(
                 "fuzz:status",
@@ -291,6 +331,189 @@ fn fuzz_import_options() -> Vec<OptionSpec> {
         .default(json!(false))
         .advanced(),
     ]
+}
+
+fn fuzz_prove_options() -> Vec<OptionSpec> {
+    let mut options = shared_engine_options();
+    options.extend(vec![
+        opt(
+            "findingId",
+            OptionType::String,
+            "Impact-grade exactly this engine finding id (re-grades even one that already \
+             has an impact verdict — the pass is a deterministic replay).",
+        )
+        .aliases(&["finding_id"]),
+        opt(
+            "runId",
+            OptionType::String,
+            "Only grade findings recorded under this engine run id.",
+        )
+        .aliases(&["run_id"]),
+        opt(
+            "maxFindings",
+            OptionType::Int,
+            "Cap on findings graded this invocation.",
+        )
+        .aliases(&["max_findings"])
+        .integer_range(1, 25)
+        .default(json!(5)),
+        opt(
+            "replayTimeoutSeconds",
+            OptionType::Int,
+            "Per-replay-lane deadline inside the engine's impact pass.",
+        )
+        .aliases(&["replay_timeout_seconds"])
+        .integer_range(5, 600)
+        .default(json!(60))
+        .advanced(),
+        opt(
+            "skipImport",
+            OptionType::Bool,
+            "Grade impact without refreshing the findings-store import afterwards.",
+        )
+        .aliases(&["skip_import"])
+        .default(json!(false))
+        .advanced(),
+        fuzz_timeout_option(),
+    ]);
+    options
+}
+
+fn fuzz_sweep_options() -> Vec<OptionSpec> {
+    let mut options = shared_engine_options();
+    options.extend(vec![
+        opt(
+            "sanitizer",
+            OptionType::String,
+            "Sanitizer variant to build and sweep with. MSan finds uninitialized reads the \
+             ASAN lane cannot; TSan needs a target that actually spawns threads.",
+        )
+        .choices(&["msan", "tsan"])
+        .default(json!("msan")),
+        opt(
+            "rebuild",
+            OptionType::Bool,
+            "Rebuild the variant fuzzer even when bin/<target>/fuzzer-<sanitizer> exists.",
+        )
+        .default(json!(false))
+        .advanced(),
+        opt(
+            "maxInputs",
+            OptionType::Int,
+            "Cap on corpus inputs replayed this sweep.",
+        )
+        .aliases(&["max_inputs"])
+        .integer_range(1, 100_000)
+        .default(json!(2000)),
+        opt(
+            "runsPerInput",
+            OptionType::Int,
+            "Repetitions per input (TSan interleavings need more than one).",
+        )
+        .aliases(&["runs_per_input"])
+        .integer_range(1, 16)
+        .default(json!(1))
+        .advanced(),
+        opt(
+            "perInputTimeoutSeconds",
+            OptionType::Int,
+            "Per-input replay deadline inside the sweep.",
+        )
+        .aliases(&["per_input_timeout_seconds"])
+        .integer_range(1, 300)
+        .default(json!(15))
+        .advanced(),
+        opt(
+            "maxSeconds",
+            OptionType::Int,
+            "Whole-sweep replay budget (the engine reports budget_exhausted past it).",
+        )
+        .aliases(&["max_seconds"])
+        .integer_range(30, 21_600)
+        .default(json!(900)),
+        opt(
+            "buildTimeoutSeconds",
+            OptionType::Int,
+            "Variant-build deadline when the sweep has to build the fuzzer first.",
+        )
+        .aliases(&["build_timeout_seconds"])
+        .integer_range(60, 7200)
+        .default(json!(1200))
+        .advanced(),
+        opt("top", OptionType::Int, "Signature groups kept in the report.")
+            .integer_range(1, 500)
+            .default(json!(50))
+            .advanced(),
+        fuzz_timeout_option(),
+    ]);
+    options
+}
+
+fn fuzz_differential_options() -> Vec<OptionSpec> {
+    let mut options = shared_engine_options();
+    options.extend(vec![
+        opt(
+            "commands",
+            OptionType::StringList,
+            "One replay argv per implementation, each as a single string with an optional \
+             {input} placeholder (appended otherwise). A single command is treated as a \
+             metamorphic self-check.",
+        )
+        .aliases(&["command"]),
+        opt(
+            "labels",
+            OptionType::StringList,
+            "Implementation labels, positionally matching commands.",
+        )
+        .aliases(&["label"])
+        .advanced(),
+        opt(
+            "compare",
+            OptionType::String,
+            "behavior compares exit classes only; output also diffs stdout hashes.",
+        )
+        .choices(&["behavior", "output"])
+        .default(json!("behavior")),
+        opt(
+            "corpusDir",
+            OptionType::Path,
+            "Corpus directory to replay. Defaults to the engine target's corpus.",
+        )
+        .external_read()
+        .aliases(&["corpus_dir"])
+        .advanced(),
+        opt(
+            "maxInputs",
+            OptionType::Int,
+            "Cap on corpus inputs replayed this run.",
+        )
+        .aliases(&["max_inputs"])
+        .integer_range(1, 100_000)
+        .default(json!(2000)),
+        opt(
+            "perInputTimeoutSeconds",
+            OptionType::Int,
+            "Per-input, per-implementation replay deadline.",
+        )
+        .aliases(&["per_input_timeout_seconds"])
+        .integer_range(1, 300)
+        .default(json!(10))
+        .advanced(),
+        opt(
+            "maxSeconds",
+            OptionType::Int,
+            "Whole-run replay budget (the engine reports budget_exhausted past it).",
+        )
+        .aliases(&["max_seconds"])
+        .integer_range(30, 21_600)
+        .default(json!(900)),
+        opt("top", OptionType::Int, "Divergences kept in the report.")
+            .integer_range(1, 500)
+            .default(json!(50))
+            .advanced(),
+        fuzz_timeout_option(),
+    ]);
+    options
 }
 
 fn fuzz_status_options() -> Vec<OptionSpec> {
@@ -631,7 +854,7 @@ pub(in crate::modules) fn run_fuzz_run(input: &Value, ctx: &ToolExecutionContext
     let probe = bootstrap::probe_workspace(&paths.workspace_root);
     let selected = selected_targets(&probe, options.afe_target.as_deref());
     let summaries = execute_rounds(&mut run, &options, &selected, timeout)?;
-    let import_summary = execute_import(&mut run, input, &options)?;
+    let import_summary = execute_import(&mut run, input, options.skip_import)?;
     Ok(fuzz_run_response(&target, &paths, run, &probe, &selected, summaries, import_summary))
 }
 
@@ -815,9 +1038,9 @@ fn execute_round_for(
 fn execute_import(
     run: &mut EngineRun<'_>,
     input: &Value,
-    options: &FuzzRunOptions,
+    skip_import: bool,
 ) -> Result<Option<import::FuzzImportSummary>> {
-    if options.skip_import {
+    if skip_import {
         run.record_skip("import", "skipImport requested");
         return Ok(None);
     }
@@ -997,6 +1220,500 @@ fn author_response(target: &Path, report: author::AuthorReport) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// fuzz:prove
+// ---------------------------------------------------------------------------
+
+/// The impact pass replays one PoV several times (flag-profile matrix plus
+/// oracle lanes), so its step budget is a multiple of the per-replay deadline.
+const PROVE_LANES_PER_FINDING: u64 = 10;
+const PROVE_STEP_SLACK: Duration = Duration::from_secs(120);
+
+struct FuzzProveOptions {
+    filter: prove::ProveFilter,
+    max_findings: usize,
+    replay_timeout_seconds: u64,
+    skip_import: bool,
+}
+
+impl FuzzProveOptions {
+    fn parse(input: &Value) -> Result<Self> {
+        Ok(Self {
+            filter: prove::ProveFilter {
+                target: optional_string_input(input, &["afeTarget", "afe_target", "shard"])?,
+                run_id: optional_string_input(input, &["runId", "run_id"])?,
+                finding_id: optional_string_input(input, &["findingId", "finding_id"])?,
+            },
+            max_findings: u64_input(input, &["maxFindings", "max_findings"], 5) as usize,
+            replay_timeout_seconds: u64_input(
+                input,
+                &["replayTimeoutSeconds", "replay_timeout_seconds"],
+                60,
+            ),
+            skip_import: bool_input(input, &["skipImport", "skip_import"]),
+        })
+    }
+
+    fn step_timeout(&self) -> Duration {
+        Duration::from_secs(self.replay_timeout_seconds * PROVE_LANES_PER_FINDING)
+            + PROVE_STEP_SLACK
+    }
+}
+
+pub(in crate::modules) fn run_fuzz_prove(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    ctx.ensure_active()?;
+    let target = resolve_tool_target(input, ctx)?;
+    let paths = match prepare_fuzz_paths(input, &target)? {
+        FuzzReadiness::Ready(paths) => paths,
+        FuzzReadiness::Skip(reason) => {
+            return Ok(fuzz_skipped_response("fuzz:prove", &target, &reason))
+        }
+    };
+    let options = FuzzProveOptions::parse(input)?;
+    let candidates = prove_candidates(&paths, &options)?;
+    let timeout = fuzz_tool_timeout(input, "fuzz:prove")?;
+    let mut run = EngineRun {
+        ctx,
+        paths: &paths,
+        deadline: Instant::now() + timeout,
+        steps: Vec::new(),
+        failed: false,
+        aborted: false,
+    };
+    let verdicts = execute_impact_passes(&mut run, &options, &candidates);
+    let import_summary = if verdicts.is_empty() {
+        run.record_skip("import", "no impact verdicts to fold");
+        None
+    } else {
+        execute_import(&mut run, input, options.skip_import)?
+    };
+    Ok(fuzz_prove_response(&target, &paths, run, &candidates, verdicts, import_summary))
+}
+
+/// Fold the durable findings index and pick the rows worth an impact pass.
+/// A missing index means the engine never recorded anything — a clean zero.
+fn prove_candidates(
+    paths: &FuzzPaths,
+    options: &FuzzProveOptions,
+) -> Result<Vec<prove::ProveCandidate>> {
+    let index_path = paths.data_root.join("findings-index.jsonl");
+    let Ok(body) = crate::bounded_file::read_utf8_text(&index_path, 64 * 1024 * 1024) else {
+        return Ok(Vec::new());
+    };
+    let (folded, _) = index_rows::parse_and_fold(&body);
+    Ok(prove::select_candidates(&folded, &options.filter, options.max_findings))
+}
+
+fn execute_impact_passes(
+    run: &mut EngineRun<'_>,
+    options: &FuzzProveOptions,
+    candidates: &[prove::ProveCandidate],
+) -> Vec<Value> {
+    if candidates.is_empty() {
+        run.record_skip("finding-impact", "no verified findings awaiting an impact verdict");
+        return Vec::new();
+    }
+    let ws = run.paths.workspace_root.display().to_string();
+    let mut verdicts = Vec::new();
+    for candidate in candidates {
+        if run.aborted {
+            break;
+        }
+        let args = vec![
+            "finding-impact".into(),
+            candidate.run_id.clone(),
+            candidate.finding_id.clone(),
+            "--workspace-root".into(),
+            ws.clone(),
+            "--timeout-seconds".into(),
+            options.replay_timeout_seconds.to_string(),
+        ];
+        let label = format!("finding-impact {}", candidate.finding_id);
+        if let Some(payload) = run.engine_step(&label, args, options.step_timeout()) {
+            verdicts.push(prove::verdict_from_payload(candidate, &payload));
+        }
+    }
+    verdicts
+}
+
+fn fuzz_prove_response(
+    target: &Path,
+    paths: &FuzzPaths,
+    run: EngineRun<'_>,
+    candidates: &[prove::ProveCandidate],
+    verdicts: Vec<Value>,
+    import_summary: Option<import::FuzzImportSummary>,
+) -> Value {
+    let write_class = verdicts.iter().filter(|v| prove::verdict_is_write_class(v)).count();
+    let output = format!(
+        "fuzz:prove · {}/{} finding(s) impact-graded · {} write-class · {} import refresh{}",
+        verdicts.len(),
+        candidates.len(),
+        write_class,
+        import_summary
+            .as_ref()
+            .map(|s| s.imported.to_string())
+            .unwrap_or_else(|| "no".to_string()),
+        if run.failed { " · PARTIAL (see steps)" } else { "" },
+    );
+    let data = json!({
+        "target": target.display().to_string(),
+        "workspaceRoot": paths.workspace_root.display().to_string(),
+        "dataRoot": paths.data_root.display().to_string(),
+        "steps": run.steps,
+        "candidates": candidates.len(),
+        "verdicts": verdicts,
+        "writeClass": write_class,
+        "importSummary": import_summary,
+    });
+    if run.failed {
+        crate::module_result::partial_output_result(
+            output.clone(),
+            output.clone(),
+            vec![json!("one or more impact passes failed; completed verdicts are durable in the findings index")],
+            data,
+        )
+    } else {
+        crate::module_result::completed_output_result(output.clone(), output, data)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// fuzz:sweep
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct FuzzSweepOptions {
+    afe_target: String,
+    sanitizer: String,
+    rebuild: bool,
+    max_inputs: u64,
+    runs_per_input: u64,
+    per_input_timeout_seconds: u64,
+    max_seconds: u64,
+    build_timeout_seconds: u64,
+    top: u64,
+}
+
+impl FuzzSweepOptions {
+    fn parse(input: &Value) -> Result<Self> {
+        let afe_target = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?
+            .context("fuzz:sweep requires afeTarget (the engine target to sweep)")?;
+        Ok(Self {
+            afe_target,
+            sanitizer: optional_string_input(input, &["sanitizer"])?
+                .unwrap_or_else(|| "msan".to_string()),
+            rebuild: bool_input(input, &["rebuild"]),
+            max_inputs: u64_input(input, &["maxInputs", "max_inputs"], 2000),
+            runs_per_input: u64_input(input, &["runsPerInput", "runs_per_input"], 1),
+            per_input_timeout_seconds: u64_input(
+                input,
+                &["perInputTimeoutSeconds", "per_input_timeout_seconds"],
+                15,
+            ),
+            max_seconds: u64_input(input, &["maxSeconds", "max_seconds"], 900),
+            build_timeout_seconds: u64_input(
+                input,
+                &["buildTimeoutSeconds", "build_timeout_seconds"],
+                1200,
+            ),
+            top: u64_input(input, &["top"], 50),
+        })
+    }
+}
+
+pub(in crate::modules) fn run_fuzz_sweep(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    ctx.ensure_active()?;
+    let target = resolve_tool_target(input, ctx)?;
+    let paths = match prepare_fuzz_paths(input, &target)? {
+        FuzzReadiness::Ready(paths) => paths,
+        FuzzReadiness::Skip(reason) => {
+            return Ok(fuzz_skipped_response("fuzz:sweep", &target, &reason))
+        }
+    };
+    let options = FuzzSweepOptions::parse(input)?;
+    let timeout = fuzz_tool_timeout(input, "fuzz:sweep")?;
+    let mut run = EngineRun {
+        ctx,
+        paths: &paths,
+        deadline: Instant::now() + timeout,
+        steps: Vec::new(),
+        failed: false,
+        aborted: false,
+    };
+    ensure_variant_built(&mut run, &options);
+    let payload = execute_sweep(&mut run, &options);
+    Ok(fuzz_sweep_response(&target, &paths, run, &options, payload))
+}
+
+fn variant_binary(paths: &FuzzPaths, options: &FuzzSweepOptions) -> PathBuf {
+    paths
+        .workspace_root
+        .join("bin")
+        .join(&options.afe_target)
+        .join(format!("fuzzer-{}", options.sanitizer))
+}
+
+/// A sweep without its variant binary is meaningless, so a failed build
+/// aborts the run instead of letting the sweep step fail confusingly.
+fn ensure_variant_built(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) {
+    if !options.rebuild && variant_binary(run.paths, options).is_file() {
+        run.record_skip("sanitizer-build", "variant fuzzer already built");
+        return;
+    }
+    let args = vec![
+        "sanitizer-build".into(),
+        "--target".into(),
+        options.afe_target.clone(),
+        "--sanitizer".into(),
+        options.sanitizer.clone(),
+        "--timeout-seconds".into(),
+        options.build_timeout_seconds.to_string(),
+        "--workspace-root".into(),
+        run.paths.workspace_root.display().to_string(),
+    ];
+    let step_timeout = Duration::from_secs(options.build_timeout_seconds + 60);
+    if run.engine_step("sanitizer-build", args, step_timeout).is_none() {
+        run.aborted = true;
+    }
+}
+
+fn execute_sweep(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) -> Option<Value> {
+    if run.aborted {
+        return None;
+    }
+    let args = vec![
+        "sanitizer-sweep".into(),
+        "--target".into(),
+        options.afe_target.clone(),
+        "--sanitizer".into(),
+        options.sanitizer.clone(),
+        "--max-inputs".into(),
+        options.max_inputs.to_string(),
+        "--per-input-timeout".into(),
+        options.per_input_timeout_seconds.to_string(),
+        "--max-seconds".into(),
+        options.max_seconds.to_string(),
+        "--runs-per-input".into(),
+        options.runs_per_input.to_string(),
+        "--top".into(),
+        options.top.to_string(),
+        "--workspace-root".into(),
+        run.paths.workspace_root.display().to_string(),
+    ];
+    run.engine_step("sanitizer-sweep", args, run.remaining())
+}
+
+fn payload_u64(payload: Option<&Value>, key: &str) -> u64 {
+    payload
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+fn fuzz_sweep_response(
+    target: &Path,
+    paths: &FuzzPaths,
+    run: EngineRun<'_>,
+    options: &FuzzSweepOptions,
+    payload: Option<Value>,
+) -> Value {
+    let summary = payload.as_ref();
+    let output = format!(
+        "fuzz:sweep · {} on {} · {}/{} input(s) replayed · {} input-dependent group(s) \
+         ({} baseline signature(s) absorbed){}",
+        options.sanitizer,
+        options.afe_target,
+        payload_u64(summary, "inputs_scanned"),
+        payload_u64(summary, "inputs_total"),
+        payload_u64(summary, "unique_signatures"),
+        payload_u64(summary, "baseline_signature_count"),
+        if run.failed { " · PARTIAL (see steps)" } else { "" },
+    );
+    let data = json!({
+        "target": target.display().to_string(),
+        "workspaceRoot": paths.workspace_root.display().to_string(),
+        "afeTarget": options.afe_target,
+        "sanitizer": options.sanitizer,
+        "steps": run.steps,
+        "sweep": payload,
+    });
+    if run.failed {
+        crate::module_result::partial_output_result(
+            output.clone(),
+            output.clone(),
+            vec![json!("one or more engine steps failed; see steps")],
+            data,
+        )
+    } else {
+        crate::module_result::completed_output_result(output.clone(), output, data)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// fuzz:differential
+// ---------------------------------------------------------------------------
+
+#[derive(Debug)]
+struct FuzzDifferentialOptions {
+    afe_target: String,
+    commands: Vec<String>,
+    labels: Vec<String>,
+    compare: String,
+    corpus_dir: Option<String>,
+    max_inputs: u64,
+    per_input_timeout_seconds: u64,
+    max_seconds: u64,
+    top: u64,
+}
+
+impl FuzzDifferentialOptions {
+    fn parse(input: &Value) -> Result<Self> {
+        let afe_target = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?
+            .context("fuzz:differential requires afeTarget (the engine target whose corpus is replayed)")?;
+        let commands = string_list_input(input, &["commands", "command"])?
+            .unwrap_or_default();
+        anyhow::ensure!(
+            !commands.is_empty(),
+            "fuzz:differential requires at least one replay command \
+             (pass commands as a JSON array of argv strings)"
+        );
+        let labels = string_list_input(input, &["labels", "label"])?.unwrap_or_default();
+        anyhow::ensure!(
+            labels.is_empty() || labels.len() == commands.len(),
+            "labels ({}) must positionally match commands ({})",
+            labels.len(),
+            commands.len()
+        );
+        Ok(Self {
+            afe_target,
+            commands,
+            labels,
+            compare: optional_string_input(input, &["compare"])?
+                .unwrap_or_else(|| "behavior".to_string()),
+            corpus_dir: optional_string_input(input, &["corpusDir", "corpus_dir"])?,
+            max_inputs: u64_input(input, &["maxInputs", "max_inputs"], 2000),
+            per_input_timeout_seconds: u64_input(
+                input,
+                &["perInputTimeoutSeconds", "per_input_timeout_seconds"],
+                10,
+            ),
+            max_seconds: u64_input(input, &["maxSeconds", "max_seconds"], 900),
+            top: u64_input(input, &["top"], 50),
+        })
+    }
+}
+
+pub(in crate::modules) fn run_fuzz_differential(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    ctx.ensure_active()?;
+    let target = resolve_tool_target(input, ctx)?;
+    let paths = match prepare_fuzz_paths(input, &target)? {
+        FuzzReadiness::Ready(paths) => paths,
+        FuzzReadiness::Skip(reason) => {
+            return Ok(fuzz_skipped_response("fuzz:differential", &target, &reason))
+        }
+    };
+    let options = FuzzDifferentialOptions::parse(input)?;
+    let timeout = fuzz_tool_timeout(input, "fuzz:differential")?;
+    let mut run = EngineRun {
+        ctx,
+        paths: &paths,
+        deadline: Instant::now() + timeout,
+        steps: Vec::new(),
+        failed: false,
+        aborted: false,
+    };
+    let payload = run.engine_step("differential-run", differential_args(&paths, &options), run.remaining());
+    Ok(fuzz_differential_response(&target, &paths, run, &options, payload))
+}
+
+fn differential_args(paths: &FuzzPaths, options: &FuzzDifferentialOptions) -> Vec<String> {
+    let mut args = vec![
+        "differential-run".to_string(),
+        "--target".into(),
+        options.afe_target.clone(),
+    ];
+    for command in &options.commands {
+        args.push("--command".into());
+        args.push(command.clone());
+    }
+    for label in &options.labels {
+        args.push("--label".into());
+        args.push(label.clone());
+    }
+    if let Some(corpus) = &options.corpus_dir {
+        args.push("--corpus-dir".into());
+        args.push(corpus.clone());
+    }
+    args.extend([
+        "--compare".into(),
+        options.compare.clone(),
+        "--max-inputs".into(),
+        options.max_inputs.to_string(),
+        "--per-input-timeout".into(),
+        options.per_input_timeout_seconds.to_string(),
+        "--max-seconds".into(),
+        options.max_seconds.to_string(),
+        "--top".into(),
+        options.top.to_string(),
+        "--workspace-root".into(),
+        paths.workspace_root.display().to_string(),
+    ]);
+    args
+}
+
+fn fuzz_differential_response(
+    target: &Path,
+    paths: &FuzzPaths,
+    run: EngineRun<'_>,
+    options: &FuzzDifferentialOptions,
+    payload: Option<Value>,
+) -> Value {
+    let summary = payload.as_ref();
+    let crash_splits = summary
+        .and_then(|value| value.get("counts_by_kind"))
+        .and_then(|counts| counts.get("crash-split"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output = format!(
+        "fuzz:differential · {} implementation(s) over {} · {}/{} input(s) replayed · \
+         {} divergence(s), {} crash-split(s){}",
+        options.commands.len(),
+        options.afe_target,
+        payload_u64(summary, "inputs_scanned"),
+        payload_u64(summary, "inputs_total"),
+        payload_u64(summary, "divergent"),
+        crash_splits,
+        if run.failed { " · PARTIAL (see steps)" } else { "" },
+    );
+    let data = json!({
+        "target": target.display().to_string(),
+        "workspaceRoot": paths.workspace_root.display().to_string(),
+        "afeTarget": options.afe_target,
+        "steps": run.steps,
+        "differential": payload,
+    });
+    if run.failed {
+        crate::module_result::partial_output_result(
+            output.clone(),
+            output.clone(),
+            vec![json!("the differential replay failed; see steps")],
+            data,
+        )
+    } else {
+        crate::module_result::completed_output_result(output.clone(), output, data)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // fuzz:import + fuzz:status
 // ---------------------------------------------------------------------------
 
@@ -1136,9 +1853,86 @@ mod tests {
         assert_eq!(import.effect, ToolEffect::WorkspaceWrite);
         assert_eq!(import.runtime_requirement, RuntimeRequirement::Never);
 
+        let prove = tools["fuzz:prove"];
+        assert_eq!(prove.phase, ToolPhase::Prove);
+        assert_eq!(prove.runtime_requirement, RuntimeRequirement::Never);
+        assert_eq!(prove.effect, ToolEffect::RepositoryExecute);
+        assert_eq!(prove.approval, ApprovalPolicy::Explicit);
+
+        let sweep = tools["fuzz:sweep"];
+        assert_eq!(sweep.phase, ToolPhase::Scan);
+        assert_eq!(sweep.runtime_requirement, RuntimeRequirement::Never);
+        assert_eq!(sweep.effect, ToolEffect::RepositoryExecute);
+        assert_eq!(sweep.approval, ApprovalPolicy::Explicit);
+
+        let differential = tools["fuzz:differential"];
+        assert_eq!(differential.phase, ToolPhase::Scan);
+        assert_eq!(differential.runtime_requirement, RuntimeRequirement::Never);
+        assert_eq!(differential.effect, ToolEffect::RepositoryExecute);
+        assert_eq!(differential.approval, ApprovalPolicy::Explicit);
+
         let status = tools["fuzz:status"];
         assert_eq!(status.effect, ToolEffect::Read);
         assert_eq!(status.approval, ApprovalPolicy::None);
+    }
+
+    #[test]
+    fn sweep_options_require_a_target_and_fold_defaults() {
+        let error = FuzzSweepOptions::parse(&json!({})).unwrap_err().to_string();
+        assert!(error.contains("afeTarget"), "{error}");
+
+        let options = FuzzSweepOptions::parse(&json!({"afeTarget": "sddecompress"})).unwrap();
+        assert_eq!(options.sanitizer, "msan");
+        assert_eq!(options.max_inputs, 2000);
+        assert!(!options.rebuild);
+
+        let tsan = FuzzSweepOptions::parse(&json!({
+            "shard": "tsk_bdi", "sanitizer": "tsan", "runsPerInput": 4, "rebuild": true,
+        }))
+        .unwrap();
+        assert_eq!(tsan.afe_target, "tsk_bdi");
+        assert_eq!(tsan.sanitizer, "tsan");
+        assert_eq!(tsan.runs_per_input, 4);
+        assert!(tsan.rebuild);
+    }
+
+    #[test]
+    fn differential_options_validate_commands_and_labels() {
+        let error = FuzzDifferentialOptions::parse(&json!({"afeTarget": "tsk_bdi"}))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("at least one replay command"), "{error}");
+
+        let error = FuzzDifferentialOptions::parse(&json!({
+            "afeTarget": "tsk_bdi",
+            "commands": ["/bin/fork {input}", "/bin/upstream {input}"],
+            "labels": ["fork"],
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("positionally match"), "{error}");
+
+        let options = FuzzDifferentialOptions::parse(&json!({
+            "afeTarget": "tsk_bdi",
+            "commands": ["/bin/fork {input}", "/bin/upstream {input}"],
+            "labels": ["fork", "upstream"],
+            "compare": "output",
+        }))
+        .unwrap();
+        let args = differential_args(
+            &FuzzPaths {
+                afe_repo: PathBuf::from("/afe"),
+                python_bin: PathBuf::from("/usr/bin/python3"),
+                workspace_root: PathBuf::from("/ws"),
+                data_root: PathBuf::from("/ws/data"),
+                source_dir: PathBuf::from("/repo"),
+            },
+            &options,
+        );
+        assert_eq!(args.iter().filter(|a| *a == "--command").count(), 2);
+        assert_eq!(args.iter().filter(|a| *a == "--label").count(), 2);
+        assert!(args.windows(2).any(|w| w[0] == "--compare" && w[1] == "output"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--workspace-root" && w[1] == "/ws"), "{args:?}");
     }
 
     #[test]

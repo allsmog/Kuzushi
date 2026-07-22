@@ -16,6 +16,7 @@ pub mod crash_location;
 pub mod engine_cli;
 pub mod import;
 pub mod index_rows;
+pub mod prove;
 pub mod provision;
 pub mod rounds;
 pub mod severity;

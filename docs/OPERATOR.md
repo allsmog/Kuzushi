@@ -397,7 +397,17 @@ parked workorders — writes are contained to the target's
 harness/build-spec files, builds and smoke runs are the deterministic
 verdict, and per-step model spend lands in the run trace. `fuzz:import`
 folds an existing engine ledger into the findings store without running
-the engine; `fuzz:status` is a read-only workspace probe. Campaign plan
+the engine; `fuzz:prove` runs the engine's per-finding impact pass over
+verified findings that lack an impact verdict and refreshes the import;
+`fuzz:sweep` builds a sanitizer-variant fuzzer for one engine target
+(`sanitizer` = `msan` uninitialized-read oracle or `tsan` race oracle)
+and replays its corpus in keep-going mode with benign-input baseline
+subtraction, reporting input-dependent signature groups ranked
+write-first; `fuzz:differential` replays the corpus through N replay
+`commands` (fork vs upstream, or one command as a metamorphic
+self-check) and ranks divergences crash-split first — the
+silent-wrong-data oracle the crash lane never fires on;
+`fuzz:status` is a read-only workspace probe. Campaign plan
 rows dispatch both job tools with shard names mapped to engine targets
 (`shard` → `afeTarget`); pass `seasonPrompts=false` when planning fuzz
 campaigns — seasoned rows fail preparation by design.
