@@ -70,6 +70,7 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchPagePrev,
     WorkbenchPage(WorkbenchPage),
     WorkbenchValidate,
+    WorkbenchInvestigationBoundary,
     WorkbenchDeferProof,
     WorkbenchReverifyPatch,
     WorkbenchSuppress,

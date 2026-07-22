@@ -153,6 +153,11 @@ fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
             proof_state(proof.requires_revalidation),
         ));
     }
+    push_if(
+        &mut specs,
+        model.investigation.is_some(),
+        selectable(PhaseSurfaceId::ProveInvestigation),
+    );
     specs
 }
 

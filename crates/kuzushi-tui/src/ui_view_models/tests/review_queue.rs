@@ -376,7 +376,10 @@ fn assert_projected_identity_across_actions(app: &mut ShellApp, selected: &Findi
     prepare_prove_navigation(app);
     let verify = press_without_running_effects(app, KeyCode::Char('v'));
     assert!(verify.effects.is_empty());
-    assert!(app.input().starts_with("run verify:exploit {"));
+    assert!(app.router.workbench().investigation_draft().is_some());
+    let start = press_without_running_effects(app, KeyCode::Enter);
+    assert!(start.effects.is_empty());
+    assert!(app.input().starts_with("run verify:finding {"));
     assert!(app.input().contains(&selected.fingerprint));
     assert_eq!(app.input_mode(), InputMode::Prompt);
 

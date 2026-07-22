@@ -19362,19 +19362,34 @@ fn workbench_validate_drafts_without_replacing_a_live_scan_job() {
         KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
     );
 
+    // `v` opens the plan card; nothing is drafted and no job is touched
+    // until the operator authorizes the plan with Enter.
     assert!(app.scan().is_some_and(|scan| scan.running));
     assert_eq!(app.jobs().running_label(JobKind::Run), Some("scan"));
     assert!(!app.tool_is_running());
+    assert!(app.router.workbench().investigation_draft().is_some());
+    assert!(app.input().is_empty(), "{}", app.input());
+    assert_eq!(app.input_mode(), crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert!(app.scan().is_some_and(|scan| scan.running));
     assert!(
-        app.input().starts_with("run verify:exploit {"),
+        app.input().starts_with("run verify:finding {"),
         "{}",
         app.input()
     );
     assert!(app.input().contains("\"fingerprint\""), "{}", app.input());
+    assert!(
+        app.input().contains("\"mode\":\"model\""),
+        "{}",
+        app.input()
+    );
     assert_eq!(app.input_mode(), crate::InputMode::Prompt);
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "verify" && line.body.contains("press Enter to start verification")
-    }));
+    assert!(app.router.workbench().investigation_draft().is_none());
 
     app.jobs_mut().finish(JobKind::Run);
     scan_ticket.complete();
@@ -19445,6 +19460,72 @@ fn review_invariant_hunt_hotkey_requires_a_selected_finding() {
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "invariant" && line.body.contains("no finding selected")
     }));
+}
+
+#[test]
+fn investigation_card_boundary_toggles_and_enter_drafts_the_bounded_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.investigate",
+        "src/lib.rs",
+        7,
+        Some(3),
+        Severity::High,
+        "investigate me",
+    )];
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
+    );
+    let plan = workbench_phase_plan(&app);
+    assert!(matches!(
+        plan.composition,
+        crate::ui_view_models::Composition::CenteredForm(
+            crate::ui_view_models::PhaseSurfaceId::ProveInvestigation
+        )
+    ));
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty()),
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert!(
+        app.input().contains("\"mode\":\"empirical\""),
+        "{}",
+        app.input()
+    );
+    assert!(app.router.workbench().investigation_draft().is_none());
+
+    // A second `v` after the draft closed reopens a fresh static-only plan;
+    // `v` again dismisses it without drafting anything.
+    app.set_input("".to_string());
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
+    );
+    assert_eq!(
+        app.router.workbench().investigation_draft(),
+        Some(crate::app::InvestigationBoundary::StaticOnly)
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
+    );
+    assert!(app.router.workbench().investigation_draft().is_none());
+    assert!(app.input().is_empty(), "{}", app.input());
 }
 
 #[test]

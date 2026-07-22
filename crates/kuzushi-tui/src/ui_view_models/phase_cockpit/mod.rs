@@ -197,6 +197,24 @@ pub(crate) struct ProvePhaseModel {
     pub(crate) proof: Option<ProofReplayModel>,
     pub(crate) selection_disclosure: Option<SelectionDisclosureModel>,
     pub(crate) empty_hint: Option<&'static str>,
+    /// The bounded investigation plan card opened by `v`: what the verifier
+    /// will pursue, under which safety boundary, and the exact command Enter
+    /// drafts. Present only while the operator has the card open.
+    pub(crate) investigation: Option<InvestigationPlanModel>,
+}
+
+/// The recommend-then-authorize card for a single-finding investigation.
+/// Every field states something real: evidence goals derive from the
+/// finding's recorded gaps, the boundary maps onto `verify:finding mode`,
+/// and `command` is exactly what Enter loads into the prompt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InvestigationPlanModel {
+    pub(crate) reference: String,
+    pub(crate) severity: String,
+    pub(crate) why: String,
+    pub(crate) evidence_goals: Vec<String>,
+    pub(crate) empirical: bool,
+    pub(crate) command: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -140,6 +140,7 @@ fn prove_fixture(state: SemanticFixture) -> ProvePhaseModel {
         attack_path: fixture_attack_path(richness >= 1),
         proof: (richness >= 2).then(|| fixture_proof(state == SemanticFixture::Stale)),
         selection_disclosure: None,
+        investigation: None,
         empty_hint: (richness == 0).then_some("fixture empty"),
     }
 }

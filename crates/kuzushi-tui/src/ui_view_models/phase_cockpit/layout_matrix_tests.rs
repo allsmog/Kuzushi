@@ -323,6 +323,49 @@ fn review_next_plan_drawer_appears_sizes_and_sheds_with_the_recommendations() {
 
 /// While a scan run is in flight the Scan page becomes the operational
 /// dashboard: scope | engines | delta over a receipt log strip. Small
+/// The `v` investigation card takes over the Prove page as a centered form;
+/// closing it restores the FocusDetail triage composition.
+#[test]
+fn investigation_card_composes_a_centered_form_over_the_prove_page() {
+    let mut body = fixture_body(WorkflowPhase::Prove, SemanticFixture::Dense);
+    let PhaseCockpitBody::Prove(model) = &mut body else {
+        panic!("prove fixture body");
+    };
+    model.investigation = Some(InvestigationPlanModel {
+        reference: "F-7".to_string(),
+        severity: "HIGH".to_string(),
+        why: "evidence message-only".to_string(),
+        evidence_goals: vec!["Recover structured evidence anchors".to_string()],
+        empirical: false,
+        command: "run verify:finding {}".to_string(),
+    });
+    let wide = Rect::new(0, 0, 160, 48);
+
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(
+        plan.composition,
+        Composition::CenteredForm(PhaseSurfaceId::ProveInvestigation)
+    ));
+    assert_eq!(plan.surfaces.len(), 1);
+    assert!(plan.surfaces[0].rect.width <= 100);
+    assert_eq!(plan.effective_focus, PhaseSurfaceId::ProveStatus);
+    let focused = phase_presentation_plan(
+        &body,
+        wide,
+        Some(PhaseSurfaceId::ProveInvestigation),
+        None,
+        AttentionMode::Normal,
+    );
+    assert_eq!(focused.effective_focus, PhaseSurfaceId::ProveInvestigation);
+
+    let PhaseCockpitBody::Prove(model) = &mut body else {
+        panic!("prove fixture body");
+    };
+    model.investigation = None;
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(plan.composition, Composition::FocusDetail { .. }));
+}
+
 /// terminals shed the strip first, then degrade to the center column.
 #[test]
 fn live_scan_composes_the_operational_dashboard_and_degrades_to_center() {

@@ -446,11 +446,12 @@ fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
 
 fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
     vec![
+        bind_char('v', "v", "investigate", ViewHotkeyAction::WorkbenchValidate),
         bind_char(
-            'v',
-            "v",
-            "draft verify",
-            ViewHotkeyAction::WorkbenchValidate,
+            'm',
+            "m",
+            "boundary",
+            ViewHotkeyAction::WorkbenchInvestigationBoundary,
         ),
         bind_char(
             'D',

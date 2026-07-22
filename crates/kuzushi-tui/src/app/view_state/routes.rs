@@ -728,6 +728,35 @@ pub struct ReportReceipt {
     pub(crate) timestamp: String,
 }
 
+/// The safety boundary an investigation plan runs under. Both variants map
+/// onto the real `verify:finding` `mode` option — this is a routing choice
+/// the operator makes on the plan card, not decoration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InvestigationBoundary {
+    /// `mode=model`: static adversarial analysis, no code is executed.
+    #[default]
+    StaticOnly,
+    /// `mode=empirical`: proof-of-concept construction with sandboxed
+    /// execution against the local checkout.
+    LocalReproduction,
+}
+
+impl InvestigationBoundary {
+    pub(crate) fn mode_value(self) -> &'static str {
+        match self {
+            Self::StaticOnly => "model",
+            Self::LocalReproduction => "empirical",
+        }
+    }
+
+    pub(crate) fn toggled(self) -> Self {
+        match self {
+            Self::StaticOnly => Self::LocalReproduction,
+            Self::LocalReproduction => Self::StaticOnly,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkbenchRouteState {
     focus: Option<crate::ui_view_models::PhaseSurfaceId>,
@@ -735,6 +764,7 @@ pub struct WorkbenchRouteState {
     page: Option<crate::app::WorkbenchPage>,
     scroll: crate::app::WorkbenchPaneScroll,
     review: crate::app::WorkbenchReviewState,
+    investigation: Option<InvestigationBoundary>,
 }
 
 impl Default for WorkbenchRouteState {
@@ -745,6 +775,7 @@ impl Default for WorkbenchRouteState {
             page: None,
             scroll: crate::app::WorkbenchPaneScroll::default(),
             review: crate::app::WorkbenchReviewState::default(),
+            investigation: None,
         }
     }
 }
@@ -769,6 +800,23 @@ impl WorkbenchRouteState {
     pub(crate) fn set_focus(&mut self, focus: crate::ui_view_models::PhaseSurfaceId) {
         self.focus = Some(focus);
         self.zoom.follow_focus(focus);
+    }
+
+    pub(crate) fn investigation_draft(&self) -> Option<InvestigationBoundary> {
+        self.investigation
+    }
+
+    pub(crate) fn open_investigation_draft(&mut self) {
+        self.investigation = Some(InvestigationBoundary::default());
+    }
+
+    pub(crate) fn close_investigation_draft(&mut self) {
+        self.investigation = None;
+    }
+
+    pub(crate) fn toggle_investigation_boundary(&mut self) -> Option<InvestigationBoundary> {
+        self.investigation = self.investigation.map(InvestigationBoundary::toggled);
+        self.investigation
     }
 
     pub(crate) fn zoom(&self) -> crate::app::WorkbenchZoom {

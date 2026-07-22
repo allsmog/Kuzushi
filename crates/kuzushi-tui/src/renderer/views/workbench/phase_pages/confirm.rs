@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{FindingDetailModel, FindingEvidenceRow, ProvePhaseModel};
+use crate::ui_view_models::{
+    FindingDetailModel, FindingEvidenceRow, InvestigationPlanModel, ProvePhaseModel,
+};
 use ratatui::layout::{Constraint, Direction, Layout};
 
 mod proof;
@@ -38,6 +40,87 @@ pub(super) fn render(
         return;
     }
     render_unzoomed(frame, area, model, finding, state);
+}
+
+/// The bounded investigation plan card: why, evidence goals, the safety
+/// boundary radio (a real `verify:finding mode` choice), the stop conditions
+/// that actually hold, and the exact command Enter drafts.
+fn render_investigation_card(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    plan: &InvestigationPlanModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "INVESTIGATE · Enter draft command · m boundary · v cancel",
+        investigation_lines(plan, area.width.saturating_sub(2) as usize),
+        PhaseSurfaceId::ProveInvestigation,
+        state,
+    );
+}
+
+fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::styled(
+            fit(&format!("{} · {}", plan.reference, plan.severity), width),
+            theme::heading(),
+        ),
+        Line::styled(fit(&plan.why, width), theme::muted()),
+        Line::styled(fit("EVIDENCE GOALS", width), theme::label()),
+    ];
+    for goal in &plan.evidence_goals {
+        lines.push(Line::styled(
+            fit(&format!("  ▸ {goal}"), width),
+            theme::primary(),
+        ));
+    }
+    lines.push(Line::styled(fit("SAFETY BOUNDARY", width), theme::label()));
+    lines.extend(boundary_lines(plan.empirical, width));
+    lines.push(Line::styled(fit("STOP CONDITIONS", width), theme::label()));
+    lines.push(Line::styled(
+        fit(
+            "  · nothing runs until you submit the drafted command",
+            width,
+        ),
+        theme::muted(),
+    ));
+    lines.push(Line::styled(
+        fit(
+            "  · destructive shell drafts require explicit confirmation",
+            width,
+        ),
+        theme::muted(),
+    ));
+    lines.push(Line::styled(fit(&plan.command, width), theme::accent()));
+    lines
+}
+
+fn boundary_lines(empirical: bool, width: usize) -> Vec<Line<'static>> {
+    let rows = [
+        (
+            !empirical,
+            "Static-only (mode=model) — adversarial analysis, no code executes",
+        ),
+        (
+            empirical,
+            "Local reproduction (mode=empirical) — sandboxed PoC execution here",
+        ),
+    ];
+    rows.into_iter()
+        .map(|(selected, label)| {
+            let marker = if selected { "(•)" } else { "( )" };
+            Line::styled(
+                fit(&format!("  {marker} {label}"), width),
+                if selected {
+                    theme::primary()
+                } else {
+                    theme::muted()
+                },
+            )
+        })
+        .collect()
 }
 
 /// The Choose-Next-Action menu: every row is an existing Prove hotkey with
@@ -239,7 +322,19 @@ pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'st
     let Some(finding) = model.finding.as_ref() else {
         return divider_lines("STATUS / NEXT", empty_selection_lines(model), width);
     };
-    let mut lines = divider_lines("STATUS / NEXT", status_lines(model, finding, width), width);
+    let mut lines = Vec::new();
+    if let Some(plan) = model.investigation.as_ref() {
+        lines.extend(divider_lines(
+            "INVESTIGATION PLAN",
+            investigation_lines(plan, width),
+            width,
+        ));
+    }
+    lines.extend(divider_lines(
+        "STATUS / NEXT",
+        status_lines(model, finding, width),
+        width,
+    ));
     lines.extend(divider_lines(
         "EVIDENCE",
         evidence_lines(finding, width),
@@ -376,6 +471,11 @@ fn render_zoomed(
         render_empty(frame, area, model, state);
         return;
     };
+    if surface == PhaseSurfaceId::ProveInvestigation {
+        if let Some(plan) = model.investigation.as_ref() {
+            return render_investigation_card(frame, area, plan, state);
+        }
+    }
     match surface {
         PhaseSurfaceId::ProveStatus => render_status(frame, area, model, finding, state),
         PhaseSurfaceId::ProveEvidence => render_evidence(frame, area, finding, state),
@@ -496,4 +596,62 @@ fn render_runtime_proof(
         PhaseSurfaceId::ProveReceipt,
         state,
     );
+}
+
+#[cfg(test)]
+mod investigation_card_tests {
+    use super::*;
+
+    fn plan(empirical: bool) -> InvestigationPlanModel {
+        InvestigationPlanModel {
+            reference: "F-7".to_string(),
+            severity: "HIGH".to_string(),
+            why: "evidence message-only".to_string(),
+            evidence_goals: vec![
+                "Recover structured evidence anchors (source and sink lines)".to_string(),
+                "Attempt safe reproduction and record a runtime witness".to_string(),
+            ],
+            empirical,
+            command: "run verify:finding {\"fingerprint\":\"abc\",\"mode\":\"model\"}".to_string(),
+        }
+    }
+
+    fn text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn card_states_goals_boundary_stop_conditions_and_the_exact_command() {
+        let body = text(&investigation_lines(&plan(false), 100));
+        assert!(body.contains("F-7 · HIGH"), "{body}");
+        assert!(body.contains("EVIDENCE GOALS"), "{body}");
+        assert!(
+            body.contains("▸ Recover structured evidence anchors"),
+            "{body}"
+        );
+        assert!(body.contains("(•) Static-only (mode=model)"), "{body}");
+        assert!(
+            body.contains("( ) Local reproduction (mode=empirical)"),
+            "{body}"
+        );
+        assert!(
+            body.contains("nothing runs until you submit the drafted command"),
+            "{body}"
+        );
+        assert!(body.contains("run verify:finding {"), "{body}");
+    }
+
+    #[test]
+    fn boundary_radio_follows_the_selected_mode() {
+        let body = text(&investigation_lines(&plan(true), 100));
+        assert!(
+            body.contains("(•) Local reproduction (mode=empirical)"),
+            "{body}"
+        );
+        assert!(body.contains("( ) Static-only (mode=model)"), "{body}");
+    }
 }

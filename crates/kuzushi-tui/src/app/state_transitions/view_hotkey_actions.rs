@@ -68,6 +68,9 @@ impl ShellApp {
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchValidate => return Some(self.draft_workbench_validation()),
+            ViewHotkeyAction::WorkbenchInvestigationBoundary => {
+                return Some(self.toggle_workbench_investigation_boundary());
+            }
             ViewHotkeyAction::WorkbenchDeferProof => {
                 return Some(self.draft_workbench_proof_deferral())
             }
@@ -259,6 +262,7 @@ impl ShellApp {
             }
             PhaseSurfaceId::MapReadiness => self.draft_map_action_card_command(),
             PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
+            PhaseSurfaceId::ProveInvestigation => self.start_investigation_from_card(),
             focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
@@ -318,19 +322,75 @@ impl ShellApp {
         self.open_finding_at_cursor();
     }
 
+    /// `v` toggles the bounded investigation plan card. Kuzushi lays out the
+    /// evidence goals, safety boundary, and exact command; only Enter on the
+    /// card drafts that command, and only submitting the prompt runs it.
     fn draft_workbench_validation(&mut self) -> InputUpdate {
-        let Some(finding) = self.current_workbench_finding() else {
+        if self.router.workbench().investigation_draft().is_some() {
+            self.router.workbench_mut().close_investigation_draft();
+            self.log("verify", "investigation plan dismissed — nothing was run");
+            return InputUpdate::handled();
+        }
+        if self.current_workbench_finding().is_none() {
             self.log(
                 "verify",
                 "no finding selected — open REVIEW and choose a finding first",
             );
             return InputUpdate::handled();
-        };
-        let input = serde_json::json!({ "fingerprint": finding.fingerprint }).to_string();
-        self.set_input(format!("run verify:exploit {input}"));
-        self.set_input_mode(InputMode::Prompt);
-        self.log("verify", "draft loaded — press Enter to start verification");
+        }
+        self.router.workbench_mut().open_investigation_draft();
+        self.router
+            .workbench_mut()
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveInvestigation);
+        self.log(
+            "verify",
+            "investigation plan opened — m switches the safety boundary, Enter drafts the command",
+        );
         InputUpdate::handled()
+    }
+
+    fn toggle_workbench_investigation_boundary(&mut self) -> InputUpdate {
+        match self.router.workbench_mut().toggle_investigation_boundary() {
+            Some(boundary) => {
+                let label = match boundary {
+                    crate::app::InvestigationBoundary::StaticOnly => {
+                        "static-only — adversarial analysis, no code executes"
+                    }
+                    crate::app::InvestigationBoundary::LocalReproduction => {
+                        "local reproduction — sandboxed PoC execution against this checkout"
+                    }
+                };
+                self.log("verify", format!("safety boundary: {label}"));
+            }
+            None => self.log("verify", "no investigation plan open — press v first"),
+        }
+        InputUpdate::handled()
+    }
+
+    /// Enter on the investigation card authorizes the plan: the previewed
+    /// verify command is drafted into the prompt and the card closes. The
+    /// operator still submits the prompt — the card never launches anything.
+    fn start_investigation_from_card(&mut self) {
+        let Some(boundary) = self.router.workbench().investigation_draft() else {
+            return;
+        };
+        let Some(finding) = self.current_workbench_finding() else {
+            self.log("verify", "no finding selected — plan dismissed");
+            self.router.workbench_mut().close_investigation_draft();
+            return;
+        };
+        let input = serde_json::json!({
+            "fingerprint": finding.fingerprint,
+            "mode": boundary.mode_value(),
+        })
+        .to_string();
+        self.router.workbench_mut().close_investigation_draft();
+        self.set_input(format!("run verify:finding {input}"));
+        self.set_input_mode(InputMode::Prompt);
+        self.log(
+            "verify",
+            "investigation drafted — press Enter to start it under the chosen boundary",
+        );
     }
 
     fn draft_workbench_proof_deferral(&mut self) -> InputUpdate {
@@ -1107,7 +1167,8 @@ fn focused_workbench_visualization(
         PhaseSurfaceId::ProveStatus
         | PhaseSurfaceId::ProveEvidence
         | PhaseSurfaceId::ProveLadder
-        | PhaseSurfaceId::ProveNextAction => {
+        | PhaseSurfaceId::ProveNextAction
+        | PhaseSurfaceId::ProveInvestigation => {
             FocusedWorkbenchVisualization::Scene(VizPage::AttackPath)
         }
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,

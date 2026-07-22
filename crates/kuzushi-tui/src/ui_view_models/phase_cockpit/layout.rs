@@ -40,6 +40,7 @@ pub(crate) enum PhaseSurfaceId {
     ProveLadder,
     ProveReceipt,
     ProveNextAction,
+    ProveInvestigation,
     FixRemediation,
     FixCandidate,
     FixAttackTree,
@@ -65,7 +66,8 @@ impl PhaseSurfaceId {
             | Self::ProveEvidence
             | Self::ProveLadder
             | Self::ProveReceipt
-            | Self::ProveNextAction => WorkbenchPage::Prove,
+            | Self::ProveNextAction
+            | Self::ProveInvestigation => WorkbenchPage::Prove,
             Self::FixRemediation
             | Self::FixCandidate
             | Self::FixAttackTree
@@ -92,6 +94,7 @@ impl PhaseSurfaceId {
             Self::ProveLadder => "Proof Ladder",
             Self::ProveReceipt => "Verification Receipt",
             Self::ProveNextAction => "Next Action",
+            Self::ProveInvestigation => "Investigation Plan",
             Self::FixRemediation => "Remediation",
             Self::FixCandidate => "Patch Candidate",
             Self::FixAttackTree => "Attack Tree",
@@ -203,6 +206,9 @@ fn screen_composition(
         return columns();
     }
     match body {
+        PhaseCockpitBody::Prove(model) if model.investigation.is_some() => {
+            Composition::CenteredForm(PhaseSurfaceId::ProveInvestigation)
+        }
         PhaseCockpitBody::Prove(model) if model.finding.is_some() => Composition::FocusDetail {
             body: PhaseSurfaceId::ProveStatus,
             action_menu: Some(PhaseSurfaceId::ProveNextAction),

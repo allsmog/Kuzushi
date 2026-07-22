@@ -99,10 +99,10 @@ pub(crate) use routes::ReportOrigin;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
-    ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState,
-    PromptDocumentMode, PromptDocumentState, ReportReceipt, ReportRouteState, RouterState,
-    SceneRouteState, ScrollRouteState, SetupEditor, SetupRouteState, SetupRowId,
-    TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
+    InvestigationBoundary, ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState,
+    PlanningPickerRouteState, PromptDocumentMode, PromptDocumentState, ReportReceipt,
+    ReportRouteState, RouterState, SceneRouteState, ScrollRouteState, SetupEditor, SetupRouteState,
+    SetupRowId, TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
