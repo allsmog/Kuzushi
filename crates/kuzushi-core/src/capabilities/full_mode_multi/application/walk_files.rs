@@ -63,11 +63,10 @@ fn push_file_buckets(root: &Path, rel_path: &str, bytes: usize, out: &mut Vec<Fi
         ));
         return;
     }
-    match window_buckets_for_large_file(root, rel_path) {
-        Some(windows) => out.extend(windows),
-        // Unreadable / non-UTF-8 oversized files keep the old skip, but the
-        // common source-file case is now covered.
-        None => {}
+    // Unreadable / non-UTF-8 oversized files keep the old skip, but the
+    // common source-file case is now covered.
+    if let Some(windows) = window_buckets_for_large_file(root, rel_path) {
+        out.extend(windows);
     }
 }
 

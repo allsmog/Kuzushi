@@ -170,14 +170,6 @@ mod tests {
         }
     }
 
-    fn fail() -> CommandOutput {
-        CommandOutput {
-            exit_code: 1,
-            stdout: String::new(),
-            stderr: String::new(),
-        }
-    }
-
     #[test]
     fn all_green_doctor_passes() {
         let transport = FakeTransport::with_outputs(vec![

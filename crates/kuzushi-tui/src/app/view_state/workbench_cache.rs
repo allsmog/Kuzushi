@@ -545,17 +545,6 @@ impl WorkbenchCache {
         });
     }
 
-    pub(crate) fn persisted_project_scope_tree_is_current(
-        &self,
-        target: &Path,
-        tree: &NestedProjectScopeTree,
-    ) -> bool {
-        self.scope_tree.as_ref().is_some_and(|cache| {
-            cache.target == target
-                && matches!(&cache.state, ProjectScopeTreeState::Persisted(cached) if cached == tree)
-        })
-    }
-
     pub(crate) fn invalidate_strategy_queue(&mut self) {
         self.strategy_queue = None;
     }

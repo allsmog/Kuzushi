@@ -64,7 +64,7 @@ pub(super) fn prefilter_full_mode_chunk(
     let threshold = cfg
         .prefilter_skip_below
         .unwrap_or(DEFAULT_PREFILTER_SKIP_BELOW);
-    let skip = (verdict.score < threshold).then(|| PrefilteredChunk {
+    let skip = (verdict.score < threshold).then_some(PrefilteredChunk {
         chunk_id: chunk.id,
         score: verdict.score,
         reason: verdict.reason,

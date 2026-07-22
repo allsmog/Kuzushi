@@ -667,7 +667,7 @@ mod tests {
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
             let mut calls = self.calls.lock().unwrap();
             *calls += 1;
-            let verdict = if *calls % 2 == 0 {
+            let verdict = if calls.is_multiple_of(2) {
                 TriageVerdict::FalsePositive
             } else {
                 TriageVerdict::TruePositive

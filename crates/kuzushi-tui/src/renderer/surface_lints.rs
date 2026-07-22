@@ -150,10 +150,7 @@ pub(crate) fn lint_jargon(corpus: &[SurfaceLine]) -> Vec<Violation> {
             flag(format!("raw UUID `{uuid}` — use the operator alias"));
         }
         if line.text.contains("sha256:") {
-            flag(format!(
-                "raw digest on screen: {}",
-                line.text.trim().to_string()
-            ));
+            flag(format!("raw digest on screen: {}", line.text.trim()));
         }
         if let Some(counter) = seq_counter(&line.text) {
             flag(format!("internal sequence counter `{counter}`"));

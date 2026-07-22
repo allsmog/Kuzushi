@@ -90,6 +90,7 @@ fn terminal_loop_event_from_crossterm(event: Event) -> TerminalLoopEvent {
         .unwrap_or(TerminalLoopEvent::Wake)
 }
 
+#[cfg(test)]
 pub(crate) fn wait_for_terminal_loop_event(
     app: &mut ShellApp,
     inbox: &TerminalLoopInbox,

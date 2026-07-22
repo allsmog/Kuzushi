@@ -299,7 +299,7 @@ fn ranked_jobs(
     let skipped_covered = before - jobs.len();
     // Stable sort: manifest order (shards) and declaration order (threats)
     // break priority ties deterministically.
-    jobs.sort_by(|left, right| right.priority.cmp(&left.priority));
+    jobs.sort_by_key(|job| std::cmp::Reverse(job.priority));
     let (kept, dropped) = breadth_first_capped(jobs, max_jobs);
     (kept, dropped, skipped_covered)
 }

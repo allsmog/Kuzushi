@@ -56,7 +56,7 @@ pub(crate) fn free_slots(remote: &RemoteBox, live: &[String]) -> Vec<usize> {
     (0..remote.slots)
         .filter(|slot| {
             let session = format!("{}-{slot}", remote.session_prefix);
-            !live.iter().any(|existing| *existing == session)
+            !live.contains(&session)
         })
         .collect()
 }

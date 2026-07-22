@@ -223,7 +223,7 @@ fn class_from_cwe(cwe: &str) -> Option<FindingClass> {
 fn class_from_cwe_number(number: u32) -> Option<FindingClass> {
     Some(match number {
         787 | 121 | 122 | 124 | 823 => FindingClass::MemOobWrite,
-        125 | 126 | 127 => FindingClass::MemOobRead,
+        125..=127 => FindingClass::MemOobRead,
         119 | 120 | 131 => FindingClass::MemOobWrite,
         416 => FindingClass::MemUseAfterFree,
         415 => FindingClass::MemDoubleFree,

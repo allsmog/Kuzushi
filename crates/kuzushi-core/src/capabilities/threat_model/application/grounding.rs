@@ -33,7 +33,7 @@ fn top_ranked_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackS
     let map = crate::attack_surface::build_attack_surface_map(target)
         .context("threat-model grounding: attack-surface map failed")?;
     let mut surfaces = map.surfaces;
-    surfaces.sort_by(|a, b| b.risk.score.cmp(&a.risk.score));
+    surfaces.sort_by_key(|surface| std::cmp::Reverse(surface.risk.score));
     surfaces.truncate(max_elements.max(1));
     Ok(surfaces)
 }

@@ -152,7 +152,6 @@ fn should_skip_chunk(cfg: &FullModeConfig, chunk_id: u32) -> bool {
 mod graceful_stop_tests {
     use super::{is_spend_cap_exhausted, run_budget_stop_reason};
     use crate::capabilities::full_mode_multi::domain::FullModeConfig;
-    use anyhow::Context;
 
     fn config_with_budget(budget: Option<f64>) -> FullModeConfig {
         FullModeConfig {

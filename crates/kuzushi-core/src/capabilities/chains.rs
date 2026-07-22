@@ -201,7 +201,7 @@ pub fn fold_chains(confirmed: &[Finding], max_chains: usize) -> ChainReport {
         .iter()
         .flat_map(|(surface, members)| surface_chains(surface, members))
         .collect();
-    chains.sort_by(|a, b| b.score.cmp(&a.score));
+    chains.sort_by_key(|chain| std::cmp::Reverse(chain.score));
     chains.truncate(max_chains);
     ChainReport {
         confirmed_count: confirmed.len(),
