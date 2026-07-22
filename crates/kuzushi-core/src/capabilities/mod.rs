@@ -22,6 +22,7 @@ pub mod taint_iris_next;
 pub mod threat_intel;
 pub mod threat_leads;
 pub mod threat_model;
+pub mod trace_expansion;
 pub mod uaf_hunt;
 pub mod variant_ndiff;
 pub mod vendor_assessment;

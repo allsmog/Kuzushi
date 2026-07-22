@@ -361,9 +361,13 @@ same tool+rule within 15 lines inherits the representative verdict with
 a duplicate-of rationale — → per-cluster LLM verdicts, weighing the
 persisted threat-model digest when one exists), `verify:finding`,
 `verify:exploit`, `patch:finding` (then `patch:reverify`),
-`findings:list`, `findings:dismiss`, `findings:chains` (deterministic
-entry→pivot→impact chain candidates over confirmed findings, per code
-surface — no model calls; `C` on the Review page drafts it),
+`trace:expand` (bounded read-only agent that deepens a finding's
+data-flow path and appends the recovered hops to the static-evidence
+store as operator-requested `DataflowStep` nodes; drafted from the
+Trace screen), `findings:list`, `findings:dismiss`, `findings:chains`
+(deterministic entry→pivot→impact chain candidates over confirmed
+findings, per code surface — no model calls; `C` on the Review page
+opens the chain-artifacts view that renders the same fold),
 `suppress:add`, `suppress:list`, `suppress:remove`, `report:build`,
 `report:sarif`.
 

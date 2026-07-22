@@ -364,6 +364,7 @@ fn register_offense_hunt_modules(registry: &mut ModuleRegistry) {
 fn register_finding_report_modules(registry: &mut ModuleRegistry) {
     registry.register(triage_module().with_executor(execute_finding_action_tool));
     registry.register(verify_module().with_executor(execute_finding_action_tool));
+    registry.register(trace_module().with_executor(execute_finding_action_tool));
     registry.register(patch_module().with_executor(execute_finding_action_tool));
     registry.register(findings_module().with_executor(execute_context_workspace_tool));
     registry.register(suppress_module().with_executor(execute_context_workspace_tool));

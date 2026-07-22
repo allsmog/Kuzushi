@@ -219,6 +219,7 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
         }
         "verify:finding" => Some(run_verify_finding(input.clone(), ctx, runtime)),
         "verify:exploit" => Some(run_verify_exploit(input.clone(), ctx)),
+        "trace:expand" => Some(run_trace_expand(input.clone(), ctx, runtime)),
         "patch:finding" => Some(run_patch_finding(input.clone(), ctx, runtime)),
         _ => None,
     }

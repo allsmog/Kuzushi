@@ -46,6 +46,8 @@ pub(in crate::modules) use threat_model_module::*;
 pub(in crate::modules) use triage::*;
 pub(in crate::modules) use triage_module::*;
 pub(in crate::modules) use uaf_hunt_module::*;
+pub(in crate::modules) use trace::*;
+pub(in crate::modules) use trace_module::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use verify_module::*;
 pub(in crate::modules) use workspace_module::*;
@@ -86,6 +88,8 @@ mod taint_iris;
 mod taint_iris_next;
 mod triage;
 mod vendor_assessment;
+mod trace;
+mod trace_module;
 mod verify;
 mod workspace_tools;
 
