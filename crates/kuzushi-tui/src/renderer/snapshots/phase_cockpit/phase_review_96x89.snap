@@ -10,14 +10,15 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
  Enter open in Prove · findings show full queue · z open heatmap · scan again
 │▸ FINDINGS · 6                     │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @? CFM open S  │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven
-│  SQL injection reaches query      │SQL injection reaches query
-│  src/auth/login.rs:17             │
-│  ▸ next:patch · Enter open        │── STATUS ──
-│ F-0002  H [●○○] s1 @? UNV open O  │severity: critical
-│ F-0003  H [●○○] s1 @? UNV open T  │  confidence: CONFIRMED
-│ F-0004  M [●○○] s1 @? UNV open U  │lifecycle status: runtime_verified
-│ F-0005  M [●○○] s1 @? UNV open S  │evidence state: evidence:1
-│ F-0006  L [●○○] s1 @? UNV open D  │  proof summary: ✓ verified L4
+│  SQL injection reaches query      │claim · runtime-verified
+│  src/auth/login.rs:17             │SQL injection reaches query
+│  ▸ next:patch · Enter open        │
+│ F-0002  H [●○○] s1 @? UNV open O  │── STATUS ──
+│ F-0003  H [●○○] s1 @? UNV open T  │severity: critical
+│ F-0004  M [●○○] s1 @? UNV open U  │  confidence: CONFIRMED
+│ F-0005  M [●○○] s1 @? UNV open S  │lifecycle status: runtime_verified
+│ F-0006  L [●○○] s1 @? UNV open D  │evidence state: evidence:1
+│                                   │  proof summary: ✓ verified L4
 │                                   │
 │                                   │── DECISION ──
 │                                   │  current decision: needs_review
@@ -28,7 +29,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │  patch: `patch F-0001`
 │                                   │  runtime proof is recorded; generate remediation
 │                                   │
-│                                   │── SOURCE ──
+│                                   │── SOURCE · observation (on-disk excerpt) ──
 │                                   │  src/auth/login.rs:17
 │                                   │    14 │ }
 │                                   │    15 │
@@ -71,7 +72,6 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                   │corroboration: 1
 │                                   │identity: phase-findi…
 │                                   │fingerprint: fp3_ed97bede6bddb852…
-│                                   │
 │                                   │
 │                                   │
 │                                   │

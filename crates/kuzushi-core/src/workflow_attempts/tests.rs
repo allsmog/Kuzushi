@@ -1541,6 +1541,39 @@ fn proof_deferral_survives_restart_for_only_the_exact_finding_generation() {
     ));
 }
 
+/// Real fingerprints are `tool:rule:hash`; the colon is part of the durable
+/// identity and must not be rejected as unsafe (that made deferral
+/// impossible for every real finding).
+#[test]
+fn proof_deferral_accepts_real_colon_fingerprints() {
+    let target = tempfile::tempdir().unwrap();
+    let snapshot = PhaseTargetSnapshot {
+        target: "/target".to_string(),
+        revision: Some("abc".to_string()),
+        dirty: false,
+    };
+
+    append_proof_deferral(
+        target.path(),
+        ProofDeferralRecorded::human(
+            "secret-scan:aws-access-key-id:9867ad7c5595db25",
+            None,
+            "scan-1",
+            snapshot.clone(),
+            "credential rotates with the lab; deferred to phase 2",
+        ),
+    )
+    .unwrap();
+
+    let ledger = load_phase_attempt_ledger(target.path()).unwrap();
+    assert!(ledger.proof_is_deferred_for(
+        &snapshot,
+        "secret-scan:aws-access-key-id:9867ad7c5595db25",
+        None,
+        "scan-1"
+    ));
+}
+
 #[test]
 fn proof_deferral_requires_a_durable_generation_and_reason() {
     let target = tempfile::tempdir().unwrap();

@@ -466,9 +466,13 @@ mod tests {
                 ".",
             ]
         );
+        // The scanning root is `.` relative to the target working directory:
+        // docker-wrapped semgrep mounts only the caller's cwd, so absolute
+        // roots fail with "Invalid scanning root" on every target.
         assert_eq!(
             command.get_current_dir(),
-            Some(std::path::Path::new("/tmp/repo"))
+            Some(std::path::Path::new("/tmp/repo")),
+            "semgrep must run from inside the target"
         );
         let metrics_env = command
             .get_envs()

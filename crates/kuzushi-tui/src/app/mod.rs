@@ -168,7 +168,6 @@ pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
 pub(crate) use log::{LogState, LOG_LINE_CAPACITY};
-pub(crate) use onboarding::immediate_target_candidate;
 pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
@@ -181,6 +180,7 @@ pub use onboarding::{
     PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition,
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
+pub(crate) use onboarding::{bound_target_candidate, immediate_target_candidate};
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,
     PrereqPlanStep, PrereqStep,

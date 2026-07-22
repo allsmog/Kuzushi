@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 /// Audited 2026-07-21 (wave-3 B1). Relative to `src/`.
 const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Config / bootstrap boundaries.
-    "agent_router/router_state.rs",     // KUZUSHI_MODELS_FILE (operator models file)
-    "config/apply_env_overrides.rs",    // sanctioned env bootstrap tier
+    "agent_router/router_state.rs", // KUZUSHI_MODELS_FILE (operator models file)
+    "config/apply_env_overrides.rs", // sanctioned env bootstrap tier
     // PATH / HOME / process-integration lookups.
     "capabilities/fuzz_engine/engine_cli.rs",      // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries
@@ -29,16 +29,17 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "scan/engines/codeql/hex_value/codeql_binary.rs", // PATH which
     // Spawn-environment sanitizers (env_clear + selective re-add / scrub).
     "capabilities/uaf_hunt/adapters/clang_subprocess.rs", // PATH re-add + KUZUSHI_MCP_CLANG_BIN
-    "modules/dynamic_loader.rs",         // worker env sanitizer + KUZUSHI_DYNAMIC_MODULE_HOST
+    "modules/dynamic_loader.rs", // worker env sanitizer + KUZUSHI_DYNAMIC_MODULE_HOST
     "remediation/patch_process_adapter.rs", // PATH/CARGO_HOME/RUSTUP_HOME for validation env
-    "scan/subprocess/try_wait.rs",       // scanner env scrubber (allowlist filter)
-    "worker_protocol.rs",                // MCP/fuzz env sanitizers + credential tokens
+    "scan/subprocess/try_wait.rs", // scanner env scrubber (allowlist filter)
+    "worker_protocol.rs",        // MCP/fuzz env sanitizers + credential tokens
     // Git integration mirrors git's own environment contract.
     "workspace/domain/workspace_state_initialization/git_policy/inputs.rs",
     "workspace/domain/workspace_state_initialization/proof_cache/path_snapshot.rs",
     // Documented compatibility tool locators / debug toggles.
     "capabilities/plugin_adapters/adapters/input.rs", // plugin-root env; tool input outranks
     "capabilities/taint_iris_next/application/codeql_dataflow.rs", // KUZUSHI_CODEQL_BIN
+    "capabilities/taint_iris_next/application/joern_dataflow.rs", // KUZUSHI_JOERN_* + debug log
     "code_nav/ripgrep/ripgrep_binary.rs", // KUZUSHI_RIPGREP_BIN
     "modules/builtins/with_v2_builtins/builtin_registration.rs", // adapter env presence probe
     "modules/plugin_resolution/mod.rs",  // plugin-root env; tool input outranks
@@ -119,8 +120,7 @@ mod tests {
              comment."
         );
 
-        let found: std::collections::BTreeSet<&str> =
-            found.iter().map(String::as_str).collect();
+        let found: std::collections::BTreeSet<&str> = found.iter().map(String::as_str).collect();
         let stale: Vec<&&str> = AUDITED_ENV_READ_FILES
             .iter()
             .filter(|file| !found.contains(**file))

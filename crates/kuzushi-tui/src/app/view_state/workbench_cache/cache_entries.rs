@@ -172,6 +172,10 @@ pub(super) struct SourceFileCache {
 pub(super) struct GitMetadataCache {
     pub(super) target: PathBuf,
     pub(super) metadata: Option<RunTargetGitMetadata>,
+    /// Invalidation marks the metadata stale instead of dropping it: the
+    /// revision label keeps the last known revision while the multi-second
+    /// git probe re-runs, instead of regressing to "rev:unknown".
+    pub(super) stale: bool,
 }
 
 #[derive(Debug)]

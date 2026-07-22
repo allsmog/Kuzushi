@@ -38,7 +38,10 @@ enum Verb {
     Launch {
         remote: String,
         /// Command each slot runs inside the staged workdir.
-        #[arg(long, default_value = "./kz campaign run --queue queue.json >> queue.log 2>&1")]
+        #[arg(
+            long,
+            default_value = "./kz campaign run --queue queue.json >> queue.log 2>&1"
+        )]
         queue_command: String,
     },
     /// Sessions, live engine processes (zombie-aware), and queue-log tail.
@@ -100,9 +103,10 @@ fn run_verb(
             find_remote(remotes, remote)?,
             queue_command,
         )?),
-        Verb::Status { remote } => {
-            pretty(&kuzushi_fleet::status::status(transport, find_remote(remotes, remote)?)?)
-        }
+        Verb::Status { remote } => pretty(&kuzushi_fleet::status::status(
+            transport,
+            find_remote(remotes, remote)?,
+        )?),
         Verb::Pull {
             remote,
             max_age_hours,

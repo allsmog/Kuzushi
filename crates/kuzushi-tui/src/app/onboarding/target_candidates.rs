@@ -50,6 +50,20 @@ pub(crate) fn immediate_target_candidate(cwd: &Path) -> TargetCandidate {
     }
 }
 
+/// The already-bound target, shown first when the picker opens over an
+/// active session so Enter re-confirms instead of silently rebinding to cwd.
+pub(crate) fn bound_target_candidate(target: &Path) -> TargetCandidate {
+    TargetCandidate {
+        path: target.to_path_buf(),
+        label: target
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| target.display().to_string()),
+        hint: "current target",
+        scope: None,
+    }
+}
+
 fn discover_target_candidates_with_recent(
     cwd: &Path,
     recent_paths: &[PathBuf],

@@ -18,7 +18,9 @@ use anyhow::{Context, Result};
 use budget::{effective_job_budget, live_run_spend_usd};
 use child::{run_child, ChildReport, ChildSpec};
 use kuzushi_core::run_artifacts::load_run_summary;
-use policy::{budget_exhausted, looks_rate_limited, transition_for, JobOutcome, QuotaWall, Transition};
+use policy::{
+    budget_exhausted, looks_rate_limited, transition_for, JobOutcome, QuotaWall, Transition,
+};
 use queue::{now_ms, QueueStore};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -113,8 +115,8 @@ fn load_plan_jobs(target: &Path, campaign_id: &str, filter: &[String]) -> Result
             plan_path.display()
         )
     })?;
-    let plan: Value =
-        serde_json::from_str(&body).with_context(|| format!("{} is malformed", plan_path.display()))?;
+    let plan: Value = serde_json::from_str(&body)
+        .with_context(|| format!("{} is malformed", plan_path.display()))?;
     let rows = plan
         .get("jobs")
         .and_then(Value::as_array)
@@ -134,7 +136,10 @@ fn plan_job_row(row: &Value) -> Result<PlanJob> {
         .and_then(Value::as_str)
         .with_context(|| format!("plan job {job_id} is missing tool"))?
         .to_string();
-    let input = row.get("input").cloned().unwrap_or_else(|| Value::Object(Default::default()));
+    let input = row
+        .get("input")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
     Ok(PlanJob {
         job_id,
         tool,
@@ -160,7 +165,10 @@ fn filtered_jobs(jobs: Vec<PlanJob>, filter: &[String]) -> Result<Vec<PlanJob>> 
 }
 
 fn print_dry_run(campaign_id: &str, jobs: &[PlanJob]) -> Result<()> {
-    println!("campaign {campaign_id}: {} job(s) in dispatch order", jobs.len());
+    println!(
+        "campaign {campaign_id}: {} job(s) in dispatch order",
+        jobs.len()
+    );
     for job in jobs {
         println!("  {}  {}  {}", job.job_id, job.tool, job.input_json);
     }
@@ -190,7 +198,10 @@ impl Dispatcher {
         let logs_dir = dir.join("logs");
         std::fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Could not create {}", logs_dir.display()))?;
-        let job_ids = plan_jobs.iter().map(|job| job.job_id.clone()).collect::<Vec<_>>();
+        let job_ids = plan_jobs
+            .iter()
+            .map(|job| job.job_id.clone())
+            .collect::<Vec<_>>();
         let mut store = QueueStore::open(
             &dir,
             &campaign_id,
@@ -280,7 +291,12 @@ impl Dispatcher {
                 entry.run_id = Some(run_id.clone());
                 entry.not_before_ms = None;
             })?;
-            running.spawn(job_future(self.child_spec(&job, &run_id), job.job_id, run_id, self.shutdown_rx.clone()));
+            running.spawn(job_future(
+                self.child_spec(&job, &run_id),
+                job.job_id,
+                run_id,
+                self.shutdown_rx.clone(),
+            ));
         }
         Ok(())
     }
@@ -324,10 +340,18 @@ impl Dispatcher {
                 let live = live_run_spend_usd(&self.target, run_id);
                 (live > 0.0).then_some(live)
             });
-        let failure_text = format!("{} {}", summary_error.unwrap_or_default(), report.output_tail);
+        let failure_text = format!(
+            "{} {}",
+            summary_error.unwrap_or_default(),
+            report.output_tail
+        );
         let rate_limited =
             report.outcome != JobOutcome::Completed && looks_rate_limited(&failure_text);
-        let attempts = self.store.job(job_id).map(|entry| entry.attempts).unwrap_or(1);
+        let attempts = self
+            .store
+            .job(job_id)
+            .map(|entry| entry.attempts)
+            .unwrap_or(1);
         let transition = transition_for(
             report.outcome,
             rate_limited,
@@ -478,11 +502,7 @@ impl Dispatcher {
         if completed == total {
             return Ok(());
         }
-        Err(RunCommandExit::new(
-            3,
-            format!("campaign {}: {summary}", self.campaign_id),
-        )
-        .into())
+        Err(RunCommandExit::new(3, format!("campaign {}: {summary}", self.campaign_id)).into())
     }
 }
 
@@ -553,8 +573,7 @@ mod cost_accounting_tests {
     fn queue_total_equals_the_sum_of_all_attempt_costs_exactly_once() {
         let tmp = tempfile::tempdir().unwrap();
         let job_ids: Vec<String> = (0..5).map(|n| format!("job-{n}")).collect();
-        let mut store =
-            queue::QueueStore::open(tmp.path(), "camp", &job_ids, None, None).unwrap();
+        let mut store = queue::QueueStore::open(tmp.path(), "camp", &job_ids, None, None).unwrap();
 
         // Deterministic pseudo-random attempt schedule: job n gets n+1
         // attempts; some attempts observe no cost at all.

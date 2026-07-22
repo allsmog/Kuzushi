@@ -186,7 +186,12 @@ impl QueueStore {
 
     pub(super) fn total_cost_usd(&self) -> f64 {
         // `+ 0.0` normalizes IEEE negative zero from cost-free child runs.
-        self.doc.jobs.values().filter_map(|job| job.cost_usd).sum::<f64>() + 0.0
+        self.doc
+            .jobs
+            .values()
+            .filter_map(|job| job.cost_usd)
+            .sum::<f64>()
+            + 0.0
     }
 
     pub(super) fn state_counts(&self) -> BTreeMap<String, usize> {
@@ -202,8 +207,7 @@ impl QueueStore {
         doc["updatedAtMs"] = json!(now_ms());
         let body = serde_json::to_vec_pretty(&doc).context("Could not serialize queue")?;
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, body)
-            .with_context(|| format!("Could not write {}", tmp.display()))?;
+        std::fs::write(&tmp, body).with_context(|| format!("Could not write {}", tmp.display()))?;
         std::fs::rename(&tmp, &self.path)
             .with_context(|| format!("Could not publish {}", self.path.display()))
     }
@@ -288,7 +292,10 @@ mod tests {
         dir: &Path,
         jobs: &[(&str, &str, Option<&str>, u32, Option<f64>)],
     ) -> QueueStore {
-        let ids = jobs.iter().map(|(id, ..)| id.to_string()).collect::<Vec<_>>();
+        let ids = jobs
+            .iter()
+            .map(|(id, ..)| id.to_string())
+            .collect::<Vec<_>>();
         let mut store = QueueStore::open(dir, "camp", &ids, None, None).unwrap();
         for (id, state, reason, attempts, cost_usd) in jobs {
             store
@@ -355,8 +362,7 @@ mod tests {
     fn legacy_queues_start_the_dispatch_counter_at_the_attempt_count() {
         let tmp = tempfile::tempdir().unwrap();
         {
-            let mut store =
-                seeded_store(tmp.path(), &[("job-a", "failed", None, 3, None)]);
+            let mut store = seeded_store(tmp.path(), &[("job-a", "failed", None, 3, None)]);
             // Simulate a pre-dispatch-counter queue on disk.
             store.doc.jobs.get_mut("job-a").unwrap().dispatches = 0;
             store.save().unwrap();
@@ -394,7 +400,10 @@ mod tests {
 
         let job = store.job("job-a").unwrap();
         assert_eq!(job.state, "planned");
-        assert_eq!(job.reason.as_deref(), Some("recovered from dead dispatcher"));
+        assert_eq!(
+            job.reason.as_deref(),
+            Some("recovered from dead dispatcher")
+        );
         let events = std::fs::read_to_string(tmp.path().join("events.jsonl")).unwrap();
         let recovery = events
             .lines()

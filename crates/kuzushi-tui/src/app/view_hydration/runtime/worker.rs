@@ -50,7 +50,8 @@ fn hydrate_key(
     if cancellation.is_canceled() {
         return false;
     }
-    let Some(message) = hydration_message(generation, target, key, reader, cancellation) else {
+    let message = hydration_message(generation, target, key, reader, cancellation);
+    let Some(message) = message else {
         return false;
     };
     if tx.send(message).is_err() {

@@ -1,0 +1,56 @@
+# J22 — Evidence loop: setup → authorized Map on the real workload module
+#
+# Launches against the operator-designated workload module (@TARGET via
+# KUZUSHI_DEVEX_TARGET, e.g. ~/monorepo/src/py/cloud — scan target ONLY, never
+# patched; the journey removes only kuzushi's own .kuzushi state for
+# determinism). Audits the desired setup contract: one readiness check, an
+# explicit Start Map commit, live run signal, and an actionable landing.
+#
+# Fixed by Phase B slice 4 (now expected PASS): the target picker opened from
+# the Target row carries the bound target (Enter re-confirms, q/Esc returns
+# to Setup with the target intact); the completed run lands on the phase
+# RESULT checkpoint; the inventory walk emits heartbeat progress so a
+# healthy long stage never shows NO PROGRESS SIGNAL.
+name: Evidence loop setup honesty (workload module)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1
+shell: rm -rf "@TARGET/.kuzushi"
+launch: --target @TARGET
+wait-for: 30 READY THE MAP RUN
+snap: setup-initial
+expect: CONFIRMED
+expect: Start Map
+expect: Enter Start Map to commit
+ask: Setup — one readiness check with the target confirmed and a single explicit commit action; do the signifiers match what Enter actually does from every cursor row?
+# The Target row edits, never ejects: the picker opens anchored on the bound
+# target, and dismissing it leaves the binding untouched.
+keys: Enter
+wait-for: 10 CHOOSE A TARGET
+snap: target-picker-bound
+expect: Enter selects: cloud
+expect-not: press `d`
+keys: q
+wait-for: 10 READY THE MAP RUN
+snap: setup-after-picker-dismiss
+expect: CONFIRMED
+# Desired: committing from the footer promise should never eject the target.
+# Walk the cursor to the Start Map row (the only row where Enter commits).
+keys: Down Down Down Down Down Down
+wait: 1
+snap: setup-cursor-start-map
+expect: Commit this Map plan
+keys: Enter
+wait-for: 30 RUN FOCUS
+snap: run-focus-live
+expect: MAP
+ask: Run focus — live stage labels and progress signal throughout; no NO PROGRESS SIGNAL warning while a stage is actively working?
+# Desired landing: the committed Map completes onto the phase RESULT
+# checkpoint (receipt + explicit next actions), never back onto the setup
+# card that committed it.
+wait-for: 240 RESULT
+snap: run-complete
+expect: receipt ·
+expect: Use map
+expect-not: READY THE MAP RUN
+ask: Landing — after the committed Map completes, does the operator land on the result (receipt + next action) instead of the untouched setup card?

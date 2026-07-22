@@ -122,9 +122,9 @@ mod tests {
                     continue;
                 };
                 for line in panic_lines_in_region(region) {
-                    let audited = AUDITED_PANIC_SITES.iter().position(|(file, needle)| {
-                        *file == relative && line.contains(needle)
-                    });
+                    let audited = AUDITED_PANIC_SITES
+                        .iter()
+                        .position(|(file, needle)| *file == relative && line.contains(needle));
                     match audited {
                         Some(index) => matched[index] = true,
                         None => violations.push(format!("{relative}: {}", line.trim())),

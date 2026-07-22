@@ -289,3 +289,74 @@ fn completed_receipt_preserves_select_without_navigation() {
         .iter()
         .any(|action| matches!(action, WorkflowContinuation::NoFurtherAction { .. })));
 }
+
+/// A healthy, durable run that ends partial is honest partial evidence: the
+/// operator must be able to accept it (select) AND explicitly continue to
+/// the next phase with it — recovery actions stay alongside.
+#[test]
+fn selectable_partial_map_receipt_offers_select_and_next_phase_continue() {
+    let run_id = run_id();
+    let projection = projection(run_id.clone(), RunItemStatus::Partial);
+
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Map,
+        RunItemStatus::Partial,
+        std::slice::from_ref(&run_id),
+        std::slice::from_ref(&projection),
+    )
+    .build()
+    .unwrap();
+
+    let RunItemV1::PhaseReceipt {
+        offered_actions, ..
+    } = item
+    else {
+        unreachable!();
+    };
+    assert!(
+        offered_actions
+            .iter()
+            .any(|action| matches!(action, WorkflowContinuation::NoFurtherAction { .. })),
+        "partial evidence must be selectable: {offered_actions:?}"
+    );
+    assert!(
+        offered_actions.iter().any(|action| matches!(
+            action,
+            WorkflowContinuation::OpenPhase {
+                phase: WorkflowPhase::Scan
+            }
+        )),
+        "partial map must offer an explicit continue-to-Scan hand-off: {offered_actions:?}"
+    );
+    assert!(offered_actions
+        .iter()
+        .any(|action| matches!(action, WorkflowContinuation::Retry { .. })));
+}
+
+/// A selection-blocked partial stays recovery-only: no select, no continue.
+#[test]
+fn blocked_partial_receipt_offers_no_select_or_continue() {
+    let run_id = run_id();
+    let projection = projection(run_id.clone(), RunItemStatus::Partial);
+
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Map,
+        RunItemStatus::Partial,
+        std::slice::from_ref(&run_id),
+        std::slice::from_ref(&projection),
+    )
+    .with_selection_blocked_reason(Some("terminal durability failed"))
+    .build()
+    .unwrap();
+
+    let RunItemV1::PhaseReceipt {
+        offered_actions, ..
+    } = item
+    else {
+        unreachable!();
+    };
+    assert!(!offered_actions.iter().any(|action| matches!(
+        action,
+        WorkflowContinuation::NoFurtherAction { .. } | WorkflowContinuation::OpenPhase { .. }
+    )));
+}

@@ -47,8 +47,13 @@ impl JobOutcome {
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum Transition {
     Complete,
-    Park { reason: String },
-    Requeue { backoff_secs: u64, consume_attempt: bool },
+    Park {
+        reason: String,
+    },
+    Requeue {
+        backoff_secs: u64,
+        consume_attempt: bool,
+    },
     Fail,
 }
 

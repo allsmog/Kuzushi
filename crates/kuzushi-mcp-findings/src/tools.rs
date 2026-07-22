@@ -142,12 +142,7 @@ impl QueryFilter {
             && self.matches_severity(finding)
     }
 
-    fn matches_substring(
-        &self,
-        finding: &Value,
-        keys: &[&str],
-        needle: &Option<String>,
-    ) -> bool {
+    fn matches_substring(&self, finding: &Value, keys: &[&str], needle: &Option<String>) -> bool {
         let Some(needle) = needle else { return true };
         text_field(finding, keys)
             .map(|value| value.to_ascii_lowercase().contains(needle))

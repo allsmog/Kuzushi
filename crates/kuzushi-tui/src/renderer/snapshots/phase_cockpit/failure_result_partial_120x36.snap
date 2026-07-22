@@ -17,6 +17,7 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
           │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │lineage: target rev unrecorded                                                                    │
           │next: select this Scan, then open Review                                                          │
           │›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.        │
           │2 ○ Use scan & continue to Review                                                                 │
@@ -27,7 +28,6 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           │1/6 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
           │                                                                                                  │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-
 
 
 

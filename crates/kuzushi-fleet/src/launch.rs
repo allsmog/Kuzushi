@@ -32,7 +32,10 @@ pub fn launch(
     let mut started = Vec::new();
     for slot in free_slots(remote, &live) {
         let session = format!("{}-{slot}", remote.session_prefix);
-        transport.run(remote, &new_session_command(remote, &session, queue_command))?;
+        transport.run(
+            remote,
+            &new_session_command(remote, &session, queue_command),
+        )?;
         started.push(session);
     }
     Ok(LaunchReport {

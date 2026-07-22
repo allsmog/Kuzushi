@@ -1,0 +1,125 @@
+# J23 — Evidence loop: recommend-then-authorize scan + real findings on the
+# workload module (@TARGET via KUZUSHI_DEVEX_TARGET, scan target ONLY).
+#
+# Drives the guided Map-first lifecycle on the real module, captures the
+# threat-model/recommender seeding state of the Scan configure card, then
+# produces real findings with the deterministic built-in scanner and audits
+# Review → Prove → Trace on a genuine workload finding.
+#
+# Known remaining baseline defects this journey evidences (expected FAIL rows
+# until the matching kuzushi slices land):
+#   - module-recommender launch is blocked on this target class ("Workspace
+#     policy verification changed during its first attempt"), so the Scan
+#     configure card degrades to generic defaults instead of a seeded plan;
+#   - semgrep:scan passes an absolute scanning root, which semgrep >= 1.x
+#     rejects ("Invalid scanning root") on every target.
+# Fixed by Phase B slices (now expected PASS): phantom-invalidation
+# rev:unknown wedge (slice 1); PARTIAL Map hand-off "Use map & choose Scan
+# modules" + page digits under an unresolved result (slice 2).
+name: Evidence loop scan + findings (workload module)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: rm -rf "@TARGET/.kuzushi"
+launch: --target @TARGET
+wait-for: 30 KUZUSHI
+# submit: self-normalizes to a clean Prompt by polling the footer mode
+# markers, so no fixed settle delay is needed after the header appears.
+submit: setg ui.auto_open_activity false
+wait: 2
+submit: scan
+wait-for: 15 MAP · ROUTE
+snap: map-route
+expect: Map establishes the target context Scan engines will consume.
+keys: Enter
+wait-for: 10 MAP · MODULES
+# STRIDE needs a configured model; keep the workload run runtime-free.
+keys: 4
+wait: 1
+keys: Enter
+# Fresh workload target: repository context is missing, so the guided flow
+# inserts the context prerequisite question and renumbers to 4 steps.
+wait-for: 10 PREREQUISITE · STEP 3 OF 4
+snap: map-context-prereq
+expect: Build context
+keys: Enter
+wait-for: 10 STEP 4 OF 4
+keys: a
+wait-live-snap: 300 RESULT READY | map-result-ready
+# A healthy partial map is selectable AND continuable: the card offers the
+# explicit "Use map & choose Scan modules" hand-off as row 3 (`Enter` takes
+# the recommended action, which for partial evidence is plain "Use map").
+expect: Use map & choose Scan modules
+keys: 3
+wait-live-snap: 20 SCAN · MODULES | configure-scan
+# Desired: a seeded plan with rationales tied to recorded evidence. Baseline:
+# the recommender is blocked on this target class, so this fails honestly.
+expect: Lineage target rev:
+expect: seeded by the threat model
+expect: RECOMMENDED
+ask: Configure — is the Scan plan seeded from recorded evidence (threat model / recommender) with per-row rationales, or does it degrade to a blind generic list on this target?
+keys: Escape
+wait: 1
+# Deterministic real findings: the built-in secret scanner runs offline, $0.
+submit: run secret-scan:scan {}
+wait-for: 120 run receipt
+wait: 2
+# The RESULT checkpoint is not a modal: page digits keep navigating under an
+# unresolved result (baseline G4 wedge, fixed by the fingerprint of slice 2).
+nav-mode:
+keys: 3
+wait-live-snap: 15 Viewing Review | page-key-after-partial-result
+ask: Result strip — can the operator resolve a PARTIAL result and keep using page keys, or is workbench navigation wedged until they know the findings verb?
+submit: findings
+wait-live-snap: 15 Viewing Review | review-real-findings
+expect: FINDINGS
+expect: SELECTED FINDING
+expect: candidate
+ask: Review — do real workload findings land in the queue with an honest proof ladder (candidate, unverified) and one selected identity with a clear next action?
+nav-mode:
+keys: Enter
+wait-live-snap: 15 Viewing Prove | prove-real-finding
+expect: PROOF SUBJECT · finding
+expect: STATUS / NEXT
+ask: Prove — is the proof subject labeled with the finding identity and does NEXT recommend evidence collection before patching?
+keys: v
+wait-live-snap: 10 INVESTIGATE · Enter draft command | investigation-card
+expect: EVIDENCE GOALS
+expect: SAFETY BOUNDARY
+expect: STOP CONDITIONS
+expect: nothing runs until you submit the drafted command
+keys: v
+wait: 1
+keys: t
+wait-live-snap: 10 TRACE · Enter draft trace:expand | trace-real-finding
+expect: RECORDED PATH
+expect: EXPANDED PATH · requested by operator
+ask: Trace — on a real workload finding, is the recorded evidence path distinguished from operator-requested expansion without fabricating hops?
+keys: t
+wait: 1
+# Chains are durable artifacts over corroborated findings: corroborate the
+# real selected finding, fold + persist (findings:chains writes
+# .kuzushi/v3/reports/chains.json + the scene snapshot), and audit the
+# honest artifact state — this module's confirmed set composes no
+# entry→impact pair, and the screen must say exactly that instead of
+# fabricating a scenario.
+nav-mode:
+keys: 3
+wait: 1
+submit: decision confirmed corroborated in the evidence-loop chain audit
+wait: 1
+submit: run findings:chains {}
+wait-for: 60 candidate chain(s)
+wait: 1
+# Resolve the chains-run checkpoint first (`u` commits the decisions); the
+# collapsed RESULT surface otherwise owns the screen.
+nav-mode:
+keys: u
+wait: 1
+keys: C
+wait-live-snap: 10 ATTACK CHAINS | chains-artifact
+expect: confirmed finding(s) compose no entry→impact pair
+expect: chains compose over CONFIRMED findings
+keys: C
+wait: 1
+keys: Escape

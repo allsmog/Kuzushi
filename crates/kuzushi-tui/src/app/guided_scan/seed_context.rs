@@ -29,6 +29,7 @@ impl ShellApp {
         let (reasons, recommended) = recommendation_seeds(&recommendation_model(self).rows);
         ScanSeedContext {
             provenance: provenance_line(
+                &crate::ui_view_models::project_revision_label(self),
                 threat_counts(threat_model_doc(self).as_ref()),
                 reasons.is_empty() && recommended.is_empty(),
             ),
@@ -38,14 +39,21 @@ impl ShellApp {
     }
 }
 
-fn provenance_line(counts: Option<ThreatSeedFacts>, without_recommendations: bool) -> String {
+/// Lineage is explicit even when degraded: an unstamped model says so, and
+/// the target revision renders in its checking/unknown form rather than
+/// silently disappearing.
+fn provenance_line(
+    target_revision: &str,
+    counts: Option<ThreatSeedFacts>,
+    without_recommendations: bool,
+) -> String {
     match counts {
         Some(facts) => format!(
-            "Seeded by the threat model{} ({} threat(s) · {} trust boundar{}) and workspace signals.",
+            "Lineage target {target_revision} · model {} — seeded by the threat model ({} threat(s) · {} trust boundar{}) and workspace signals.",
             facts
                 .revision
-                .map(|revision| format!(" @{revision}"))
-                .unwrap_or_default(),
+                .map(|revision| format!("@{revision}"))
+                .unwrap_or_else(|| "[unstamped]".to_string()),
             facts.threats,
             facts.boundaries,
             if facts.boundaries == 1 { "y" } else { "ies" }
@@ -172,11 +180,11 @@ mod tests {
             "threats": [{"id": "T-1"}, {"id": "T-2"}]
         });
 
-        let line = provenance_line(threat_counts(Some(&doc)), true);
+        let line = provenance_line("rev:e817c5e*", threat_counts(Some(&doc)), true);
 
         assert_eq!(
             line,
-            "Seeded by the threat model (2 threat(s) · 1 trust boundary) and workspace signals."
+            "Lineage target rev:e817c5e* · model [unstamped] — seeded by the threat model (2 threat(s) · 1 trust boundary) and workspace signals."
         );
     }
 
@@ -195,11 +203,11 @@ mod tests {
             "provenance": {"revision": "a1b2c3d4e5f60718"}
         });
 
-        let line = provenance_line(threat_counts(Some(&doc)), true);
+        let line = provenance_line("rev:e817c5e*", threat_counts(Some(&doc)), true);
 
         assert_eq!(
             line,
-            "Seeded by the threat model @a1b2c3d4 (1 threat(s) · 1 trust boundary) and workspace signals."
+            "Lineage target rev:e817c5e* · model @a1b2c3d4 — seeded by the threat model (1 threat(s) · 1 trust boundary) and workspace signals."
         );
     }
 
@@ -223,8 +231,8 @@ mod tests {
 
     #[test]
     fn provenance_line_degrades_honestly_without_any_evidence() {
-        let generic = provenance_line(None, true);
-        let signals_only = provenance_line(None, false);
+        let generic = provenance_line("rev:unknown", None, true);
+        let signals_only = provenance_line("rev:unknown", None, false);
 
         assert!(generic.contains("generic engine defaults"));
         assert!(generic.contains("Run Map"));

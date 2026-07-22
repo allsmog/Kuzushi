@@ -136,7 +136,7 @@ fn push_source_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailMod
     let Some(snippet) = detail.source_snippet.as_ref() else {
         return;
     };
-    push_section_header(lines, "SOURCE");
+    push_section_header(lines, "SOURCE · observation (on-disk excerpt)");
     push_wrapped(lines, &detail.location, budget, "  ", theme::muted());
     if let Some(note) = snippet.note.as_deref() {
         push_wrapped(lines, note, budget, "  ", theme::warn());
@@ -450,8 +450,25 @@ fn push_alias_note(lines: &mut Vec<Line<'static>>, budget: usize) {
 
 fn detail_title_lines(detail: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    // The description is the scanner's CLAIM — every asserting row states
+    // whether it is a claim or a recorded observation, so the epistemic
+    // status never depends on reading the adjacent ladder.
+    lines.push(Line::styled(
+        format!("claim · {}", claim_marker(detail.proof_tier)),
+        theme::muted(),
+    ));
     push_wrapped(&mut lines, &detail.title, width, "", theme::heading());
     lines
+}
+
+fn claim_marker(tier: crate::ui_view_models::ProofTier) -> &'static str {
+    use crate::ui_view_models::ProofTier;
+    match tier {
+        ProofTier::RuntimeVerified => "runtime-verified",
+        ProofTier::StaticLinked => "statically corroborated, not reproduced",
+        ProofTier::Suspected => "unverified scanner assertion",
+        ProofTier::Rejected => "refuted — kept for the record",
+    }
 }
 
 fn push_detail_kv(lines: &mut Vec<Line<'static>>, key: &'static str, value: &str, width: usize) {
@@ -625,6 +642,22 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// Every asserting row states its epistemic status: the description is
+    /// a claim (tiered), the source excerpt is an observation.
+    #[test]
+    fn detail_marks_the_claim_and_the_observation_explicitly() {
+        let text = detail_text(None);
+
+        assert!(
+            text.contains("claim · unverified scanner assertion"),
+            "{text}"
+        );
+        assert!(
+            text.contains("SOURCE · observation (on-disk excerpt)"),
+            "{text}"
+        );
     }
 
     #[test]

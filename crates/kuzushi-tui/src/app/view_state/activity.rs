@@ -1680,14 +1680,16 @@ fn typed_task_cost(projection: &kuzushi_core::run_lifecycle::RunProjection, task
         .sum()
 }
 
+// Meta strings render appended to the row label, so each carries its own
+// leading separator (the latency/cost meta does the same with " (…)").
 fn typed_cost_meta(cost: RuntimeCostReport) -> String {
     if cost.is_unavailable() {
-        return "cost not recorded".to_string();
+        return " · cost not recorded".to_string();
     }
     if cost.is_complete() {
-        return format!("${:.4}", cost.observed_usd());
+        return format!(" · ${:.4}", cost.observed_usd());
     }
-    format!(">=${:.4} (metering incomplete)", cost.observed_usd())
+    format!(" · >=${:.4} (metering incomplete)", cost.observed_usd())
 }
 
 fn typed_task_state(status: kuzushi_core::run_lifecycle::RunItemStatus) -> DagTaskState {
@@ -1941,6 +1943,18 @@ mod tests {
     use super::*;
     use crate::app::PendingOperatorQuestion;
     use kuzushi_core::RunTraceStep;
+
+    /// Meta strings append directly to the row label: without its own
+    /// leading separator the card reads "context:buildcost not recorded".
+    #[test]
+    fn typed_cost_meta_carries_its_own_separator() {
+        let meta = typed_cost_meta(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
+        assert_eq!(meta, " · cost not recorded");
+        assert!(
+            format!("context:build{meta}").contains("context:build · cost"),
+            "label+meta must not concatenate without a separator"
+        );
+    }
 
     #[test]
     fn live_delivery_health_moves_from_catching_up_to_replay_equivalent() {

@@ -459,6 +459,18 @@ impl ShellApp {
     }
 
     fn defer_target_picker(&mut self) {
+        // Dismissing the picker never touches an existing binding: from the
+        // Setup editor it returns to Setup with the target intact, and from
+        // an already-targeted session it returns to the workbench.
+        if self.router.setup().editor() == Some(SetupEditor::Target) {
+            self.return_to_setup_from_editor();
+            return;
+        }
+        if self.target().is_some() {
+            self.log("onboarding", "target unchanged");
+            self.open_workbench();
+            return;
+        }
         self.log(
             "onboarding",
             "browsing without a target — set one later with `target <path>`, or run `demo` for the offline fixture",

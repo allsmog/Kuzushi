@@ -10,8 +10,7 @@
 use anyhow::{Context, Result};
 use kuzushi_core::capabilities::campaign::snapshot::{campaign_ids, load_campaign_snapshot};
 use kuzushi_core::capabilities::campaign::trend::{
-    latest_confirmed_finding_ids, trend_json, trend_metrics, workspace_campaign_spend,
-    TrendMetrics,
+    latest_confirmed_finding_ids, trend_json, trend_metrics, workspace_campaign_spend, TrendMetrics,
 };
 use kuzushi_core::findings::ReviewDecisionRecord;
 use kuzushi_core::{Finding, FindingStore, Severity, WorkspaceTarget};
@@ -209,8 +208,8 @@ fn load_baseline(root: &Path) -> Result<Option<CiBaseline>> {
     }
     let body = std::fs::read_to_string(&path)
         .with_context(|| format!("Could not read {}", path.display()))?;
-    let baseline = serde_json::from_str(&body)
-        .with_context(|| format!("{} is malformed", path.display()))?;
+    let baseline =
+        serde_json::from_str(&body).with_context(|| format!("{} is malformed", path.display()))?;
     Ok(Some(baseline))
 }
 
@@ -341,7 +340,10 @@ fn print_plain_summary(
         findings.len(),
         severity_strip(findings)
     );
-    println!("ci: confirmed {} (latest review decision wins)", confirmed.len());
+    println!(
+        "ci: confirmed {} (latest review decision wins)",
+        confirmed.len()
+    );
     match baseline {
         Some(doc) => println!(
             "ci: baseline {} known confirmed fingerprint(s) at {}",
@@ -352,7 +354,10 @@ fn print_plain_summary(
             "ci: baseline absent — every confirmed finding counts as new (run --update-baseline to accept current state)"
         ),
     }
-    println!("ci: new confirmed since baseline: {}", gate.new_confirmed.len());
+    println!(
+        "ci: new confirmed since baseline: {}",
+        gate.new_confirmed.len()
+    );
     for campaign in campaign_lines(root) {
         println!("ci: {campaign}");
     }
@@ -412,9 +417,7 @@ mod tests {
         }
     }
 
-    fn workspace_with_confirmed(
-        severities: &[Severity],
-    ) -> (tempfile::TempDir, PathBuf) {
+    fn workspace_with_confirmed(severities: &[Severity]) -> (tempfile::TempDir, PathBuf) {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -455,9 +458,10 @@ mod tests {
         let code = ci_command(target.clone(), options(Severity::High, false)).unwrap();
 
         assert_eq!(code, 1);
-        let summary_body =
-            std::fs::read_to_string(summary_path(&target, &options(Severity::High, false)).unwrap())
-                .unwrap();
+        let summary_body = std::fs::read_to_string(
+            summary_path(&target, &options(Severity::High, false)).unwrap(),
+        )
+        .unwrap();
         let summary: Value = serde_json::from_str(&summary_body).unwrap();
         assert_eq!(summary["exitCode"], 1);
         assert_eq!(summary["confirmedCount"], 2);
@@ -516,7 +520,10 @@ mod tests {
                 .unwrap();
         assert_eq!(baseline.fingerprints.len(), 1);
 
-        assert_eq!(ci_command(target, options(Severity::Low, false)).unwrap(), 0);
+        assert_eq!(
+            ci_command(target, options(Severity::Low, false)).unwrap(),
+            0
+        );
     }
 
     #[test]

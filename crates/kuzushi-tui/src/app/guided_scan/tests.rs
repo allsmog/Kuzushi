@@ -686,6 +686,10 @@ fn guided_attention_preserves_body_focus_and_scroll_from_mouse_input() {
     );
 }
 
+/// A RESULT checkpoint collapses the body, so body cursor keys must not act
+/// on the invisible body — but the checkpoint is NOT a modal: page and mode
+/// navigation stay live under it (the G4 wedge fix; see
+/// `unresolved_partial_result_does_not_wedge_page_navigation`).
 #[test]
 fn result_ready_attention_consumes_body_navigation_keys() {
     let target = tempfile::tempdir().unwrap();
@@ -704,21 +708,30 @@ fn result_ready_attention_consumes_body_navigation_keys() {
     app.router.workbench_mut().set_focus(PhaseSurfaceId::MapDfd);
     let page = app.router.workbench().page();
 
-    for key in [
-        crossterm::event::KeyEvent::new(
-            crossterm::event::KeyCode::BackTab,
-            crossterm::event::KeyModifiers::SHIFT,
-        ),
-        crossterm::event::KeyEvent::new(
+    assert!(
+        app.reduce_key(crossterm::event::KeyEvent::new(
             crossterm::event::KeyCode::Char('j'),
             crossterm::event::KeyModifiers::NONE,
-        ),
-    ] {
-        assert!(app.reduce_key(key).handled);
-    }
-
+        ))
+        .handled
+    );
     assert_eq!(app.router.workbench().page(), page);
     assert_eq!(wb_focus(&app), PhaseSurfaceId::MapDfd);
+
+    // Mode cycling keeps navigating under the checkpoint, and leaving the
+    // page never silently resolves the attempt.
+    assert!(
+        app.reduce_key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::BackTab,
+            crossterm::event::KeyModifiers::SHIFT,
+        ))
+        .handled
+    );
+    assert_ne!(app.router.workbench().page(), page);
+    assert!(app
+        .engagement
+        .unresolved_phase_attempt(WorkflowPhase::Map)
+        .is_some());
 }
 
 #[test]
@@ -885,7 +898,10 @@ fn scan_module_selection_is_seeded_by_threat_model_and_recommender() {
 
     assert_eq!(
         question.detail_lines.last().map(String::as_str),
-        Some("Seeded by the threat model (2 threat(s) · 1 trust boundary) and workspace signals.")
+        Some(
+            "Lineage target rev:unknown · model [unstamped] — seeded by the threat model (2 \
+             threat(s) · 1 trust boundary) and workspace signals."
+        )
     );
     let semgrep = &question.options[0];
     assert!(

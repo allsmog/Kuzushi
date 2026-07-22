@@ -4,20 +4,31 @@ const MAX_REPOSITORY_ENTRIES: usize = 100_000;
 const MAX_REPOSITORY_INSPECTED_BYTES: usize = 512 * 1024 * 1024;
 const MAX_FILE_INSPECTION_BYTES: usize = 256 * 1024;
 
-#[derive(Debug)]
-struct InventoryBudget {
+struct InventoryBudget<'p> {
     entries: usize,
     inspected_bytes: usize,
     max_entries: usize,
     max_inspected_bytes: usize,
     truncation: Option<String>,
+    /// Walked-entry observer: monorepo walks run for minutes, and a silent
+    /// walk reads as a hung run — callers surface these counts as heartbeat
+    /// progress.
+    progress: Option<&'p mut dyn FnMut(usize)>,
 }
 
 pub fn build_repository_inventory(root: impl AsRef<Path>) -> Result<RepositoryInventory> {
+    build_repository_inventory_with_progress(root, |_| {})
+}
+
+pub fn build_repository_inventory_with_progress(
+    root: impl AsRef<Path>,
+    mut on_entries: impl FnMut(usize),
+) -> Result<RepositoryInventory> {
     build_repository_inventory_with_limits(
         root.as_ref(),
         MAX_REPOSITORY_ENTRIES,
         MAX_REPOSITORY_INSPECTED_BYTES,
+        &mut on_entries,
     )
 }
 
@@ -25,6 +36,7 @@ fn build_repository_inventory_with_limits(
     root: &Path,
     max_entries: usize,
     max_inspected_bytes: usize,
+    on_entries: &mut dyn FnMut(usize),
 ) -> Result<RepositoryInventory> {
     let root = root
         .canonicalize()
@@ -34,7 +46,7 @@ fn build_repository_inventory_with_limits(
     }
 
     let mut builder = InventoryBuilder::default();
-    let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes);
+    let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes, on_entries);
     walk_repository(&root, &root, &mut builder, &mut budget)?;
     let truncation = budget
         .truncation
@@ -42,14 +54,19 @@ fn build_repository_inventory_with_limits(
     Ok(builder.finish(root_name(&root), truncation))
 }
 
-impl InventoryBudget {
-    fn new(max_entries: usize, max_inspected_bytes: usize) -> Self {
+impl<'p> InventoryBudget<'p> {
+    fn new(
+        max_entries: usize,
+        max_inspected_bytes: usize,
+        progress: &'p mut dyn FnMut(usize),
+    ) -> Self {
         Self {
             entries: 0,
             inspected_bytes: 0,
             max_entries,
             max_inspected_bytes,
             truncation: None,
+            progress: Some(progress),
         }
     }
 
@@ -72,6 +89,9 @@ impl InventoryBudget {
             ));
         }
         self.entries += entries.len();
+        if let Some(progress) = self.progress.as_deref_mut() {
+            progress(self.entries);
+        }
         Ok(entries)
     }
 
@@ -102,7 +122,7 @@ fn walk_repository(
     root: &Path,
     dir: &Path,
     builder: &mut InventoryBuilder,
-    budget: &mut InventoryBudget,
+    budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
     if budget.entries_exhausted() {
         budget.mark_truncated(format!(
@@ -127,7 +147,7 @@ fn walk_repository_entry(
     root: &Path,
     entry: fs::DirEntry,
     builder: &mut InventoryBuilder,
-    budget: &mut InventoryBudget,
+    budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
     let path = entry.path();
     let file_type = entry
@@ -151,7 +171,7 @@ fn walk_repository_dir(
     relative: &str,
     name: &str,
     builder: &mut InventoryBuilder,
-    budget: &mut InventoryBudget,
+    budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
     if ignored_dir(name) {
         return Ok(());
@@ -168,7 +188,7 @@ fn walk_repository_file(
     relative: &str,
     name: &str,
     builder: &mut InventoryBuilder,
-    budget: &mut InventoryBudget,
+    budget: &mut InventoryBudget<'_>,
 ) -> Result<()> {
     let generated_vendor = record_file_metadata(relative, name, builder);
     let Some(text) = read_text_prefix(path, MAX_FILE_INSPECTION_BYTES)? else {
@@ -224,7 +244,7 @@ mod coverage_limit_tests {
         fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
         fs::write(temp.path().join("b.rs"), "fn b() {}\n").unwrap();
 
-        let inventory = build_repository_inventory_with_limits(temp.path(), 1, 1024).unwrap();
+        let inventory = build_repository_inventory_with_limits(temp.path(), 1, 1024, &mut |_| {}).unwrap();
 
         let truncation = inventory.truncation.expect("partial walk must be marked");
         assert!(truncation.reason.contains("entry cap"));
@@ -236,7 +256,7 @@ mod coverage_limit_tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("large.rs"), "x".repeat(64)).unwrap();
 
-        let inventory = build_repository_inventory_with_limits(temp.path(), 10, 8).unwrap();
+        let inventory = build_repository_inventory_with_limits(temp.path(), 10, 8, &mut |_| {}).unwrap();
 
         let truncation = inventory.truncation.expect("partial inspection must be marked");
         assert!(truncation.reason.contains("content-inspection cap"));
@@ -248,7 +268,7 @@ mod coverage_limit_tests {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
 
-        let inventory = build_repository_inventory_with_limits(temp.path(), 100, 1024).unwrap();
+        let inventory = build_repository_inventory_with_limits(temp.path(), 100, 1024, &mut |_| {}).unwrap();
 
         assert!(inventory.truncation.is_none());
         assert_eq!(inventory.source_files.len(), 1);

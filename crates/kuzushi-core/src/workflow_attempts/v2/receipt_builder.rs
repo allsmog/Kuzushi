@@ -54,6 +54,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
                 self.final_run()?,
                 &continuation,
                 self.selection_is_allowed(),
+                self.partial_continuation_phase(),
             ),
             continuation,
         })
@@ -144,6 +145,15 @@ impl<'a> PhaseReceiptBuilder<'a> {
                     | RunItemStatus::Running
             )
             && outstanding_question(self.projections).is_none()
+    }
+
+    /// A selectable partial attempt may also be accepted AND advanced from:
+    /// the operator explicitly continues with partial evidence. Completed
+    /// attempts already carry the continuation as their primary action.
+    fn partial_continuation_phase(&self) -> Option<WorkflowPhase> {
+        (self.selection_is_allowed() && self.status != RunItemStatus::Completed)
+            .then(|| next_phase(self.phase))
+            .flatten()
     }
 }
 
@@ -315,15 +325,14 @@ fn offered_actions(
     final_run: RunId,
     primary: &WorkflowContinuation,
     selection_is_allowed: bool,
+    partial_continuation: Option<WorkflowPhase>,
 ) -> Vec<WorkflowContinuation> {
     let inspect = inspect_continuation(final_run, "inspect the canonical run evidence");
     let retry = WorkflowContinuation::Retry {
         reason: SafeText::operator_visible("run the phase again with explicit operator changes"),
     };
     let mut offered = vec![primary.clone()];
-    if selection_is_allowed
-        && !matches!(primary, WorkflowContinuation::NoFurtherAction { .. })
-    {
+    if selection_is_allowed && !matches!(primary, WorkflowContinuation::NoFurtherAction { .. }) {
         push_unique(
             &mut offered,
             WorkflowContinuation::NoFurtherAction {
@@ -332,6 +341,9 @@ fn offered_actions(
                 ),
             },
         );
+    }
+    if let Some(phase) = partial_continuation {
+        push_unique(&mut offered, WorkflowContinuation::OpenPhase { phase });
     }
     push_unique(&mut offered, inspect);
     if !matches!(primary, WorkflowContinuation::Retry { .. }) {

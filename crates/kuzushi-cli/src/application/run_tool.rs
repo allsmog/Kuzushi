@@ -1,8 +1,8 @@
-#[cfg(test)]
-pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_exit::{
     run_exit_code, write_done_sentinel, RunCommandExit, EXIT_RUN_PREPARE_FAILED,
 };
+#[cfg(test)]
+pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_requirements::resolve_run_target;
 use anyhow::{Context, Result};

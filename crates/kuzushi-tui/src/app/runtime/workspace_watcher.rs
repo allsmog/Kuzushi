@@ -21,6 +21,43 @@ pub(crate) struct WorkspaceWatcherRuntime {
     deferred_state_artifact_paths: Vec<PathBuf>,
     state_artifact_flush_after: Option<Instant>,
     last_state_artifact_flush: Option<Instant>,
+    applied_state_fingerprints: std::collections::BTreeMap<PathBuf, Option<StateFingerprint>>,
+}
+
+/// Identity of a state artifact as last applied. Reads that take file locks
+/// open store files with write-capable handles, so closing them emits
+/// close-write events without changing the file — each refresh then re-emits
+/// events for the very files it read, and the shell invalidates forever.
+/// Comparing (len, mtime, inode) drops those phantom reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StateFingerprint {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    inode: u64,
+    is_dir: bool,
+}
+
+fn state_fingerprint(target: &Path, relative: &Path) -> Option<StateFingerprint> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::symlink_metadata(target.join(relative)).ok()?;
+    // A directory's size/mtime churn on every child create/delete — including
+    // the sqlite -wal/-shm side files kuzushi's own store reads create and
+    // remove — while every real artifact change reports through the child's
+    // own path. Directories carry identity only.
+    if metadata.is_dir() {
+        return Some(StateFingerprint {
+            len: 0,
+            modified: None,
+            inode: metadata.ino(),
+            is_dir: true,
+        });
+    }
+    Some(StateFingerprint {
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+        inode: metadata.ino(),
+        is_dir: false,
+    })
 }
 
 /// Recursive watch registration walks every directory under the target —
@@ -58,6 +95,7 @@ impl WorkspaceWatcherRuntime {
             deferred_state_artifact_paths: Vec::new(),
             state_artifact_flush_after: None,
             last_state_artifact_flush: None,
+            applied_state_fingerprints: std::collections::BTreeMap::new(),
         }))
     }
 
@@ -98,6 +136,13 @@ impl WorkspaceWatcherRuntime {
 
     fn collect_pending_changes(&mut self, release_deferred_state: bool) -> WatcherDrainOutcome {
         let mut drained = overflow_marker(&self.overflowed);
+        let from_overflow = drained.state_artifact_paths.len();
+        if from_overflow > 0 {
+            // Overflow means writes went unobserved: forget the applied
+            // identities so the refresh sentinel cannot be gated as
+            // "unchanged".
+            self.applied_state_fingerprints.clear();
+        }
         let mut new_state_event = !drained.state_artifact_paths.is_empty();
         let mut tail_may_remain = true;
         if release_deferred_state {
@@ -143,8 +188,27 @@ impl WorkspaceWatcherRuntime {
             return;
         }
         self.state_artifact_flush_after = None;
+        drained
+            .state_artifact_paths
+            .retain(|path| self.state_artifact_changed(path));
         if !drained.state_artifact_paths.is_empty() {
             self.last_state_artifact_flush = Some(Instant::now());
+        }
+    }
+
+    /// True when the artifact's on-disk identity differs from the identity
+    /// last applied; records the observed identity either way. Lock-only
+    /// reopens (close-write with unchanged content) report as unchanged and
+    /// must not re-trigger the external-state refresh.
+    fn state_artifact_changed(&mut self, relative: &Path) -> bool {
+        let current = state_fingerprint(&self.target, relative);
+        match self.applied_state_fingerprints.get(relative) {
+            Some(previous) if *previous == current => false,
+            _ => {
+                self.applied_state_fingerprints
+                    .insert(relative.to_path_buf(), current);
+                true
+            }
         }
     }
 
@@ -492,6 +556,7 @@ mod tests {
                 .unwrap();
         };
 
+        write_state_artifact(&watcher, ".kuzushi/v3/index.sqlite3", "state-one");
         send_state_event(&watcher);
         assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
         std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
@@ -500,6 +565,7 @@ mod tests {
             "the first quiet window must apply a refresh"
         );
 
+        write_state_artifact(&watcher, ".kuzushi/v3/index.sqlite3", "state-two-longer");
         send_state_event(&watcher);
         assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
         std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
@@ -513,6 +579,135 @@ mod tests {
         assert!(
             apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
             "the deferred paths must apply once the cooldown expires"
+        );
+    }
+
+    /// Loop breaker for phantom self-invalidation: kuzushi's own store reads
+    /// reopen state files through write-capable lock handles, emitting
+    /// close-write events with NO content change. Applying a refresh on those
+    /// re-reads the stores, which emits the next phantom event — a
+    /// self-sustaining cycle that discards every slow hydration result
+    /// (rev:unknown forever on large targets). An unchanged artifact identity
+    /// must therefore never re-apply the external-state refresh.
+    #[test]
+    fn unchanged_state_artifact_reopen_does_not_reapply_refresh() {
+        let (_input, wake) = TerminalLoopInbox::channel_for_test();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut watcher = watcher_for_test(wake);
+        let send_state_event = |watcher: &TestWatcherRuntime| {
+            watcher
+                .tx
+                .try_send(WorkspaceWatcherBatch {
+                    changes: Vec::new(),
+                    state_artifact_paths: vec![PathBuf::from(".kuzushi/v3/options.json")],
+                })
+                .unwrap();
+        };
+        let expire_cooldown = |watcher: &mut TestWatcherRuntime| {
+            watcher.runtime.last_state_artifact_flush =
+                Some(Instant::now() - STATE_ARTIFACT_REFRESH_COOLDOWN);
+        };
+
+        write_state_artifact(&watcher, ".kuzushi/v3/options.json", r#"{"value":1}"#);
+        send_state_event(&watcher);
+        assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "a new artifact identity must apply a refresh"
+        );
+
+        // Lock-only reopen: the event arrives with no on-disk change.
+        expire_cooldown(&mut watcher);
+        send_state_event(&watcher);
+        assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            !apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "an unchanged artifact identity must not re-apply the refresh"
+        );
+
+        // A genuine modification still applies.
+        write_state_artifact(&watcher, ".kuzushi/v3/options.json", r#"{"value":22}"#);
+        expire_cooldown(&mut watcher);
+        send_state_event(&watcher);
+        assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "a modified artifact identity must apply a refresh again"
+        );
+    }
+
+    /// The state dir's mtime churns on every child create/delete — including
+    /// sqlite side files kuzushi's own reads produce. Directory-level events
+    /// carry no artifact identity of their own (children report through
+    /// their own paths), so dir mtime churn must not re-apply the refresh.
+    #[test]
+    fn state_dir_mtime_churn_does_not_reapply_refresh() {
+        let (_input, wake) = TerminalLoopInbox::channel_for_test();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut watcher = watcher_for_test(wake);
+        let send_dir_event = |watcher: &TestWatcherRuntime| {
+            watcher
+                .tx
+                .try_send(WorkspaceWatcherBatch {
+                    changes: Vec::new(),
+                    state_artifact_paths: vec![PathBuf::from(".kuzushi/v3")],
+                })
+                .unwrap();
+        };
+
+        std::fs::create_dir_all(watcher.target.path().join(".kuzushi/v3")).unwrap();
+        send_dir_event(&watcher);
+        assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "the first sighting of the state dir must apply a refresh"
+        );
+
+        // Child create/delete bumps the dir mtime without changing identity.
+        std::fs::write(
+            watcher.target.path().join(".kuzushi/v3/index.sqlite3-wal"),
+            "wal",
+        )
+        .unwrap();
+        watcher.runtime.last_state_artifact_flush =
+            Some(Instant::now() - STATE_ARTIFACT_REFRESH_COOLDOWN);
+        send_dir_event(&watcher);
+        assert!(!apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed);
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            !apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "dir mtime churn from child side files must not re-apply the refresh"
+        );
+    }
+
+    /// Overflow means writes went unobserved; its `.kuzushi/v3` refresh
+    /// sentinel must bypass the unchanged-identity gate even when the dir
+    /// was already applied.
+    #[test]
+    fn overflow_refresh_sentinel_bypasses_the_unchanged_gate() {
+        let (_input, wake) = TerminalLoopInbox::channel_for_test();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut watcher = watcher_for_test(wake);
+        std::fs::create_dir_all(watcher.target.path().join(".kuzushi/v3")).unwrap();
+        let applied = state_fingerprint(watcher.target.path(), Path::new(".kuzushi/v3"));
+        assert!(applied.is_some());
+        watcher
+            .runtime
+            .applied_state_fingerprints
+            .insert(PathBuf::from(".kuzushi/v3"), applied);
+        watcher.runtime.overflowed.store(true, Ordering::SeqCst);
+
+        // The overflow marker's GitHeadChanged applies immediately; the state
+        // sentinel defers into the debounce window.
+        apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
+        std::thread::sleep(STATE_ARTIFACT_DEBOUNCE + Duration::from_millis(10));
+        assert!(
+            apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime)).changed,
+            "the overflow sentinel must apply a refresh despite an applied identity"
         );
     }
 
@@ -574,7 +769,14 @@ mod tests {
         let mut watcher = watcher_for_test(wake);
         let start = Instant::now();
         let mut applied = false;
+        let mut version = 0usize;
         while start.elapsed() < STATE_ARTIFACT_DEBOUNCE * 4 {
+            version += 1;
+            write_state_artifact(
+                &watcher,
+                ".kuzushi/v3/index.sqlite3",
+                &format!("v{version}-{}", "x".repeat(version)),
+            );
             watcher
                 .tx
                 .try_send(WorkspaceWatcherBatch {
@@ -616,6 +818,13 @@ mod tests {
     struct TestWatcherRuntime {
         runtime: WorkspaceWatcherRuntime,
         tx: SyncSender<WorkspaceWatcherBatch>,
+        target: tempfile::TempDir,
+    }
+
+    fn write_state_artifact(watcher: &TestWatcherRuntime, relative: &str, content: &str) {
+        let path = watcher.target.path().join(relative);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
     }
 
     fn watcher_for_test(wake: TerminalLoopWake) -> TestWatcherRuntime {
@@ -632,7 +841,12 @@ mod tests {
             deferred_state_artifact_paths: Vec::new(),
             state_artifact_flush_after: None,
             last_state_artifact_flush: None,
+            applied_state_fingerprints: std::collections::BTreeMap::new(),
         };
-        TestWatcherRuntime { runtime, tx }
+        TestWatcherRuntime {
+            runtime,
+            tx,
+            target: tmp,
+        }
     }
 }

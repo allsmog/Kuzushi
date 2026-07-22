@@ -168,7 +168,19 @@ pub(super) fn workbench_keybindings_for_plan(
     // before page/visualization shortcuts and secondary actions.
     let page = crate::ui_view_models::active_workbench_page(app);
     if plan.is_some_and(|plan| plan.density == crate::ui_view_models::LayoutDensity::Guided) {
-        return Vec::new();
+        // A guided QUESTION card owns every key. A RESULT checkpoint only
+        // owns the keys its strip binds (dispatched before these): page
+        // navigation and page-level actions must keep working under an
+        // unresolved result, or the operator is stranded on the phase page.
+        if app.guided_scan_question_is_open() {
+            return Vec::new();
+        }
+        let mut bindings = workbench_page_keybindings();
+        bindings.extend(workbench_secondary_action_keybindings(
+            page,
+            crate::ui_view_models::review_backlog_active(app),
+        ));
+        return bindings;
     }
     let available_count = plan.map_or(0, |plan| plan.available_surfaces.len());
     let focused_surface = plan

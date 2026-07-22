@@ -102,6 +102,10 @@ pub struct ChainLink {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChainCandidate {
+    /// Stable identity over the constituent finding fingerprints: the same
+    /// confirmed set always folds to the same chain id, so durable chain
+    /// artifacts survive re-runs and can be referenced across sessions.
+    pub id: String,
     pub surface: String,
     pub entry: ChainLink,
     pub pivots: Vec<ChainLink>,
@@ -296,6 +300,7 @@ fn candidate(
         }
     );
     ChainCandidate {
+        id: chain_identity(surface, entry, &bridge, impact),
         surface: surface.to_string(),
         entry: chain_link(entry, ChainRole::Entry),
         pivots: bridge,
@@ -303,6 +308,33 @@ fn candidate(
         score,
         rationale,
     }
+}
+
+/// Deterministic chain identity over the constituent finding fingerprints.
+fn chain_identity(
+    surface: &str,
+    entry: &Finding,
+    pivots: &[ChainLink],
+    impact: &Finding,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(surface.as_bytes());
+    hasher.update(b"|");
+    hasher.update(entry.fingerprint.as_bytes());
+    for pivot in pivots {
+        hasher.update(b"|");
+        hasher.update(pivot.fingerprint.as_bytes());
+    }
+    hasher.update(b"|");
+    hasher.update(impact.fingerprint.as_bytes());
+    let digest = hasher.finalize();
+    let hex: String = digest
+        .iter()
+        .take(6)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("AC-{hex}")
 }
 
 /// `findings:chains` executor — deterministic, read-mostly; writes the
@@ -318,6 +350,7 @@ pub fn execute_findings_chains(
     let max_chains = max_chains_from_input(input)?;
     let report = fold_chains(&confirmed, max_chains);
     let report_json = serde_json::to_value(&report)?;
+    persist_chain_artifacts(ctx, &report, &report_json)?;
     write_optional_report(input, ctx, &report_json)?;
     let output = report_summary(&report);
     Ok(crate::module_result::completed_output_result(
@@ -348,6 +381,63 @@ fn max_chains_from_input(input: &Value) -> Result<usize> {
         .context("findings:chains: maxChains must be a positive integer")?;
     anyhow::ensure!(max > 0, "findings:chains: maxChains must be positive");
     Ok(max as usize)
+}
+
+/// Chains are durable artifacts, not a transient view: every fold persists
+/// the canonical report (`.kuzushi/v3/reports/chains.json`) and the scene
+/// snapshot the ATTACK CHAINS screen renders from, each chain carrying its
+/// stable identity and the constituent finding fingerprints.
+fn persist_chain_artifacts(
+    ctx: &crate::modules::ToolExecutionContext<'_>,
+    report: &ChainReport,
+    report_json: &Value,
+) -> Result<()> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(());
+    };
+    crate::workspace::write_workspace_state_file(
+        workspace.root(),
+        std::path::Path::new(crate::workspace::KUZUSHI_STATE_DIR)
+            .join("v3/reports/chains.json"),
+        format!("{}\n", serde_json::to_string_pretty(report_json)?).as_bytes(),
+    )?;
+    crate::capabilities::save_persistent_exploit_chains(
+        workspace.root(),
+        &scene_chain_payload(report),
+    )?;
+    Ok(())
+}
+
+/// Scene-snapshot shape consumed by the attack-tree visualization: one step
+/// per constituent finding, ordered entry → pivots → impact.
+fn scene_chain_payload(report: &ChainReport) -> Value {
+    let chains: Vec<Value> = report
+        .chains
+        .iter()
+        .map(|chain| {
+            let mut steps = vec![scene_chain_step(&chain.entry)];
+            steps.extend(chain.pivots.iter().map(scene_chain_step));
+            steps.push(scene_chain_step(&chain.impact));
+            serde_json::json!({
+                "id": chain.id,
+                "name": format!("{} → {}", chain.entry.title, chain.impact.title),
+                "overallSeverity": chain.impact.severity,
+                "narrative": chain.rationale,
+                "preconditions": [format!("surface `{}` reachable", chain.surface)],
+                "steps": steps,
+            })
+        })
+        .collect();
+    serde_json::json!({ "chains": chains })
+}
+
+fn scene_chain_step(link: &ChainLink) -> Value {
+    serde_json::json!({
+        "role": format!("{:?}", link.role).to_lowercase(),
+        "description": format!("{} · finding {}", link.title, link.fingerprint),
+        "filePath": link.file_path,
+        "startLine": 0,
+    })
 }
 
 fn write_optional_report(
@@ -567,5 +657,79 @@ mod tests {
         let report = fold_chains(&confirmed, 1);
         assert_eq!(report.chains.len(), 1);
         assert_eq!(report.chains[0].impact.fingerprint, "fp-impact-hi");
+    }
+
+    /// Chain identity is stable over the constituent finding fingerprints:
+    /// the same confirmed set always folds to the same durable id.
+    #[test]
+    fn chain_identity_is_stable_and_fingerprint_derived() {
+        let confirmed = vec![
+            finding(
+                "fp-entry",
+                "Unauthenticated request handler",
+                Severity::High,
+                "svc/api/entry.py",
+            ),
+            finding(
+                "fp-impact",
+                "Command injection in worker",
+                Severity::High,
+                "svc/api/worker.py",
+            ),
+        ];
+
+        let first = fold_chains(&confirmed, 4);
+        let second = fold_chains(&confirmed, 4);
+
+        assert_eq!(first.chains.len(), 1);
+        let id = &first.chains[0].id;
+        assert!(id.starts_with("AC-") && id.len() == 15, "{id}");
+        assert_eq!(id, &second.chains[0].id, "identity must be deterministic");
+    }
+
+    /// The persisted scene payload references the real finding fingerprints
+    /// so the ATTACK CHAINS screen renders chains as artifacts over
+    /// constituent findings, not detached narrative.
+    #[test]
+    fn scene_payload_orders_steps_and_references_finding_fingerprints() {
+        let confirmed = vec![
+            finding(
+                "fp-entry",
+                "Unauthenticated request handler",
+                Severity::High,
+                "svc/api/entry.py",
+            ),
+            finding(
+                "fp-pivot",
+                "Hardcoded password in config",
+                Severity::Medium,
+                "svc/api/config.py",
+            ),
+            finding(
+                "fp-impact",
+                "Command injection in worker",
+                Severity::High,
+                "svc/api/worker.py",
+            ),
+        ];
+        let report = fold_chains(&confirmed, 4);
+
+        let payload = scene_chain_payload(&report);
+
+        let chain = &payload["chains"][0];
+        assert_eq!(chain["id"], report.chains[0].id.as_str());
+        let steps = chain["steps"].as_array().unwrap();
+        assert_eq!(steps[0]["role"], "entry");
+        assert_eq!(steps.last().unwrap()["role"], "impact");
+        assert!(steps[0]["description"]
+            .as_str()
+            .unwrap()
+            .contains("finding fp-entry"));
+        assert!(steps
+            .last()
+            .unwrap()["description"]
+            .as_str()
+            .unwrap()
+            .contains("finding fp-impact"));
     }
 }

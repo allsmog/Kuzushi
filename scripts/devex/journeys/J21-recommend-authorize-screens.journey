@@ -27,7 +27,7 @@ submit: demo
 wait-for: 120 PDF phase reference fixture loaded
 submit: workbench
 wait: 2
-keys: Escape
+nav-mode:
 keys: 4
 wait-live-snap: 10 Viewing Prove | 1-prove
 expect: STATUS / NEXT
@@ -49,9 +49,11 @@ expect: run trace:expand
 ask: Trace — is the recorded path clearly separated from operator-requested expansion, with Enter only drafting the command?
 keys: t
 wait: 1
+nav-mode:
 keys: 3
 wait-live-snap: 10 Viewing Review | 4-review
 expect: SELECTED FINDING
+nav-mode:
 keys: C
 wait-live-snap: 10 ATTACK CHAINS · Enter open constituent | 5-attack-chains
 expect: ATTACK CHAINS

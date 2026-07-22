@@ -232,13 +232,82 @@ d_type() { # literal text, no Enter
 
 d_submit() { # literal text + Enter (the common "type a verb" case)
   ensure_session
-  # First Esc clears a notice/completion card or leaves Navigate mode. The
-  # following F2/Esc pair then normalizes either shell input state to Prompt.
-  # This remains idempotent when no modal is present and prevents typed audit
-  # commands from being mistaken for view hotkeys after an acknowledgement.
-  tmux send-keys -t "$SESSION" Escape F2 Escape
-  devex_send_line "$SESSION" "$(expand_tokens "$1")"
-  report step "submit: $1"
+  # Normalize the shell to a clean Prompt before typing. Esc is a toggle
+  # (clean prompt <-> Navigate) and a clearer (drafted prompt -> clean), so no
+  # blind key sequence can converge; poll the mode markers the shell renders:
+  # the Navigate footer advertises "Esc prompt", the Prompt footer advertises
+  # "Esc nav mode", and a CLEAN prompt shows its placeholder ("· Esc list
+  # keys" on workbench pages, "type help or press Tab" elsewhere). F2 must
+  # never be sent — it is no longer a mode toggle, and delivered raw its
+  # ESC O Q bytes type a literal "OQ" into the prompt.
+  local tries=0 tail3
+  while (( tries++ < 10 )); do
+    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    case $tail3 in
+      *'Esc list keys'* | *'type help or press Tab'*)
+        break;;                               # clean prompt — ready for input
+      *'command prompt paused'*)
+        # Picker-style views park the prompt entirely; the advertised ":"
+        # reopens it (Escape only cycles picker states and never converges).
+        tmux send-keys -t "$SESSION" :;;
+      *)
+        # Navigate -> Prompt, drafted prompt -> cleared, or notice/completion
+        # card -> dismissed; re-check the rendered state before each press.
+        tmux send-keys -t "$SESSION" Escape;;
+    esac
+    sleep 0.3
+  done
+  # The TUI event loop can lag seconds behind send-keys while async target
+  # hydration runs, and hydration events can wipe or corrupt an in-flight
+  # draft — typing blind then pressing Enter submits garbage (observed: the
+  # command "scan" arriving as "scanj" in the session transcript). Type, wait
+  # until the draft renders intact at the end of the prompt line, and only
+  # then commit with Enter; a corrupted draft is cleared and retyped.
+  local text attempt=0 waited line
+  text=$(expand_tokens "$1")
+  while (( attempt++ <= 4 )); do
+    tmux send-keys -t "$SESSION" -l -- "$text"
+    waited=0
+    while (( waited++ <= 40 )); do
+      line=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -1)
+      line=${line%"${line##*[![:space:]]}"}   # strip trailing blanks/cursor
+      # A clean draft ends the line, or is followed by a two-space-separated
+      # inline completion ghost (e.g. "› findings  export"). A one-character
+      # corruption ("› scanj") matches neither form.
+      case $line in
+        *"› $text" | *"kuzushi> $text" \
+        | *"› $text  "* | *"kuzushi> $text  "*)
+          tmux send-keys -t "$SESSION" Enter
+          report step "submit: $1"
+          return 0;;
+      esac
+      sleep 0.25
+    done
+    tmux send-keys -t "$SESSION" Escape       # clear the corrupted draft
+    sleep 0.5
+  done
+  fail "submit: $1 — draft never rendered intact on the prompt line"
+}
+
+d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
+  ensure_session
+  # Same footer-marker polling as d_submit, aimed at the opposite mode: a
+  # Navigate footer advertises "Esc prompt"; from a clean prompt one Escape
+  # enters Navigate, and a drafted prompt or modal needs a clearing Escape
+  # first. Blind Escapes cannot converge on a toggle — poll between presses.
+  local tries=0 tail3
+  while (( tries++ <= 10 )); do
+    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    case $tail3 in
+      *'Esc prompt'*)
+        report step "nav-mode (converged)"
+        return 0;;
+      *)
+        tmux send-keys -t "$SESSION" Escape;;
+    esac
+    sleep 0.3
+  done
+  fail "nav-mode — Navigate footer never rendered"
 }
 
 d_wait() { sleep "$1"; }
@@ -396,6 +465,14 @@ d_wait_snap_kind() { # <automatic|live> <[timeout] substring | label>
     fi
     sleep 0.5; waited=$((waited + 1))
   done
+  # Timed out: keep one final capture as a .timeout diagnosis artifact so the
+  # failing screen is evidenced, but never publish it as the last snapshot —
+  # the following expects must still report "no snapshot yet" honestly.
+  if capture_pending automatic; then
+    mv "$PENDING_SNAP" "${PENDING_SNAP%.txt}.timeout.txt" 2>/dev/null || true
+    mv "$PENDING_ANSI" "${PENDING_ANSI%.ansi}.timeout.ansi" 2>/dev/null || true
+    report snap "$PENDING_SNAP_NAME.timeout.txt (diagnosis capture of the timed-out screen)"
+  fi
   discard_pending_snapshot
   fail "wait-$requested_kind-snap \"$needle\" timed out after ${timeout}s"
 }
@@ -473,6 +550,44 @@ d_ask() { # human-judgment checkpoint — recorded, never auto-verdicted
   review "($LAST_SNAP_NAME) $1"
 }
 
+d_expect_echo_within() { # <budget-ms> <probe-text> — type probe, time until echoed
+  ensure_session
+  local budget=${1%% *} probe=${1#* } start now elapsed_ms
+  probe=$(expand_tokens "$probe")
+  start=$(date +%s%N)
+  tmux send-keys -t "$SESSION" -l -- "$probe"
+  while :; do
+    now=$(date +%s%N)
+    elapsed_ms=$(((now - start) / 1000000))
+    if devex_pane_contains "$SESSION" "$probe"; then
+      if [ "$elapsed_ms" -le "$budget" ]; then
+        pass "echo \"$probe\" within ${elapsed_ms}ms (budget ${budget}ms)"
+      else
+        fail "echo \"$probe\" took ${elapsed_ms}ms (budget ${budget}ms)"
+      fi
+      return 0
+    fi
+    # Poll cost bounds precision; a miss can overshoot by one poll interval.
+    if [ "$elapsed_ms" -gt $((budget * 4 + 2000)) ]; then
+      fail "echo \"$probe\" never appeared after ${elapsed_ms}ms (budget ${budget}ms)"
+      return 0
+    fi
+    sleep 0.05
+  done
+}
+
+d_expect_count_at_most() { # <n> <substring> — occurrence ceiling in last snapshot
+  local limit=${1%% *} needle=${1#* } count
+  needle=$(expand_tokens "$needle")
+  [ -n "$LAST_SNAP" ] || { fail "expect-count-at-most \"$needle\" — no snapshot taken yet"; return; }
+  count=$(grep -Fic -- "$needle" "$LAST_SNAP" || true)
+  if [ "$count" -le "$limit" ]; then
+    pass "$LAST_SNAP_NAME shows \"$needle\" ${count}x (limit $limit)"
+  else
+    fail "$LAST_SNAP_NAME shows \"$needle\" ${count}x (limit $limit)"
+  fi
+}
+
 dispatch() { # <directive> <value>
   case $1 in
     name)            printf '%s\n' "$2" >> "$REPORT";;
@@ -489,6 +604,7 @@ dispatch() { # <directive> <value>
     keys)            d_keys "$2";;
     type)            d_type "$2";;
     submit)          d_submit "$2";;
+    nav-mode)        d_nav_mode;;
     wait)            d_wait "$2";;
     wait-for)        d_wait_for "$2";;
     wait-snap)       d_wait_snap "$2";;
@@ -499,6 +615,8 @@ dispatch() { # <directive> <value>
     expect)          d_expect "$2";;
     expect-not)      d_expect_not "$2";;
     expect-ansi-profile) d_expect_ansi_profile "$2";;
+    expect-echo-within) d_expect_echo_within "$2";;
+    expect-count-at-most) d_expect_count_at_most "$2";;
     ask)             d_ask "$2";;
     *)               devex_die "unknown directive '$1:' (in $CURRENT_FILE)";;
   esac

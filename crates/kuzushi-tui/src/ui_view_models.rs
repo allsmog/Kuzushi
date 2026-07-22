@@ -241,7 +241,9 @@ pub(crate) use prereq_prompt::{
     plain_prereq_plan_model, prereq_prompt_model, PlainPrereqPlanModel, PrereqPromptModel,
     PrereqPromptStepModel,
 };
-pub(crate) use project_model::{project_model, ProjectModel, ProjectModelOrigin, ProjectModelRow};
+pub(crate) use project_model::{
+    project_model, project_revision_label, ProjectModel, ProjectModelOrigin, ProjectModelRow,
+};
 pub(crate) use prompt::{
     navigation_prompt_label, prompt_model, prompt_text, workbench_prompt_mode,
     workbench_prompt_token,

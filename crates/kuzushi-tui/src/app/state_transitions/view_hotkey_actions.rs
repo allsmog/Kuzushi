@@ -103,7 +103,7 @@ impl ShellApp {
         Some(InputUpdate::handled())
     }
 
-    pub(super) fn set_workbench_page(&mut self, page: WorkbenchPage) {
+    pub(crate) fn set_workbench_page(&mut self, page: WorkbenchPage) {
         let workbench = self.router.workbench_mut();
         workbench.set_page(Some(page));
         workbench.scroll_mut().set(page.primary_surface(), 0);

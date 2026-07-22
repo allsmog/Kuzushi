@@ -38,7 +38,9 @@ fn sessions_root() -> PathBuf {
     if let Some(argument) = std::env::args().nth(1) {
         return PathBuf::from(argument);
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default();
     kuzushi_core::session_transcript::default_sessions_root(home)
 }
 
@@ -50,7 +52,10 @@ fn collect_jsonl_files(directory: &Path, files: &mut Vec<PathBuf>) {
         let path = entry.path();
         if path.is_dir() {
             collect_jsonl_files(&path, files);
-        } else if path.extension().is_some_and(|extension| extension == "jsonl") {
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")
+        {
             files.push(path);
         }
     }

@@ -188,8 +188,8 @@ mod tests {
     fn missing_engine_or_low_disk_fails_the_gate() {
         let transport = FakeTransport::with_outputs(vec![
             ok(""),
-            ok(""),           // no version output → engine missing
-            ok("1048576"),    // 1 GiB free
+            ok(""),        // no version output → engine missing
+            ok("1048576"), // 1 GiB free
             ok("ok"),
         ]);
 

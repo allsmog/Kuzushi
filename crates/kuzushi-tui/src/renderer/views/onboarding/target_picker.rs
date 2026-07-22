@@ -265,7 +265,7 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
     );
     lines.extend(
         wrap_text(
-            "no repo or no key yet: press `d` for the offline fixture",
+            "no repo or no key yet: type `:demo` for the offline fixture",
             width as usize,
         )
         .into_iter()

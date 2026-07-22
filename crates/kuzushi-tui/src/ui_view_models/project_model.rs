@@ -85,7 +85,10 @@ fn project_scope_label(app: &ShellApp) -> String {
         .unwrap_or_else(|| "no target selected".to_string())
 }
 
-fn project_revision_label(app: &ShellApp) -> String {
+pub(crate) fn project_revision_label(app: &ShellApp) -> String {
+    if app.target().is_none() {
+        return "rev:unknown".to_string();
+    }
     match app
         .workbench_cache()
         .borrow()
@@ -95,9 +98,10 @@ fn project_revision_label(app: &ShellApp) -> String {
             let sha = git.sha.chars().take(7).collect::<String>();
             format!("rev:{}{}", sha, if git.dirty { "*" } else { "" })
         }
-        ViewDataState::Ready(None) | ViewDataState::NotRequested | ViewDataState::Loading => {
-            "rev:unknown".to_string()
-        }
+        // "unknown" is a terminal claim; while the probe is merely in
+        // flight the honest state is "checking".
+        ViewDataState::NotRequested | ViewDataState::Loading => "rev:checking…".to_string(),
+        ViewDataState::Ready(None) => "rev:unknown".to_string(),
     }
 }
 

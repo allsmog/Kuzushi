@@ -133,7 +133,10 @@ fn shard_entry_paths(entry: &toml::Value, name: &str) -> Result<Vec<String>> {
         .iter()
         .map(|value| shard_path_string(value, name))
         .collect::<Result<_>>()?;
-    anyhow::ensure!(!paths.is_empty(), "shard {name:?} has an empty `paths` array");
+    anyhow::ensure!(
+        !paths.is_empty(),
+        "shard {name:?} has an empty `paths` array"
+    );
     Ok(paths)
 }
 
@@ -142,10 +145,7 @@ fn shard_path_string(value: &toml::Value, name: &str) -> Result<String> {
         .as_str()
         .with_context(|| format!("shard {name:?} `paths` entries must be strings"))?
         .trim();
-    anyhow::ensure!(
-        !path.is_empty(),
-        "shard {name:?} has a blank `paths` entry"
-    );
+    anyhow::ensure!(!path.is_empty(), "shard {name:?} has a blank `paths` entry");
     Ok(path.to_string())
 }
 
@@ -198,7 +198,9 @@ mod tests {
     #[test]
     fn missing_manifest_is_actionable() {
         let temp = tempfile::tempdir().unwrap();
-        let error = resolve_shard(temp.path(), "any", None).unwrap_err().to_string();
+        let error = resolve_shard(temp.path(), "any", None)
+            .unwrap_err()
+            .to_string();
         assert!(error.contains("shards.toml"), "{error}");
         assert!(error.contains("--shard-manifest"), "{error}");
     }

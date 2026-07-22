@@ -41,7 +41,10 @@ pub fn status(transport: &dyn Transport, remote: &RemoteBox) -> Result<StatusRep
 fn engine_process_count(transport: &dyn Transport, remote: &RemoteBox) -> Result<usize> {
     let output = transport.run(
         remote,
-        &format!("pgrep -fc {}/kz 2>/dev/null || echo 0", shq(&remote.workdir)),
+        &format!(
+            "pgrep -fc {}/kz 2>/dev/null || echo 0",
+            shq(&remote.workdir)
+        ),
     )?;
     Ok(output.stdout.trim().parse().unwrap_or(0))
 }

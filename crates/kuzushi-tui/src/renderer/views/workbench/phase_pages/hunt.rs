@@ -93,14 +93,28 @@ fn chain_artifact_lines(
         return Vec::new();
     };
     if chains.candidates.is_empty() && chains.grounded.is_empty() {
-        return empty_state_panel(
+        // The zero state is a statement about the confirmed set, not a
+        // shrug: it names how many confirmed findings were folded and why
+        // no scenario composed.
+        let mut lines = vec![Line::styled(
+            fit(
+                &format!(
+                    "no chain artifacts · {} confirmed finding(s) compose no entry→impact pair",
+                    chains.confirmed_count
+                ),
+                width,
+            ),
+            theme::muted(),
+        )];
+        lines.extend(empty_state_panel(
             "no chain artifacts yet",
             &[
                 "chains compose over CONFIRMED findings with entry- and impact-class roles",
                 "confirm findings in Review, then run `run exploit-chain:scan {}` for grounded chains",
             ],
             &[("C", "close attack chains")],
-        );
+        ));
+        return lines;
     }
     let mut lines = vec![Line::styled(
         fit(

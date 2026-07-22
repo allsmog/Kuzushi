@@ -27,7 +27,9 @@ mod target_kind;
 #[cfg(test)]
 mod tests;
 
-pub use build_repository_inventory::build_repository_inventory;
+pub use build_repository_inventory::{
+    build_repository_inventory, build_repository_inventory_with_progress,
+};
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;
 pub use repository_inventory::InventoryFramework;

@@ -397,10 +397,26 @@ fn phase_result_details(
         .collect::<Vec<_>>();
     let mut terminal = terminal_result_details(completed, typed_receipt, live);
     rows.append(&mut terminal.rows);
+    rows.push(PhaseResultDetailRow::unkeyed(target_lineage_line(
+        &completed.target_snapshot,
+    )));
     rows.push(PhaseResultDetailRow::unkeyed(format!(
         "next: {recommended_next}"
     )));
     PhaseResultDetails { rows }
+}
+
+/// Lineage row: the target identity this attempt was recorded against. The
+/// degraded form is explicit ("rev unrecorded"), never omitted.
+fn target_lineage_line(snapshot: &kuzushi_core::workflow_attempts::PhaseTargetSnapshot) -> String {
+    match snapshot.revision.as_deref() {
+        Some(sha) => format!(
+            "lineage: target rev:{}{}",
+            sha.chars().take(7).collect::<String>(),
+            if snapshot.dirty { "*" } else { "" }
+        ),
+        None => "lineage: target rev unrecorded".to_string(),
+    }
 }
 
 fn legacy_result_receipt_line(

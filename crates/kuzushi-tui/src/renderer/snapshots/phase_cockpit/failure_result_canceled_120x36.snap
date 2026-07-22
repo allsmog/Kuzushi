@@ -17,6 +17,7 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN was canceled. Open the run or try again.                                                     │
           │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │lineage: target rev unrecorded                                                                    │
           │next: open the canceled run or run it again                                                       │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
           │2 ○ Run again                                                                                     │
@@ -24,7 +25,6 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           │1/3 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
           │                                                                                                  │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-
 
 
 

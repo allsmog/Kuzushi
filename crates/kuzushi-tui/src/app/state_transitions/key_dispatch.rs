@@ -91,11 +91,10 @@ impl ShellApp {
         if let Some(update) = self.handle_phase_result_escape(key) {
             return Some(update);
         }
-        if let Some(update) = self.handle_phase_result_key(key) {
-            return Some(update);
-        }
-        (self.phase_result_is_open() && !guided_question_yields_to_control_c(key))
-            .then(InputUpdate::handled)
+        // Keys the RESULT strip does not bind fall through to the shell:
+        // an unresolved attempt is a checkpoint, not a modal — page keys,
+        // pane cycling, and mode controls must keep working under it.
+        self.handle_phase_result_key(key)
     }
 
     fn handle_configured_phase_result_prompt_mode(&mut self, key: KeyEvent) -> Option<InputUpdate> {

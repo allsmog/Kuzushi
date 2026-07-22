@@ -7,7 +7,7 @@ use anyhow::Result;
 
 pub(super) fn validate_proof_deferral(deferral: &ProofDeferralRecorded) -> Result<()> {
     validate_target_snapshot("proof deferral", &deferral.target_snapshot)?;
-    validate_identifier("proof deferral fingerprint", &deferral.finding_fingerprint)?;
+    validate_finding_fingerprint("proof deferral fingerprint", &deferral.finding_fingerprint)?;
     validate_identifier("proof deferral scan id", &deferral.finding_scan_id)?;
     if let Some(identity_id) = deferral.identity_id.as_deref() {
         validate_identifier("proof deferral identity id", identity_id)?;
@@ -98,6 +98,22 @@ pub(super) fn validate_target_snapshot(label: &str, snapshot: &PhaseTargetSnapsh
     anyhow::ensure!(
         !snapshot.target.trim().is_empty(),
         "{label} target snapshot cannot be blank"
+    );
+    Ok(())
+}
+
+/// Finding fingerprints are `tool:rule:hash` — the `:` separator is part of
+/// the durable identity, so the plain identifier alphabet rejects EVERY real
+/// fingerprint (which made proof deferral impossible outside fixtures).
+fn validate_finding_fingerprint(label: &str, value: &str) -> Result<()> {
+    let value = value.trim();
+    anyhow::ensure!(!value.is_empty(), "{label} cannot be blank");
+    anyhow::ensure!(value.len() <= 256, "{label} is too long");
+    anyhow::ensure!(
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')),
+        "{label} contains unsafe characters"
     );
     Ok(())
 }

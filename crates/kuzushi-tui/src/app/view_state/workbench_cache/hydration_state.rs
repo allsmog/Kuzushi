@@ -64,9 +64,7 @@ impl WorkbenchCache {
 
     fn project_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
-            ViewHydrationKey::GitMetadata => {
-                self.cached_git_metadata(Some(target)).is_not_requested()
-            }
+            ViewHydrationKey::GitMetadata => self.git_metadata_needs_refresh(target),
             ViewHydrationKey::ProjectScopeTree => self
                 .cached_project_scope_tree(Some(target))
                 .is_not_requested(),
@@ -243,7 +241,11 @@ impl WorkbenchCache {
     ) {
         match (key, value) {
             (ViewHydrationKey::GitMetadata, ViewHydrationValue::GitMetadata(metadata)) => {
-                self.git_metadata = Some(GitMetadataCache { target, metadata });
+                self.git_metadata = Some(GitMetadataCache {
+                    target,
+                    metadata,
+                    stale: false,
+                });
             }
             (ViewHydrationKey::ProjectScopeTree, ViewHydrationValue::ProjectScopeTree(state)) => {
                 self.scope_tree = Some(ScopeTreeCache { target, state });

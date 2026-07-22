@@ -1,0 +1,81 @@
+# J24 — Remediation lifecycle reality (fixture target — monorepo is NEVER
+# patched; every patch action here runs against the harness fixture repo).
+#
+# Drives the runtime-free remediation truth end-to-end on a real git fixture:
+# a real finding, a durable defer-with-reason (peer outcome, not a dead end),
+# and the HONEST patch refusals — an unconfirmed finding refuses drafting,
+# and a confirmed finding without a configured model runtime refuses with
+# the explicit no-silent-fallback message instead of pretending a draft
+# exists. The Fix page renders the remediation lifecycle summary with its
+# distinct states. Model-backed draft→staged→applied→reverified requires a
+# configured model runtime; on a runtime-less box those states are
+# unreachable BY DESIGN and the refusal captures are the honest record.
+name: Remediation lifecycle reality (fixture target)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+shell: rm -rf "@TMP_TARGET/.kuzushi" && git -C "@TMP_TARGET" add -A >/dev/null 2>&1; git -C "@TMP_TARGET" -c user.email=devex@kuzushi -c user.name=kz-devex commit -qm fixture >/dev/null 2>&1 || true
+launch: --target @TMP_TARGET
+wait-for: 30 KUZUSHI
+submit: setg ui.auto_open_activity false
+wait: 2
+submit: run secret-scan:scan {}
+wait-for: 60 run receipt
+wait: 2
+submit: findings
+wait-live-snap: 15 Viewing Review | review-fixture-finding
+expect: candidate
+expect: claim ·
+# An unconfirmed finding refuses patch drafting — triage gates remediation.
+submit: run patch:finding {"fingerprint":"F-0001"}
+wait-for: 30 run receipt
+wait: 1
+snap: patch-refusal-unconfirmed
+ask: Refusal — does patch:finding on an untriaged finding state WHY it refuses (triage first) instead of failing opaquely?
+# The remediation lifecycle summary distinguishes the four states (plus the
+# durable defer path) — audited while the triptych owns the page.
+nav-mode:
+keys: 5
+wait-live-snap: 10 Viewing Fix | fix-lifecycle
+expect: patch drafted
+expect: applied
+expect: proof fails after patch
+expect: defer with a reason code
+ask: Fix — does the remediation summary distinguish draft / staged / applied / reverified states?
+# Confirm the finding, then patch again: the refusal moves to the missing
+# model runtime with the explicit no-silent-fallback message.
+nav-mode:
+keys: 3
+wait: 1
+submit: decision confirmed fixture credential confirmed for the lifecycle audit
+wait: 1
+# On a confirmed finding, drafting first crosses the explicit authorization
+# gate (descriptor-declared repository-execute effect), then refuses with
+# the specific missing prerequisite: patching requires a TRIAGE verdict,
+# not just a review decision.
+submit: run patch:finding {"fingerprint":"F-0001"}
+wait-for: 20 CONFIRM · descriptor-declared effect
+snap: patch-authorization-gate
+expect: patch:finding
+keys: y
+wait-for: 30 run receipt
+wait: 1
+nav-mode:
+keys: 5
+wait-live-snap: 10 Viewing Fix | patch-refusal-untriaged
+expect: has no triage verdict
+# Discard the refused attempt (evidence stays on disk) so the remediation
+# triptych is visible again for the lifecycle-state audit below.
+keys: d
+wait: 1
+# Defer-with-reason is a durable PEER outcome, reachable without a runtime.
+submit: proof defer F-0001 --reason fixture credential rotates with the lab; patch deferred to phase 2
+wait: 2
+snap: proof-deferred
+expect: proof deferred for F-0001
+# The deferral is durable: the prove surface reports it as a recorded peer
+# outcome, not a dismissed prompt.
+nav-mode:
+keys: 4
+wait-live-snap: 10 Viewing Prove | prove-after-defer
+ask: Prove — is the recorded deferral visible as a durable outcome for this finding?

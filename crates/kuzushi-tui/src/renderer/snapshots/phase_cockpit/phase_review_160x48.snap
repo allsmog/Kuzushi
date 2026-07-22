@@ -10,14 +10,15 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
  Enter open in Prove · findings show full queue · z open heatmap · scan again · report open Report
 │▸ FINDINGS · 6                                             │SELECTED FINDING · Enter prove · z heatmap
 │▸F-0001  C [●●●] s1 @? CFM open       SQL injection...     │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven
-│  SQL injection reaches query                              │SQL injection reaches query
-│  src/auth/login.rs:17                                     │
-│  ▸ next:patch · Enter open                                │── STATUS ──
-│ F-0002  H [●○○] s1 @? UNV open       Order identifier...  │severity: critical
-│ F-0003  H [●○○] s1 @? UNV open       Template input...    │  confidence: CONFIRMED
-│ F-0004  M [●○○] s1 @? UNV open       Upload type is...    │lifecycle status: runtime_verified
-│ F-0005  M [●○○] s1 @? UNV open       Session cookie...    │evidence state: evidence:1
-│ F-0006  L [●○○] s1 @? UNV open       Debug endpoint...    │  proof summary: ✓ verified L4
+│  SQL injection reaches query                              │claim · runtime-verified
+│  src/auth/login.rs:17                                     │SQL injection reaches query
+│  ▸ next:patch · Enter open                                │
+│ F-0002  H [●○○] s1 @? UNV open       Order identifier...  │── STATUS ──
+│ F-0003  H [●○○] s1 @? UNV open       Template input...    │severity: critical
+│ F-0004  M [●○○] s1 @? UNV open       Upload type is...    │  confidence: CONFIRMED
+│ F-0005  M [●○○] s1 @? UNV open       Session cookie...    │lifecycle status: runtime_verified
+│ F-0006  L [●○○] s1 @? UNV open       Debug endpoint...    │evidence state: evidence:1
+│                                                           │  proof summary: ✓ verified L4
 │                                                           │
 │                                                           │── DECISION ──
 │                                                           │  current decision: needs_review
@@ -28,7 +29,7 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                                           │  patch: `patch F-0001`
 │                                                           │  runtime proof is recorded; generate remediation
 │                                                           │
-│                                                           │── SOURCE ──
+│                                                           │── SOURCE · observation (on-disk excerpt) ──
 │                                                           │  src/auth/login.rs:17
 │                                                           │    14 │ }
 │                                                           │    15 │
@@ -47,7 +48,6 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │                                                           │
 │                                                           │── VERIFICATION ──
 │                                                           │  runtime verification: verified L4 - runtime verification recorded empirical evidence for this
-│                                                           │  finding
 run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                                   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt

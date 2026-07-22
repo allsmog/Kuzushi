@@ -17812,6 +17812,65 @@ fn deferred_visualization_without_artifact_restores_origin_instead_of_empty_deck
         .any(|line| { line.prefix == "scene" && line.body.contains("artifact still hydrating") }));
 }
 
+/// A committed phase run (Setup origin) lands on the phase RESULT checkpoint
+/// on the workbench, never back on the setup card that committed it — that
+/// card still promises "Start Map" for a run that already happened.
+#[test]
+fn setup_committed_run_lands_on_the_phase_result_not_the_setup_card() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Setup);
+    let session = app.capture_run_focus_origin(ActivitySession::for_phase(
+        "run-setup-map",
+        WorkflowPhase::Map,
+    ));
+    app.set_activity(Some(session));
+    app.set_shell_view(ShellView::Activity);
+
+    app.activity_mut()
+        .expect("run focus")
+        .mark_run_focus_terminal_pending("completed");
+    assert!(app.run_background_maintenance());
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&app),
+        WorkbenchPage::Map
+    );
+}
+
+/// Opening the target picker over a bound target anchors it on that target
+/// (Enter re-confirms), and dismissing from the Setup editor returns to
+/// Setup with the binding untouched.
+#[test]
+fn target_picker_over_a_bound_target_anchors_and_preserves_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.router.setup_mut().open();
+    app.router
+        .setup_mut()
+        .begin_editor(crate::app::SetupEditor::Target);
+
+    app.open_target_picker();
+
+    assert_eq!(app.shell_view(), ShellView::TargetPicker);
+    let selected = app
+        .router
+        .target_picker()
+        .selected()
+        .expect("bound target candidate");
+    assert_eq!(selected.path, temp.path());
+
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('q'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+
+    assert!(update.handled);
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.target(), Some(temp.path()));
+}
+
 fn write_concrete_threat_model_dfd(root: &std::path::Path) {
     let path = kuzushi_core::capabilities::persistent_threat_model_path(root);
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -20698,6 +20757,53 @@ fn default_phase_result_keys_work_outside_guided_flow() {
         "one verb per action: attempt dispositions are discarded, findings \
          are dismissed: {:?}",
         notice.message
+    );
+}
+
+/// An unresolved PARTIAL result is a checkpoint, not a modal: keys the
+/// RESULT strip does not bind — page digits above all — must keep
+/// navigating the workbench instead of being swallowed, or the operator
+/// is stranded on the phase page until they know the findings verb.
+#[test]
+fn unresolved_partial_result_does_not_wedge_page_navigation() {
+    use kuzushi_core::workflow_attempts::{
+        PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
+    };
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let completed = PhaseAttemptCompleted::new(
+        WorkflowPhase::Map,
+        vec!["run-map-partial".to_string()],
+        PhaseTargetSnapshot::capture(target.path()),
+        PhaseAttemptOutcome::Partial,
+    );
+    kuzushi_core::workflow_attempts::append_phase_attempt_completed(target.path(), completed)
+        .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.refresh_phase_attempt_projection();
+    open_workbench_page_for_test(&mut app, WorkbenchPage::Map);
+    app.set_input_mode(crate::InputMode::Navigate);
+    assert!(app
+        .engagement
+        .unresolved_phase_attempt(WorkflowPhase::Map)
+        .is_some());
+
+    let update = app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('3'),
+        crossterm::event::KeyModifiers::NONE,
+    ));
+
+    assert!(update.handled);
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&app),
+        WorkbenchPage::Review,
+        "page digits must keep working under an unresolved result strip"
+    );
+    assert!(
+        app.engagement
+            .unresolved_phase_attempt(WorkflowPhase::Map)
+            .is_some(),
+        "navigating away must not silently resolve the attempt"
     );
 }
 

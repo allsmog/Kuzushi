@@ -20,7 +20,10 @@ pub(crate) fn findings_command(
         // The aliased rows, not the raw report: aliases are how decisions
         // and detail lookups address findings, so the machine output must
         // carry the same ledger-stable aliases the plain table shows.
-        println!("{}", serde_json::to_string_pretty(&report.aliased_rows_json())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report.aliased_rows_json())?
+        );
     } else if report.findings.is_empty() {
         println!(
             "no findings found at {}\nNext: kuzushi scan {}",

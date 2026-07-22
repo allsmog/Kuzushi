@@ -4643,8 +4643,9 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
         "manual-path escape hatch"
     );
     assert!(
-        rendered.contains("press `d`"),
-        "targetless/no-key escape hatch"
+        rendered.contains("type `:demo`"),
+        "targetless/no-key escape hatch must advertise a live binding \
+         (the `d` hotkey was retired)"
     );
 }
 

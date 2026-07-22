@@ -91,9 +91,11 @@ impl SemgrepScanner {
         for config in &self.config {
             command.arg("--config").arg(config);
         }
-        // Recent semgrep releases reject absolute scanning roots ("Invalid
-        // scanning root"), so scan `.` from inside the target. This also keeps
-        // reported finding paths target-relative.
+        // Scan `.` from inside the target instead of passing the absolute
+        // path: docker-wrapped semgrep distributions mount only the caller's
+        // working directory, so an absolute root fails with "Invalid
+        // scanning root" on every target — and the relative result paths
+        // match the findings store convention without translation.
         command
             .arg(".")
             .current_dir(target)

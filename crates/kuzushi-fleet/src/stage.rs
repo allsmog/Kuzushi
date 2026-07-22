@@ -107,14 +107,8 @@ fn behind_upstream(engine_binary: &Path) -> Option<u32> {
     String::from_utf8_lossy(&output.stdout).trim().parse().ok()
 }
 
-pub(crate) fn live_sessions(
-    transport: &dyn Transport,
-    remote: &RemoteBox,
-) -> Result<Vec<String>> {
-    let output = transport.run(
-        remote,
-        "tmux list-sessions -F '#S' 2>/dev/null || true",
-    )?;
+pub(crate) fn live_sessions(transport: &dyn Transport, remote: &RemoteBox) -> Result<Vec<String>> {
+    let output = transport.run(remote, "tmux list-sessions -F '#S' 2>/dev/null || true")?;
     Ok(output
         .stdout
         .lines()
@@ -164,7 +158,10 @@ mod tests {
             live_sessions: vec!["kz-fleet-0".to_string()],
             ..inputs()
         };
-        assert!(stage_guard(&live).unwrap_err().to_string().contains("kz-fleet-0"));
+        assert!(stage_guard(&live)
+            .unwrap_err()
+            .to_string()
+            .contains("kz-fleet-0"));
 
         assert!(stage_guard(&StageGuardInputs {
             force: true,

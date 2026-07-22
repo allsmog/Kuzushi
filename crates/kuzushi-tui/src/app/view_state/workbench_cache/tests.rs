@@ -147,6 +147,35 @@ fn stale_run_summary_entries_serve_until_rehydrated() {
     ));
 }
 
+/// Invalidation marks git metadata stale instead of dropping it: the last
+/// known revision keeps serving (no "rev:unknown" regression on screen while
+/// the multi-second git probe re-runs) and the hydration gate reports a
+/// refresh is due.
+#[test]
+fn stale_git_metadata_serves_until_rehydrated() {
+    let target = PathBuf::from("/tmp/git-metadata-cache-target");
+    let mut cache = WorkbenchCache::default();
+    assert!(cache.git_metadata_needs_refresh(&target));
+    cache.apply_view_hydration(ViewHydrationResult {
+        target: target.clone(),
+        key: ViewHydrationKey::GitMetadata,
+        value: ViewHydrationValue::GitMetadata(Some(kuzushi_core::RunTargetGitMetadata {
+            sha: "e817c5ee00112233445566778899aabbccddeeff".to_string(),
+            branch: Some("main".to_string()),
+            dirty: false,
+        })),
+    });
+    assert!(!cache.git_metadata_needs_refresh(&target));
+
+    cache.invalidate_workspace_files();
+
+    assert!(cache.git_metadata_needs_refresh(&target));
+    assert!(matches!(
+        cache.cached_git_metadata(Some(&target)),
+        ViewDataState::Ready(Some(git)) if git.sha.starts_with("e817c5ee")
+    ));
+}
+
 fn ready_receipt_state() -> ScanStageReceiptState {
     ScanStageReceiptState::Ready(kuzushi_core::run_artifacts::PhaseStageReceipt {
         phase: kuzushi_core::WorkflowPhase::Scan,

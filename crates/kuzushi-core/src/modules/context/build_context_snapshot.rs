@@ -14,12 +14,18 @@ pub(in crate::modules) fn build_context_snapshot(
     emit_context_build_start(ctx, workspace.root());
     emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
     let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
-    let mut snapshot =
-        context_snapshot_value_with_progress(workspace.root(), &options, &file_sample, |stage| {
-            let detail = (stage == ContextBuildStage::InferRepository)
-                .then(|| format!("{} files indexed", file_sample.files_indexed));
+    let mut snapshot = context_snapshot_value_with_progress(
+        workspace.root(),
+        &options,
+        &file_sample,
+        |stage, detail| {
+            let detail = detail.or_else(|| {
+                (stage == ContextBuildStage::InferRepository)
+                    .then(|| format!("{} files indexed", file_sample.files_indexed))
+            });
             emit_context_build_stage(ctx, stage, detail);
-        })?;
+        },
+    )?;
     emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
     let snapshot_path = save_context_snapshot(workspace.root(), &mut snapshot)?;
     let provenance = match index_snapshot_provenance(workspace) {
@@ -199,20 +205,35 @@ fn context_snapshot_value(
     options: &ContextBuildOptions,
     file_sample: &ContextFileSample,
 ) -> Result<Value> {
-    context_snapshot_value_with_progress(root, options, file_sample, |_| {})
+    context_snapshot_value_with_progress(root, options, file_sample, |_, _| {})
 }
+
+/// Heartbeat cadence for the inventory walk: monorepo walks run for minutes,
+/// and without intra-stage progress the run watchdog reports a healthy walk
+/// as NO PROGRESS SIGNAL.
+const INVENTORY_HEARTBEAT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn context_snapshot_value_with_progress(
     root: &Path,
     options: &ContextBuildOptions,
     file_sample: &ContextFileSample,
-    mut progress: impl FnMut(ContextBuildStage),
+    mut progress: impl FnMut(ContextBuildStage, Option<String>),
 ) -> Result<Value> {
-    progress(ContextBuildStage::InferRepository);
+    progress(ContextBuildStage::InferRepository, None);
     let repo_context = infer_repo_context(root, &file_sample.files_sample)?;
-    progress(ContextBuildStage::BuildInventory);
-    let repository_inventory = crate::repository_inventory::build_repository_inventory(root)?;
-    progress(ContextBuildStage::MapAttackSurface);
+    progress(ContextBuildStage::BuildInventory, None);
+    let mut last_heartbeat = std::time::Instant::now();
+    let repository_inventory =
+        crate::repository_inventory::build_repository_inventory_with_progress(root, |entries| {
+            if last_heartbeat.elapsed() >= INVENTORY_HEARTBEAT {
+                last_heartbeat = std::time::Instant::now();
+                progress(
+                    ContextBuildStage::BuildInventory,
+                    Some(format!("{entries} entries walked")),
+                );
+            }
+        })?;
+    progress(ContextBuildStage::MapAttackSurface, None);
     let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
         root,
         &repository_inventory,
@@ -463,7 +484,7 @@ mod stage_tests {
         };
         let mut stages = Vec::new();
 
-        context_snapshot_value_with_progress(temp.path(), &options, &sample, |stage| {
+        context_snapshot_value_with_progress(temp.path(), &options, &sample, |stage, _| {
             stages.push(stage)
         })
         .unwrap();

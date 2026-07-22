@@ -308,6 +308,27 @@ impl WorkbenchCache {
         }
     }
 
+    /// Whether the git probe must be (re-)run: never loaded for this target,
+    /// or loaded but marked stale by an invalidation. Stale metadata keeps
+    /// serving through `cached_git_metadata` in the meantime, so the
+    /// revision label never regresses to "rev:unknown" mid-refresh.
+    pub(crate) fn git_metadata_needs_refresh(&self, target: &Path) -> bool {
+        match self
+            .git_metadata
+            .as_ref()
+            .filter(|cache| cache.target == target)
+        {
+            Some(cache) => cache.stale,
+            None => true,
+        }
+    }
+
+    fn mark_git_metadata_stale(&mut self) {
+        if let Some(cache) = self.git_metadata.as_mut() {
+            cache.stale = true;
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn run_summary_entries(&mut self, target: Option<&Path>) -> Vec<RunSummaryEntry> {
         let Some(target) = target else {
@@ -373,7 +394,7 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_workspace_files(&mut self) {
         self.source_file = None;
-        self.git_metadata = None;
+        self.mark_git_metadata_stale();
         self.scope_tree = None;
         self.project_model_document = None;
         self.strategy_queue = None;

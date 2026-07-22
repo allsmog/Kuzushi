@@ -44,7 +44,15 @@ mod tests {
 
     #[test]
     fn rejects_option_shaped_and_malformed_revisions() {
-        for rev in ["", "  ", "-x", "--output=/tmp/pwn", "-O/tmp/pwn", "a\nb", "a\0b"] {
+        for rev in [
+            "",
+            "  ",
+            "-x",
+            "--output=/tmp/pwn",
+            "-O/tmp/pwn",
+            "a\nb",
+            "a\0b",
+        ] {
             assert!(ensure_safe_git_rev(rev, "test").is_err(), "{rev:?}");
         }
     }

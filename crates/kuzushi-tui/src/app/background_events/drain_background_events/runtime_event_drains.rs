@@ -180,6 +180,22 @@ impl ShellApp {
             return false;
         }
         let origin = completion.origin.expect("restore decision requires origin");
+        // A committed phase run never lands back on the setup card that
+        // committed it — that card still promises "Start Map" for a run
+        // that already happened. The honest landing is the phase RESULT
+        // checkpoint, which publish_run_focus_receipt records right after
+        // this restore.
+        if origin.view == ShellView::Setup {
+            if let Some(phase) = completion
+                .receipt
+                .as_ref()
+                .and_then(|receipt| receipt.origin_phase)
+            {
+                self.set_workbench_page(crate::app::WorkbenchPage::from_phase(phase));
+                self.set_input_mode(InputMode::Navigate);
+                return true;
+            }
+        }
         self.set_shell_view(origin.view);
         self.set_input_mode(origin.input_mode);
         true
@@ -957,11 +973,24 @@ fn completed_with_live_health_gate(
     if completed.outcome != PhaseAttemptOutcome::Partial {
         return completed;
     }
+    // A healthy, durable run whose terminal is partial carries honest
+    // partial evidence — the operator may accept it explicitly. Only a
+    // genuinely unsettled run (integrity or durability) blocks selection.
+    if matching.is_some_and(run_settlement_is_healthy_and_durable) {
+        return completed;
+    }
     completed.selection_blocked_reason = Some(
         "live run settlement is not healthy and durable; inspect the run before continuing"
             .to_string(),
     );
     completed
+}
+
+fn run_settlement_is_healthy_and_durable(session: &ActivitySession) -> bool {
+    use kuzushi_core::run_lifecycle::{ProjectionHealth, RunDurabilityHealth};
+    let health = session.effective_run_lifecycle_health();
+    matches!(health.integrity, ProjectionHealth::Healthy)
+        && matches!(health.durability, RunDurabilityHealth::Durable { .. })
 }
 
 fn live_health_adjusted_outcome(
@@ -988,14 +1017,8 @@ fn run_allows_phase_completion(
     run_id: Option<&str>,
     session: &ActivitySession,
 ) -> bool {
-    use kuzushi_core::run_lifecycle::{ProjectionHealth, RunDurabilityHealth};
-    let health = session.effective_run_lifecycle_health();
-    if !matches!(health.integrity, ProjectionHealth::Healthy)
-        || !matches!(health.durability, RunDurabilityHealth::Durable { .. })
-    {
-        return false;
-    }
-    live_terminal_is_complete(session) || durable_terminal_is_complete(target.zip(run_id))
+    run_settlement_is_healthy_and_durable(session)
+        && (live_terminal_is_complete(session) || durable_terminal_is_complete(target.zip(run_id)))
 }
 
 fn live_terminal_is_complete(session: &ActivitySession) -> bool {
@@ -1455,6 +1478,55 @@ mod run_focus_completion_tests {
             .selection_blocked_reason
             .as_deref()
             .is_some_and(|reason| reason.contains("inspect the run")));
+    }
+
+    /// A healthy, durable run whose terminal is PARTIAL is honest partial
+    /// evidence — the operator must stay able to select it. Blocking is
+    /// reserved for genuine settlement failures (integrity/durability).
+    #[test]
+    fn healthy_partial_terminal_stays_selectable() {
+        let mut session = ActivitySession::new("run-partial-healthy");
+        session.observe_committed_range(kuzushi_core::run_lifecycle::CommittedRange {
+            first_seq: 1,
+            through_seq: 1,
+        });
+        session
+            .apply_run_item(partial_terminal_item("run-partial-healthy"))
+            .unwrap();
+        let mut completed = completed_attempt("run-partial-healthy");
+        completed.outcome = PhaseAttemptOutcome::Partial;
+
+        let gated = completed_with_live_health_gate(completed, None, Some(&session));
+
+        assert_eq!(gated.outcome, PhaseAttemptOutcome::Partial);
+        assert!(
+            gated.selection_blocked_reason.is_none(),
+            "healthy partial evidence must not be selection-blocked: {:?}",
+            gated.selection_blocked_reason
+        );
+    }
+
+    fn partial_terminal_item(run_id: &str) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {
+        use kuzushi_core::run_lifecycle::{
+            RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemStatus, RunItemV1, SafeText,
+            WorkflowContinuation,
+        };
+        RunItemEnvelopeV1::new(
+            1,
+            RunId::parse(run_id).unwrap(),
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TerminalOutcome {
+                status: RunItemStatus::Partial,
+                summary: SafeText::operator_visible("partial"),
+                cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("partial evidence recorded"),
+                },
+            },
+            None,
+        )
+        .unwrap()
     }
 
     #[test]

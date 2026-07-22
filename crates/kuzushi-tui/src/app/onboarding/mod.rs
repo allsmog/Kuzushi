@@ -38,7 +38,7 @@ pub use recommend::{
     TargetProfile,
 };
 pub(crate) use runner::PlanningRunStep;
-pub(crate) use target_candidates::immediate_target_candidate;
+pub(crate) use target_candidates::{bound_target_candidate, immediate_target_candidate};
 pub use target_candidates::{
     discover_target_candidates, record_recent_target, TargetCandidate, TargetCandidateScope,
 };

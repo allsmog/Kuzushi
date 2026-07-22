@@ -118,10 +118,18 @@ impl ShellApp {
     /// and test apps keep their targetless default.
     pub(crate) fn open_target_picker(&mut self) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        self.router
-            .target_picker_mut()
-            .open(vec![crate::app::immediate_target_candidate(&cwd)]);
-        self.runtime_state.start_target_candidate_discovery(cwd);
+        // A bound target anchors the picker: it is the first, pre-selected
+        // candidate and Enter re-confirms it. Opening the picker over an
+        // active session must never present it as "no target set" or offer
+        // to silently rebind to the process cwd.
+        let bound = self.target_owned();
+        let first = bound.as_deref().map_or_else(
+            || crate::app::immediate_target_candidate(&cwd),
+            crate::app::bound_target_candidate,
+        );
+        self.router.target_picker_mut().open(vec![first]);
+        self.runtime_state
+            .start_target_candidate_discovery(bound.clone().unwrap_or(cwd));
         if let Some(path) = self
             .router
             .target_picker()
@@ -131,10 +139,19 @@ impl ShellApp {
             self.runtime_state.start_target_candidate_facts(path);
         }
         self.set_shell_view(ShellView::TargetPicker);
-        self.log(
-            "onboarding",
-            "no target set — pick what to scan with ↑/↓/Enter (Esc to browse without one)",
-        );
+        match bound {
+            Some(target) => self.log(
+                "onboarding",
+                format!(
+                    "target {} bound — Enter keeps it, or pick another (Esc leaves it unchanged)",
+                    target.display()
+                ),
+            ),
+            None => self.log(
+                "onboarding",
+                "no target set — pick what to scan with ↑/↓/Enter (Esc to browse without one)",
+            ),
+        }
     }
 
     pub(crate) fn apply_target_candidate_discovery_results(&mut self) -> bool {

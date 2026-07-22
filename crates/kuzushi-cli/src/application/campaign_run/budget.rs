@@ -8,7 +8,9 @@
 //! cost gives the dispatcher a bounded view of in-flight spend without a
 //! side channel.
 
-use kuzushi_core::run_artifacts::{run_artifact_path, terminal_model_call_cost_report, RunTraceStep};
+use kuzushi_core::run_artifacts::{
+    run_artifact_path, terminal_model_call_cost_report, RunTraceStep,
+};
 use std::path::Path;
 
 /// The ceiling for one job: the tightest of the dispatcher-wide
@@ -33,8 +35,7 @@ fn positive(value: Option<f64>) -> Option<f64> {
 /// $0 spent — the strict variant (`trace_cost_report`) remains the
 /// settlement-time accounting path.
 pub(super) fn live_run_spend_usd(target: &Path, run_id: &str) -> f64 {
-    let Ok(body) = std::fs::read_to_string(run_artifact_path(target, run_id, "trace.jsonl"))
-    else {
+    let Ok(body) = std::fs::read_to_string(run_artifact_path(target, run_id, "trace.jsonl")) else {
         return 0.0;
     };
     sum_terminal_call_costs(&body)
@@ -172,7 +173,10 @@ mod tests {
         );
 
         // A torn append is deferred, then folded once its newline lands.
-        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         use std::io::Write;
         write!(file, "{}", &terminal(100_000)[..40]).unwrap();
         file.flush().unwrap();
