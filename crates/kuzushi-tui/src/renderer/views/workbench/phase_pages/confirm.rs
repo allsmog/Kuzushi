@@ -128,6 +128,9 @@ fn trace_lines(trace: &TraceEvidenceModel, width: usize) -> Vec<Line<'static>> {
         ),
         theme::heading(),
     )];
+    if let Some(identity) = trace.identity.as_ref() {
+        lines.push(Line::styled(fit(identity, width), theme::muted()));
+    }
     lines.push(Line::styled(fit("RECORDED PATH", width), theme::label()));
     if trace.original.is_empty() {
         lines.push(Line::styled(
@@ -508,6 +511,21 @@ fn status_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let mut lines = selection_disclosure_lines(model.selection_disclosure.as_ref(), width);
+    // The proof subject is a finding today; chain-shaped subjects arrive
+    // with core chain validation, so the label states the artifact kind.
+    lines.push(Line::styled(
+        fit(
+            &format!(
+                "PROOF SUBJECT · finding {}",
+                finding
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| finding.identity_label.clone())
+            ),
+            width,
+        ),
+        theme::label(),
+    ));
     lines.extend(finding_header_lines(finding, width));
     if model
         .proof
@@ -785,6 +803,7 @@ mod trace_screen_tests {
         TraceEvidenceModel {
             reference: "F-2".to_string(),
             severity: "HIGH".to_string(),
+            identity: Some("target demo@1a2b3c4d · threat model @9f8e7d6c".to_string()),
             original: vec![hop("source", "src/input.rs:4", "attacker-controlled read")],
             expanded: vec![hop(
                 "parse_header",
@@ -811,6 +830,10 @@ mod trace_screen_tests {
         let body = text(&trace_lines(&trace_model(), 100));
         assert!(
             body.contains("F-2 · HIGH · where does this value travel"),
+            "{body}"
+        );
+        assert!(
+            body.contains("target demo@1a2b3c4d · threat model @9f8e7d6c"),
             "{body}"
         );
         assert!(body.contains("RECORDED PATH"), "{body}");

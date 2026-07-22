@@ -32,6 +32,7 @@ pub(super) fn trace_evidence_model(
         .map(|snapshot| snapshot.open_questions.clone())
         .unwrap_or_default();
     Some(TraceEvidenceModel {
+        identity: super::identity::engagement_identity_line(app),
         reference: alias
             .clone()
             .unwrap_or_else(|| detail.identity_label.clone()),

@@ -26,6 +26,7 @@ pub(super) fn chain_artifacts_model(app: &ShellApp) -> Option<ChainArtifactsMode
     let aliases = alias_by_fingerprint(app);
     Some(ChainArtifactsModel {
         confirmed_count: report.confirmed_count,
+        identity: super::identity::engagement_identity_line(app),
         candidates: report
             .chains
             .iter()

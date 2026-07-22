@@ -333,6 +333,7 @@ fn chains_view_composes_full_screen_over_the_review_page() {
     };
     model.chains = Some(crate::ui_view_models::ChainArtifactsModel {
         confirmed_count: 2,
+        identity: None,
         candidates: Vec::new(),
         grounded: Vec::new(),
     });
@@ -365,6 +366,7 @@ fn trace_view_composes_full_screen_over_the_prove_page() {
     model.trace = Some(crate::ui_view_models::TraceEvidenceModel {
         reference: "F-1".to_string(),
         severity: "HIGH".to_string(),
+        identity: None,
         original: Vec::new(),
         expanded: Vec::new(),
         open_questions: Vec::new(),

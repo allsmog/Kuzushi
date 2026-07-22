@@ -38,11 +38,17 @@ impl ShellApp {
     }
 }
 
-fn provenance_line(counts: Option<(usize, usize)>, without_recommendations: bool) -> String {
+fn provenance_line(counts: Option<ThreatSeedFacts>, without_recommendations: bool) -> String {
     match counts {
-        Some((threats, boundaries)) => format!(
-            "Seeded by the threat model ({threats} threat(s) · {boundaries} trust boundar{}) and workspace signals.",
-            if boundaries == 1 { "y" } else { "ies" }
+        Some(facts) => format!(
+            "Seeded by the threat model{} ({} threat(s) · {} trust boundar{}) and workspace signals.",
+            facts
+                .revision
+                .map(|revision| format!(" @{revision}"))
+                .unwrap_or_default(),
+            facts.threats,
+            facts.boundaries,
+            if facts.boundaries == 1 { "y" } else { "ies" }
         ),
         None if without_recommendations => {
             "No threat model or recommendation evidence yet — generic engine defaults. Run Map to seed this plan."
@@ -53,17 +59,29 @@ fn provenance_line(counts: Option<(usize, usize)>, without_recommendations: bool
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ThreatSeedFacts {
+    threats: usize,
+    boundaries: usize,
+    /// Short revision the persisted doc was built against, when stamped —
+    /// the count-only line remains the degraded form without it.
+    revision: Option<String>,
+}
+
 /// Threat/boundary counts only when the persisted model carries a concrete
 /// DFD; a scope-placeholder-only document must not claim to seed anything.
-fn threat_counts(doc: Option<&serde_json::Value>) -> Option<(usize, usize)> {
+fn threat_counts(doc: Option<&serde_json::Value>) -> Option<ThreatSeedFacts> {
     let doc = doc?;
     let concrete = kuzushi_core::workflow_attempts::threat_model_has_concrete_dfd(doc)
         && !kuzushi_core::workflow_attempts::threat_model_is_scope_placeholder_only(doc);
-    concrete.then(|| {
-        (
-            array_len(doc.get("threats")),
-            array_len(doc.pointer("/dfd/trustBoundaries")),
-        )
+    concrete.then(|| ThreatSeedFacts {
+        threats: array_len(doc.get("threats")),
+        boundaries: array_len(doc.pointer("/dfd/trustBoundaries")),
+        revision: doc
+            .pointer("/provenance/revision")
+            .and_then(serde_json::Value::as_str)
+            .filter(|revision| !revision.is_empty())
+            .map(|revision| revision.chars().take(8).collect()),
     })
 }
 
@@ -159,6 +177,29 @@ mod tests {
         assert_eq!(
             line,
             "Seeded by the threat model (2 threat(s) · 1 trust boundary) and workspace signals."
+        );
+    }
+
+    #[test]
+    fn provenance_line_names_the_stamped_threat_model_revision() {
+        let doc = json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "a", "name": "api", "trustZone": "app", "type": "process"},
+                    {"id": "b", "name": "db", "trustZone": "data", "type": "data-store"}
+                ],
+                "flows": [{"id": "f", "sourceId": "a", "targetId": "b"}],
+                "trustBoundaries": [{"id": "edge"}]
+            },
+            "threats": [{"id": "T-1"}],
+            "provenance": {"revision": "a1b2c3d4e5f60718"}
+        });
+
+        let line = provenance_line(threat_counts(Some(&doc)), true);
+
+        assert_eq!(
+            line,
+            "Seeded by the threat model @a1b2c3d4 (1 threat(s) · 1 trust boundary) and workspace signals."
         );
     }
 

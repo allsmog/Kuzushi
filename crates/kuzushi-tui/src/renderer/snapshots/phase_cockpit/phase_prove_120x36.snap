@@ -9,6 +9,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report
 │▸ STATUS / NEXT
+│PROOF SUBJECT · finding F-0001
 │F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  runtime_verified
 │SQL injection reaches query
 │src/auth/login.rs:17
@@ -26,7 +27,6 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 │                                                                     │▸ replay verify-phase-run  open trace
 │                                                                     │▸ verify F-0001  recheck
 │                                                                     │language: rust
-│                                                                     │harness: .kuzushi/harness/sql-injection.rs
 │CHOOSE NEXT ACTION
 │ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt safe reproduction
 │ c  Generate attack chain model prerequisites, trust transitions, and impact over verified findings

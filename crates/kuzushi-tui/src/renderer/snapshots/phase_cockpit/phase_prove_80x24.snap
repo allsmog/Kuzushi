@@ -9,12 +9,12 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay
 │▸ STATUS / NEXT
+│PROOF SUBJECT · finding F-0001
 │F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  runtime_verified
 │SQL injection reaches query
 │src/auth/login.rs:17
 │STATUS runtime_verified · decision:needs_review · evidence:1
 │NEXT   patch F-0001
-│
 │EVIDENCE · z attack path                     │PROOF LADDER
 │evidence:1 · 1 source(s) · 1                 │● 1 signal captured
 │1. observed code evidence · source-sink...   │PROOF · REPLAY

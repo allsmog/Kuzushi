@@ -9,12 +9,12 @@ KUZUSHI · Viewing Prove · pipeline live in Review · ● LIVE
  ▸ NEXT record terminal dispositions for 6 of 6 ledger
         candidates
 │▸ STATUS / NEXT
+│PROOF SUBJECT · finding F-0001
 │F-0001  CRITICAL  ✓ [●●●] · CONFIRMED · 1 source(s)  ru...
 │SQL injection reaches query
 │src/auth/login.rs:17
 │STATUS runtime_verified · decision:needs_review ·...
 │NEXT   patch F-0001
-│
 │
 │
 │

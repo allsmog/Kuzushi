@@ -112,6 +112,9 @@ fn chain_artifact_lines(
         ),
         theme::muted(),
     )];
+    if let Some(identity) = chains.identity.as_ref() {
+        lines.push(Line::styled(fit(identity, width), theme::muted()));
+    }
     for (index, candidate) in chains.candidates.iter().enumerate() {
         lines.extend(candidate_lines(index, candidate, width));
     }
@@ -476,6 +479,7 @@ mod chain_artifact_tests {
     #[test]
     fn chain_screen_names_constituents_and_the_advisory_triage_mutation() {
         let chains = ChainArtifactsModel {
+            identity: None,
             confirmed_count: 2,
             candidates: vec![candidate()],
             grounded: Vec::new(),
@@ -490,6 +494,7 @@ mod chain_artifact_tests {
     #[test]
     fn grounded_chains_render_assumptions_as_side_nodes() {
         let chains = ChainArtifactsModel {
+            identity: None,
             confirmed_count: 0,
             candidates: Vec::new(),
             grounded: vec![crate::app::ExploitChainDetail {
@@ -514,6 +519,7 @@ mod chain_artifact_tests {
     #[test]
     fn empty_chain_screen_explains_how_artifacts_come_to_exist() {
         let chains = ChainArtifactsModel {
+            identity: None,
             confirmed_count: 0,
             candidates: Vec::new(),
             grounded: Vec::new(),

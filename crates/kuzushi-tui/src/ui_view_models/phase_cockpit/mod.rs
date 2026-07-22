@@ -26,6 +26,7 @@ mod scan;
 
 pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
 mod chain_artifacts;
+mod identity;
 mod trace_evidence;
 use confirm::prove_phase_model;
 pub(crate) use layout::{
@@ -202,6 +203,9 @@ pub(crate) struct ReviewPhaseModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ChainArtifactsModel {
     pub(crate) confirmed_count: usize,
+    /// `target …@rev · threat model @rev` when the cached metadata and the
+    /// persisted document carry them; chains compose over exactly that pair.
+    pub(crate) identity: Option<String>,
     pub(crate) candidates: Vec<ChainCandidateModel>,
     pub(crate) grounded: Vec<crate::app::ExploitChainDetail>,
 }
@@ -252,6 +256,9 @@ pub(crate) struct ProvePhaseModel {
 pub(crate) struct TraceEvidenceModel {
     pub(crate) reference: String,
     pub(crate) severity: String,
+    /// `target …@rev · threat model @rev` when the cached metadata and the
+    /// persisted document carry them.
+    pub(crate) identity: Option<String>,
     pub(crate) original: Vec<TraceHopModel>,
     pub(crate) expanded: Vec<TraceHopModel>,
     pub(crate) open_questions: Vec<String>,
