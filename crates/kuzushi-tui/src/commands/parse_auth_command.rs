@@ -38,8 +38,17 @@ pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {
         Some("regen") => ShellCommand::ThreatRegen,
         Some("apply") => ShellCommand::ThreatApply,
         Some("reject") | Some("discard") => ShellCommand::ThreatReject,
+        Some("versions") | Some("history") | Some("5") => ShellCommand::ThreatVersions,
+        Some("use") | Some("select") | Some("restore") => threat_version_use_command(args),
         Some("ask") => threat_ask_command(args),
         Some(other) => ShellCommand::Unknown(format!("/threats {other}")),
+    }
+}
+
+fn threat_version_use_command(args: &[&str]) -> ShellCommand {
+    match args.get(1).and_then(|value| value.parse::<i64>().ok()) {
+        Some(id) => ShellCommand::ThreatVersionUse(id),
+        None => ShellCommand::Unknown("/threats use <version-id>".to_string()),
     }
 }
 

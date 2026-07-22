@@ -131,6 +131,7 @@ fn threat_view_slug(view: ThreatView) -> &'static str {
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",
         ThreatView::Summary => "summary",
+        ThreatView::Versions => "versions",
     }
 }
 

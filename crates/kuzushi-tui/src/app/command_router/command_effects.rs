@@ -323,6 +323,14 @@ impl ShellApp {
                 self.discard_pending_threat_patch();
                 Some(Vec::new())
             }
+            ShellCommand::ThreatVersions => {
+                self.open_threat_versions();
+                Some(Vec::new())
+            }
+            ShellCommand::ThreatVersionUse(id) => {
+                self.use_threat_version(*id);
+                Some(Vec::new())
+            }
             _ => None,
         }
     }
@@ -1019,6 +1027,55 @@ impl ShellApp {
     fn open_threat_editor(&mut self) {
         self.set_shell_view(ShellView::ThreatEditor);
         self.log("view", "threats edit");
+    }
+
+    fn open_threat_versions(&mut self) {
+        let Some(target) = self.target_owned() else {
+            self.log("threats", "no active target; `target <path>` first");
+            return;
+        };
+        self.refresh_threat_versions(&target);
+        self.open_threat_view(crate::app::ThreatView::Versions);
+    }
+
+    /// Cap version rows loaded into the view; the ledger itself is unbounded.
+    const THREAT_VERSION_LIST_LIMIT: usize = 50;
+
+    fn refresh_threat_versions(&mut self, target: &std::path::Path) {
+        match kuzushi_core::list_threat_model_versions(target, Self::THREAT_VERSION_LIST_LIMIT) {
+            Ok(versions) => {
+                let live_sha256 = kuzushi_core::live_threat_model_sha256(target);
+                self.router.threat_mut().set_versions(versions, live_sha256);
+            }
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("could not load threat-model versions: {error:#}"),
+                );
+                self.router.threat_mut().set_versions(Vec::new(), None);
+            }
+        }
+    }
+
+    fn use_threat_version(&mut self, id: i64) {
+        let Some(target) = self.target_owned() else {
+            self.log("threats", "no active target; `target <path>` first");
+            return;
+        };
+        match kuzushi_core::restore_threat_model_version(&target, id) {
+            Ok(version) => {
+                self.log(
+                    "threats",
+                    format!(
+                        "version {} is now the live threat model ({} threat(s), source {})",
+                        version.id, version.threat_count, version.source
+                    ),
+                );
+                self.hydrate_latest_threat_model_for_dfd();
+                self.refresh_threat_versions(&target);
+            }
+            Err(error) => self.log("error", format!("threats use {id} failed: {error:#}")),
+        }
     }
 
     fn help_summary(query: Option<&str>) -> String {

@@ -28,7 +28,10 @@ pub use domain::{
     StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
     VulnSource,
 };
-pub use persistence::{FindingStore, ObservationSourceRef, SuppressionLifecycleEvent};
+pub use persistence::{
+    threat_model_document_sha256, FindingStore, ObservationSourceRef,
+    SuppressionLifecycleEvent, ThreatModelVersionRecord,
+};
 pub use presentation::{
     compare_findings_by_confidence, finding_lifecycle_status, finding_next_action,
     format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,

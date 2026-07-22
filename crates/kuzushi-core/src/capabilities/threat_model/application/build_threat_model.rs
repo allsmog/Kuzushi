@@ -100,9 +100,16 @@ pub(crate) fn complete_threat_model_build(
     let artifacts =
         write_threat_model_outputs(flavor, &input, &generated.document, has_concrete_content)?;
     emit_artifact_write(ctx, verb, &artifacts);
+    let version_warning = record_persisted_version(
+        ctx,
+        &input.target,
+        &generated.document,
+        "build",
+        artifacts.persisted,
+    );
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
-    let lines = threat_model_output_lines(
+    let mut lines = threat_model_output_lines(
         flavor,
         &input,
         &summary,
@@ -111,6 +118,7 @@ pub(crate) fn complete_threat_model_build(
         has_concrete_content,
         cost,
     );
+    lines.extend(version_warning);
     emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
     threat_model_response(
         input,
@@ -139,6 +147,29 @@ fn finalize_document_identity(document: &mut Value, target: &Path) -> Result<()>
     let previous = try_load_persistent_threat_model(target)?;
     assign_display_ids(document, previous.as_ref());
     Ok(())
+}
+
+/// Best-effort append of the just-persisted document to the version ledger
+/// in the index DB. The flat JSON save already succeeded, so a ledger
+/// failure must not fail the build -- but it surfaces as an output line
+/// instead of being swallowed.
+pub(crate) fn record_persisted_version(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    document: &Value,
+    source: &str,
+    persisted: bool,
+) -> Option<String> {
+    if !persisted {
+        return None;
+    }
+    let run_id = ctx.run_id();
+    match record_threat_model_version(target, document, source, run_id.as_deref()) {
+        Ok(_) => None,
+        Err(error) => Some(format!(
+            "  Warning:  version ledger append failed: {error:#}"
+        )),
+    }
 }
 
 fn take_threat_model_findings(
@@ -428,7 +459,8 @@ pub(crate) fn query_threat_model_document(
             input.target.clone(),
             threat_model_system_prompt(),
             prompt,
-        ),
+        )
+        .with_max_output_tokens(input.max_output_tokens),
         StructuredJsonContract::new(
             flavor.tool_name(),
             "ThreatModelDocument",

@@ -53,6 +53,8 @@ pub enum ShellCommand {
     ThreatAsk(String),
     ThreatApply,
     ThreatReject,
+    ThreatVersions,
+    ThreatVersionUse(i64),
     Prompts,
     Prompt(String),
     Actor(usize),

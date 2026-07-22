@@ -9,5 +9,8 @@ mod open;
 mod store_rows;
 
 pub use finding_store::FindingStore;
-pub use open::{ObservationSourceRef, SuppressionLifecycleEvent};
+pub use open::{
+    threat_model_document_sha256, ObservationSourceRef, SuppressionLifecycleEvent,
+    ThreatModelVersionRecord,
+};
 pub(in crate::findings) use store_rows::*;

@@ -1149,15 +1149,19 @@ fn wrap_scene_angle(angle: f32) -> f32 {
     wrapped
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreatRouteState {
     view: crate::app::ThreatView,
+    versions: Vec<kuzushi_core::findings::ThreatModelVersionRecord>,
+    live_sha256: Option<String>,
 }
 
 impl Default for ThreatRouteState {
     fn default() -> Self {
         Self {
             view: crate::app::ThreatView::Summary,
+            versions: Vec::new(),
+            live_sha256: None,
         }
     }
 }
@@ -1169,6 +1173,23 @@ impl ThreatRouteState {
 
     pub(crate) fn open(&mut self, view: crate::app::ThreatView) {
         self.view = view;
+    }
+
+    pub(crate) fn versions(&self) -> &[kuzushi_core::findings::ThreatModelVersionRecord] {
+        &self.versions
+    }
+
+    pub(crate) fn live_sha256(&self) -> Option<&str> {
+        self.live_sha256.as_deref()
+    }
+
+    pub(crate) fn set_versions(
+        &mut self,
+        versions: Vec<kuzushi_core::findings::ThreatModelVersionRecord>,
+        live_sha256: Option<String>,
+    ) {
+        self.versions = versions;
+        self.live_sha256 = live_sha256;
     }
 }
 

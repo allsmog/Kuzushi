@@ -65,8 +65,9 @@ pub use crate::secret_scan::{
     SecretSeverity,
 };
 pub use crate::threat_model::{
-    execute_threat_model_tool, load_persistent_threat_model, save_persistent_threat_model,
-    try_load_persistent_threat_model,
+    execute_threat_model_tool, list_threat_model_versions, live_threat_model_sha256,
+    load_persistent_threat_model, record_threat_model_version, restore_threat_model_version,
+    save_persistent_threat_model, try_load_persistent_threat_model,
 };
 pub use crate::variant_ndiff::{
     derive_whitebox_variant_patterns, hunt_whitebox_static_variants, WhiteboxVariantPattern,

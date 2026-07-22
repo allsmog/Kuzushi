@@ -212,4 +212,16 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::FindingsEvidence,
         description: "discard the pending threat-model patch",
     },
+    ShellCommandSpec {
+        command: "threats versions",
+        aliases: &["/threats versions", "threats history"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "list stored threat-model versions from the index ledger",
+    },
+    ShellCommandSpec {
+        command: "threats use <n>",
+        aliases: &["/threats use <n>", "threats select <n>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "make a stored threat-model version the live model",
+    },
 ];

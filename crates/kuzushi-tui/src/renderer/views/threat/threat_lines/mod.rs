@@ -5,6 +5,7 @@ mod scope;
 mod stories;
 mod stride;
 mod summary;
+mod versions;
 
 pub(crate) fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -17,6 +18,7 @@ pub(crate) fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<
         ThreatPanel::Stories => stories::append_story_lines(app, area, &mut lines),
         ThreatPanel::Scope => scope::append_scope_lines(app, area, &mut lines),
         ThreatPanel::Summary => summary::append_summary_lines(app, area, &mut lines),
+        ThreatPanel::Versions => versions::append_version_lines(app, area, &mut lines),
     }
 
     lines

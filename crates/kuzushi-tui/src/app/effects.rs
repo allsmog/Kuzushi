@@ -743,8 +743,26 @@ impl ShellApp {
             .unwrap_or_else(|| serde_json::json!({}));
         merge_json(&mut document, &apply.patch.patch);
         match kuzushi_core::save_persistent_threat_model(&target, &document, true) {
-            Ok(_) => self.log_applied_threat_patch(apply.patch.unsupported),
+            Ok(_) => {
+                self.log_applied_threat_patch(apply.patch.unsupported);
+                self.record_threat_model_version_row(&target, &document);
+            }
             Err(error) => self.log("error", format!("failed to write threat model: {error}")),
+        }
+    }
+
+    fn record_threat_model_version_row(
+        &mut self,
+        target: &std::path::Path,
+        document: &serde_json::Value,
+    ) {
+        if let Err(error) =
+            kuzushi_core::record_threat_model_version(target, document, "operator-edit", None)
+        {
+            self.log(
+                "threats",
+                format!("version ledger append failed: {error:#}"),
+            );
         }
     }
 

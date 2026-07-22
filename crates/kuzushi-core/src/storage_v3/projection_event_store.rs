@@ -27,6 +27,8 @@ pub(super) fn insert_event_row(
     Ok(())
 }
 
+// threat_model_versions is intentionally NOT cleared here: it is an
+// authoritative append-only ledger, not a projection of the event log.
 pub(super) fn clear_projection_tables(tx: &rusqlite::Transaction<'_>) -> Result<()> {
     tx.execute_batch(
         r#"

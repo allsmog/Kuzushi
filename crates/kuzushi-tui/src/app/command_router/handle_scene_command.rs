@@ -84,7 +84,7 @@ impl ShellApp {
         self.auto_open_viz_page(VizPage::Dfd);
     }
 
-    fn hydrate_latest_threat_model_for_dfd(&mut self) {
+    pub(super) fn hydrate_latest_threat_model_for_dfd(&mut self) {
         let Some(target) = self.target_owned() else {
             return;
         };

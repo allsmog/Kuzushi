@@ -36,6 +36,13 @@ pub(crate) fn build_deterministic_threat_model(
     )?;
     let persisted =
         persist_deterministic_document(flavor, &input, &document, has_concrete_content)?;
+    if let Some(warning) =
+        record_persisted_version(ctx, &input.target, &document, "deterministic", persisted)
+    {
+        if let Some(trace) = ctx.trace {
+            let _ = trace.step("tool-progress", "build", warning).emit();
+        }
+    }
     Ok(deterministic_response(
         input,
         flavor,

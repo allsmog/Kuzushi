@@ -14698,6 +14698,41 @@ fn apply_pending_threat_patch_writes_to_disk() {
 }
 
 #[test]
+fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().to_path_buf();
+    let original = serde_json::json!({"methodology": "stride", "threats": [{"id": "T-1", "title": "original"}]});
+    let newer =
+        serde_json::json!({"methodology": "stride", "threats": [{"id": "T-1", "title": "newer"}]});
+    let original_id = kuzushi_core::record_threat_model_version(&target, &original, "build", None)
+        .unwrap()
+        .unwrap();
+    kuzushi_core::record_threat_model_version(&target, &newer, "build", None).unwrap();
+    save_persistent_threat_model(&target, &newer, true).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.clone()));
+
+    update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatVersions));
+
+    assert_eq!(app.router.threat().view(), ThreatView::Versions);
+    assert_eq!(app.router.threat().versions().len(), 2);
+
+    update_and_execute_effects(
+        &mut app,
+        Msg::Cmd(ShellCommand::ThreatVersionUse(original_id)),
+    );
+
+    assert_eq!(load_persistent_threat_model(&target).unwrap(), original);
+    let original_sha = kuzushi_core::findings::threat_model_document_sha256(&original);
+    assert_eq!(
+        app.router.threat().live_sha256(),
+        Some(original_sha.as_str())
+    );
+    // restore appended a row: original, newer, restore-of-original
+    assert_eq!(app.router.threat().versions().len(), 3);
+}
+
+#[test]
 fn discard_threat_patch_clears_state() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_pending_threat_patch(ThreatPatch {

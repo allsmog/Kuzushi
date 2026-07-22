@@ -175,6 +175,18 @@ mod tests {
         );
         assert_eq!(parse_command("/threats regen"), ShellCommand::ThreatRegen);
         assert_eq!(
+            parse_command("/threats versions"),
+            ShellCommand::ThreatVersions
+        );
+        assert_eq!(
+            parse_command("/threats use 3"),
+            ShellCommand::ThreatVersionUse(3)
+        );
+        assert_eq!(
+            parse_command("/threats use"),
+            ShellCommand::Unknown("/threats use <version-id>".to_string())
+        );
+        assert_eq!(
             parse_command("/threats ask what changed?"),
             ShellCommand::ThreatAsk("what changed?".to_string())
         );
@@ -860,6 +872,8 @@ mod tests {
             "threat-editor",
             "threat-regen",
             "threat-reject",
+            "threat-versions",
+            "threat-version-use",
             "theme-picker",
             "tools",
             "trace",
@@ -1009,6 +1023,8 @@ mod tests {
             ShellCommand::ThreatAsk(_) => "threat-ask",
             ShellCommand::ThreatApply => "threat-apply",
             ShellCommand::ThreatReject => "threat-reject",
+            ShellCommand::ThreatVersions => "threat-versions",
+            ShellCommand::ThreatVersionUse(_) => "threat-version-use",
             ShellCommand::Prompts => "prompts",
             ShellCommand::Prompt(_) => "prompt",
             ShellCommand::Actor(_) => "actor",

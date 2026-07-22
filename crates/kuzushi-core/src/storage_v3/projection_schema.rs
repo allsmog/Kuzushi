@@ -366,6 +366,20 @@ create table if not exists finding_search_content (
   triage_text text,
   verification_text text
 );
+
+-- Append-only threat-model version ledger. Authoritative data, NOT a
+-- projection of the event log: it must survive projection rebuilds, so it
+-- is deliberately absent from clear_projection_tables.
+create table if not exists threat_model_versions (
+  id integer primary key autoincrement,
+  created_at text not null,
+  source text not null,
+  run_id text,
+  methodology text not null,
+  threat_count integer not null,
+  sha256 text not null,
+  document_json text not null
+);
 "#;
 
 pub(super) const FTS_SCHEMA: &str = r#"

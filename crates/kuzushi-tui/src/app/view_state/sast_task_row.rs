@@ -245,6 +245,7 @@ pub enum ThreatView {
     Stories,
     Scope,
     Summary,
+    Versions,
 }
 
 /// Durable operator screens for the five engagement phases.
