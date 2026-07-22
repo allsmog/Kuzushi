@@ -3,6 +3,8 @@
 //!
 //! Snapshot fixtures are checked directly to keep tests offline-friendly.
 
+mod common;
+
 use std::{fs, path::PathBuf};
 
 use kuzushi_core::{

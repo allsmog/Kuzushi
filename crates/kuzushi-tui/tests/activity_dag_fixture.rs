@@ -3,6 +3,8 @@
 //! mpsc::channel -> ShellApp.trace_rx -> drain_trace_events -> ActivitySession,
 //! then render the Activity view and assert on the expected output.
 
+mod common;
+
 use std::sync::mpsc;
 use std::sync::Arc;
 

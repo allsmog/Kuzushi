@@ -5,6 +5,8 @@
 //! Run with:
 //!   cargo test -p kuzushi-tui --test stress -- --nocapture
 
+mod common;
+
 use std::time::Instant;
 
 use kuzushi_core::{Finding, FindingStore, Severity, V2Config};

@@ -7,6 +7,19 @@ use kuzushi_core::{WorkflowPhase, WorkspaceTarget};
 use serde_json::{Map, Value};
 use std::path::Path;
 
+/// Tests must never observe the operator's real `$HOME/.kuzushi` state: a
+/// globally configured model or runtime silently flips every "no model
+/// configured" expectation (target activation, pickers, scan reducers).
+/// Runs before `main`, while the process is still single-threaded, so every
+/// test in this binary resolves global config against a disposable HOME.
+/// Tests that need a specific HOME still override it per-test on top.
+#[ctor::ctor]
+fn isolate_operator_home_from_tests() {
+    let home = std::env::temp_dir().join(format!("kuzushi-tui-test-home-{}", std::process::id()));
+    std::fs::create_dir_all(&home).expect("create isolated test HOME");
+    std::env::set_var("HOME", &home);
+}
+
 pub(crate) fn with_indexed_snapshot(target: &Path, mut output: Value) -> Value {
     let workspace = WorkspaceTarget::new(target).expect("test workspace");
     let indexed = kuzushi_core::incremental_index::index_workspace_snapshot(&workspace)

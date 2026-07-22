@@ -3,6 +3,8 @@
 //! Run with:
 //! `cargo test -p kuzushi-tui --test parity`
 
+mod common;
+
 use std::{collections::BTreeMap, path::PathBuf, process::Command, sync::OnceLock};
 
 use kuzushi_core::{ToolOptionStore, V2Config};
