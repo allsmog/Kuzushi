@@ -95,7 +95,8 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         command: "coverage",
         aliases: &["/coverage"],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "coverage matrix: shards × threat sources with campaign progress + finding counts",
+        description:
+            "coverage matrix: shards × threat sources with campaign progress + finding counts",
     },
     ShellCommandSpec {
         command: "jobs -k <runId>",
