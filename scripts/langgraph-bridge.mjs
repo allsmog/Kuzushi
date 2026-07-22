@@ -85,8 +85,18 @@ async function runOneTool(call, tool) {
   if (!tool) {
     return new ToolMessage({ tool_call_id: call.id ?? call.name, content: `Unknown tool ${call.name}` });
   }
-  const output = await tool.invoke(call.args ?? {});
-  return toolMessageForOutput(call, output);
+  try {
+    const output = await tool.invoke(call.args ?? {});
+    return toolMessageForOutput(call, output);
+  } catch (error) {
+    // A failed tool call is agent feedback, not a bridge crash: return the
+    // failure as an error tool result so the model can adjust its approach.
+    return new ToolMessage({
+      tool_call_id: call.id ?? call.name,
+      content: `Tool ${call.name} failed: ${String(error?.message ?? error).slice(0, 2000)}`,
+      status: "error",
+    });
+  }
 }
 
 function shouldContinue(state) {

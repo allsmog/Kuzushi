@@ -13,8 +13,24 @@ export async function mcpToolsForRequest(request) {
       throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
     },
   });
-  const tools = await client.getTools();
+  const tools = providerSafeToolNames(await client.getTools());
   return { tools, close: async () => client.close?.() };
+}
+
+// Anthropic (direct and Vertex) rejects tool names outside
+// ^[a-zA-Z0-9_-]{1,128}$, and kuzushi's MCP servers use names like
+// `tree_sitter:query` and `cpg.taint_paths`. The rename is bridge-internal:
+// the model and the tool node both see the safe name, while each tool's MCP
+// dispatch keeps the original server-side name in its closure.
+function providerSafeToolNames(tools) {
+  const taken = new Set();
+  for (const tool of tools) {
+    let name = tool.name.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 128);
+    while (taken.has(name)) name = `${name.slice(0, 120)}_${taken.size}`;
+    taken.add(name);
+    tool.name = name;
+  }
+  return tools;
 }
 
 export function mcpConnectionFailureMessage(server, error, serverConfig = {}) {
