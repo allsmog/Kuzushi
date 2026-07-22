@@ -15,6 +15,7 @@ use crate::app::{
 };
 use crate::{ShellApp, ShellView};
 use anyhow::Result;
+use kuzushi_core::modules::PathSemantics;
 use kuzushi_core::{
     ExecutionAuthorization, Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict,
     WorkspaceTarget,
@@ -127,7 +128,8 @@ impl ShellApp {
                 self.pending_planning_step_count(),
             ),
         );
-        let authorization = planning_step_authorization(step.task);
+        let authorization =
+            planning_step_authorization(step.task, self.step_configures_write_path(&step));
         self.start_authorized_background_tool(
             step.tool_name,
             step.input,
@@ -137,6 +139,26 @@ impl ShellApp {
             authorization,
         );
         Vec::new()
+    }
+
+    /// True when the step's prepared input sets a write-capable path option
+    /// (external-write or target-write semantics), which the executor refuses
+    /// without an explicit authorization grant.
+    fn step_configures_write_path(&self, step: &PlanningRunStep) -> bool {
+        let Some(input) = step.input.as_object() else {
+            return false;
+        };
+        let Some(tool) = self.registry().resolve_tool(&step.tool_name) else {
+            return false;
+        };
+        tool.options.iter().any(|spec| {
+            matches!(
+                spec.path_semantics,
+                Some(PathSemantics::ExternalWrite | PathSemantics::TargetWrite)
+            ) && std::iter::once(spec.name.as_str())
+                .chain(spec.aliases.iter().map(String::as_str))
+                .any(|name| input.contains_key(name))
+        })
     }
 
     fn expand_planning_task(
@@ -766,8 +788,15 @@ impl ShellApp {
     }
 }
 
-fn planning_step_authorization(task: PlanningTaskId) -> ExecutionAuthorization {
-    if task == PlanningTaskId::PatchFindings {
+/// A confirmed patch plan and any step whose input carries an
+/// operator-configured write-capable path option run with scoped interactive
+/// authorization: the operator typed the value into the picker and confirmed
+/// the phase run, which is the consent the executor's write gate binds to.
+fn planning_step_authorization(
+    task: PlanningTaskId,
+    configures_write_path: bool,
+) -> ExecutionAuthorization {
+    if task == PlanningTaskId::PatchFindings || configures_write_path {
         return ExecutionAuthorization::interactive_request();
     }
     ExecutionAuthorization::default()
@@ -1115,11 +1144,34 @@ mod tests {
     #[test]
     fn confirmed_patch_plan_requests_scoped_interactive_authorization() {
         assert_eq!(
-            planning_step_authorization(PatchFindings),
+            planning_step_authorization(PatchFindings, false),
             ExecutionAuthorization::interactive_request()
         );
         assert_eq!(
-            planning_step_authorization(VerifyFindings),
+            planning_step_authorization(VerifyFindings, false),
+            ExecutionAuthorization::default()
+        );
+    }
+
+    #[test]
+    fn operator_configured_write_path_option_requests_interactive_authorization() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let step = |input: serde_json::Value| PlanningRunStep {
+            task: PlanningTaskId::ScanFuzz,
+            tool_name: "fuzz:run".to_string(),
+            input,
+        };
+
+        assert!(app.step_configures_write_path(&step(json!({"workspaceRoot": "/tmp/ws"}))));
+        assert!(!app.step_configures_write_path(&step(json!({"afeTarget": "appliance_regf"}))));
+        assert_eq!(
+            planning_step_authorization(PlanningTaskId::ScanFuzz, true),
+            ExecutionAuthorization::interactive_request()
+        );
+        assert_eq!(
+            planning_step_authorization(PlanningTaskId::ScanFuzz, false),
             ExecutionAuthorization::default()
         );
     }
