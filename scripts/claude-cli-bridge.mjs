@@ -149,7 +149,16 @@ function isTransient(message) {
   ].some((needle) => lower.includes(needle));
 }
 
-async function runClaude({ model, cwd, systemPrompt, prompt, allowedTools, maxTurns, mcpServers }) {
+async function runClaude({
+  model,
+  cwd,
+  systemPrompt,
+  prompt,
+  allowedTools,
+  maxTurns,
+  mcpServers,
+  builtinTools = true,
+}) {
   const tmp = mkdtempSync(path.join(tmpdir(), "kuzushi-claude-"));
   const systemFile = path.join(tmp, "system.txt");
   writeFileSync(systemFile, systemPrompt ?? "", "utf8");
@@ -182,6 +191,12 @@ async function runClaude({ model, cwd, systemPrompt, prompt, allowedTools, maxTu
   if ((Array.isArray(allowedTools) && allowedTools.length > 0) || mcpAllowed.length > 0) {
     args.push("--allowedTools", ...(allowedTools ?? []), ...mcpAllowed);
     args.push("--disallowedTools", "Edit", "Write", "NotebookEdit", "MultiEdit");
+  }
+  if (!builtinTools) {
+    // Single-step callers (next-step, ping) own their tool contract in text.
+    // A visible built-in tool invites the model to spend its only turn on a
+    // Read/Grep attempt, which --max-turns 1 cuts off with an empty result.
+    args.push("--tools", "");
   }
   if (Number.isFinite(maxTurns) && maxTurns > 0) {
     args.push("--max-turns", String(maxTurns));
@@ -433,7 +448,14 @@ function contentText(content) {
 }
 
 function nextStepToolContract(tools) {
-  if (!Array.isArray(tools) || tools.length === 0) return "";
+  if (!Array.isArray(tools) || tools.length === 0) {
+    return (
+      "\n\nKuzushi tool-loop contract:\n" +
+      "You have no tools in this step. Do not write or simulate tool calls, " +
+      "shell commands, or file reads; answer directly as plain text using only " +
+      "the conversation and any context provided above."
+    );
+  }
   const schema = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
@@ -441,7 +463,8 @@ function nextStepToolContract(tools) {
   }));
   return (
     "\n\nKuzushi tool-loop contract:\n" +
-    "You may call exactly one of the following Kuzushi-defined tools per step.\n" +
+    "You may call exactly one of the following Kuzushi-defined tools per step. " +
+    "These are the only tools that exist; do not simulate shell commands or file reads.\n" +
     "Tools (JSON):\n" +
     JSON.stringify(schema, null, 2) +
     "\n\nTo call a tool, reply with ONLY a single JSON object on one line:\n" +
@@ -465,9 +488,17 @@ async function handleNextStep(request) {
     prompt,
     allowedTools: [],
     maxTurns: 1,
+    builtinTools: false,
   });
   const text = String(payload.result ?? "");
   const usage = usageFromClaude(payload);
+  if (!text.trim()) {
+    return {
+      ok: false,
+      error: `next-step returned an invalid response: no text (subtype=${payload.subtype ?? "unknown"})`,
+      cost_usd: usage.costUsd,
+    };
+  }
   const structured = maybeParseJson(text);
   const call = structured?.kuzushi_tool_call;
   if (call && typeof call.name === "string") {
@@ -501,6 +532,7 @@ async function handlePing(request) {
     prompt: "ok",
     allowedTools: [],
     maxTurns: 1,
+    builtinTools: false,
   });
   const usage = usageFromClaude(payload);
   return {
