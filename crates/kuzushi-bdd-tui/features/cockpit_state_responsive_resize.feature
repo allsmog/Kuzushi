@@ -13,7 +13,7 @@ Feature: Durable phase pages survive in-place terminal resizing
     When I launch the shell
     And I press "F2"
     And I press "<key>"
-    Then an alternate-screen capture shows "VIEW <phase>"
+    Then an alternate-screen capture shows "Viewing <title>"
     When I resize the live terminal to 120 by 36
     Then the same shell process is still running
     And the resized live frame shows "<phase>"
@@ -28,15 +28,15 @@ Feature: Durable phase pages survive in-place terminal resizing
     And the resized live frame shows "<phase>"
     When I resize the live terminal to 160 by 48
     Then the same shell process is still running
-    And the resized live frame shows "VIEW <phase>"
+    And the resized live frame shows "Viewing <title>"
 
     Examples:
-      | key | phase  |
-      | 1   | MAP    |
-      | 2   | SCAN   |
-      | 3   | REVIEW |
-      | 4   | PROVE  |
-      | 5   | FIX    |
+      | key | phase  | title  |
+      | 1   | MAP    | Map    |
+      | 2   | SCAN   | Scan   |
+      | 3   | REVIEW | Review |
+      | 4   | PROVE  | Prove  |
+      | 5   | FIX    | Fix    |
 
   Scenario: A hidden compact fallback restores semantic focus when space returns
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\"}"
@@ -52,4 +52,4 @@ Feature: Durable phase pages survive in-place terminal resizing
     And I press "Z"
     Then an alternate-screen capture shows "ZOOM DFD"
     When I press "Z"
-    Then an alternate-screen capture shows "VIEW MAP"
+    Then an alternate-screen capture shows "Viewing Map"

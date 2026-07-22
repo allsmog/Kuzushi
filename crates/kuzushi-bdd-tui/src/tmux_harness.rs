@@ -584,7 +584,11 @@ fn status_footer_line(snapshot: &str) -> Option<&str> {
 
 fn is_status_footer_line(line: &str) -> bool {
     let line = line.trim_start();
-    line.starts_with("route:")
+    let english_route = ["shell", "module", "agent", "plan", "run"]
+        .iter()
+        .any(|mode| line.starts_with(&format!("{mode} route ·")));
+    english_route
+        || line.starts_with("route:")
         || line.starts_with("mode:")
         || (line.starts_with("KUZUSHI") && (line.contains("route:") || line.contains("mode:")))
 }
@@ -691,6 +695,16 @@ fn apply_artifact_seeds(target: &std::path::Path, seeds: &[ArtifactSeed]) -> Res
 #[cfg(test)]
 mod tests {
     use super::{interactive_frame_ready, status_footer_line, PaneStatus};
+
+    #[test]
+    fn finds_english_route_footer() {
+        let snapshot = "body\nshell route · Map 1/5 · workbench\ncomposer\n";
+
+        assert_eq!(
+            status_footer_line(snapshot),
+            Some("shell route · Map 1/5 · workbench")
+        );
+    }
 
     #[test]
     fn finds_canonical_route_footer() {

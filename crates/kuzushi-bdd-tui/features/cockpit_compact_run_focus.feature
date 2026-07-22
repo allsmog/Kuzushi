@@ -16,4 +16,4 @@ Feature: Compact Run Focus remains operable in a real terminal
     And I press "Down"
     And I press "Down"
     And I press "Enter"
-    Then one compact Run Focus capture shows plan "context:build" then "entry-points:extract" with "TASKS" above "OUTPUT" without a shell prompt
+    Then one compact Run Focus capture shows plan "context:build" then "entry-points:extract" with "STEPS" above "OUTPUT" without a shell prompt
