@@ -765,6 +765,7 @@ pub struct WorkbenchRouteState {
     scroll: crate::app::WorkbenchPaneScroll,
     review: crate::app::WorkbenchReviewState,
     investigation: Option<InvestigationBoundary>,
+    chains_open: bool,
 }
 
 impl Default for WorkbenchRouteState {
@@ -776,6 +777,7 @@ impl Default for WorkbenchRouteState {
             scroll: crate::app::WorkbenchPaneScroll::default(),
             review: crate::app::WorkbenchReviewState::default(),
             investigation: None,
+            chains_open: false,
         }
     }
 }
@@ -817,6 +819,15 @@ impl WorkbenchRouteState {
     pub(crate) fn toggle_investigation_boundary(&mut self) -> Option<InvestigationBoundary> {
         self.investigation = self.investigation.map(InvestigationBoundary::toggled);
         self.investigation
+    }
+
+    pub(crate) fn chains_view_open(&self) -> bool {
+        self.chains_open
+    }
+
+    pub(crate) fn toggle_chains_view(&mut self) -> bool {
+        self.chains_open = !self.chains_open;
+        self.chains_open
     }
 
     pub(crate) fn zoom(&self) -> crate::app::WorkbenchZoom {

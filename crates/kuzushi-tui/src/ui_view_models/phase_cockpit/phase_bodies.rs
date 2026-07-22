@@ -21,6 +21,7 @@ pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
         finding,
         selection_disclosure: review_selection_disclosure(app, &findings),
         next_plan: super::map::next_scans_state(app),
+        chains: super::chain_artifacts::chain_artifacts_model(app),
     }
 }
 

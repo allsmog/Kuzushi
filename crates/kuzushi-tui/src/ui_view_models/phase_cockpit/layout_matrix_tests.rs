@@ -323,6 +323,37 @@ fn review_next_plan_drawer_appears_sizes_and_sheds_with_the_recommendations() {
 
 /// While a scan run is in flight the Scan page becomes the operational
 /// dashboard: scope | engines | delta over a receipt log strip. Small
+/// `C` gives the whole Review body to the chain-artifact screen; closing it
+/// restores the list+detail triage composition.
+#[test]
+fn chains_view_composes_full_screen_over_the_review_page() {
+    let mut body = fixture_body(WorkflowPhase::Review, SemanticFixture::Dense);
+    let PhaseCockpitBody::Review(model) = &mut body else {
+        panic!("review fixture body");
+    };
+    model.chains = Some(crate::ui_view_models::ChainArtifactsModel {
+        confirmed_count: 2,
+        candidates: Vec::new(),
+        grounded: Vec::new(),
+    });
+    let wide = Rect::new(0, 0, 160, 48);
+
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(
+        plan.composition,
+        Composition::FullScreen(PhaseSurfaceId::ReviewChains)
+    ));
+    assert_eq!(plan.surfaces.len(), 1);
+    assert_eq!(plan.surfaces[0].rect, wide);
+
+    let PhaseCockpitBody::Review(model) = &mut body else {
+        panic!("review fixture body");
+    };
+    model.chains = None;
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(plan.composition, Composition::ListDetail { .. }));
+}
+
 /// The `v` investigation card takes over the Prove page as a centered form;
 /// closing it restores the FocusDetail triage composition.
 #[test]

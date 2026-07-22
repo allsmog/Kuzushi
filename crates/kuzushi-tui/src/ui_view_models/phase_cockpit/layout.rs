@@ -33,6 +33,7 @@ pub(crate) enum PhaseSurfaceId {
     ScanDelta,
     ScanScope,
     ReviewQueue,
+    ReviewChains,
     ReviewDetail,
     ReviewNextPlan,
     ProveStatus,
@@ -61,7 +62,9 @@ impl PhaseSurfaceId {
             Self::ScanEngines | Self::ScanReceipt | Self::ScanDelta | Self::ScanScope => {
                 WorkbenchPage::Scan
             }
-            Self::ReviewQueue | Self::ReviewDetail | Self::ReviewNextPlan => WorkbenchPage::Review,
+            Self::ReviewChains | Self::ReviewQueue | Self::ReviewDetail | Self::ReviewNextPlan => {
+                WorkbenchPage::Review
+            }
             Self::ProveStatus
             | Self::ProveEvidence
             | Self::ProveLadder
@@ -87,6 +90,7 @@ impl PhaseSurfaceId {
             Self::ScanDelta => "Finding Delta",
             Self::ScanScope => "Scope and Plan",
             Self::ReviewQueue => "Review Queue",
+            Self::ReviewChains => "Attack Chains",
             Self::ReviewDetail => "Selected Finding",
             Self::ReviewNextPlan => "Next Investigation Plan",
             Self::ProveStatus => "Proof Status",
@@ -230,6 +234,9 @@ fn screen_composition(
             right: PhaseSurfaceId::ScanDelta,
             log_strip: Some(PhaseSurfaceId::ScanReceipt),
         },
+        PhaseCockpitBody::Review(model) if model.chains.is_some() => {
+            Composition::FullScreen(PhaseSurfaceId::ReviewChains)
+        }
         PhaseCockpitBody::Review(model) if visible.len() >= 2 => Composition::ListDetail {
             list: PhaseSurfaceId::ReviewQueue,
             detail: PhaseSurfaceId::ReviewDetail,

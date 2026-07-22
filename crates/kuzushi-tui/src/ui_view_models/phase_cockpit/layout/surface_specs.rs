@@ -128,6 +128,11 @@ fn review_specs(model: &ReviewPhaseModel) -> Vec<PhaseSurfaceSpec> {
         has_plan,
         selectable(PhaseSurfaceId::ReviewNextPlan),
     );
+    push_if(
+        &mut specs,
+        model.chains.is_some(),
+        selectable(PhaseSurfaceId::ReviewChains),
+    );
     specs
 }
 

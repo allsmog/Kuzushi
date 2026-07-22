@@ -223,13 +223,13 @@ pub(crate) use permission_policy::{
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
     phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
-    Composition, DrawerSize, DrawerSpec, EngagementHeaderModel, FixPhaseModel,
-    InvestigationPlanModel, LayoutDensity, LiveScanModel, MapPhaseModel, NextScanRow,
-    NextScansState, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
-    PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel,
-    RemediationLifecycleModel, RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel,
-    ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel,
-    SurfaceInteraction, SurfaceRole, SurfaceState,
+    ChainArtifactsModel, ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
+    EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
+    MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
+    PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
+    ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
+    RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
+    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{

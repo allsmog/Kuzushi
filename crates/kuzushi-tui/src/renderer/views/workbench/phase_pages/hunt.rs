@@ -41,6 +41,13 @@ pub(super) fn plain_lines(model: &ReviewPhaseModel, width: usize) -> Vec<Line<'s
     if !plan.is_empty() {
         lines.extend(divider_lines("NEXT INVESTIGATION PLAN", plan, width));
     }
+    if model.chains.is_some() {
+        lines.extend(divider_lines(
+            "ATTACK CHAINS",
+            chain_artifact_lines(model.chains.as_ref(), width),
+            width,
+        ));
+    }
     lines
 }
 
@@ -54,7 +61,164 @@ fn render_review_pane(
     match surface {
         PhaseSurfaceId::ReviewDetail => render_review_detail(frame, area, model, state),
         PhaseSurfaceId::ReviewNextPlan => render_next_plan_drawer(frame, area, model, state),
+        PhaseSurfaceId::ReviewChains => render_chain_artifacts(frame, area, model, state),
         _ => render_review_list(frame, area, model, state),
+    }
+}
+
+/// The Attack Chains screen: chains as first-class artifacts over the SET of
+/// confirmed findings — constituent references, assumption-labeled
+/// prerequisites as side nodes, and the triage mutation each chain implies.
+fn render_chain_artifacts(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ReviewPhaseModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "ATTACK CHAINS · Enter open constituent · C close",
+        chain_artifact_lines(model.chains.as_ref(), area.width.saturating_sub(2) as usize),
+        PhaseSurfaceId::ReviewChains,
+        state,
+    );
+}
+
+fn chain_artifact_lines(
+    chains: Option<&crate::ui_view_models::ChainArtifactsModel>,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let Some(chains) = chains else {
+        return Vec::new();
+    };
+    if chains.candidates.is_empty() && chains.grounded.is_empty() {
+        return empty_state_panel(
+            "no chain artifacts yet",
+            &[
+                "chains compose over CONFIRMED findings with entry- and impact-class roles",
+                "confirm findings in Review, then run `run exploit-chain:scan {}` for grounded chains",
+            ],
+            &[("C", "close attack chains")],
+        );
+    }
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "composed over {} confirmed finding(s) · deterministic fold seeds, exploit-chain:scan grounds",
+                chains.confirmed_count
+            ),
+            width,
+        ),
+        theme::muted(),
+    )];
+    for (index, candidate) in chains.candidates.iter().enumerate() {
+        lines.extend(candidate_lines(index, candidate, width));
+    }
+    for grounded in &chains.grounded {
+        lines.extend(grounded_chain_lines(grounded, width));
+    }
+    lines
+}
+
+fn candidate_lines(
+    index: usize,
+    candidate: &crate::ui_view_models::ChainCandidateModel,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let constituents = candidate
+        .links
+        .iter()
+        .map(|link| link.reference.as_str())
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "CANDIDATE {} · {} = {}",
+                index + 1,
+                candidate.surface,
+                constituents
+            ),
+            width,
+        ),
+        theme::heading(),
+    )];
+    for link in &candidate.links {
+        lines.push(Line::styled(
+            fit(
+                &format!(
+                    "  {} {} [{}] {} · {}",
+                    role_glyph(&link.role),
+                    link.reference,
+                    link.severity,
+                    link.title,
+                    link.file
+                ),
+                width,
+            ),
+            theme::primary(),
+        ));
+    }
+    lines.push(Line::styled(
+        fit(&format!("  {}", candidate.rationale), width),
+        theme::muted(),
+    ));
+    if let Some(note) = candidate.mutation_note.as_deref() {
+        lines.push(Line::styled(
+            fit(&format!("  ⚠ {note}"), width),
+            theme::warn(),
+        ));
+    }
+    lines
+}
+
+fn grounded_chain_lines(
+    chain: &crate::app::ExploitChainDetail,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "GROUNDED {} · {:?} · {}",
+                chain.id, chain.severity, chain.title
+            ),
+            width,
+        ),
+        theme::heading(),
+    )];
+    for step in &chain.steps {
+        lines.push(Line::styled(
+            fit(
+                &format!(
+                    "  ▸ {} — {} · {}:{}",
+                    step.role, step.description, step.file, step.line
+                ),
+                width,
+            ),
+            theme::primary(),
+        ));
+    }
+    for precondition in &chain.preconditions {
+        lines.push(Line::styled(
+            fit(&format!("  ? assumes: {precondition}"), width),
+            theme::warn(),
+        ));
+    }
+    if let Some(impact) = chain.impact_description.as_deref() {
+        lines.push(Line::styled(
+            fit(&format!("  impact: {impact}"), width),
+            theme::muted(),
+        ));
+    }
+    lines
+}
+
+fn role_glyph(role: &str) -> &'static str {
+    match role {
+        "entry" => "→",
+        "pivot" => "↝",
+        _ => "☒",
     }
 }
 
@@ -271,5 +435,91 @@ mod tests {
         assert!(next_plan_lines(&NextScansState::Pending, 80).is_empty());
         assert!(next_plan_lines(&NextScansState::Ready(Vec::new()), 80).is_empty());
         assert!(next_plan_lines(&NextScansState::Unavailable("boom".to_string()), 80).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod chain_artifact_tests {
+    use super::*;
+    use crate::ui_view_models::{ChainArtifactsModel, ChainCandidateModel, ChainLinkModel};
+
+    fn candidate() -> ChainCandidateModel {
+        let link = |role: &str, reference: &str, severity: &str| ChainLinkModel {
+            role: role.to_string(),
+            reference: reference.to_string(),
+            severity: severity.to_string(),
+            title: format!("{role} finding"),
+            file: "src/net/handler.rs".to_string(),
+        };
+        ChainCandidateModel {
+            surface: "src/net".to_string(),
+            links: vec![
+                link("entry", "F-1", "medium"),
+                link("impact", "F-3", "high"),
+            ],
+            rationale: "entry reaches impact on one surface".to_string(),
+            mutation_note: Some(
+                "chain would raise F-1 toward the composed impact (advisory)".to_string(),
+            ),
+            open_command: "open F-1".to_string(),
+        }
+    }
+
+    fn text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn chain_screen_names_constituents_and_the_advisory_triage_mutation() {
+        let chains = ChainArtifactsModel {
+            confirmed_count: 2,
+            candidates: vec![candidate()],
+            grounded: Vec::new(),
+        };
+        let body = text(&chain_artifact_lines(Some(&chains), 120));
+        assert!(body.contains("F-1 + F-3"), "{body}");
+        assert!(body.contains("[medium]"), "{body}");
+        assert!(body.contains("⚠ chain would raise F-1"), "{body}");
+        assert!(body.contains("2 confirmed finding(s)"), "{body}");
+    }
+
+    #[test]
+    fn grounded_chains_render_assumptions_as_side_nodes() {
+        let chains = ChainArtifactsModel {
+            confirmed_count: 0,
+            candidates: Vec::new(),
+            grounded: vec![crate::app::ExploitChainDetail {
+                id: "AC-1".to_string(),
+                title: "bucket tamper to heap write".to_string(),
+                severity: crate::app::ChainSeverity::Critical,
+                narrative: None,
+                impact_description: Some("arbitrary heap write".to_string()),
+                preconditions: vec!["attacker controls bucket contents".to_string()],
+                steps: Vec::new(),
+            }],
+        };
+        let body = text(&chain_artifact_lines(Some(&chains), 120));
+        assert!(body.contains("GROUNDED AC-1"), "{body}");
+        assert!(
+            body.contains("? assumes: attacker controls bucket contents"),
+            "{body}"
+        );
+        assert!(body.contains("impact: arbitrary heap write"), "{body}");
+    }
+
+    #[test]
+    fn empty_chain_screen_explains_how_artifacts_come_to_exist() {
+        let chains = ChainArtifactsModel {
+            confirmed_count: 0,
+            candidates: Vec::new(),
+            grounded: Vec::new(),
+        };
+        let body = text(&chain_artifact_lines(Some(&chains), 120));
+        assert!(body.contains("no chain artifacts yet"), "{body}");
+        assert!(body.contains("CONFIRMED findings"), "{body}");
     }
 }

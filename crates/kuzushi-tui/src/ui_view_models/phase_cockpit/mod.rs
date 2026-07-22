@@ -25,6 +25,7 @@ mod phase_bodies;
 mod scan;
 
 pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
+mod chain_artifacts;
 use confirm::prove_phase_model;
 pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,
@@ -188,6 +189,40 @@ pub(crate) struct ReviewPhaseModel {
     /// Recommender follow-up passes shown as the Next-Investigation-Plan
     /// drawer; the operator authorizes each pass, nothing runs on its own.
     pub(crate) next_plan: NextScansState,
+    /// The Attack Chains screen (`C`): chain artifacts composed over the SET
+    /// of confirmed findings, plus grounded chains from `exploit-chain:scan`.
+    pub(crate) chains: Option<ChainArtifactsModel>,
+}
+
+/// Chains are artifacts produced by a transformation over the triaged result
+/// set, not a visualization: each candidate names its constituent findings
+/// by alias, and carries the triage mutation the composition implies. The
+/// mutation stays advisory copy until the core chain-triage pass exists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChainArtifactsModel {
+    pub(crate) confirmed_count: usize,
+    pub(crate) candidates: Vec<ChainCandidateModel>,
+    pub(crate) grounded: Vec<crate::app::ExploitChainDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChainCandidateModel {
+    pub(crate) surface: String,
+    pub(crate) links: Vec<ChainLinkModel>,
+    pub(crate) rationale: String,
+    /// Advisory chain-triage note: which constituents this chain would raise.
+    pub(crate) mutation_note: Option<String>,
+    /// The prompt draft Enter loads — navigate back to the entry finding.
+    pub(crate) open_command: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ChainLinkModel {
+    pub(crate) role: String,
+    pub(crate) reference: String,
+    pub(crate) severity: String,
+    pub(crate) title: String,
+    pub(crate) file: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

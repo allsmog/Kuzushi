@@ -263,6 +263,7 @@ impl ShellApp {
             PhaseSurfaceId::MapReadiness => self.draft_map_action_card_command(),
             PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
             PhaseSurfaceId::ProveInvestigation => self.start_investigation_from_card(),
+            PhaseSurfaceId::ReviewChains => self.open_chain_constituent(),
             focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
@@ -484,14 +485,53 @@ impl ShellApp {
     /// Deterministic ledger-only counterpart to `draft_workbench_chain`:
     /// folds already-confirmed findings into chain candidates without a
     /// model call, so it is safe to run on every triage pass.
+    /// `C` toggles the Attack Chains screen: chain artifacts composed live
+    /// over the confirmed findings (same fold as `findings:chains`), plus
+    /// grounded chains from `exploit-chain:scan`.
     fn draft_workbench_chain_fold(&mut self) -> InputUpdate {
-        self.set_input("run findings:chains {}".to_string());
+        if self.router.workbench_mut().toggle_chains_view() {
+            self.router
+                .workbench_mut()
+                .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewChains);
+            self.log(
+                "chain",
+                "attack chains opened — Enter opens a constituent finding, C closes",
+            );
+        } else {
+            self.log("chain", "attack chains closed");
+        }
+        InputUpdate::handled()
+    }
+
+    /// Enter on the chains screen navigates back to the top candidate's
+    /// entry finding — chains reference findings, findings stay the durable
+    /// unit of triage.
+    fn open_chain_constituent(&mut self) {
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            self,
+            kuzushi_core::WorkflowPhase::Review,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Review(review) = model.body else {
+            return;
+        };
+        let Some(command) = review
+            .chains
+            .as_ref()
+            .and_then(|chains| chains.candidates.first())
+            .map(|candidate| candidate.open_command.clone())
+        else {
+            self.log(
+                "chain",
+                "no chain candidates yet — confirm entry- and impact-class findings first",
+            );
+            return;
+        };
+        self.set_input(command);
         self.set_input_mode(InputMode::Prompt);
         self.log(
             "chain",
-            "draft loaded — press Enter to fold confirmed findings into chain candidates (no model)",
+            "constituent finding draft loaded — Enter opens it in Review",
         );
-        InputUpdate::handled()
     }
 
     pub(super) fn reduce_hotkey_command(&mut self, command: ShellCommand) -> InputUpdate {
@@ -1174,7 +1214,8 @@ fn focused_workbench_visualization(
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
         PhaseSurfaceId::FixCandidate
         | PhaseSurfaceId::FixVerification
-        | PhaseSurfaceId::FixAttackTree => {
+        | PhaseSurfaceId::FixAttackTree
+        | PhaseSurfaceId::ReviewChains => {
             FocusedWorkbenchVisualization::Scene(VizPage::ExploitChain)
         }
     }

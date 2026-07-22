@@ -13612,9 +13612,10 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             }
             ViewHotkeyAction::WorkbenchChainFold => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.input(), "run findings:chains {}");
-                assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+                assert!(app.router.workbench().chains_view_open());
                 assert!(!app.tool_is_running());
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(!app.router.workbench().chains_view_open());
             }
             ViewHotkeyAction::WorkbenchCluster => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
@@ -19460,6 +19461,79 @@ fn review_invariant_hunt_hotkey_requires_a_selected_finding() {
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "invariant" && line.body.contains("no finding selected")
     }));
+}
+
+#[test]
+fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
+    use kuzushi_core::{TriageOutcome, TriageVerdict};
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let confirmed = |finding: &mut Finding| {
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            rationale: "reviewed".to_string(),
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        });
+    };
+    let mut entry = Finding::new_semgrep(
+        "demo.entry",
+        "src/net/handler.rs",
+        7,
+        Some(3),
+        Severity::Medium,
+        "unauthenticated remote request handler",
+    );
+    confirmed(&mut entry);
+    let mut impact = Finding::new_semgrep(
+        "demo.impact",
+        "src/net/parse.rs",
+        21,
+        Some(3),
+        Severity::High,
+        "heap buffer overflow in parser",
+    );
+    confirmed(&mut impact);
+    *app.findings_mut() = vec![entry, impact];
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('C'), KeyModifiers::empty()),
+    );
+    let plan = workbench_phase_plan(&app);
+    assert!(matches!(
+        plan.composition,
+        crate::ui_view_models::Composition::FullScreen(
+            crate::ui_view_models::PhaseSurfaceId::ReviewChains
+        )
+    ));
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert!(app.input().starts_with("open "), "{}", app.input());
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+
+    app.set_input("".to_string());
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('C'), KeyModifiers::empty()),
+    );
+    assert!(!app.router.workbench().chains_view_open());
+    let plan = workbench_phase_plan(&app);
+    assert!(!matches!(
+        plan.composition,
+        crate::ui_view_models::Composition::FullScreen(_)
+    ));
 }
 
 #[test]
