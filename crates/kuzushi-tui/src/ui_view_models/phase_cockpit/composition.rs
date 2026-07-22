@@ -435,7 +435,7 @@ mod tests {
         let regions = form.solve(WIDE);
         let rect = regions[0].1;
         assert!(rect.width <= 100);
-        assert!(rect.x >= WIDE.x && rect.right() <= WIDE.right());
+        assert!(rect.right() <= WIDE.right());
         assert_eq!(ids(&form.solve(NARROW)), vec![PhaseSurfaceId::ScanScope]);
     }
 

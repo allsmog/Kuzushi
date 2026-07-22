@@ -13,7 +13,7 @@ mod seed_context;
 #[cfg(test)]
 mod tests;
 
-pub(self) use seed_context::ScanSeedContext;
+use seed_context::ScanSeedContext;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum GuidedScanStage {

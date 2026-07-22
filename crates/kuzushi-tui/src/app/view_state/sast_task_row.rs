@@ -259,20 +259,14 @@ pub enum WorkbenchPage {
 
 impl WorkbenchPage {
     pub const SCAN_GRID_MIN_COLUMNS: u16 = 50;
-    pub const SCAN_GRID_MIN_BODY_ROWS: u16 = 14;
     /// Shared chrome and the engagement header consume ten rows in the
-    /// canonical Scan composition. Below this viewport height the renderer
-    /// uses its one-pane summary, so keyboard focus must do the same.
-    #[cfg(test)]
-    pub const SCAN_GRID_MIN_ROWS: u16 = Self::SCAN_GRID_MIN_BODY_ROWS + 10;
-    #[cfg(test)]
-    pub const FIX_GRID_MIN_COLUMNS: u16 = 80;
-    pub const FIX_DIAGRAM_MIN_BODY_ROWS: u16 = 20;
+    /// canonical Scan composition. Below `SCAN_GRID_MIN_BODY_ROWS` the
+    /// renderer uses its one-pane summary, so keyboard focus must do the same.
+    pub const SCAN_GRID_MIN_BODY_ROWS: u16 = 14;
     /// The phase body sits below the shared status/keybind/prompt chrome and
     /// the engagement header. Canonical 80x24 therefore has fewer than 20 body
     /// rows and renders the single combined Fix pane.
-    #[cfg(test)]
-    pub const FIX_GRID_MIN_ROWS: u16 = Self::FIX_DIAGRAM_MIN_BODY_ROWS + 10;
+    pub const FIX_DIAGRAM_MIN_BODY_ROWS: u16 = 20;
     pub const ALL: [Self; 5] = [Self::Map, Self::Scan, Self::Review, Self::Prove, Self::Fix];
 
     pub fn from_phase(phase: WorkflowPhase) -> Self {
