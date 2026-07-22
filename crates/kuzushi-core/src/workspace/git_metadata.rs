@@ -64,8 +64,12 @@ fn git_branch(target: &Path) -> Option<String> {
     git_stdout(target, &["branch", "--show-current"]).filter(|branch| !branch.trim().is_empty())
 }
 
+/// Provenance dirty flag: tracked modifications only (`-uno`). Untracked
+/// files are invisible to revision provenance (they exist in no commit) and
+/// enumerating them cost ~4.7 s of the ~6.3 s cold open on a monorepo-sized
+/// target — 10x the tracked-only probe.
 fn git_dirty_excluding_kuzushi_state(target: &Path) -> bool {
-    git_stdout(target, &["status", "--porcelain"])
+    git_stdout(target, &["status", "--porcelain", "-uno"])
         .map(|status| dirty_status_lines(&status).any(|line| !status_line_is_kuzushi_state(line)))
         .unwrap_or(false)
 }
@@ -185,6 +189,24 @@ mod tests {
         let outcome = switch_target_revision(repo.path(), &first).unwrap();
 
         assert_eq!(outcome.current.sha, first);
+    }
+
+    #[test]
+    fn untracked_files_do_not_mark_the_revision_dirty() {
+        let Some(repo) = temp_git_repo() else {
+            return;
+        };
+        fs::write(repo.path().join("untracked-scratch.txt"), "notes\n").unwrap();
+
+        let metadata = target_git_metadata(repo.path()).unwrap();
+
+        assert!(
+            !metadata.dirty,
+            "untracked files exist in no commit and must not dirty revision provenance"
+        );
+
+        fs::write(repo.path().join("tracked.txt"), "modified\n").unwrap();
+        assert!(target_git_metadata(repo.path()).unwrap().dirty);
     }
 
     #[test]
