@@ -447,6 +447,7 @@ fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
 fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
     vec![
         bind_char('v', "v", "investigate", ViewHotkeyAction::WorkbenchValidate),
+        bind_char('t', "t", "trace", ViewHotkeyAction::WorkbenchTraceView),
         bind_char(
             'm',
             "m",

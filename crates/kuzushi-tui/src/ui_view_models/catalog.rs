@@ -130,7 +130,7 @@ pub(crate) fn capability_disposition(id: &str) -> Option<CapabilityDisposition> 
         "recon" | "threat-model" | "sast" | "findings" | "verify" | "patch" => Product,
         "bounty" | "campaign" | "config" | "context" | "coverage" | "engagement"
         | "entry-points" | "fleet" | "module-recommender" | "pack" | "randori" | "report"
-        | "router" | "suppress" | "triage" | "workspace" | "x-ray" => Folded,
+        | "router" | "suppress" | "trace" | "triage" | "workspace" | "x-ray" => Folded,
         "agentic-sast" | "cargo-audit" | "codeql" | "codeql-db" | "cpg" | "dep-hygiene"
         | "fuzz" | "govulncheck" | "iac-scan" | "license-scan" | "ndiff" | "offense-review"
         | "sbom-scan" | "secret-scan" | "semgrep" | "taint-iris-next" | "threat-intel"

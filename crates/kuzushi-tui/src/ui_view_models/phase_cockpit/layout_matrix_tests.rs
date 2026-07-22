@@ -354,6 +354,42 @@ fn chains_view_composes_full_screen_over_the_review_page() {
     assert!(matches!(plan.composition, Composition::ListDetail { .. }));
 }
 
+/// `t` gives the whole Prove body to the Trace screen; closing it restores
+/// the FocusDetail composition.
+#[test]
+fn trace_view_composes_full_screen_over_the_prove_page() {
+    let mut body = fixture_body(WorkflowPhase::Prove, SemanticFixture::Dense);
+    let PhaseCockpitBody::Prove(model) = &mut body else {
+        panic!("prove fixture body");
+    };
+    model.trace = Some(crate::ui_view_models::TraceEvidenceModel {
+        reference: "F-1".to_string(),
+        severity: "HIGH".to_string(),
+        original: Vec::new(),
+        expanded: Vec::new(),
+        open_questions: Vec::new(),
+        evidence_deltas: Vec::new(),
+        expand_command: "run trace:expand {}".to_string(),
+        next_hint: "hint".to_string(),
+    });
+    let wide = Rect::new(0, 0, 160, 48);
+
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(
+        plan.composition,
+        Composition::FullScreen(PhaseSurfaceId::ProveTrace)
+    ));
+    assert_eq!(plan.surfaces.len(), 1);
+    assert_eq!(plan.surfaces[0].rect, wide);
+
+    let PhaseCockpitBody::Prove(model) = &mut body else {
+        panic!("prove fixture body");
+    };
+    model.trace = None;
+    let plan = phase_presentation_plan(&body, wide, None, None, AttentionMode::Normal);
+    assert!(matches!(plan.composition, Composition::FocusDetail { .. }));
+}
+
 /// The `v` investigation card takes over the Prove page as a centered form;
 /// closing it restores the FocusDetail triage composition.
 #[test]

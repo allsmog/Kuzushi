@@ -239,6 +239,7 @@ fn phase_surface_zoom_label(surface: PhaseSurfaceId) -> &'static str {
         PhaseSurfaceId::ProveReceipt => "PROOF",
         PhaseSurfaceId::ProveNextAction => "NEXT ACTION",
         PhaseSurfaceId::ProveInvestigation => "INVESTIGATION PLAN",
+        PhaseSurfaceId::ProveTrace => "TRACE",
         PhaseSurfaceId::FixCandidate => "FIX STATUS",
         PhaseSurfaceId::FixAttackTree => "ATTACK TREE",
         PhaseSurfaceId::FixRemediation => "REMEDIATION",

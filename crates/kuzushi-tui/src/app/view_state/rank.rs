@@ -109,6 +109,26 @@ pub struct TaintStage {
     pub snippet: Option<String>,
 }
 
+/// One finding's operator-requested trace expansion. Steps hydrate from the
+/// durable static-evidence store (or the `trace:expand` result on
+/// completion); open questions and evidence deltas are session-scoped
+/// advisory copy from the last expansion run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceExpansionSnapshot {
+    pub finding_fingerprint: String,
+    pub steps: Vec<TraceExpansionStep>,
+    pub open_questions: Vec<String>,
+    pub evidence_deltas: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceExpansionStep {
+    pub symbol: String,
+    pub file: String,
+    pub line: u32,
+    pub annotation: String,
+}
+
 impl ChainSeverity {
     pub(crate) fn rank(self) -> u8 {
         match self {

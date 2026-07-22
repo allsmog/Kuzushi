@@ -13617,6 +13617,16 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert!(!app.router.workbench().chains_view_open());
             }
+            ViewHotkeyAction::WorkbenchTraceView => {
+                app.router
+                    .workbench_mut()
+                    .set_page(Some(WorkbenchPage::Prove));
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(app.router.workbench().trace_view_open());
+                assert!(!app.tool_is_running());
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(!app.router.workbench().trace_view_open());
+            }
             ViewHotkeyAction::WorkbenchCluster => {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
@@ -19534,6 +19544,198 @@ fn chains_screen_folds_confirmed_findings_and_enter_opens_a_constituent() {
         plan.composition,
         crate::ui_view_models::Composition::FullScreen(_)
     ));
+}
+
+#[test]
+fn trace_screen_opens_full_screen_and_enter_drafts_the_expansion_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.trace",
+        "src/parse.rs",
+        10,
+        Some(3),
+        Severity::High,
+        "length flows to memcpy",
+    )];
+    let fingerprint = app.findings()[0].fingerprint.clone();
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()),
+    );
+    assert!(app.router.workbench().trace_view_open());
+    let plan = workbench_phase_plan(&app);
+    assert!(matches!(
+        plan.composition,
+        crate::ui_view_models::Composition::FullScreen(
+            crate::ui_view_models::PhaseSurfaceId::ProveTrace
+        )
+    ));
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert_eq!(
+        app.input(),
+        format!(
+            "run trace:expand {}",
+            serde_json::json!({ "fingerprint": fingerprint })
+        )
+    );
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+    assert!(!app.tool_is_running());
+
+    app.set_input("".to_string());
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()),
+    );
+    assert!(!app.router.workbench().trace_view_open());
+    let plan = workbench_phase_plan(&app);
+    assert!(!matches!(
+        plan.composition,
+        crate::ui_view_models::Composition::FullScreen(_)
+    ));
+}
+
+/// A cached `trace:expand` completion renders on the Trace screen as the
+/// expanded path, with open questions and evidence deltas beside it.
+#[test]
+fn trace_expansion_snapshot_renders_expanded_hops_and_open_questions() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.trace",
+        "src/parse.rs",
+        10,
+        Some(3),
+        Severity::High,
+        "length flows to memcpy",
+    )];
+    let fingerprint = app.findings()[0].fingerprint.clone();
+    app.cache_tool_snapshot(
+        "trace:expand",
+        &serde_json::json!({
+            "data": {
+                "tool": "trace:expand",
+                "version": 1,
+                "findingFingerprint": fingerprint,
+                "steps": [
+                    {
+                        "symbol": "parse_header",
+                        "filePath": "src/parse.rs",
+                        "line": 32,
+                        "annotation": "length copied without bound"
+                    }
+                ],
+                "evidenceDeltas": ["length reaches memcpy unchecked"],
+                "openQuestions": ["is the header attacker-controlled over TLS?"]
+            }
+        }),
+    );
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()),
+    );
+
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+        &app,
+        kuzushi_core::WorkflowPhase::Prove,
+    );
+    let crate::ui_view_models::PhaseCockpitBody::Prove(prove) = model.body else {
+        panic!("prove body");
+    };
+    let trace = prove.trace.expect("trace model");
+    assert_eq!(trace.expanded.len(), 1);
+    assert_eq!(trace.expanded[0].label, "parse_header");
+    assert_eq!(trace.expanded[0].location, "src/parse.rs:32");
+    assert_eq!(
+        trace.open_questions,
+        vec!["is the header attacker-controlled over TLS?".to_string()]
+    );
+    assert_eq!(
+        trace.evidence_deltas,
+        vec!["length reaches memcpy unchecked".to_string()]
+    );
+    assert!(trace.next_hint.contains("open questions"));
+}
+
+/// Opening the Trace screen re-reads the durable static-evidence store, so
+/// hops appended by an earlier session render without any tool completion
+/// in this one.
+#[test]
+fn trace_screen_hydrates_operator_steps_from_the_durable_store() {
+    use kuzushi_core::capabilities::trace_expansion::{
+        append_trace_expansion_evidence, TraceExpansionResult, TraceStep,
+        TRACE_EXPANSION_CONTRACT_VERSION,
+    };
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.trace",
+        "src/parse.rs",
+        10,
+        Some(3),
+        Severity::High,
+        "length flows to memcpy",
+    )];
+    let fingerprint = app.findings()[0].fingerprint.clone();
+    let store = kuzushi_core::static_evidence::StaticEvidenceStore::open(&workspace).unwrap();
+    append_trace_expansion_evidence(
+        &store,
+        &TraceExpansionResult {
+            version: TRACE_EXPANSION_CONTRACT_VERSION,
+            finding_fingerprint: fingerprint.clone(),
+            steps: vec![TraceStep {
+                symbol: "copy_len".to_string(),
+                file_path: "src/copy.rs".to_string(),
+                line: 88,
+                annotation: "unclamped length forwarded".to_string(),
+            }],
+            evidence_deltas: Vec::new(),
+            open_questions: Vec::new(),
+        },
+    )
+    .unwrap();
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('t'), KeyModifiers::empty()),
+    );
+
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+        &app,
+        kuzushi_core::WorkflowPhase::Prove,
+    );
+    let crate::ui_view_models::PhaseCockpitBody::Prove(prove) = model.body else {
+        panic!("prove body");
+    };
+    let trace = prove.trace.expect("trace model");
+    assert_eq!(trace.expanded.len(), 1);
+    assert_eq!(trace.expanded[0].label, "copy_len");
+    assert_eq!(trace.expanded[0].location, "src/copy.rs:88");
+    assert_eq!(trace.expanded[0].annotation, "unclamped length forwarded");
 }
 
 #[test]

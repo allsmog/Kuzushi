@@ -26,6 +26,7 @@ mod scan;
 
 pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
 mod chain_artifacts;
+mod trace_evidence;
 use confirm::prove_phase_model;
 pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,
@@ -236,6 +237,35 @@ pub(crate) struct ProvePhaseModel {
     /// will pursue, under which safety boundary, and the exact command Enter
     /// drafts. Present only while the operator has the card open.
     pub(crate) investigation: Option<InvestigationPlanModel>,
+    /// The Trace screen (`t`): where does this value travel. Original
+    /// recorded path beside the operator-requested expansion from the
+    /// durable static-evidence store.
+    pub(crate) trace: Option<TraceEvidenceModel>,
+}
+
+/// The data-flow evidence graph for one finding. The original path is what
+/// discovery recorded (finding-keyed taint flow, else the evidence anchors);
+/// the expanded path is every hop a `trace:expand` run appended with
+/// "requested by operator" provenance. Open questions and evidence deltas
+/// are the last expansion's advisory copy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TraceEvidenceModel {
+    pub(crate) reference: String,
+    pub(crate) severity: String,
+    pub(crate) original: Vec<TraceHopModel>,
+    pub(crate) expanded: Vec<TraceHopModel>,
+    pub(crate) open_questions: Vec<String>,
+    pub(crate) evidence_deltas: Vec<String>,
+    /// The exact command Enter loads — nothing runs from the screen.
+    pub(crate) expand_command: String,
+    pub(crate) next_hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TraceHopModel {
+    pub(crate) label: String,
+    pub(crate) location: String,
+    pub(crate) annotation: String,
 }
 
 /// The recommend-then-authorize card for a single-finding investigation.

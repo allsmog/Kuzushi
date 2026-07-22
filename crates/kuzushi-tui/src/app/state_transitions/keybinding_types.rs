@@ -77,6 +77,7 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchInvariantHunt,
     WorkbenchOrderChain,
     WorkbenchChainFold,
+    WorkbenchTraceView,
     WorkbenchCluster,
     WorkbenchBacklogToggle,
     /// One-key backlog decision; payload is the review verdict keyword fed

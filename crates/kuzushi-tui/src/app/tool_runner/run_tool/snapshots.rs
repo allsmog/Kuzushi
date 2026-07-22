@@ -52,6 +52,31 @@ impl ShellApp {
         self.domain_mut().set_taint_flows(flows);
     }
 
+    /// Re-read the durable operator-requested trace steps for one finding so
+    /// the Trace screen renders from the static-evidence store. Best-effort:
+    /// a missing store leaves the expansion empty, exactly as a never-run
+    /// `trace:expand` would.
+    pub(crate) fn hydrate_trace_expansion_from_store(&mut self, fingerprint: &str) {
+        let Some(root) = self.target().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        match load_trace_expansion_steps(&root, fingerprint) {
+            Ok(steps) if steps.is_empty() => {}
+            Ok(steps) => {
+                self.domain_mut()
+                    .set_trace_expansion(Some(TraceExpansionSnapshot {
+                        finding_fingerprint: fingerprint.to_string(),
+                        steps,
+                        open_questions: Vec::new(),
+                        evidence_deltas: Vec::new(),
+                    }));
+            }
+            Err(error) => {
+                self.log("trace", format!("Could not hydrate trace steps: {error}"));
+            }
+        }
+    }
+
     fn hydrate_persisted_exploit_chains(&mut self, root: &std::path::Path) {
         let chain_data = match kuzushi_core::capabilities::try_load_persistent_exploit_chains(root)
         {
@@ -83,6 +108,7 @@ const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     cache_recon_snapshot,
     cache_exploit_chain_snapshot,
     cache_taint_flow_snapshot,
+    cache_trace_expansion_snapshot,
     cache_threat_hunt_snapshot,
     cache_agentic_sast_snapshot,
     cache_patch_snapshot,
@@ -92,6 +118,8 @@ const MAX_EXPLOIT_CHAIN_SNAPSHOTS: usize = 25;
 const MAX_EXPLOIT_CHAIN_STEPS: usize = 20;
 const MAX_EXPLOIT_CHAIN_PRECONDITIONS: usize = 10;
 const MAX_TAINT_FLOW_STAGES: usize = 25;
+const MAX_TRACE_EXPANSION_STEPS: usize = 12;
+const MAX_TRACE_NOTES: usize = 12;
 const MAX_RECON_HOSTS: usize = 200;
 const MAX_RECON_SERVICES: usize = 500;
 const MAX_RECON_NOTES: usize = 200;
@@ -295,6 +323,78 @@ fn chain_severity(value: &str) -> ChainSeverity {
         "medium" | "med" => ChainSeverity::Medium,
         _ => ChainSeverity::High,
     }
+}
+
+/// Cache a `trace:expand` completion for the Trace screen: steps plus the
+/// session-scoped open questions and evidence deltas the durable store does
+/// not carry. The store stays the source of truth on reopen.
+fn cache_trace_expansion_snapshot(
+    app: &mut ShellApp,
+    tool_name: &str,
+    data: &serde_json::Value,
+) -> bool {
+    if tool_name != "trace:expand" {
+        return false;
+    }
+    let Some(fingerprint) = data_string(data, "findingFingerprint") else {
+        return true;
+    };
+    app.domain_mut()
+        .set_trace_expansion(Some(TraceExpansionSnapshot {
+            finding_fingerprint: fingerprint,
+            steps: trace_expansion_steps(data),
+            open_questions: limited_string_array(data, "openQuestions", MAX_TRACE_NOTES),
+            evidence_deltas: limited_string_array(data, "evidenceDeltas", MAX_TRACE_NOTES),
+        }));
+    true
+}
+
+fn trace_expansion_steps(data: &serde_json::Value) -> Vec<TraceExpansionStep> {
+    data.get("steps")
+        .and_then(serde_json::Value::as_array)
+        .map(|steps| {
+            steps
+                .iter()
+                .take(MAX_TRACE_EXPANSION_STEPS)
+                .filter_map(trace_expansion_step)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn trace_expansion_step(step: &serde_json::Value) -> Option<TraceExpansionStep> {
+    Some(TraceExpansionStep {
+        symbol: data_string(step, "symbol")?,
+        file: data_string(step, "filePath").unwrap_or_default(),
+        line: step
+            .get("line")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+        annotation: data_string(step, "annotation").unwrap_or_default(),
+    })
+}
+
+/// Read the durable operator-requested steps back out of the workspace's
+/// static-evidence store.
+fn load_trace_expansion_steps(
+    root: &std::path::Path,
+    fingerprint: &str,
+) -> anyhow::Result<Vec<TraceExpansionStep>> {
+    let workspace = kuzushi_core::WorkspaceTarget::new(root)?;
+    let store = kuzushi_core::static_evidence::StaticEvidenceStore::open(&workspace)?;
+    let steps = kuzushi_core::capabilities::trace_expansion::list_operator_trace_steps(
+        &store,
+        fingerprint,
+    )?;
+    Ok(steps
+        .into_iter()
+        .map(|step| TraceExpansionStep {
+            symbol: step.symbol,
+            file: step.file_path,
+            line: step.line,
+            annotation: step.annotation,
+        })
+        .collect())
 }
 
 fn cache_threat_hunt_snapshot(

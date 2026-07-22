@@ -83,6 +83,9 @@ impl ShellApp {
             }
             ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
             ViewHotkeyAction::WorkbenchChainFold => return Some(self.draft_workbench_chain_fold()),
+            ViewHotkeyAction::WorkbenchTraceView => {
+                return Some(self.toggle_workbench_trace_view())
+            }
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
             ViewHotkeyAction::WorkbenchBacklogDecide(verdict) => {
@@ -264,6 +267,7 @@ impl ShellApp {
             PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
             PhaseSurfaceId::ProveInvestigation => self.start_investigation_from_card(),
             PhaseSurfaceId::ReviewChains => self.open_chain_constituent(),
+            PhaseSurfaceId::ProveTrace => self.draft_trace_expansion_command(),
             focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
@@ -531,6 +535,55 @@ impl ShellApp {
         self.log(
             "chain",
             "constituent finding draft loaded — Enter opens it in Review",
+        );
+    }
+
+    /// `t` toggles the Trace screen: where does this value travel. The
+    /// recorded path renders beside the operator-requested expansion, which
+    /// hydrates from the durable static-evidence store on open.
+    fn toggle_workbench_trace_view(&mut self) -> InputUpdate {
+        if self.router.workbench_mut().toggle_trace_view() {
+            self.router
+                .workbench_mut()
+                .set_focus(crate::ui_view_models::PhaseSurfaceId::ProveTrace);
+            self.hydrate_selected_trace_expansion();
+            self.log(
+                "trace",
+                "trace opened — Enter drafts trace:expand, t closes",
+            );
+        } else {
+            self.log("trace", "trace closed");
+        }
+        InputUpdate::handled()
+    }
+
+    fn hydrate_selected_trace_expansion(&mut self) {
+        let Some(fingerprint) = crate::ui_view_models::current_finding_for_detail(self)
+            .map(|(_, finding)| finding.fingerprint)
+        else {
+            return;
+        };
+        self.hydrate_trace_expansion_from_store(&fingerprint);
+    }
+
+    /// Enter on the Trace screen drafts the expansion command for the
+    /// selected finding — nothing runs until the operator submits it.
+    fn draft_trace_expansion_command(&mut self) {
+        let Some((alias, finding)) = crate::ui_view_models::current_finding_for_detail(self) else {
+            self.log("trace", "no finding selected — open one from Review first");
+            return;
+        };
+        self.set_input(format!(
+            "run trace:expand {}",
+            serde_json::json!({ "fingerprint": finding.fingerprint })
+        ));
+        self.set_input_mode(InputMode::Prompt);
+        let reference = alias.unwrap_or_else(|| finding.fingerprint.clone());
+        self.log(
+            "trace",
+            format!(
+                "trace:expand draft loaded for {reference} — Enter runs the bounded read-only agent"
+            ),
         );
     }
 
@@ -1208,9 +1261,8 @@ fn focused_workbench_visualization(
         | PhaseSurfaceId::ProveEvidence
         | PhaseSurfaceId::ProveLadder
         | PhaseSurfaceId::ProveNextAction
-        | PhaseSurfaceId::ProveInvestigation => {
-            FocusedWorkbenchVisualization::Scene(VizPage::AttackPath)
-        }
+        | PhaseSurfaceId::ProveInvestigation
+        | PhaseSurfaceId::ProveTrace => FocusedWorkbenchVisualization::Scene(VizPage::AttackPath),
         PhaseSurfaceId::ProveReceipt => FocusedWorkbenchVisualization::ProofReplay,
         PhaseSurfaceId::FixCandidate
         | PhaseSurfaceId::FixVerification

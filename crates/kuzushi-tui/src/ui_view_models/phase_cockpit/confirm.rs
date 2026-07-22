@@ -1,3 +1,4 @@
+use super::trace_evidence::trace_evidence_model;
 use super::{InvestigationPlanModel, ProofReplayModel, ProvePhaseModel};
 use crate::ui_view_models::{
     current_finding_for_detail, finding_detail_model_for_projection, findings_model,
@@ -19,6 +20,9 @@ pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
     });
     let investigation =
         investigation_plan_model(app, selected.as_ref(), finding.as_ref(), proof.as_ref());
+    let attack_path =
+        taint_flow_path_for_finding(app, selected.as_ref().map(|(_, finding)| finding));
+    let trace = trace_evidence_model(app, selected.as_ref(), finding.as_ref(), &attack_path);
     ProvePhaseModel {
         selection_disclosure: super::phase_bodies::actionable_selection_disclosure(
             app,
@@ -26,15 +30,13 @@ pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
             finding.as_ref(),
         ),
         finding,
-        attack_path: taint_flow_path_for_finding(
-            app,
-            selected.as_ref().map(|(_, finding)| finding),
-        ),
+        attack_path,
         proof,
         empty_hint: selected
             .is_none()
             .then_some("select a finding to inspect its path and proof"),
         investigation,
+        trace,
     }
 }
 

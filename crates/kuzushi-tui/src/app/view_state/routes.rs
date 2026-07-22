@@ -766,6 +766,7 @@ pub struct WorkbenchRouteState {
     review: crate::app::WorkbenchReviewState,
     investigation: Option<InvestigationBoundary>,
     chains_open: bool,
+    trace_open: bool,
 }
 
 impl Default for WorkbenchRouteState {
@@ -778,6 +779,7 @@ impl Default for WorkbenchRouteState {
             review: crate::app::WorkbenchReviewState::default(),
             investigation: None,
             chains_open: false,
+            trace_open: false,
         }
     }
 }
@@ -828,6 +830,15 @@ impl WorkbenchRouteState {
     pub(crate) fn toggle_chains_view(&mut self) -> bool {
         self.chains_open = !self.chains_open;
         self.chains_open
+    }
+
+    pub(crate) fn trace_view_open(&self) -> bool {
+        self.trace_open
+    }
+
+    pub(crate) fn toggle_trace_view(&mut self) -> bool {
+        self.trace_open = !self.trace_open;
+        self.trace_open
     }
 
     pub(crate) fn zoom(&self) -> crate::app::WorkbenchZoom {

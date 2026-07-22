@@ -163,6 +163,11 @@ fn prove_specs(model: &ProvePhaseModel) -> Vec<PhaseSurfaceSpec> {
         model.investigation.is_some(),
         selectable(PhaseSurfaceId::ProveInvestigation),
     );
+    push_if(
+        &mut specs,
+        model.trace.is_some(),
+        selectable(PhaseSurfaceId::ProveTrace),
+    );
     specs
 }
 

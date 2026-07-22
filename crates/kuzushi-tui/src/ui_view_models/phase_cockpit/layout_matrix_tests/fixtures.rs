@@ -142,6 +142,7 @@ fn prove_fixture(state: SemanticFixture) -> ProvePhaseModel {
         proof: (richness >= 2).then(|| fixture_proof(state == SemanticFixture::Stale)),
         selection_disclosure: None,
         investigation: None,
+        trace: None,
         empty_hint: (richness == 0).then_some("fixture empty"),
     }
 }

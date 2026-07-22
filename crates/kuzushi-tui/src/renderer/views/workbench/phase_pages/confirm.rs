@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     FindingDetailModel, FindingEvidenceRow, InvestigationPlanModel, ProvePhaseModel,
+    TraceEvidenceModel, TraceHopModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -94,6 +95,110 @@ fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<
         theme::muted(),
     ));
     lines.push(Line::styled(fit(&plan.command, width), theme::accent()));
+    lines
+}
+
+/// The Trace screen: the recorded path beside the operator-requested
+/// expansion, every hop cited to file:line, open questions as first-class
+/// `?` rows, and the evidence the last expansion added.
+fn render_trace_screen(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    trace: &TraceEvidenceModel,
+    state: PhaseRenderState,
+) {
+    render_lines_pane(
+        frame,
+        area,
+        "TRACE · Enter draft trace:expand · v investigate · t close",
+        trace_lines(trace, area.width.saturating_sub(2) as usize),
+        PhaseSurfaceId::ProveTrace,
+        state,
+    );
+}
+
+fn trace_lines(trace: &TraceEvidenceModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::styled(
+        fit(
+            &format!(
+                "{} · {} · where does this value travel",
+                trace.reference, trace.severity
+            ),
+            width,
+        ),
+        theme::heading(),
+    )];
+    lines.push(Line::styled(fit("RECORDED PATH", width), theme::label()));
+    if trace.original.is_empty() {
+        lines.push(Line::styled(
+            fit(
+                "  no located evidence anchors recorded for this finding",
+                width,
+            ),
+            theme::muted(),
+        ));
+    }
+    for hop in &trace.original {
+        lines.extend(trace_hop_lines(hop, width));
+    }
+    lines.push(Line::styled(
+        fit("EXPANDED PATH · requested by operator", width),
+        theme::label(),
+    ));
+    if trace.expanded.is_empty() {
+        lines.push(Line::styled(
+            fit(
+                "  no operator-requested hops yet — the durable evidence store has none for this finding",
+                width,
+            ),
+            theme::muted(),
+        ));
+    }
+    for hop in &trace.expanded {
+        lines.extend(trace_hop_lines(hop, width));
+    }
+    for question in &trace.open_questions {
+        lines.push(Line::styled(
+            fit(&format!("  ? open: {question}"), width),
+            theme::warn(),
+        ));
+    }
+    if !trace.evidence_deltas.is_empty() {
+        lines.push(Line::styled(fit("NEW EVIDENCE", width), theme::label()));
+        for delta in &trace.evidence_deltas {
+            lines.push(Line::styled(
+                fit(&format!("  + {delta}"), width),
+                theme::primary(),
+            ));
+        }
+    }
+    lines.push(Line::styled(
+        fit(&format!("NEXT · {}", trace.next_hint), width),
+        theme::muted(),
+    ));
+    lines.push(Line::styled(
+        fit(&trace.expand_command, width),
+        theme::accent(),
+    ));
+    lines
+}
+
+fn trace_hop_lines(hop: &TraceHopModel, width: usize) -> Vec<Line<'static>> {
+    let location = if hop.location.is_empty() {
+        "location unrecorded".to_string()
+    } else {
+        hop.location.clone()
+    };
+    let mut lines = vec![Line::styled(
+        fit(&format!("  ▾ {} — {}", hop.label, location), width),
+        theme::primary(),
+    )];
+    if !hop.annotation.is_empty() {
+        lines.push(Line::styled(
+            fit(&format!("      {}", hop.annotation), width),
+            theme::muted(),
+        ));
+    }
     lines
 }
 
@@ -323,6 +428,9 @@ pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'st
         return divider_lines("STATUS / NEXT", empty_selection_lines(model), width);
     };
     let mut lines = Vec::new();
+    if let Some(trace) = model.trace.as_ref() {
+        lines.extend(divider_lines("TRACE", trace_lines(trace, width), width));
+    }
     if let Some(plan) = model.investigation.as_ref() {
         lines.extend(divider_lines(
             "INVESTIGATION PLAN",
@@ -474,6 +582,11 @@ fn render_zoomed(
     if surface == PhaseSurfaceId::ProveInvestigation {
         if let Some(plan) = model.investigation.as_ref() {
             return render_investigation_card(frame, area, plan, state);
+        }
+    }
+    if surface == PhaseSurfaceId::ProveTrace {
+        if let Some(trace) = model.trace.as_ref() {
+            return render_trace_screen(frame, area, trace, state);
         }
     }
     match surface {
@@ -653,5 +766,85 @@ mod investigation_card_tests {
             "{body}"
         );
         assert!(body.contains("( ) Static-only (mode=model)"), "{body}");
+    }
+}
+
+#[cfg(test)]
+mod trace_screen_tests {
+    use super::*;
+
+    fn hop(label: &str, location: &str, annotation: &str) -> TraceHopModel {
+        TraceHopModel {
+            label: label.to_string(),
+            location: location.to_string(),
+            annotation: annotation.to_string(),
+        }
+    }
+
+    fn trace_model() -> TraceEvidenceModel {
+        TraceEvidenceModel {
+            reference: "F-2".to_string(),
+            severity: "HIGH".to_string(),
+            original: vec![hop("source", "src/input.rs:4", "attacker-controlled read")],
+            expanded: vec![hop(
+                "parse_header",
+                "src/parse.rs:32",
+                "length copied without bound",
+            )],
+            open_questions: vec!["is the header attacker-controlled over TLS?".to_string()],
+            evidence_deltas: vec!["length reaches memcpy unchecked".to_string()],
+            expand_command: "run trace:expand {\"fingerprint\":\"abc\"}".to_string(),
+            next_hint: "resolve the open questions below".to_string(),
+        }
+    }
+
+    fn text(lines: &[Line<'static>]) -> String {
+        lines
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn trace_screen_separates_recorded_and_operator_requested_paths() {
+        let body = text(&trace_lines(&trace_model(), 100));
+        assert!(
+            body.contains("F-2 · HIGH · where does this value travel"),
+            "{body}"
+        );
+        assert!(body.contains("RECORDED PATH"), "{body}");
+        assert!(body.contains("▾ source — src/input.rs:4"), "{body}");
+        assert!(
+            body.contains("EXPANDED PATH · requested by operator"),
+            "{body}"
+        );
+        assert!(body.contains("▾ parse_header — src/parse.rs:32"), "{body}");
+        assert!(body.contains("length copied without bound"), "{body}");
+        assert!(
+            body.contains("? open: is the header attacker-controlled over TLS?"),
+            "{body}"
+        );
+        assert!(body.contains("NEW EVIDENCE"), "{body}");
+        assert!(body.contains("+ length reaches memcpy unchecked"), "{body}");
+        assert!(body.contains("NEXT · resolve the open questions"), "{body}");
+        assert!(body.contains("run trace:expand {"), "{body}");
+    }
+
+    #[test]
+    fn empty_paths_render_honest_guidance_instead_of_invented_hops() {
+        let mut model = trace_model();
+        model.original.clear();
+        model.expanded.clear();
+        model.open_questions.clear();
+        model.evidence_deltas.clear();
+        model.next_hint = "no operator-requested hops yet".to_string();
+        let body = text(&trace_lines(&model, 100));
+        assert!(
+            body.contains("no located evidence anchors recorded"),
+            "{body}"
+        );
+        assert!(body.contains("no operator-requested hops yet"), "{body}");
+        assert!(!body.contains("NEW EVIDENCE"), "{body}");
     }
 }

@@ -1,7 +1,8 @@
 use super::{
     ActivitySession, AgentChatState, AgentChatView, ContextSnapshotView, ExploitChain,
     ExploitChainDetail, KnowledgeBaseView, LiveActivity, LogLine, LogState, PwnView, ReconSnapshot,
-    ScanPanelState, ScanState, TaintFlowSnapshot, TaskDurationStore, WorkbenchCache, WorkspaceView,
+    ScanPanelState, ScanState, TaintFlowSnapshot, TaskDurationStore, TraceExpansionSnapshot,
+    WorkbenchCache, WorkspaceView,
 };
 use kuzushi_core::{
     findings::ReviewDecisionRecord,
@@ -123,6 +124,7 @@ pub struct DomainCache {
     chain_aliases: Vec<ExploitChain>,
     exploit_chains: Vec<ExploitChainDetail>,
     taint_flows: Vec<TaintFlowSnapshot>,
+    trace_expansion: Option<TraceExpansionSnapshot>,
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
     findings_revision: u64,
@@ -164,6 +166,7 @@ impl DomainCache {
             chain_aliases: Vec::new(),
             exploit_chains: Vec::new(),
             taint_flows: Vec::new(),
+            trace_expansion: None,
             program_scope: None,
             findings: Vec::new(),
             findings_revision: 0,
@@ -213,6 +216,7 @@ impl DomainCache {
         self.chain_aliases.clear();
         self.exploit_chains.clear();
         self.taint_flows.clear();
+        self.trace_expansion = None;
         self.program_scope = None;
     }
 
@@ -445,6 +449,38 @@ impl DomainCache {
 
     pub(crate) fn set_taint_flows(&mut self, flows: Vec<TaintFlowSnapshot>) {
         self.taint_flows = flows;
+    }
+
+    /// The operator-requested trace expansion, keyed by finding fingerprint;
+    /// another finding's snapshot never renders under the selected one.
+    pub(crate) fn trace_expansion_for_finding(
+        &self,
+        fingerprint: &str,
+    ) -> Option<&TraceExpansionSnapshot> {
+        self.trace_expansion
+            .as_ref()
+            .filter(|snapshot| snapshot.finding_fingerprint == fingerprint)
+    }
+
+    /// Replace the cached expansion. Steps come from the durable
+    /// static-evidence store; when the store has steps but this session has
+    /// no advisory copy yet, the previous snapshot's open questions and
+    /// evidence deltas are retained if it described the same finding.
+    pub(crate) fn set_trace_expansion(&mut self, snapshot: Option<TraceExpansionSnapshot>) {
+        self.trace_expansion = match (snapshot, self.trace_expansion.take()) {
+            (Some(mut next), Some(previous))
+                if next.finding_fingerprint == previous.finding_fingerprint =>
+            {
+                if next.open_questions.is_empty() {
+                    next.open_questions = previous.open_questions;
+                }
+                if next.evidence_deltas.is_empty() {
+                    next.evidence_deltas = previous.evidence_deltas;
+                }
+                Some(next)
+            }
+            (next, _) => next,
+        };
     }
 
     pub(crate) fn taint_flow_for_finding(&self, finding: &Finding) -> Option<&TaintFlowSnapshot> {
