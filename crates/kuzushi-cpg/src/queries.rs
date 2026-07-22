@@ -117,7 +117,11 @@ pub fn method_at(project: &Project, file: &str, line: u32) -> Option<MethodRecor
             cpg.path_of(cpg.file_of(*m))
                 .is_some_and(|path| file_matches(path, file))
         })
-        .filter_map(|m| cpg.line_of(m).filter(|start| *start <= line).map(|s| (s, m)))
+        .filter_map(|m| {
+            cpg.line_of(m)
+                .filter(|start| *start <= line)
+                .map(|s| (s, m))
+        })
         .max_by_key(|(start, _)| *start)
         .map(|(_, m)| method_record(project, m))
 }
@@ -164,7 +168,11 @@ fn method_node_at(project: &Project, file: &str, line: u32) -> Option<cpg_core::
             cpg.path_of(cpg.file_of(*m))
                 .is_some_and(|path| file_matches(path, file))
         })
-        .filter_map(|m| cpg.line_of(m).filter(|start| *start <= line).map(|s| (s, m)))
+        .filter_map(|m| {
+            cpg.line_of(m)
+                .filter(|start| *start <= line)
+                .map(|s| (s, m))
+        })
         .max_by_key(|(start, _)| *start)
         .map(|(_, m)| m)
 }
@@ -190,7 +198,8 @@ pub fn backward_slice_at(
 ) -> (Vec<SliceRecord>, bool) {
     let cpg = &project.cpg;
     let criteria = cpg_cli::slice::criterion_location(cpg, method_name, line);
-    let (entries, truncated) = cpg_cli::slice::backward_slice(cpg, &criteria, depth, SLICE_MAX_NODES);
+    let (entries, truncated) =
+        cpg_cli::slice::backward_slice(cpg, &criteria, depth, SLICE_MAX_NODES);
     let records = entries
         .into_iter()
         .map(|entry| SliceRecord {
@@ -247,7 +256,10 @@ mod tests {
 
         let callees = callees_of(&project, "handler");
         assert!(callees.iter().any(|c| c.contains("run")), "{callees:?}");
-        assert!(callees.iter().any(|c| c.contains("sanitize")), "{callees:?}");
+        assert!(
+            callees.iter().any(|c| c.contains("sanitize")),
+            "{callees:?}"
+        );
 
         let defs = methods_named(&project, "run");
         assert_eq!(defs.len(), 1);

@@ -201,7 +201,8 @@ impl ToolHandler for MethodAtTool {
             let method = projects
                 .iter()
                 .find_map(|(lang, project)| {
-                    queries::method_at(project, &file, line).map(|record| method_json(&record, lang))
+                    queries::method_at(project, &file, line)
+                        .map(|record| method_json(&record, lang))
                 })
                 .unwrap_or(Value::Null);
             Ok(json!({"file": file, "line": line, "method": method}))

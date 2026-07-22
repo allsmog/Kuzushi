@@ -316,7 +316,12 @@ fn cpg_graph_row(app: &ShellApp) -> HealthRow {
     };
     let dir = kuzushi_core::cpg_artifact_dir(target);
     if matches!(cached_path_state(app, &dir), PathState::Directory) {
-        return health_row(HealthTone::Pass, "cpg graphs", dir.display(), "backend=cpg-rs");
+        return health_row(
+            HealthTone::Pass,
+            "cpg graphs",
+            dir.display(),
+            "backend=cpg-rs",
+        );
     }
     health_row(
         HealthTone::Pass,

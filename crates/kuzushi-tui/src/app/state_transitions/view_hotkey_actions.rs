@@ -1295,7 +1295,10 @@ mod invariant_hunt_focus_tests {
             focus.starts_with("Invariant hunt seeded from rules.cwe-787 at src/compress.c:108."),
             "{focus}"
         );
-        assert!(focus.contains("dst_len truncation before SDDecompress"), "{focus}");
+        assert!(
+            focus.contains("dst_len truncation before SDDecompress"),
+            "{focus}"
+        );
         assert!(focus.contains("Hunt the whole repository"), "{focus}");
     }
 }

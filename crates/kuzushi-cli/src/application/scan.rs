@@ -12,9 +12,8 @@ use kuzushi_core::run_artifacts::{
 };
 use kuzushi_core::run_lifecycle::{RunItemStatus, RunObservationHandle};
 use kuzushi_core::{
-    config_hash, new_run_id, tool_wants_runtime, AgentRuntime,
-    FindingStore, ModuleRegistry, PreparedToolInput, ToolOptionStore, ToolResultStatus,
-    TraceHandle, WorkspaceTarget,
+    config_hash, new_run_id, tool_wants_runtime, AgentRuntime, FindingStore, ModuleRegistry,
+    PreparedToolInput, ToolOptionStore, ToolResultStatus, TraceHandle, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};

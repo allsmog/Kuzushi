@@ -213,7 +213,10 @@ fn harvest_regex_name(
 }
 
 fn is_identifier_like(name: &str) -> bool {
-    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
 }
 
 enum PatternMatcher {
@@ -348,7 +351,10 @@ mod tests {
 
         assert!(stats.flow_count > 0, "expected a flow; stats {stats:?}");
         let flow = &findings[0];
-        assert!(flow.sink_file.as_deref().is_some_and(|f| f.ends_with("users.ts")));
+        assert!(flow
+            .sink_file
+            .as_deref()
+            .is_some_and(|f| f.ends_with("users.ts")));
         assert!(!flow.path.is_empty());
     }
 

@@ -174,7 +174,8 @@ fn plain_retry_card_lines(model: RetryCardModel, width: usize) -> Vec<String> {
         model.failed_count
     ));
     lines.extend(
-        model.rows
+        model
+            .rows
             .into_iter()
             .map(|row| format!("- {}: {}", row.tool, row.error)),
     );

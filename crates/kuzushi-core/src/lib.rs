@@ -34,12 +34,12 @@ pub(crate) mod jsonl_tail;
 pub(crate) mod module_result;
 #[cfg(test)]
 mod panic_surface_lint;
-#[cfg(test)]
-mod terminal_output_lint;
 pub(crate) mod process_lookup;
+mod runtime_diagnostics;
 pub(crate) mod sqlite_connection;
 pub(crate) mod structured_output;
-mod runtime_diagnostics;
+#[cfg(test)]
+mod terminal_output_lint;
 #[cfg(test)]
 pub(crate) mod test_env;
 pub(crate) mod yaml;
@@ -49,5 +49,5 @@ mod public_exports;
 pub use demo::{
     demo_fixture_path, offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture,
 };
-pub use runtime_diagnostics::{take_runtime_diagnostics, RuntimeDiagnostic};
 pub use public_exports::*;
+pub use runtime_diagnostics::{take_runtime_diagnostics, RuntimeDiagnostic};

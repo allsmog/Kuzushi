@@ -28,9 +28,9 @@ impl IndexFacade {
             };
             match client.call_tool(call.tool, call.args).await {
                 Ok(value) => return Ok(value),
-                Err(err) => self.diagnostics.push(backend_failure_diagnostic(
-                    backend, operation, symbol, &err,
-                )),
+                Err(err) => self
+                    .diagnostics
+                    .push(backend_failure_diagnostic(backend, operation, symbol, &err)),
             }
         }
         anyhow::bail!("no backend was able to answer {operation}({symbol})")

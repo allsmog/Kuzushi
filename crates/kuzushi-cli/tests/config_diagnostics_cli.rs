@@ -95,5 +95,8 @@ fn plain_shell_preserves_config_deprecation_on_stderr() {
         stderr.contains("global config uses deprecated stop_after = \"confirm\"; use \"prove\""),
         "stderr: {stderr}"
     );
-    assert!(!output.stdout.is_empty(), "plain shell summary is preserved");
+    assert!(
+        !output.stdout.is_empty(),
+        "plain shell summary is preserved"
+    );
 }

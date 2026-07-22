@@ -428,7 +428,9 @@ fn resolve_snippet_with_scanned_copy(
         ScannedSnippetLookup::Window(window) if !live_ok || snippet_is_stale(&live, &window) => {
             scanned_snippet_fallback_model(app, finding, window)
         }
-        ScannedSnippetLookup::Absent if !live_ok => append_snippet_note(live, "no scanned copy recorded"),
+        ScannedSnippetLookup::Absent if !live_ok => {
+            append_snippet_note(live, "no scanned copy recorded")
+        }
         _ => live,
     }
 }

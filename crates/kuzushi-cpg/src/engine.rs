@@ -54,7 +54,9 @@ fn build_report(
 }
 
 fn load_fresh(target: &Path, lang: &str, cpg_path: &Path) -> Option<Project> {
-    let artifact_mtime = std::fs::metadata(cpg_path).and_then(|m| m.modified()).ok()?;
+    let artifact_mtime = std::fs::metadata(cpg_path)
+        .and_then(|m| m.modified())
+        .ok()?;
     if newest_source_mtime(target, lang).is_some_and(|source| source > artifact_mtime) {
         return None;
     }

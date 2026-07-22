@@ -9,7 +9,10 @@ const PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 #[tokio::main]
 async fn main() -> Result<()> {
     if std::env::args().any(|a| a == "--health") {
-        println!("{}", serde_json::to_string_pretty(&tools::health_summary())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&tools::health_summary())?
+        );
         return Ok(());
     }
     let info = ServerInfo::new("kuzushi-mcp-cpg", PKG_VERSION);

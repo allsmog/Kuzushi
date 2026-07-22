@@ -46,4 +46,3 @@ fn prompts_editor_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     ]);
     bindings
 }
-

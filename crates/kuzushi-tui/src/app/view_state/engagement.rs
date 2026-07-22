@@ -1,8 +1,7 @@
 use crate::app::{
     ExecutionAuthorization, FailedPlanningTask, GuidedScanFlow, PendingPatch, PendingPrereqPrompt,
     PlanningOptionOverrides, PlanningPickerRouteState, PlanningRunStep, PlanningTaskId,
-    PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, ThreatPatch,
-    WorkflowPhase,
+    PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, ThreatPatch, WorkflowPhase,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};

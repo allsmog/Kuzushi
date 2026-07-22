@@ -622,10 +622,7 @@ fn blocked_planning_row_names_its_exact_prerequisite_in_focused_detail() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("prerequisite missing"), "{rendered}");
-    assert!(
-        rendered.contains("install `codeql` on PATH"),
-        "{rendered}"
-    );
+    assert!(rendered.contains("install `codeql` on PATH"), "{rendered}");
     assert!(!rendered.contains("KUZUSHI_*_BIN"), "{rendered}");
 }
 

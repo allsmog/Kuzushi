@@ -695,7 +695,6 @@ impl ShellApp {
         );
     }
 
-
     fn log_retry_plan(&mut self, plan: &[PlanningTaskId]) {
         let labels = plan
             .iter()
@@ -948,7 +947,6 @@ fn recommended_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId>
         .find(|task| task.tool_name() == tool_name)
 }
 
-
 fn failed_task_is_structurally_unsatisfiable(item: &FailedPlanningTask) -> bool {
     let error = item.error.to_ascii_lowercase();
     structurally_unsatisfiable_error(&error)
@@ -1024,7 +1022,6 @@ mod tests {
 
         assert_eq!(app.shell_view(), ShellView::Setup);
     }
-
 
     #[test]
     fn model_recommendation_result_maps_tools_to_phase_tasks() {
