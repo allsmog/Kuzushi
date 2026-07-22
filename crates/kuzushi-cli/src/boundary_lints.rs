@@ -16,7 +16,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "adapters/auth_oauth.rs",  // OPENAI_BASE_URL, CODEX_CI, key presence
     // Doctor diagnostics probe the operator environment by design.
     "doctor/bridge.rs", // PATH
-    "doctor/checks.rs", // PATH, HOME, KUZUSHI_JOERN_BIN/REVNG_IMAGE locators
+    "doctor/checks.rs", // PATH, HOME, REVNG_IMAGE locators
     // Terminal / accessibility mode.
     "presentation/terminal.rs", // KUZUSHI_PLAIN/SCREEN_READER/LOW_BANDWIDTH
 ];

@@ -73,43 +73,17 @@ pub(crate) fn check_scanner_binary(binary: &'static str) -> DoctorCheck {
     }
 }
 
-pub(crate) fn check_joern_binary() -> DoctorCheck {
-    if let Some(check) = check_joern_env_override() {
-        return check;
-    }
-
-    let path = env::var_os("PATH");
-    let cwd = current_dir_for_doctor();
-    if let Some(found) = resolve_executable("joern", path.as_deref(), &cwd) {
-        return DoctorCheck::ok("joern", format!("found joern at {}", found.display()));
-    }
-    if let Some(found) = resolve_executable("joern-parse", path.as_deref(), &cwd) {
-        return DoctorCheck::ok("joern", format!("found joern-parse at {}", found.display()));
-    }
-
-    DoctorCheck::warn(
-        "joern",
-        "joern and joern-parse were not found on PATH",
-        "Install Joern from https://docs.joern.io/installation or set KUZUSHI_JOERN_BIN=<path-to-joern> before using Joern-backed analysis.",
-    )
-}
-
-fn check_joern_env_override() -> Option<DoctorCheck> {
-    let path = env::var_os("KUZUSHI_JOERN_BIN").map(PathBuf::from)?;
-    if path.is_file() {
-        return Some(DoctorCheck::ok(
-            "joern",
-            format!("KUZUSHI_JOERN_BIN points to {}", path.display()),
-        ));
-    }
-    Some(DoctorCheck::warn(
-        "joern",
+/// The CPG engine is compiled in (cpg-rs, in-process) — nothing to install,
+/// so this check is informational and always green.
+pub(crate) fn check_cpg_engine() -> DoctorCheck {
+    DoctorCheck::ok(
+        "cpg",
         format!(
-            "KUZUSHI_JOERN_BIN points to missing file {}",
-            path.display()
+            "cpg-rs engine compiled in (graph shape v{}; languages: {})",
+            kuzushi_cpg::GRAPH_SHAPE_VERSION,
+            kuzushi_cpg::supported_languages().join(", ")
         ),
-        "Fix KUZUSHI_JOERN_BIN or install joern/joern-parse on PATH.",
-    ))
+    )
 }
 
 pub(crate) fn deterministic_capability_checks() -> Vec<DoctorCheck> {

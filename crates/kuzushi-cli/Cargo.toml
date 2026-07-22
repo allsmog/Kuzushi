@@ -17,6 +17,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap.workspace = true
 kuzushi-core = { path = "../kuzushi-core" }
+kuzushi-cpg = { path = "../kuzushi-cpg" }
 kuzushi-openai = { path = "../kuzushi-openai" }
 kuzushi-tui = { path = "../kuzushi-tui" }
 serde.workspace = true

@@ -78,7 +78,7 @@ container):
 - **apktool** — `https://apktool.org/`
 - **unzip** — standard on macOS/Linux; install via your package manager on
   bare images
-- Optional, future phases: `d2j-dex2jar`, `frida`, `revng`, `joern`, `codeql`
+- Optional, future phases: `d2j-dex2jar`, `frida`, `revng`, `codeql`
 
 Verify they're on PATH:
 
@@ -255,8 +255,8 @@ today:
 
 - **Structural rules** — Semgrep patterns matched on AST shape (call sites,
   method-chain shapes) survive renaming.
-- **Data-flow** — `taint-iris-next:source-sink-trace` can use CodeQL/Joern
-  through its MCP servers. Joern's `joern.taint_paths` is
+- **Data-flow** — `taint-iris-next:source-sink-trace` can use cpg-rs/CodeQL
+  through its MCP servers. The cpg server's `cpg.taint_paths` is
   agnostic to identifier names; it traces actual edges in the code property
   graph.
 - **apktool smali fallback** — when an interesting source location in jadx

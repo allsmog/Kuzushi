@@ -22,7 +22,7 @@ pub enum ToggleOutcome {
         dependents: Vec<PlanningTaskId>,
     },
     /// Tried to toggle a row whose CLI requirement isn't met
-    /// (joern-parse / codeql not on PATH).
+    /// (codeql / semgrep not on PATH).
     MissingCli {
         task: PlanningTaskId,
         cli: &'static str,
@@ -345,27 +345,27 @@ mod tests {
     }
 
     #[test]
-    fn cpg_with_missing_cli_is_blocked() {
-        // CPG row without joern-parse on PATH cannot be toggled on.
+    fn codeql_db_with_missing_cli_is_blocked() {
+        // CodeQL DB row without codeql on PATH cannot be toggled on.
         let rows = vec![PlanningTaskRow {
-            id: BuildCodePropertyGraph,
-            label: BuildCodePropertyGraph.label(),
-            tool_name: BuildCodePropertyGraph.tool_name(),
+            id: BuildCodeQlDatabase,
+            label: BuildCodeQlDatabase.label(),
+            tool_name: BuildCodeQlDatabase.tool_name(),
             artifact_path: PathBuf::from("/dev/null"),
             artifact_state: ArtifactState::Missing,
             artifact_modified: None,
             model_backed: false,
-            required_cli: Some("joern-parse"),
+            required_cli: Some("codeql"),
             cli_available: false,
             blocker: None,
         }];
         let mut selected = BTreeSet::new();
-        let outcome = toggle_planning_row(BuildCodePropertyGraph, &rows, &mut selected);
+        let outcome = toggle_planning_row(BuildCodeQlDatabase, &rows, &mut selected);
         assert_eq!(
             outcome,
             ToggleOutcome::MissingCli {
-                task: BuildCodePropertyGraph,
-                cli: "joern-parse"
+                task: BuildCodeQlDatabase,
+                cli: "codeql"
             }
         );
         assert!(selected.is_empty());

@@ -38,7 +38,7 @@ fn uses_last_meaningful_line_when_nothing_names_a_failure() {
 
 #[test]
 fn skips_generic_exit_wrapper_in_favor_of_real_cause() {
-    // joern emits the generic ExternalCommand wrapper first; the actionable
+    // JVM tools emit the generic ExternalCommand wrapper first; the actionable
     // cause (missing astgen) comes later and should win.
     let stderr = b"2026-05-28 13:48:03.597 ERROR ExternalCommand$          Process exited with code 1.\n\
         2026-05-28 13:48:03.500 ERROR AstGenRunner              Local astgen binary not found at '/x/astgen'!\n";

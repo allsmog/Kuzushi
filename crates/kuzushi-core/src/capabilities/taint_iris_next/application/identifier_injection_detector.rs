@@ -11,13 +11,13 @@
 //! ...). Both the SQL keyword check and the safe-wrapper check are
 //! intentionally precise and codebase-agnostic — they catch the
 //! exact class of bug CVE-2018-1058 / CVE-2020-25694 and the dblink
-//! finding share without needing joern's flow analysis.
+//! finding share without needing CPG flow analysis.
 //!
 //! Cost: 0 LLM tokens. Pure tree-sitter, runs in <10s on the full
 //! postgres tree (~1600 .c files). Feeds into the existing
 //! `TaintIrisNextCandidate` stream so Thread D's mandatory
 //! call-site audit runs against detector hits the same way it does
-//! for rg / joern / codeql candidates.
+//! for rg / cpg-rs / codeql candidates.
 
 use super::*;
 use tree_sitter::{Node, Parser};

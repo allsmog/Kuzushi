@@ -444,6 +444,8 @@ fn sast_taint_backend_options() -> Vec<OptionSpec> {
     .choices(&[
         "auto",
         "structural",
+        "cpg-rs",
+        "cpg",
         "semgrep",
         "codeql",
         "joern",

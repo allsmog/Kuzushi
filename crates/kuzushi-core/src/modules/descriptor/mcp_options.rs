@@ -10,28 +10,6 @@ pub(in crate::modules) fn mcps_option() -> OptionSpec {
     .advanced()
 }
 
-pub(in crate::modules) fn joern_cpg_option() -> OptionSpec {
-    opt(
-        "joernCpg",
-        OptionType::Path,
-        "Path to a Joern CPG (`cpg.bin`) for the Joern MCP server.",
-    )
-    .aliases(&["joern_cpg"])
-    .workspace_read()
-    .advanced()
-}
-
-pub(in crate::modules) fn joern_per_cwe_timeout_ms_option() -> OptionSpec {
-    opt(
-        "joernPerCweTimeoutMs",
-        OptionType::Int,
-        "Wall-clock budget in milliseconds for each Joern CWE flow query.",
-    )
-    .aliases(&["joern_per_cwe_timeout_ms"])
-    .default(json!(60000))
-    .advanced()
-}
-
 pub(in crate::modules) fn codeql_prewarm_option() -> OptionSpec {
     opt(
         "codeqlPrewarm",

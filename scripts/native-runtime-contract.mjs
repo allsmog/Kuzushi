@@ -11,7 +11,7 @@ export const nativeRuntimePackages = Object.freeze([
   { packageName: "kuzushi-cli", binaryName: "kuzushi" },
   { packageName: "kuzushi-mcp-gtags", binaryName: "kuzushi-mcp-gtags" },
   { packageName: "kuzushi-mcp-clang", binaryName: "kuzushi-mcp-clang" },
-  { packageName: "kuzushi-mcp-joern", binaryName: "kuzushi-mcp-joern" },
+  { packageName: "kuzushi-mcp-cpg", binaryName: "kuzushi-mcp-cpg" },
   { packageName: "kuzushi-mcp-treesitter", binaryName: "kuzushi-mcp-treesitter" },
   { packageName: "kuzushi-mcp-codeql", binaryName: "kuzushi-mcp-codeql" },
   { packageName: "kuzushi-mcp-revng", binaryName: "kuzushi-mcp-revng" },

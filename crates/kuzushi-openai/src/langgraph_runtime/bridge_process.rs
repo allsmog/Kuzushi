@@ -553,7 +553,7 @@ pub(super) fn mcp_binary_env_defaults() -> Vec<(&'static str, PathBuf)> {
     };
     const CANDIDATES: &[(&str, &str)] = &[
         ("KUZUSHI_MCP_TREESITTER_BIN", "kuzushi-mcp-treesitter"),
-        ("KUZUSHI_MCP_JOERN_BIN", "kuzushi-mcp-joern"),
+        ("KUZUSHI_MCP_CPG_BIN", "kuzushi-mcp-cpg"),
         ("KUZUSHI_MCP_CODEQL_BIN", "kuzushi-mcp-codeql"),
         ("KUZUSHI_MCP_CLANG_BIN", "kuzushi-mcp-clang"),
         ("KUZUSHI_MCP_GTAGS_BIN", "kuzushi-mcp-gtags"),

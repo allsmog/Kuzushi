@@ -48,8 +48,8 @@ pub(crate) fn health_model(app: &ShellApp) -> HealthModel {
         scanner_row("semgrep", checks.as_ref().map(|value| &value.semgrep_error)),
         scanner_row("codeql", checks.as_ref().map(|value| &value.codeql_error)),
         codeql_db_row(app),
-        joern_cli_row(checks.as_ref()),
-        joern_cpg_row(app, checks.as_ref()),
+        cpg_engine_row(),
+        cpg_graph_row(app),
     ];
     HealthModel {
         summary: health_summary(&rows),
@@ -293,43 +293,36 @@ fn codeql_db_row(app: &ShellApp) -> HealthRow {
     }
 }
 
-fn joern_cli_row(checks: Option<&ViewHealthChecks>) -> HealthRow {
-    let Some(checks) = checks else {
-        return loading_health_row("joern");
-    };
-    if let Some(path) = checks.joern_path.as_ref() {
-        return health_row(HealthTone::Pass, "joern", path.display(), "backend=joern");
-    }
+fn cpg_engine_row() -> HealthRow {
     health_row(
-        HealthTone::Fail,
-        "joern",
-        "joern launcher not found",
-        "install Joern or set KUZUSHI_JOERN_BIN",
+        HealthTone::Pass,
+        "cpg",
+        format!(
+            "cpg-rs engine compiled in (graph shape v{})",
+            kuzushi_core::CPG_GRAPH_SHAPE_VERSION
+        ),
+        "backend=cpg-rs",
     )
 }
 
-fn joern_cpg_row(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> HealthRow {
-    let Some(path) = joern_cpg_path(app, checks) else {
+fn cpg_graph_row(app: &ShellApp) -> HealthRow {
+    let Some(target) = app.target() else {
         return health_row(
             HealthTone::Warn,
-            "joern cpg",
+            "cpg graphs",
             "no target selected",
             "target <path>",
         );
     };
-    if matches!(cached_path_state(app, &path), PathState::File { .. }) {
-        return health_row(
-            HealthTone::Pass,
-            "joern cpg",
-            path.display(),
-            "backend=joern",
-        );
+    let dir = kuzushi_core::cpg_artifact_dir(target);
+    if matches!(cached_path_state(app, &dir), PathState::Directory) {
+        return health_row(HealthTone::Pass, "cpg graphs", dir.display(), "backend=cpg-rs");
     }
     health_row(
-        HealthTone::Warn,
-        "joern cpg",
-        format!("missing {}", path.display()),
-        "run cpg:build or joern-parse",
+        HealthTone::Pass,
+        "cpg graphs",
+        "none prebuilt; graphs build implicitly on first hunt",
+        "run cpg:build to prebuild",
     )
 }
 
@@ -340,15 +333,6 @@ fn existing_codeql_db(app: &ShellApp, target: &Path) -> Option<PathBuf> {
     ]
     .into_iter()
     .find(|path| matches!(cached_path_state(app, path), PathState::Directory))
-}
-
-fn joern_cpg_path(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> Option<PathBuf> {
-    checks
-        .and_then(|checks| checks.configured_joern_cpg.clone())
-        .or_else(|| {
-            app.target()
-                .map(|target| target.join(".kuzushi").join("cpg.bin"))
-        })
 }
 
 fn cached_health_checks(app: &ShellApp) -> Option<ViewHealthChecks> {

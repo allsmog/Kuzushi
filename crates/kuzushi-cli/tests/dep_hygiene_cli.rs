@@ -1724,11 +1724,9 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
-    // hunt mode refuses to dispatch without the joern/codeql artifacts; the
-    // bridge is faked, so stub them.
+    // The bridge is faked; stub the optional CodeQL DB artifact.
     std::fs::create_dir_all(repo.join(".kuzushi/codeql-db")).unwrap();
     std::fs::write(repo.join(".kuzushi/codeql-db/placeholder"), "stub").unwrap();
-    std::fs::write(repo.join(".kuzushi/cpg.bin"), "stub").unwrap();
     let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -3201,10 +3199,10 @@ fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str)
 }
 
 fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
-    // The taint-iris-next MCP gate refuses to dispatch unless the joern CPG
-    // (`.kuzushi/cpg.bin`) and CodeQL DB (`.kuzushi/codeql-db/`) artifacts
-    // exist — the precondition `/planning` builds. The fake bridge does not
-    // read them, so non-empty placeholders satisfy the gate.
+    // The taint-iris-next MCP probe attaches the codeql server only when a
+    // CodeQL DB (`.kuzushi/codeql-db/`) artifact exists. The fake bridge does
+    // not read it, so a non-empty placeholder satisfies the probe. cpg-rs
+    // needs no artifact: graphs build implicitly in-process.
     let kuzushi = repo.join(".kuzushi");
     std::fs::create_dir_all(kuzushi.join("codeql-db")).unwrap();
     std::fs::write(
@@ -3212,7 +3210,6 @@ fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
         "primaryLanguage: javascript\n",
     )
     .unwrap();
-    std::fs::write(kuzushi.join("cpg.bin"), "cpg-stub").unwrap();
 }
 
 #[cfg(unix)]

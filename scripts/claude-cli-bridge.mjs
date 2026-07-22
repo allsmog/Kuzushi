@@ -354,7 +354,6 @@ function mcpServerEntry(attachment, readRoots) {
   const artifact = attachment.artifactPath ?? attachment.artifact_path;
   if (typeof artifact === "string" && artifact.length > 0) {
     env[`KUZUSHI_MCP_${token}_ARTIFACT`] = artifact;
-    if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = artifact;
   }
   return {
     command: process.env[`KUZUSHI_MCP_${token}_BIN`] || `kuzushi-mcp-${attachment.name}`,

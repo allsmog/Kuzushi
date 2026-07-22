@@ -23,7 +23,6 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "capabilities/fuzz_engine/engine_cli.rs",      // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries
     "modules/codeql_db_module.rs",                 // PATH which
-    "modules/cpg_module.rs",                       // PATH which + KUZUSHI_JOERN_BIN locator
     "modules/fuzz_module.rs",                      // HOME for the derived engine workspace
     "modules/pwn/mod.rs",                          // HOME for installed revng
     "process_lookup.rs",                           // PATH which
@@ -40,7 +39,6 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Documented compatibility tool locators / debug toggles.
     "capabilities/plugin_adapters/adapters/input.rs", // plugin-root env; tool input outranks
     "capabilities/taint_iris_next/application/codeql_dataflow.rs", // KUZUSHI_CODEQL_BIN
-    "capabilities/taint_iris_next/application/joern_dataflow.rs", // KUZUSHI_JOERN_* + debug log
     "code_nav/ripgrep/ripgrep_binary.rs", // KUZUSHI_RIPGREP_BIN
     "modules/builtins/with_v2_builtins/builtin_registration.rs", // adapter env presence probe
     "modules/plugin_resolution/mod.rs",  // plugin-root env; tool input outranks

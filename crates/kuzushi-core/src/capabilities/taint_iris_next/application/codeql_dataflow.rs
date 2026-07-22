@@ -154,8 +154,8 @@ pub(crate) fn codeql_db_path(repo_root: &Path) -> Option<PathBuf> {
 }
 
 /// One source-to-sink path discovered by a CodeQL query, distilled from
-/// SARIF. Mirrors `JoernFlow` so the rest of the pipeline doesn't care
-/// which engine produced the result.
+/// SARIF. Mirrors the cpg-rs flow record shape so the rest of the pipeline
+/// doesn't care which engine produced the result.
 #[derive(Debug, Clone)]
 pub(crate) struct CodeqlFlow {
     pub(crate) cwe: String,
@@ -181,7 +181,7 @@ pub(crate) struct CodeqlStep {
 /// `<target>/.kuzushi/codeql-db` and return the resulting source-to-sink
 /// flows. Returns `Ok(None)` when CodeQL is unavailable, the DB is
 /// missing, or the query suite isn't installed — callers fall back to
-/// joern or the heuristic linker without surfacing an error.
+/// cpg-rs or the heuristic linker without surfacing an error.
 pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<CodeqlFlow>>> {
     if !codeql_available() {
         return Ok(None);

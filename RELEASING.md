@@ -283,3 +283,24 @@ A unified `SuppressionRule` primitive now backs all muting concepts. Notes:
   value stored in finding JSON). This lights up the pre-existing
   `status:suppressed` / `verdict:suppressed` filter tokens and the export
   `suppressed` column/SARIF `result.suppressions[]`.
+
+## JVM Joern retirement (unreleased)
+
+The JVM Joern integration is deleted. CPG evidence now comes from the
+in-process cpg-rs engine (git-pinned `oxidized-joern` crates) — no Java, no
+2 GB Joern install, no `joern-parse` subprocess.
+
+- `kuzushi-mcp-joern` is gone; `kuzushi-mcp-cpg` replaces it (`cpg.*` tools,
+  joern-compatible input schemas). `kuzushi mcp serve|health joern` is now
+  `kuzushi mcp serve|health cpg`.
+- The `<target>/.kuzushi/cpg.bin` artifact is obsolete. Graphs live under
+  `<target>/.kuzushi/cpg-rs/<lang>.v<shape>.cpg` and build implicitly in
+  seconds; `cpg:build` prebuilds them and no longer accepts `heapMb`.
+- `taint-iris-next` `backend=joern` is a retired alias: it redirects to
+  `backend=cpg-rs` with a warning. Rename saved configs to `cpg-rs`.
+- Retired env vars (now ignored): `KUZUSHI_JOERN_BIN`, `KUZUSHI_JOERN_CPG`,
+  `KUZUSHI_JOERN_TIMEOUT_SECS`, `KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS`,
+  `KUZUSHI_JOERN_FLOW_SCRIPT`, `KUZUSHI_JOERN_DEBUG_LOG`, `JOERN_SERVER_URL`.
+- Language coverage change: Kotlin, C#, PHP, Swift, and bytecode targets have
+  no cpg-rs frontend yet and fall back to codeql/structural evidence. cpg-rs
+  covers c, cpp, go, java, javascript, python, ruby, rust, scala, typescript.

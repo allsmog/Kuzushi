@@ -16,7 +16,7 @@ const isolatedEnvironment = { ...process.env, PATH: "" };
 const mcpBackends = new Map([
   ["kuzushi-mcp-gtags", "gtags"],
   ["kuzushi-mcp-clang", "clang"],
-  ["kuzushi-mcp-joern", "joern"],
+  ["kuzushi-mcp-cpg", "cpg"],
   ["kuzushi-mcp-treesitter", "tree-sitter"],
   ["kuzushi-mcp-codeql", "codeql"],
   ["kuzushi-mcp-revng", "revng"],

@@ -1,7 +1,7 @@
 //! Postgres-shape target partitioning.
 //!
 //! When an operator points kuzushi at the full PostgreSQL mainline
-//! tree (`/tmp/targets/pg`, 1612 .c files, 4.5GB), running joern's
+//! tree (`/tmp/targets/pg`, 1612 .c files, 4.5GB), running a JVM-era CPG backend's
 //! `reachableByFlows` across the whole CPG with a broad CWE catalog
 //! hangs (orafce-shape exponential blow-up on broad `appendStringInfo`
 //! / `elog` regexes). Two responses:
@@ -25,7 +25,7 @@
 //! `targetSubdir` manually.
 //!
 //! Why not auto-spawn parallel hunts inside one tool invocation?
-//! Joern's REPL launcher writes per-CPG state under
+//! (Historical: the JVM Joern REPL launcher wrote per-CPG state under
 //! `<cwd>/workspace/<cpg-name>` and concurrent runs against the
 //! same CPG fight over it. Each partitioned hunt is a separate
 //! process with its own working directory; that's the operator's

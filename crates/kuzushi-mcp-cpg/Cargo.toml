@@ -1,6 +1,6 @@
 [package]
-name = "kuzushi-mcp-joern"
-description = "Local MCP server wrapping joern for Code Property Graph queries (callers, callees, taint paths)."
+name = "kuzushi-mcp-cpg"
+description = "Local MCP server over the in-process cpg-rs engine: callers, callees, taint paths, slices — no JVM, no external binary."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,15 +9,15 @@ authors.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "kuzushi-mcp-joern"
+name = "kuzushi-mcp-cpg"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+kuzushi-cpg = { path = "../kuzushi-cpg" }
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
-serde.workspace = true
+regex = "1"
 serde_json.workspace = true
 tokio.workspace = true
 

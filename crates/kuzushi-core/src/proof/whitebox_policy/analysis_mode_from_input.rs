@@ -34,7 +34,7 @@ pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
 
 /// Whitebox-static base policy with the conditional MCP attachment
 /// plan baked in. Use this in every model-backed analysis tool that
-/// would benefit from joern / codeql / context / entry-points /
+/// would benefit from cpg / codeql / context / entry-points /
 /// threat-model / threat-intel / x-ray MCPs — the probe attaches each
 /// server only when its backing artifact exists, so calling this on a
 /// fresh workspace is a no-op (just the constant treesitter MCP is

@@ -18,7 +18,7 @@ Feature: Conditional MCP attachment plan
     Then the status segment shows "workbench"
     When I type command "logs"
     Then the log contains "MCP plan: treesitter"
-    And I do not see "joern,"
+    And I do not see "cpg,"
     And I do not see "codeql,"
 
   Scenario: Pre-seeded context snapshot attaches the context MCP
@@ -28,11 +28,13 @@ Feature: Conditional MCP attachment plan
     When I type command "logs"
     Then the log contains "MCP plan: treesitter, context"
 
-  Scenario: Pre-seeded CPG and CodeQL DB attach the joern + codeql MCPs
-    Given the artifact ".kuzushi/cpg.bin" is seeded with "CPGSTUB"
+  Scenario: Pre-seeded CPG graphs and CodeQL DB attach the cpg + codeql MCPs
+    # The cpg server only attaches for current-shape-version graphs
+    # (<lang>.v<GRAPH_SHAPE_VERSION>.cpg) under .kuzushi/cpg-rs/.
+    Given the artifact ".kuzushi/cpg-rs/rust.v11.cpg" is seeded with "CPGSTUB"
     And the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
     When I launch the shell
     Then the status segment shows "workbench"
     When I type command "logs"
-    Then the log contains "joern"
+    Then the log contains "cpg"
     And the log contains "codeql"

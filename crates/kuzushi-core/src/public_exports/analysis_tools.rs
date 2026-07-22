@@ -1,3 +1,8 @@
+pub use kuzushi_cpg::{
+    artifact_dir as cpg_artifact_dir, artifact_langs as cpg_artifact_langs,
+    supported_languages as cpg_supported_languages, GRAPH_SHAPE_VERSION as CPG_GRAPH_SHAPE_VERSION,
+};
+
 pub use crate::attack_surface::{
     build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
     AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceRisk, AttackSurfaceSummary,

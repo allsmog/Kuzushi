@@ -157,7 +157,6 @@ pub fn cli_is_on_path(name: &str) -> bool {
 
 fn cli_env_override(name: &str) -> Option<&'static str> {
     match name {
-        "joern-parse" => Some("KUZUSHI_JOERN_BIN"),
         "codeql" => Some("KUZUSHI_CODEQL_BIN"),
         _ => None,
     }

@@ -193,7 +193,7 @@ fn is_generic_wrapper(line: &str) -> bool {
     lower.contains("process exited with code") || lower.contains("externalcommand")
 }
 
-/// Drop a leading `<timestamp> LEVEL Logger` prefix that tools like joern emit,
+/// Drop a leading `<timestamp> LEVEL Logger` prefix that JVM-style tools emit,
 /// leaving just the message.
 fn strip_log_prefix(line: &str) -> &str {
     for level in ["ERROR ", "WARN ", "FATAL ", "SEVERE "] {

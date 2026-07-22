@@ -4,8 +4,8 @@ catalog, candidates, typed specs, and evidence bundles to select relevant CWE th
 only defensible findings.";
 
 const TAINT_IRIS_NEXT_TRIANGULATION: &str = "When MCP/dataflow tools are available, triangulate every promoted finding with syntax evidence \
-and at least one dataflow backend such as CodeQL or Joern. Downgrade or reject candidates when \
-backend evidence contradicts the source/sink story. If CodeQL, Joern, tree-sitter, or static \
+and at least one dataflow backend such as cpg-rs or CodeQL. Downgrade or reject candidates when \
+backend evidence contradicts the source/sink story. If cpg-rs, CodeQL, tree-sitter, or static \
 syntax evidence contradicts the CWE label, change the CWE with rationale or reject the candidate.
 
 Sanitizer-shaped names are hypotheses, not proof. Inspect bodies before clearing a linked flow.";

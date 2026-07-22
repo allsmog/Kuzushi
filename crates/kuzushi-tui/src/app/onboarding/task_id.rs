@@ -226,7 +226,6 @@ impl PlanningTaskId {
     pub fn required_cli(self) -> Option<&'static str> {
         use PlanningTaskId::*;
         match self {
-            BuildCodePropertyGraph => Some("joern-parse"),
             BuildCodeQlDatabase | ScanCodeql => Some("codeql"),
             ScanSemgrep => Some("semgrep"),
             _ => None,

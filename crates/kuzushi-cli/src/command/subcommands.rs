@@ -290,7 +290,10 @@ pub(crate) enum SessionExportFormat {
 pub(crate) enum McpBackend {
     Gtags,
     Clang,
-    Joern,
+    /// In-process cpg-rs code-property-graph queries (taint_paths,
+    /// callers_of, slice, scan). No JVM; graphs build implicitly from
+    /// `<target>/.kuzushi/cpg-rs/`.
+    Cpg,
     /// Tree-sitter syntax-aware queries (node_at, query, callers).
     /// Pure-Rust, sub-10ms per call so the agent can invoke it freely
     /// during a hunt to verify candidates.
@@ -323,7 +326,7 @@ impl McpBackend {
         match self {
             Self::Gtags => "kuzushi-mcp-gtags",
             Self::Clang => "kuzushi-mcp-clang",
-            Self::Joern => "kuzushi-mcp-joern",
+            Self::Cpg => "kuzushi-mcp-cpg",
             Self::TreeSitter => "kuzushi-mcp-treesitter",
             Self::Codeql => "kuzushi-mcp-codeql",
             Self::Revng => "kuzushi-mcp-revng",

@@ -119,15 +119,12 @@ function plannedServer(attachment, cwd, request, readRoots) {
 }
 
 // Artifact-backed servers read their input path from
-// `KUZUSHI_MCP_<NAME>_ARTIFACT`; the joern server predates that
-// convention and reads `KUZUSHI_JOERN_CPG`.
+// `KUZUSHI_MCP_<NAME>_ARTIFACT`.
 function artifactEnv(attachment, token, readRoots) {
   const path = attachment.artifactPath ?? attachment.artifact_path;
   if (typeof path !== "string" || path.length === 0) return {};
   const authorizedPath = authorizedArtifactPath(path, readRoots);
-  const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
-  if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = authorizedPath;
-  return env;
+  return { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
 }
 
 function authorizedArtifactPath(path, readRoots) {
@@ -159,10 +156,10 @@ function defaultServerConfig(cwd, request, readRoots) {
       request,
       readRoots,
     ),
-    joern: stdioServer(
-      "joern",
-      "KUZUSHI_MCP_JOERN_BIN",
-      "kuzushi-mcp-joern",
+    cpg: stdioServer(
+      "cpg",
+      "KUZUSHI_MCP_CPG_BIN",
+      "kuzushi-mcp-cpg",
       cwd,
       request,
       readRoots,
@@ -216,7 +213,7 @@ function mcpEnvironment(request) {
 const COMMON_CHILD_ENV = ["PATH"];
 const READ_CAPABILITY_SERVERS = new Set([
   "treesitter",
-  "joern",
+  "cpg",
   "codeql",
   "context",
   "entry-points",
@@ -226,15 +223,6 @@ const READ_CAPABILITY_SERVERS = new Set([
   "findings",
 ]);
 const SERVER_CHILD_ENV = {
-  joern: [
-    "HOME",
-    "TMPDIR",
-    "JAVA_HOME",
-    "JOERN_SERVER_URL",
-    "KUZUSHI_JOERN_BIN",
-    "KUZUSHI_JOERN_CPG",
-    "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
-  ],
   codeql: [
     "HOME",
     "TMPDIR",

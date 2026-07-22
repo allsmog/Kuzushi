@@ -72,12 +72,12 @@ attaches as agent tools when a module asks for it:
 - `crates/kuzushi-mcp-treesitter` — `tree_sitter:node_at`,
   `tree_sitter:query`, `tree_sitter:callers`. Pure-Rust, sub-10ms per
   call. Verifies AST structure of a candidate without spawning anything.
-- `crates/kuzushi-mcp-joern` — `joern.taint_paths`, `joern.callers_of`,
-  `joern.method_at`, etc. Lazy-spawns `joern --server` on first call
-  under the MCP server's lifetime; honour `KUZUSHI_JOERN_CPG=<cpg.bin>`
-  to importCpg the project at spawn time, or set `JOERN_SERVER_URL` to
-  point at an operator-managed server. Schema includes regex examples
-  for `source`/`sink` so the agent doesn't have to guess.
+- `crates/kuzushi-mcp-cpg` — `cpg.taint_paths`, `cpg.callers_of`,
+  `cpg.method_at`, `cpg.slice`, `cpg.scan`, etc. In-process cpg-rs
+  engine (oxidized-joern): no JVM, no subprocess; reads the target from
+  `KUZUSHI_MCP_CPG_ARTIFACT` and loads `<target>/.kuzushi/cpg-rs/`
+  graphs, building them implicitly when absent. Schema includes regex
+  examples for `source`/`sink` so the agent doesn't have to guess.
 - `crates/kuzushi-mcp-codeql` — `codeql:flows_for_cwe`, `codeql:query`,
   `codeql:db_info`. Wraps `codeql database analyze` with an in-process
   result memo (same `(db, selector, limit)` returns instantly on
@@ -95,11 +95,8 @@ with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
 - `KUZUSHI_BRIDGE_LOG=<path>` — also append every bridge log line to
   `<path>` (useful when stdout is being captured by Rust).
 - `KUZUSHI_MCP_TOOL_TIMEOUT_MS=<N>` — cap per-MCP-tool-call wall-clock
-  so a runaway joern/codeql query surfaces as a tool error instead of
+  so a runaway codeql query surfaces as a tool error instead of
   hanging the agent loop.
-- `KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS=<N>` — read by
-  `scripts/taint_iris_next_flows.sc` so one catastrophic CWE doesn't
-  deadlock the structural pass on a 187 MB postgres CPG.
 
 ### Load specifiers
 
@@ -271,7 +268,7 @@ tool-input boundary.
   provider API keys/OAuth tokens, `PATH`/`HOME`/`EDITOR`, terminal or
   accessibility mode, test hooks, and documented emergency debug toggles.
 - Do not add product behavior env vars for ordinary tool settings such as
-  scanner binaries, budgets, MCP/CodeQL/Joern tuning, reasoning effort,
+  scanner binaries, budgets, MCP/CodeQL tuning, reasoning effort,
   plugin roots, or prompt knobs. Surface those as options or config fields;
   existing compatibility env vars should stay at config/adapter boundaries.
 - Direct env reads belong at adapter/config/presentation boundaries. Domain

@@ -120,7 +120,7 @@ fn ensure_systems_hunt_surfaces(
          gather_systems_context yielded 0 surfaces from max_files={} \
          head_bytes={} max_surfaces={}. Likely causes: target has no \
          C/C++/Rust source, or `maxFiles`/`headBytes` is too restrictive, \
-         or the joern/codeql augmentation backend errored silently. \
+         or the cpg/codeql augmentation backend errored silently. \
          Re-run with larger inventory caps, or scope to a directory \
          that contains systems-level code.",
         target.display(),

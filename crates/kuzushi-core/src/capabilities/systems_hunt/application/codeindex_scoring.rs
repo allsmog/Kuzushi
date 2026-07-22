@@ -1,10 +1,10 @@
 use super::*;
 
-pub(crate) fn codeindex_has_joern_backend(facade: &kuzushi_codeindex::IndexFacade) -> bool {
+pub(crate) fn codeindex_has_cpg_backend(facade: &kuzushi_codeindex::IndexFacade) -> bool {
     facade
         .live_backends()
         .iter()
-        .any(|backend| matches!(backend, kuzushi_codeindex::Backend::Joern))
+        .any(|backend| matches!(backend, kuzushi_codeindex::Backend::Cpg))
 }
 
 pub(crate) async fn indexed_ffi_files(

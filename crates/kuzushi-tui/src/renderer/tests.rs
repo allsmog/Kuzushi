@@ -89,8 +89,7 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
         tasks: vec![crate::app::FailedPlanningTask {
             task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
-            error: "java heap OOM".to_string(),
-            adjustment: Some(crate::app::RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+            error: "graph build failed".to_string(),
             blocked: vec![crate::app::PlanningTaskId::HuntTaint],
         }],
     });
@@ -101,7 +100,7 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     // The retry section must paint its own card (correct handler index).
     assert!(rendered.contains("RETRY"));
     assert!(rendered.contains("cpg:build"));
-    assert!(rendered.contains("12288"));
+    assert!(rendered.contains("graph build failed"));
     assert!(rendered.contains("retry"));
 }
 
@@ -603,10 +602,10 @@ fn blocked_planning_row_names_its_exact_prerequisite_in_focused_detail() {
     app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
     let mut row = planning_row_fixture(
-        PlanningTaskId::BuildCodePropertyGraph,
+        PlanningTaskId::BuildCodeQlDatabase,
         PlanningArtifactState::Missing,
     );
-    row.required_cli = Some("joern-parse");
+    row.required_cli = Some("codeql");
     row.cli_available = false;
     app.engagement
         .planning_picker_mut()
@@ -618,7 +617,7 @@ fn blocked_planning_row_names_its_exact_prerequisite_in_focused_detail() {
 
     assert!(rendered.contains("prerequisite missing"), "{rendered}");
     assert!(
-        rendered.contains("install `joern-parse` on PATH"),
+        rendered.contains("install `codeql` on PATH"),
         "{rendered}"
     );
     assert!(!rendered.contains("KUZUSHI_*_BIN"), "{rendered}");
@@ -750,8 +749,7 @@ fn plain_retry_gate_explains_y_n_intercept() {
     app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
         tasks: vec![crate::app::FailedPlanningTask {
             task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
-            error: "java heap OOM".to_string(),
-            adjustment: Some(crate::app::RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+            error: "graph build failed".to_string(),
             blocked: vec![crate::app::PlanningTaskId::HuntTaint],
         }],
     });
@@ -762,7 +760,7 @@ fn plain_retry_gate_explains_y_n_intercept() {
     assert!(rendered.contains("y/Enter retry"));
     assert!(rendered.contains("n/Esc skip"));
     assert!(rendered.contains("cpg:build"));
-    assert!(rendered.contains("12288"));
+    assert!(rendered.contains("graph build failed"));
 }
 
 #[test]
@@ -4054,7 +4052,7 @@ fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
             {"identityId":"fi_shared","fingerprint":"same","title":"shared","severity":"high","filePath":"src/lib.rs","startLine":10,"tool":"semgrep"},
             {"identityId":"fi_changed","fingerprint":"changed","title":"changed item","severity":"high","filePath":"src/change.rs","startLine":15,"tool":"semgrep","triage":{"confidence":"0.91","verdict":"confirmed"}},
             {"fingerprint":"line-new","ruleId":"demo.sql","title":"line shifted item","severity":"high","filePath":"src/db.rs","startLine":24,"tool":"semgrep"},
-            {"fingerprint":"new","title":"new item","severity":"critical","filePath":"src/new.rs","startLine":30,"tool":"joern"}
+            {"fingerprint":"new","title":"new item","severity":"critical","filePath":"src/new.rs","startLine":30,"tool":"cpg"}
         ]),
     );
     let backend = TestBackend::new(120, 30);

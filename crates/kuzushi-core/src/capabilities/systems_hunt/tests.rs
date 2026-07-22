@@ -943,7 +943,7 @@ mod tests {
 
     #[tokio::test]
     async fn augment_with_index_returns_input_unchanged_when_no_backend_live() {
-        // Sandbox has no joern; the augmenter must short-circuit.
+        // Sandbox has no cpg backend binary; the augmenter must short-circuit.
         let surfaces = vec![surface("crates/foo/src/lib.rs", "unsafe-region")];
         let augmented = try_augment_with_index(surfaces.clone()).await;
         assert_eq!(augmented.len(), 1);

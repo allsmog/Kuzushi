@@ -1,7 +1,7 @@
 //! Per-target source/sink + entry-point discovery for taint-iris-next.
 //!
 //! Runs once at plan time, before the catalog is ranked. The output
-//! supplements the static catalog so the joern flow queries and the
+//! supplements the static catalog so the cpg-rs flow queries and the
 //! agent prompt are grounded in primitives that actually exist in the
 //! codebase, not just the static catalog's a-priori guess at what a
 //! "C application" looks like. Persists to
@@ -22,7 +22,7 @@
 //!   `SetUserIdAndSecContext`, `system(`, `popen(`,
 //!   `OpenPipeStream(`, `execve`, `execlp`, `RestrictSearchPath`. We
 //!   record the call line so the agent can verify with tree-sitter and
-//!   joern.
+//!   the CPG backend.
 //!
 //! Discovery is best-effort: a regex match isn't proof a name is
 //! exploitable, only that it's worth ranking up. The agent's MCP

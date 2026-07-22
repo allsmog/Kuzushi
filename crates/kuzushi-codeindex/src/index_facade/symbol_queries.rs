@@ -24,7 +24,7 @@ impl IndexFacade {
 
     /// Methods that call the named function. Routes per [`RoutingTable`].
     /// Tries clang first when (file, line, column) is supplied; otherwise
-    /// falls through to joern's name-based query.
+    /// falls through to the cpg backend's name-based query.
     pub async fn callers_of(
         &mut self,
         symbol: &str,

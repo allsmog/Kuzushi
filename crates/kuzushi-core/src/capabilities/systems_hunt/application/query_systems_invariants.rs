@@ -139,7 +139,7 @@ pub(crate) async fn score_with_index(
     use kuzushi_codeindex::IndexFacade;
 
     let mut facade = IndexFacade::with_available_backends().await;
-    if !codeindex_has_joern_backend(&facade) {
+    if !codeindex_has_cpg_backend(&facade) {
         return surfaces;
     }
 

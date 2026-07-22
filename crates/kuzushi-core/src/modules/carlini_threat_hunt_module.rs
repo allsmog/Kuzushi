@@ -409,6 +409,8 @@ fn evidence_backend_option() -> OptionSpec {
         .choices(&[
             "auto",
             "structural",
+            "cpg-rs",
+            "cpg",
             "semgrep",
             "codeql",
             "joern",
@@ -525,8 +527,6 @@ fn taint_iris_next_agent_knobs() -> Vec<OptionSpec> {
     vec![
         mcps_option(),
         allow_deterministic_fallback_option(),
-        joern_cpg_option(),
-        joern_per_cwe_timeout_ms_option(),
         codeql_prewarm_option(),
         codeql_cache_dir_option(),
         mcp_tool_timeout_ms_option(),

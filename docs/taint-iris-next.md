@@ -13,7 +13,7 @@ References:
 
 The IRIS idea is to use LLMs to infer taint specifications, run static analysis to find whole-repo source-to-sink paths, and apply contextual analysis to filter false positives.
 
-Kuzushi's adaptation keeps that source/sink and taint-spec workflow as inspiration, but drives the hunt from Kuzushi's context and threat-model modules. The intended flow is context/threat-model driven hunt planning, tree-sitter/ast-grep/Semgrep-style structural extraction, scoped agents, and optional CodeQL/Joern/language backends for deeper evidence.
+Kuzushi's adaptation keeps that source/sink and taint-spec workflow as inspiration, but drives the hunt from Kuzushi's context and threat-model modules. The intended flow is context/threat-model driven hunt planning, tree-sitter/ast-grep/Semgrep-style structural extraction, scoped agents, and the in-process cpg-rs dataflow backend (with optional CodeQL) for deeper evidence.
 
 The engine design also follows the concepts reviewed from `/Users/operator/Desktop/iris.pdf`: candidate API extraction, LLM taint-spec labeling, CodeQL-backed path detection, and contextual false-positive filtering.
 
@@ -29,7 +29,8 @@ exact-invocation compatibility entry for older workflows.
 - `backend=auto` uses structural extraction first. If `ast-grep`/tree-sitter support is available, V1 uses it for bounded parser-aware call candidates and falls back to `rg` for broad/token signals. If an existing CodeQL DB is present under `.kuzushi/codeql-db` or `.codeql/db`, V1 also runs read-only CodeQL analysis as corroboration and converts matching SARIF findings into catalog-scoped evidence rows.
 - `backend=codeql` is opt-in and uses an existing DB only. If no DB exists, V1 falls back to structural evidence and reports a warning. It never creates a CodeQL database.
 - If a DB exists but the CodeQL CLI is not installed, V1 keeps the structural evidence and reports the CLI problem explicitly.
-- `backend=semgrep|joern|language` is reserved behind the same evidence interface; V1 falls back to structural evidence until those adapters land.
+- `backend=cpg-rs` (alias `cpg`) is the default deep-evidence backend: the in-process cpg-rs engine builds per-language graphs implicitly under `.kuzushi/cpg-rs/` — no install, no JVM. `backend=joern` is a retired alias that redirects to `cpg-rs` with a warning.
+- `backend=semgrep|language` is reserved behind the same evidence interface; V1 falls back to structural evidence until those adapters land.
 
 Caps keep the run bounded: `maxCatalogEntries`, `maxCandidatesPerCwe`, `maxEvidencePerCwe`, `maxFilesPerQuery`, `maxSpecsPerCwe`, `maxAgentFindings`, and `codeqlAnalyzeTimeoutMs`.
 

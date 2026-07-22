@@ -71,7 +71,7 @@ fn run_diff_model_compares_findings_by_stable_identity() {
                 "0.91",
                 "confirmed"
             ),
-            finding("new", "new item", "critical", "src/new.rs", 30, "joern")
+            finding("new", "new item", "critical", "src/new.rs", 30, "cpg")
         ]),
     );
     let mut app = ShellApp::new(V2Config::default(), None);

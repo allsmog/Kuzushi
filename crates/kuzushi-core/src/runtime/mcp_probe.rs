@@ -52,8 +52,8 @@ pub const MCP_ARTIFACT_TABLE: &[McpArtifactSpec] = &[
         artifact_relative_path: "x-ray/x-ray.md",
     },
     McpArtifactSpec {
-        name: "joern",
-        artifact_relative_path: ".kuzushi/cpg.bin",
+        name: "cpg",
+        artifact_relative_path: ".kuzushi/cpg-rs",
     },
     McpArtifactSpec {
         name: "codeql",
@@ -85,6 +85,11 @@ pub fn mcp_attachment_plan_for_target(target: &Path) -> Vec<McpAttachment> {
 fn mcp_artifact_is_ready(target: &Path, spec: &McpArtifactSpec, path: &Path) -> bool {
     match spec.name {
         "codeql" => codeql_database_is_ready(target, path),
+        // Ready when at least one current-shape-version graph exists —
+        // stale-version leftovers alone must not attach the server.
+        "cpg" => {
+            artifact_state_within(target, path).is_cached() && kuzushi_cpg::has_artifacts(target)
+        }
         _ => artifact_state_within(target, path).is_cached(),
     }
 }
@@ -138,18 +143,19 @@ mod tests {
         let plan = mcp_attachment_plan_for_target(tmp.path());
         assert!(plan_contains(&plan, "context"));
         // Other artifact-backed servers stay off.
-        assert!(!plan_contains(&plan, "joern"));
+        assert!(!plan_contains(&plan, "cpg"));
         assert!(!plan_contains(&plan, "codeql"));
     }
 
     #[test]
-    fn cpg_attaches_joern_only_when_binary_present() {
+    fn stale_joern_cpg_bin_attaches_nothing() {
+        // Pre-cutover targets may still carry a JVM-joern `.kuzushi/cpg.bin`;
+        // it must not attach any server now that the joern MCP is deleted.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
         std::fs::write(tmp.path().join(".kuzushi/cpg.bin"), b"CPG\0bin").unwrap();
         let plan = mcp_attachment_plan_for_target(tmp.path());
-        assert!(plan_contains(&plan, "joern"));
-        assert!(!plan_contains(&plan, "codeql"));
+        assert_eq!(plan.len(), MCP_CONSTANT_NAMES.len());
     }
 
     #[test]
@@ -192,7 +198,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
         std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}").unwrap();
-        std::fs::write(tmp.path().join(".kuzushi/cpg.bin"), b"CPG").unwrap();
         let first = mcp_attachment_plan_for_target(tmp.path());
         let second = mcp_attachment_plan_for_target(tmp.path());
         assert_eq!(first, second);

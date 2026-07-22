@@ -284,7 +284,7 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: CampaignCommand,
     },
-    /// Run a local MCP server (joern, clang, or gtags) over stdio.
+    /// Run a local MCP server (cpg, clang, or gtags) over stdio.
     Mcp {
         #[command(subcommand)]
         command: McpCommand,

@@ -369,7 +369,7 @@ surface — no model calls; `C` on the Review page drafts it),
 
 **Workspace & context** — `workspace:status`,
 `workspace:import-findings`, `workspace:export-findings`,
-`context:build`, `context-lite:index`, `cpg:build` (Joern CPG),
+`context:build`, `context-lite:index`, `cpg:build` (in-process cpg-rs graphs),
 `engagement:aim` (engagement scoping).
 
 **Fuzzing (agentic-fuzz-engine)** — drives an external

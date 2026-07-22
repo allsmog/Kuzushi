@@ -19,8 +19,8 @@ pub(crate) fn definition_call(
             tool: "gtags.definitions",
             args: serde_json::json!({ "symbol": symbol, "repoPath": repo }),
         }),
-        Backend::Joern => Some(BackendToolCall {
-            tool: "joern.definitions",
+        Backend::Cpg => Some(BackendToolCall {
+            tool: "cpg.definitions",
             args: serde_json::json!({ "fn": symbol }),
         }),
         Backend::Clang => None,
@@ -45,7 +45,7 @@ pub(crate) fn callers_call(
 ) -> Option<BackendToolCall> {
     match (backend, position) {
         (Backend::Clang, Some(pos)) => Some(clang_position_call("clang.callers", pos)),
-        (Backend::Joern, _) => Some(joern_function_call("joern.callers_of", symbol)),
+        (Backend::Cpg, _) => Some(cpg_function_call("cpg.callers_of", symbol)),
         _ => None,
     }
 }
@@ -56,7 +56,7 @@ pub(crate) fn callees_call(
     position: Option<&FilePosition>,
 ) -> Option<BackendToolCall> {
     match (backend, position) {
-        (Backend::Joern, _) => Some(joern_function_call("joern.callees_of", symbol)),
+        (Backend::Cpg, _) => Some(cpg_function_call("cpg.callees_of", symbol)),
         (Backend::Clang, Some(pos)) => Some(clang_position_call("clang.callees", pos)),
         _ => None,
     }
@@ -74,7 +74,7 @@ pub(crate) fn clang_position_call(tool: &'static str, position: &FilePosition) -
     }
 }
 
-pub(crate) fn joern_function_call(tool: &'static str, symbol: &str) -> BackendToolCall {
+pub(crate) fn cpg_function_call(tool: &'static str, symbol: &str) -> BackendToolCall {
     BackendToolCall {
         tool,
         args: serde_json::json!({ "fn": symbol }),

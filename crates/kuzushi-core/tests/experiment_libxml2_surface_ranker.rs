@@ -5,7 +5,7 @@
 //! `xmlSnprintfElements` function lands on the ranked surface list.
 //!
 //! This tests the *fast pass* of the surface ranker only — no LLM,
-//! no codeindex (joern is absent in the dev sandbox so the index
+//! no codeindex (no cpg backend binary in the dev sandbox so the index
 //! augmentation no-ops cleanly). Run-time ~seconds, cost $0.
 //!
 //! Run with:

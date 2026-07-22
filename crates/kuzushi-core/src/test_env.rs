@@ -8,13 +8,6 @@ pub(crate) fn codeql_bin_env_lock() -> MutexGuard<'static, ()> {
         .unwrap_or_else(|error| error.into_inner())
 }
 
-pub(crate) fn joern_env_lock() -> MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-}
-
 /// One process-wide lock for `KUZUSHI_MCP_CLANG_BIN`. Both the uaf-hunt
 /// report tests and the clang_subprocess adapter tests mutate this var;
 /// two separate mutexes would let them race each other.

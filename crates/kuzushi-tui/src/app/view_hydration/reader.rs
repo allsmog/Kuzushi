@@ -308,32 +308,8 @@ fn health_checks(credential_env: &str) -> ViewHealthChecks {
             .preflight()
             .err()
             .map(|error| error.to_string()),
-        joern_path: configured_binary("KUZUSHI_JOERN_BIN")
-            .or_else(|| kuzushi_core::executable_on_path("joern"))
-            .or_else(fallback_joern_path),
         credential_set: env_is_set(credential_env),
-        configured_joern_cpg: configured_path("KUZUSHI_JOERN_CPG"),
     }
-}
-
-fn fallback_joern_path() -> Option<PathBuf> {
-    [
-        "/opt/joern/joern-cli/joern",
-        "/usr/local/bin/joern",
-        "/usr/bin/joern",
-    ]
-    .into_iter()
-    .map(PathBuf::from)
-    .find(|path| matches!(inspect_path(path), PathState::File { .. }))
-}
-
-fn configured_binary(name: &str) -> Option<PathBuf> {
-    configured_path(name).filter(|path| matches!(inspect_path(path), PathState::File { .. }))
-}
-
-fn configured_path(name: &str) -> Option<PathBuf> {
-    let path = PathBuf::from(std::env::var_os(name)?);
-    (!path.as_os_str().is_empty()).then_some(path)
 }
 
 fn env_is_set(name: &str) -> bool {

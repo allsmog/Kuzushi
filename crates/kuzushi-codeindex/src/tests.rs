@@ -32,9 +32,9 @@ mod tests {
         let def = definition_call(Backend::Gtags, "parse", repo).unwrap();
         assert_eq!(def.tool, "gtags.definitions");
         assert_eq!(def.args["symbol"], serde_json::json!("parse"));
-        let joern_def = definition_call(Backend::Joern, "parse", repo).unwrap();
-        assert_eq!(joern_def.tool, "joern.definitions");
-        assert_eq!(joern_def.args["fn"], serde_json::json!("parse"));
+        let cpg_def = definition_call(Backend::Cpg, "parse", repo).unwrap();
+        assert_eq!(cpg_def.tool, "cpg.definitions");
+        assert_eq!(cpg_def.args["fn"], serde_json::json!("parse"));
         assert!(definition_call(Backend::Clang, "parse", repo).is_none());
 
         let pos = FilePosition {
@@ -48,8 +48,8 @@ mod tests {
         assert_eq!(callers.args["line"], serde_json::json!(10));
         assert!(callers_call(Backend::Gtags, "parse", Some(&pos)).is_none());
 
-        let callees = callees_call(Backend::Joern, "parse", None).unwrap();
-        assert_eq!(callees.tool, "joern.callees_of");
+        let callees = callees_call(Backend::Cpg, "parse", None).unwrap();
+        assert_eq!(callees.tool, "cpg.callees_of");
         assert_eq!(callees.args["fn"], serde_json::json!("parse"));
     }
 
@@ -62,37 +62,37 @@ mod tests {
     #[test]
     fn backend_failures_are_data_instead_of_terminal_writes() {
         let error = anyhow::anyhow!("connection reset");
-        let diagnostic = backend_failure_diagnostic(Backend::Joern, "callers", "parse", &error);
+        let diagnostic = backend_failure_diagnostic(Backend::Cpg, "callers", "parse", &error);
 
         assert_eq!(
             diagnostic,
-            "kuzushi-mcp-joern backend failed for callers(parse): connection reset"
+            "kuzushi-mcp-cpg backend failed for callers(parse): connection reset"
         );
     }
 
     #[tokio::test]
-    async fn taint_paths_reports_backend_unavailable_without_joern() {
+    async fn taint_paths_reports_backend_unavailable_without_cpg() {
         let mut facade = IndexFacade::new();
         let err = facade
             .taint_paths("argv", "system", None)
             .await
             .unwrap_err();
         assert!(err.to_string().contains("BackendUnavailable"));
-        assert!(err.to_string().contains("joern"));
+        assert!(err.to_string().contains("cpg"));
     }
 
     #[tokio::test]
-    async fn unsafe_blocks_reports_backend_unavailable_without_joern() {
+    async fn unsafe_blocks_reports_guidance() {
         let mut facade = IndexFacade::new();
         let err = facade.unsafe_blocks(None).await.unwrap_err();
-        assert!(err.to_string().contains("joern"));
+        assert!(err.to_string().contains("cpg"));
     }
 
     #[tokio::test]
-    async fn ffi_boundaries_reports_backend_unavailable_without_joern() {
+    async fn ffi_boundaries_reports_backend_unavailable_without_cpg() {
         let mut facade = IndexFacade::new();
         let err = facade.ffi_boundaries().await.unwrap_err();
-        assert!(err.to_string().contains("joern"));
+        assert!(err.to_string().contains("cpg"));
     }
 
     #[tokio::test]

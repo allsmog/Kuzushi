@@ -25,7 +25,7 @@ pub use controls::{
 pub use dependencies::{
     direct_dependencies, direct_dependents, topological_order, transitive_dependencies,
 };
-pub use failure::{FailedPlanningTask, PendingRetry, RetryAdjustment};
+pub use failure::{FailedPlanningTask, PendingRetry};
 pub use initial_view::{
     initial_onboarding_phase, initial_onboarding_phase_for, skip_onboarding_env,
     InitialOnboardingPhase, OnboardingInputs,

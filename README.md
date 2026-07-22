@@ -246,7 +246,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand.Batch contract for unattended callers: exit `0` completed/skipped, `2` run could not be prepared (unknown tool, bad input — retry is pointless), `3` tool executed and failed, `4` `status=partial`; every prepared run atomically publishes `.kuzushi/v3/runs/<runId>/done.json` (`runId`, `tool`, `status`, `ok`, `exitCode`) at its terminal envelope, so a run directory without it and with a dead `processId` in `run.json` crashed. |
-| `kuzushi mcp serve\|health <backend>` | Run or health-check a shipped local MCP server over stdio. Backends: `gtags`, `clang`, `joern`, `tree-sitter`, `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`, `x-ray`. |
+| `kuzushi mcp serve\|health <backend>` | Run or health-check a shipped local MCP server over stdio. Backends: `gtags`, `clang`, `cpg`, `tree-sitter`, `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`, `x-ray`. |
 | `kuzushi auth ping [provider] [--model <spec>]` | Round-trip a 1-token request to verify credentials, network, and bridge. Interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
@@ -392,10 +392,8 @@ descriptor-backed tools:
   are detected and reused by default — press `g` on a row to force a rebuild.
 - **Dependency-aware failure.** If a task fails, only the tasks that depended on
   it are skipped; the independent rest of the queue keeps running.
-- **Retry gate.** In Fix, a `y`/`n` gate offers to re-run failed tasks
-  with an auto-adjusted parameter when the cause is known (e.g. a joern
-  `OutOfMemoryError` → re-run `cpg:build` with a larger `-J-Xmx`; see the
-  `heapMb` option), unblocking the dependents that were skipped.
+- **Retry gate.** In Fix, a `y`/`n` gate offers to re-run failed tasks,
+  unblocking the dependents that were skipped.
 
 `cpg:build` accepts a `heapMb` option (defaulting to ~75% of physical RAM) and
 classifies heap-exhaustion failures with an actionable message instead of an
@@ -467,10 +465,11 @@ Subprocess-backed tools require the operator to install or configure binaries:
 
 The npm and native release payloads include every `kuzushi-mcp-*` server.
 Some servers wrap an operator-installed analysis engine: `gtags` needs GNU
-GLOBAL, `clang` needs clangd, `joern` needs Joern (or `JOERN_SERVER_URL`),
-`codeql` needs CodeQL plus a database, and `revng` needs its documented
-container runtime. `tree-sitter` and the artifact readers are self-contained;
-their `health` commands work without those external engines.
+GLOBAL, `clang` needs clangd, `codeql` needs CodeQL plus a database, and `revng`
+needs its documented container runtime. `cpg` is fully self-contained: the
+cpg-rs engine is compiled in and builds its graphs in-process — no JVM, no
+external install. `tree-sitter` and the artifact readers are also
+self-contained; their `health` commands work without external engines.
 
 LangGraph-backed tools require Node, `@langchain/langgraph`,
 `@langchain/openai` or `@langchain/anthropic`, a configured model, and provider

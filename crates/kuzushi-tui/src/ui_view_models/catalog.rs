@@ -514,7 +514,7 @@ const MAP_EXPERT_ACTIONS: [CapabilityActionSpec; 7] = [
     action!(
         "cpg",
         "Code property graph",
-        "Build the Joern oracle artifact",
+        "Build the in-process cpg-rs graphs",
         "run cpg:build",
         "EXPERT",
         tool = "cpg:build"

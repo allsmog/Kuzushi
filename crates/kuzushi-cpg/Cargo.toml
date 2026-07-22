@@ -1,0 +1,22 @@
+[package]
+name = "kuzushi-cpg"
+description = "In-process cpg-rs engine adapter: artifact conventions, implicit CPG builds, and catalog-signal to taint-spec translation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+cpg-analysis.workspace = true
+cpg-cli.workspace = true
+cpg-core.workspace = true
+cpg-incremental.workspace = true
+regex = "1"
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

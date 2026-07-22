@@ -14,14 +14,14 @@ use crate::FilePosition;
 mod backend_routing;
 mod clang_queries;
 mod construction;
-mod joern_queries;
+mod cpg_queries;
 mod symbol_queries;
 
 #[derive(Default)]
 pub struct IndexFacade {
     pub gtags: Option<McpClient>,
     pub clang: Option<McpClient>,
-    pub joern: Option<McpClient>,
+    pub cpg: Option<McpClient>,
     pub(crate) routing: RoutingTable,
     diagnostics: Vec<String>,
 }

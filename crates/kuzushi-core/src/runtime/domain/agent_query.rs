@@ -152,7 +152,7 @@ pub struct AgentToolPolicy {
     #[serde(default)]
     pub tools: Vec<String>,
     /// If true, the bridge attaches the kuzushi MCP servers
-    /// (tree-sitter, joern, codeql, plus the artifact-backed ones in
+    /// (tree-sitter, cpg, codeql, plus the artifact-backed ones in
     /// `mcps_attached`) as agent tools alongside whatever the
     /// `profile`/`tools` fields specify. Use `with_mcps_for_target` to
     /// populate this from artifact existence rather than hard-coding
@@ -181,7 +181,7 @@ pub struct AgentToolPolicy {
 #[serde(rename_all = "camelCase")]
 pub struct McpAttachment {
     /// Short server name. Maps 1:1 to `KUZUSHI_MCP_<NAME>_BIN`
-    /// (uppercased, `-` → `_`) — e.g. "joern", "codeql", "context",
+    /// (uppercased, `-` → `_`) — e.g. "cpg", "codeql", "context",
     /// "entry-points", "threat-model", "threat-intel", "x-ray",
     /// "treesitter".
     pub name: String,

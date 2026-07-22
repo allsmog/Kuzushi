@@ -1,6 +1,6 @@
 [package]
 name = "kuzushi-codeindex"
-description = "Unified code-index facade — routes queries across the joern, clang, and gtags MCP servers."
+description = "Unified code-index facade — routes queries across the cpg, clang, and gtags MCP servers."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

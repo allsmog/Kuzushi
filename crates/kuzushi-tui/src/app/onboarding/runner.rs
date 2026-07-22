@@ -5,7 +5,7 @@
 //! tool-event handler).
 
 use super::dependencies::{topological_order, transitive_dependencies};
-use super::failure::{FailedPlanningTask, PendingRetry, RetryAdjustment};
+use super::failure::{FailedPlanningTask, PendingRetry};
 use super::planning_task_explicit_input;
 use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
@@ -441,7 +441,6 @@ impl ShellApp {
         self.engagement.record_failed_task(FailedPlanningTask {
             task,
             error: first_line(error),
-            adjustment: retry_adjustment_from_error(error),
             blocked: skipped,
         });
     }
@@ -642,8 +641,8 @@ impl ShellApp {
         );
     }
 
-    /// Operator accepted the retry gate: re-queue every failed task (with its
-    /// auto-adjustment) plus the dependents that were skipped, then run them.
+    /// Operator accepted the retry gate: re-queue every failed task plus the
+    /// dependents that were skipped, then run them.
     pub(crate) fn retry_failed_tasks(&mut self) -> Vec<crate::app::ShellEffect> {
         let Some(pending) = self.advisory_mut().pending_retry.take() else {
             return Vec::new();
@@ -662,7 +661,7 @@ impl ShellApp {
     }
 
     fn reset_retry_state(&mut self) {
-        self.engagement.clear_failures_and_adjustments();
+        self.engagement.clear_failures();
     }
 
     fn retryable_tasks_from_failures(
@@ -687,7 +686,6 @@ impl ShellApp {
         }
         tasks.insert(item.task);
         tasks.extend(item.blocked.iter().copied());
-        self.store_retry_adjustment(item);
     }
 
     fn log_non_retryable_task(&mut self, item: &FailedPlanningTask) {
@@ -697,12 +695,6 @@ impl ShellApp {
         );
     }
 
-    fn store_retry_adjustment(&mut self, item: &FailedPlanningTask) {
-        if let Some(adjustment) = &item.adjustment {
-            self.engagement
-                .insert_retry_adjustment(item.task, adjustment.clone());
-        }
-    }
 
     fn log_retry_plan(&mut self, plan: &[PlanningTaskId]) {
         let labels = plan
@@ -733,23 +725,15 @@ impl ShellApp {
     /// Operator declined the retry gate: drop the failures and move on.
     pub(crate) fn decline_retry(&mut self) {
         self.advisory_mut().pending_retry = None;
-        self.engagement.clear_failures_and_adjustments();
+        self.engagement.clear_failures();
         self.engagement.clear_planning_queue();
         self.log("phase", "retry skipped");
         self.finish_planning();
     }
 
-    /// Tool input for a planning task, with any retry adjustment applied (e.g.
-    /// a larger `heapMb` after a joern OOM).
+    /// Tool input for a planning task.
     fn input_for_planning_task(&self, task: PlanningTaskId) -> Result<Value> {
-        let mut input = self.input_for_planning_task_with_options(task)?;
-        if let Some(RetryAdjustment::RaiseHeap { heap_mb }) = self.engagement.retry_adjustment(task)
-        {
-            if let Some(object) = input.as_object_mut() {
-                object.insert("heapMb".to_string(), json!(heap_mb));
-            }
-        }
-        Ok(input)
+        self.input_for_planning_task_with_options(task)
     }
 
     fn input_for_planning_task_with_extra(
@@ -759,12 +743,6 @@ impl ShellApp {
     ) -> Result<Value> {
         let mut input = planning_task_explicit_input(task, self.engagement.option_overrides());
         merge_input_object(&mut input, extra);
-        if let Some(RetryAdjustment::RaiseHeap { heap_mb }) = self.engagement.retry_adjustment(task)
-        {
-            if let Some(object) = input.as_object_mut() {
-                object.insert("heapMb".to_string(), json!(heap_mb));
-            }
-        }
         Ok(input)
     }
 
@@ -970,21 +948,8 @@ fn recommended_planning_task_for_tool(tool_name: &str) -> Option<PlanningTaskId>
         .find(|task| task.tool_name() == tool_name)
 }
 
-/// Parse the `[retry:raise-heap:<mb>]` hint a tool embeds in its error so the
-/// retry gate can offer an auto-adjusted re-run.
-fn retry_adjustment_from_error(error: &str) -> Option<RetryAdjustment> {
-    const MARKER: &str = "[retry:raise-heap:";
-    let start = error.find(MARKER)? + MARKER.len();
-    let rest = &error[start..];
-    let end = rest.find(']')?;
-    let heap_mb: u64 = rest[..end].trim().parse().ok()?;
-    Some(RetryAdjustment::RaiseHeap { heap_mb })
-}
 
 fn failed_task_is_structurally_unsatisfiable(item: &FailedPlanningTask) -> bool {
-    if item.adjustment.is_some() {
-        return false;
-    }
     let error = item.error.to_ascii_lowercase();
     structurally_unsatisfiable_error(&error)
 }
@@ -1060,14 +1025,6 @@ mod tests {
         assert_eq!(app.shell_view(), ShellView::Setup);
     }
 
-    #[test]
-    fn retry_hint_parses_raise_heap_token() {
-        assert_eq!(
-            retry_adjustment_from_error("java heap OOM ... [retry:raise-heap:12288]"),
-            Some(RetryAdjustment::RaiseHeap { heap_mb: 12288 })
-        );
-        assert_eq!(retry_adjustment_from_error("a plain parse error"), None);
-    }
 
     #[test]
     fn model_recommendation_result_maps_tools_to_phase_tasks() {
@@ -1202,7 +1159,6 @@ mod tests {
         let failed = FailedPlanningTask {
             task: VerifyFindings,
             error: "verify:finding requires a fingerprint".to_string(),
-            adjustment: None,
             blocked: vec![PatchFindings],
         };
         assert!(failed_task_is_structurally_unsatisfiable(&failed));

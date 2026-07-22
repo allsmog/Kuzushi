@@ -427,6 +427,90 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
+name = "cpg-analysis"
+version = "0.1.0"
+dependencies = [
+ "cpg-core",
+ "rayon",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "cpg-cli"
+version = "0.1.0"
+dependencies = [
+ "cpg-analysis",
+ "cpg-core",
+ "cpg-frontend",
+ "cpg-incremental",
+ "cpg-lang-c",
+ "cpg-lang-python",
+ "cpg-lang-ts",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "cpg-core"
+version = "0.1.0"
+
+[[package]]
+name = "cpg-frontend"
+version = "0.1.0"
+dependencies = [
+ "cpg-core",
+]
+
+[[package]]
+name = "cpg-incremental"
+version = "0.1.0"
+dependencies = [
+ "cpg-analysis",
+ "cpg-core",
+ "cpg-frontend",
+ "rayon",
+]
+
+[[package]]
+name = "cpg-lang-c"
+version = "0.1.0"
+dependencies = [
+ "cpg-core",
+ "cpg-frontend",
+ "tree-sitter",
+ "tree-sitter-c 0.24.2",
+]
+
+[[package]]
+name = "cpg-lang-python"
+version = "0.1.0"
+dependencies = [
+ "cpg-core",
+ "cpg-frontend",
+ "tree-sitter",
+ "tree-sitter-python 0.25.0",
+]
+
+[[package]]
+name = "cpg-lang-ts"
+version = "0.1.0"
+dependencies = [
+ "cpg-core",
+ "cpg-frontend",
+ "tree-sitter",
+ "tree-sitter-cpp",
+ "tree-sitter-go 0.25.0",
+ "tree-sitter-java",
+ "tree-sitter-javascript 0.25.0",
+ "tree-sitter-python 0.25.0",
+ "tree-sitter-ruby",
+ "tree-sitter-rust",
+ "tree-sitter-scala",
+ "tree-sitter-typescript",
+]
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1795,6 +1879,7 @@ dependencies = [
  "anyhow",
  "clap",
  "kuzushi-core",
+ "kuzushi-cpg",
  "kuzushi-openai",
  "kuzushi-tui",
  "serde",
@@ -1833,6 +1918,7 @@ dependencies = [
  "goblin",
  "ipnet",
  "kuzushi-codeindex",
+ "kuzushi-cpg",
  "kuzushi-mcp-common",
  "kuzushi-sandbox",
  "libc",
@@ -1852,12 +1938,12 @@ dependencies = [
  "tokio",
  "toml",
  "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-go",
+ "tree-sitter-c 0.23.4",
+ "tree-sitter-go 0.23.4",
  "tree-sitter-java",
- "tree-sitter-javascript",
+ "tree-sitter-javascript 0.23.1",
  "tree-sitter-php",
- "tree-sitter-python",
+ "tree-sitter-python 0.23.6",
  "tree-sitter-ruby",
  "tree-sitter-typescript",
  "url",
@@ -1865,6 +1951,18 @@ dependencies = [
  "wasmtime",
  "wat",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "kuzushi-cpg"
+version = "0.24.0-alpha.8"
+dependencies = [
+ "cpg-analysis",
+ "cpg-cli",
+ "cpg-core",
+ "cpg-incremental",
+ "regex",
+ "tempfile",
 ]
 
 [[package]]
@@ -1946,6 +2044,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-mcp-cpg"
+version = "0.24.0-alpha.8"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-cpg",
+ "kuzushi-mcp-common",
+ "regex",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-mcp-entry-points"
 version = "0.24.0-alpha.8"
 dependencies = [
@@ -1977,20 +2089,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "kuzushi-mcp-common",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "kuzushi-mcp-joern"
-version = "0.24.0-alpha.8"
-dependencies = [
- "anyhow",
- "async-trait",
- "kuzushi-mcp-common",
- "reqwest",
- "serde",
  "serde_json",
  "tempfile",
  "tokio",
@@ -2045,12 +2143,12 @@ dependencies = [
  "tempfile",
  "tokio",
  "tree-sitter",
- "tree-sitter-c",
- "tree-sitter-go",
+ "tree-sitter-c 0.23.4",
+ "tree-sitter-go 0.23.4",
  "tree-sitter-java",
- "tree-sitter-javascript",
+ "tree-sitter-javascript 0.23.1",
  "tree-sitter-php",
- "tree-sitter-python",
+ "tree-sitter-python 0.23.6",
  "tree-sitter-ruby",
  "tree-sitter-typescript",
 ]
@@ -2980,6 +3078,26 @@ dependencies = [
  "time",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "rayon"
+version = "1.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
+dependencies = [
+ "either",
+ "rayon-core",
+]
+
+[[package]]
+name = "rayon-core"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
+dependencies = [
+ "crossbeam-deque",
+ "crossbeam-utils",
 ]
 
 [[package]]
@@ -4058,10 +4176,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-c"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9b2eb57a55fed6b00812912e730b7a275cf4fe98bfd6a5d76263d4438371728"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-cpp"
+version = "0.23.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df2196ea9d47b4ab4a31b9297eaa5a5d19a0b121dceb9f118f6790ad0ab94743"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-go"
 version = "0.23.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b13d476345220dbe600147dd444165c5791bf85ef53e28acbedd46112ee18431"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-go"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8560a4d2f835cc0d4d2c2e03cbd0dde2f6114b43bc491164238d333e28b16ea"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -4082,6 +4230,16 @@ name = "tree-sitter-javascript"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bf40bf599e0416c16c125c3cec10ee5ddc7d1bb8b0c60fa5c4de249ad34dc1b1"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-javascript"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68204f2abc0627a90bdf06e605f5c470aa26fdcb2081ea553a04bdad756693f5"
 dependencies = [
  "cc",
  "tree-sitter-language",
@@ -4114,10 +4272,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "tree-sitter-python"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6bf85fd39652e740bf60f46f4cda9492c3a9ad75880575bf14960f775cb74a1c"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "tree-sitter-ruby"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be0484ea4ef6bb9c575b4fdabde7e31340a8d2dbc7d52b321ac83da703249f95"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-rust"
+version = "0.24.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "439e577dbe07423ec2582ac62c7531120dbfccfa6e5f92406f93dd271a120e45"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-scala"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de5a4a7ff23a55474ce6a741d52aaeca7a82fe9421bb982b86e98c6ac8629397"
 dependencies = [
  "cc",
  "tree-sitter-language",

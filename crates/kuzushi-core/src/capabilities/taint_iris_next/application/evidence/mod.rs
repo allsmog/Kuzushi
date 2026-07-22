@@ -167,7 +167,7 @@ fn primary_backend_evidence(
 ) -> BackendEvidence {
     match plan.backend.selected.as_str() {
         "codeql" => codeql_backend_evidence(plan, candidates, warnings),
-        "joern" => joern_backend_evidence(plan, candidates, warnings),
+        "cpg-rs" => cpgrs_backend_evidence(plan, candidates, warnings),
         _ => heuristic_backend_evidence(plan, candidates),
     }
 }
@@ -221,52 +221,45 @@ fn codeql_flow_evidence(
     }
 }
 
-fn joern_backend_evidence(
+fn cpgrs_backend_evidence(
     plan: &TaintIrisNextPlan,
     candidates: &mut Vec<TaintIrisNextCandidate>,
     warnings: &mut Vec<String>,
 ) -> BackendEvidence {
-    let flows = match super::run_joern_flows(plan) {
+    let flows = match super::run_cpgrs_flows(plan) {
         Ok(flows) => flows,
-        Err(error) => return joern_error_fallback(plan, candidates, warnings, error),
+        Err(error) => {
+            let warning =
+                format!("cpg-rs dataflow query failed ({error}); falling back to heuristic linker");
+            return backend_fallback_evidence(plan, candidates, warnings, &warning);
+        }
     };
     let Some(flows) = flows else {
         return backend_fallback_evidence(
             plan,
             candidates,
             warnings,
-            "joern was selected but the launcher or CPG disappeared between plan and run; using heuristic linker",
+            "cpg-rs was selected but no plan language has a cpg-rs frontend; using heuristic linker",
         );
     };
-    joern_flow_evidence(flows, candidates, warnings)
+    cpgrs_flow_evidence(flows, candidates, warnings)
 }
 
-fn joern_error_fallback(
-    plan: &TaintIrisNextPlan,
-    candidates: &[TaintIrisNextCandidate],
-    warnings: &mut Vec<String>,
-    error: anyhow::Error,
-) -> BackendEvidence {
-    let warning =
-        format!("joern dataflow query failed ({error}); falling back to heuristic linker");
-    backend_fallback_evidence(plan, candidates, warnings, &warning)
-}
-
-fn joern_flow_evidence(
-    flows: Vec<super::JoernFlow>,
+fn cpgrs_flow_evidence(
+    flows: Vec<super::CpgrsFlow>,
     candidates: &mut Vec<TaintIrisNextCandidate>,
     warnings: &mut Vec<String>,
 ) -> BackendEvidence {
     append_empty_flow_warning(
         flows.is_empty(),
         warnings,
-        "joern reachableByFlows found no source-to-sink paths; reporting empty linked stories rather than synthesising heuristic ones",
+        "cpg-rs taint found no source-to-sink paths; reporting empty linked stories rather than synthesising heuristic ones",
     );
     let backend_path_count = flows.len();
-    let mut joern_candidates = super::joern_flows_to_candidates(&flows);
-    candidates.append(&mut joern_candidates);
+    let mut cpgrs_candidates = super::cpgrs_flows_to_candidates(&flows);
+    candidates.append(&mut cpgrs_candidates);
     BackendEvidence {
-        linked_stories: super::joern_flows_to_linked_stories(&flows),
+        linked_stories: super::cpgrs_flows_to_linked_stories(&flows),
         backend_path_count,
     }
 }
@@ -325,7 +318,7 @@ fn codeql_corroboration_flows(
         Ok(flows) => flows,
         Err(error) => {
             warnings.push(format!(
-                "codeql corroboration pass failed ({error}); proceeding with rg/joern evidence only"
+                "codeql corroboration pass failed ({error}); proceeding with rg/cpg-rs evidence only"
             ));
             return None;
         }
@@ -363,7 +356,7 @@ const DISCOVERY_MAX_ENTRY_POINT_CANDIDATES: usize = 40;
 /// stories, evidence projection, agent prompt's `## Candidates` block)
 /// can use them as anchors. Entry points map to the `source` role,
 /// sinks to the `sink` role; both are tagged with `source: "discovery"`
-/// so downstream consumers can tell them apart from rg / joern /
+/// so downstream consumers can tell them apart from rg / cpg-rs /
 /// codeql derived rows.
 ///
 /// Sinks keep their marker-table intrinsic CWE (`dlopen` → CWE-94 by
@@ -613,7 +606,7 @@ mod tests {
         assert_eq!(by_role.get("sink"), Some(&2));
         assert_eq!(by_role.get("source"), Some(&1));
         // Tag must be discovery so downstream consumers can distinguish
-        // from rg / joern / codeql derived candidates.
+        // from rg / cpg-rs / codeql derived candidates.
         assert!(candidates.iter().all(|c| c.source == "discovery"));
         // taintClass must be the catalog-aligned label, not "discovery".
         let dlopen = candidates.iter().find(|c| c.pattern == "dlopen").unwrap();

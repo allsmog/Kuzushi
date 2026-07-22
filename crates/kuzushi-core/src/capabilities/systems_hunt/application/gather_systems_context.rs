@@ -54,7 +54,7 @@ pub(crate) fn gather_systems_context(
             .then_with(|| left.start_line.cmp(&right.start_line))
     });
 
-    // Block-on the async index augmentation. Failures (no joern,
+    // Block-on the async index augmentation. Failures (no cpg backend,
     // network error, …) leave surfaces unchanged.
     let augment_count = surfaces.len().min(options.max_surfaces.saturating_mul(2));
     let to_augment = surfaces

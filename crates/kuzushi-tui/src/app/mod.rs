@@ -178,7 +178,7 @@ pub use onboarding::{
     skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
     ArtifactState as PlanningArtifactState, AuthMethodRow, AuthMethodRowKind, FailedPlanningTask,
     InitialOnboardingPhase, OnboardingInputs, PendingRetry, PickerFocus, PlanningOptionEdit,
-    PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RetryAdjustment, RowDisposition,
+    PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition,
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{

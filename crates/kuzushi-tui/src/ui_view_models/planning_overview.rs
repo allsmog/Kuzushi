@@ -284,7 +284,7 @@ mod tests {
 
     fn blocked_row(id: PlanningTaskId) -> PlanningTaskRow {
         PlanningTaskRow {
-            required_cli: Some("joern-parse"),
+            required_cli: Some("codeql"),
             cli_available: false,
             ..row(id, PlanningArtifactState::Missing)
         }
@@ -296,7 +296,7 @@ mod tests {
             row(GatherRepoContext, PlanningArtifactState::Missing), // run
             row(BuildXRay, PlanningArtifactState::Cached),          // reuse (checked)
             row(MapEntryPoints, PlanningArtifactState::Missing),    // skip (unchecked)
-            blocked_row(BuildCodePropertyGraph),                    // blocked
+            blocked_row(BuildCodeQlDatabase),                       // blocked
         ];
         let selected: BTreeSet<PlanningTaskId> =
             [GatherRepoContext, BuildXRay].into_iter().collect();

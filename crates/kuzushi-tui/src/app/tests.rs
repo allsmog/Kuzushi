@@ -8750,12 +8750,11 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
-    // taint-iris-next:hunt now requires CPG + CodeQL DB artifacts to
-    // attach the joern/codeql MCPs. Stub both so the policy probe
-    // returns the expected attachments and the hunt routes.
+    // taint-iris-next:hunt attaches the codeql MCP only when a CodeQL DB
+    // artifact exists. Stub it so the policy probe returns the expected
+    // attachment and the hunt routes. cpg-rs needs no artifact stub.
     let kuzushi = tmp.path().join(".kuzushi");
     fs::create_dir_all(&kuzushi).unwrap();
-    fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
     let codeql_db = kuzushi.join("codeql-db");
     fs::create_dir_all(&codeql_db).unwrap();
     fs::write(
@@ -15692,7 +15691,7 @@ fn tool_failure_marks_activity_dag_row_failing() {
 
     app.apply_tool_event(ToolEvent::Failed {
         tool_name: "cpg:build".to_string(),
-        error: "joern-parse exited with status Some(1): astgen not found".to_string(),
+        error: "cpg graph build failed: unreadable source tree".to_string(),
     });
 
     let row = &app.activity().unwrap().tasks["cpg:build"];

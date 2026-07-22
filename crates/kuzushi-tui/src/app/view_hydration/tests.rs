@@ -99,9 +99,7 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::HealthChecks(ViewHealthChecks {
                 semgrep_error: None,
                 codeql_error: None,
-                joern_path: None,
                 credential_set: false,
-                configured_joern_cpg: None,
             })
         }
         ViewHydrationKey::TargetProfile => {

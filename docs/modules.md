@@ -779,7 +779,7 @@ manually:
 
 Native MCP integration is explicit rather than a generic `--load mcp:<spec>`
 module bridge. Every npm and platform-native runtime payload ships the Rust
-servers exposed by the CLI: `gtags`, `clang`, `joern`, `tree-sitter`,
+servers exposed by the CLI: `gtags`, `clang`, `cpg`, `tree-sitter`,
 `codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`,
 and `x-ray`. Operators can run them over stdio with:
 
@@ -815,9 +815,10 @@ redirects disabled in the live local-worker backend.
 The npm wrapper prepends its private native platform directory to the child
 `PATH`, and the Rust CLI also resolves an MCP executable next to itself. This
 keeps `mcp health`, direct native archives, and bridge-spawned tools independent
-of an operator's global `PATH`. Servers that wrap Joern, CodeQL, clangd, GNU
+of an operator's global `PATH`. Servers that wrap CodeQL, clangd, GNU
 GLOBAL, or rev.ng still report those external engine prerequisites honestly.
-The pure tree-sitter and artifact-reader servers have no external engine.
+The pure tree-sitter, cpg (in-process cpg-rs), and artifact-reader servers
+have no external engine.
 
 The npm package is the full Node-capable distribution. Platform-specific
 native archives on GitHub contain the CLI and MCP siblings only; use the npm

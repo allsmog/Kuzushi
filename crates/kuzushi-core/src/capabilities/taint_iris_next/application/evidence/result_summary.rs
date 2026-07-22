@@ -28,7 +28,7 @@ pub(super) fn count_labeled_specs(
 pub(super) fn selected_tool(plan: &TaintIrisNextPlan) -> String {
     match plan.backend.selected.as_str() {
         "codeql" => "codeql".to_string(),
-        "joern" => "joern".to_string(),
+        "cpg-rs" => "cpg-rs".to_string(),
         _ => plan.backend.structural_tool.clone(),
     }
 }

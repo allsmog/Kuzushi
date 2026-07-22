@@ -1031,7 +1031,6 @@ export function checkTaintIrisNextArtifactPathHelpers(root) {
     return [`taint-iris-next artifact path helper: missing ${helperFile}`];
   const helper = readFileSync(helperPath, "utf8");
   const constants = rustStringConstants(helper, [
-    "TAINT_IRIS_NEXT_JOERN_CPG_FILE",
     "TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE",
     "TAINT_IRIS_NEXT_TARGET_CATALOG_FILE",
     "TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE",
@@ -1071,9 +1070,6 @@ export function checkTuiPrereqChainPathHelpers(root) {
 
 function taintIrisNextArtifactPathConstantFailures(constants) {
   return [
-    constants.TAINT_IRIS_NEXT_JOERN_CPG_FILE === "cpg.bin"
-      ? null
-      : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_JOERN_CPG_FILE as cpg.bin",
     constants.TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE === "discovered-signals.json"
       ? null
       : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE as discovered-signals.json",
@@ -1088,9 +1084,6 @@ function taintIrisNextArtifactPathConstantFailures(constants) {
 
 function taintIrisNextArtifactPathFunctionFailures(helper) {
   return [
-    helper.includes("taint_iris_next_joern_cpg_path(target: &Path) -> PathBuf")
-      ? null
-      : "taint-iris-next artifact path helper must expose joern CPG path",
     helper.includes("taint_iris_next_discovered_signals_path(target: &Path) -> PathBuf")
       ? null
       : "taint-iris-next artifact path helper must expose discovered signals path",
@@ -1100,9 +1093,6 @@ function taintIrisNextArtifactPathFunctionFailures(helper) {
     helper.includes("taint_iris_next_codeql_build_script_path(target: &Path) -> PathBuf")
       ? null
       : "taint-iris-next artifact path helper must expose CodeQL build script path",
-    helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_JOERN_CPG_FILE)")
-      ? null
-      : "taint-iris-next joern CPG path must derive from workspace_state_root",
     helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE)")
       ? null
       : "taint-iris-next discovered signals path must derive from workspace_state_root",
@@ -1117,7 +1107,6 @@ function taintIrisNextArtifactPathFunctionFailures(helper) {
 
 function taintIrisNextArtifactPathConsumerFailures(root) {
   const consumers = [
-    "crates/kuzushi-core/src/capabilities/taint_iris_next/application/joern_dataflow.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/source_sink_discovery.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/dynamic_catalog.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_build.rs",
@@ -1142,7 +1131,6 @@ function taintIrisNextArtifactPathConsumerFailure(root, file) {
 
 function taintIrisNextArtifactPathConsumerUsesHelper(source) {
   return [
-    "taint_iris_next_joern_cpg_path(",
     "taint_iris_next_discovered_signals_path(",
     "taint_iris_next_target_catalog_artifact_path(",
     "taint_iris_next_codeql_build_script_path(",

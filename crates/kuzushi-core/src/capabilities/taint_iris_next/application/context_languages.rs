@@ -139,7 +139,7 @@ fn collect_named_strings(root: &Value, primary: &str, fallback: &str) -> Vec<Str
 
 /// Role-gate entries pair a check (`superuser`, `has_privs_of_role`)
 /// with a guarded API. We extract both names so the agent can probe
-/// either direction with `joern.callers_of` /
+/// either direction with `cpg.callers_of` /
 /// `tree_sitter:callers`.
 fn collect_role_gates(root: &Value) -> Vec<String> {
     let Some(array) = root

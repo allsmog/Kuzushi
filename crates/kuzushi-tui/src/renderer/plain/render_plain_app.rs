@@ -170,16 +170,14 @@ fn plain_run_projection_lines(model: PlainRunProjectionModel, width: usize) -> V
 fn plain_retry_card_lines(model: RetryCardModel, width: usize) -> Vec<String> {
     let mut lines = vec![plain_section_divider("RETRY", width)];
     lines.push(format!(
-        "{} task(s) failed. y/Enter retry with fixes; n/Esc skip.",
+        "{} task(s) failed. y/Enter retry; n/Esc skip.",
         model.failed_count
     ));
-    lines.extend(model.rows.into_iter().map(|row| {
-        let adjustment = row
-            .adjustment
-            .map(|adjustment| format!(" ({adjustment})"))
-            .unwrap_or_default();
-        format!("- {}: {}{}", row.tool, row.error, adjustment)
-    }));
+    lines.extend(
+        model.rows
+            .into_iter()
+            .map(|row| format!("- {}: {}", row.tool, row.error)),
+    );
     lines
 }
 

@@ -278,20 +278,11 @@ fn append_health_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    let mut paths = vec![
+    let paths = vec![
         kuzushi_core::workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
-        target.join(".kuzushi/cpg.bin"),
+        kuzushi_core::cpg_artifact_dir(target),
     ];
-    if let ViewDataState::Ready(checks) = app
-        .workbench_cache()
-        .borrow()
-        .cached_health_checks(Some(target), &credential_env)
-    {
-        if let Some(path) = checks.configured_joern_cpg {
-            paths.push(path);
-        }
-    }
     keys.extend(
         paths
             .into_iter()

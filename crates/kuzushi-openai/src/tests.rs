@@ -834,8 +834,8 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let mut mcp_environment = BTreeMap::new();
         mcp_environment.insert(
-            "KUZUSHI_JOERN_CPG".to_string(),
-            ".kuzushi/cpg.bin".to_string(),
+            "KUZUSHI_CODEQL_CACHE_DIR".to_string(),
+            ".kuzushi/codeql-cache".to_string(),
         );
 
         bridge
@@ -854,8 +854,8 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             serde_json::from_str(&std::fs::read_to_string(payload_path).unwrap()).unwrap();
         assert_eq!(payload["thinkingLevel"], serde_json::json!("high"));
         assert_eq!(
-            payload["runtimeOptions"]["mcpEnvironment"]["KUZUSHI_JOERN_CPG"],
-            serde_json::json!(".kuzushi/cpg.bin")
+            payload["runtimeOptions"]["mcpEnvironment"]["KUZUSHI_CODEQL_CACHE_DIR"],
+            serde_json::json!(".kuzushi/codeql-cache")
         );
         assert_eq!(
             payload["runtimeOptions"]["mcpToolTimeoutMs"],

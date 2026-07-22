@@ -11,28 +11,6 @@ mod tests {
     use crate::workspace::WorkspaceTarget;
     use tempfile::tempdir;
 
-    struct EnvVarGuard {
-        name: &'static str,
-        previous: Option<std::ffi::OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(name: &'static str, value: &std::path::Path) -> Self {
-            let previous = std::env::var_os(name);
-            std::env::set_var(name, value);
-            Self { name, previous }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.name, value),
-                None => std::env::remove_var(self.name),
-            }
-        }
-    }
-
     struct TaintNextRuntime {
         queries: Mutex<Vec<AgentQueryRequest>>,
     }
@@ -71,8 +49,6 @@ mod tests {
     fn runtime_options_are_derived_from_canonical_tool_input_not_process_env() {
         let options = taint_iris_next_runtime_options(
             &json!({
-                "joernCpg": ".kuzushi/cpg.bin",
-                "joernPerCweTimeoutMs": 120000,
                 "codeqlPrewarm": true,
                 "codeqlCacheDir": ".kuzushi/codeql-cache",
                 "mcpToolTimeoutMs": 90000,
@@ -83,14 +59,6 @@ mod tests {
         )
         .expect("runtime options should be emitted");
 
-        assert_eq!(
-            options.mcp_environment["KUZUSHI_JOERN_CPG"],
-            ".kuzushi/cpg.bin"
-        );
-        assert_eq!(
-            options.mcp_environment["KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS"],
-            "120000"
-        );
         assert_eq!(options.mcp_environment["KUZUSHI_CODEQL_PREWARM"], "1");
         assert_eq!(
             options.mcp_environment["KUZUSHI_CODEQL_CACHE_DIR"],
@@ -105,12 +73,10 @@ mod tests {
     }
 
     #[test]
-    fn joern_backend_sets_request_scoped_mcp_timeout_default() {
-        let options =
-            taint_iris_next_runtime_options(&json!({}), "joern").expect("joern needs timeout");
-
-        assert_eq!(options.mcp_tool_timeout_ms, Some(180_000));
-        assert!(options.mcp_environment.is_empty());
+    fn runtime_options_are_empty_without_explicit_input() {
+        // No backend earns an implicit MCP timeout any more: cpg-rs runs
+        // in-process, so only explicit tool input produces options.
+        assert!(taint_iris_next_runtime_options(&json!({}), "cpg-rs").is_none());
     }
 
     #[test]
@@ -132,25 +98,16 @@ mod tests {
     }
 
     #[test]
-    fn explicit_joern_backend_fails_preflight_when_cpg_is_missing() {
-        let _guard = crate::test_env::joern_env_lock();
-        let temp = tempdir().unwrap();
-        let missing_cpg = temp.path().join("missing-cpg.bin");
-        let _env = EnvVarGuard::set("KUZUSHI_JOERN_CPG", &missing_cpg);
-        let options = TaintIrisNextInput::from_tool_input(&json!({
-            "mode": "plan",
-            "backend": "joern"
-        }))
-        .unwrap();
-
-        let error = build_taint_iris_next_plan(temp.path(), options)
-            .unwrap_err()
-            .to_string();
-
-        assert!(error.contains("backend=joern requested"));
-        assert!(error.contains("no CPG was found"));
-        assert!(error.contains(&missing_cpg.display().to_string()));
-        assert!(!error.contains("Using structural evidence"));
+    fn retired_joern_backend_redirects_to_cpgrs() {
+        // backend=joern in a saved config keeps working: the selector
+        // redirects to the in-process cpg-rs engine with a rename warning.
+        let choice = choose_taint_iris_next_backend(
+            "joern",
+            Path::new("/nonexistent"),
+            &["typescript".to_string()],
+        );
+        assert_eq!(choice.selected, "cpg-rs");
+        assert!(choice.warnings.iter().any(|w| w.contains("retired")));
     }
 
     /// Cost the test runtime reports for every query — exercises the cost
@@ -235,7 +192,7 @@ mod tests {
     }
 
     /// Place empty CPG + CodeQL DB stubs under the workspace target so
-    /// the artifact-aware MCP attachment probe attaches the joern and
+    /// the artifact-aware MCP attachment probe attaches the cpg and
     /// codeql servers. The hunt tests don't actually query these MCPs
     /// (the stub runtime stands in for the bridge), but the policy
     /// builder refuses to dispatch without them — see
@@ -244,7 +201,6 @@ mod tests {
     fn stub_taint_iris_next_mcp_artifacts(root: &Path) {
         let kuzushi = root.join(".kuzushi");
         fs::create_dir_all(&kuzushi).unwrap();
-        fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
         let db = kuzushi.join("codeql-db");
         fs::create_dir_all(&db).unwrap();
         fs::write(
@@ -1079,8 +1035,6 @@ authorization: Default::default(),
             "mcps",
             "cweFocus",
             "discoverSignals",
-            "joernCpg",
-            "joernPerCweTimeoutMs",
             "codeqlPrewarm",
             "codeqlCacheDir",
             "mcpToolTimeoutMs",

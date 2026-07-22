@@ -17,8 +17,8 @@ impl IndexFacade {
         if let Ok(client) = McpClient::spawn(Backend::Clang.binary_name()).await {
             facade.clang = Some(client);
         }
-        if let Ok(client) = McpClient::spawn(Backend::Joern.binary_name()).await {
-            facade.joern = Some(client);
+        if let Ok(client) = McpClient::spawn(Backend::Cpg.binary_name()).await {
+            facade.cpg = Some(client);
         }
         facade
     }
@@ -32,8 +32,8 @@ impl IndexFacade {
         if self.clang.is_some() {
             out.push(Backend::Clang);
         }
-        if self.joern.is_some() {
-            out.push(Backend::Joern);
+        if self.cpg.is_some() {
+            out.push(Backend::Cpg);
         }
         out
     }

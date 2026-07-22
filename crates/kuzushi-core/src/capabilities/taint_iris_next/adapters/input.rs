@@ -246,10 +246,10 @@ fn taint_iris_next_backend(input: &Value) -> Result<String> {
         optional_taint_next_string(input, &["backend"])?.unwrap_or_else(|| "auto".to_string());
     if !matches!(
         backend.as_str(),
-        "auto" | "structural" | "semgrep" | "codeql" | "joern" | "language"
+        "auto" | "structural" | "cpg-rs" | "cpg" | "semgrep" | "codeql" | "joern" | "language"
     ) {
         anyhow::bail!(
-            "taint-iris-next:hunt backend must be auto, structural, semgrep, codeql, joern, or language"
+            "taint-iris-next:hunt backend must be auto, structural, cpg-rs, codeql, semgrep, or language (joern is a retired alias for cpg-rs)"
         );
     }
     Ok(backend)

@@ -11,10 +11,10 @@ mod tests {
     }
 
     #[test]
-    fn defaults_route_taint_paths_joern_only() {
+    fn defaults_route_taint_paths_cpg_only() {
         let table = RoutingTable::new();
         let order = table.order_for(Query::TaintPaths);
-        assert_eq!(order, vec![Backend::Joern]);
+        assert_eq!(order, vec![Backend::Cpg]);
     }
 
     #[test]
@@ -32,6 +32,6 @@ mod tests {
     fn binary_names_round_trip() {
         assert_eq!(Backend::Gtags.binary_name(), "kuzushi-mcp-gtags");
         assert_eq!(Backend::Clang.binary_name(), "kuzushi-mcp-clang");
-        assert_eq!(Backend::Joern.binary_name(), "kuzushi-mcp-joern");
+        assert_eq!(Backend::Cpg.binary_name(), "kuzushi-mcp-cpg");
     }
 }

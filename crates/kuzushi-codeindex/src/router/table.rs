@@ -12,7 +12,7 @@ impl RoutingTable {
     }
 
     /// Override the routing for a single query type. Useful when the
-    /// operator knows their joern install is stale and wants clang to win
+    /// operator knows their cpg graph is stale and wants clang to win
     /// for callers, or similar.
     pub fn with_override(mut self, capability: BackendCapability) -> Self {
         self.overrides.retain(|c| c.query != capability.query);

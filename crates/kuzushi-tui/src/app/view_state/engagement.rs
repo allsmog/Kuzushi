@@ -1,7 +1,7 @@
 use crate::app::{
     ExecutionAuthorization, FailedPlanningTask, GuidedScanFlow, PendingPatch, PendingPrereqPrompt,
     PlanningOptionOverrides, PlanningPickerRouteState, PlanningRunStep, PlanningTaskId,
-    PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, RetryAdjustment, ThreatPatch,
+    PrereqChain, PrereqFinalInput, PrereqPlanAction, PrereqStep, ThreatPatch,
     WorkflowPhase,
 };
 use serde_json::Value;
@@ -36,7 +36,6 @@ pub struct EngagementState {
     planning_failed: Vec<FailedPlanningTask>,
     planning_skipped_phases: BTreeSet<WorkflowPhase>,
     durable_skipped_phases: BTreeSet<WorkflowPhase>,
-    planning_adjustments: BTreeMap<PlanningTaskId, RetryAdjustment>,
     model_recommended_tasks: Option<BTreeSet<PlanningTaskId>>,
     latest_phase_attempt: Option<kuzushi_core::workflow_attempts::PhaseAttemptRecord>,
     phase_attempt_ledger: kuzushi_core::workflow_attempts::PhaseAttemptLedger,
@@ -676,21 +675,8 @@ impl EngagementState {
         self.planning_failed.push(failed);
     }
 
-    pub(crate) fn clear_failures_and_adjustments(&mut self) {
+    pub(crate) fn clear_failures(&mut self) {
         self.planning_failed.clear();
-        self.planning_adjustments.clear();
-    }
-
-    pub(crate) fn insert_retry_adjustment(
-        &mut self,
-        task: PlanningTaskId,
-        adjustment: RetryAdjustment,
-    ) {
-        self.planning_adjustments.insert(task, adjustment);
-    }
-
-    pub(crate) fn retry_adjustment(&self, task: PlanningTaskId) -> Option<&RetryAdjustment> {
-        self.planning_adjustments.get(&task)
     }
 
     pub(crate) fn pending_plan(&self) -> Option<&PlanProposal> {

@@ -41,18 +41,10 @@ fn retry_header_line(model: &RetryCardModel) -> Line<'static> {
 }
 
 fn retry_row_line(row: &RetryCardRow, width: usize) -> Line<'static> {
-    let detail = match &row.adjustment {
-        Some(label) => format!("{} — {} ({})", row.tool, row.error, label),
-        None => format!("{} — {}", row.tool, row.error),
-    };
-    let style = if row.adjustment.is_some() {
-        theme::primary()
-    } else {
-        theme::muted()
-    };
+    let detail = format!("{} — {}", row.tool, row.error);
     Line::from(vec![
         Span::raw("  ✗ "),
-        Span::styled(fit(&detail, width.saturating_sub(4)), style),
+        Span::styled(fit(&detail, width.saturating_sub(4)), theme::muted()),
     ])
 }
 

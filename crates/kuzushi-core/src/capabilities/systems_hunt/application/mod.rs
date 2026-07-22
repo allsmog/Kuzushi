@@ -1,6 +1,6 @@
 use super::*;
 
-pub(crate) use codeindex_has_joern_backend::*;
+pub(crate) use codeindex_scoring::*;
 pub(crate) use collect_inventory::*;
 pub(crate) use gather_systems_context::*;
 pub(crate) use indexed_taint_path_found::*;
@@ -14,7 +14,7 @@ pub(crate) use run_deep_semantic_cwe_select::*;
 pub(crate) use run_options::*;
 pub(crate) use run_systems_trigger_synth::*;
 
-mod codeindex_has_joern_backend;
+mod codeindex_scoring;
 mod collect_inventory;
 mod gather_systems_context;
 mod indexed_taint_path_found;

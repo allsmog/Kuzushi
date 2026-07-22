@@ -183,7 +183,6 @@ mod tests {
             allow_deterministic_fallback_option().default,
             Some(json!(false))
         );
-        assert_eq!(joern_cpg_option().option_type, OptionType::Path);
         assert_eq!(mcp_tool_timeout_ms_option().default, Some(json!(60000)));
     }
 }

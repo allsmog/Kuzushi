@@ -1,5 +1,5 @@
 //! View model for the end-of-engagement retry gate: the failed tasks, their
-//! one-line errors, and any auto-adjustment that will be applied on retry.
+//! and their one-line errors.
 
 use crate::ShellApp;
 
@@ -15,9 +15,6 @@ pub(crate) struct RetryCardModel {
 pub(crate) struct RetryCardRow {
     pub(crate) tool: String,
     pub(crate) error: String,
-    /// Human label for the auto-adjustment (e.g. "retry with heap 12288 MB"),
-    /// or `None` when the task will be retried as-is.
-    pub(crate) adjustment: Option<String>,
 }
 
 pub(crate) fn retry_card_model(app: &ShellApp) -> Option<RetryCardModel> {
@@ -29,7 +26,6 @@ pub(crate) fn retry_card_model(app: &ShellApp) -> Option<RetryCardModel> {
         .map(|item| RetryCardRow {
             tool: item.task.tool_name().to_string(),
             error: item.error.clone(),
-            adjustment: item.adjustment.as_ref().map(|adj| adj.label()),
         })
         .collect();
     Some(RetryCardModel {
@@ -41,17 +37,16 @@ pub(crate) fn retry_card_model(app: &ShellApp) -> Option<RetryCardModel> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::{FailedPlanningTask, PendingRetry, PlanningTaskId, RetryAdjustment};
+    use crate::app::{FailedPlanningTask, PendingRetry, PlanningTaskId};
     use kuzushi_core::V2Config;
 
     #[test]
-    fn retry_card_model_summarizes_failures_with_adjustments() {
+    fn retry_card_model_summarizes_failures() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.advisory_mut().pending_retry = Some(PendingRetry {
             tasks: vec![FailedPlanningTask {
                 task: PlanningTaskId::BuildCodePropertyGraph,
-                error: "java heap OOM".to_string(),
-                adjustment: Some(RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+                error: "graph build failed".to_string(),
                 blocked: vec![PlanningTaskId::HuntTaint],
             }],
         });
@@ -59,11 +54,7 @@ mod tests {
         let model = retry_card_model(&app).expect("retry card");
         assert_eq!(model.failed_count, 1);
         assert_eq!(model.rows[0].tool, "cpg:build");
-        assert!(model.rows[0]
-            .adjustment
-            .as_deref()
-            .unwrap()
-            .contains("12288"));
+        assert!(model.rows[0].error.contains("graph build failed"));
     }
 
     #[test]

@@ -21,7 +21,8 @@ pub(crate) fn build_taint_iris_next_plan(
     let catalog = catalog_selection.catalog;
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options)?;
+    let backend =
+        configure_taint_iris_next_backend(&roots.repo_root, &options, &planning.languages)?;
     Ok(finalize_taint_iris_next_plan(
         target,
         roots,
@@ -329,16 +330,17 @@ fn finalize_taint_iris_next_catalog(
 fn configure_taint_iris_next_backend(
     repo_root: &Path,
     options: &TaintIrisNextInput,
+    languages: &[String],
 ) -> Result<TaintIrisNextBackendChoice> {
-    let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root);
+    let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root, languages);
     validate_explicit_taint_iris_next_backend(&backend)?;
     if options.target_subdir.is_none() {
         let c_file_count = count_c_files_under(repo_root);
         if should_recommend_partitioning(repo_root, c_file_count) {
             let parts = postgres_partitions_for(repo_root);
             backend.warnings.push(format!(
-                "target looks postgres-shaped with {c_file_count} .c files; broad CWE regex on joern \
-                 will likely hang. Run partitioned hunts in parallel with `targetSubdir` for each \
+                "target looks postgres-shaped with {c_file_count} .c files; consider partitioned \
+                 hunts in parallel with `targetSubdir` for each \
                  subdir: {}",
                 parts
                     .iter()
@@ -353,10 +355,17 @@ fn configure_taint_iris_next_backend(
 }
 
 fn validate_explicit_taint_iris_next_backend(backend: &TaintIrisNextBackendChoice) -> Result<()> {
-    if !matches!(backend.requested.as_str(), "codeql" | "joern") {
+    if !matches!(
+        backend.requested.as_str(),
+        "codeql" | "joern" | "cpg-rs" | "cpg"
+    ) {
         return Ok(());
     }
-    if backend.selected == backend.requested {
+    if backend.selected == backend.requested
+        || (backend.requested == "cpg" && backend.selected == "cpg-rs")
+        // backend=joern is retired; its selector redirects to cpg-rs.
+        || (backend.requested == "joern" && backend.selected == "cpg-rs")
+    {
         return Ok(());
     }
     let reason = backend
@@ -530,10 +539,10 @@ fn boost_catalog_with_discovered_signals(
     // pgcrypto-shaped discoveries (mbuf_*, pullf_*, pgp_mpi_*) yield
     // ~16 unique source names per CWE; a cap of 8 alphabetically
     // truncated the parser-layer reads (`pullf_read`, `pgp_mpi_read`)
-    // out of the joern source set and the heap-overflow flow that
+    // out of the CPG source set and the heap-overflow flow that
     // hinges on them never surfaced. 24 fits the pgcrypto family
     // comfortably while still bounding postgres-scale discoveries
-    // (the joern script enforces its own 200-source per-CWE cap so a
+    // (the cpg-rs flow pass enforces its own 200-source per-CWE cap so a
     // pathological codebase can't blow up reachableByFlows runtime).
     const SPLICE_PER_ROLE_PER_ENTRY: usize = 24;
     for entry in &mut catalog {
@@ -1331,7 +1340,7 @@ mod boost_with_discovered_signals_tests {
         // otherwise the first frequently-occurring name eats every
         // slot and downstream names like pullf_read / pgp_mpi_read
         // are starved. Reproduces the pgcrypto bug where mbuf_*
-        // duplicates squeezed pullf_read out of the joern source set.
+        // duplicates squeezed pullf_read out of the CPG source set.
         let catalog = vec![entry(
             "CWE-120",
             vec!["c"],

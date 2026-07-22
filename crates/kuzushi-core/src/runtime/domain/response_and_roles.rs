@@ -117,7 +117,7 @@ mod policy_tests {
     fn with_mcps_plan_replaces_attachment_list() {
         let plan = vec![
             McpAttachment::constant("treesitter"),
-            McpAttachment::new("joern", "/work/.kuzushi/cpg.bin"),
+            McpAttachment::new("cpg", "/work/.kuzushi/cpg-rs"),
         ];
         let policy = AgentToolPolicy::default().with_mcps_plan(plan.clone());
         assert!(policy.mcps);
@@ -150,7 +150,7 @@ mod policy_tests {
             .collect();
         assert!(names.contains(&"treesitter"));
         assert!(names.contains(&"context"));
-        assert!(!names.contains(&"joern"));
+        assert!(!names.contains(&"cpg"));
         assert!(!names.contains(&"codeql"));
         assert_eq!(
             policy.mcp_read_roots,

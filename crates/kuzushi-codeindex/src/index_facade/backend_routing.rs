@@ -5,7 +5,7 @@ impl IndexFacade {
         match backend {
             Backend::Gtags => self.gtags.as_mut(),
             Backend::Clang => self.clang.as_mut(),
-            Backend::Joern => self.joern.as_mut(),
+            Backend::Cpg => self.cpg.as_mut(),
         }
     }
 

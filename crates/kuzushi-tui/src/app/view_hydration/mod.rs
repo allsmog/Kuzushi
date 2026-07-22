@@ -219,9 +219,7 @@ pub(crate) enum ViewHydrationValue {
 pub(crate) struct ViewHealthChecks {
     pub(crate) semgrep_error: Option<String>,
     pub(crate) codeql_error: Option<String>,
-    pub(crate) joern_path: Option<PathBuf>,
     pub(crate) credential_set: bool,
-    pub(crate) configured_joern_cpg: Option<PathBuf>,
 }
 
 #[derive(Debug)]

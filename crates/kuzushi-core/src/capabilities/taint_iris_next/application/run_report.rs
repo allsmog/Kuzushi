@@ -163,7 +163,8 @@ fn prepare_taint_iris_next_agent_execution<'a>(
     emit_taint_iris_next_progress(ctx, parent_step, "agent · resolve runtime/model");
     let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
     emit_taint_iris_next_progress(ctx, parent_step, "agent · configure runtime options");
-    let agent_tool_policy = build_taint_iris_next_tool_policy(input, target)?;
+    let agent_tool_policy =
+        build_taint_iris_next_tool_policy(input, target, &plan.backend.selected)?;
     emit_taint_iris_next_progress(ctx, parent_step, "agent · attach analysis tools");
     Ok(TaintIrisNextAgentExecution {
         runtime,
@@ -314,14 +315,17 @@ pub(crate) fn require_taint_iris_next_runtime<'a>(
     )
 }
 
-/// Build the tool policy for a taint-iris-next hunt, gating MCP
-/// attachment on artifact existence and refusing to dispatch when the
-/// CPG / CodeQL DB are missing. Honors the legacy `mcps: false` input
-/// for callers that explicitly want to suppress MCP attachment (used
-/// by `dataflow-plan` and other planning verbs).
+/// Build the tool policy for a taint-iris-next hunt. MCP attachment is
+/// gated on artifact existence; which attachments are HARD requirements
+/// follows the selected backend — the in-process cpg-rs backend needs no
+/// external artifact at all, while an explicit codeql backend still
+/// refuses to dispatch without its DB. Honors the legacy
+/// `mcps: false` input for callers that explicitly want to suppress MCP
+/// attachment (used by `dataflow-plan` and other planning verbs).
 pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_policy(
     input: &Value,
     target: &Path,
+    selected_backend: &str,
 ) -> Result<AgentToolPolicy> {
     let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
     let policy = agent_tool_policy_for_input(input)?;
@@ -329,8 +333,18 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_polic
         return Ok(policy);
     }
     let policy = policy.with_mcps_for_target(target);
-    ensure_required_mcps(&policy, target, &["joern", "codeql"])?;
+    ensure_required_mcps(&policy, target, required_mcps_for_backend(selected_backend))?;
     Ok(policy)
+}
+
+/// The MCP servers a hunt cannot run without, per backend. cpg-rs and the
+/// structural fallback run fully in-process, so the codeql attachment
+/// becomes a best-effort extra instead of a dispatch blocker.
+fn required_mcps_for_backend(selected_backend: &str) -> &'static [&'static str] {
+    match selected_backend {
+        "codeql" => &["codeql"],
+        _ => &[],
+    }
 }
 
 fn ensure_required_mcps(
@@ -361,10 +375,6 @@ fn ensure_required_mcps(
 
 fn missing_mcp_hint(name: &str, target: &Path) -> String {
     match name {
-        "joern" => format!(
-            "- joern (.kuzushi/cpg.bin)              missing -> run `cpg:build` on {}",
-            target.display()
-        ),
         "codeql" => format!(
             "- codeql (.kuzushi/codeql-db/)          missing -> run `codeql:create-db` on {}",
             target.display()
@@ -373,25 +383,11 @@ fn missing_mcp_hint(name: &str, target: &Path) -> String {
     }
 }
 
-const JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS: &str = "180000";
-
 pub(in crate::capabilities::taint_iris_next) fn taint_iris_next_runtime_options(
     input: &Value,
-    selected_backend: &str,
+    _selected_backend: &str,
 ) -> Option<AgentRuntimeOptions> {
     let mut options = AgentRuntimeOptions::default();
-    insert_path_option(
-        &mut options.mcp_environment,
-        input,
-        &["joernCpg", "joern_cpg"],
-        "KUZUSHI_JOERN_CPG",
-    );
-    insert_int_option(
-        &mut options.mcp_environment,
-        input,
-        &["joernPerCweTimeoutMs", "joern_per_cwe_timeout_ms"],
-        "KUZUSHI_JOERN_PER_CWE_TIMEOUT_MS",
-    );
     insert_bool_option(
         &mut options.mcp_environment,
         input,
@@ -406,25 +402,9 @@ pub(in crate::capabilities::taint_iris_next) fn taint_iris_next_runtime_options(
     );
     options.mcp_tool_timeout_ms =
         read_u64_option(input, &["mcpToolTimeoutMs", "mcp_tool_timeout_ms"]);
-    if options.mcp_tool_timeout_ms.is_none() && joern_reachable_from_agent(input, selected_backend)
-    {
-        options.mcp_tool_timeout_ms = JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS.parse::<u64>().ok();
-    }
     options.bridge_verbose = read_bool_alias(input, &["bridgeVerbose", "bridge_verbose"]);
     options.bridge_log_path = read_string_option(input, &["bridgeLogPath", "bridge_log_path"]);
     (!options.is_empty()).then_some(options)
-}
-
-fn joern_reachable_from_agent(input: &Value, selected_backend: &str) -> bool {
-    if selected_backend == "joern" {
-        return true;
-    }
-    if input.get("joernCpg").and_then(Value::as_str).is_some()
-        || input.get("joern_cpg").and_then(Value::as_str).is_some()
-    {
-        return true;
-    }
-    false
 }
 
 fn insert_bool_option(
@@ -438,17 +418,6 @@ fn insert_bool_option(
             env_key.to_string(),
             if value { "1" } else { "0" }.to_string(),
         );
-    }
-}
-
-fn insert_int_option(
-    values: &mut BTreeMap<String, String>,
-    input: &Value,
-    aliases: &[&str],
-    env_key: &str,
-) {
-    if let Some(value) = read_u64_option(input, aliases) {
-        values.insert(env_key.to_string(), value.to_string());
     }
 }
 

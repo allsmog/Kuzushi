@@ -1427,15 +1427,15 @@ mod tests {
     fn missing_cli_planning_toggle_is_visible_as_a_warning_notice() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         let outcome = ToggleOutcome::MissingCli {
-            task: PlanningTaskId::BuildCodePropertyGraph,
-            cli: "joern-parse",
+            task: PlanningTaskId::BuildCodeQlDatabase,
+            cli: "codeql",
         };
 
         app.log_toggle_outcome(&outcome);
 
         let notice = app.advisory().notice.as_ref().expect("warning notice");
         assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
-        assert!(notice.message.contains("`joern-parse` on PATH"));
+        assert!(notice.message.contains("`codeql` on PATH"));
         assert!(notice.message.contains("reopen this phase"));
         assert_eq!(
             app.log_lines()

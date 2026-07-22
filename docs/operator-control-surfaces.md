@@ -458,7 +458,7 @@ presentation, test hooks, and documented emergency debug toggles.
 
 Ordinary product behavior should not depend on new env vars. Prefer:
 
-- tool options for scanner binaries, MCP/CodeQL/Joern tuning, prompt knobs,
+- tool options for scanner binaries, MCP/CodeQL tuning, prompt knobs,
   and plugin roots;
 - config for runtime/provider defaults, model, bridge command, thinking level,
   budgets, approval policy, host-mounted MCP aliases, and host-mounted fuzz
@@ -473,6 +473,6 @@ presentation concerns.
 
 Some existing scanner/tool adapters still read compatibility env vars for
 local binaries, caches, timeouts, or external toolchain integration (for
-example CodeQL, Joern, Clang, rev.ng, and MCP bridge knobs). Treat those as
+example CodeQL, Clang, rev.ng, and MCP bridge knobs). Treat those as
 legacy adapter-boundary exceptions: do not add new product behavior env vars,
 and migrate touched knobs toward declared options or config.

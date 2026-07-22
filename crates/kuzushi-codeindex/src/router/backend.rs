@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum Backend {
     Gtags,
     Clang,
-    Joern,
+    Cpg,
 }
 
 impl Backend {
@@ -13,7 +13,7 @@ impl Backend {
         match self {
             Self::Gtags => "kuzushi-mcp-gtags",
             Self::Clang => "kuzushi-mcp-clang",
-            Self::Joern => "kuzushi-mcp-joern",
+            Self::Cpg => "kuzushi-mcp-cpg",
         }
     }
 }

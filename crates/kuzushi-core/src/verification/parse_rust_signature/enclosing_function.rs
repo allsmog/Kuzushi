@@ -4,7 +4,7 @@ use std::path::Path;
 /// Best-effort: read the suspect file and locate the enclosing function
 /// signature for the finding's `start_line`. Returns `None` when the
 /// file isn't readable or no signature is found within a small look-back
-/// window. Pure-text and language-agnostic — for joern/clang accuracy
+/// window. Pure-text and language-agnostic — for cpg/clang accuracy
 /// we'll route through `IndexFacade` in a future iteration.
 #[cfg(test)]
 pub(crate) fn extract_enclosing_function(
