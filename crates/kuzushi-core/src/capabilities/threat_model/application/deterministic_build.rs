@@ -13,7 +13,12 @@ pub(crate) fn build_deterministic_threat_model(
 ) -> Result<Value> {
     let input = parse_deterministic_build_input(&input, ctx, flavor)?;
     let surface_map = build_attack_surface_map(&input.target)?;
-    let document = deterministic_document(&input, &surface_map.surfaces)?;
+    let mut document = deterministic_document(&input, &surface_map.surfaces)?;
+    // The explicitly requested deterministic fold stamps the same provenance
+    // as the model-backed pipeline: derived surfaces (seeding lines, lineage
+    // headers) name the target revision this model was built against instead
+    // of degrading to count-only provenance.
+    stamp_provenance(&mut document, &input.target, "deterministic");
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&document);
     let normalized_artifact =
@@ -207,7 +212,7 @@ fn attacker_story(index: usize, surface: &AttackSurface) -> Value {
 fn deterministic_degradation() -> Value {
     json!({
         "mode": "deterministic-no-runtime",
-        "reason": "agent runtime unavailable; no model call was made",
+        "reason": "operator explicitly requested pipeline=deterministic; no model call was made",
         "allowedProofLevel": "artifact-review-only; empirical verification did not run",
     })
 }
@@ -302,16 +307,18 @@ fn deterministic_warning(target: &Path, has_concrete_content: bool) -> String {
     if !has_concrete_content {
         return crate::workflow_attempts::insufficient_map_evidence_message(target);
     }
-    "agent runtime unavailable; generated artifact-review-only threat model".to_string()
+    "pipeline=deterministic explicitly requested; generated artifact-review-only threat model without a model call".to_string()
 }
 
 fn deterministic_summary(repo_name: &str) -> String {
-    format!("Built deterministic threat-model artifact for {repo_name} without LLM runtime.")
+    format!(
+        "Built deterministic threat-model artifact for {repo_name} (explicitly requested; no model call)."
+    )
 }
 
 fn deterministic_output(flavor: BuildFlavor, repo_name: &str, threat_count: usize) -> String {
     format!(
-        "{} degraded deterministically for {}: {} threat(s).",
+        "{} ran the explicitly requested deterministic pipeline for {}: {} threat(s).",
         flavor.tool_name(),
         repo_name,
         threat_count

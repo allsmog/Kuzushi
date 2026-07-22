@@ -133,15 +133,17 @@ pub(super) fn tool_optionally_wants_runtime(
     input: &Value,
     config: &V2Config,
 ) -> bool {
-    threat_model_build_wants_runtime(tool_name, config)
-        || module_recommender_wants_runtime(tool_name, input, config)
+    module_recommender_wants_runtime(tool_name, input, config)
 }
 
+/// Threat modeling is model-backed by default. Only the explicitly requested
+/// `pipeline=deterministic` fold runs without a runtime — a missing model is
+/// never a silent reason to degrade to the deterministic pipeline.
 fn threat_model_build_needs_runtime(input: &Value) -> bool {
-    input
-        .get("model")
+    !input
+        .get("pipeline")
         .and_then(Value::as_str)
-        .is_some_and(|model| !model.trim().is_empty())
+        .is_some_and(|pipeline| pipeline.trim().eq_ignore_ascii_case("deterministic"))
 }
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
@@ -169,10 +171,6 @@ fn patch_reverify_needs_runtime(input: &Value) -> bool {
     }
     let detector_input = input.get("detectorInput").unwrap_or(&Value::Null);
     tool_needs_runtime(tool, detector_input)
-}
-
-fn threat_model_build_wants_runtime(tool_name: &str, config: &V2Config) -> bool {
-    tool_name == "threat-model:build" && config.model.is_some()
 }
 
 fn module_recommender_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
@@ -363,9 +361,9 @@ mod tests {
     }
 
     #[test]
-    fn threat_model_build_runtime_requirement_is_input_aware() {
+    fn threat_model_build_is_model_backed_by_default() {
         assert!(tool_uses_agent_runtime("threat-model:build"));
-        assert!(!tool_needs_runtime("threat-model:build", &json!({})));
+        assert!(tool_needs_runtime("threat-model:build", &json!({})));
         assert!(tool_needs_runtime(
             "threat-model:build",
             &json!({"model": "openai:gpt-5.4"})
@@ -373,20 +371,20 @@ mod tests {
     }
 
     #[test]
-    fn threat_model_build_wants_runtime_when_config_has_model() {
-        let mut config = V2Config::default();
-        assert!(!tool_wants_runtime(
+    fn threat_model_build_skips_runtime_only_for_explicit_deterministic_pipeline() {
+        assert!(!tool_needs_runtime(
             "threat-model:build",
-            &json!({}),
-            &config
+            &json!({"pipeline": "deterministic"})
         ));
 
+        let mut config = V2Config::default();
         config.model = Some("openai:gpt-5.4".to_string());
-        assert!(tool_wants_runtime(
+        assert!(!tool_wants_runtime(
             "threat-model:build",
-            &json!({}),
+            &json!({"pipeline": "deterministic"}),
             &config
         ));
+        assert!(tool_wants_runtime("threat-model:build", &json!({}), &config));
     }
 
     #[test]

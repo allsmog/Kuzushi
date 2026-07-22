@@ -685,6 +685,7 @@ fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {
             | "prompt-armor:analyze"
             | "prompt-armor:attack"
             | "prompt-armor:scan"
+            | "threat-model:build"
             | "verify:finding"
     )
 }

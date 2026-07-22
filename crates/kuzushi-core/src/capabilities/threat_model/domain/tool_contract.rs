@@ -18,7 +18,7 @@ pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] = &[
 
 pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
 
-pub(crate) const VALID_PIPELINES: &[&str] = &["single", "staged"];
+pub(crate) const VALID_PIPELINES: &[&str] = &["single", "staged", "deterministic"];
 
 pub(crate) const VALID_BUILD_MODES: &[&str] = &["build", "refine"];
 

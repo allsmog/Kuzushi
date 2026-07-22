@@ -838,7 +838,7 @@ authorization: Default::default(),
     }
 
     #[test]
-    fn threat_model_build_degrades_without_runtime_or_explicit_model() {
+    fn explicit_deterministic_pipeline_builds_without_runtime() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
         fs::write(
@@ -866,7 +866,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -981,11 +981,16 @@ authorization: Default::default(),
         assert!(!degraded.to_string().contains("validated"));
 
         let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
-        let degraded_with_runtime = registry
-            .execute_tool_with_runtime("threat-model:build", json!({}), &ctx, Some(&runtime))
+        let deterministic_with_runtime = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"pipeline": "deterministic"}),
+                &ctx,
+                Some(&runtime),
+            )
             .unwrap();
         assert_eq!(
-            degraded_with_runtime
+            deterministic_with_runtime
                 .pointer("/data/provider")
                 .and_then(Value::as_str),
             Some("deterministic")
@@ -1018,7 +1023,7 @@ authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({}), &ctx)
+            .execute_tool("threat-model:build", json!({"pipeline": "deterministic"}), &ctx)
             .unwrap();
 
         assert_eq!(
@@ -1050,7 +1055,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"sources": ["threat-model", "context"]}),
+                json!({"pipeline": "deterministic", "sources": ["threat-model", "context"]}),
                 &ctx,
             )
             .unwrap();
@@ -1082,7 +1087,7 @@ authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({"contextMode": "off"}), &ctx)
+            .execute_tool("threat-model:build", json!({"pipeline": "deterministic", "contextMode": "off"}), &ctx)
             .unwrap();
 
         assert_eq!(
@@ -1092,7 +1097,39 @@ authorization: Default::default(),
     }
 
     #[test]
-    fn threat_model_no_runtime_rejects_source_backed_options() {
+    fn default_build_without_runtime_is_rejected_as_model_backed() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = registry
+            .execute_tool("threat-model:build", json!({}), &ctx)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("model-backed and requires a configured model"),
+            "{error}"
+        );
+        assert!(error.contains("pipeline=deterministic"), "{error}");
+    }
+
+    #[test]
+    fn deterministic_pipeline_rejects_source_backed_options() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
             temp.path().join("package.json"),
@@ -1114,13 +1151,13 @@ authorization: Default::default(),
         let error = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"sources": ["x-ray"], "seed": ["prior threat model"]}),
+                json!({"pipeline": "deterministic", "sources": ["x-ray"], "seed": ["prior threat model"]}),
                 &ctx,
             )
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("require a configured model/runtime"), "{error}");
+        assert!(error.contains("require the model-backed pipeline"), "{error}");
     }
 
     #[test]
@@ -1152,7 +1189,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false, "maxThreats": 64}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false, "maxThreats": 64}),
                 &ctx,
             )
             .unwrap();
@@ -1350,7 +1387,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1402,7 +1439,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1454,7 +1491,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1508,7 +1545,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1560,7 +1597,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1612,7 +1649,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1664,7 +1701,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1716,7 +1753,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1767,7 +1804,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1818,7 +1855,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1869,7 +1906,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1920,7 +1957,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -1971,7 +2008,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2022,7 +2059,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2070,7 +2107,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2118,7 +2155,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2159,7 +2196,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2205,7 +2242,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2250,7 +2287,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2301,7 +2338,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2344,7 +2381,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2398,7 +2435,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2446,7 +2483,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2490,7 +2527,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2542,7 +2579,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2584,7 +2621,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2619,7 +2656,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2662,7 +2699,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2708,7 +2745,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2756,7 +2793,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2799,7 +2836,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2847,7 +2884,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2895,7 +2932,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2938,7 +2975,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -2981,7 +3018,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3024,7 +3061,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3067,7 +3104,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3113,7 +3150,7 @@ authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({}), &ctx)
+            .execute_tool("threat-model:build", json!({"pipeline": "deterministic"}), &ctx)
             .unwrap();
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
@@ -3160,7 +3197,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3209,7 +3246,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3257,7 +3294,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3305,7 +3342,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3353,7 +3390,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3398,7 +3435,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3447,7 +3484,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3498,7 +3535,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3549,7 +3586,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3600,7 +3637,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3647,7 +3684,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3693,7 +3730,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3743,7 +3780,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3794,7 +3831,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3849,7 +3886,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3899,7 +3936,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3947,7 +3984,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -3997,7 +4034,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4046,7 +4083,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4097,7 +4134,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4146,7 +4183,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4192,7 +4229,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4233,7 +4270,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4269,7 +4306,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4315,7 +4352,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4367,7 +4404,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4413,7 +4450,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4461,7 +4498,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4506,7 +4543,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4553,7 +4590,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4601,7 +4638,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4648,7 +4685,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4696,7 +4733,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4747,7 +4784,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4794,7 +4831,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4838,7 +4875,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4899,7 +4936,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -4956,7 +4993,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5020,7 +5057,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5078,7 +5115,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5136,7 +5173,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5194,7 +5231,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5249,7 +5286,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5306,7 +5343,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5361,7 +5398,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5417,7 +5454,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5480,7 +5517,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5545,7 +5582,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5605,7 +5642,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5665,7 +5702,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5719,7 +5756,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5775,7 +5812,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5820,7 +5857,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5864,7 +5901,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5926,7 +5963,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -5985,7 +6022,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6039,7 +6076,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6095,7 +6132,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6153,7 +6190,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6207,7 +6244,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6263,7 +6300,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6318,7 +6355,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6371,7 +6408,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6426,7 +6463,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6483,7 +6520,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6542,7 +6579,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6598,7 +6635,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6653,7 +6690,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6708,7 +6745,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6779,7 +6816,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6835,7 +6872,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6898,7 +6935,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -6958,7 +6995,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7022,7 +7059,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7079,7 +7116,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7146,7 +7183,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7197,7 +7234,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7256,7 +7293,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7309,7 +7346,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7362,7 +7399,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7417,7 +7454,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7475,7 +7512,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7531,7 +7568,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7595,7 +7632,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7657,7 +7694,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7727,7 +7764,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7804,7 +7841,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7879,7 +7916,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -7966,7 +8003,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8038,7 +8075,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8105,7 +8142,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8170,7 +8207,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8249,7 +8286,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8323,7 +8360,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8403,7 +8440,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8476,7 +8513,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8532,7 +8569,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8582,7 +8619,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8638,7 +8675,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8695,7 +8732,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8749,7 +8786,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8807,7 +8844,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8876,7 +8913,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8925,7 +8962,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -8972,7 +9009,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9024,7 +9061,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9079,7 +9116,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9147,7 +9184,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9199,7 +9236,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9257,7 +9294,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9304,7 +9341,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9360,7 +9397,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9420,7 +9457,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9468,7 +9505,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9504,7 +9541,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9545,7 +9582,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9581,7 +9618,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9626,7 +9663,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9662,7 +9699,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9739,7 +9776,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9809,7 +9846,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9877,7 +9914,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9931,7 +9968,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -9987,7 +10024,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10071,7 +10108,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10130,7 +10167,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10189,7 +10226,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10234,7 +10271,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10276,7 +10313,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10371,7 +10408,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10464,7 +10501,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10511,7 +10548,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10576,7 +10613,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10661,7 +10698,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10741,7 +10778,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10801,7 +10838,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10852,7 +10889,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10912,7 +10949,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -10968,7 +11005,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11024,7 +11061,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11080,7 +11117,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11126,7 +11163,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11192,7 +11229,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11248,7 +11285,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11299,7 +11336,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11349,7 +11386,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11395,7 +11432,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11456,7 +11493,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11498,7 +11535,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11540,7 +11577,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11597,7 +11634,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11639,7 +11676,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11707,7 +11744,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11758,7 +11795,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -11815,7 +11852,7 @@ authorization: Default::default(),
         let degraded = registry
             .execute_tool(
                 "threat-model:build",
-                json!({"preserveUserEdits": false}),
+                json!({"pipeline": "deterministic", "preserveUserEdits": false}),
                 &ctx,
             )
             .unwrap();
@@ -12327,7 +12364,7 @@ authorization: Default::default(),
             .execute_tool("threat-model:build", json!({"pipeline": "staged"}), &ctx)
             .unwrap_err();
         assert!(
-            format!("{error:#}").contains("staged-pipeline options require a configured model/runtime"),
+            format!("{error:#}").contains("model-backed and requires a configured model"),
             "unexpected error: {error:#}"
         );
     }

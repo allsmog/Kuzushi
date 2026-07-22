@@ -6,20 +6,37 @@ pub(crate) fn build_threat_model(
     runtime: Option<&dyn AgentRuntime>,
     flavor: BuildFlavor,
 ) -> Result<Value> {
-    if should_build_deterministically(&input, ctx, runtime) {
-        reject_source_options_without_runtime(&input, ctx)?;
+    if deterministic_pipeline_requested(&input) {
+        reject_model_only_options_for_deterministic_pipeline(&input, ctx)?;
         return build_deterministic_threat_model(input, ctx, flavor);
     }
+    let runtime = require_threat_model_runtime(runtime, flavor)?;
     build_agentic_threat_model(input, ctx, runtime, flavor)
+}
+
+/// Threat modeling is model-backed. The runtime-free deterministic fold is an
+/// explicit operator choice (`pipeline=deterministic`), never a silent
+/// fallback when no model is configured.
+fn require_threat_model_runtime<'a>(
+    runtime: Option<&'a dyn AgentRuntime>,
+    flavor: BuildFlavor,
+) -> Result<&'a dyn AgentRuntime> {
+    runtime.with_context(|| {
+        format!(
+            "{} is model-backed and requires a configured model and agent runtime; \
+             pass pipeline=deterministic to explicitly request the runtime-free \
+             artifact-review-only fold instead",
+            flavor.tool_name()
+        )
+    })
 }
 
 fn build_agentic_threat_model(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
+    runtime: &dyn AgentRuntime,
     flavor: BuildFlavor,
 ) -> Result<Value> {
-    let runtime = runtime.expect("deterministic path handles missing runtime");
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
@@ -114,21 +131,20 @@ fn take_threat_model_findings(
     threat_model_findings(input, generated.bridge_findings.take(), &generated.document)
 }
 
-fn should_build_deterministically(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
-) -> bool {
-    runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
+/// True only when the operator explicitly asked for the runtime-free
+/// deterministic fold. The default pipeline is model-backed.
+pub(crate) fn deterministic_pipeline_requested(input: &Value) -> bool {
+    read_string(input, &["pipeline"])
+        .is_some_and(|pipeline| pipeline.eq_ignore_ascii_case("deterministic"))
 }
 
-fn reject_source_options_without_runtime(
+fn reject_model_only_options_for_deterministic_pipeline(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<()> {
     if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
-            "threat-model:build seed/design/source/prompt/staged-pipeline options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
+            "threat-model:build seed/design/source/prompt/staged-pipeline options require the model-backed pipeline; the explicitly requested pipeline=deterministic fold cannot consume them"
         );
     }
     Ok(())
@@ -156,7 +172,7 @@ fn has_nonempty_list(input: &Value, key: &str) -> bool {
 }
 
 fn staged_pipeline_options_requested(input: &Value) -> bool {
-    read_string(input, &["pipeline"]).is_some_and(|pipeline| pipeline.to_lowercase() != "single")
+    read_string(input, &["pipeline"]).is_some_and(|pipeline| pipeline.to_lowercase() == "staged")
         || read_string(input, &["mode"]).is_some_and(|mode| mode.to_lowercase() != "build")
         || input.get("budgetUsd").is_some()
         || input.get("budget_usd").is_some()

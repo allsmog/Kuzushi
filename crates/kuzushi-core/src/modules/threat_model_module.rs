@@ -88,9 +88,9 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         opt(
             "pipeline",
             OptionType::Enum,
-            "Build pipeline: one synthesis call, or the staged evidence pipeline (research, synthesis, coverage gap-fill).",
+            "Build pipeline: one model synthesis call, the staged evidence pipeline (research, synthesis, coverage gap-fill), or the explicit runtime-free deterministic fold (artifact-review-only; never selected implicitly).",
         )
-        .choices(&["single", "staged"])
+        .choices(&["single", "staged", "deterministic"])
         .default(json!("single"))
         .advanced(),
         opt(
