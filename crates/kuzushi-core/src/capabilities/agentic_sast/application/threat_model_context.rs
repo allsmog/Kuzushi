@@ -28,10 +28,15 @@ impl PromptEnrichment {
 
 /// Compact digest of the persisted threat model for the scan prompt. The
 /// scan stays runnable without one: a missing or malformed artifact yields
-/// None and the hunt proceeds uninformed.
+/// None and the hunt proceeds uninformed. A stale or verification-failed
+/// document keeps its digest but leads with an honesty warning.
 pub(crate) fn threat_model_scan_context(target: &Path) -> Option<String> {
     let document = crate::capabilities::threat_model::load_persistent_threat_model(target)?;
-    render_threat_model_digest(&document)
+    let digest = render_threat_model_digest(&document)?;
+    match crate::capabilities::threat_model::verification_warning(&document, target) {
+        Some(warning) => Some(format!("{warning}\n\n{digest}")),
+        None => Some(digest),
+    }
 }
 
 pub(crate) fn render_threat_model_digest(document: &Value) -> Option<String> {

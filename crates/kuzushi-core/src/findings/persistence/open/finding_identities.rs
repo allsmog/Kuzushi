@@ -6,6 +6,10 @@ pub(in crate::findings::persistence::open) struct FindingIdentityAssignment {
     pub match_tier: FindingIdentityMatchTier,
 }
 
+/// Bound on how many prior-run rows are inspected for one dedup_key before
+/// giving up on cross-run identity reuse.
+const CROSS_RUN_CANDIDATE_LIMIT: usize = 32;
+
 impl FindingStore {
     pub(in crate::findings::persistence::open) fn identity_assignment_for_finding(
         &self,
@@ -13,6 +17,9 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
     ) -> Result<FindingIdentityAssignment> {
+        if let Some(reused) = self.cross_run_identity(conn, scan_id, finding)? {
+            return Ok(reused);
+        }
         let context = scan_identity_context(conn, scan_id)?;
         let identity_key = finding_identity_key_for_finding(finding);
         let identity_id = compute_finding_identity_id(&context.target_id, &identity_key.key);
@@ -22,6 +29,79 @@ impl FindingStore {
         };
         Ok(assignment)
     }
+
+    /// Same dedup_key + same file on an open row from an earlier run reuses
+    /// that row's identity, so repeated hunts converge on one durable
+    /// identity instead of minting a fresh `fi_` per differently-worded
+    /// rediscovery. Rows are never merged — only the identity is shared.
+    fn cross_run_identity(
+        &self,
+        conn: &Connection,
+        scan_id: &str,
+        finding: &Finding,
+    ) -> Result<Option<FindingIdentityAssignment>> {
+        let Some(dedup_key) = finding.dedup_key.as_deref() else {
+            return Ok(None);
+        };
+        let rekeyed = rekeyed_old_fps(conn)?;
+        let identity_id = prior_run_rows(conn, scan_id, dedup_key)?
+            .into_iter()
+            .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
+            .and_then(|prior| prior.identity_id);
+        Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
+            identity_id,
+            match_tier: FindingIdentityMatchTier::DedupKeyCrossRun,
+        }))
+    }
+}
+
+fn prior_run_rows(conn: &Connection, scan_id: &str, dedup_key: &str) -> Result<Vec<Finding>> {
+    let mut stmt = conn.prepare(
+        "select finding_json
+           from finding_current
+          where dedup_key = ?1
+            and run_id <> ?2
+          order by id asc
+          limit ?3",
+    )?;
+    let rows = stmt
+        .query_map(
+            params![dedup_key, scan_id, CROSS_RUN_CANDIDATE_LIMIT as i64],
+            super::finding_writes::row_to_current_finding,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+fn reusable_prior_identity(
+    prior: &Finding,
+    incoming: &Finding,
+    rekeyed_old_fps: &std::collections::HashSet<String>,
+) -> bool {
+    if prior.identity_id.is_none() || prior.suppressed {
+        return false;
+    }
+    if normalized_identity_file(&prior.file_path) != normalized_identity_file(&incoming.file_path)
+    {
+        return false;
+    }
+    let stable_key = prior
+        .identity_id
+        .as_deref()
+        .unwrap_or(prior.fingerprint.as_str());
+    !rekeyed_old_fps.contains(stable_key) && !rekeyed_old_fps.contains(&prior.fingerprint)
+}
+
+fn normalized_identity_file(file_path: &str) -> &str {
+    file_path.trim().trim_start_matches("./")
+}
+
+fn rekeyed_old_fps(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt = conn.prepare("select old_fp from rekey_edges")?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
 }
 
 struct ScanIdentityContext {

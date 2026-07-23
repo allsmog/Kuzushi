@@ -30,9 +30,15 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         HuntThreatModel => &[BuildThreatModel],
         HuntSystems => &[GatherRepoContext],
         ScanFuzz => &[GatherRepoContext],
+        ScanFuzzSweep => &[GatherRepoContext],
+        ScanFuzzDifferential => &[GatherRepoContext],
         HuntUseAfterFree => &[GatherRepoContext],
         // 作 TSUKURI · confirm — triage then verify the findings.
         TriageFindings => &[GatherRepoContext],
+        // Dedupe and chain composition read the findings ledger the same way
+        // triage does; neither requires a prior triage pass.
+        DedupeFindings => &[GatherRepoContext],
+        HuntChains => &[GatherRepoContext],
         VerifyFindings => &[TriageFindings],
         // 掛 KAKE · fix — patch verified findings, then report.
         PatchFindings => &[VerifyFindings],

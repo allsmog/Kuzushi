@@ -14822,7 +14822,12 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
         Msg::Cmd(ShellCommand::ThreatVersionUse(original_id)),
     );
 
-    assert_eq!(load_persistent_threat_model(&target).unwrap(), original);
+    let mut live = load_persistent_threat_model(&target).unwrap();
+    assert!(
+        live.as_object_mut().unwrap().remove("verification").is_some(),
+        "threats use <n> re-verifies the restored document"
+    );
+    assert_eq!(live, original);
     let original_sha = kuzushi_core::findings::threat_model_document_sha256(&original);
     assert_eq!(
         app.router.threat().live_sha256(),

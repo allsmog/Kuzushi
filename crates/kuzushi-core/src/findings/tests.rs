@@ -64,6 +64,52 @@ mod tests {
     }
 
     #[test]
+    fn dedup_key_falls_back_to_closed_class_when_no_cwe() {
+        let classed = Finding::new_tool(
+            "semgrep",
+            "generic.download",
+            "src/files.py",
+            20,
+            None,
+            Severity::High,
+            "Path traversal in download handler",
+        );
+        assert_eq!(
+            classed.dedup_key.as_deref(),
+            Some("src/files.py:2:class:path-traversal")
+        );
+
+        let unclassifiable = Finding::new_tool(
+            "semgrep",
+            "generic.rule",
+            "src/files.py",
+            20,
+            None,
+            Severity::High,
+            "Something looks wrong around this handler",
+        );
+        assert_eq!(
+            unclassifiable.dedup_key, None,
+            "class Other never mints a wildcard key"
+        );
+
+        let with_cwe = Finding::new_tool(
+            "semgrep",
+            "generic.rule",
+            "src/files.py",
+            20,
+            None,
+            Severity::High,
+            "Path traversal in download handler, CWE-22",
+        );
+        assert_eq!(
+            with_cwe.dedup_key.as_deref(),
+            Some("src/files.py:2:22"),
+            "an extractable CWE stays primary over the class fallback"
+        );
+    }
+
+    #[test]
     fn source_signature_keeps_basename_exact_line_and_cwe_or_title() {
         assert_eq!(
             compute_source_signature("src/foo.c", 42, Some("CWE-787")),
@@ -159,7 +205,7 @@ mod tests {
     }
 
     #[test]
-    fn new_tool_only_sets_dedup_key_when_cwe_was_extracted() {
+    fn new_tool_dedup_key_prefers_cwe_then_closed_class() {
         let with_cwe = Finding::new_tool(
             "semgrep",
             "rule",
@@ -169,8 +215,8 @@ mod tests {
             Severity::High,
             "OOB write CWE-787 in handler",
         );
-        assert!(with_cwe.dedup_key.is_some());
-        let without_cwe = Finding::new_tool(
+        assert_eq!(with_cwe.dedup_key.as_deref(), Some("src/foo.c:1:787"));
+        let classed = Finding::new_tool(
             "semgrep",
             "rule",
             "src/foo.c",
@@ -179,7 +225,11 @@ mod tests {
             Severity::High,
             "Hardcoded credential in source",
         );
-        assert!(without_cwe.dedup_key.is_none());
+        assert_eq!(
+            classed.dedup_key.as_deref(),
+            Some("src/foo.c:1:class:secret-exposure"),
+            "no CWE, but the closed class enum still keys the finding"
+        );
     }
 
     #[test]
@@ -577,7 +627,11 @@ mod tests {
 
         assert_ne!(id1, id2);
         let listed = store.list_findings(10).unwrap();
-        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed.len(),
+            1,
+            "cross-run dedup_key reuse converges the global identity view"
+        );
         let rerun = store.list_findings_for_scan_id("run-source-2").unwrap();
         assert_eq!(rerun.len(), 1);
         assert_eq!(rerun[0].severity, Severity::High);
@@ -704,6 +758,131 @@ mod tests {
         assert_eq!(
             rows[0].triage.as_ref().unwrap().verdict,
             TriageVerdict::NeedsReview
+        );
+    }
+
+    #[test]
+    fn cross_run_dedup_key_reuses_identity_without_merging_rows() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        store
+            .record_run_started("run-a", temp.path(), "running")
+            .unwrap();
+        let first = Finding::new_tool(
+            "semgrep",
+            "py.traversal",
+            "webapp/files.py",
+            20,
+            None,
+            Severity::High,
+            "Path traversal in download",
+        );
+        store.insert_finding("run-a", &first).unwrap();
+
+        store
+            .record_run_started("run-b", temp.path(), "running")
+            .unwrap();
+        let second = Finding::new_tool(
+            "agentic-sast",
+            "download-escape",
+            "webapp/files.py",
+            22,
+            None,
+            Severity::High,
+            "Path traversal lets clients escape the files dir",
+        );
+        store.insert_finding("run-b", &second).unwrap();
+
+        let run_a = store.list_findings_for_scan_id("run-a").unwrap();
+        let run_b = store.list_findings_for_scan_id("run-b").unwrap();
+        assert_eq!(run_a.len(), 1);
+        assert_eq!(run_b.len(), 1, "cross-run reuse never merges rows");
+        assert_eq!(run_a[0].identity_id, run_b[0].identity_id);
+        assert_eq!(
+            run_b[0].identity_match_tier.as_deref(),
+            Some("dedup_key_cross_run")
+        );
+    }
+
+    #[test]
+    fn suppressed_and_rekeyed_prior_rows_do_not_donate_identity() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        store
+            .record_run_started("run-a", temp.path(), "running")
+            .unwrap();
+        let mut suppressed = Finding::new_tool(
+            "semgrep",
+            "py.traversal",
+            "webapp/files.py",
+            20,
+            None,
+            Severity::High,
+            "Path traversal in download",
+        );
+        suppressed.suppressed = true;
+        store.insert_finding("run-a", &suppressed).unwrap();
+
+        store
+            .record_run_started("run-b", temp.path(), "running")
+            .unwrap();
+        let rediscovery = Finding::new_tool(
+            "agentic-sast",
+            "download-escape",
+            "webapp/files.py",
+            22,
+            None,
+            Severity::High,
+            "Path traversal lets clients escape the files dir",
+        );
+        store.insert_finding("run-b", &rediscovery).unwrap();
+        let run_b = store.list_findings_for_scan_id("run-b").unwrap();
+        let run_a = store.list_findings_for_scan_id("run-a").unwrap();
+        assert_ne!(
+            run_a[0].identity_id, run_b[0].identity_id,
+            "a suppressed prior row does not donate its identity"
+        );
+
+        // Rekey the run-b row away; a third run must mint a fresh identity
+        // instead of reusing the rekeyed row's.
+        let run_b_key = run_b[0]
+            .identity_id
+            .clone()
+            .unwrap_or_else(|| run_b[0].fingerprint.clone());
+        store
+            .record_model_rekey(&ModelRekeyRequest {
+                duplicate_stable_key: run_b_key,
+                canonical_stable_key: "fp3_elsewhere".to_string(),
+                duplicate_fingerprint: run_b[0].fingerprint.clone(),
+                canonical_fingerprint: "fp3_elsewhere".to_string(),
+                canonical_identity_id: None,
+                root_cause_summary: "test rekey".to_string(),
+                confidence: 0.9,
+                run_id: Some("run-b".to_string()),
+            })
+            .unwrap();
+        store
+            .record_run_started("run-c", temp.path(), "running")
+            .unwrap();
+        let third = Finding::new_tool(
+            "shinsa",
+            "traversal-again",
+            "webapp/files.py",
+            21,
+            None,
+            Severity::High,
+            "Path traversal in the download route",
+        );
+        store.insert_finding("run-c", &third).unwrap();
+        let run_c = store.list_findings_for_scan_id("run-c").unwrap();
+        assert_ne!(
+            run_c[0].identity_id, run_b[0].identity_id,
+            "a rekeyed prior row does not donate its identity"
+        );
+        assert_eq!(
+            run_c[0].identity_match_tier.as_deref(),
+            Some("stable_fp"),
+            "with no reusable prior row the pure identity path applies"
         );
     }
 

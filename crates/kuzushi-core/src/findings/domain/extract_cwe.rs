@@ -45,7 +45,7 @@ impl Finding {
         );
         let cwe = extract_cwe(&rule_id, &title, &message);
         let (dedup_key, source_signature) =
-            finding_identity(&file_path, start_line, cwe.as_deref(), &title);
+            finding_identity(&file_path, start_line, cwe.as_deref(), &rule_id, &title);
         let vuln_source = Some(VulnSource::from_tool(&tool));
 
         finding_record(FindingRecordInput {
@@ -163,17 +163,33 @@ fn finding_title(message: &str, rule_id: &str) -> String {
     message.lines().next().unwrap_or(rule_id).trim().to_string()
 }
 
-fn finding_dedup_key(file_path: &str, start_line: u32, cwe: Option<&str>) -> Option<String> {
-    cwe.map(|cwe| compute_dedup_key(file_path, start_line, Some(cwe)))
+/// CWE keys stay primary; CWE-less findings fall back to the closed
+/// vulnerability-class enum so cross-channel rediscoveries of the same
+/// classless defect still collide. `Other` yields no key — a wildcard class
+/// would merge unrelated findings that merely share a line bucket.
+fn finding_dedup_key(
+    file_path: &str,
+    start_line: u32,
+    cwe: Option<&str>,
+    rule_id: &str,
+    title: &str,
+) -> Option<String> {
+    if cwe.is_some() {
+        return Some(compute_dedup_key(file_path, start_line, cwe));
+    }
+    let class = crate::findings::ingest_contract::classify(rule_id, None, title).class;
+    (class != crate::findings::ingest_contract::FindingClass::Other)
+        .then(|| compute_class_dedup_key(file_path, start_line, class.slug()))
 }
 
 fn finding_identity(
     file_path: &str,
     start_line: u32,
     cwe: Option<&str>,
+    rule_id: &str,
     title: &str,
 ) -> (Option<String>, Option<String>) {
-    let dedup_key = finding_dedup_key(file_path, start_line, cwe);
+    let dedup_key = finding_dedup_key(file_path, start_line, cwe, rule_id, title);
     let source_signature = compute_source_signature(file_path, start_line, cwe.or(Some(title)));
     (dedup_key, Some(source_signature))
 }

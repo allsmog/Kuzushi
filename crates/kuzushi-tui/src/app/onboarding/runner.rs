@@ -1146,6 +1146,46 @@ mod tests {
         );
     }
 
+    /// The journey dispatches both fuzz lanes with an empty preset input
+    /// (the executor defaults to all built targets / auto mode), and the
+    /// write-path escalation still guards workspaceRoot overrides.
+    #[test]
+    fn fuzz_lane_tasks_expand_to_single_deterministic_steps_with_empty_input() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        for (task, tool) in [
+            (PlanningTaskId::ScanFuzzSweep, "fuzz:sweep"),
+            (PlanningTaskId::ScanFuzzDifferential, "fuzz:differential"),
+        ] {
+            assert!(!task.is_model_backed(), "{task:?} must stay deterministic");
+            let steps = app.expand_planning_task(task, &workspace).unwrap();
+            assert_eq!(steps.len(), 1, "{task:?}");
+            assert_eq!(steps[0].tool_name, tool, "{task:?}");
+            // The journey adds no operator preset: the prepared input is the
+            // descriptor defaults only — no target pin, no write-path override.
+            let prepared = steps[0].input.as_object().expect("object input");
+            for preset_key in ["afeTarget", "target", "workspaceRoot"] {
+                assert!(!prepared.contains_key(preset_key), "{task:?} {preset_key}");
+            }
+            let write_path = PlanningRunStep {
+                task,
+                tool_name: tool.to_string(),
+                input: json!({"workspaceRoot": "/tmp/ws"}),
+            };
+            assert!(app.step_configures_write_path(&write_path), "{task:?}");
+            assert_eq!(
+                planning_step_authorization(task, true),
+                ExecutionAuthorization::interactive_request()
+            );
+            assert_eq!(
+                planning_step_authorization(task, false),
+                ExecutionAuthorization::default()
+            );
+        }
+    }
+
     #[test]
     fn reverse_engineering_planning_task_autofills_binary_from_target() {
         let tmp = tempfile::tempdir().unwrap();
