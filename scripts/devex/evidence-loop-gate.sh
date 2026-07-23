@@ -17,17 +17,17 @@
 #      parallel load are re-run solo once; they pass only if solo-green
 #      (each rerun disclosed in the log).
 #
-# The workload journeys (J22, J23) run against KUZUSHI_DEVEX_TARGET
-# (default /home/ubuntu/monorepo/src/py/cloud) as a SCAN TARGET ONLY — the
-# target repository is never modified beyond kuzushi's own .kuzushi state.
-# J21 and J24 run against harness-owned fixture targets.
+# Every journey this gate runs (J21–J24) uses a HARNESS-OWNED fixture
+# target (@TMP_TARGET or journey-local fixtures). No operator checkout is
+# required, read, or touched: real-monorepo acceptance belongs to
+# local-monorepo-gate.sh / kuzushi-master-gate.sh, which require an
+# explicit KUZUSHI_DEVEX_TARGET and never delete target state.
 set -uo pipefail
 
 MODE=${1:---fast}
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
 GATE_TARGET_DIR="$REPO_ROOT/target-dev"
-WORKLOAD_TARGET=${KUZUSHI_DEVEX_TARGET:-/home/ubuntu/monorepo/src/py/cloud}
 GATE_ROOT=${EVIDENCE_LOOP_GATE_ROOT:-"$HOME/kz-evidence-loop/phaseC"}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RUN_DIR="$GATE_ROOT/gate-$STAMP-${MODE#--}"
@@ -41,7 +41,7 @@ fail() { FAILED=1; say "GATE-FAIL: $*"; }
 
 say "evidence-loop gate $MODE · $(date -u +%FT%TZ)"
 say "worktree: $REPO_ROOT @ $(git rev-parse --short HEAD 2>/dev/null || echo unknown) (uncommitted work included by design)"
-say "workload target (scan-only): $WORKLOAD_TARGET"
+say "targets: harness-owned fixtures only (no operator checkout used)"
 
 # ---------------------------------------------------------------- fmt
 if ! cargo fmt --check >>"$LOG" 2>&1; then
@@ -118,7 +118,6 @@ if [ "$MODE" = "--full" ]; then
   for journey in J21 J22 J23 J24; do
     say "JOURNEY $journey"
     if KUZUSHI_BIN="$KUZUSHI_BIN" \
-       KUZUSHI_DEVEX_TARGET="$WORKLOAD_TARGET" \
        KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys" \
        "$REPO_ROOT/scripts/devex/run-journey.sh" "$journey" >>"$LOG" 2>&1; then
       say "PASS journey $journey ($(grep -h 'result:' "$RUN_DIR"/journeys/*/"$journey"/report.txt 2>/dev/null | tail -1))"
@@ -135,9 +134,18 @@ fi
   echo "completed: $(date -u +%FT%TZ)"
   echo "disclosed environment limitations:"
   echo "  - kuzushi-core dynamic-JS tests require Node >= 25 (see ENV-LIMITED lines)"
-  echo "  - model-backed patch draft->applied->reverified not exercisable on this box"
-  echo "    (no ANTHROPIC_API_KEY; no Vertex provider; bridge forbidden by operator rule);"
-  echo "    J24 captures the honest refusal chain instead"
+  # Provider capability is DERIVED from doctor at gate time, never asserted
+  # from stale prose (post-Vertex-support honesty rule).
+  if [ -x "$KUZUSHI_BIN" ] && "$KUZUSHI_BIN" doctor > "$RUN_DIR/doctor.txt" 2>&1; then
+    echo "  - provider capability (from doctor at $(date -u +%FT%TZ); full report: doctor.txt):"
+    grep -iE 'auth|provider|vertex|model|credential' "$RUN_DIR/doctor.txt" | sed 's/^/      /' \
+      || echo "      (doctor reported no provider lines)"
+    echo "    model-backed cells are exercised by live-mode gates, not this one;"
+    echo "    J24 captures the runtime-free refusal/deferral chain either way"
+  else
+    echo "  - provider capability: doctor probe unavailable (binary missing or doctor failed;"
+    echo "    see doctor.txt if present) — no capability is claimed without a probe"
+  fi
   if [ $FAILED -eq 0 ]; then
     echo "verdict: CLEAN"
   else

@@ -136,6 +136,8 @@ pub(in crate::modules) fn language_for_context_file(file: &str) -> Option<&'stat
         "py" => Some("Python"),
         "go" => Some("Go"),
         "java" => Some("Java"),
+        "scala" | "sc" | "sbt" => Some("Scala"),
+        "kt" | "kts" => Some("Kotlin"),
         "cs" => Some("C#"),
         "rb" => Some("Ruby"),
         "php" => Some("PHP"),

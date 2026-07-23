@@ -295,8 +295,12 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   # Navigate footer advertises "Esc prompt"; from a clean prompt one Escape
   # enters Navigate, and a drafted prompt or modal needs a clearing Escape
   # first. Blind Escapes cannot converge on a toggle — poll between presses.
+  # The window must cover launch-time hydration: on a large real target the
+  # footer does not render its mode segment for several seconds (observed
+  # >3s on a 442k-file monorepo), so give convergence the same order of
+  # patience as the page waits (30s) while still failing honestly.
   local tries=0 tail3
-  while (( tries++ <= 10 )); do
+  while (( tries++ <= 60 )); do
     tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
     case $tail3 in
       *'Esc prompt'*)
@@ -305,7 +309,7 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
       *)
         tmux send-keys -t "$SESSION" Escape;;
     esac
-    sleep 0.3
+    sleep 0.5
   done
   fail "nav-mode — Navigate footer never rendered"
 }
@@ -499,6 +503,21 @@ d_snap() { d_snap_kind automatic "$1"; }
 d_live_snap() { d_snap_kind live "$1"; }
 d_saved_snap() { d_snap_kind saved "$1"; }
 
+d_expect_wide() { # <min-cols> <substring> — assert only at widths where the
+  # full layout renders. NOT a silent skip: below the threshold the step is
+  # reported visibly, and the omission it tolerates must be a ledgered
+  # compact-layout gap, never an unexplained absence.
+  local min=${1%% *} rest=${1#* }
+  case $min in
+    ''|*[!0-9]*) devex_die "expect-wide requires '<min-cols> <substring>' (in $CURRENT_FILE)";;
+  esac
+  if [ "$J_COLS" -ge "$min" ]; then
+    d_expect "$rest"
+  else
+    report step "expect-wide skipped at ${J_COLS}col (< ${min}col): \"$rest\" — compact-layout gap, see gap ledger"
+  fi
+}
+
 d_expect() { # fixed substring, case-insensitive, against last snapshot
   local needle; needle=$(expand_tokens "$1")
   [ -n "$LAST_SNAP" ] || { fail "expect \"$needle\" — no snapshot taken yet"; return; }
@@ -613,6 +632,7 @@ dispatch() { # <directive> <value>
     live-snap)       d_live_snap "$2";;
     saved-snap)      d_saved_snap "$2";;
     expect)          d_expect "$2";;
+    expect-wide)     d_expect_wide "$2";;
     expect-not)      d_expect_not "$2";;
     expect-ansi-profile) d_expect_ansi_profile "$2";;
     expect-echo-within) d_expect_echo_within "$2";;

@@ -171,8 +171,10 @@ fn validate_empirical_proof(
         "proof input",
     )?;
     let reference = required_string(&input, "fingerprint", "proof input fingerprint")?;
+    // Operator-reference resolution: verify:finding accepts aliases (F-0001),
+    // so the recorded proof input may carry one instead of a fingerprint.
     let finding = store
-        .get_finding_by_reference(reference)?
+        .get_finding_by_operator_reference(reference)?
         .context("proof finding no longer exists")?;
     let proof = finding
         .verification
@@ -197,8 +199,10 @@ fn current_candidate_finding(
 ) -> Result<Finding> {
     let input = read_json_artifact(target, run_id, "input.json", "proof input")?;
     let reference = required_string(&input, "fingerprint", "proof input fingerprint")?;
+    // Operator-reference resolution: verify:finding accepts aliases (F-0001),
+    // so the recorded proof input may carry one instead of a fingerprint.
     let input_finding = store
-        .get_finding_by_reference(reference)?
+        .get_finding_by_operator_reference(reference)?
         .context("proof input finding no longer exists")?;
     let finding = store
         .get_finding_by_fingerprint(&candidate.fingerprint)?

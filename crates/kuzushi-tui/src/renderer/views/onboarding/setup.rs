@@ -67,7 +67,7 @@ fn setup_summary_line(
         styled(
             &fit(
                 &format!(
-                    " READY · {} Map task(s) · Enter Start Map to commit",
+                    " READY · {} Map task(s) · s Start Map · Enter edits the selected row",
                     model.selected_tasks
                 ),
                 width,

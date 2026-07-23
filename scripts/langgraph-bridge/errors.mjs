@@ -40,12 +40,28 @@ export function invalidProviderResponseError() {
 
 export function bridgeErrorResponse(error) {
   const failure = classifyBridgeError(error);
+  const retryAfterSeconds = retryAfterSecondsFromError(error);
   return {
     ok: false,
     error: publicFailureMessage(failure.errorClass, failure.status),
     errorClass: failure.errorClass,
     ...(failure.status === undefined ? {} : { status: failure.status }),
+    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
   };
+}
+
+const RETRY_AFTER_MAX_SECONDS = 300;
+
+/** Provider-declared wait before the next attempt (rate limits). Only the
+ * delta-seconds form is honored; HTTP-date values are ignored rather than
+ * trusting clock math on an adversarial header. */
+function retryAfterSecondsFromError(error) {
+  const headers = error?.headers ?? error?.response?.headers ?? error?.cause?.headers;
+  const raw =
+    typeof headers?.get === "function" ? headers.get("retry-after") : headers?.["retry-after"];
+  const seconds = Number(typeof raw === "string" ? raw.trim() : raw);
+  if (!Number.isInteger(seconds) || seconds <= 0) return undefined;
+  return Math.min(seconds, RETRY_AFTER_MAX_SECONDS);
 }
 
 function classifyBridgeError(error) {

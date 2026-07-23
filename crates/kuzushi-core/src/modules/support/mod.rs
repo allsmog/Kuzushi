@@ -63,7 +63,7 @@ pub(in crate::modules) fn should_skip_path(name: &str) -> bool {
             | "native"
             | "node_modules"
             | "target"
-    )
+    ) || crate::incremental_index::is_bazel_output_component(name)
 }
 
 /// Directory-only companion to [`should_skip_path`]: hidden directories hold

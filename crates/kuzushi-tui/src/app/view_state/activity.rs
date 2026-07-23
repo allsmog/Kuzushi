@@ -1682,9 +1682,12 @@ fn typed_task_cost(projection: &kuzushi_core::run_lifecycle::RunProjection, task
 
 // Meta strings render appended to the row label, so each carries its own
 // leading separator (the latency/cost meta does the same with " (…)").
+// Unavailable cost renders nothing: the header and HEALTH pane already
+// disclose it once, and repeating "cost not recorded" on every task row
+// both spams the screen and eats the row's truncation budget.
 fn typed_cost_meta(cost: RuntimeCostReport) -> String {
     if cost.is_unavailable() {
-        return " · cost not recorded".to_string();
+        return String::new();
     }
     if cost.is_complete() {
         return format!(" · ${:.4}", cost.observed_usd());
@@ -1945,14 +1948,20 @@ mod tests {
     use kuzushi_core::RunTraceStep;
 
     /// Meta strings append directly to the row label: without its own
-    /// leading separator the card reads "context:buildcost not recorded".
+    /// leading separator the card reads "context:build$0.0100". Unavailable
+    /// cost stays silent — the header/HEALTH pane disclose it once.
     #[test]
     fn typed_cost_meta_carries_its_own_separator() {
-        let meta = typed_cost_meta(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
-        assert_eq!(meta, " · cost not recorded");
+        let unavailable = typed_cost_meta(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
+        assert_eq!(unavailable, "", "per-row 'cost not recorded' is noise");
+
+        let known = kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(0.01, "test").unwrap(),
+        );
+        let meta = typed_cost_meta(known);
         assert!(
-            format!("context:build{meta}").contains("context:build · cost"),
-            "label+meta must not concatenate without a separator"
+            format!("context:build{meta}").contains("context:build · $"),
+            "label+meta must not concatenate without a separator: {meta:?}"
         );
     }
 

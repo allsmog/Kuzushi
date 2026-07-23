@@ -134,6 +134,7 @@ fn append_jobs_footer(lines: &mut Vec<Line<'static>>, model: &JobsRegistryModel,
     lines.push(command_list_line(
         &[
             "jobs -k <id>",
+            "resume <id>",
             "trace <id>",
             "replay <id>",
             "background",

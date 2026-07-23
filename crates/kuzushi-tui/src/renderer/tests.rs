@@ -6262,7 +6262,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
         kuzushi_core::RunTraceStep::new(
             1,
             "tool-progress",
-            "stage 3/5 · building repository inventory",
+            "stage 3/6 · building repository inventory",
         )
         .with_module_id("context")
         .with_verb("build"),
@@ -6334,13 +6334,13 @@ fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
     );
     task.state = DagTaskState::Active;
     task.started_at = Some(now - std::time::Duration::from_secs(65));
-    task.last_label = "stage 4/5 · mapping attack surface".to_string();
+    task.last_label = "stage 4/6 · mapping attack surface".to_string();
     session.tasks.insert(task.task_id.clone(), task);
     session.events.push_back(crate::RecordedTraceEvent {
         step: kuzushi_core::RunTraceStep::new(
             1,
             "tool-progress",
-            "stage 4/5 · mapping attack surface",
+            "stage 4/6 · mapping attack surface",
         )
         .with_module_id("context")
         .with_verb("build"),
@@ -6367,8 +6367,8 @@ fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
         "warning should remain in the header: {rendered}"
     );
     assert!(rendered.contains("current context:build"), "{rendered}");
-    assert!(rendered.contains("last stage 4/5"), "{rendered}");
-    assert!(rendered.contains("stage 4/5"), "{rendered}");
+    assert!(rendered.contains("last stage 4/6"), "{rendered}");
+    assert!(rendered.contains("stage 4/6"), "{rendered}");
     assert!(!rendered.contains("view map"), "{rendered}");
 }
 

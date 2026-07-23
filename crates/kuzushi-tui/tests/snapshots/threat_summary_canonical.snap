@@ -4,7 +4,7 @@ assertion_line: 57
 ---
 KUZUSHI shell route · view:threats:summary · target:none · model:unconfigured · context not built · cost:$0.00 (no...
 
-1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY
+1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
 
  -- THREAT MODEL REVIEW ------------------------------------------------------------------------------------------------
 status             no target selected

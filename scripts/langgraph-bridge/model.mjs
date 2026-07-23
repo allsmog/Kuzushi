@@ -207,11 +207,37 @@ function nonEmpty(value) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+// Adaptive-thinking-only Anthropic models reject sampling knobs client-side
+// (@langchain/anthropic `validateInvocationParamCompatibility` throws before
+// any HTTP call when temperature is set to a non-default value). Mirror its
+// prefix list so a caller-pinned deterministic temperature (e.g. triage's
+// 0.0) degrades to the provider default for these models instead of failing
+// every bridge call.
+const TEMPERATURE_LOCKED_MODEL_PREFIXES = [
+  "claude-opus-4-7",
+  "claude-opus-4-8",
+  "claude-fable-5",
+  "claude-orchid-5",
+  "claude-orchid-preview",
+];
+
+function temperatureLockedModel(request) {
+  const [, model] = parseModelSpec(request?.model ?? "");
+  return TEMPERATURE_LOCKED_MODEL_PREFIXES.some((prefix) => model.startsWith(prefix));
+}
+
+// Agentic tool loops issue many back-to-back calls, so a burst-quota 429 in
+// the middle of a graph run is routine; the SDK's default two retries give
+// up long before a per-minute window resets and fail the whole run.
+const MODEL_MAX_RETRIES = 8;
+
 function modelOptions(request) {
-  const options = {};
+  const options = { maxRetries: MODEL_MAX_RETRIES };
   const temperature = numericTemperature(request);
   const maxTokens = request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
-  if (temperature !== undefined) options.temperature = temperature;
+  if (temperature !== undefined && !temperatureLockedModel(request)) {
+    options.temperature = temperature;
+  }
   if (Number.isFinite(Number(maxTokens)) && Number(maxTokens) > 0) {
     options.maxTokens = Math.floor(Number(maxTokens));
   }

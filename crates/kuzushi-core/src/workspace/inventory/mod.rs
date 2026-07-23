@@ -9,6 +9,7 @@ pub(crate) use language_for_path::*;
 pub(crate) use repository_inventory::*;
 pub(crate) use route_item::*;
 use serde::{Deserialize, Serialize};
+pub(crate) use source_text_scan::*;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
@@ -23,12 +24,14 @@ mod inspect_source_frameworks;
 mod language_for_path;
 mod repository_inventory;
 mod route_item;
+mod source_text_scan;
 mod target_kind;
 #[cfg(test)]
 mod tests;
 
 pub use build_repository_inventory::{
-    build_repository_inventory, build_repository_inventory_with_progress,
+    build_repository_inventory, build_repository_inventory_with_observer,
+    build_repository_inventory_with_progress,
 };
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;

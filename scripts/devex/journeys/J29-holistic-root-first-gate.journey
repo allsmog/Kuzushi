@@ -1,0 +1,28 @@
+# J29 — Holistic-first acceptance: root-first gate on the real monorepo.
+#
+# Cycle-3 acceptance journey (master contract §15 / §10.2). Runs against the
+# operator's existing checkout (@TARGET), never deletes or resets its state.
+# EXPECTED FAIL until the holistic domain state machine lands: with no
+# accepted current-revision root holistic baseline, the Map page must show
+# the §10.2 pre-baseline composition — inventory / model / holistic status
+# rows and ONE dominant primary action, "Run holistic repository scan" —
+# and no authoritative child-scope recommendations.
+name: Holistic root-first gate (real target)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TARGET
+wait-for: 60 KUZUSHI
+nav-mode:
+keys: 1
+wait-live-snap: 30 Viewing Map | map-pre-baseline
+expect: rev:
+# §10.2 pre-baseline status rows:
+expect: Inventory
+expect: Security model
+expect: Holistic scan
+expect: NOT RUN
+# The single dominant primary action before any root baseline:
+expect: Run holistic repository scan
+ask: Map — is "Run holistic repository scan" visibly THE one primary NEXT (child-scope rows absent or explicitly gated/non-authoritative), per §10.2?
+keys: Escape

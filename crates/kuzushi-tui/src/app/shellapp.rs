@@ -1397,7 +1397,9 @@ mod tests {
         let notice = app.advisory().notice.as_ref().expect("visible notice");
         assert_eq!(notice.severity, NoticeSeverity::Error);
         assert!(notice.message.contains("run input must be JSON"));
-        assert!(notice.message.contains("Next: run <tool> {}"));
+        assert!(notice
+            .message
+            .contains("Next: run <tool> (input is optional and defaults to {})"));
         assert_failed_preparation_run(temp.path(), &expected_title);
     }
 

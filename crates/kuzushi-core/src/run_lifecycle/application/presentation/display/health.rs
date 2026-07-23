@@ -60,14 +60,16 @@ fn durability_label(durability: &RunDurabilityHealth) -> String {
     }
 }
 
+/// These describe the *fidelity of the progress feed*, not run completion —
+/// "Progress: complete" on a mid-flight run read as "the run is complete".
 fn progress_fidelity_label(progress: &RunProgressFidelity) -> String {
     match progress {
-        RunProgressFidelity::Complete => "Progress: complete".to_string(),
+        RunProgressFidelity::Complete => "Progress feed: lossless".to_string(),
         RunProgressFidelity::Coalesced { omitted } => {
-            format!("Progress: healthy but lossy · {omitted} update(s) omitted")
+            format!("Progress feed: healthy but lossy · {omitted} update(s) omitted")
         }
         RunProgressFidelity::Saturated { omitted_at_least } => {
-            format!("Progress: saturated · at least {omitted_at_least} update(s) omitted")
+            format!("Progress feed: saturated · at least {omitted_at_least} update(s) omitted")
         }
     }
 }

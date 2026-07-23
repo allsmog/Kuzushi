@@ -93,8 +93,12 @@ impl fmt::Display for StructuredOutputError {
 }
 
 impl std::error::Error for StructuredOutputError {
+    /// Display already renders the complete `{:#}` chain of the wrapped
+    /// error. Exposing the same chain through `source()` again made anyhow's
+    /// alternate formatting print the whole message twice, concatenated —
+    /// the "429 error shown twice" result-card bug.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        Some(self.source.as_ref())
+        None
     }
 }
 

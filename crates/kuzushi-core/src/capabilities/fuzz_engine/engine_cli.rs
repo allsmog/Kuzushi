@@ -40,6 +40,9 @@ pub fn engine_invocation(paths: &FuzzPaths, verb_args: &[String]) -> EngineInvoc
                 "AGENTIC_FUZZ_WORKSPACE".to_string(),
                 paths.workspace_root.display().to_string(),
             ),
+            // llvm-symbolizer hangs when the ambient environment exports a
+            // debuginfod URL on egress-blocked hosts; keep symbolization local.
+            ("DEBUGINFOD_URLS".to_string(), String::new()),
         ],
         cwd: paths.afe_repo.clone(),
     }
@@ -160,6 +163,9 @@ mod tests {
         assert!(invocation
             .envs
             .contains(&("AGENTIC_FUZZ_WORKSPACE".to_string(), "/ws".to_string())));
+        assert!(invocation
+            .envs
+            .contains(&("DEBUGINFOD_URLS".to_string(), String::new())));
     }
 
     #[test]

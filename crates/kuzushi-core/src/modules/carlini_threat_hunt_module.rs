@@ -379,8 +379,21 @@ fn taint_iris_next_planning_knobs() -> Vec<OptionSpec> {
         cwe_focus_option(),
         discover_signals_option(),
         target_subdir_option(),
+        extra_catalog_entries_option(),
     ]);
     options
+}
+
+fn extra_catalog_entries_option() -> OptionSpec {
+    opt(
+        "extraCatalogEntries",
+        OptionType::Json,
+        "Operator-supplied CWE catalog entries (array of {cwe, name, taintClass, languages, \
+         sourceSignals, sinkSignals, sanitizerSignals, structuralQueries, regexMarkers}). \
+         Ranked above every built-in entry — use for boundary-anchored or threat-intel signals.",
+    )
+    .aliases(&["extra_catalog_entries"])
+    .advanced()
 }
 
 fn taint_iris_next_backend_knobs() -> Vec<OptionSpec> {
@@ -401,6 +414,7 @@ fn taint_iris_next_limit_knobs() -> Vec<OptionSpec> {
         max_files_per_query_option(),
         max_specs_per_cwe_option(),
         max_agent_findings_option(),
+        max_cpg_source_files_option(),
     ]
 }
 
@@ -520,6 +534,18 @@ fn max_agent_findings_option() -> OptionSpec {
         "Maximum agent findings.",
     )
     .aliases(&["max_agent_findings"])
+    .advanced()
+}
+
+fn max_cpg_source_files_option() -> OptionSpec {
+    opt(
+        "maxCpgSourceFiles",
+        OptionType::Int,
+        "Refuse cpg-rs graph builds whose in-scope corpus exceeds this many source files \
+         (default 25000). Prefer scoping with targetSubdir over raising the cap.",
+    )
+    .aliases(&["max_cpg_source_files"])
+    .default(json!(kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES))
     .advanced()
 }
 

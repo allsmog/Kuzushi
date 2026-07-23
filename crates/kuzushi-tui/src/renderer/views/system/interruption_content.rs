@@ -48,7 +48,7 @@ fn budget_hard_stop_content() -> InterruptionContent {
                 ],
             ),
         ],
-        &["cost", "run <tool> --resume <runId>", "story", "activity"],
+        &["cost", "resume <runId>", "story", "activity"],
     )
 }
 

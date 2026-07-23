@@ -4,10 +4,15 @@
 #
 # The explicit DevEx hook enriches only the canonical offline-demo target with
 # the same deterministic state used by the buffer contract. It cannot write
-# into an operator target. `kuzushi demo` is the separate headless command, so
-# this journey enters through the target gate and presses `d` inside the TUI.
-# Numeric page keys are printable view hotkeys, so this journey enters strict
-# Navigate mode before selecting Map, Scan, Review, Prove, and Fix.
+# into an operator target. The picker's `d` key hook was retired; the current
+# product enters the offline fixture with the `:demo` command at the target
+# gate (the picker hint says exactly that). Entered via `submit:` — not blind
+# type+Enter — because async picker hydration can corrupt an in-flight draft
+# (the known "scanj"/"demoj" corruption; submit verifies the draft renders
+# intact and retypes it if corrupted).
+# Numeric page keys are printable view hotkeys, so this journey converges
+# Navigate mode (nav-mode: polls the footer markers; F2 is retired) before
+# selecting Map, Scan, Review, Prove, and Fix.
 name: Canonical five-phase cockpit reference
 size: 120x36
 cwd: @TMP_TARGET
@@ -15,31 +20,31 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
+submit: demo
 wait-for: 120 PDF phase reference fixture loaded
 keys: Escape
 submit: workbench
 wait: 2
-keys: F2
+nav-mode:
 keys: 1
-wait-live-snap: 10 VIEW MAP | 1-map
+wait-live-snap: 10 Viewing Map | 1-map
 expect-ansi-profile: truecolor
 expect: PROJECT CONTEXT
 expect: ATTACK SURFACE
 expect: HOT MODULES
-expect: THREAT MODEL / DFD
+expect: DATA-FLOW MAP
 expect: NEXT
 ask: Map — does project readiness lead, with real attack-surface and threat-model context supporting one obvious NEXT action?
 keys: 2
-wait-live-snap: 10 VIEW SCAN | 2-scan
+wait-live-snap: 10 Viewing Scan | 2-scan
 expect: SCOPE / PLAN
 expect: RECORDED ENGINE OUTCOMES
-expect: FINDING / ARTIFACT DELTA
+expect: recorded tool sast:scan
 expect: SCAN RECEIPT
 expect: outcome completed
 ask: Scan — do accepted attempts, engine outcomes, deltas, and the recorded receipt remain distinct from live Run Focus progress?
 keys: 3
-wait-live-snap: 10 VIEW REVIEW | 3-review
+wait-live-snap: 10 Viewing Review | 3-review
 expect: FINDINGS
 expect: SELECTED FINDING
 expect: F-0001
@@ -47,7 +52,7 @@ expect: SQL injection reaches query
 expect: runtime_verified
 ask: Review — is the queue confidence-first, is exactly one selected identity obvious, and do actions visibly target that finding?
 keys: 4
-wait-live-snap: 10 VIEW PROVE | 4-prove
+wait-live-snap: 10 Viewing Prove | 4-prove
 expect: STATUS / NEXT
 expect: SQL injection reaches query
 expect: EVIDENCE
@@ -56,12 +61,14 @@ expect: replay verify-phase
 expect: verify F-0001
 ask: Prove — do identity, STATUS, and NEXT precede evidence, with replay offered only for the persisted verification run?
 keys: 5
-wait-live-snap: 10 VIEW FIX | 5-fix
+# Remediation truth hydrates async — wait on the loaded lifecycle state
+# ("Staged for approval", seeded by the fixture), not merely the page chrome.
+wait-live-snap: 15 Staged for approval | 5-fix
+expect: Viewing Fix
 expect: BREAKDOWN REPORT
-expect: ATTACK TREE
+expect: VERIFICATION
 expect: DFD
 expect: REMEDIATION
-expect: Staged for approval
 expect: report
 ask: Fix — does remediation lifecycle lead the operator toward an authorized next action while diagrams remain supporting evidence?
 keys: Escape

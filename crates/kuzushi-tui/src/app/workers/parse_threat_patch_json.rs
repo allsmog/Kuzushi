@@ -78,7 +78,7 @@ pub(crate) fn run_registry_scan_worker(
         cancel,
         trace_handle,
     )?;
-    let preparation = invocation.prepare_workspace_state()?;
+    let preparation = invocation.prepare_workspace_state(sink)?;
     if let Some(warning) = &preparation.tree_identity_warning {
         sink.send(ShellEvent::Scan(ScanEvent::Stage(warning.clone())));
     }
@@ -107,8 +107,26 @@ struct RegistryScanInvocation {
 }
 
 impl RegistryScanInvocation {
-    fn prepare_workspace_state(&self) -> Result<kuzushi_core::scan::ScanWorkspacePreparation> {
-        kuzushi_core::scan::prepare_scan_workspace_state(&self.workspace, &self.store)
+    fn prepare_workspace_state(
+        &self,
+        sink: &JobEventSink,
+    ) -> Result<kuzushi_core::scan::ScanWorkspacePreparation> {
+        // The identity walk hashes every file; heartbeats keep the stall
+        // watchdog honest on monorepo-scale targets.
+        let mut heartbeat =
+            kuzushi_core::progress::HeartbeatGate::new(std::time::Duration::from_secs(5));
+        let mut on_files_hashed = |files: usize| {
+            if heartbeat.ready() {
+                sink.send(ShellEvent::Scan(ScanEvent::Stage(format!(
+                    "registering workspace tree identity · {files} files hashed"
+                ))));
+            }
+        };
+        kuzushi_core::scan::prepare_scan_workspace_state_with_observer(
+            &self.workspace,
+            &self.store,
+            &mut on_files_hashed,
+        )
     }
 
     fn execute(self, registry: ModuleRegistry) -> Result<serde_json::Value> {

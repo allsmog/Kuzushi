@@ -12,6 +12,7 @@ use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::LangGraphRuntime;
+use super::transport_retry;
 use super::triage::{
     clamp_outcome, normalize_triage_confidence, triage_prompt, triage_system_prompt,
 };
@@ -41,7 +42,6 @@ impl AgentRuntime for LangGraphRuntime {
             &self.command,
             bridge_request,
             self.cancellation.as_ref(),
-            self.retry,
         )?;
         observed_agent_response_from_bridge(response).try_map(AgentQueryResponse::validate_cost)
     }
@@ -216,23 +216,23 @@ fn run_bridge_with_transport_retries(
     command: &[String],
     request: BridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
-    retry: super::runtime_config::BridgeRetryPolicy,
 ) -> Result<BridgeResponse> {
-    let attempts = retry.attempts();
-    let mut last_error: Option<anyhow::Error> = None;
-    for attempt in 1..=attempts {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
         ensure_not_cancelled(cancellation)?;
-        match bridge_attempt_outcome(
-            run_bridge(command, &request, cancellation),
-            attempt == attempts,
-        )? {
-            BridgeAttempt::Success(response) => return Ok(response),
-            BridgeAttempt::Retry(error) => last_error = Some(error),
+        let (error, failure) =
+            match bridge_attempt_outcome(run_bridge(command, &request, cancellation))? {
+                BridgeAttempt::Success(response) => return Ok(response),
+                BridgeAttempt::Retry { error, failure } => (error, failure),
+            };
+        if attempt >= transport_retry::max_attempts(&failure) {
+            return Err(error);
         }
-        ensure_not_cancelled(cancellation)?;
-        thread::sleep(Duration::from_millis(retry.delay_ms(attempt)));
+        transport_retry::sleep_before_retry(transport_retry::backoff_delay(attempt, &failure), || {
+            ensure_not_cancelled(cancellation)
+        })?;
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LangGraph bridge failed")))
 }
 
 fn ensure_not_cancelled(cancellation: Option<&kuzushi_core::ScanCancellation>) -> Result<()> {
@@ -244,78 +244,50 @@ fn ensure_not_cancelled(cancellation: Option<&kuzushi_core::ScanCancellation>) -
 
 enum BridgeAttempt {
     Success(BridgeResponse),
-    Retry(anyhow::Error),
+    Retry {
+        error: anyhow::Error,
+        failure: transport_retry::TransientFailure,
+    },
 }
 
-fn bridge_attempt_outcome(
-    result: Result<BridgeResponse>,
-    final_attempt: bool,
-) -> Result<BridgeAttempt> {
+fn bridge_attempt_outcome(result: Result<BridgeResponse>) -> Result<BridgeAttempt> {
     match result {
         Ok(response) if response.ok => Ok(BridgeAttempt::Success(response)),
-        Ok(response) => bridge_response_error(response, final_attempt),
-        Err(error) => bridge_transport_error(error, final_attempt),
+        Ok(response) => bridge_response_error(response),
+        Err(error) => bridge_transport_error(error),
     }
 }
 
-fn bridge_response_error(response: BridgeResponse, final_attempt: bool) -> Result<BridgeAttempt> {
-    let transient = transient_bridge_response(&response);
+fn bridge_response_error(response: BridgeResponse) -> Result<BridgeAttempt> {
+    let failure = transport_retry::response_transient_failure(
+        response.status,
+        response.error_class.as_deref(),
+        response.error.as_deref(),
+        response.retry_after_seconds,
+    );
     let message = public_bridge_failure(
         response.error_class.as_deref(),
         response.status,
         response.error.as_deref(),
     );
-    if final_attempt || !transient {
+    let Some(failure) = failure else {
         anyhow::bail!("LangGraph bridge failed: {message}");
-    }
-    Ok(BridgeAttempt::Retry(anyhow::anyhow!(
-        "LangGraph bridge failed: {message}"
-    )))
+    };
+    Ok(BridgeAttempt::Retry {
+        error: anyhow::anyhow!("LangGraph bridge failed: {message}"),
+        failure,
+    })
 }
 
-fn transient_bridge_response(response: &BridgeResponse) -> bool {
-    matches!(response.status, Some(408 | 425 | 429 | 500..=599))
-        || matches!(
-            response.error_class.as_deref(),
-            Some("rate_limited" | "timeout" | "provider_unavailable" | "transport")
-        )
-        || response
-            .error
-            .as_deref()
-            .is_some_and(is_transient_bridge_error)
-}
-
-fn bridge_transport_error(error: anyhow::Error, final_attempt: bool) -> Result<BridgeAttempt> {
+fn bridge_transport_error(error: anyhow::Error) -> Result<BridgeAttempt> {
     let message = error.to_string();
-    if final_attempt || !is_transient_bridge_error(&message) {
+    let Some(failure) = transport_retry::message_transient_failure(&message) else {
         anyhow::bail!("{}", public_bridge_error(&message));
-    }
-    Ok(BridgeAttempt::Retry(anyhow::anyhow!(
-        "{}",
-        public_bridge_error(&message)
-    )))
-}
-
-pub(super) fn is_transient_bridge_error(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    [
-        "websocket closed 1006",
-        "websocket closed",
-        "socket hang up",
-        "econnreset",
-        "etimedout",
-        "network error",
-        "fetch failed",
-        "429",
-        "rate limit",
-        "temporarily unavailable",
-        "internal server error",
-        "bad gateway",
-        "service unavailable",
-        "gateway timeout",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    };
+    Ok(BridgeAttempt::Retry {
+        error: anyhow::anyhow!("{}", public_bridge_error(&message)),
+        failure,
+    })
 }
 
 pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {

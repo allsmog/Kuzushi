@@ -15,8 +15,9 @@ mod tests;
 mod traced_runtime;
 
 pub use application::{
-    query_blocking_checked, query_blocking_controlled_checked, run_tool_loop,
-    run_tool_loop_observed, spawn_subagent_blocking_checked, triage_finding_blocking_checked,
+    pending_agent_loop_checkpoints, query_blocking_checked, query_blocking_controlled_checked,
+    run_tool_loop, run_tool_loop_observed, spawn_subagent_blocking_checked,
+    triage_finding_blocking_checked, PendingLoopCheckpoint,
 };
 pub use domain::{
     append_structured_output_contract, triage_cost_report, AgentLoopOutcome, AgentLoopStep,

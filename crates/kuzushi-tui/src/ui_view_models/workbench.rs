@@ -90,7 +90,7 @@ static PROVE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 ];
 
 static MAP_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
-    hint("next", "continue Map"),
+    hint("next", "continue workspace phase"),
     hint("context build", "build context"),
     hint("jobs", "inspect prior runs"),
     hint("z", "open visualization"),
@@ -226,8 +226,21 @@ fn active_workbench_page_with_journey(
     app.router
         .workbench()
         .page()
+        .or_else(|| unresolved_result_page(app))
         .or_else(|| journey.map(|journey| WorkbenchPage::from_phase(journey.current)))
         .unwrap_or(WorkbenchPage::Review)
+}
+
+/// While a phase attempt is unresolved (RESULT READY), the workbench stays
+/// anchored to that phase's page: the advertised resolution keys, pane
+/// cycling, and hints must all describe the result the operator is being
+/// asked to resolve, not a page re-derived from refreshed reality.
+fn unresolved_result_page(app: &ShellApp) -> Option<WorkbenchPage> {
+    kuzushi_core::WorkflowPhase::ORDER
+        .iter()
+        .copied()
+        .find(|phase| app.engagement.unresolved_phase_attempt(*phase).is_some())
+        .map(WorkbenchPage::from_phase)
 }
 
 pub(crate) fn workbench_presentation_snapshot(app: &ShellApp) -> WorkbenchPresentationSnapshot {

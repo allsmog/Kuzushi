@@ -155,7 +155,7 @@ pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
     let root = root.as_ref();
     let mut entries = Vec::new();
     let mut budget = IndexBudget::tree_identity();
-    collect_current_tree_entries(root, root, &mut entries, &mut budget)?;
+    collect_current_tree_entries(root, root, &mut entries, &mut budget, &mut |_| {})?;
     entries.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
@@ -173,11 +173,28 @@ pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
 pub fn register_workspace_tree_identity(
     workspace: &WorkspaceTarget,
 ) -> Result<IndexedWorkspaceSnapshot> {
+    register_workspace_tree_identity_with_observer(workspace, &mut |_| {})
+}
+
+/// Same registration with a per-file observer. The identity walk
+/// full-content-hashes every file — minutes of work on a monorepo — and a
+/// caller that owns a progress surface must be able to emit heartbeats
+/// instead of going silent under a stale stage label.
+pub fn register_workspace_tree_identity_with_observer(
+    workspace: &WorkspaceTarget,
+    on_files_hashed: &mut dyn FnMut(usize),
+) -> Result<IndexedWorkspaceSnapshot> {
     workspace.ensure_state_dir()?;
     let store = ContentStore::open(workspace.objects_dir())?;
     let mut entries = Vec::new();
     let mut budget = IndexBudget::tree_identity();
-    collect_current_tree_entries(workspace.root(), workspace.root(), &mut entries, &mut budget)?;
+    collect_current_tree_entries(
+        workspace.root(),
+        workspace.root(),
+        &mut entries,
+        &mut budget,
+        on_files_hashed,
+    )?;
     let tree = store.put_tree(entries)?;
     let metadata = snapshot_metadata(workspace.root(), &[]);
     let snapshot = store.put_snapshot(&TargetSnapshot {
@@ -199,6 +216,7 @@ fn collect_current_tree_entries(
     dir: &Path,
     entries: &mut Vec<TreeEntry>,
     budget: &mut IndexBudget,
+    on_files_hashed: &mut dyn FnMut(usize),
 ) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("Could not read {}", dir.display()))? {
         let entry = entry?;
@@ -208,9 +226,10 @@ fn collect_current_tree_entries(
         }
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            collect_current_tree_entries(root, &path, entries, budget)?;
+            collect_current_tree_entries(root, &path, entries, budget, on_files_hashed)?;
         } else if kind.is_file() && !exceeds_indexed_file_size(&entry)? {
             entries.push(current_tree_entry(root, &path, budget)?);
+            on_files_hashed(entries.len());
         }
     }
     Ok(())

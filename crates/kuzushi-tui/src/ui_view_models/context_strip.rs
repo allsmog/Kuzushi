@@ -10,6 +10,9 @@ pub(crate) struct ContextStripModel {
     pub(crate) target: String,
     pub(crate) context_present: bool,
     pub(crate) context_state: &'static str,
+    /// A context snapshot build is live right now: the strip must say so
+    /// instead of asserting "context not built" mid-build.
+    pub(crate) context_building: bool,
     pub(crate) model: String,
     pub(crate) findings: String,
     pub(crate) view: String,
@@ -33,6 +36,9 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
         target: target_segment_value(app),
         context_present: app.domain().context_view().exists,
         context_state: context_snapshot_state(app),
+        context_building: app
+            .running_tool_name()
+            .is_some_and(|tool| matches!(tool, "context:build" | "context-lite:index")),
         model: model_segment_value(app),
         findings: findings_count_summary_with_total(app.findings(), app.findings_total_count()),
         view: view_status_segment(app),
@@ -72,7 +78,9 @@ impl ContextStripModel {
         // The context snapshot is an optional repo index. Word the empty state
         // as an action ("not built") rather than an alarm ("missing") — scans
         // run fine without it; `context build` creates it.
-        if self.context_state == "malformed" {
+        if self.context_building && !self.context_present {
+            "context building…".to_string()
+        } else if self.context_state == "malformed" {
             "context malformed".to_string()
         } else if self.context_present {
             "context ready".to_string()

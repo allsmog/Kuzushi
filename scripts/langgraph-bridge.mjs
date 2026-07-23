@@ -4,6 +4,7 @@ import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
 import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
+import { fileToolsForRequest } from "./langgraph-bridge/file-tools.mjs";
 import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
@@ -26,16 +27,24 @@ async function readStdin() {
   return data;
 }
 
+// Agentic tool loops need room beyond langgraph's default recursion limit
+// of 25: one model step plus one tool step per hop halves the effective
+// tool budget, and evidence-gathering verbs (verify:finding) routinely
+// need >12 tool hops on large targets.
+const QUERY_GRAPH_RECURSION_LIMIT = 64;
+
 async function runQueryGraph(request) {
   const mcp = await mcpToolsForRequest(request);
   try {
     const system = querySystemPromptForRequest(request);
-    const graph = queryGraphForRequest(request, mcp.tools, system);
-    const result = await graph.invoke({
-      messages: [new HumanMessage(request.prompt ?? "")],
-    });
+    const tools = [...fileToolsForRequest(request), ...mcp.tools];
+    const graph = queryGraphForRequest(request, tools, system);
+    const result = await graph.invoke(
+      { messages: [new HumanMessage(request.prompt ?? "")] },
+      { recursionLimit: QUERY_GRAPH_RECURSION_LIMIT },
+    );
     const message = result.messages.at(-1);
-    debugDumpBridgeCall("query", request, mcp.tools, system, message);
+    debugDumpBridgeCall("query", request, tools, system, message);
     return queryResultFromMessage(message);
   } finally {
     await mcp.close();
@@ -61,10 +70,51 @@ function querySystemPromptForRequest(request) {
   );
 }
 
+// The SDK's built-in retries back off for seconds, but Vertex burst quotas
+// are per-minute windows: an agent loop whose context has grown past the
+// per-minute token quota sees every fast retry fail. Waiting out the window
+// (honoring retry-after when the provider states one) lets the run finish
+// instead of dying mid-loop.
+const QUOTA_WINDOW_RETRIES = 3;
+const QUOTA_WINDOW_WAIT_MS = 65_000;
+
 function callModelNode(model, request, system) {
   return async (state) => ({
-    messages: [await model.invoke([systemMessageForRequest(request, system), ...state.messages])],
+    messages: [
+      await invokeThroughQuotaWindows(model, [
+        systemMessageForRequest(request, system),
+        ...state.messages,
+      ]),
+    ],
   });
+}
+
+async function invokeThroughQuotaWindows(model, messages) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await model.invoke(messages);
+    } catch (error) {
+      if (attempt >= QUOTA_WINDOW_RETRIES || !isRateLimitError(error)) throw error;
+      await sleep(quotaWaitMs(error));
+    }
+  }
+}
+
+function isRateLimitError(error) {
+  const status = error?.status ?? error?.statusCode ?? error?.response?.status;
+  return Number(status) === 429;
+}
+
+function quotaWaitMs(error) {
+  const headers = error?.headers ?? error?.response?.headers;
+  const raw = typeof headers?.get === "function" ? headers.get("retry-after") : headers?.["retry-after"];
+  const seconds = Number(typeof raw === "string" ? raw.trim() : raw);
+  if (Number.isInteger(seconds) && seconds > 0) return Math.min(seconds, 300) * 1000;
+  return QUOTA_WINDOW_WAIT_MS;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function runToolsNode(tools) {

@@ -26,7 +26,34 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
         next_scans,
         dfd,
         empty_hint,
+        decompose_first: decompose_first_hint(app),
     }
+}
+
+/// On repositories this large, one whole-repo threat model is noise; the
+/// productive first Map action is breaking the target into logical modules.
+const DECOMPOSE_FIRST_FILE_THRESHOLD: u64 = 20_000;
+
+/// Recommend module decomposition before threat modeling when the indexed
+/// repository is monorepo-sized and no nested scope decomposition exists yet.
+/// A persisted scope tree (or an unhydrated/unreadable verdict) keeps the
+/// regular threat-model recommendation.
+fn decompose_first_hint(app: &ShellApp) -> Option<String> {
+    let files = app.domain().context_view().files_indexed?;
+    if files < DECOMPOSE_FIRST_FILE_THRESHOLD {
+        return None;
+    }
+    let tree = app
+        .workbench_cache()
+        .borrow()
+        .cached_project_scope_tree(app.target());
+    let undecomposed = matches!(
+        tree,
+        ViewDataState::Ready(crate::app::ProjectScopeTreeState::RootOnly)
+    );
+    undecomposed.then(|| {
+        format!("{files} files indexed — break the target into logical modules first")
+    })
 }
 
 const NEXT_SCAN_ROW_LIMIT: usize = 4;
@@ -147,6 +174,44 @@ mod tests {
             hint.contains("no map artifacts yet"),
             "empty target guidance after hydration: {hint}"
         );
+    }
+
+    #[test]
+    fn monorepo_without_scope_tree_recommends_decomposition_first() {
+        let target = std::path::PathBuf::from("/tmp/decompose-first-target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(target.clone()));
+        app.domain_mut().context_view_mut().files_indexed = Some(81_259);
+
+        // Scope-tree verdict not hydrated yet: no premature recommendation.
+        assert_eq!(map_phase_model(&app).decompose_first, None);
+
+        let hydrate = |state: crate::app::ProjectScopeTreeState| crate::app::ViewHydrationResult {
+            target: target.clone(),
+            key: crate::app::ViewHydrationKey::ProjectScopeTree,
+            value: crate::app::ViewHydrationValue::ProjectScopeTree(state),
+        };
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(hydrate(crate::app::ProjectScopeTreeState::RootOnly));
+        let hint = map_phase_model(&app)
+            .decompose_first
+            .expect("monorepo without decomposition must recommend it first");
+        assert!(hint.contains("81259 files indexed"), "{hint}");
+
+        // An existing decomposition or a small repository keeps the normal
+        // threat-model recommendation.
+        let tree = kuzushi_core::discover_nested_project_scopes(std::path::Path::new("/tmp"));
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(hydrate(crate::app::ProjectScopeTreeState::Persisted(tree)));
+        assert_eq!(map_phase_model(&app).decompose_first, None);
+
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(hydrate(crate::app::ProjectScopeTreeState::RootOnly));
+        app.domain_mut().context_view_mut().files_indexed = Some(1_200);
+        assert_eq!(map_phase_model(&app).decompose_first, None);
     }
 
     #[test]

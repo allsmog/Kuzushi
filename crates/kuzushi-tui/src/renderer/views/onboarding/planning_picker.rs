@@ -515,6 +515,10 @@ fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
             theme::success().add_modifier(Modifier::BOLD),
         ),
         Span::styled(headline, theme::primary()),
+        Span::styled(
+            " · phase map starts a fresh Map pass".to_string(),
+            theme::muted(),
+        ),
     ])
 }
 

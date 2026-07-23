@@ -207,8 +207,7 @@ impl ShellApp {
         if self.guided_scan_question_is_open() {
             return true;
         }
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
-        self.engagement.unresolved_phase_attempt(phase).is_some()
+        self.phase_result_target_phase().is_some()
     }
 
     fn move_findings_cursor(&mut self, amount: i32) {
