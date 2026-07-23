@@ -406,14 +406,23 @@ verdict, and per-step model spend lands in the run trace. `fuzz:import`
 folds an existing engine ledger into the findings store without running
 the engine; `fuzz:prove` runs the engine's per-finding impact pass over
 verified findings that lack an impact verdict and refreshes the import;
-`fuzz:sweep` builds a sanitizer-variant fuzzer for one engine target
-(`sanitizer` = `msan` uninitialized-read oracle or `tsan` race oracle)
-and replays its corpus in keep-going mode with benign-input baseline
-subtraction, reporting input-dependent signature groups ranked
-write-first; `fuzz:differential` replays the corpus through N replay
-`commands` (fork vs upstream, or one command as a metamorphic
-self-check) and ranks divergences crash-split first — the
-silent-wrong-data oracle the crash lane never fires on;
+`fuzz:sweep` builds a sanitizer-variant fuzzer (`sanitizer` = `msan`
+uninitialized-read oracle or `tsan` race oracle) and replays its corpus
+in keep-going mode with benign-input baseline subtraction, reporting
+input-dependent signature groups ranked write-first — omit `afeTarget`
+to sweep every built target in turn (the engine rebuilds prebuilt dep
+archives under the variant sanitizer from a target's
+`.localfuzz/sanitizer-deps.json` recipe when one is declared);
+`fuzz:differential` replays the corpus through N replay `commands`
+(fork vs upstream, or one command as a metamorphic self-check) and
+ranks divergences crash-split first — the silent-wrong-data oracle the
+crash lane never fires on; omit `commands` for auto mode, where the
+engine resolves and builds implementations from the target's
+`.localfuzz/differential.json` recipe or its `bin/<t>/replay*`
+binaries and honestly skips targets with fewer than two (omit
+`afeTarget` too to replay every built target). Both sweep and
+differential surface in the planner's Scan phase as opt-in tasks that
+dispatch with no options;
 `fuzz:status` is a read-only workspace probe. Campaign plan
 rows dispatch both job tools with shard names mapped to engine targets
 (`shard` → `afeTarget`); pass `seasonPrompts=false` when planning fuzz

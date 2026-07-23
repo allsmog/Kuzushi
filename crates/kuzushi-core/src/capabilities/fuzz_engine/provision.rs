@@ -13,12 +13,13 @@ use std::process::Command;
 use std::time::Duration;
 
 pub const DEFAULT_AFE_GIT_URL: &str = "git@github.com:allsmog/agentic-fuzz-engine.git";
-/// Remote tip as of 2026-07-22; carries every verb the fuzz module drives
+/// Remote tip as of 2026-07-23; carries every verb the fuzz module drives
 /// (workspace-init, sink-scan, target-generate, target-build,
 /// campaign-round-run, finding-impact) plus the fork-scan/entry-scan
-/// discovery verbs and the discovery lanes (sanitizer-build/sanitizer-sweep,
-/// differential-run, candidate scoring).
-pub const DEFAULT_AFE_REV: &str = "c28bb8d4ca7cbb008f9057af50ef4779d6771252";
+/// discovery verbs, the discovery lanes (sanitizer-build/sanitizer-sweep,
+/// differential-run, candidate scoring), and lane auto-provisioning
+/// (sanitizer dep recipes, differential-run --auto).
+pub const DEFAULT_AFE_REV: &str = "0d20a48f9888f80eee54d2eba73fe6b1e8ac41d0";
 
 /// Everything one provisioning attempt needs, resolved by the module layer.
 #[derive(Debug, Clone)]
@@ -213,7 +214,7 @@ mod tests {
         let dir = engine_cache_dir(Path::new("/home/op/.cache/agentic-fuzz"), DEFAULT_AFE_REV);
         assert_eq!(
             dir,
-            PathBuf::from("/home/op/.cache/agentic-fuzz/engine-c28bb8d4")
+            PathBuf::from("/home/op/.cache/agentic-fuzz/engine-0d20a48f")
         );
     }
 
