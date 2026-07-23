@@ -386,7 +386,8 @@ fn fuzz_sweep_options() -> Vec<OptionSpec> {
             "sanitizer",
             OptionType::String,
             "Sanitizer variant to build and sweep with. MSan finds uninitialized reads the \
-             ASAN lane cannot; TSan needs a target that actually spawns threads.",
+             ASAN lane cannot; TSan needs a target that actually spawns threads. Without \
+             afeTarget, every built target is swept in turn (budget = maxSeconds each).",
         )
         .choices(&["msan", "tsan"])
         .default(json!("msan")),
@@ -457,7 +458,9 @@ fn fuzz_differential_options() -> Vec<OptionSpec> {
             OptionType::StringList,
             "One replay argv per implementation, each as a single string with an optional \
              {input} placeholder (appended otherwise). A single command is treated as a \
-             metamorphic self-check.",
+             metamorphic self-check. Omit for auto mode: the engine resolves (and builds) \
+             implementations from the target's .localfuzz/differential.json recipe or its \
+             bin/<t>/replay* binaries, and honestly skips targets with fewer than two.",
         )
         .aliases(&["command"]),
         opt(
@@ -1386,7 +1389,8 @@ fn fuzz_prove_response(
 
 #[derive(Debug)]
 struct FuzzSweepOptions {
-    afe_target: String,
+    /// Absent → sweep every built target in the workspace.
+    afe_target: Option<String>,
     sanitizer: String,
     rebuild: bool,
     max_inputs: u64,
@@ -1399,10 +1403,8 @@ struct FuzzSweepOptions {
 
 impl FuzzSweepOptions {
     fn parse(input: &Value) -> Result<Self> {
-        let afe_target = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?
-            .context("fuzz:sweep requires afeTarget (the engine target to sweep)")?;
         Ok(Self {
-            afe_target,
+            afe_target: optional_string_input(input, &["afeTarget", "afe_target", "shard"])?,
             sanitizer: optional_string_input(input, &["sanitizer"])?
                 .unwrap_or_else(|| "msan".to_string()),
             rebuild: bool_input(input, &["rebuild"]),
@@ -1437,6 +1439,14 @@ pub(in crate::modules) fn run_fuzz_sweep(
         }
     };
     let options = FuzzSweepOptions::parse(input)?;
+    let selected = engine_targets(&paths, options.afe_target.as_deref());
+    if selected.is_empty() {
+        return Ok(fuzz_skipped_response(
+            "fuzz:sweep",
+            &target,
+            "no built engine targets to sweep — run fuzz:run first to scaffold and build fuzzers",
+        ));
+    }
     let timeout = fuzz_tool_timeout(input, "fuzz:sweep")?;
     let mut run = EngineRun {
         ctx,
@@ -1446,30 +1456,57 @@ pub(in crate::modules) fn run_fuzz_sweep(
         failed: false,
         aborted: false,
     };
-    ensure_variant_built(&mut run, &options);
-    let payload = execute_sweep(&mut run, &options);
-    Ok(fuzz_sweep_response(&target, &paths, run, &options, payload))
+    let mut reports = Vec::new();
+    for afe_target in &selected {
+        if run.aborted {
+            break;
+        }
+        if !ensure_variant_built(&mut run, &options, afe_target) {
+            continue;
+        }
+        if let Some(payload) = execute_sweep(&mut run, &options, afe_target) {
+            reports.push(json!({ "afeTarget": afe_target, "sweep": payload }));
+        }
+    }
+    Ok(fuzz_sweep_response(&target, &paths, run, &options, &selected, reports))
 }
 
-fn variant_binary(paths: &FuzzPaths, options: &FuzzSweepOptions) -> PathBuf {
+/// An explicit afeTarget is honored as-is (the engine reports honestly when it
+/// does not exist); absent, every built target in the workspace is in scope.
+fn engine_targets(paths: &FuzzPaths, filter: Option<&str>) -> Vec<String> {
+    match filter {
+        Some(name) => vec![name.to_string()],
+        None => bootstrap::probe_workspace(&paths.workspace_root)
+            .built
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn variant_binary(paths: &FuzzPaths, options: &FuzzSweepOptions, afe_target: &str) -> PathBuf {
     paths
         .workspace_root
         .join("bin")
-        .join(&options.afe_target)
+        .join(afe_target)
         .join(format!("fuzzer-{}", options.sanitizer))
 }
 
-/// A sweep without its variant binary is meaningless, so a failed build
-/// aborts the run instead of letting the sweep step fail confusingly.
-fn ensure_variant_built(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) {
-    if !options.rebuild && variant_binary(run.paths, options).is_file() {
-        run.record_skip("sanitizer-build", "variant fuzzer already built");
-        return;
+/// A sweep without its variant binary is meaningless, so a failed build costs
+/// that target its sweep (returns false) — the remaining targets still run.
+fn ensure_variant_built(
+    run: &mut EngineRun<'_>,
+    options: &FuzzSweepOptions,
+    afe_target: &str,
+) -> bool {
+    let label = format!("sanitizer-build {afe_target}");
+    if !options.rebuild && variant_binary(run.paths, options, afe_target).is_file() {
+        run.record_skip(&label, "variant fuzzer already built");
+        return true;
     }
     let args = vec![
         "sanitizer-build".into(),
         "--target".into(),
-        options.afe_target.clone(),
+        afe_target.to_string(),
         "--sanitizer".into(),
         options.sanitizer.clone(),
         "--timeout-seconds".into(),
@@ -1478,19 +1515,18 @@ fn ensure_variant_built(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) {
         run.paths.workspace_root.display().to_string(),
     ];
     let step_timeout = Duration::from_secs(options.build_timeout_seconds + 60);
-    if run.engine_step("sanitizer-build", args, step_timeout).is_none() {
-        run.aborted = true;
-    }
+    run.engine_step(&label, args, step_timeout).is_some()
 }
 
-fn execute_sweep(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) -> Option<Value> {
-    if run.aborted {
-        return None;
-    }
+fn execute_sweep(
+    run: &mut EngineRun<'_>,
+    options: &FuzzSweepOptions,
+    afe_target: &str,
+) -> Option<Value> {
     let args = vec![
         "sanitizer-sweep".into(),
         "--target".into(),
-        options.afe_target.clone(),
+        afe_target.to_string(),
         "--sanitizer".into(),
         options.sanitizer.clone(),
         "--max-inputs".into(),
@@ -1506,7 +1542,7 @@ fn execute_sweep(run: &mut EngineRun<'_>, options: &FuzzSweepOptions) -> Option<
         "--workspace-root".into(),
         run.paths.workspace_root.display().to_string(),
     ];
-    run.engine_step("sanitizer-sweep", args, run.remaining())
+    run.engine_step(&format!("sanitizer-sweep {afe_target}"), args, run.remaining())
 }
 
 fn payload_u64(payload: Option<&Value>, key: &str) -> u64 {
@@ -1521,27 +1557,34 @@ fn fuzz_sweep_response(
     paths: &FuzzPaths,
     run: EngineRun<'_>,
     options: &FuzzSweepOptions,
-    payload: Option<Value>,
+    selected: &[String],
+    reports: Vec<Value>,
 ) -> Value {
-    let summary = payload.as_ref();
+    let inputs: u64 = reports
+        .iter()
+        .map(|report| payload_u64(report.get("sweep"), "inputs_scanned"))
+        .sum();
+    let groups: u64 = reports
+        .iter()
+        .map(|report| payload_u64(report.get("sweep"), "unique_signatures"))
+        .sum();
     let output = format!(
-        "fuzz:sweep · {} on {} · {}/{} input(s) replayed · {} input-dependent group(s) \
-         ({} baseline signature(s) absorbed){}",
+        "fuzz:sweep · {} · {}/{} target(s) swept · {} input(s) replayed · \
+         {} input-dependent group(s){}",
         options.sanitizer,
-        options.afe_target,
-        payload_u64(summary, "inputs_scanned"),
-        payload_u64(summary, "inputs_total"),
-        payload_u64(summary, "unique_signatures"),
-        payload_u64(summary, "baseline_signature_count"),
+        reports.len(),
+        selected.len(),
+        inputs,
+        groups,
         if run.failed { " · PARTIAL (see steps)" } else { "" },
     );
     let data = json!({
         "target": target.display().to_string(),
         "workspaceRoot": paths.workspace_root.display().to_string(),
-        "afeTarget": options.afe_target,
+        "afeTargets": selected,
         "sanitizer": options.sanitizer,
         "steps": run.steps,
-        "sweep": payload,
+        "reports": reports,
     });
     if run.failed {
         crate::module_result::partial_output_result(
@@ -1561,7 +1604,10 @@ fn fuzz_sweep_response(
 
 #[derive(Debug)]
 struct FuzzDifferentialOptions {
-    afe_target: String,
+    /// Absent → replay every built target in auto mode.
+    afe_target: Option<String>,
+    /// Empty → the engine auto-resolves implementations from the target's
+    /// `.localfuzz/differential.json` recipe or its `bin/<t>/replay*` binaries.
     commands: Vec<String>,
     labels: Vec<String>,
     compare: String,
@@ -1574,14 +1620,13 @@ struct FuzzDifferentialOptions {
 
 impl FuzzDifferentialOptions {
     fn parse(input: &Value) -> Result<Self> {
-        let afe_target = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?
-            .context("fuzz:differential requires afeTarget (the engine target whose corpus is replayed)")?;
+        let afe_target = optional_string_input(input, &["afeTarget", "afe_target", "shard"])?;
         let commands = string_list_input(input, &["commands", "command"])?
             .unwrap_or_default();
         anyhow::ensure!(
-            !commands.is_empty(),
-            "fuzz:differential requires at least one replay command \
-             (pass commands as a JSON array of argv strings)"
+            commands.is_empty() || afe_target.is_some(),
+            "fuzz:differential with explicit commands needs afeTarget \
+             (replay argvs are per-target; omit commands for auto mode)"
         );
         let labels = string_list_input(input, &["labels", "label"])?.unwrap_or_default();
         anyhow::ensure!(
@@ -1622,6 +1667,14 @@ pub(in crate::modules) fn run_fuzz_differential(
         }
     };
     let options = FuzzDifferentialOptions::parse(input)?;
+    let selected = engine_targets(&paths, options.afe_target.as_deref());
+    if selected.is_empty() {
+        return Ok(fuzz_skipped_response(
+            "fuzz:differential",
+            &target,
+            "no built engine targets to replay — run fuzz:run first to scaffold and build fuzzers",
+        ));
+    }
     let timeout = fuzz_tool_timeout(input, "fuzz:differential")?;
     let mut run = EngineRun {
         ctx,
@@ -1631,16 +1684,33 @@ pub(in crate::modules) fn run_fuzz_differential(
         failed: false,
         aborted: false,
     };
-    let payload = run.engine_step("differential-run", differential_args(&paths, &options), run.remaining());
-    Ok(fuzz_differential_response(&target, &paths, run, &options, payload))
+    let mut reports = Vec::new();
+    for afe_target in &selected {
+        if run.aborted {
+            break;
+        }
+        let label = format!("differential-run {afe_target}");
+        let args = differential_args(&paths, &options, afe_target);
+        if let Some(payload) = run.engine_step(&label, args, run.remaining()) {
+            reports.push(json!({ "afeTarget": afe_target, "differential": payload }));
+        }
+    }
+    Ok(fuzz_differential_response(&target, &paths, run, &options, &selected, reports))
 }
 
-fn differential_args(paths: &FuzzPaths, options: &FuzzDifferentialOptions) -> Vec<String> {
+fn differential_args(
+    paths: &FuzzPaths,
+    options: &FuzzDifferentialOptions,
+    afe_target: &str,
+) -> Vec<String> {
     let mut args = vec![
         "differential-run".to_string(),
         "--target".into(),
-        options.afe_target.clone(),
+        afe_target.to_string(),
     ];
+    if options.commands.is_empty() {
+        args.push("--auto".into());
+    }
     for command in &options.commands {
         args.push("--command".into());
         args.push(command.clone());
@@ -1675,31 +1745,57 @@ fn fuzz_differential_response(
     paths: &FuzzPaths,
     run: EngineRun<'_>,
     options: &FuzzDifferentialOptions,
-    payload: Option<Value>,
+    selected: &[String],
+    reports: Vec<Value>,
 ) -> Value {
-    let summary = payload.as_ref();
-    let crash_splits = summary
-        .and_then(|value| value.get("counts_by_kind"))
-        .and_then(|counts| counts.get("crash-split"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let mut divergent = 0u64;
+    let mut crash_splits = 0u64;
+    let mut skip_notes = Vec::new();
+    for report in &reports {
+        let payload = report.get("differential");
+        let skipped = payload
+            .and_then(|value| value.get("skipped"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if skipped {
+            let afe_target = report["afeTarget"].as_str().unwrap_or("?");
+            let reason = payload
+                .and_then(|value| value.get("skip_reason"))
+                .and_then(Value::as_str)
+                .unwrap_or("skipped");
+            skip_notes.push(format!("{afe_target}: {reason}"));
+            continue;
+        }
+        divergent += payload_u64(payload, "divergent");
+        crash_splits += payload
+            .and_then(|value| value.get("counts_by_kind"))
+            .and_then(|counts| counts.get("crash-split"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+    }
+    let mode = if options.commands.is_empty() { "auto" } else { "explicit" };
     let output = format!(
-        "fuzz:differential · {} implementation(s) over {} · {}/{} input(s) replayed · \
-         {} divergence(s), {} crash-split(s){}",
-        options.commands.len(),
-        options.afe_target,
-        payload_u64(summary, "inputs_scanned"),
-        payload_u64(summary, "inputs_total"),
-        payload_u64(summary, "divergent"),
+        "fuzz:differential · {mode} · {}/{} target(s) replayed · {} divergence(s), \
+         {} crash-split(s){}{}",
+        reports.len(),
+        selected.len(),
+        divergent,
         crash_splits,
+        if skip_notes.is_empty() {
+            String::new()
+        } else {
+            format!(" · {} skipped", skip_notes.len())
+        },
         if run.failed { " · PARTIAL (see steps)" } else { "" },
     );
     let data = json!({
         "target": target.display().to_string(),
         "workspaceRoot": paths.workspace_root.display().to_string(),
-        "afeTarget": options.afe_target,
+        "afeTargets": selected,
+        "mode": mode,
+        "skipNotes": skip_notes,
         "steps": run.steps,
-        "differential": payload,
+        "reports": reports,
     });
     if run.failed {
         crate::module_result::partial_output_result(
@@ -1877,11 +1973,11 @@ mod tests {
     }
 
     #[test]
-    fn sweep_options_require_a_target_and_fold_defaults() {
-        let error = FuzzSweepOptions::parse(&json!({})).unwrap_err().to_string();
-        assert!(error.contains("afeTarget"), "{error}");
-
-        let options = FuzzSweepOptions::parse(&json!({"afeTarget": "sddecompress"})).unwrap();
+    fn sweep_options_default_to_all_built_targets_and_fold_defaults() {
+        // A planner-dispatched `{}` must parse: no target means "every built
+        // target", resolved at execution time.
+        let options = FuzzSweepOptions::parse(&json!({})).unwrap();
+        assert_eq!(options.afe_target, None);
         assert_eq!(options.sanitizer, "msan");
         assert_eq!(options.max_inputs, 2000);
         assert!(!options.rebuild);
@@ -1890,18 +1986,65 @@ mod tests {
             "shard": "tsk_bdi", "sanitizer": "tsan", "runsPerInput": 4, "rebuild": true,
         }))
         .unwrap();
-        assert_eq!(tsan.afe_target, "tsk_bdi");
+        assert_eq!(tsan.afe_target.as_deref(), Some("tsk_bdi"));
         assert_eq!(tsan.sanitizer, "tsan");
         assert_eq!(tsan.runs_per_input, 4);
         assert!(tsan.rebuild);
     }
 
     #[test]
+    fn engine_target_selection_honors_explicit_names_and_falls_back_to_built() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = FuzzPaths {
+            afe_repo: PathBuf::from("/afe"),
+            python_bin: PathBuf::from("/usr/bin/python3"),
+            workspace_root: temp.path().join("ws"),
+            data_root: temp.path().join("ws/data"),
+            source_dir: PathBuf::from("/repo"),
+        };
+        // An explicit name is honored even before anything is built.
+        assert_eq!(engine_targets(&paths, Some("named")), vec!["named".to_string()]);
+        assert!(engine_targets(&paths, None).is_empty());
+
+        let ws = &paths.workspace_root;
+        std::fs::create_dir_all(ws.join("targets/c/vhdx")).unwrap();
+        std::fs::write(ws.join("targets/c/vhdx/harness.cpp"), "// h").unwrap();
+        std::fs::create_dir_all(ws.join("bin/vhdx")).unwrap();
+        std::fs::write(ws.join("bin/vhdx/fuzzer"), "").unwrap();
+        assert_eq!(engine_targets(&paths, None), vec!["vhdx".to_string()]);
+    }
+
+    #[test]
     fn differential_options_validate_commands_and_labels() {
-        let error = FuzzDifferentialOptions::parse(&json!({"afeTarget": "tsk_bdi"}))
-            .unwrap_err()
-            .to_string();
-        assert!(error.contains("at least one replay command"), "{error}");
+        fn fixture_paths() -> FuzzPaths {
+            FuzzPaths {
+                afe_repo: PathBuf::from("/afe"),
+                python_bin: PathBuf::from("/usr/bin/python3"),
+                workspace_root: PathBuf::from("/ws"),
+                data_root: PathBuf::from("/ws/data"),
+                source_dir: PathBuf::from("/repo"),
+            }
+        }
+
+        // No commands → auto mode; the engine resolves implementations.
+        let auto = FuzzDifferentialOptions::parse(&json!({"afeTarget": "tsk_bdi"})).unwrap();
+        assert!(auto.commands.is_empty());
+        let args = differential_args(&fixture_paths(), &auto, "tsk_bdi");
+        assert!(args.contains(&"--auto".to_string()), "{args:?}");
+        assert!(!args.contains(&"--command".to_string()), "{args:?}");
+
+        // A planner-dispatched `{}` parses too: auto mode over all built targets.
+        let bare = FuzzDifferentialOptions::parse(&json!({})).unwrap();
+        assert_eq!(bare.afe_target, None);
+        assert!(bare.commands.is_empty());
+
+        // Explicit commands are per-target replay argvs — they need a target.
+        let error = FuzzDifferentialOptions::parse(&json!({
+            "commands": ["/bin/fork {input}"],
+        }))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("afeTarget"), "{error}");
 
         let error = FuzzDifferentialOptions::parse(&json!({
             "afeTarget": "tsk_bdi",
@@ -1919,16 +2062,8 @@ mod tests {
             "compare": "output",
         }))
         .unwrap();
-        let args = differential_args(
-            &FuzzPaths {
-                afe_repo: PathBuf::from("/afe"),
-                python_bin: PathBuf::from("/usr/bin/python3"),
-                workspace_root: PathBuf::from("/ws"),
-                data_root: PathBuf::from("/ws/data"),
-                source_dir: PathBuf::from("/repo"),
-            },
-            &options,
-        );
+        let args = differential_args(&fixture_paths(), &options, "tsk_bdi");
+        assert!(!args.contains(&"--auto".to_string()), "{args:?}");
         assert_eq!(args.iter().filter(|a| *a == "--command").count(), 2);
         assert_eq!(args.iter().filter(|a| *a == "--label").count(), 2);
         assert!(args.windows(2).any(|w| w[0] == "--compare" && w[1] == "output"), "{args:?}");
@@ -2041,6 +2176,29 @@ mod tests {
             assert_eq!(prepared["afeTarget"], json!("vhdx"), "{tool}");
             assert_eq!(prepared["paths"], json!(["src/cpp/code/vhdx"]), "{tool}");
         }
+    }
+
+    /// The planner journey dispatches `{}` for the sweep and differential
+    /// tasks; prepare must accept the empty input and fold descriptor
+    /// defaults instead of demanding afeTarget/commands.
+    #[test]
+    fn planner_empty_input_prepares_for_sweep_and_differential() {
+        let registry = crate::modules::ModuleRegistry::with_v2_builtins_without_optional_adapters();
+
+        for tool in ["fuzz:sweep", "fuzz:differential"] {
+            let prepared = registry
+                .prepare_tool_input(tool, json!({}), None)
+                .unwrap_or_else(|error| panic!("{tool}: {error:#}"));
+            assert!(prepared.get("afeTarget").is_none(), "{tool}: {prepared}");
+        }
+
+        let sweep = registry.prepare_tool_input("fuzz:sweep", json!({}), None).unwrap();
+        assert_eq!(sweep["sanitizer"], json!("msan"));
+        FuzzSweepOptions::parse(&sweep).unwrap();
+        let differential = registry
+            .prepare_tool_input("fuzz:differential", json!({}), None)
+            .unwrap();
+        FuzzDifferentialOptions::parse(&differential).unwrap();
     }
 
     /// Prompt seasoning writes a TRIAGE_PROMPT option key the fuzz tools do

@@ -545,7 +545,7 @@ const MAP_EXPERT_ACTIONS: [CapabilityActionSpec; 7] = [
     ),
 ];
 
-const SCAN_EXPERT_ACTIONS: [CapabilityActionSpec; 13] = [
+const SCAN_EXPERT_ACTIONS: [CapabilityActionSpec; 16] = [
     action!(
         "semgrep",
         "Semgrep",
@@ -649,6 +649,30 @@ const SCAN_EXPERT_ACTIONS: [CapabilityActionSpec; 13] = [
         "run variant:hunt",
         "EXPERT",
         tool = "variant:hunt"
+    ),
+    action!(
+        "fuzz-run",
+        "Coverage fuzzing",
+        "Run bounded AFE campaign rounds (C/C++)",
+        "run fuzz:run",
+        "EXPERT",
+        tool = "fuzz:run"
+    ),
+    action!(
+        "fuzz-sweep",
+        "MSan corpus sweep",
+        "Replay corpora under a sanitizer variant",
+        "run fuzz:sweep",
+        "EXPERT",
+        tool = "fuzz:sweep"
+    ),
+    action!(
+        "fuzz-differential",
+        "Differential replay",
+        "Fork-vs-upstream divergence oracle",
+        "run fuzz:differential",
+        "EXPERT",
+        tool = "fuzz:differential"
     ),
 ];
 
