@@ -191,7 +191,10 @@ impl ShellApp {
                     &serde_json::json!({"inputState": "invalid_json"}),
                     error,
                 );
-                self.log("error", format!("{error}. Next: run <tool> {{}}"));
+                self.log(
+                    "error",
+                    format!("{error}. Next: run <tool> (input is optional and defaults to {{}})"),
+                );
                 None
             }
         }

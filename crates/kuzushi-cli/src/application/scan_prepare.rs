@@ -162,9 +162,21 @@ impl ScanCommandSetup {
     }
 
     fn prepare_workspace_state(&self, store: &FindingStore) -> Result<()> {
-        let preparation =
-            kuzushi_core::scan::prepare_scan_workspace_state(&self.bootstrap.workspace, store)
-                .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))?;
+        // The identity walk hashes every file; on a monorepo that is minutes
+        // of work, so a silent prepare reads as a hang.
+        let mut heartbeat =
+            kuzushi_core::progress::HeartbeatGate::new(std::time::Duration::from_secs(5));
+        let mut on_files_hashed = |files: usize| {
+            if heartbeat.ready() {
+                eprintln!("scan prepare: registering workspace tree identity · {files} files hashed");
+            }
+        };
+        let preparation = kuzushi_core::scan::prepare_scan_workspace_state_with_observer(
+            &self.bootstrap.workspace,
+            store,
+            &mut on_files_hashed,
+        )
+        .map_err(|error| self.recorded_error(error, &self.bootstrap.requested_input))?;
         if let Some(warning) = &preparation.tree_identity_warning {
             eprintln!("warning: {warning}");
         }
@@ -349,14 +361,13 @@ mod tests {
         let log =
             kuzushi_core::event_log::EventLog::open(tmp.path().join(".kuzushi/v3/log")).unwrap();
         let events = log.read_all().unwrap();
-        assert_eq!(events.len(), 2);
+        // Scan preparation registers a hash-only tree identity: one snapshot
+        // event, no per-file content indexing. The full indexer stays behind
+        // `workspace reindex` and the wasm-plugin sandbox.
+        assert_eq!(events.len(), 1);
         assert_eq!(
             events[0].event_kind,
             kuzushi_core::event_log::EventKind::SnapshotIndexed
-        );
-        assert_eq!(
-            events[1].event_kind,
-            kuzushi_core::event_log::EventKind::FileIndexed
         );
     }
 

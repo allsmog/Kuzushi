@@ -1,6 +1,7 @@
 use super::*;
 
 mod checked_queries;
+mod loop_checkpoint;
 mod run_tool_loop;
 
 pub use checked_queries::{

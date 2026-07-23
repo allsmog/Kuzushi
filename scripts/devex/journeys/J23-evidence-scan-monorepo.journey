@@ -1,10 +1,14 @@
-# J23 — Evidence loop: recommend-then-authorize scan + real findings on the
-# workload module (@TARGET via KUZUSHI_DEVEX_TARGET, scan target ONLY).
+# J23 — Evidence loop: recommend-then-authorize scan + real findings
+# (harness fixture target).
 #
-# Drives the guided Map-first lifecycle on the real module, captures the
-# threat-model/recommender seeding state of the Scan configure card, then
-# produces real findings with the deterministic built-in scanner and audits
-# Review → Prove → Trace on a genuine workload finding.
+# Runs against the HARNESS-OWNED fixture repo (@TMP_TARGET), never an
+# operator checkout: the journey needs deterministic clean state, and the
+# master contract forbids deleting `.kuzushi` under an operator-designated
+# target. Real-monorepo coverage lives in J25–J27. Drives the guided
+# Map-first lifecycle, captures the threat-model/recommender seeding state
+# of the Scan configure card, then produces real findings with the
+# deterministic built-in scanner and audits Review → Prove → Trace on a
+# genuine finding (the fixture carries a real secret-scan hit).
 #
 # Known remaining baseline defects this journey evidences (expected FAIL rows
 # until the matching kuzushi slices land):
@@ -16,12 +20,12 @@
 # Fixed by Phase B slices (now expected PASS): phantom-invalidation
 # rev:unknown wedge (slice 1); PARTIAL Map hand-off "Use map & choose Scan
 # modules" + page digits under an unresolved result (slice 2).
-name: Evidence loop scan + findings (workload module)
+name: Evidence loop scan + findings (fixture target)
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
-shell: rm -rf "@TARGET/.kuzushi"
-launch: --target @TARGET
+shell: rm -rf "@TMP_TARGET/.kuzushi" && git -C "@TMP_TARGET" add -A >/dev/null 2>&1; git -C "@TMP_TARGET" -c user.email=devex@kuzushi -c user.name=kz-devex commit -qm fixture >/dev/null 2>&1 || true
+launch: --target @TMP_TARGET
 wait-for: 30 KUZUSHI
 # submit: self-normalizes to a clean Prompt by polling the footer mode
 # markers, so no fixed settle delay is needed after the header appears.

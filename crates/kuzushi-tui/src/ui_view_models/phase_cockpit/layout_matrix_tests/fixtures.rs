@@ -36,6 +36,7 @@ fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
         next_scans: super::super::NextScansState::Pending,
         dfd: fixture_dfd(richness >= 3),
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),
+        decompose_first: None,
     }
 }
 

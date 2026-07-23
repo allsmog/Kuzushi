@@ -16,15 +16,35 @@ pub fn run_tool_loop_observed(
     ensure_tool_loop_runtime(runtime)?;
 
     let cap = request.max_steps.max(1);
-    let mut accumulator = LoopAccumulator::default();
-    for step in 0..cap {
+    let checkpoint = super::loop_checkpoint::LoopCheckpointStore::discover(request);
+    let mut accumulator = LoopAccumulator::resumed_from(&checkpoint);
+    let first_step = super::loop_checkpoint::restored_step_count(&accumulator.transcript);
+    for step in first_step..cap {
         let outcome = next_loop_step(runtime, request, &accumulator.transcript, step)?;
         if let Some(final_outcome) = accumulator.apply_step(outcome, handler, step + 1)? {
+            clear_checkpoint(&checkpoint);
             return Ok(final_outcome);
         }
+        save_checkpoint(&checkpoint, &accumulator.transcript);
     }
 
+    clear_checkpoint(&checkpoint);
     Ok(accumulator.truncated(cap))
+}
+
+fn save_checkpoint(
+    checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>,
+    transcript: &[LoopHistoryEntry],
+) {
+    if let Some(store) = checkpoint {
+        store.save(transcript);
+    }
+}
+
+fn clear_checkpoint(checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>) {
+    if let Some(store) = checkpoint {
+        store.clear();
+    }
 }
 
 struct LoopAccumulator {
@@ -40,6 +60,19 @@ impl Default for LoopAccumulator {
             cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             usage: ModelTokenUsage::default(),
         }
+    }
+}
+
+impl LoopAccumulator {
+    /// Seed the transcript from an interrupted run of the identical request.
+    /// Restored rounds were paid for by the previous run, so cost/usage stay
+    /// zero here — this run reports only what it spends itself.
+    fn resumed_from(checkpoint: &Option<super::loop_checkpoint::LoopCheckpointStore>) -> Self {
+        let mut accumulator = Self::default();
+        if let Some(transcript) = checkpoint.as_ref().and_then(|store| store.load()) {
+            accumulator.transcript = transcript;
+        }
+        accumulator
     }
 }
 

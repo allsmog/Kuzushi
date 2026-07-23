@@ -289,7 +289,12 @@ impl ShellApp {
         let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
             return;
         };
-        let (command, note) = if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
+        let (command, note) = if map.decompose_first.is_some() {
+            (
+                "run pack:suggest-shards {}",
+                "module-decomposition draft loaded — Enter to propose scoped modules",
+            )
+        } else if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
             (
                 "run threat-model:build {}",
                 "threat-model draft loaded — Enter to generate (seeds scan recommendations)",
@@ -300,7 +305,7 @@ impl ShellApp {
                 "refine draft loaded — Enter to update the stale threat model",
             )
         } else {
-            ("next", "journey planner loaded — Enter to continue Map")
+            ("next", "journey planner loaded — Enter to continue the derived phase")
         };
         self.set_input(command.to_string());
         self.set_input_mode(InputMode::Prompt);

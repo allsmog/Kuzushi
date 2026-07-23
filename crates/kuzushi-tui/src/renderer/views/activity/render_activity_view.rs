@@ -26,7 +26,7 @@ const SIDE_BY_SIDE_BREAKPOINT: u16 = 78;
 /// │ ┌─ OUTPUT ─────────┬─ TASKS ──────────────────────────┐  │
 /// │ │ build trace      │ ✓ context:build                 │  │
 /// │ │ ▸ map surface    │ 15:09:39 [context:build]        │  │
-/// │ │ · write snapshot │ 15:09:42 stage 4/5             │  │
+/// │ │ · write snapshot │ 15:09:42 stage 4/6             │  │
 /// │ └──────────────────┴──────────────────────────────────┘  │
 /// │ ● LIVE · current context:build · last progress 2s ago     │
 /// └──────────────────────────────────────────────────────────┘

@@ -1429,4 +1429,43 @@ mod tests {
             inventory.routes_controllers
         );
     }
+
+    /// Manual scale probe (never in CI): times a capped walk against a real
+    /// repository named by KUZUSHI_INVENTORY_PROBE_ROOT, once with content
+    /// inspection and once metadata-only, to attribute walk latency. Lives in
+    /// this dedicated test file so its env read and stderr reporting stay
+    /// outside the audited production boundaries.
+    #[test]
+    #[ignore = "manual scale probe; requires KUZUSHI_INVENTORY_PROBE_ROOT"]
+    fn inventory_throughput_probe() {
+        use super::super::build_repository_inventory::{
+            build_repository_inventory_with_limits, MAX_REPOSITORY_INSPECTED_BYTES,
+        };
+        use std::path::Path;
+        let Ok(root) = std::env::var("KUZUSHI_INVENTORY_PROBE_ROOT") else {
+            eprintln!("probe skipped: KUZUSHI_INVENTORY_PROBE_ROOT unset");
+            return;
+        };
+        for (label, byte_cap) in [
+            ("metadata-only", 0usize),
+            ("content-inspecting", MAX_REPOSITORY_INSPECTED_BYTES),
+        ] {
+            let start = std::time::Instant::now();
+            let mut last = 0usize;
+            let inventory = build_repository_inventory_with_limits(
+                Path::new(&root),
+                5_000,
+                byte_cap,
+                &mut |entries| last = entries,
+                &|| false,
+            )
+            .unwrap();
+            eprintln!(
+                "probe[{label}] entries={last} elapsed={:?} source_files={} truncation={:?}",
+                start.elapsed(),
+                inventory.source_files.len(),
+                inventory.truncation.map(|t| t.reason)
+            );
+        }
+    }
 }

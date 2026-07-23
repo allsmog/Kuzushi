@@ -727,8 +727,19 @@ fn semantic_result_lines<'a>(
     artifact_labels: impl Iterator<Item = &'a str>,
 ) -> Vec<String> {
     let mut lines = vec![format!("{tool} · {status} — {summary}")];
-    lines.extend(output_lines.take(5).map(|line| format!("│ {line}")));
-    if let Some(message) = operator_message.filter(|message| *message != summary) {
+    // The heading already shows the summary; an output whose first line
+    // restates it (common for single-purpose tools) must not print twice.
+    let preview: Vec<&str> = output_lines
+        .filter(|line| *line != summary)
+        .take(5)
+        .collect();
+    lines.extend(preview.iter().map(|line| format!("│ {line}")));
+    // Failed runs carry the same error text as both output and error; the
+    // card must not print it twice (once as `│ …` preview, once as `⚠ …`).
+    if let Some(message) = operator_message
+        .filter(|message| *message != summary)
+        .filter(|message| !preview.join("\n").contains(*message))
+    {
         lines.push(format!("⚠ {message}"));
     }
     let labels = artifact_labels.take(3).collect::<Vec<_>>();

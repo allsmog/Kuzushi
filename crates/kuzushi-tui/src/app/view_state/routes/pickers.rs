@@ -373,6 +373,10 @@ pub struct PlanningPickerRouteState {
     option_edit: Option<PlanningOptionEdit>,
     option_error: Option<String>,
     return_to_setup: bool,
+    /// Workbench page the operator was on when the picker opened. Closing
+    /// the picker restores it instead of re-deriving a page from refreshed
+    /// reality (which could teleport, e.g. Map → Prove after Esc).
+    origin_workbench_page: Option<crate::app::WorkbenchPage>,
 }
 
 impl PlanningPickerRouteState {
@@ -451,6 +455,14 @@ impl PlanningPickerRouteState {
 
     pub(crate) fn returns_to_setup(&self) -> bool {
         self.return_to_setup
+    }
+
+    pub(crate) fn set_origin_workbench_page(&mut self, page: Option<crate::app::WorkbenchPage>) {
+        self.origin_workbench_page = page;
+    }
+
+    pub(crate) fn take_origin_workbench_page(&mut self) -> Option<crate::app::WorkbenchPage> {
+        self.origin_workbench_page.take()
     }
 
     pub(crate) fn refresh_profiled(

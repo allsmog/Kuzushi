@@ -10151,6 +10151,36 @@ fn fresh_target_opens_aggregate_setup() {
 }
 
 #[test]
+fn setup_start_key_commits_regardless_of_the_focused_row() {
+    // `Enter` activates the focused row (Target row → target picker), so the
+    // advertised Start Map commit needs `s` to work from any cursor position.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(dir.path().to_path_buf()));
+    app.open_setup();
+    app.router.setup_mut().set_cursor(0);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
+    );
+
+    // The commit attempt ran from the Target row: either the plan started
+    // (phase committed) or the first readiness blocker was disclosed —
+    // never the target-picker loop.
+    let started = app.engagement.current_phase() == Some(WorkflowPhase::Map);
+    let blocked = app
+        .log_lines()
+        .iter()
+        .any(|line| line.body.contains("Start Map blocked"));
+    assert_ne!(app.shell_view(), ShellView::TargetPicker);
+    assert!(
+        started || blocked,
+        "s must attempt the Start Map commit from any row"
+    );
+}
+
+#[test]
 fn setup_plan_editor_returns_without_starting_or_losing_its_cursor() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -10566,6 +10596,31 @@ fn next_command_opens_phase_picker_at_derived_phase() {
     app.engagement.clear_phase();
     run_command(&mut app, ShellCommand::Next);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Prove));
+}
+
+#[test]
+fn closing_the_planner_restores_the_workbench_page_the_operator_came_from() {
+    // With a persisted prior engagement, `next` on the Map page opens the
+    // derived-phase planner. Esc means "never mind": it must land back on
+    // Map, not on whatever page a fresh reality derivation prefers.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(dir.path().to_path_buf()));
+    *app.findings_mut() = vec![make_finding(Severity::High, "fp-origin", "Unconfirmed")];
+    app.open_workbench();
+    app.set_workbench_page(WorkbenchPage::Map);
+
+    run_command(&mut app, ShellCommand::Next);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(
+        app.router.workbench().page(),
+        Some(WorkbenchPage::Map),
+        "Esc from the planner must restore the origin page"
+    );
 }
 
 #[test]

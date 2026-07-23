@@ -61,7 +61,11 @@ pub(crate) fn cpgrs_plan_languages(languages: &[String]) -> Vec<&'static str> {
 }
 
 fn run_cpgrs_language_flows(plan: &TaintIrisNextPlan, lang: &str) -> Result<Vec<CpgrsFlow>> {
-    let (project, _report) = kuzushi_cpg::ensure_project(&plan.scan_root, lang)
+    let scope = cpgrs_build_scope(plan)?;
+    let limits = kuzushi_cpg::BuildLimits {
+        max_source_files: plan.caps.max_cpg_source_files,
+    };
+    let (project, _report) = kuzushi_cpg::ensure_project_in(&scope, lang, &limits)
         .map_err(|error| anyhow::anyhow!("cpg-rs {lang} graph build failed: {error}"))?;
     let scan_root = plan.scan_root.display().to_string();
     let mut flows = Vec::new();
@@ -69,6 +73,22 @@ fn run_cpgrs_language_flows(plan: &TaintIrisNextPlan, lang: &str) -> Result<Vec<
         flows.extend(run_cpgrs_catalog_entry(&project, entry, &scan_root));
     }
     Ok(flows)
+}
+
+/// Artifacts always land under the workspace root's `.kuzushi`, even for
+/// `targetSubdir` hunts — a scan must never create state inside the scanned
+/// subtree. Plans whose scan root is unrelated to the repo root (test
+/// fixtures, ad-hoc paths) scope on the scan root itself, preserving the
+/// old placement for exactly the cases that have no workspace root.
+fn cpgrs_build_scope(plan: &TaintIrisNextPlan) -> Result<kuzushi_cpg::BuildScope> {
+    if plan.scan_root == plan.repo_root {
+        return Ok(kuzushi_cpg::BuildScope::whole(&plan.repo_root));
+    }
+    match plan.scan_root.strip_prefix(&plan.repo_root) {
+        Ok(subdir) => kuzushi_cpg::BuildScope::subtree(&plan.repo_root, subdir)
+            .map_err(|error| anyhow::anyhow!("cpg-rs build scope: {error}")),
+        Err(_) => Ok(kuzushi_cpg::BuildScope::whole(&plan.scan_root)),
+    }
 }
 
 fn run_cpgrs_catalog_entry(
@@ -355,6 +375,7 @@ mod tests {
             max_files_per_query: 10,
             max_specs_per_cwe: 10,
             max_agent_findings: 10,
+            max_cpg_source_files: kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES,
             codeql_analyze_timeout_ms: 1000,
             min_evidence_level: "candidate".to_string(),
         }
@@ -386,6 +407,44 @@ mod tests {
         assert!(!flow.steps.is_empty());
         // The implicit build must have persisted the artifact for reuse.
         assert!(kuzushi_cpg::has_artifacts(temp.path()));
+    }
+
+    #[test]
+    fn subdir_hunts_keep_artifacts_under_the_repo_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let subtree = temp.path().join("svc");
+        std::fs::create_dir_all(&subtree).unwrap();
+        std::fs::write(
+            subtree.join("users.ts"),
+            "function list(req, res) {\n  const id = req.query.id;\n  db.query(\"SELECT \" + id);\n}\n",
+        )
+        .unwrap();
+        let mut plan = cpgrs_test_plan(subtree.clone(), vec!["typescript".to_string()]);
+        plan.repo_root = temp.path().to_path_buf();
+
+        let flows = run_cpgrs_flows(&plan).unwrap().expect("supported language");
+
+        assert!(!flows.is_empty(), "expected a req.query -> db.query flow");
+        assert!(
+            !subtree.join(".kuzushi").exists(),
+            "a targetSubdir hunt must never write state into the scanned subtree"
+        );
+        let scoped = temp.path().join(".kuzushi/cpg-rs/scoped/svc");
+        assert!(scoped.is_dir(), "scoped artifact dir missing: {}", scoped.display());
+    }
+
+    #[test]
+    fn oversized_corpus_refusal_names_the_overrides() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("a.ts"), "const a = 1;\n").unwrap();
+        std::fs::write(temp.path().join("b.ts"), "const b = 2;\n").unwrap();
+        let mut plan = cpgrs_test_plan(temp.path().to_path_buf(), vec!["typescript".to_string()]);
+        plan.repo_root = temp.path().to_path_buf();
+        plan.caps.max_cpg_source_files = 1;
+
+        let error = run_cpgrs_flows(&plan).unwrap_err().to_string();
+        assert!(error.contains("build cap"), "{error}");
+        assert!(error.contains("targetSubdir"), "{error}");
     }
 
     #[test]

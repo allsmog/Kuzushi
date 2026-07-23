@@ -16,6 +16,7 @@ impl EffectRuntime {
             ShellEffect::PrepareRunTool(prepare) => app.prepare_run_tool_effect(prepare),
             ShellEffect::PrepareScan(prepare) => app.prepare_scan_start_effect(prepare),
             ShellEffect::DispatchRunTool(launch) => app.dispatch_run_tool_effect(launch),
+            ShellEffect::ResumeSession(resume) => app.resume_session_effect(resume),
             ShellEffect::Quit => Self::quit_effects(),
             effect if Self::is_chained_effect(&effect) => Self::execute_chained_effect(app, effect),
             other => {
@@ -232,7 +233,6 @@ impl EffectRuntime {
             | ShellEffect::RecordAgentRun(_)
             | ShellEffect::RecordScanStageTrace(_)
             | ShellEffect::RecordToolRun(_)) => Self::execute_persistence_effect(app, effect),
-            ShellEffect::ResumeSession(resume) => app.resume_session_effect(resume),
             other => Self::execute_secondary_shell_effect(app, other),
         }
     }

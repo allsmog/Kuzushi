@@ -76,10 +76,23 @@ fn resolve_c_cpp_overlap(langs: Vec<&'static str>) -> Vec<&'static str> {
 
 fn count_sources(dir: &Path, lang: &str) -> usize {
     let exts = extensions_for(lang);
-    let excludes = cpg_cli::workspace::excludes_for(lang);
+    let excludes = build_excludes(lang);
     let mut count = 0usize;
-    walk_sources(dir, exts, excludes, &mut |_| count += 1);
+    walk_sources(dir, exts, &excludes, &mut |_| count += 1);
     count
+}
+
+/// Generated/derived trees the engine's per-language lists don't cover:
+/// kuzushi's own state dir, bazel output trees, and conventional codegen
+/// directories. Applied to build, staleness, and detection alike so all
+/// three always see the same corpus.
+const GENERATED_EXCLUDES: &[&str] = &["/.kuzushi/", "/bazel-", "/gen/", "/generated/"];
+
+/// The engine's per-language excludes plus kuzushi's generated-code excludes.
+pub(crate) fn build_excludes(lang: &str) -> Vec<&'static str> {
+    let mut excludes = cpg_cli::workspace::excludes_for(lang).to_vec();
+    excludes.extend_from_slice(GENERATED_EXCLUDES);
+    excludes
 }
 
 /// Minimal recursive source walk honouring the engine's per-language exclude
@@ -98,9 +111,16 @@ pub(crate) fn walk_sources(
         if is_excluded(&path, excludes) {
             continue;
         }
-        if path.is_dir() {
+        // Classify by the directory entry itself so symlinks are never
+        // followed — the engine's build walk skips them, and following them
+        // here would make staleness/detection disagree with the built graph
+        // (and cycle on bazel-style symlink farms).
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             walk_sources(&path, exts, excludes, visit);
-        } else if has_extension(&path, exts) {
+        } else if file_type.is_file() && has_extension(&path, exts) {
             visit(&path);
         }
     }
@@ -115,4 +135,39 @@ fn has_extension(path: &Path, exts: &[&str]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| exts.contains(&ext))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn count_go(dir: &Path) -> usize {
+        count_sources(dir, "go")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_trees_are_never_walked() {
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("a.go"), "package a").unwrap();
+        std::os::unix::fs::symlink(&real, temp.path().join("linked")).unwrap();
+        std::os::unix::fs::symlink(real.join("a.go"), temp.path().join("b.go")).unwrap();
+        // One real file: the dir symlink is not followed and the file
+        // symlink is not visited, matching the engine's build walk.
+        assert_eq!(count_go(temp.path()), 1);
+    }
+
+    #[test]
+    fn generated_trees_are_excluded_from_the_corpus() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("main.go"), "package m").unwrap();
+        for dir in [".kuzushi", "bazel-out", "gen", "generated"] {
+            let sub = temp.path().join(dir);
+            std::fs::create_dir_all(&sub).unwrap();
+            std::fs::write(sub.join("g.go"), "package g").unwrap();
+        }
+        assert_eq!(count_go(temp.path()), 1);
+    }
 }

@@ -4,23 +4,23 @@ pub(crate) fn inspect_python_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     let trimmed = line.trim();
-    if is_sanic_source(text) {
+    if is_sanic_source(scan) {
         inspect_sanic_route(relative, line_number, trimmed, builder);
     } else {
         inspect_python_decorator_route(relative, line_number, trimmed, builder);
     }
-    inspect_bottle_route(relative, line_number, trimmed, text, builder);
-    inspect_falcon_route(relative, line_number, trimmed, text, builder);
+    inspect_bottle_route(relative, line_number, trimmed, scan, builder);
+    inspect_falcon_route(relative, line_number, trimmed, scan, builder);
     inspect_flask_add_url_rule(relative, line_number, trimmed, builder);
-    inspect_litestar_route(relative, line_number, trimmed, text, builder);
-    inspect_pyramid_route(relative, line_number, trimmed, text, builder);
-    inspect_starlette_route(relative, line_number, trimmed, text, builder);
-    inspect_aiohttp_route(relative, line_number, trimmed, text, builder);
-    inspect_tornado_route(relative, line_number, trimmed, text, builder);
+    inspect_litestar_route(relative, line_number, trimmed, scan, builder);
+    inspect_pyramid_route(relative, line_number, trimmed, scan, builder);
+    inspect_starlette_route(relative, line_number, trimmed, scan, builder);
+    inspect_aiohttp_route(relative, line_number, trimmed, scan, builder);
+    inspect_tornado_route(relative, line_number, trimmed, scan, builder);
     inspect_django_urlpattern(relative, line_number, trimmed, builder);
 }
 
@@ -82,8 +82,8 @@ fn inspect_sanic_route(
     ));
 }
 
-fn is_sanic_source(text: &str) -> bool {
-    text.to_ascii_lowercase().contains("sanic")
+fn is_sanic_source(scan: &SourceTextScan) -> bool {
+    scan.contains_ci("sanic")
 }
 
 fn sanic_decorator_route(line: &str) -> Option<(&'static str, String)> {
@@ -110,10 +110,10 @@ fn inspect_bottle_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("bottle") {
+    if !scan.contains_ci("bottle") {
         return;
     }
     let Some((method, route)) = bottle_decorator_route(trimmed) else {
@@ -174,10 +174,10 @@ fn inspect_falcon_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("falcon") {
+    if !scan.contains_ci("falcon") {
         return;
     }
     let Some(route) = extract_quoted_after_marker_case_insensitive(trimmed, ".add_route(") else {
@@ -186,7 +186,7 @@ fn inspect_falcon_route(
     builder.add_route_controller(route_item(
         relative,
         line_number,
-        falcon_route_method(text),
+        falcon_route_method(scan),
         &route,
         "Falcon",
         trim_detail(trimmed),
@@ -197,10 +197,10 @@ fn inspect_litestar_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !is_litestar_source(text) {
+    if !is_litestar_source(scan) {
         return;
     }
     let Some((method, route)) = litestar_decorator_route(trimmed) else {
@@ -216,9 +216,8 @@ fn inspect_litestar_route(
     ));
 }
 
-fn is_litestar_source(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("litestar") || lower.contains("starlite")
+fn is_litestar_source(scan: &SourceTextScan) -> bool {
+    scan.contains_ci("litestar") || scan.contains_ci("starlite")
 }
 
 fn litestar_decorator_route(line: &str) -> Option<(&'static str, String)> {
@@ -236,8 +235,7 @@ fn litestar_decorator_route(line: &str) -> Option<(&'static str, String)> {
     None
 }
 
-fn falcon_route_method(text: &str) -> &'static str {
-    let lower = text.to_ascii_lowercase();
+fn falcon_route_method(scan: &SourceTextScan) -> &'static str {
     for (needle, method) in [
         ("def on_post(", "POST"),
         ("def on_put(", "PUT"),
@@ -245,7 +243,7 @@ fn falcon_route_method(text: &str) -> &'static str {
         ("def on_delete(", "DELETE"),
         ("def on_get(", "GET"),
     ] {
-        if lower.contains(needle) {
+        if scan.contains_ci(needle) {
             return method;
         }
     }
@@ -276,10 +274,10 @@ fn inspect_pyramid_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("pyramid") {
+    if !scan.contains_ci("pyramid") {
         return;
     }
     let Some(route) = pyramid_route_path(trimmed) else {
@@ -315,10 +313,10 @@ fn inspect_starlette_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("starlette") {
+    if !scan.contains_ci("starlette") {
         return;
     }
     let Some(route) = extract_quoted_after_marker_case_insensitive(trimmed, "route(") else {
@@ -338,10 +336,10 @@ fn inspect_aiohttp_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("aiohttp") {
+    if !scan.contains_ci("aiohttp") {
         return;
     }
     if let Some((method, route)) = aiohttp_add_route(trimmed) {
@@ -420,10 +418,10 @@ fn inspect_tornado_route(
     relative: &str,
     line_number: u32,
     trimmed: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    if !text.to_ascii_lowercase().contains("tornado") {
+    if !scan.contains_ci("tornado") {
         return;
     }
     let Some(route) = tornado_route_tuple(trimmed) else {
@@ -432,7 +430,7 @@ fn inspect_tornado_route(
     builder.add_route_controller(route_item(
         relative,
         line_number,
-        tornado_route_method(text),
+        tornado_route_method(scan),
         &route,
         "Tornado",
         trim_detail(trimmed),
@@ -447,8 +445,7 @@ fn tornado_route_tuple(line: &str) -> Option<String> {
     extract_first_quoted(trimmed).filter(|route| route.starts_with('/'))
 }
 
-fn tornado_route_method(text: &str) -> &'static str {
-    let lower = text.to_ascii_lowercase();
+fn tornado_route_method(scan: &SourceTextScan) -> &'static str {
     for (needle, method) in [
         ("def post(", "POST"),
         ("def put(", "PUT"),
@@ -456,7 +453,7 @@ fn tornado_route_method(text: &str) -> &'static str {
         ("def delete(", "DELETE"),
         ("def get(", "GET"),
     ] {
-        if lower.contains(needle) {
+        if scan.contains_ci(needle) {
             return method;
         }
     }
@@ -529,10 +526,10 @@ pub(crate) fn inspect_go_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    let method_route_framework = go_method_route_framework(text);
+    let method_route_framework = go_method_route_framework(scan);
     for (method, marker, framework) in [
         ("ANY", "http.handlefunc(", "net/http"),
         ("ANY", ".handlefunc(", "net/http"),
@@ -558,13 +555,12 @@ pub(crate) fn inspect_go_route_line(
     }
 }
 
-fn go_method_route_framework(text: &str) -> &'static str {
-    let lower = text.to_ascii_lowercase();
-    if contains_any(&lower, &["github.com/gofiber/fiber", "fiber.new("]) {
+fn go_method_route_framework(scan: &SourceTextScan) -> &'static str {
+    if scan.contains_any_ci(&["github.com/gofiber/fiber", "fiber.new("]) {
         "Fiber"
-    } else if contains_any(&lower, &["github.com/labstack/echo", "echo.new("]) {
+    } else if scan.contains_any_ci(&["github.com/labstack/echo", "echo.new("]) {
         "Echo"
-    } else if contains_any(&lower, &["github.com/go-chi/chi", "chi.newrouter("]) {
+    } else if scan.contains_any_ci(&["github.com/go-chi/chi", "chi.newrouter("]) {
         "Chi"
     } else {
         "Gin"
@@ -575,11 +571,11 @@ pub(crate) fn inspect_rust_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     inspect_warp_route_line(relative, line_number, line, builder);
-    let attribute_framework = rust_attribute_route_framework(text);
+    let attribute_framework = rust_attribute_route_framework(scan);
     for (method, marker, framework) in [
         ("ANY", ".route(", "Axum"),
         ("GET", "#[get(", attribute_framework),
@@ -650,9 +646,8 @@ fn warp_method(line: &str) -> &'static str {
     "ANY"
 }
 
-fn rust_attribute_route_framework(text: &str) -> &'static str {
-    let lower = text.to_ascii_lowercase();
-    if contains_any(&lower, &["rocket::", "use rocket", "#[launch]"]) {
+fn rust_attribute_route_framework(scan: &SourceTextScan) -> &'static str {
+    if scan.contains_any_ci(&["rocket::", "use rocket", "#[launch]"]) {
         "Rocket"
     } else {
         "Actix Web"
@@ -667,7 +662,7 @@ pub(crate) fn inspect_jvm_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    _text: &str,
+    _scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     let lower = line.to_ascii_lowercase();
@@ -691,14 +686,14 @@ pub(crate) fn inspect_dotnet_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     let lower = line.to_ascii_lowercase();
     let Some(method) = dotnet_route_method(&lower) else {
         return;
     };
-    let Some(route) = dotnet_route_for_line(line, text, line_number) else {
+    let Some(route) = dotnet_route_for_line(line, scan.text(), line_number) else {
         return;
     };
     builder.add_route_controller(route_item(
@@ -1338,7 +1333,7 @@ pub(crate) fn inspect_ruby_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    _text: &str,
+    _scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     let lower = line.to_ascii_lowercase();
@@ -1362,7 +1357,7 @@ pub(crate) fn inspect_php_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    _text: &str,
+    _scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
     let lower = line.to_ascii_lowercase();

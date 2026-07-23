@@ -43,7 +43,9 @@ mod tests {
     fn req() -> AgentToolLoopRequest {
         AgentToolLoopRequest {
             model: "anthropic:claude-sonnet-4-6".to_string(),
-            cwd: PathBuf::from("/tmp"),
+            // Deliberately not a Kuzushi target (no `.kuzushi`): driver tests
+            // must not read or write transcript checkpoints.
+            cwd: PathBuf::from("/tmp/kuzushi-loop-driver-tests-no-target"),
             system_prompt: "you are a tester".to_string(),
             prompt: "do the thing".to_string(),
             tools: vec![AgentTool {
@@ -215,6 +217,57 @@ mod tests {
         let seen = runtime.seen.lock().unwrap();
         assert_eq!(seen[0], 0);
         assert_eq!(seen[1], 2);
+    }
+
+    #[test]
+    fn driver_resumes_a_failed_loop_from_its_transcript_checkpoint() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join(".kuzushi")).unwrap();
+        let mut request = req();
+        request.cwd = target.path().to_path_buf();
+        let tool_runs = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut tb = ToolBox::new();
+        let counter = tool_runs.clone();
+        tb.register("read_source", move |call| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::json!({ "contents": "fn main() {}" }),
+                is_error: false,
+            })
+        });
+
+        // First run: one paid tool round completes, then the provider dies.
+        let dying = ScriptedRuntime::new(vec![AgentLoopStep::ToolCall {
+            call: ToolCall {
+                name: "read_source".to_string(),
+                input: serde_json::json!({ "path": "src/foo.rs" }),
+                call_id: "call_1".to_string(),
+            },
+            cost_usd: Some(0.10),
+        }]);
+        run_tool_loop(&dying, &request, &mut tb).unwrap_err();
+        assert_eq!(tool_runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Retry of the identical request resumes at the failed turn: the
+        // model sees the restored history, the tool does not re-run.
+        let recovered = ScriptedRuntime::new(vec![AgentLoopStep::Final {
+            text: "resumed".to_string(),
+            structured: None,
+            cost_usd: Some(0.01),
+        }]);
+        let outcome = run_tool_loop(&recovered, &request, &mut tb).unwrap();
+
+        assert_eq!(outcome.text, "resumed");
+        assert_eq!(tool_runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert_eq!(*recovered.seen.lock().unwrap(), vec![2]);
+        assert_eq!(outcome.transcript.len(), 3);
+        assert_eq!(outcome.cost_usd, 0.01, "restored rounds were already paid");
+        let checkpoints = target.path().join(".kuzushi/v3/checkpoints");
+        let leftover = std::fs::read_dir(&checkpoints)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(leftover, 0, "completion must clear the checkpoint");
     }
 
     #[test]

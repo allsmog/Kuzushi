@@ -25,10 +25,25 @@ pub(in crate::modules) fn build_context_snapshot(
             });
             emit_context_build_stage(ctx, stage, detail);
         },
+        &|| {
+            ctx.cancellation
+                .is_some_and(crate::scan::ScanCancellation::is_cancelled)
+        },
     )?;
     emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
     let snapshot_path = save_context_snapshot(workspace.root(), &mut snapshot)?;
-    let provenance = match index_snapshot_provenance(workspace) {
+    emit_context_build_stage(ctx, ContextBuildStage::RegisterTreeIdentity, None);
+    let mut identity_heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
+    let mut on_files_hashed = |files: usize| {
+        if identity_heartbeat.ready() {
+            emit_context_build_stage(
+                ctx,
+                ContextBuildStage::RegisterTreeIdentity,
+                Some(format!("{files} files hashed")),
+            );
+        }
+    };
+    let provenance = match index_snapshot_provenance(workspace, &mut on_files_hashed) {
         Ok(provenance) => Some(provenance),
         Err(error) => {
             emit_context_build_note(ctx, format!("tree identity unavailable: {error:#}"));
@@ -64,8 +79,12 @@ struct SnapshotProvenance {
 /// never the build.
 fn index_snapshot_provenance(
     workspace: &crate::workspace::WorkspaceTarget,
+    on_files_hashed: &mut dyn FnMut(usize),
 ) -> Result<SnapshotProvenance> {
-    let indexed = crate::incremental_index::register_workspace_tree_identity(workspace)?;
+    let indexed = crate::incremental_index::register_workspace_tree_identity_with_observer(
+        workspace,
+        on_files_hashed,
+    )?;
     Ok(SnapshotProvenance {
         snapshot_hash: indexed.snapshot_hash,
         tree_hash: indexed.tree_hash,
@@ -205,7 +224,7 @@ fn context_snapshot_value(
     options: &ContextBuildOptions,
     file_sample: &ContextFileSample,
 ) -> Result<Value> {
-    context_snapshot_value_with_progress(root, options, file_sample, |_, _| {})
+    context_snapshot_value_with_progress(root, options, file_sample, |_, _| {}, &|| false)
 }
 
 /// Heartbeat cadence for the inventory walk: monorepo walks run for minutes,
@@ -218,21 +237,26 @@ fn context_snapshot_value_with_progress(
     options: &ContextBuildOptions,
     file_sample: &ContextFileSample,
     mut progress: impl FnMut(ContextBuildStage, Option<String>),
+    should_cancel: &dyn Fn() -> bool,
 ) -> Result<Value> {
     progress(ContextBuildStage::InferRepository, None);
-    let repo_context = infer_repo_context(root, &file_sample.files_sample)?;
+    let mut repo_context = infer_repo_context(root, &file_sample.files_sample)?;
     progress(ContextBuildStage::BuildInventory, None);
-    let mut last_heartbeat = std::time::Instant::now();
-    let repository_inventory =
-        crate::repository_inventory::build_repository_inventory_with_progress(root, |entries| {
-            if last_heartbeat.elapsed() >= INVENTORY_HEARTBEAT {
-                last_heartbeat = std::time::Instant::now();
-                progress(
-                    ContextBuildStage::BuildInventory,
-                    Some(format!("{entries} entries walked")),
-                );
-            }
-        })?;
+    let mut inventory_heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
+    let mut on_entries = |entries: usize| {
+        if inventory_heartbeat.ready() {
+            progress(
+                ContextBuildStage::BuildInventory,
+                Some(format!("{entries} entries walked")),
+            );
+        }
+    };
+    let repository_inventory = crate::repository_inventory::build_repository_inventory_with_observer(
+        root,
+        &mut on_entries,
+        should_cancel,
+    )?;
+    apply_inventory_repo_context(&mut repo_context, &repository_inventory);
     progress(ContextBuildStage::MapAttackSurface, None);
     let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
         root,
@@ -258,6 +282,44 @@ fn context_snapshot_value_with_progress(
     }))
 }
 
+/// The alphabetical file sample can land entirely in one corner of a
+/// monorepo (a Python-heavy tools/ tree on a Scala repo), so the whole-repo
+/// inventory is the authority on languages and frameworks. Languages are
+/// ordered dominant-first (taint language selection reads index 0); the
+/// sample keeps seeding the signals the inventory does not carry
+/// (entry points, auth/ORM manifest probes).
+fn apply_inventory_repo_context(
+    repo_context: &mut Value,
+    inventory: &crate::repository_inventory::RepositoryInventory,
+) {
+    if !inventory.languages.is_empty() {
+        let mut languages: Vec<_> = inventory.languages.iter().collect();
+        languages.sort_by(|left, right| {
+            right
+                .files
+                .cmp(&left.files)
+                .then_with(|| left.name.cmp(&right.name))
+        });
+        repo_context["languages"] = json!(languages
+            .iter()
+            .map(|language| language.name.clone())
+            .collect::<Vec<_>>());
+    }
+    let mut frameworks: std::collections::BTreeSet<String> = repo_context["frameworks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str().map(str::to_string))
+        .collect();
+    frameworks.extend(
+        inventory
+            .frameworks
+            .iter()
+            .map(|framework| framework.name.clone()),
+    );
+    repo_context["frameworks"] = json!(frameworks.into_iter().collect::<Vec<_>>());
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContextBuildStage {
     ScanFiles,
@@ -265,7 +327,10 @@ enum ContextBuildStage {
     BuildInventory,
     MapAttackSurface,
     WriteSnapshot,
+    RegisterTreeIdentity,
 }
+
+const CONTEXT_BUILD_STAGE_COUNT: usize = 6;
 
 impl ContextBuildStage {
     fn position(self) -> usize {
@@ -275,6 +340,7 @@ impl ContextBuildStage {
             Self::BuildInventory => 3,
             Self::MapAttackSurface => 4,
             Self::WriteSnapshot => 5,
+            Self::RegisterTreeIdentity => 6,
         }
     }
 
@@ -285,6 +351,7 @@ impl ContextBuildStage {
             Self::BuildInventory => "building repository inventory",
             Self::MapAttackSurface => "mapping attack surface",
             Self::WriteSnapshot => "writing context snapshot",
+            Self::RegisterTreeIdentity => "registering tree identity",
         }
     }
 }
@@ -355,7 +422,13 @@ fn emit_context_build_stage(
         let detail = detail
             .map(|value| format!(" · {value}"))
             .unwrap_or_default();
-        let label = format!("stage {}/5 · {}{}", stage.position(), stage.label(), detail);
+        let label = format!(
+            "stage {}/{} · {}{}",
+            stage.position(),
+            CONTEXT_BUILD_STAGE_COUNT,
+            stage.label(),
+            detail
+        );
         let _ = trace.step("tool-progress", "build", label).emit();
     }
 }
@@ -399,7 +472,11 @@ fn context_build_response(
         data["snapshotHash"] = json!(provenance.snapshot_hash);
         data["treeHash"] = json!(provenance.tree_hash);
     }
-    crate::module_result::completed_output_result(output.clone(), output, data)
+    // Summary must stay one line: result cards escape control characters,
+    // so a multi-line summary renders literal `\n` sequences. The full
+    // multi-line detail belongs to `output` only.
+    let summary = output.lines().next().unwrap_or_default().to_string();
+    crate::module_result::completed_output_result(summary, output, data)
 }
 
 const RESULT_EMBED_LIST_CAP: usize = 500;
@@ -484,9 +561,13 @@ mod stage_tests {
         };
         let mut stages = Vec::new();
 
-        context_snapshot_value_with_progress(temp.path(), &options, &sample, |stage, _| {
-            stages.push(stage)
-        })
+        context_snapshot_value_with_progress(
+            temp.path(),
+            &options,
+            &sample,
+            |stage, _| stages.push(stage),
+            &|| false,
+        )
         .unwrap();
 
         assert_eq!(
@@ -497,6 +578,85 @@ mod stage_tests {
                 ContextBuildStage::MapAttackSurface,
             ]
         );
+    }
+
+    /// The monorepo regression: an alphabetical 200-file sample hit a
+    /// Python-heavy corner of a Scala/Java monorepo and the snapshot reported
+    /// `languages: Python`. The inventory's whole-repo counts must win, with
+    /// the dominant language first.
+    #[test]
+    fn inventory_language_counts_override_the_sample_guess() {
+        let mut repo_context = json!({
+            "languages": ["Python"],
+            "frameworks": ["flask"],
+            "entryPoints": ["app.py"],
+        });
+        let inventory = crate::repository_inventory::RepositoryInventory {
+            root_name: "monorepo".to_string(),
+            languages: vec![
+                crate::repository_inventory::InventoryLanguage {
+                    name: "Java".to_string(),
+                    files: 20_000,
+                    bytes: 1,
+                },
+                crate::repository_inventory::InventoryLanguage {
+                    name: "Python".to_string(),
+                    files: 900,
+                    bytes: 1,
+                },
+                crate::repository_inventory::InventoryLanguage {
+                    name: "Scala".to_string(),
+                    files: 45_000,
+                    bytes: 1,
+                },
+            ],
+            source_files: Vec::new(),
+            manifests: Vec::new(),
+            dependency_manifests: Vec::new(),
+            config_files: Vec::new(),
+            frameworks: vec![crate::repository_inventory::InventoryFramework {
+                name: "spring".to_string(),
+                language: "Java".to_string(),
+                evidence: vec!["services/pom.xml".to_string()],
+            }],
+            entrypoints: Vec::new(),
+            routes_controllers: Vec::new(),
+            generated_vendor_paths: Vec::new(),
+            truncation: None,
+        };
+
+        apply_inventory_repo_context(&mut repo_context, &inventory);
+
+        assert_eq!(
+            repo_context["languages"],
+            json!(["Scala", "Java", "Python"]),
+            "dominant language must come first"
+        );
+        assert_eq!(repo_context["frameworks"], json!(["flask", "spring"]));
+        // Sample-derived signals the inventory does not carry survive.
+        assert_eq!(repo_context["entryPoints"], json!(["app.py"]));
+    }
+
+    #[test]
+    fn empty_inventory_keeps_the_sample_language_guess() {
+        let mut repo_context = json!({"languages": ["Rust"], "frameworks": []});
+        let inventory = crate::repository_inventory::RepositoryInventory {
+            root_name: "tiny".to_string(),
+            languages: Vec::new(),
+            source_files: Vec::new(),
+            manifests: Vec::new(),
+            dependency_manifests: Vec::new(),
+            config_files: Vec::new(),
+            frameworks: Vec::new(),
+            entrypoints: Vec::new(),
+            routes_controllers: Vec::new(),
+            generated_vendor_paths: Vec::new(),
+            truncation: None,
+        };
+
+        apply_inventory_repo_context(&mut repo_context, &inventory);
+
+        assert_eq!(repo_context["languages"], json!(["Rust"]));
     }
 
     #[test]
@@ -570,7 +730,15 @@ mod provenance_tests {
         fs::write(temp.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
         let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
 
-        let provenance = index_snapshot_provenance(&workspace).expect("indexable workspace");
+        let mut hashed_counts = Vec::new();
+        let provenance = index_snapshot_provenance(&workspace, &mut |files| {
+            hashed_counts.push(files)
+        })
+        .expect("indexable workspace");
+        assert!(
+            !hashed_counts.is_empty(),
+            "identity walk must report per-file progress so monorepo builds are never silent"
+        );
         let response = context_build_response(
             temp.path(),
             &workspace.state_dir(),

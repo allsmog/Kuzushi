@@ -10,6 +10,7 @@ use super::bridge_process::{
     public_bridge_failure, run_next_step_bridge, run_next_step_preflight_bridge,
 };
 use super::runtime_config::LangGraphRuntime;
+use super::transport_retry;
 use crate::messages::build_messages_for_anthropic;
 
 pub(crate) fn next_step_blocking(
@@ -30,33 +31,46 @@ pub(crate) fn next_step_observed_blocking(
     // Same transient-retry policy as query_blocking: without it, one 429 or
     // dropped socket kills an entire multi-step agent loop mid-flight. A
     // next-step call is a pure model query, so retrying is safe.
-    const ATTEMPTS: usize = 3;
-    let mut last_error: Option<anyhow::Error> = None;
-    for attempt in 1..=ATTEMPTS {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
         ensure_not_cancelled(runtime)?;
-        match run_next_step_bridge(
+        let outcome = run_next_step_bridge(
             &runtime.command,
             &bridge_request,
             runtime.cancellation.as_ref(),
-        )
-        .and_then(ensure_next_step_response_ok)
-        {
+        );
+        let failure = next_step_transient_failure(&outcome);
+        let error = match outcome.and_then(ensure_next_step_response_ok) {
             Ok(step) => return Ok(step),
-            Err(error) => {
-                if attempt == ATTEMPTS
-                    || !super::runtime_impl::is_transient_bridge_error(&error.to_string())
-                {
-                    return Err(error);
-                }
-                last_error = Some(error);
-            }
-        }
-        ensure_not_cancelled(runtime)?;
-        std::thread::sleep(std::time::Duration::from_millis(
-            super::runtime_impl::retry_delay_ms(attempt),
-        ));
+            Err(error) => error,
+        };
+        let Some(failure) = failure.filter(|f| attempt < transport_retry::max_attempts(f)) else {
+            return Err(error);
+        };
+        transport_retry::sleep_before_retry(transport_retry::backoff_delay(attempt, &failure), || {
+            ensure_not_cancelled(runtime)
+        })?;
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("next-step bridge failed")))
+}
+
+/// A retryable next-step failure, classified from the structured response
+/// fields when the bridge answered, or from the transport message when the
+/// bridge process itself failed. `None` (including an `ok` response that
+/// later fails shape validation) is permanent.
+fn next_step_transient_failure(
+    outcome: &Result<NextStepBridgeResponse>,
+) -> Option<transport_retry::TransientFailure> {
+    match outcome {
+        Ok(response) if !response.ok => transport_retry::response_transient_failure(
+            response.status,
+            response.error_class.as_deref(),
+            response.error.as_deref(),
+            response.retry_after_seconds,
+        ),
+        Ok(_) => None,
+        Err(error) => transport_retry::message_transient_failure(&error.to_string()),
+    }
 }
 
 pub(crate) fn preflight_tool_loop_blocking(

@@ -7,7 +7,7 @@ size: 80x24
 KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · ● LIVE
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- next continue Map · context build build context · jobs inspect prior runs
+ next continue workspace phase · context build build context
 │REPOSITORY / DATA-FLOW MAP · z visualize
 │./phase-target · rev:unknown
 │ready · 3 nodes · 2 flows · 2 trust crossings

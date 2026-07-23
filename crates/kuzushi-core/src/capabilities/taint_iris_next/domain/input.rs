@@ -34,6 +34,10 @@ pub(crate) struct TaintIrisNextCaps {
     pub(crate) max_files_per_query: usize,
     pub(crate) max_specs_per_cwe: usize,
     pub(crate) max_agent_findings: usize,
+    /// Build-refusal ceiling for the cpg-rs backend: a stale/missing graph
+    /// whose in-scope corpus exceeds this file count fails explicitly
+    /// instead of grinding unbounded (scope with `targetSubdir` instead).
+    pub(crate) max_cpg_source_files: usize,
     pub(crate) codeql_analyze_timeout_ms: usize,
     pub(crate) min_evidence_level: String,
 }

@@ -77,6 +77,20 @@ fn collect_structural_candidates_inproc(
 mod fallback_tests {
     use super::*;
 
+    fn unit_caps() -> TaintIrisNextCaps {
+        TaintIrisNextCaps {
+            max_catalog_entries: 1,
+            max_candidates_per_cwe: 1,
+            max_evidence_per_cwe: 1,
+            max_files_per_query: 1,
+            max_specs_per_cwe: 1,
+            max_agent_findings: 1,
+            max_cpg_source_files: kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES,
+            codeql_analyze_timeout_ms: 1_000,
+            min_evidence_level: "candidate".to_string(),
+        }
+    }
+
     fn empty_rg_plan() -> TaintIrisNextPlan {
         TaintIrisNextPlan {
             target: PathBuf::from("."),
@@ -84,16 +98,7 @@ mod fallback_tests {
             repo_root: PathBuf::from("."),
             source_paths: std::sync::Arc::from([]),
             mode: TaintIrisNextMode::Hunt,
-            caps: TaintIrisNextCaps {
-                max_catalog_entries: 1,
-                max_candidates_per_cwe: 1,
-                max_evidence_per_cwe: 1,
-                max_files_per_query: 1,
-                max_specs_per_cwe: 1,
-                max_agent_findings: 1,
-                codeql_analyze_timeout_ms: 1_000,
-                min_evidence_level: "candidate".to_string(),
-            },
+            caps: unit_caps(),
             languages: Vec::new(),
             context_status: empty_status(),
             threat_model_status: empty_status(),

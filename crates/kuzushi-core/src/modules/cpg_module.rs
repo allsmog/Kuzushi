@@ -53,7 +53,29 @@ fn cpg_build_options() -> Vec<OptionSpec> {
         )
         .external_read()
         .aliases(&["import_path", "existingCpg", "existing_cpg"]),
+        cpg_build_subdir_option(),
+        opt(
+            "maxSourceFiles",
+            OptionType::Int,
+            "Refuse builds whose in-scope corpus exceeds this many source files (default \
+             25000). Prefer scoping with subdir over raising the cap.",
+        )
+        .aliases(&["max_source_files", "maxCpgSourceFiles"])
+        .advanced(),
     ]
+}
+
+fn cpg_build_subdir_option() -> OptionSpec {
+    opt(
+        "subdir",
+        OptionType::Path,
+        "Relative subdirectory under the target to build graphs from. The graph still \
+         lands under the target root's .kuzushi/cpg-rs/scoped/<key>/ — a scoped build \
+         never writes inside the scanned subtree.",
+    )
+    .workspace_read()
+    .aliases(&["targetSubdir", "target_subdir"])
+    .advanced()
 }
 
 fn announce_cpg_phase(ctx: &ToolExecutionContext<'_>, kind: &str, label: &str) {
@@ -69,29 +91,74 @@ pub(in crate::modules) fn run_cpg_build(
     if let Some(import_path) = resolve_cpg_import_path(input) {
         return run_cpg_import(ctx, &target, &import_path);
     }
-    let languages = resolve_build_languages(input, &target)?;
+    let scope = resolve_cpg_scope(input, &target)?;
+    let limits = resolve_cpg_limits(input)?;
+    let languages = resolve_build_languages(input, &scope.scan_root())?;
     if languages.is_empty() {
-        return Ok(no_supported_language_response(&target));
+        return Ok(no_supported_language_response(&scope.scan_root()));
     }
     announce_cpg_phase(ctx, "tool", "cpg:build start");
     let started = Instant::now();
-    let reports = build_language_graphs(ctx, &target, &languages)?;
+    let reports = build_language_graphs(ctx, &target, &scope, &limits, &languages)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
     announce_cpg_phase(ctx, "done", &cpg_complete_label(&reports, elapsed_ms));
     cpg_build_response(&target, &reports, elapsed_ms, now_ms()?)
 }
 
+/// Build scope from the optional `subdir` input: sources come from the
+/// subtree, the artifact stays under the target root's `.kuzushi`. The
+/// prepared option may arrive target-absolute (workspace-read resolution);
+/// both spellings normalize to a target-relative subdir.
+fn resolve_cpg_scope(input: &Value, target: &Path) -> Result<kuzushi_cpg::BuildScope> {
+    let subdir = input
+        .get("subdir")
+        .or_else(|| input.get("targetSubdir"))
+        .or_else(|| input.get("target_subdir"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match subdir {
+        None => Ok(kuzushi_cpg::BuildScope::whole(target)),
+        Some(subdir) => {
+            let relative = Path::new(subdir)
+                .strip_prefix(target)
+                .unwrap_or(Path::new(subdir));
+            kuzushi_cpg::BuildScope::subtree(target, relative)
+                .map_err(|error| anyhow::anyhow!("cpg:build subdir: {error}"))
+        }
+    }
+}
+
+fn resolve_cpg_limits(input: &Value) -> Result<kuzushi_cpg::BuildLimits> {
+    let raw = ["maxSourceFiles", "max_source_files", "maxCpgSourceFiles"]
+        .iter()
+        .find_map(|key| input.get(*key));
+    let Some(raw) = raw else {
+        return Ok(kuzushi_cpg::BuildLimits::default());
+    };
+    let value = raw
+        .as_u64()
+        .or_else(|| raw.as_str().and_then(|text| text.trim().parse().ok()))
+        .filter(|value| *value > 0)
+        .context("cpg:build maxSourceFiles must be a positive integer")?;
+    Ok(kuzushi_cpg::BuildLimits {
+        max_source_files: value as usize,
+    })
+}
+
 fn build_language_graphs(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
+    scope: &kuzushi_cpg::BuildScope,
+    limits: &kuzushi_cpg::BuildLimits,
     languages: &[&'static str],
 ) -> Result<Vec<kuzushi_cpg::CpgBuildReport>> {
     let mut reports = Vec::new();
     for lang in languages {
         ctx.ensure_active()?;
-        prepare_cpg_artifact_path(target, lang)?;
+        prepare_cpg_artifact_path(target, &scope.artifact_path(lang))?;
         announce_cpg_phase(ctx, "tool-progress", &format!("building {lang} graph"));
-        let (_, report) = kuzushi_cpg::ensure_project(target, lang)
+        let (_, report) = kuzushi_cpg::ensure_project_in(scope, lang, limits)
             .map_err(|error| anyhow::anyhow!("cpg:build {lang} failed: {error}"))?;
         announce_cpg_phase(ctx, "tool-progress", &language_report_label(&report));
         reports.push(report);
@@ -102,8 +169,13 @@ fn build_language_graphs(
 fn language_report_label(report: &kuzushi_cpg::CpgBuildReport) -> String {
     let action = if report.reused_cache { "reused" } else { "built" };
     format!(
-        "{} {} graph · {} methods, {} calls · {} ms",
-        action, report.language, report.methods, report.calls, report.duration_ms
+        "{} {} graph · {} source files · {} methods, {} calls · {} ms",
+        action,
+        report.language,
+        report.source_files,
+        report.methods,
+        report.calls,
+        report.duration_ms
     )
 }
 
@@ -173,7 +245,7 @@ fn run_cpg_import(
 ) -> Result<Value> {
     let source_bytes = validated_cpg_import_source(import_path)?;
     let lang = import_language(import_path)?;
-    let output_path = prepare_cpg_artifact_path(target, lang)?;
+    let output_path = prepare_cpg_artifact_path(target, &kuzushi_cpg::artifact_path(target, lang))?;
     announce_cpg_phase(
         ctx,
         "tool",
@@ -258,10 +330,9 @@ fn validated_cpg_import_source(import_path: &Path) -> Result<u64> {
     Ok(metadata.len())
 }
 
-/// Validate + create the artifact location for one language, keeping the
-/// write inside `.kuzushi` through the shared workspace guard.
-fn prepare_cpg_artifact_path(target: &Path, lang: &str) -> Result<PathBuf> {
-    let path = kuzushi_cpg::artifact_path(target, lang);
+/// Validate + create one artifact location, keeping the write inside the
+/// target root's `.kuzushi` through the shared workspace guard.
+fn prepare_cpg_artifact_path(target: &Path, path: &Path) -> Result<PathBuf> {
     let relative = path.strip_prefix(target).with_context(|| {
         format!(
             "CPG output {} must stay inside target {}",
@@ -329,6 +400,7 @@ fn report_json(report: &kuzushi_cpg::CpgBuildReport) -> Value {
         "language": report.language,
         "cpgPath": report.cpg_path.display().to_string(),
         "reusedCache": report.reused_cache,
+        "sourceFiles": report.source_files,
         "methods": report.methods,
         "calls": report.calls,
         "nodes": report.nodes,
@@ -462,7 +534,45 @@ mod cpg_build_tests {
         )
         .unwrap();
 
-        assert!(prepare_cpg_artifact_path(workspace.path(), "go").is_err());
+        assert!(prepare_cpg_artifact_path(
+            workspace.path(),
+            &kuzushi_cpg::artifact_path(workspace.path(), "go")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn subdir_scope_resolves_and_rejects_traversal() {
+        let target = Path::new("/repo");
+        let scoped = resolve_cpg_scope(&json!({"subdir": "src/go"}), target).unwrap();
+        assert_eq!(scoped.scan_root(), PathBuf::from("/repo/src/go"));
+        assert!(scoped
+            .artifact_path("go")
+            .starts_with("/repo/.kuzushi/cpg-rs/scoped"));
+        assert!(resolve_cpg_scope(&json!({"subdir": "../out"}), target).is_err());
+        let whole = resolve_cpg_scope(&json!({}), target).unwrap();
+        assert_eq!(whole.scan_root(), PathBuf::from("/repo"));
+    }
+
+    #[test]
+    fn max_source_files_parses_and_rejects_nonpositive() {
+        assert_eq!(
+            resolve_cpg_limits(&json!({})).unwrap().max_source_files,
+            kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES
+        );
+        assert_eq!(
+            resolve_cpg_limits(&json!({"maxSourceFiles": 500}))
+                .unwrap()
+                .max_source_files,
+            500
+        );
+        assert_eq!(
+            resolve_cpg_limits(&json!({"max_source_files": "1200"}))
+                .unwrap()
+                .max_source_files,
+            1200
+        );
+        assert!(resolve_cpg_limits(&json!({"maxSourceFiles": 0})).is_err());
     }
 
     #[test]

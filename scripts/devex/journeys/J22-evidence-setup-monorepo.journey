@@ -1,22 +1,24 @@
-# J22 — Evidence loop: setup → authorized Map on the real workload module
+# J22 — Evidence loop: setup → authorized Map (harness fixture target)
 #
-# Launches against the operator-designated workload module (@TARGET via
-# KUZUSHI_DEVEX_TARGET, e.g. ~/monorepo/src/py/cloud — scan target ONLY, never
-# patched; the journey removes only kuzushi's own .kuzushi state for
-# determinism). Audits the desired setup contract: one readiness check, an
-# explicit Start Map commit, live run signal, and an actionable landing.
+# Runs against the HARNESS-OWNED fixture repo (@TMP_TARGET), never an
+# operator checkout: this journey needs deterministic clean state, and the
+# master contract forbids deleting `.kuzushi` (or anything else) under an
+# operator-designated target. Real-monorepo coverage lives in J25–J27,
+# which never reset target state. Audits the desired setup contract: one
+# readiness check, an explicit Start Map commit, live run signal, and an
+# actionable landing.
 #
 # Fixed by Phase B slice 4 (now expected PASS): the target picker opened from
 # the Target row carries the bound target (Enter re-confirms, q/Esc returns
 # to Setup with the target intact); the completed run lands on the phase
 # RESULT checkpoint; the inventory walk emits heartbeat progress so a
 # healthy long stage never shows NO PROGRESS SIGNAL.
-name: Evidence loop setup honesty (workload module)
+name: Evidence loop setup honesty (fixture target)
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1
-shell: rm -rf "@TARGET/.kuzushi"
-launch: --target @TARGET
+shell: rm -rf "@TMP_TARGET/.kuzushi" && git -C "@TMP_TARGET" add -A >/dev/null 2>&1; git -C "@TMP_TARGET" -c user.email=devex@kuzushi -c user.name=kz-devex commit -qm fixture >/dev/null 2>&1 || true
+launch: --target @TMP_TARGET
 wait-for: 30 READY THE MAP RUN
 snap: setup-initial
 expect: CONFIRMED
@@ -28,7 +30,7 @@ ask: Setup — one readiness check with the target confirmed and a single explic
 keys: Enter
 wait-for: 10 CHOOSE A TARGET
 snap: target-picker-bound
-expect: Enter selects: cloud
+expect: Enter selects: fixture-target
 expect-not: press `d`
 keys: q
 wait-for: 10 READY THE MAP RUN

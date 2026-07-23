@@ -42,15 +42,18 @@ fn taint_iris_next_target_subdir(input: &Value) -> Result<Option<String>> {
         .filter(|value| !value.trim().is_empty());
     if subdir.as_deref().is_some_and(invalid_target_subdir) {
         anyhow::bail!(
-            "taint-iris-next:hunt targetSubdir must be a relative path under --target without '..' traversal, got {:?}",
+            "taint-iris-next:hunt targetSubdir must not contain '..' traversal, got {:?}",
             subdir.unwrap()
         );
     }
     Ok(subdir)
 }
 
+/// The prepare boundary may hand this option back target-absolute
+/// (workspace-read normalization); containment under --target is enforced
+/// when the scan root resolves. Only traversal is rejected here.
 fn invalid_target_subdir(subdir: &str) -> bool {
-    subdir.starts_with('/') || subdir.split('/').any(|part| part == "..")
+    subdir.split('/').any(|part| part == "..")
 }
 
 pub(in crate::capabilities::taint_iris_next) fn parse_taint_iris_next_cwe_focus(
@@ -266,70 +269,61 @@ fn taint_iris_next_languages(input: &Value) -> Result<Vec<String>> {
         .collect::<Vec<_>>())
 }
 
+const CATALOG_ENTRY_KEYS: &[&str] = &[
+    "maxCatalogEntries",
+    "maxCwes",
+    "max_catalog_entries",
+    "max_cwes",
+];
+const CANDIDATES_PER_CWE_KEYS: &[&str] = &["maxCandidatesPerCwe", "max_candidates_per_cwe"];
+const EVIDENCE_PER_CWE_KEYS: &[&str] = &["maxEvidencePerCwe", "max_evidence_per_cwe"];
+const FILES_PER_QUERY_KEYS: &[&str] = &["maxFilesPerQuery", "max_files_per_query"];
+const SPECS_PER_CWE_KEYS: &[&str] = &["maxSpecsPerCwe", "max_specs_per_cwe"];
+const AGENT_FINDINGS_KEYS: &[&str] = &[
+    "maxAgentFindings",
+    "max_agent_findings",
+    "maxFindings",
+    "max_findings",
+];
+const CPG_SOURCE_FILES_KEYS: &[&str] = &["maxCpgSourceFiles", "max_cpg_source_files"];
+const CODEQL_TIMEOUT_KEYS: &[&str] = &["codeqlAnalyzeTimeoutMs", "codeql_analyze_timeout_ms"];
+
 fn taint_iris_next_caps(input: &Value) -> Result<TaintIrisNextCaps> {
-    let min_evidence_level = taint_iris_next_min_evidence_level(input)?;
+    let cap = |keys: &[&str], label: &str, default: usize, ceiling: usize| {
+        capped_usize_input(input, keys, label, default, ceiling)
+    };
     Ok(TaintIrisNextCaps {
-        max_catalog_entries: positive_usize_input(
-            input,
-            &[
-                "maxCatalogEntries",
-                "maxCwes",
-                "max_catalog_entries",
-                "max_cwes",
-            ],
-            "taint-iris-next:hunt maxCatalogEntries",
-        )?
-        .unwrap_or(24)
-        .min(100),
-        max_candidates_per_cwe: positive_usize_input(
-            input,
-            &["maxCandidatesPerCwe", "max_candidates_per_cwe"],
-            "taint-iris-next:hunt maxCandidatesPerCwe",
-        )?
-        .unwrap_or(2000)
-        .min(10000),
-        max_evidence_per_cwe: positive_usize_input(
-            input,
-            &["maxEvidencePerCwe", "max_evidence_per_cwe"],
-            "taint-iris-next:hunt maxEvidencePerCwe",
-        )?
-        .unwrap_or(12)
-        .min(200),
-        max_files_per_query: positive_usize_input(
-            input,
-            &["maxFilesPerQuery", "max_files_per_query"],
-            "taint-iris-next:hunt maxFilesPerQuery",
-        )?
-        .unwrap_or(120)
-        .min(500),
-        max_specs_per_cwe: positive_usize_input(
-            input,
-            &["maxSpecsPerCwe", "max_specs_per_cwe"],
-            "taint-iris-next:hunt maxSpecsPerCwe",
-        )?
-        .unwrap_or(16)
-        .min(200),
-        max_agent_findings: positive_usize_input(
-            input,
-            &[
-                "maxAgentFindings",
-                "max_agent_findings",
-                "maxFindings",
-                "max_findings",
-            ],
-            "taint-iris-next:hunt maxAgentFindings",
-        )?
-        .unwrap_or(20)
-        .min(250),
-        codeql_analyze_timeout_ms: positive_usize_input(
-            input,
-            &["codeqlAnalyzeTimeoutMs", "codeql_analyze_timeout_ms"],
-            "taint-iris-next:hunt codeqlAnalyzeTimeoutMs",
-        )?
-        .unwrap_or(180_000)
-        .clamp(30_000, 900_000),
-        min_evidence_level,
+        max_catalog_entries: cap(CATALOG_ENTRY_KEYS, "maxCatalogEntries", 24, 100)?,
+        max_candidates_per_cwe: cap(CANDIDATES_PER_CWE_KEYS, "maxCandidatesPerCwe", 2000, 10000)?,
+        max_evidence_per_cwe: cap(EVIDENCE_PER_CWE_KEYS, "maxEvidencePerCwe", 12, 200)?,
+        max_files_per_query: cap(FILES_PER_QUERY_KEYS, "maxFilesPerQuery", 120, 500)?,
+        max_specs_per_cwe: cap(SPECS_PER_CWE_KEYS, "maxSpecsPerCwe", 16, 200)?,
+        max_agent_findings: cap(AGENT_FINDINGS_KEYS, "maxAgentFindings", 20, 250)?,
+        max_cpg_source_files: cap(
+            CPG_SOURCE_FILES_KEYS,
+            "maxCpgSourceFiles",
+            kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES,
+            2_000_000,
+        )?,
+        codeql_analyze_timeout_ms: cap(CODEQL_TIMEOUT_KEYS, "codeqlAnalyzeTimeoutMs", 180_000, 900_000)?
+            .max(30_000),
+        min_evidence_level: taint_iris_next_min_evidence_level(input)?,
     })
+}
+
+/// Parse one optional cap: `default` when absent, positive, and bounded by
+/// `ceiling`. Labels render as `taint-iris-next:hunt <label>` in errors.
+fn capped_usize_input(
+    input: &Value,
+    keys: &[&str],
+    label: &str,
+    default: usize,
+    ceiling: usize,
+) -> Result<usize> {
+    let label = format!("taint-iris-next:hunt {label}");
+    Ok(positive_usize_input(input, keys, &label)?
+        .unwrap_or(default)
+        .min(ceiling))
 }
 
 fn taint_iris_next_min_evidence_level(input: &Value) -> Result<String> {

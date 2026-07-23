@@ -15,6 +15,37 @@ pub fn artifact_path(target: &Path, lang: &str) -> PathBuf {
     artifact_dir(target).join(format!("{lang}.v{GRAPH_SHAPE_VERSION}.cpg"))
 }
 
+/// The graph file for one build scope. Whole-workspace graphs keep the flat
+/// per-language name; subtree-scoped graphs nest under `scoped/<key>/` — the
+/// artifact ALWAYS lives under the workspace root's `.kuzushi`, never inside
+/// the scanned subtree, so a scoped build leaves the target tree untouched.
+pub fn scoped_artifact_path(root: &Path, subdir: Option<&Path>, lang: &str) -> PathBuf {
+    match subdir {
+        None => artifact_path(root, lang),
+        Some(subdir) => artifact_dir(root)
+            .join("scoped")
+            .join(scope_key(subdir))
+            .join(format!("{lang}.v{GRAPH_SHAPE_VERSION}.cpg")),
+    }
+}
+
+/// Filesystem-safe single-segment key for a scope subdir. Distinct subdirs
+/// that sanitize identically would share a key; traversal is rejected by the
+/// scope constructor before paths ever reach here.
+fn scope_key(subdir: &Path) -> String {
+    subdir
+        .to_string_lossy()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// True when at least one current-shape-version graph exists for the target.
 /// This is the MCP attachment / backend readiness probe.
 pub fn has_artifacts(target: &Path) -> bool {
@@ -46,6 +77,33 @@ mod tests {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
         assert_eq!(name, format!("go.v{GRAPH_SHAPE_VERSION}.cpg"));
         assert!(path.starts_with("/repo/.kuzushi/cpg-rs"));
+    }
+
+    #[test]
+    fn scoped_paths_stay_under_the_workspace_root() {
+        let root = Path::new("/repo");
+        assert_eq!(
+            scoped_artifact_path(root, None, "go"),
+            artifact_path(root, "go")
+        );
+        let scoped = scoped_artifact_path(root, Some(Path::new("platform/src/acme")), "go");
+        assert_eq!(
+            scoped,
+            PathBuf::from(format!(
+                "/repo/.kuzushi/cpg-rs/scoped/platform_src_acme/go.v{GRAPH_SHAPE_VERSION}.cpg"
+            ))
+        );
+    }
+
+    #[test]
+    fn scoped_graphs_do_not_masquerade_as_root_languages() {
+        let temp = tempfile::tempdir().unwrap();
+        let scoped = scoped_artifact_path(temp.path(), Some(Path::new("svc")), "go");
+        std::fs::create_dir_all(scoped.parent().unwrap()).unwrap();
+        std::fs::write(&scoped, b"x").unwrap();
+        // Root-level readiness must not report a subtree-scoped graph.
+        assert!(artifact_langs(temp.path()).is_empty());
+        assert!(!has_artifacts(temp.path()));
     }
 
     #[test]
