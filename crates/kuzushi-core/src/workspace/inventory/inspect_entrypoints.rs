@@ -96,11 +96,12 @@ pub(crate) fn inspect_routes(
     text: &str,
     builder: &mut InventoryBuilder,
 ) {
+    let scan = SourceTextScan::new(text);
     for (index, line) in text.lines().enumerate() {
         let line_number = u32::try_from(index + 1).unwrap_or(u32::MAX);
         for inspector in ROUTE_INSPECTORS {
             if inspector.supports(language) {
-                (inspector.inspect)(relative, line_number, line, text, builder);
+                (inspector.inspect)(relative, line_number, line, &scan, builder);
             }
         }
     }
@@ -108,7 +109,7 @@ pub(crate) fn inspect_routes(
 
 struct RouteInspector {
     languages: &'static [&'static str],
-    inspect: fn(&str, u32, &str, &str, &mut InventoryBuilder),
+    inspect: fn(&str, u32, &str, &SourceTextScan, &mut InventoryBuilder),
 }
 
 impl RouteInspector {
@@ -156,10 +157,10 @@ pub(crate) fn inspect_node_route_line(
     relative: &str,
     line_number: u32,
     line: &str,
-    text: &str,
+    scan: &SourceTextScan,
     builder: &mut InventoryBuilder,
 ) {
-    let framework = node_route_framework(text);
+    let framework = node_route_framework(scan);
     inspect_express_route_line(relative, line_number, line, framework, builder);
     inspect_nest_route_line(relative, line_number, line, builder);
     inspect_next_route_line(relative, line_number, line, builder);
@@ -197,74 +198,58 @@ fn inspect_express_route_line(
     }
 }
 
-fn node_route_framework(text: &str) -> &'static str {
-    if source_looks_like_elysia(text) {
+fn node_route_framework(scan: &SourceTextScan) -> &'static str {
+    if source_looks_like_elysia(scan) {
         "Elysia"
-    } else if source_looks_like_fastify(text) {
+    } else if source_looks_like_fastify(scan) {
         "Fastify"
-    } else if source_looks_like_hono(text) {
+    } else if source_looks_like_hono(scan) {
         "Hono"
-    } else if source_looks_like_koa(text) {
+    } else if source_looks_like_koa(scan) {
         "Koa"
     } else {
         "Express"
     }
 }
 
-fn source_looks_like_elysia(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    contains_any(
-        &lower,
-        &[
-            "from 'elysia'",
-            "from \"elysia\"",
-            "require('elysia')",
-            "require(\"elysia\")",
-            "new elysia",
-        ],
-    )
+fn source_looks_like_elysia(scan: &SourceTextScan) -> bool {
+    scan.contains_any_ci(&[
+        "from 'elysia'",
+        "from \"elysia\"",
+        "require('elysia')",
+        "require(\"elysia\")",
+        "new elysia",
+    ])
 }
 
-fn source_looks_like_fastify(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    contains_any(
-        &lower,
-        &[
-            "from 'fastify'",
-            "from \"fastify\"",
-            "require('fastify')",
-            "require(\"fastify\")",
-            "fastify(",
-        ],
-    )
+fn source_looks_like_fastify(scan: &SourceTextScan) -> bool {
+    scan.contains_any_ci(&[
+        "from 'fastify'",
+        "from \"fastify\"",
+        "require('fastify')",
+        "require(\"fastify\")",
+        "fastify(",
+    ])
 }
 
-fn source_looks_like_hono(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    contains_any(
-        &lower,
-        &[
-            "from 'hono'",
-            "from \"hono\"",
-            "require('hono')",
-            "require(\"hono\")",
-            "new hono",
-        ],
-    )
+fn source_looks_like_hono(scan: &SourceTextScan) -> bool {
+    scan.contains_any_ci(&[
+        "from 'hono'",
+        "from \"hono\"",
+        "require('hono')",
+        "require(\"hono\")",
+        "new hono",
+    ])
 }
 
-fn source_looks_like_koa(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    contains_any(
-        &lower,
-        &[
-            "from 'koa'",
-            "from \"koa\"",
-            "require('koa')",
-            "require(\"koa\")",
-            "@koa/router",
-        ],
-    )
+fn source_looks_like_koa(scan: &SourceTextScan) -> bool {
+    scan.contains_any_ci(&[
+        "from 'koa'",
+        "from \"koa\"",
+        "require('koa')",
+        "require(\"koa\")",
+        "@koa/router",
+    ])
 }
 
 fn inspect_nest_route_line(

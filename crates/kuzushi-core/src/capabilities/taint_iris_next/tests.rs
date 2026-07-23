@@ -310,6 +310,7 @@ mod tests {
                 max_files_per_query: 10,
                 max_specs_per_cwe: 10,
                 max_agent_findings: 10,
+                max_cpg_source_files: kuzushi_cpg::DEFAULT_MAX_SOURCE_FILES,
                 codeql_analyze_timeout_ms: 1000,
                 min_evidence_level: "candidate".to_string(),
             },

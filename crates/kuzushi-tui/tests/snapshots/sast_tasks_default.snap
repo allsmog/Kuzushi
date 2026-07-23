@@ -7,6 +7,7 @@ assertion_line: 137
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
 selected: 5/13 enabled, 0 blocked
+legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked
 
 state  id                        cost    scan                notes
 [x]    semgrep                   low     semgrep             pattern scanner

@@ -1,0 +1,45 @@
+# J27 — Local monorepo baseline: scan plan, Run Focus, cancellation receipt.
+#
+# Against the real local monorepo checkout, captures (1) the guided scan
+# plan surfaces (route + module cards) without launching a scan, then
+# (2) a live Run Focus over a deterministic runtime-free run
+# (`context:build`), an operator cancellation, and whatever receipt the
+# cancellation actually produces. The contract requires canceled work to
+# land as an honest canceled/partial receipt that earns no coverage
+# credit; whatever the product does today is recorded as baseline truth.
+#
+# Never deletes pre-existing `.kuzushi` engagement state; never touches
+# target sources or git state.
+name: Monorepo baseline · scan plan and cancellation receipt
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TARGET
+wait-for: 60 KUZUSHI
+submit: scan
+wait-for: 20 MAP · ROUTE
+snap: scan-route
+ask: Route — is the guided route derived from the real target state (context/coverage present or missing), and does it lead root-first when no holistic baseline exists?
+keys: Enter
+wait-for: 15 MAP · MODULES
+snap: scan-modules
+ask: Modules — are module recommendations tied to recorded evidence from this checkout, with honest disclosure when the recommender has nothing real to stand on?
+keys: Escape
+wait: 1
+keys: Escape
+wait: 1
+submit: run context:build {}
+wait-live-snap: 60 RUN FOCUS | run-focus-live
+ask: Run Focus — do task identities and output lines reflect the real whole-repo build (real paths/counts), with honest liveness signals at this repository scale?
+keys: C-c
+wait: 2
+snap: cancel-requested
+wait-for: 180 canceled
+wait: 2
+snap: cancel-receipt
+ask: Cancellation — does the canceled run land as an honest canceled/partial receipt (no completion claim, no coverage credit), with a clear return path to the Map page?
+nav-mode:
+keys: 1
+wait-live-snap: 30 Viewing Map | map-after-cancel
+ask: Map after cancel — does the page reflect the canceled attempt truthfully (no forged progress), and is the dominant NEXT still the root-first action?
+keys: Escape

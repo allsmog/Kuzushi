@@ -218,6 +218,10 @@ impl ShellApp {
             );
             return false;
         };
+        // Capture where the operator actually was before the picker takes
+        // over, so Esc can restore that page instead of a re-derived one.
+        let origin = (self.shell_view() == ShellView::Workbench)
+            .then(|| crate::ui_view_models::active_workbench_page(self));
         let (profile, pending) = self.phase_picker_target_profile(&target_root);
         let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
         self.engagement
@@ -226,6 +230,9 @@ impl ShellApp {
         self.engagement
             .planning_picker_mut()
             .set_return_to_setup(false);
+        self.engagement
+            .planning_picker_mut()
+            .set_origin_workbench_page(origin);
         self.engagement.set_phase(phase);
         true
     }

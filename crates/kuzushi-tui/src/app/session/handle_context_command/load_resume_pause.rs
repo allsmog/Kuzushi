@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context as _;
 #[cfg(test)]
 use kuzushi_core::ScanCancellation;
 
@@ -42,15 +43,89 @@ impl ShellApp {
             .then(|| module_id.to_string())
     }
 
-    pub(crate) fn resume_session_effect(&mut self, resume: ResumeSession) {
+    pub(crate) fn resume_session_effect(&mut self, resume: ResumeSession) -> Vec<ShellEffect> {
         if let Some(run_id) = normalized_resume_run_id(resume) {
-            self.open_resume_replay(run_id);
-            return;
+            return self.resume_recorded_run(run_id);
         }
-        if self.resume_paused_scan() {
-            return;
+        if !self.resume_paused_scan() {
+            self.offer_latest_resumable_run();
         }
-        self.show_resume_guidance();
+        Vec::new()
+    }
+
+    /// Bare `resume` with nothing paused: draft `resume <runId>` for the most
+    /// recent resumable run so one Enter continues it — the operator commits
+    /// the spend explicitly instead of the shell auto-dispatching.
+    fn offer_latest_resumable_run(&mut self) {
+        let Some(run_id) = self.latest_resumable_run_id() else {
+            self.show_resume_guidance();
+            return;
+        };
+        self.log(
+            "resume",
+            format!("latest resumable run is {run_id} — Enter re-dispatches it"),
+        );
+        self.set_input(format!("resume {run_id}"));
+        self.set_input_mode(InputMode::Prompt);
+    }
+
+    fn latest_resumable_run_id(&self) -> Option<String> {
+        let target = self.target()?;
+        kuzushi_core::list_run_summaries(target)
+            .ok()?
+            .into_iter()
+            .find(|summary| {
+                matches!(
+                    summary.status.as_str(),
+                    "failed" | "interrupted" | "canceled"
+                ) && summary.tool.is_some()
+            })
+            .map(|summary| summary.run_id)
+    }
+
+    /// `resume <runId>`: re-dispatch the failed run's recorded tool + input.
+    /// Agent tool loops pick up their transcript checkpoint automatically, so
+    /// this continues from the failure point instead of re-buying completed
+    /// turns. Runs without a resumable invocation fall back to replay.
+    fn resume_recorded_run(&mut self, run_id: String) -> Vec<ShellEffect> {
+        match self.resumable_run_invocation(&run_id) {
+            Ok(Some((tool, input))) => {
+                self.log(
+                    "resume",
+                    format!(
+                        "resuming {run_id} — re-dispatching {tool}; completed agent turns replay from the checkpoint"
+                    ),
+                );
+                self.reduce_run_tool(Some(tool), Some(input))
+            }
+            Ok(None) => {
+                self.open_resume_replay(run_id);
+                Vec::new()
+            }
+            Err(error) => {
+                self.log("error", format!("resume: {error:#}"));
+                self.open_resume_replay(run_id);
+                Vec::new()
+            }
+        }
+    }
+
+    /// A run can be resumed when it ended without completing (failed,
+    /// interrupted, or canceled) and recorded the tool + input it was
+    /// dispatched with. Anything else is inspect-only.
+    fn resumable_run_invocation(&mut self, run_id: &str) -> anyhow::Result<Option<(String, String)>> {
+        let Some(target) = self.target_owned() else {
+            anyhow::bail!("resume requires an active target. Next: target <path>");
+        };
+        let summary = kuzushi_core::run_artifacts::load_run_summary(&target, run_id)?;
+        let resumable = matches!(summary.status.as_str(), "failed" | "interrupted" | "canceled");
+        let Some(tool) = summary.tool.filter(|_| resumable) else {
+            return Ok(None);
+        };
+        let input_path = kuzushi_core::run_artifacts::run_dir(&target, run_id).join("input.json");
+        let input = std::fs::read_to_string(&input_path)
+            .with_context(|| format!("Could not read recorded input {}", input_path.display()))?;
+        Ok(Some((tool, input)))
     }
 
     fn open_resume_replay(&mut self, run_id: String) {
@@ -59,7 +134,7 @@ impl ShellApp {
         self.log(
             "resume",
             format!(
-                "checkpoint resume not implemented; opening replay {run_id}. Next: /replay {run_id}"
+                "run is not resumable (only failed/interrupted/canceled tool runs are); opening replay {run_id}. Next: /replay {run_id}"
             ),
         );
     }
@@ -80,7 +155,7 @@ impl ShellApp {
         self.set_shell_view(ShellView::Runs);
         self.log(
             "resume",
-            "no paused scan to resume. Next: show runs, replay <runId>, or scan <target>",
+            "nothing to resume — no paused scan and no failed/interrupted run. Next: show runs, replay <runId>, or scan <target>",
         );
     }
 
@@ -213,4 +288,69 @@ fn normalized_load_specifier(specifier: Option<String>) -> Option<String> {
 
 fn normalized_resume_run_id(resume: ResumeSession) -> Option<String> {
     resume.run_id.filter(|value| !value.trim().is_empty())
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::*;
+    use kuzushi_core::{V2Config, WorkspaceTarget};
+
+    fn app_with_run(status_failed: bool) -> (tempfile::TempDir, ShellApp, String) {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let run_id = "run-resume-1".to_string();
+        let summary = kuzushi_core::RunSummary::running(
+            run_id.clone(),
+            "tool",
+            Some("x-ray:run".to_string()),
+            workspace.root().display().to_string(),
+        );
+        let summary = if status_failed {
+            summary.failed("LangGraph bridge failed: Provider rate limited the request (HTTP 429).")
+        } else {
+            summary
+        };
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        let run_dir = kuzushi_core::run_artifacts::run_dir(workspace.root(), &run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(run_dir.join("input.json"), r#"{"target":"."}"#).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        (temp, app, run_id)
+    }
+
+    #[test]
+    fn failed_run_resumes_with_its_recorded_tool_and_input() {
+        let (_temp, mut app, run_id) = app_with_run(true);
+
+        let invocation = app.resumable_run_invocation(&run_id).unwrap();
+
+        assert_eq!(
+            invocation,
+            Some(("x-ray:run".to_string(), r#"{"target":"."}"#.to_string()))
+        );
+    }
+
+    #[test]
+    fn bare_resume_drafts_the_latest_resumable_run() {
+        let (_temp, mut app, run_id) = app_with_run(true);
+
+        let effects = app.resume_session_effect(ResumeSession { run_id: None });
+
+        assert!(effects.is_empty());
+        assert_eq!(app.input(), format!("resume {run_id}"));
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+    }
+
+    #[test]
+    fn still_running_run_is_not_resumable_and_falls_back_to_replay() {
+        let (_temp, mut app, run_id) = app_with_run(false);
+
+        assert_eq!(app.resumable_run_invocation(&run_id).unwrap(), None);
+
+        let effects = app.resume_session_effect(ResumeSession {
+            run_id: Some(run_id.clone()),
+        });
+        assert!(effects.is_empty());
+        assert_eq!(app.shell_view(), ShellView::Replay);
+    }
 }

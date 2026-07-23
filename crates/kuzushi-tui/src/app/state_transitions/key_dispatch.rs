@@ -236,12 +236,30 @@ impl ShellApp {
         if self.shell_view() != ShellView::Workbench || self.input_mode() != InputMode::Navigate {
             return false;
         }
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
-        self.engagement.unresolved_phase_attempt(phase).is_some()
+        self.phase_result_target_phase().is_some()
+    }
+
+    /// Phase whose unresolved RESULT READY attempt the result-card keys act
+    /// on. Prefer the page in view; when reality derivation has moved the
+    /// page away from the phase that actually finished (e.g. a Map result
+    /// while prior findings derive Review), fall back to the earliest phase
+    /// with an unresolved attempt — advertised keys must work where
+    /// advertised.
+    pub(crate) fn phase_result_target_phase(&self) -> Option<WorkflowPhase> {
+        let page_phase = crate::ui_view_models::active_workbench_page(self).phase();
+        if self.engagement.unresolved_phase_attempt(page_phase).is_some() {
+            return Some(page_phase);
+        }
+        WorkflowPhase::ORDER
+            .iter()
+            .copied()
+            .find(|phase| self.engagement.unresolved_phase_attempt(*phase).is_some())
     }
 
     fn phase_result_command_is_available(&self, command: PhaseResultCommand) -> bool {
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        let Some(phase) = self.phase_result_target_phase() else {
+            return false;
+        };
         self.projected_phase_result_policy(phase)
             .is_some_and(|policy| {
                 policy
@@ -277,7 +295,9 @@ impl ShellApp {
         use kuzushi_core::workflow_attempts::{
             PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptOutcome,
         };
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        let Some(phase) = self.phase_result_target_phase() else {
+            return InputUpdate::handled();
+        };
         let Some(record) = self.engagement.unresolved_phase_attempt(phase).cloned() else {
             return InputUpdate::handled();
         };
@@ -415,7 +435,9 @@ impl ShellApp {
         use kuzushi_core::workflow_attempts::{
             PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
         };
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        let Some(phase) = self.phase_result_target_phase() else {
+            return InputUpdate::handled();
+        };
         let Some(record) = self.engagement.unresolved_phase_attempt(phase).cloned() else {
             return InputUpdate::handled();
         };
@@ -504,7 +526,7 @@ impl ShellApp {
     fn current_phase_result_record(
         &self,
     ) -> Option<kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
-        let phase = crate::ui_view_models::active_workbench_page(self).phase();
+        let phase = self.phase_result_target_phase()?;
         self.engagement.unresolved_phase_attempt(phase).cloned()
     }
 
@@ -1966,6 +1988,25 @@ mod tests {
             .engagement
             .unresolved_phase_attempt(WorkflowPhase::Map)
             .is_none());
+    }
+
+    #[test]
+    fn result_keys_resolve_the_unresolved_attempt_even_when_the_page_drifted() {
+        // Prior findings can re-derive the active page to Review while the
+        // Map result is still unresolved; the advertised `u` must resolve
+        // the Map attempt anyway instead of dying as a silent no-op.
+        let (_target, mut app, attempt_id) = app_with_unresolved_map_result(V2Config::default());
+        app.router.workbench_mut().set_page(None);
+
+        assert_eq!(app.phase_result_target_phase(), Some(WorkflowPhase::Map));
+        assert!(app.reduce_key(plain_key(KeyCode::Char('u'))).handled);
+
+        assert!(
+            app.engagement
+                .unresolved_phase_attempt(WorkflowPhase::Map)
+                .is_none(),
+            "attempt {attempt_id} must be resolved by the advertised key"
+        );
     }
 
     #[test]

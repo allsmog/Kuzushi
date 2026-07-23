@@ -1,0 +1,49 @@
+# J25 — Local monorepo baseline: entry + five-page current-state capture.
+#
+# Runs the production binary against the operator's existing local monorepo
+# checkout (@TARGET via KUZUSHI_DEVEX_TARGET — never a clone, copy, or
+# fixture substitute) and records what every durable phase page currently
+# shows before any new engagement work. This journey NEVER deletes or
+# resets pre-existing `.kuzushi` engagement state on the target: prior
+# findings, runs, and coverage rows are part of the baseline being recorded.
+#
+# The root-first holistic-gate acceptance row lives in J29 (cycle 3), not
+# here: this journey verifies harness truth on the real target — identity,
+# non-destructive entry, honest page-state disclosure — and stays green on
+# those facts alone. The holistic judgment `ask:` below remains as an honest
+# open question either way.
+name: Monorepo baseline · entry and phase pages (real target)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TARGET
+wait-for: 60 KUZUSHI
+# No setg here: the prompt can be owned by a launch-time run (G11/G17,
+# cycle-3 ledger rows) and this journey's five-page capture works without
+# it (proved at baseline). nav-mode converges Navigate regardless.
+nav-mode:
+keys: 1
+wait-live-snap: 30 Viewing Map | map-initial
+# Target identity must survive every size (top chrome renders `target ./<name>`):
+expect: target ./
+# Full Map facts render at >=80 cols (evidenced: 80x24 shows them, 60x20
+# compact layout omits the PROJECT CONTEXT pane and revision — ledgered as a
+# cycle-visual product gap, not asserted away):
+expect-wide: 80 PROJECT CONTEXT
+expect-wide: 80 rev:
+ask: Map — with no accepted root holistic baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
+ask: Map — are the repository facts on screen (target name, revision, scope names, counts) derived from the real checkout rather than hard-coded or fabricated?
+keys: 2
+wait-live-snap: 15 Viewing Scan | scan-initial
+ask: Scan — are recorded receipts from the pre-existing engagement state clearly separated from live progress, and is scope-level scan guidance honestly gated when no root holistic baseline exists?
+keys: 3
+wait-live-snap: 15 Viewing Review | review-initial
+expect: FINDINGS
+ask: Review — do pre-existing engagement findings surface with honest provenance (which run/revision produced them) instead of presenting as fresh results?
+keys: 4
+wait-live-snap: 15 Viewing Prove | prove-initial
+ask: Prove — does the page state honestly that no verification evidence exists for the current selection, without fabricating proof state?
+keys: 5
+wait-live-snap: 15 Viewing Fix | fix-initial
+ask: Fix — is remediation strictly planning/diff-preview against the live checkout, with explicit operator authorization required before any application?
+keys: Escape

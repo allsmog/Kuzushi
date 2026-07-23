@@ -35,7 +35,8 @@ mod tests;
 #[cfg(test)]
 pub(in crate::scan) use application::default_scan_engine_selection_for_test;
 pub use application::{
-    default_scan_engines, normalize_semgrep_json, prepare_scan_workspace_state, run_scan_engines,
+    default_scan_engines, normalize_semgrep_json, prepare_scan_workspace_state,
+    prepare_scan_workspace_state_with_observer, run_scan_engines,
     run_scan_engines_with_options, run_scan_engines_with_options_and_cancellation,
     run_semgrep_scan, scan_engines_for_tasks, ScanRun, ScanRunOptions, ScanWorkspacePreparation,
 };

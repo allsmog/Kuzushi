@@ -15,7 +15,19 @@ pub fn prepare_scan_workspace_state(
     workspace: &WorkspaceTarget,
     store: &FindingStore,
 ) -> Result<ScanWorkspacePreparation> {
-    let tree_identity_warning = register_scan_tree_identity(workspace);
+    prepare_scan_workspace_state_with_observer(workspace, store, &mut |_| {})
+}
+
+/// Same preparation with a per-file observer over the tree-identity walk:
+/// the walk full-content-hashes every file (minutes on monorepos), and the
+/// caller's progress surface must show heartbeats instead of going silent
+/// before the scan starts.
+pub fn prepare_scan_workspace_state_with_observer(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    on_files_hashed: &mut dyn FnMut(usize),
+) -> Result<ScanWorkspacePreparation> {
+    let tree_identity_warning = register_scan_tree_identity(workspace, on_files_hashed);
     let suppressions =
         crate::suppressions::run_suppression_sweep(store, workspace, "system:scan-start")
             .map(|sweep| sweep.summary)
@@ -30,10 +42,16 @@ pub fn prepare_scan_workspace_state(
 /// index: the hash-only registration fits monorepo-scale targets whose file
 /// count blows the blob-store budget, and losing the identity costs
 /// verification of this scan's provenance only — never the scan itself.
-fn register_scan_tree_identity(workspace: &WorkspaceTarget) -> Option<String> {
-    crate::incremental_index::register_workspace_tree_identity(workspace)
-        .err()
-        .map(|error| format!("workspace tree identity unavailable for this scan: {error:#}"))
+fn register_scan_tree_identity(
+    workspace: &WorkspaceTarget,
+    on_files_hashed: &mut dyn FnMut(usize),
+) -> Option<String> {
+    crate::incremental_index::register_workspace_tree_identity_with_observer(
+        workspace,
+        on_files_hashed,
+    )
+    .err()
+    .map(|error| format!("workspace tree identity unavailable for this scan: {error:#}"))
 }
 
 #[cfg(test)]

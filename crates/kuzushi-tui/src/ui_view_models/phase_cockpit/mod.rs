@@ -163,6 +163,9 @@ pub(crate) struct MapPhaseModel {
     pub(crate) next_scans: NextScansState,
     pub(crate) dfd: DfdModel,
     pub(crate) empty_hint: Option<String>,
+    /// Set on very large, still-undecomposed repositories: the NEXT ACTION
+    /// card recommends module decomposition before threat-model generation.
+    pub(crate) decompose_first: Option<String>,
 }
 
 /// Coverage-ledger scan recommendations shown inside the HOT MODULES pane.

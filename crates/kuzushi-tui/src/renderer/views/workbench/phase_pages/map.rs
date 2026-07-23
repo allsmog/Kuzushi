@@ -159,6 +159,9 @@ fn map_action_card_lines(
     model: &MapPhaseModel,
     width: usize,
 ) -> (&'static str, Vec<Line<'static>>) {
+    if let Some(hint) = model.decompose_first.as_deref() {
+        return ("NEXT ACTION", decompose_first_lines(hint, width));
+    }
     if model.dfd.empty_hint.is_some() || model.empty_hint.is_some() {
         let mut lines = vec![
             Line::styled(fit("⚠ No threat model detected", width), theme::warn()),
@@ -210,6 +213,27 @@ fn map_action_card_lines(
     )];
     lines.extend(next_scan_lines(&model.next_scans, width));
     ("PROJECT CONTEXT · NEXT SCANS", lines)
+}
+
+/// Very large, still-undecomposed repositories get module decomposition as
+/// the first recommendation — a whole-repo threat model on a monorepo is
+/// noise until the target is broken into scoped modules.
+fn decompose_first_lines(hint: &str, width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(fit("⚠ Large monorepo — decompose before modeling", width), theme::warn()),
+        Line::styled(fit(hint, width), theme::muted()),
+        Line::styled(
+            fit(
+                "scoped modules make threat models and scans tractable",
+                width,
+            ),
+            theme::muted(),
+        ),
+        Line::from(vec![
+            Span::styled("▸ Enter suggest module decomposition", theme::accent()),
+            Span::styled("   Tab focus map · not now", theme::muted()),
+        ]),
+    ]
 }
 
 fn render_map_pane(
@@ -331,7 +355,7 @@ fn attack_surface_lines(
         return empty_state_panel(
             "no attack-surface artifact",
             &["run `next` to inventory externally reachable surfaces"],
-            &[("next", "continue Map")],
+            &[("next", "continue workspace phase")],
         );
     };
     let mut lines = vec![Line::styled(fit(&model.summary, width), theme::primary())];
@@ -565,6 +589,32 @@ mod next_scan_tests {
     #[test]
     fn pending_recommendations_draw_no_chrome() {
         assert!(next_scan_lines(&NextScansState::Pending, 80).is_empty());
+    }
+
+    #[test]
+    fn decompose_first_card_outranks_threat_model_generation() {
+        let app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            &app,
+            kuzushi_core::WorkflowPhase::Map,
+        );
+        let crate::ui_view_models::PhaseCockpitBody::Map(mut map) = model.body else {
+            panic!("map body expected");
+        };
+        assert!(
+            map.dfd.empty_hint.is_some() || map.empty_hint.is_some(),
+            "fixture must be in the missing-threat-model state"
+        );
+        map.decompose_first =
+            Some("81259 files indexed — break the target into logical modules first".to_string());
+
+        let (title, lines) = map_action_card_lines(&map, 100);
+
+        assert_eq!(title, "NEXT ACTION");
+        let rendered = text(&lines);
+        assert!(rendered.contains("suggest module decomposition"), "{rendered}");
+        assert!(rendered.contains("81259 files indexed"), "{rendered}");
+        assert!(!rendered.contains("generate threat model"), "{rendered}");
     }
 
     #[test]

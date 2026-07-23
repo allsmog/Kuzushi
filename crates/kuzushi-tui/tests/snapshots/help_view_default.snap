@@ -62,7 +62,7 @@ run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthan
 recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path> - import an external reconnaissance export through the
 registered recon tool
   aliases / examples: recon import <format> <path>, /recon:import <format> <path>
-ask <question> - explicit agent question
+ask <question> - explicit agent question (stays on the current view)
   aliases / examples: /ask <question>, ?text
 queue <tool|verb> - queue a command to run after the current one finishes
   aliases / examples: /queue <tool>, queue run <tool>
@@ -205,6 +205,10 @@ threats apply - apply the pending threat-model patch
   aliases / examples: /threats apply
 threats reject - discard the pending threat-model patch
   aliases / examples: /threats reject
+threats versions - list stored threat-model versions from the index ledger
+  aliases / examples: /threats versions, threats history
+threats use <n> - make a stored threat-model version the live model
+  aliases / examples: /threats use <n>, threats select <n>
 
 AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
@@ -241,7 +245,7 @@ pause - pause a running scan when scan cancellation is available
   aliases / examples: /pause
 cancel - cancel the active scan/tool/agent without leaving the shell
   aliases / examples: /cancel, c, /c, stop, /stop
-resume [runId] - resume a paused scan or open a run replay by id
+resume [runId] - continue a failed run from its checkpoint, or resume a paused scan
   aliases / examples: /resume [runId]
 story - show session story replacements
   aliases / examples: /story

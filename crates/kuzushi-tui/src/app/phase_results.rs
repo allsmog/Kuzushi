@@ -208,13 +208,16 @@ impl ShellApp {
         let recommended_next = policy
             .recommended_next
             .unwrap_or_else(|| "open the result and choose a disposition".to_string());
-        let details = phase_result_details(
+        let mut details = phase_result_details(
             completed,
             effective_outcome,
             &typed_receipt,
             live,
             &recommended_next,
         );
+        if let Some(row) = self.resume_checkpoint_row(effective_outcome) {
+            details.rows.push(row);
+        }
         let detail_lines = details.rows.iter().map(|row| row.text.clone()).collect();
         let semantic_keys = details
             .rows
@@ -231,6 +234,32 @@ impl ShellApp {
             actions,
             recommended_next,
         }
+    }
+
+    /// Disclose a pending agent-loop checkpoint on failed/canceled results:
+    /// `r` reruns the recorded request, and the tool loop resumes from the
+    /// checkpoint instead of re-buying completed turns. Silent when no
+    /// checkpoint is waiting (single-call tools, or the loop never finished
+    /// a turn).
+    fn resume_checkpoint_row(
+        &self,
+        outcome: PhaseAttemptOutcome,
+    ) -> Option<PhaseResultDetailRow> {
+        if !matches!(
+            outcome,
+            PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled
+        ) {
+            return None;
+        }
+        let target = self.target()?;
+        let newest = kuzushi_core::runtime::pending_agent_loop_checkpoints(target)
+            .into_iter()
+            .next()?;
+        let turns = newest.completed_turns;
+        let plural = if turns == 1 { "" } else { "s" };
+        Some(PhaseResultDetailRow::unkeyed(format!(
+            "⟲ resume checkpoint saved ({turns} completed agent turn{plural}) — r run again continues from the failure point"
+        )))
     }
 
     pub(crate) fn projected_phase_result_policy(
@@ -727,8 +756,19 @@ fn semantic_result_lines<'a>(
     artifact_labels: impl Iterator<Item = &'a str>,
 ) -> Vec<String> {
     let mut lines = vec![format!("{tool} · {status} — {summary}")];
-    lines.extend(output_lines.take(5).map(|line| format!("│ {line}")));
-    if let Some(message) = operator_message.filter(|message| *message != summary) {
+    // The heading already shows the summary; an output whose first line
+    // restates it (common for single-purpose tools) must not print twice.
+    let preview: Vec<&str> = output_lines
+        .filter(|line| *line != summary)
+        .take(5)
+        .collect();
+    lines.extend(preview.iter().map(|line| format!("│ {line}")));
+    // Failed runs carry the same error text as both output and error; the
+    // card must not print it twice (once as `│ …` preview, once as `⚠ …`).
+    if let Some(message) = operator_message
+        .filter(|message| *message != summary)
+        .filter(|message| !preview.join("\n").contains(*message))
+    {
         lines.push(format!("⚠ {message}"));
     }
     let labels = artifact_labels.take(3).collect::<Vec<_>>();
@@ -933,6 +973,67 @@ mod tests {
                 }]
             }),
         );
+    }
+
+    fn write_pending_loop_checkpoint(target: &std::path::Path) {
+        let dir = target.join(".kuzushi").join("v3").join("checkpoints");
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = kuzushi_core::runtime::LoopHistoryEntry::AssistantToolCall(
+            kuzushi_core::runtime::ToolCall {
+                name: "read_source".to_string(),
+                input: serde_json::json!({}),
+                call_id: "call-1".to_string(),
+            },
+        );
+        let file = serde_json::json!({
+            "version": 1,
+            "fingerprint": "abcd",
+            "transcript": [entry],
+        });
+        std::fs::write(dir.join("agent-loop-abcd.json"), file.to_string()).unwrap();
+    }
+
+    fn attempt_with_outcome(
+        target: &std::path::Path,
+        outcome: PhaseAttemptOutcome,
+    ) -> PhaseAttemptCompleted {
+        PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["scan-run".to_string()],
+            kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target),
+            outcome,
+        )
+    }
+
+    #[test]
+    fn failed_results_disclose_a_pending_resume_checkpoint() {
+        let temp = tempfile::tempdir().unwrap();
+        write_pending_loop_checkpoint(temp.path());
+        let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        let failed = app
+            .phase_result_presentation_for(&attempt_with_outcome(
+                temp.path(),
+                PhaseAttemptOutcome::Failed,
+            ));
+        assert!(
+            failed.detail_lines.iter().any(|line| {
+                line.contains("resume checkpoint saved (1 completed agent turn)")
+            }),
+            "failed result must disclose the checkpoint: {:?}",
+            failed.detail_lines
+        );
+
+        // A successful result never advertises resume.
+        let completed = app.phase_result_presentation_for(&attempt_with_outcome(
+            temp.path(),
+            PhaseAttemptOutcome::Completed,
+        ));
+        assert!(!completed
+            .detail_lines
+            .iter()
+            .any(|line| line.contains("resume checkpoint")));
     }
 
     #[test]

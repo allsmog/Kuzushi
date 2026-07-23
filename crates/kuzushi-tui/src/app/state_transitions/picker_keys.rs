@@ -196,6 +196,14 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             KeyCode::Enter => self.activate_setup_row(),
+            // Dedicated commit key: Enter activates whichever row is
+            // focused (Target row opens the target picker again), so the
+            // advertised Start Map action needs a key that works regardless
+            // of cursor position.
+            KeyCode::Char('s') => {
+                self.start_setup_map();
+                InputUpdate::handled()
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.open_workbench();
                 InputUpdate::handled()
@@ -1191,6 +1199,10 @@ impl ShellApp {
             self.return_to_setup_from_editor();
             return;
         }
+        let origin = self
+            .engagement
+            .planning_picker_mut()
+            .take_origin_workbench_page();
         let phase = self
             .engagement
             .current_phase()
@@ -1198,6 +1210,12 @@ impl ShellApp {
             .unwrap_or("planning");
         self.log("phase", format!("closed {phase} picker"));
         self.open_workbench();
+        // Esc means "never mind" — put the operator back on the page they
+        // came from; the findings refresh inside `open_workbench` may have
+        // re-derived a different one.
+        if let Some(page) = origin {
+            self.set_workbench_page(page);
+        }
     }
 }
 

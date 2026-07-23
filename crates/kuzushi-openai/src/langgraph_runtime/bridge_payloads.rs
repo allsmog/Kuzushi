@@ -59,6 +59,10 @@ pub(crate) struct NextStepBridgeResponse {
     pub(crate) error_class: Option<String>,
     #[serde(default)]
     pub(crate) status: Option<u16>,
+    /// Provider-declared `Retry-After` (seconds) forwarded by the bridge so
+    /// the transport retry can wait out a declared rate-limit window.
+    #[serde(default, alias = "retry_after_seconds")]
+    pub(crate) retry_after_seconds: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -104,6 +108,10 @@ pub(crate) struct BridgeResponse {
     pub(crate) error_class: Option<String>,
     #[serde(default)]
     pub(crate) status: Option<u16>,
+    /// Provider-declared `Retry-After` (seconds) forwarded by the bridge so
+    /// the transport retry can wait out a declared rate-limit window.
+    #[serde(default, alias = "retry_after_seconds")]
+    pub(crate) retry_after_seconds: Option<u64>,
     #[serde(default)]
     pub(crate) truncated: bool,
     #[serde(default)]

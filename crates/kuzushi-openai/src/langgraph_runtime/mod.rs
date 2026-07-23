@@ -5,6 +5,7 @@ mod bridge_process_tests;
 mod next_step_bridge;
 mod runtime_config;
 mod runtime_impl;
+mod transport_retry;
 mod triage;
 
 pub use runtime_config::LangGraphRuntime;

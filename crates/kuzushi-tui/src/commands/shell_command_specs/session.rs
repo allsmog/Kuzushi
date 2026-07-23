@@ -41,7 +41,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         command: "resume [runId]",
         aliases: &["/resume [runId]"],
         category: ShellCommandCategory::Session,
-        description: "resume a paused scan or open a run replay by id",
+        description: "continue a failed run from its checkpoint, or resume a paused scan",
     },
     ShellCommandSpec {
         command: "story",

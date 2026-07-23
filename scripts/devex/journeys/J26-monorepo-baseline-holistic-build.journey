@@ -1,0 +1,42 @@
+# J26 — Local monorepo baseline: whole-repository context/inventory attempt.
+#
+# Drives the closest thing the current product has to a holistic pass —
+# `context:build` — against the real local monorepo checkout (~440k tracked
+# files) and records what actually happens: duration, truncation/partial
+# disclosure, revision binding, and what the Map page claims afterwards.
+# A timeout here is itself baseline evidence (SCALE/RESOURCE), not a
+# harness failure: the wait bound is generous and the timed-out screen is
+# captured honestly.
+#
+# This journey writes only Kuzushi's own engagement artifacts under
+# <target>/.kuzushi (the product's normal operation). It never touches
+# target sources or git state, and never deletes pre-existing state.
+#
+# Known baseline defects this journey evidences (gap-ledger candidates):
+#   - The inventory walk is a plain fs::read_dir walk hard-capped at
+#     100k entries with no git-index enumeration, no persistence outside
+#     the context snapshot, and no revision binding on the snapshot file.
+#   - Truncation disclosure ("PARTIAL") may or may not survive to the
+#     screen the operator actually reads — the expect below records which.
+name: Monorepo baseline · holistic context build on real target
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
+launch: --target @TARGET
+wait-for: 60 KUZUSHI
+submit: setg ui.auto_open_activity false
+wait: 2
+submit: run context:build {}
+wait-for: 900 run receipt
+wait: 2
+snap: context-build-receipt
+ask: Receipt — does the completed whole-repo build disclose partial coverage / the walk cap on this ~440k-file repository, or does it present the bounded walk as complete?
+# Honest-coverage disclosure (expected to record current truth either way):
+expect: PARTIAL
+nav-mode:
+keys: 1
+wait-live-snap: 30 Viewing Map | map-after-build
+expect: PROJECT CONTEXT
+ask: Map — after the build, does PROJECT CONTEXT bind the snapshot to the target revision, disclose truncation, and populate the scope tree with real member names from the monorepo (not a flat or empty list)?
+ask: NEXT SCANS — with no root holistic baseline accepted, does the recommendation surface stay gated, or does it already emit child-scope recommendations?
+keys: Escape

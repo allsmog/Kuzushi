@@ -19,8 +19,13 @@ mod languages;
 pub mod queries;
 mod taint;
 
-pub use artifacts::{artifact_dir, artifact_langs, artifact_path, has_artifacts};
-pub use engine::{ensure_project, CpgBuildReport};
+pub use artifacts::{
+    artifact_dir, artifact_langs, artifact_path, has_artifacts, scoped_artifact_path,
+};
+pub use engine::{
+    ensure_project, ensure_project_in, BuildLimits, BuildScope, CpgBuildReport,
+    DEFAULT_MAX_SOURCE_FILES,
+};
 pub use languages::{canonical_language, detect_buildable_languages, supported_languages};
 pub use taint::{
     harvest_regex_spec, harvest_spec, run_taint_query, CpgFlowQueryStats, HarvestedSpec,
