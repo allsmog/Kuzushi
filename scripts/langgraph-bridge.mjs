@@ -38,12 +38,9 @@ async function runQueryGraph(request) {
   try {
     const system = querySystemPromptForRequest(request);
     const tools = [...fileToolsForRequest(request), ...mcp.tools];
-    const graph = queryGraphForRequest(request, tools, system);
-    const result = await graph.invoke(
-      { messages: [new HumanMessage(request.prompt ?? "")] },
-      { recursionLimit: QUERY_GRAPH_RECURSION_LIMIT },
-    );
-    const message = result.messages.at(-1);
+    const progress = { messages: [] };
+    const graph = queryGraphForRequest(request, tools, system, progress);
+    const message = await runQueryGraphToConclusion(graph, request, system, progress);
     debugDumpBridgeCall("query", request, tools, system, message);
     return queryResultFromMessage(message);
   } finally {
@@ -51,12 +48,55 @@ async function runQueryGraph(request) {
   }
 }
 
-function queryGraphForRequest(request, tools, system) {
+// When an evidence-gathering loop exhausts its tool budget, a verdict from
+// the evidence already collected beats an opaque failure: force one final
+// tool-free model turn so the caller always receives the structured output,
+// with the model's confidence reflecting the incomplete investigation.
+const FORCED_CONCLUSION_PROMPT =
+  "Your tool budget is exhausted — no further tool calls are possible. " +
+  "Produce your final structured answer now from the evidence you have " +
+  "already gathered, lowering your stated confidence to reflect anything " +
+  "you could not confirm.";
+
+async function runQueryGraphToConclusion(graph, request, system, progress) {
+  const state = { messages: [new HumanMessage(request.prompt ?? "")] };
+  try {
+    const result = await graph.invoke(state, {
+      recursionLimit: QUERY_GRAPH_RECURSION_LIMIT,
+    });
+    return result.messages.at(-1);
+  } catch (error) {
+    if (error?.name !== "GraphRecursionError") throw error;
+    return forcedConclusion(request, system, progress);
+  }
+}
+
+async function forcedConclusion(request, system, progress) {
+  const model = modelForRequest(request);
+  return invokeThroughQuotaWindows(model, [
+    systemMessageForRequest(request, system),
+    new HumanMessage(request.prompt ?? ""),
+    ...concludedEvidenceMessages(progress),
+    new HumanMessage(FORCED_CONCLUSION_PROMPT),
+  ]);
+}
+
+// The evidence transcript minus the leading prompt, trimmed of a trailing
+// assistant turn whose tool calls never received results — the provider
+// rejects tool_use blocks without matching tool_result blocks.
+function concludedEvidenceMessages(progress) {
+  const evidence = progress.messages.slice(1);
+  const last = evidence.at(-1);
+  if (isAiMessage(last) && last.tool_calls?.length) evidence.pop();
+  return evidence;
+}
+
+function queryGraphForRequest(request, tools, system, progress) {
   const model = modelForRequest(request);
   const boundModel = tools.length ? model.bindTools(tools) : model;
   return new StateGraph(MessagesAnnotation)
-    .addNode("model", callModelNode(boundModel, request, system))
-    .addNode("tools", runToolsNode(tools))
+    .addNode("model", callModelNode(boundModel, request, system, progress))
+    .addNode("tools", runToolsNode(tools, progress))
     .addEdge(START, "model")
     .addConditionalEdges("model", shouldContinue)
     .addEdge("tools", "model")
@@ -78,15 +118,15 @@ function querySystemPromptForRequest(request) {
 const QUOTA_WINDOW_RETRIES = 3;
 const QUOTA_WINDOW_WAIT_MS = 65_000;
 
-function callModelNode(model, request, system) {
-  return async (state) => ({
-    messages: [
-      await invokeThroughQuotaWindows(model, [
-        systemMessageForRequest(request, system),
-        ...state.messages,
-      ]),
-    ],
-  });
+function callModelNode(model, request, system, progress) {
+  return async (state) => {
+    const response = await invokeThroughQuotaWindows(model, [
+      systemMessageForRequest(request, system),
+      ...state.messages,
+    ]);
+    progress.messages = [...state.messages, response];
+    return { messages: [response] };
+  };
 }
 
 async function invokeThroughQuotaWindows(model, messages) {
@@ -117,9 +157,13 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function runToolsNode(tools) {
+function runToolsNode(tools, progress) {
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
-  return async (state) => ({ messages: await runRequestedTools(state.messages.at(-1), byName) });
+  return async (state) => {
+    const results = await runRequestedTools(state.messages.at(-1), byName);
+    progress.messages = [...state.messages, ...results];
+    return { messages: results };
+  };
 }
 
 async function runRequestedTools(message, toolsByName) {
@@ -270,6 +314,12 @@ async function main() {
 }
 
 main().catch((error) => {
-  process.stdout.write(JSON.stringify(bridgeErrorResponse(error)));
+  const response = bridgeErrorResponse(error);
+  // Mirror the bounded raw detail on stderr so `KUZUSHI_BRIDGE_VERBOSE` /
+  // `KUZUSHI_BRIDGE_LOG` capture it even when stdout parsing fails.
+  if (response.detail) {
+    process.stderr.write(`[bridge-error] ${response.errorClass}: ${response.detail}\n`);
+  }
+  process.stdout.write(JSON.stringify(response));
   process.exitCode = 1;
 });
