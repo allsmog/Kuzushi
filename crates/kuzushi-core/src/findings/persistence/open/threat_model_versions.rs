@@ -19,8 +19,22 @@ const MAX_LEDGER_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
 /// Canonical content hash for a threat-model document: compact JSON
 /// serialization (serde_json maps are order-stable), same `sha256:` prefix
 /// convention as prompt content hashes.
+/// Content identity of a threat-model document. The `verification` block is
+/// excluded: it carries a timestamp and re-verifying an unchanged document
+/// must neither defeat ledger sha-dedupe nor un-badge the live version row.
 pub fn threat_model_document_sha256(document: &Value) -> String {
-    crate::options::prompt_content_sha256(&document.to_string())
+    crate::options::prompt_content_sha256(&verification_agnostic_body(document))
+}
+
+fn verification_agnostic_body(document: &Value) -> String {
+    match document {
+        Value::Object(map) if map.contains_key("verification") => {
+            let mut map = map.clone();
+            map.remove("verification");
+            Value::Object(map).to_string()
+        }
+        other => other.to_string(),
+    }
 }
 
 impl FindingStore {
@@ -38,7 +52,7 @@ impl FindingStore {
             body.len() <= MAX_LEDGER_DOCUMENT_BYTES,
             "threat model document exceeds the {MAX_LEDGER_DOCUMENT_BYTES} byte ledger limit"
         );
-        let sha256 = crate::options::prompt_content_sha256(&body);
+        let sha256 = threat_model_document_sha256(document);
         if self.latest_threat_model_version_sha()?.as_deref() == Some(sha256.as_str()) {
             return Ok(None);
         }

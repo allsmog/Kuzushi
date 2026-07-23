@@ -78,11 +78,15 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         ScanCodeql | ScanAgenticSast | HuntTaint => false,
         HuntThreatModel => true,
         HuntSystems => false,
-        // Fuzzing runs the external engine for many minutes — deliberate opt-in.
-        ScanFuzz => false,
+        // Fuzzing lanes run the external engine for many minutes — deliberate
+        // opt-in (sweep/differential also assume fuzz:run built targets first).
+        ScanFuzz | ScanFuzzSweep | ScanFuzzDifferential => false,
         HuntUseAfterFree => target.has_c_family_source && target.has_compile_commands,
         // Review and Prove default to processing whatever the scan found.
         TriageFindings | VerifyFindings => true,
+        // Corpus dedupe and chain composition are deliberate opt-ins:
+        // both spend model dollars over the whole ledger.
+        DedupeFindings | HuntChains => false,
         // 掛 KAKE · fix — always report; patching is a deliberate opt-in.
         BuildReport => true,
         PatchFindings => false,
@@ -96,7 +100,9 @@ fn task_applies_to_target(task: PlanningTaskId, target: TargetProfile) -> bool {
         HuntSystems => target.has_systems_surface(),
         // The engine compiles C/C++ libFuzzer harnesses; other estates have
         // nothing for it to build or fuzz.
-        HuntUseAfterFree | ScanFuzz | MapFuzzAuthor => target.has_c_family_source,
+        HuntUseAfterFree | ScanFuzz | ScanFuzzSweep | ScanFuzzDifferential | MapFuzzAuthor => {
+            target.has_c_family_source
+        }
         _ => true,
     }
 }
@@ -224,6 +230,8 @@ mod tests {
         let source = applicable_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source));
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(!source.contains(&PlanningTaskId::HuntSystems));
+        assert!(!source.contains(&PlanningTaskId::ScanFuzzSweep));
+        assert!(!source.contains(&PlanningTaskId::ScanFuzzDifferential));
 
         let rust = applicable_tasks_for_phase(WorkflowPhase::Scan, rust_profile());
         assert!(!rust.contains(&PlanningTaskId::HuntUseAfterFree));
@@ -232,6 +240,20 @@ mod tests {
         let c_source = applicable_tasks_for_phase(WorkflowPhase::Scan, c_profile());
         assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(c_source.contains(&PlanningTaskId::HuntSystems));
+        assert!(c_source.contains(&PlanningTaskId::ScanFuzzSweep));
+        assert!(c_source.contains(&PlanningTaskId::ScanFuzzDifferential));
+    }
+
+    /// The fuzz lanes are journey-visible on C-family targets but never
+    /// preselected: they assume fuzz:run already built targets and spend
+    /// real engine minutes.
+    #[test]
+    fn fuzz_lane_tasks_are_visible_opt_ins_on_c_targets() {
+        let rows = rows_for(WorkflowPhase::Scan);
+        let picked = recommended_tasks_for_phase(WorkflowPhase::Scan, c_profile(), &rows);
+        assert!(!picked.contains(&PlanningTaskId::ScanFuzz));
+        assert!(!picked.contains(&PlanningTaskId::ScanFuzzSweep));
+        assert!(!picked.contains(&PlanningTaskId::ScanFuzzDifferential));
     }
 
     #[test]
@@ -241,6 +263,13 @@ mod tests {
             recommended_tasks_for_phase(WorkflowPhase::Review, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::TriageFindings));
         assert!(!picked.contains(&PlanningTaskId::VerifyFindings));
+        // Dedupe and chain-hunt are offered in the Review picker but never
+        // preselected — both are deliberate model-spend opt-ins.
+        let offered = applicable_tasks_for_phase(WorkflowPhase::Review, profile(TargetKind::Source));
+        assert!(offered.contains(&PlanningTaskId::DedupeFindings));
+        assert!(offered.contains(&PlanningTaskId::HuntChains));
+        assert!(!picked.contains(&PlanningTaskId::DedupeFindings));
+        assert!(!picked.contains(&PlanningTaskId::HuntChains));
     }
 
     #[test]

@@ -157,6 +157,35 @@ pub enum FindingClass {
     Other,
 }
 
+impl FindingClass {
+    /// Kebab-case slug matching the serde rename and the `exact_class`
+    /// ingest labels — the only class spelling that may appear in keys.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::MemOobWrite => "mem-oob-write",
+            Self::MemOobRead => "mem-oob-read",
+            Self::MemUseAfterFree => "mem-use-after-free",
+            Self::MemDoubleFree => "mem-double-free",
+            Self::MemUninit => "mem-uninit",
+            Self::IntOverflow => "int-overflow",
+            Self::Injection => "injection",
+            Self::PathTraversal => "path-traversal",
+            Self::Ssrf => "ssrf",
+            Self::Xxe => "xxe",
+            Self::Deserialization => "deserialization",
+            Self::AuthBypass => "auth-bypass",
+            Self::AuthzMissing => "authz-missing",
+            Self::CryptoMisuse => "crypto-misuse",
+            Self::SecretExposure => "secret-exposure",
+            Self::RaceCondition => "race-condition",
+            Self::Dos => "dos",
+            Self::InfoLeak => "info-leak",
+            Self::LogicError => "logic-error",
+            Self::Other => "other",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClassifiedFinding {

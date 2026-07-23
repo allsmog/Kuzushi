@@ -26,6 +26,7 @@ struct CarliniThreatHuntRun<'a> {
     model: String,
     capped: Vec<ActorHunt>,
     inventory: Vec<(String, String)>,
+    threat_model_warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ struct CarliniThreatHuntScope {
     target: PathBuf,
     parent_step: Option<usize>,
     actors: ActorsResult,
+    threat_model_warning: Option<String>,
 }
 
 struct CarliniExecutionInputs<'a> {
@@ -81,6 +83,7 @@ fn prepare_carlini_threat_hunt_run<'a>(
         model: execution.model,
         capped,
         inventory,
+        threat_model_warning: scope.threat_model_warning,
     })
 }
 
@@ -91,7 +94,7 @@ fn prepare_carlini_threat_hunt_scope(
     let target = resolve_carlini_target(input, ctx)?;
     let parent_step = emit_carlini_start_step(ctx, &target);
     emit_carlini_progress(ctx, parent_step, "threat-model · load actors and threats");
-    let actors = resolve_carlini_actor_hunts(input, ctx, &target)?;
+    let (actors, threat_model_warning) = resolve_carlini_actor_hunts(input, ctx, &target)?;
     emit_carlini_progress(
         ctx,
         parent_step,
@@ -106,6 +109,7 @@ fn prepare_carlini_threat_hunt_scope(
         target,
         parent_step,
         actors,
+        threat_model_warning,
     })
 }
 
@@ -265,11 +269,15 @@ fn resolve_carlini_actor_hunts(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
-) -> Result<ActorsResult> {
+) -> Result<(ActorsResult, Option<String>)> {
     let document = resolve_threat_model_document(input, target)?;
     let actors = actors_from_document(&document);
     ensure_carlini_actor_inputs(&document, target, &actors, ctx)?;
-    Ok(actors)
+    // Consumption honesty: a stale or verification-failed threat model still
+    // grounds the hunt, but every actor prompt leads with the warning.
+    let warning =
+        crate::capabilities::threat_model::verification_warning(&document, target);
+    Ok((actors, warning))
 }
 
 fn execute_carlini_threat_hunt_run(
@@ -286,7 +294,10 @@ fn execute_carlini_threat_hunt_run(
     // The repository inventory is identical for every actor, so render its
     // untrusted-repo block once here and reuse it across the whole loop
     // instead of rebuilding the same large payload once per actor.
-    let inventory_block = render_carlini_inventory_block(&run.inventory);
+    let mut inventory_block = render_carlini_inventory_block(&run.inventory);
+    if let Some(warning) = &run.threat_model_warning {
+        inventory_block = format!("{warning}\n\n{inventory_block}");
+    }
     let outcome = run_carlini_actor_hunts(
         run.runtime,
         input,

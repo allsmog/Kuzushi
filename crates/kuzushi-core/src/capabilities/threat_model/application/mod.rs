@@ -16,6 +16,7 @@ pub(crate) use read_threat_model::*;
 pub(crate) use schema_markdown::*;
 pub(crate) use source_bundle::*;
 pub(crate) use staged::*;
+pub use verify::{stamp_verification, verification_warning, verify_threat_model_document};
 
 mod build_threat_model;
 mod build_summary;
@@ -37,3 +38,4 @@ mod read_threat_model;
 mod schema_markdown;
 mod source_bundle;
 mod staged;
+mod verify;

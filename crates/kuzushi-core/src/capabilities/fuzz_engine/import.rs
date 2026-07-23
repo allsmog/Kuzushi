@@ -47,10 +47,11 @@ pub fn import_afe_findings(
         .with_context(|| format!("Could not read AFE index {}", index_path.display()))?;
     let (folded, skipped_rows) = parse_and_fold(&body);
     let (eligible, skipped_unverified) = gate_rows(folded, request);
-    let findings: Vec<Finding> = eligible
+    let mut findings: Vec<Finding> = eligible
         .iter()
         .map(|row| build_fuzz_finding(row, request))
         .collect();
+    stamp_import_grounding(workspace.root(), &mut findings);
 
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = fuzz_import_run_id(&findings);
@@ -65,6 +66,22 @@ pub fn import_afe_findings(
         skipped_rows,
         source_path: index_path.display().to_string(),
     })
+}
+
+/// Imported crashes are claims about the target tree like any other import;
+/// stamp each with its grounding verdict (synthetic `fuzz/...` pseudo-paths
+/// have line 0 and ground as `not_applicable`).
+fn stamp_import_grounding(root: &Path, findings: &mut [Finding]) {
+    let revision = crate::workspace::target_git_metadata(root).map(|metadata| metadata.sha);
+    for finding in findings {
+        finding.grounding = Some(crate::findings::ground_finding_location(
+            root,
+            &finding.file_path,
+            finding.start_line,
+            "",
+            revision.as_deref(),
+        ));
+    }
 }
 
 fn gate_rows(

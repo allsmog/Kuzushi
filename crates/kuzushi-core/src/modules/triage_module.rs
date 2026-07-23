@@ -12,7 +12,11 @@ pub(crate) fn triage_module() -> BuiltinModule {
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Required,
             ),
-            vec![triage_run_tool(), triage_chain_hunt_tool()],
+            vec![
+                triage_run_tool(),
+                triage_chain_hunt_tool(),
+                triage_dedupe_tool(),
+            ],
         ),
         vec![dag("triage:run", "triage", &["semgrep:scan"])],
     )
@@ -44,6 +48,53 @@ fn triage_chain_hunt_tool() -> ToolDescriptor {
     )
 }
 
+fn triage_dedupe_tool() -> ToolDescriptor {
+    tool_with_options(
+        "triage:dedupe",
+        "Model-driven corpus dedupe across all runs and tools: a judge proposes duplicate \
+         groups over the fingerprint-keyed ledger, low-confidence groups escalate to one \
+         code-reading confirmation pass, and confirmed duplicates rekey onto their canonical \
+         finding with a false_positive/duplicate verdict.",
+        dedupe_options(),
+    )
+}
+
+fn dedupe_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "maxGroups",
+            OptionType::Int,
+            "Maximum validated duplicate groups to accept per run.",
+        )
+        .aliases(&["max_groups"])
+        .default(json!(16)),
+        opt(
+            "maxCandidates",
+            OptionType::Int,
+            "Cap on ledger candidates shown to the dedupe judge.",
+        )
+        .aliases(&["max_candidates"])
+        .default(json!(200))
+        .advanced(),
+        opt(
+            "maxEscalations",
+            OptionType::Int,
+            "Cap on low-confidence groups escalated to a code-reading confirmation pass.",
+        )
+        .aliases(&["max_escalations"])
+        .default(json!(4))
+        .advanced(),
+        opt(
+            "dryRun",
+            OptionType::Bool,
+            "Report proposed duplicate groups without writing rekeys or verdicts.",
+        )
+        .aliases(&["dry_run"])
+        .default(json!(false)),
+        model_option(),
+    ]
+}
+
 fn chain_hunt_options() -> Vec<OptionSpec> {
     vec![
         opt(
@@ -67,6 +118,7 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_cost_cap_option(),
         triage_prefilter_option(),
         triage_retriage_option(),
+        triage_dedupe_flag_option(),
         triage_votes_option(),
         triage_stage2_tier_option(),
         triage_strategy_option(),
@@ -146,6 +198,16 @@ fn triage_retriage_option() -> OptionSpec {
     .aliases(&["force", "includeTriaged", "include_triaged"])
     .default(json!(false))
     .advanced()
+}
+
+fn triage_dedupe_flag_option() -> OptionSpec {
+    opt(
+        "dedupe",
+        OptionType::Bool,
+        "Run the model-driven corpus dedupe (triage:dedupe) before triage so settled \
+duplicates never burn triage spend. Opt-in.",
+    )
+    .default(json!(false))
 }
 
 fn triage_votes_option() -> OptionSpec {

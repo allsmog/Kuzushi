@@ -556,7 +556,7 @@ fn apply_projection_identity(
     projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
 }
 
-fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
+pub(super) fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
     let raw: String = row.get(0)?;
     serde_json::from_str(&raw).map_err(|error| to_sql_error(anyhow::Error::new(error)))
 }
@@ -742,6 +742,7 @@ fn collision_identity_assignment(finding: &Finding) -> Option<FindingIdentityAss
 fn identity_match_tier(raw: Option<&str>) -> FindingIdentityMatchTier {
     match raw {
         Some("dedup_collision") => FindingIdentityMatchTier::DedupCollision,
+        Some("dedup_key_cross_run") => FindingIdentityMatchTier::DedupKeyCrossRun,
         _ => FindingIdentityMatchTier::StableFingerprint,
     }
 }

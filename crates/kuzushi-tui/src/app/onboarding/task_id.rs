@@ -36,11 +36,22 @@ pub enum PlanningTaskId {
     /// Run bounded agentic-fuzz-engine campaign rounds and import verified
     /// crashes (C/C++ targets).
     ScanFuzz,
+    /// Replay every built engine target's corpus under an MSan-variant fuzzer
+    /// (uninitialized-read oracle the ASAN lane cannot fire).
+    ScanFuzzSweep,
+    /// Replay every built engine target's corpus through auto-resolved fork
+    /// vs upstream implementations (silent-wrong-data oracle).
+    ScanFuzzDifferential,
     /// Retained only to decode older saved plans; superseded by the supported
     /// systems/dataflow engines and no longer offered by Planning.
     HuntUseAfterFree,
     // Review — triage and decide candidate findings.
     TriageFindings,
+    /// Model-driven corpus dedupe: collapse cross-run/cross-tool
+    /// rediscoveries of one defect onto a canonical finding.
+    DedupeFindings,
+    /// Compose confirmed findings into multi-step attack chains.
+    HuntChains,
     // Prove — verify actionable findings with empirical evidence.
     VerifyFindings,
     // 掛 KAKE · fix — patch & report.
@@ -68,7 +79,11 @@ impl PlanningTaskId {
         PlanningTaskId::HuntThreatModel,
         PlanningTaskId::HuntSystems,
         PlanningTaskId::ScanFuzz,
+        PlanningTaskId::ScanFuzzSweep,
+        PlanningTaskId::ScanFuzzDifferential,
         PlanningTaskId::TriageFindings,
+        PlanningTaskId::DedupeFindings,
+        PlanningTaskId::HuntChains,
         PlanningTaskId::VerifyFindings,
         PlanningTaskId::PatchFindings,
         PlanningTaskId::BuildReport,
@@ -98,8 +113,9 @@ impl PlanningTaskId {
             | MapFuzzAuthor
             | ReverseEngineerBinary => WorkflowPhase::Map,
             ScanSecrets | ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint
-            | HuntThreatModel | HuntSystems | ScanFuzz | HuntUseAfterFree => WorkflowPhase::Scan,
-            TriageFindings => WorkflowPhase::Review,
+            | HuntThreatModel | HuntSystems | ScanFuzz | ScanFuzzSweep | ScanFuzzDifferential
+            | HuntUseAfterFree => WorkflowPhase::Scan,
+            TriageFindings | DedupeFindings | HuntChains => WorkflowPhase::Review,
             VerifyFindings => WorkflowPhase::Prove,
             PatchFindings | BuildReport => WorkflowPhase::Fix,
         }
@@ -127,8 +143,12 @@ impl PlanningTaskId {
             HuntThreatModel => "Threat-model-driven hunt",
             HuntSystems => "Systems-level semantic hunt",
             ScanFuzz => "Coverage fuzzing (AFE)",
+            ScanFuzzSweep => "MSan corpus sweep (AFE)",
+            ScanFuzzDifferential => "Differential replay (AFE)",
             HuntUseAfterFree => "Use-after-free hunt (C/C++)",
             TriageFindings => "Triage findings",
+            DedupeFindings => "Dedupe findings corpus",
+            HuntChains => "Hunt attack chains",
             VerifyFindings => "Verify findings",
             PatchFindings => "Patch findings",
             BuildReport => "Build report",
@@ -158,8 +178,12 @@ impl PlanningTaskId {
             HuntThreatModel => "offense-review:threat-hunt",
             HuntSystems => "systems-hunt:systems-hunt",
             ScanFuzz => "fuzz:run",
+            ScanFuzzSweep => "fuzz:sweep",
+            ScanFuzzDifferential => "fuzz:differential",
             HuntUseAfterFree => "uaf-hunt:hunt",
             TriageFindings => "triage:run",
+            DedupeFindings => "triage:dedupe",
+            HuntChains => "triage:chain-hunt",
             VerifyFindings => "verify:finding",
             PatchFindings => "patch:finding",
             BuildReport => "report:build",
@@ -192,6 +216,8 @@ impl PlanningTaskId {
                 | HuntSystems
                 | HuntUseAfterFree
                 | TriageFindings
+                | DedupeFindings
+                | HuntChains
                 | VerifyFindings
                 | PatchFindings
         )

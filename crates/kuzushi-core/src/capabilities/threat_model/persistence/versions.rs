@@ -41,12 +41,16 @@ pub fn restore_threat_model_version(root: &Path, id: i64) -> Result<ThreatModelV
     let summary = store
         .threat_model_version_summary(id)?
         .with_context(|| format!("threat-model version {id} not found"))?;
-    let document = store
+    let mut document = store
         .threat_model_version_document(id)?
         .with_context(|| format!("threat-model version {id} not found"))?;
     if let Some(live) = load_persistent_threat_model(root) {
         store.record_threat_model_version(&live, "pre-restore", None)?;
     }
+    // A restored document may predate the current checkout; re-verify so
+    // consumers see an honest staleness verdict instead of blind trust.
+    let verification = verify_threat_model_document(&document, root)?;
+    stamp_verification(&mut document, &verification);
     save_persistent_threat_model(root, &document, true)?;
     store.record_threat_model_version(&document, "restore", None)?;
     Ok(summary)
@@ -116,7 +120,11 @@ mod version_tests {
         let restored = restore_threat_model_version(workspace.path(), original_id).unwrap();
 
         assert_eq!(restored.id, original_id);
-        let live = load_persistent_threat_model(workspace.path()).unwrap();
+        let mut live = load_persistent_threat_model(workspace.path()).unwrap();
+        assert!(
+            live.as_object_mut().unwrap().remove("verification").is_some(),
+            "restore re-verifies the document"
+        );
         assert_eq!(live, original);
         assert_eq!(
             live_threat_model_sha256(workspace.path()).unwrap(),
@@ -147,10 +155,9 @@ mod version_tests {
             versions.iter().any(|version| version.source == "pre-restore"),
             "edited live document must be snapshotted before restore"
         );
-        assert_eq!(
-            load_persistent_threat_model(workspace.path()).unwrap(),
-            recorded
-        );
+        let mut live = load_persistent_threat_model(workspace.path()).unwrap();
+        live.as_object_mut().unwrap().remove("verification");
+        assert_eq!(live, recorded);
     }
 
     #[test]

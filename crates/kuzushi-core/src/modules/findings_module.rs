@@ -7,43 +7,82 @@ pub(crate) fn findings_module() -> BuiltinModule {
         ModuleKind::Defense,
         "Persist and inspect findings in SQLite.",
         vec![
-            tool_with_options(
-                "findings:list",
-                "List persisted findings.",
-                findings_list_options(),
-            )
-            .with_policy(ToolPolicy::new(
-                ToolPhase::Review,
-                RuntimeRequirement::Never,
-                ToolEffect::Read,
-                WorkspaceRequirement::Required,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "findings:dismiss",
-                "Dismiss a finding with an auditable, SARIF-compatible reason.",
-                findings_dismiss_options(),
-            )
-            .with_policy(workspace_policy(
-                ToolPhase::Review,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "findings:chains",
-                "Deterministically fold confirmed findings into ranked \
-                 entry→pivot→impact chain candidates per code surface. \
-                 Advisory leads only; no model calls.",
-                findings_chains_options(),
-            )
-            .with_policy(workspace_policy(
-                ToolPhase::Review,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Required,
-            )),
+            findings_list_tool(),
+            findings_dismiss_tool(),
+            findings_ground_tool(),
+            findings_chains_tool(),
         ],
         vec![],
     )
+}
+
+fn findings_list_tool() -> ToolDescriptor {
+    tool_with_options(
+        "findings:list",
+        "List persisted findings.",
+        findings_list_options(),
+    )
+    .with_policy(ToolPolicy::new(
+        ToolPhase::Review,
+        RuntimeRequirement::Never,
+        ToolEffect::Read,
+        WorkspaceRequirement::Required,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn findings_dismiss_tool() -> ToolDescriptor {
+    tool_with_options(
+        "findings:dismiss",
+        "Dismiss a finding with an auditable, SARIF-compatible reason.",
+        findings_dismiss_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Review,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn findings_ground_tool() -> ToolDescriptor {
+    tool_with_options(
+        "findings:ground",
+        "Re-check every open finding's citation against the target \
+         tree at the current revision. Reports grounded / line-drift \
+         / file-missing counts and audits newly stale anchors. \
+         Descriptive only — never retires a finding.",
+        findings_ground_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Review,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn findings_chains_tool() -> ToolDescriptor {
+    tool_with_options(
+        "findings:chains",
+        "Deterministically fold confirmed findings into ranked \
+         entry→pivot→impact chain candidates per code surface. \
+         Advisory leads only; no model calls.",
+        findings_chains_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Review,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn findings_ground_options() -> Vec<OptionSpec> {
+    vec![opt(
+        "limit",
+        OptionType::Int,
+        "Maximum findings to re-ground in one pass.",
+    )
+    .default(json!(500))
+    .advanced()]
 }
 
 fn findings_chains_options() -> Vec<OptionSpec> {

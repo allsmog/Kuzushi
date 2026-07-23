@@ -168,6 +168,11 @@ pub struct Finding {
     pub evidence: Vec<FindingEvidence>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<FindingSource>,
+    /// Import-grounding verdict stamped when the finding entered from an
+    /// external source (`workspace:import-findings`, `fuzz:import`).
+    /// `None` for findings born from native scans/hunts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grounding: Option<super::GroundingStatus>,
 }
 
 impl Default for Finding {
@@ -206,8 +211,21 @@ impl Default for Finding {
             references: Vec::new(),
             evidence: Vec::new(),
             sources: Vec::new(),
+            grounding: None,
         }
     }
+}
+
+/// Attack-chain findings compose multiple component bugs, so their locations
+/// intentionally collide with component findings. Dedupe and clustering must
+/// never absorb a chain into (or collapse it with) its members.
+pub fn is_attack_chain_finding(finding: &Finding) -> bool {
+    finding.tool.trim().eq_ignore_ascii_case("chains")
+        || finding
+            .rule_id
+            .trim()
+            .to_ascii_lowercase()
+            .starts_with("exploit-chain/")
 }
 
 pub(crate) const DEDUP_LINE_BUCKET: u32 = 8;
@@ -221,6 +239,16 @@ pub fn compute_dedup_key(file: &str, line: u32, cwe: Option<&str>) -> String {
     let normalised_file = file.trim_start_matches("./");
     let cwe_part = cwe.map(normalize_cwe).unwrap_or_else(|| "*".to_string());
     format!("{normalised_file}:{bucket}:{cwe_part}")
+}
+
+/// Dedup key for CWE-less findings, keyed by the closed vulnerability class
+/// instead of a CWE number. The `class:` prefix cannot collide with
+/// [`normalize_cwe`] output (digits only), so class keys and CWE keys never
+/// cross-merge.
+pub fn compute_class_dedup_key(file: &str, line: u32, class_slug: &str) -> String {
+    let bucket = line / DEDUP_LINE_BUCKET;
+    let normalised_file = file.trim_start_matches("./");
+    format!("{normalised_file}:{bucket}:class:{class_slug}")
 }
 
 pub fn compute_source_signature(file: &str, line: u32, cwe_or_title: Option<&str>) -> String {

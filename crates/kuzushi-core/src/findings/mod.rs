@@ -17,10 +17,12 @@ pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
     GenericPersistedRun,
 };
-pub(crate) use domain::{is_runtime_proof_state, now_isoish};
+pub(crate) use domain::{is_runtime_proof_state, now_isoish, safe_target_path};
 pub use domain::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
-    extract_cwe, normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence,
+    extract_cwe, ground_finding_location, grounding_prompt_note, is_attack_chain_finding,
+    normalize_cwe, ConfidenceBand, DismissReason, Finding,
+    FindingEvidence, GroundingStatus,
     FindingSource, FindingTriageState, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
     PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
@@ -29,7 +31,7 @@ pub use domain::{
     VulnSource,
 };
 pub use persistence::{
-    threat_model_document_sha256, FindingStore, ObservationSourceRef,
+    threat_model_document_sha256, FindingStore, ModelRekeyRequest, ObservationSourceRef,
     SuppressionLifecycleEvent, ThreatModelVersionRecord,
 };
 pub use presentation::{

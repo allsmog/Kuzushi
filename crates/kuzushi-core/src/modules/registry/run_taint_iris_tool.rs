@@ -183,6 +183,8 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         "deep-audit:run" => Some(run_deep_audit_tool(input.clone(), ctx, runtime)),
         "threat-model:build"
         | "threat-model:read"
+        | "threat-model:verify"
+        | "threat-model:import"
         | "threat-model:methodologies"
         | "randori:pasta"
         | "randori:threat-model" => {
@@ -213,8 +215,13 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
             ctx,
             runtime,
         )),
-        "triage:run" => Some(run_triage(input.clone(), ctx, runtime)),
+        "triage:run" => Some(run_triage_with_optional_dedupe(input, ctx, runtime)),
         "triage:chain-hunt" => Some(crate::capabilities::chain_hunt::execute_triage_chain_hunt(
+            input.clone(),
+            ctx,
+            runtime,
+        )),
+        "triage:dedupe" => Some(crate::capabilities::corpus_dedupe::execute_triage_dedupe(
             input.clone(),
             ctx,
             runtime,
@@ -228,6 +235,73 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
         "patch:finding" => Some(run_patch_finding(input.clone(), ctx, runtime)),
         _ => None,
     }
+}
+
+/// Opt-in `dedupe=true` runs the model-driven corpus dedupe BEFORE bulk
+/// triage, so settled duplicates drop out of finding selection instead of
+/// burning independent triage spend. The dedupe payload rides the triage
+/// result under `data.dedupe` and both spends fold into one envelope cost.
+fn run_triage_with_optional_dedupe(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let dedupe_enabled = input
+        .get("dedupe")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !dedupe_enabled {
+        return run_triage(input.clone(), ctx, runtime);
+    }
+    let dedupe = crate::capabilities::corpus_dedupe::execute_triage_dedupe(
+        dedupe_prepass_input(input),
+        ctx,
+        runtime,
+    )?;
+    let mut result = run_triage(input.clone(), ctx, runtime)?;
+    merge_dedupe_into_triage_result(&mut result, dedupe)?;
+    Ok(result)
+}
+
+fn dedupe_prepass_input(input: &Value) -> Value {
+    match input.get("model") {
+        Some(model) => json!({ "model": model }),
+        None => json!({}),
+    }
+}
+
+fn merge_dedupe_into_triage_result(result: &mut Value, dedupe: Value) -> Result<()> {
+    let combined = envelope_cost_report(result)?.checked_add(
+        envelope_cost_report(&dedupe)?,
+        "triage:run dedupe pre-pass cost",
+    )?;
+    if let Some(data) = result.get_mut("data").and_then(Value::as_object_mut) {
+        data.insert(
+            "dedupe".to_string(),
+            dedupe.get("data").cloned().unwrap_or(dedupe),
+        );
+    }
+    crate::module_result::apply_runtime_cost_report(result, combined);
+    Ok(())
+}
+
+/// Read a result envelope's monetary claim back into a checked report so two
+/// envelopes can fold without inventing exactness.
+fn envelope_cost_report(value: &Value) -> Result<crate::runtime::RuntimeCostReport> {
+    use crate::runtime::{RuntimeCost, RuntimeCostReport};
+    if let Some(exact) = value.get("costUsd").and_then(Value::as_f64) {
+        return Ok(RuntimeCostReport::known(RuntimeCost::from_usd(
+            exact,
+            "result envelope cost",
+        )?));
+    }
+    if let Some(observed) = value.get("observedCostUsd").and_then(Value::as_f64) {
+        return Ok(RuntimeCostReport::incomplete(RuntimeCost::from_usd(
+            observed,
+            "result envelope cost",
+        )?));
+    }
+    Ok(RuntimeCostReport::UNAVAILABLE)
 }
 
 /// The single-finding deep-audit tool needs an explicit fingerprint; a

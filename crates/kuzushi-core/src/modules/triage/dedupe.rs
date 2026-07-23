@@ -39,14 +39,7 @@ pub(in crate::modules) fn cluster_triage_findings(findings: Vec<Finding>) -> Vec
     result
 }
 
-pub(in crate::modules) fn is_attack_chain_finding(finding: &Finding) -> bool {
-    finding.tool.trim().eq_ignore_ascii_case("chains")
-        || finding
-            .rule_id
-            .trim()
-            .to_ascii_lowercase()
-            .starts_with("exploit-chain/")
-}
+pub(in crate::modules) use crate::findings::is_attack_chain_finding;
 
 fn with_cluster_ids(findings: Vec<Finding>) -> Vec<(Finding, String)> {
     let rows: Vec<(String, u32)> = findings

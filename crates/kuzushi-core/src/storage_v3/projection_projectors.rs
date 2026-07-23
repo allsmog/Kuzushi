@@ -69,5 +69,31 @@ fn project_finding_rekeyed(tx: &Transaction<'_>, event: &EventEnvelope) -> Resul
           where stable_fp = ?1",
         params![old_fp, sql_seq(event.seq)?],
     )?;
+    attach_model_dedupe_identity(tx, event)?;
+    Ok(())
+}
+
+/// Model-dedupe rekeys carry the canonical identity plus the duplicate's raw
+/// fingerprint in their evidence payload; attaching that fingerprint to the
+/// canonical identity makes independent rediscovery converge on one identity.
+/// Legacy rekey events without the evidence keys replay unchanged.
+fn attach_model_dedupe_identity(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
+    let Some(evidence) = event.payload.get("evidence") else {
+        return Ok(());
+    };
+    let identity_id = evidence.get("canonicalIdentityId").and_then(|v| v.as_str());
+    let fingerprint = evidence.get("duplicateFingerprint").and_then(|v| v.as_str());
+    let (Some(identity_id), Some(fingerprint)) = (identity_id, fingerprint) else {
+        return Ok(());
+    };
+    tx.execute(
+        r#"
+        insert or ignore into finding_identity_fingerprints
+            (identity_id, fingerprint, match_basis, created_at)
+        select ?1, ?2, 'model_dedupe', ?3
+         where exists (select 1 from finding_identities where identity_id = ?1)
+        "#,
+        params![identity_id, fingerprint, event.created_at],
+    )?;
     Ok(())
 }

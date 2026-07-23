@@ -30,6 +30,8 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
                 WorkspaceRequirement::Required,
                 FindingStoreRequirement::Optional,
             )),
+        threat_model_verify_tool(),
+        threat_model_import_tool(),
         tool(
                 "threat-model:methodologies",
                 "List supported threat-model methodologies.",
@@ -38,6 +40,74 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
                 ToolPhase::Map,
                 WorkspaceRequirement::Optional,
             )),
+    ]
+}
+
+fn threat_model_verify_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:verify",
+        "Verify the persisted threat model against the target: cited \
+         paths exist, documented revision vs HEAD, coverage vs fresh \
+         grounding surfaces. Stamps the verdict on the document.",
+        threat_model_verify_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_model_import_tool() -> ToolDescriptor {
+    tool_with_options(
+        "threat-model:import",
+        "Import an externally-authored threat-model document: \
+         normalize, verify against the target, stamp import \
+         provenance, and persist (refuses to overwrite a user-edited \
+         live model without force).",
+        threat_model_import_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn threat_model_verify_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt(
+            "write",
+            OptionType::Bool,
+            "Save the verification-stamped document back to \
+             .kuzushi/threat-model.json.",
+        )
+        .default(json!(true)),
+    ]
+}
+
+fn threat_model_import_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt(
+            "path",
+            OptionType::Path,
+            "Path to the threat-model JSON document to import.",
+        )
+        .external_read(),
+        opt(
+            "document",
+            OptionType::Json,
+            "Inline threat-model document (alternative to path).",
+        ),
+        threat_model_methodology_option("stride"),
+        opt(
+            "force",
+            OptionType::Bool,
+            "Overwrite a user-edited live threat model.",
+        )
+        .default(json!(false)),
     ]
 }
 

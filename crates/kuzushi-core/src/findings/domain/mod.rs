@@ -7,6 +7,7 @@ mod extract_cwe;
 mod finding_identity;
 mod finding_record;
 mod from_semgrep;
+mod grounding;
 mod now_isoish;
 mod patch_lifecycle;
 mod patch_status;
@@ -24,10 +25,13 @@ pub use finding_identity::{
     compute_finding_identity_id, finding_identity_alias, FindingIdentityMatchTier,
 };
 pub use finding_record::{
-    compute_dedup_key, compute_root_cause_key, compute_source_signature, normalize_cwe, Finding,
-    FindingEvidence, FindingSource,
+    compute_class_dedup_key, compute_dedup_key, compute_root_cause_key, compute_source_signature,
+    is_attack_chain_finding,
+    normalize_cwe, Finding, FindingEvidence, FindingSource,
 };
 pub use from_semgrep::{Severity, VulnSource};
+pub(crate) use grounding::safe_target_path;
+pub use grounding::{ground_finding_location, grounding_prompt_note, GroundingStatus};
 pub(crate) use now_isoish::now_isoish;
 pub use patch_lifecycle::{PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState};
 pub use patch_status::PatchStatus;

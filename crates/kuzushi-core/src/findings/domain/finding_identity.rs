@@ -7,6 +7,10 @@ use super::{extract_cwe, normalize_cwe, Finding, FindingEvidence};
 pub enum FindingIdentityMatchTier {
     StableFingerprint,
     DedupCollision,
+    /// Identity reused from an open row in an earlier run that shares the
+    /// finding's dedup_key and file. Rows are never merged across runs —
+    /// only the durable identity converges.
+    DedupKeyCrossRun,
 }
 
 impl FindingIdentityMatchTier {
@@ -14,6 +18,7 @@ impl FindingIdentityMatchTier {
         match self {
             Self::StableFingerprint => "stable_fp",
             Self::DedupCollision => "dedup_collision",
+            Self::DedupKeyCrossRun => "dedup_key_cross_run",
         }
     }
 }

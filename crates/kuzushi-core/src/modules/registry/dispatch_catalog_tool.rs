@@ -59,26 +59,12 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "fleet:diff-findings" => Some(run_fleet_diff_findings(input)),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
-        "campaign:plan" => Some(crate::capabilities::campaign::execute_campaign_plan(
-            input, ctx,
-        )),
-        "campaign:status" => Some(crate::capabilities::campaign::execute_campaign_status(
-            input, ctx,
-        )),
-        "campaign:coverage" => Some(crate::capabilities::campaign::execute_campaign_coverage(
-            input, ctx,
-        )),
+        "campaign:plan" | "campaign:status" | "campaign:coverage" => {
+            dispatch_campaign_tool(name, input, ctx)
+        }
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
-        "findings:list" => Some(list_findings_tool(input, ctx)),
-        "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
-        "findings:chains" => Some(crate::capabilities::chains::execute_findings_chains(
-            input, ctx,
-        )),
-        "suppress:add" => Some(run_suppress_add(input, ctx)),
-        "suppress:list" => Some(run_suppress_list(input, ctx)),
-        "suppress:remove" => Some(run_suppress_remove(input, ctx)),
         "pack:lint" => Some(crate::capabilities::pack_lint::execute_pack_lint(input, ctx)),
         "pack:suggest-shards" => Some(crate::capabilities::shard_suggest::execute_suggest_shards(
             input, ctx,
@@ -86,6 +72,41 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "report:build" => Some(build_report_tool(input, ctx)),
         "report:sarif" => Some(crate::report::execute_report_sarif(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
+        _ => dispatch_finding_ledger_tool(name, input, ctx),
+    }
+}
+
+fn dispatch_campaign_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> ToolDispatchResult {
+    use crate::capabilities::campaign;
+    match name {
+        "campaign:plan" => Some(campaign::execute_campaign_plan(input, ctx)),
+        "campaign:status" => Some(campaign::execute_campaign_status(input, ctx)),
+        "campaign:coverage" => Some(campaign::execute_campaign_coverage(input, ctx)),
+        _ => None,
+    }
+}
+
+fn dispatch_finding_ledger_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> ToolDispatchResult {
+    match name {
+        "findings:list" => Some(list_findings_tool(input, ctx)),
+        "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
+        "findings:chains" => Some(crate::capabilities::chains::execute_findings_chains(
+            input, ctx,
+        )),
+        "findings:ground" => Some(
+            crate::capabilities::findings_ground::execute_findings_ground(input, ctx),
+        ),
+        "suppress:add" => Some(run_suppress_add(input, ctx)),
+        "suppress:list" => Some(run_suppress_list(input, ctx)),
+        "suppress:remove" => Some(run_suppress_remove(input, ctx)),
         _ => None,
     }
 }

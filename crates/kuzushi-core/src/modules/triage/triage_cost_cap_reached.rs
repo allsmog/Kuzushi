@@ -67,7 +67,7 @@ pub(in crate::modules) fn call_triage_runtime(
         model: config.stage2_model.clone(),
         cwd: config.cwd.clone(),
         finding: finding.clone(),
-        prompt_template: input.prompt_template.clone(),
+        prompt_template: triage_prompt_with_grounding(input, finding),
     };
     let key = triage_runtime_cache_key(&request);
     if !input.retriage {
@@ -100,9 +100,22 @@ pub(in crate::modules) fn call_triage_runtime_uncached(
         model: config.stage2_model.clone(),
         cwd: config.cwd.clone(),
         finding: finding.clone(),
-        prompt_template: input.prompt_template.clone(),
+        prompt_template: triage_prompt_with_grounding(input, finding),
     };
     crate::runtime::triage_finding_blocking_checked(runtime, request)
+}
+
+/// Imported findings with stale anchors get an honesty note appended to the
+/// triage prompt so the model re-checks the citation instead of trusting it.
+fn triage_prompt_with_grounding(input: &TriageRunInput, finding: &Finding) -> Option<String> {
+    let Some(note) = crate::findings::grounding_prompt_note(finding) else {
+        return input.prompt_template.clone();
+    };
+    let template = input
+        .prompt_template
+        .clone()
+        .unwrap_or_else(|| crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string());
+    Some(format!("{template}\n\nGrounding note: {note}"))
 }
 
 fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
