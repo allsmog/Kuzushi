@@ -145,9 +145,12 @@ pub(in crate::verification::adapters) fn verify_system_prompt() -> String {
 }
 
 pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
+    // `proofLevel`/`proofVerdict` are required downstream by the proof
+    // snapshot (`verification_proof_snapshot`), which deliberately refuses to
+    // default them — so the enforced schema must demand them from the model.
     json!({
         "type": "object",
-        "required": ["fingerprint", "exploitable", "confidence"],
+        "required": ["fingerprint", "exploitable", "confidence", "proofLevel", "proofVerdict"],
         "additionalProperties": true,
         "properties": {
             "fingerprint": {"type": "string"},
@@ -159,7 +162,23 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
             "attackVector": {"type": ["string", "null"]},
             "attack_vector": {"type": ["string", "null"]},
             "preconditions": {"type": "array", "items": {"type": "string"}},
-            "confidence": {"type": "number"}
+            "confidence": {"type": "number"},
+            "proofLevel": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "description": "Strength of the evidence behind this verdict: 1 = signal only, 2 = source-grounded static reasoning, 3 = corroborated static analysis (multiple independent code paths inspected), 4 = empirical runtime proof (never claim 4 from static review)."
+            },
+            "proofVerdict": {
+                "type": "string",
+                "enum": [
+                    "exploited",
+                    "not_reproduced",
+                    "insufficient_finding_detail",
+                    "language_unsupported_yet"
+                ],
+                "description": "Verdict of this review: `exploited` when the traced path stands with no blocking control, `not_reproduced` when the claim is defeated or unsupported, `insufficient_finding_detail` when the finding lacks the detail needed to judge it."
+            }
         }
     })
 }
