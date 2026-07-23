@@ -53,7 +53,18 @@ pub(crate) struct ThreatStrideRow {
     pub(crate) tone: ThreatStrideTone,
     pub(crate) cells: [String; 4],
     pub(crate) detail: Option<String>,
+    /// Full member rows (id · severity · title), one per matching threat —
+    /// the rollup names every threat instead of a 2-title teaser string.
+    pub(crate) members: Vec<ThreatStrideMember>,
     issue_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatStrideMember {
+    pub(crate) tone: ThreatStrideTone,
+    pub(crate) id: String,
+    pub(crate) severity: String,
+    pub(crate) title: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -127,13 +138,34 @@ fn category(letter: &'static str, key: &'static str, label: &'static str) -> Str
 
 fn row_for_category(category: StrideCategory, threats: &[serde_json::Value]) -> ThreatStrideRow {
     let matching = matching_threats(category.key, threats);
-    threat_stride_row(
+    let mut row = threat_stride_row(
         category.letter,
         max_severity(&matching),
         category.label,
         matching.len(),
-        threat_titles(&matching).join(", "),
-    )
+        String::new(),
+    );
+    row.members = matching.iter().map(|threat| stride_member(threat)).collect();
+    row
+}
+
+fn stride_member(threat: &serde_json::Value) -> ThreatStrideMember {
+    let severity = threat_impact(threat).unwrap_or(Severity::Unknown);
+    ThreatStrideMember {
+        tone: ThreatStrideTone::from_severity(severity),
+        id: threat
+            .get("displayId")
+            .or_else(|| threat.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("?")
+            .to_string(),
+        severity: severity.as_str().to_uppercase(),
+        title: threat
+            .get("title")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("untitled")
+            .to_string(),
+    }
 }
 
 fn matching_threats<'a>(
@@ -172,14 +204,6 @@ fn threat_impact(threat: &serde_json::Value) -> Option<Severity> {
         .map(super::threat_impact::impact_to_severity)
 }
 
-fn threat_titles(threats: &[&serde_json::Value]) -> Vec<String> {
-    threats
-        .iter()
-        .filter_map(|threat| threat.get("title")?.as_str().map(ToString::to_string))
-        .take(2)
-        .collect()
-}
-
 fn canonical_stride_rollup() -> ThreatStrideModel {
     let rows = CANONICAL_STRIDE_ROWS
         .into_iter()
@@ -210,6 +234,7 @@ fn threat_stride_row(
             issue_label(count).to_string(),
         ],
         detail: (!description.is_empty()).then_some(description),
+        members: Vec::new(),
         issue_count: count,
     }
 }
@@ -254,21 +279,17 @@ mod tests {
         assert_eq!(rollup.rows[0].tone, ThreatStrideTone::High);
         assert_eq!(rollup.rows[0].cells[2], "2");
         assert_eq!(rollup.rows[0].cells[3], "issues");
-        assert!(rollup.rows[0]
-            .detail
-            .as_deref()
-            .unwrap()
-            .contains("spoofed login"));
-        assert!(rollup.rows[0]
-            .detail
-            .as_deref()
-            .unwrap()
-            .contains("stolen token"));
+        let members = &rollup.rows[0].members;
+        assert_eq!(members.len(), 2, "every matching threat gets a member row");
+        assert_eq!(members[0].id, "T-001");
+        assert_eq!(members[0].severity, "HIGH");
+        assert_eq!(members[0].title, "spoofed login");
+        assert_eq!(members[1].title, "stolen token");
         assert_eq!(rollup.rows[1].tone, ThreatStrideTone::Critical);
-        assert_eq!(rollup.rows[1].detail.as_deref(), Some("config tamper"));
+        assert_eq!(rollup.rows[1].members[0].title, "config tamper");
         assert_eq!(rollup.rows[2].tone, ThreatStrideTone::Low);
-        assert_eq!(rollup.rows[2].detail, None);
-        assert_eq!(rollup.rows[3].detail.as_deref(), Some("log leak"));
+        assert!(rollup.rows[2].members.is_empty());
+        assert_eq!(rollup.rows[3].members[0].title, "log leak");
     }
 
     #[test]

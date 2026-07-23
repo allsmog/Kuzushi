@@ -7,7 +7,7 @@ size: 160x48
 KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · model configured openai:gpt-5.4 [auth missing]
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- next continue workspace phase · context build build context · jobs inspect prior runs · z open visualization · report open Report
+ next → Review · context build build context · jobs inspect prior runs · z open visualization · report open Report
 │REPOSITORY / DATA-FLOW MAP · z visualize
 │./phase-target · rev:unknown
 │ready · 3 nodes · 2 flows · 2 trust crossings

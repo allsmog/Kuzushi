@@ -248,6 +248,7 @@ mod tests {
             model: "openai:gpt-4.1".to_string(),
             pipeline: "staged".to_string(),
             mode: "build".to_string(),
+            seed_mode: "seeded".to_string(),
             budget_usd: None,
             history_depth: 300,
             variant_scan: true,

@@ -15,12 +15,21 @@ pub(crate) fn planning_task_explicit_input(
 
 pub(crate) fn planning_task_preset_input(task: PlanningTaskId) -> Value {
     match task {
+        // Legacy decode-only rows keep their historical presets so older
+        // saved plans replay unchanged. The merged BuildThreatModel row has
+        // no preset: methodology and seedMode arrive through the
+        // descriptor-driven options editor.
         PlanningTaskId::BuildPastaThreatModel => json!({
             "methodology": "pasta",
             "outputDir": ".kuzushi/threat-model-pasta",
         }),
         PlanningTaskId::BuildStrideThreatModel => json!({
             "methodology": "stride",
+        }),
+        // The planner's decomposition row closes the loop: the shard
+        // candidates also materialize as the nested project-scope tree.
+        PlanningTaskId::DecomposeModules => json!({
+            "emitScopes": true,
         }),
         _ => json!({}),
     }

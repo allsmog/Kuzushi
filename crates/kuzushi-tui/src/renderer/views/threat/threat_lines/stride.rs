@@ -1,12 +1,29 @@
 use super::*;
-use crate::ui_view_models::{SeverityTone, ThreatStrideRow, ThreatStrideTone};
+use crate::ui_view_models::{
+    SeverityTone, ThreatStrideMember, ThreatStrideRow, ThreatStrideTone,
+};
 
 pub(super) fn append_stride_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let rollup = crate::ui_view_models::threat_stride_rollup(app);
     lines.push(section_header_line(&rollup.header, area.width));
     for row in &rollup.rows {
         lines.push(stride_row(row, area.width));
+        for member in &row.members {
+            lines.push(stride_member_row(member, area.width));
+        }
     }
+}
+
+/// One indented row per threat in the category: id · severity · title. The
+/// rollup fills its space with the real threats instead of blank rows.
+fn stride_member_row(member: &ThreatStrideMember, width: u16) -> Line<'static> {
+    let title_w = (width as usize).saturating_sub(8 + 6 + 10 + 4).max(8);
+    Line::from(vec![
+        Span::raw("        "),
+        Span::styled(pad(&member.id, 6), theme::primary()),
+        Span::styled(pad(&member.severity, 10), threat_stride_tone_style(member.tone)),
+        Span::styled(fit(&member.title, title_w), theme::muted()),
+    ])
 }
 
 fn stride_row(row: &ThreatStrideRow, width: u16) -> Line<'static> {

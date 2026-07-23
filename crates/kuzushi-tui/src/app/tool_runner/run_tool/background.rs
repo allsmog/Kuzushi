@@ -452,6 +452,11 @@ impl ShellApp {
         session.seed_task_sequence(self.engagement.planning_tool_sequence());
         if let Some(task) = self.engagement.running_planning_task() {
             session.bind_tool_task(tool_name, task.activity_task_id());
+        } else {
+            // Other launch paths (chain, steer, ad hoc re-runs) must still
+            // land trace rows on the seeded planned row instead of minting
+            // a duplicate task for the same logical run.
+            session.alias_tool_to_unique_planned_row(tool_name);
         }
         session
     }

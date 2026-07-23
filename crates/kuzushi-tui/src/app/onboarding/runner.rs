@@ -283,6 +283,7 @@ impl ShellApp {
             return Vec::new();
         }
         self.engagement.clear_running_tool();
+        self.reflect_planning_artifacts_after_tool();
         // Refresh the MCP attachment summary: the completed tool may
         // have produced an artifact whose absence was the only reason
         // an MCP wasn't attached.
@@ -298,6 +299,21 @@ impl ShellApp {
                 success_view: None,
             },
         )]
+    }
+
+    /// The picker's checklist must reflect the artifact the completed tool
+    /// just produced — re-entering the picker later may otherwise offer to
+    /// re-run finished work from a stale snapshot.
+    fn reflect_planning_artifacts_after_tool(&mut self) {
+        self.engagement.planning_picker_mut().mark_artifacts_stale();
+        if self.shell_view() != crate::app::ShellView::PlanningPicker {
+            return;
+        }
+        if let Some(target) = self.target_owned() {
+            self.engagement
+                .planning_picker_mut()
+                .refresh_artifact_states(&target);
+        }
     }
 
     fn completed_current_planning_tool(&self, tool_name: &str) -> bool {

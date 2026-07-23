@@ -3510,7 +3510,12 @@ mod tests {
     }
 
     fn assert_manifest_has_sarif_report_artifact(artifacts: &[RunArtifact]) {
-        for spec in OPTIONAL_RUN_ARTIFACTS {
+        // Optional artifacts appear in the manifest only when the run
+        // produced them; this fixture emits a SARIF report and semantic
+        // items but no tool stage receipts.
+        for leaf in ["report.sarif", "items.jsonl"] {
+            let spec = crate::artifact_contract::optional_run_artifact_spec(leaf)
+                .expect("optional artifact must be in shared spec");
             assert!(
                 artifacts.iter().any(|artifact| {
                     artifact.path.ends_with(spec.leaf)
@@ -6202,6 +6207,7 @@ mod tests {
                 tool: "triage:run".to_string(),
                 status: "failed".to_string(),
                 error: "runtime unavailable".to_string(),
+                error_class: None,
                 agent_thread_context: FailureToLlmContext {
                     failed_stage: "triage:run".to_string(),
                     cause: "runtime unavailable".to_string(),
@@ -6217,6 +6223,10 @@ mod tests {
                     recovery_options: vec!["rerun triage".to_string()],
                     fallback_prompt: "continue failed run".to_string(),
                     claims_forbidden: vec!["verified claim".to_string()],
+                    resume_from: None,
+                    completed_stages: Vec::new(),
+                    checkpoint_artifacts: Vec::new(),
+                    checkpoint_fingerprint: None,
                 },
             }],
         }

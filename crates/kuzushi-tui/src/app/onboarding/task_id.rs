@@ -12,8 +12,20 @@ pub enum PlanningTaskId {
     AttachFiles,
     GatherRepoContext,
     MapEntryPoints,
+    /// Big-monorepo first move: materialize the module decomposition
+    /// (`.kuzushi/project-model/scopes.json`) before whole-repo modeling.
+    DecomposeModules,
     BuildXRay,
+    /// One threat model per target; methodology and seed mode are options on
+    /// the shared `threat-model:build` tool, not separate planner rows.
+    BuildThreatModel,
+    /// Retained only to decode older saved plans; superseded by the merged
+    /// `BuildThreatModel` row.
+    #[allow(dead_code)]
     BuildStrideThreatModel,
+    /// Retained only to decode older saved plans; superseded by the merged
+    /// `BuildThreatModel` row.
+    #[allow(dead_code)]
     BuildPastaThreatModel,
     BuildCodePropertyGraph,
     BuildCodeQlDatabase,
@@ -53,9 +65,9 @@ impl PlanningTaskId {
         PlanningTaskId::AttachFiles,
         PlanningTaskId::GatherRepoContext,
         PlanningTaskId::MapEntryPoints,
+        PlanningTaskId::DecomposeModules,
         PlanningTaskId::BuildXRay,
-        PlanningTaskId::BuildStrideThreatModel,
-        PlanningTaskId::BuildPastaThreatModel,
+        PlanningTaskId::BuildThreatModel,
         PlanningTaskId::BuildCodePropertyGraph,
         PlanningTaskId::BuildCodeQlDatabase,
         PlanningTaskId::ThreatIntelCves,
@@ -89,7 +101,9 @@ impl PlanningTaskId {
             AttachFiles
             | GatherRepoContext
             | MapEntryPoints
+            | DecomposeModules
             | BuildXRay
+            | BuildThreatModel
             | BuildStrideThreatModel
             | BuildPastaThreatModel
             | BuildCodePropertyGraph
@@ -111,12 +125,14 @@ impl PlanningTaskId {
             AttachFiles => "Attach reference files",
             GatherRepoContext => "Gather repo context",
             MapEntryPoints => "Map entry points",
+            DecomposeModules => "Decompose into modules",
             BuildXRay => "Build X-ray",
+            BuildThreatModel => "Build threat model",
             BuildStrideThreatModel => "Build STRIDE threat model",
             BuildPastaThreatModel => "Build PASTA threat model",
             BuildCodePropertyGraph => "Build code property graph",
             BuildCodeQlDatabase => "Build CodeQL DB",
-            ThreatIntelCves => "Threat intel (CVEs)",
+            ThreatIntelCves => "Inventory deps for CVE harvest",
             MapFuzzAuthor => "Author fuzz harnesses (AFE)",
             ReverseEngineerBinary => "Reverse-engineer binary",
             ScanSecrets => "Scan for secrets",
@@ -143,8 +159,11 @@ impl PlanningTaskId {
             AttachFiles => "attach",
             GatherRepoContext => "context:build",
             MapEntryPoints => "entry-points:extract",
+            DecomposeModules => "pack:suggest-shards",
             BuildXRay => "x-ray:run",
-            BuildStrideThreatModel | BuildPastaThreatModel => "threat-model:build",
+            BuildThreatModel | BuildStrideThreatModel | BuildPastaThreatModel => {
+                "threat-model:build"
+            }
             BuildCodePropertyGraph => "cpg:build",
             BuildCodeQlDatabase => "codeql:create-db",
             ThreatIntelCves => "threat-intel:discover",
@@ -167,7 +186,8 @@ impl PlanningTaskId {
     }
 
     /// Stable Activity identity for one planned capability invocation.
-    /// Distinct planning tasks may intentionally dispatch the same tool.
+    /// The merged threat-model row uses the plain tool name; the legacy
+    /// decorated ids remain only so older saved plans replay unchanged.
     pub(crate) fn activity_task_id(self) -> String {
         match self {
             Self::BuildStrideThreatModel => "threat-model:build[stride]".to_string(),
@@ -183,6 +203,7 @@ impl PlanningTaskId {
         matches!(
             self,
             BuildXRay
+                | BuildThreatModel
                 | BuildStrideThreatModel
                 | BuildPastaThreatModel
                 | MapFuzzAuthor
@@ -211,8 +232,13 @@ impl PlanningTaskId {
             GatherRepoContext => ".kuzushi/context-snapshot.json",
             MapEntryPoints => ".kuzushi/entry-points.json",
             BuildXRay => "x-ray/x-ray.md",
-            BuildStrideThreatModel => ".kuzushi/threat-model.json",
-            BuildPastaThreatModel => ".kuzushi/threat-model-pasta.json",
+            // One live model regardless of methodology; the legacy PASTA row
+            // probes the same file (nothing ever wrote the old phantom
+            // `.kuzushi/threat-model-pasta.json`).
+            BuildThreatModel | BuildStrideThreatModel | BuildPastaThreatModel => {
+                ".kuzushi/threat-model.json"
+            }
+            DecomposeModules => ".kuzushi/project-model/scopes.json",
             BuildCodePropertyGraph => ".kuzushi/cpg.bin",
             BuildCodeQlDatabase => ".kuzushi/codeql-db",
             ThreatIntelCves => ".kuzushi/threat-intel/candidates.json",

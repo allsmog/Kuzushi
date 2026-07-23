@@ -17,6 +17,10 @@ pub struct CarliniThreatHuntReport {
     pub prompt_inventory_files: usize,
     pub threat_focused_prompt_files: usize,
     pub findings: Vec<Finding>,
+    /// Model-reported findings the deterministic normalizer rejected
+    /// (missing usable location). Disclosed, never silently dropped.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub rejected_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<CarliniThreatHuntPersistedRun>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -32,6 +36,10 @@ pub struct CarliniThreatHuntReport {
 
 const fn default_cost_usd_exact() -> bool {
     true
+}
+
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 const fn is_true(value: &bool) -> bool {

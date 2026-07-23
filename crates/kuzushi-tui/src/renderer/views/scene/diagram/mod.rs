@@ -70,6 +70,17 @@ pub(super) fn render_empty_state_panel(
     .render(area, buf);
 }
 
+/// Blank a rect (area-relative coords) so a box drawn after the connector
+/// pass hides any edge run beneath its interior — edges route under boxes,
+/// never through them.
+pub(super) fn clear_rect(buf: &mut Buffer, area: Rect, x: u16, y: u16, w: u16, h: u16) {
+    for row in y..y.saturating_add(h) {
+        for col in x..x.saturating_add(w) {
+            put(buf, area, col, row, " ", Color::Reset);
+        }
+    }
+}
+
 /// Write a label, truncated to fit within `area`.
 pub(super) fn text(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, color: Color) {
     let (ax, ay) = (area.x + x, area.y + y);
@@ -290,12 +301,14 @@ mod tests {
                     to: "api".into(),
                     crosses: true,
                     label: "https".into(),
+                    boundary_ids: vec!["tb-edge".into()],
                 },
                 DfdFlowModel {
                     from: "api".into(),
                     to: "db".into(),
                     crosses: true,
                     label: "sql".into(),
+                    boundary_ids: vec!["tb-data".into()],
                 },
             ],
             empty_hint: None,
@@ -338,7 +351,8 @@ mod tests {
                 "\n=== dfd @{w} ===\n{}",
                 render_to_text(
                     DfdDiagram {
-                        model: sample_dfd()
+                        model: sample_dfd(),
+                        selection: Some(0),
                     },
                     w,
                     24
@@ -368,7 +382,14 @@ mod tests {
             empty_hint: Some("no chains".into()),
             ..Default::default()
         };
-        let _ = render_to_text(DfdDiagram { model: dfd }, 72, 24);
+        let _ = render_to_text(
+            DfdDiagram {
+                model: dfd,
+                selection: None,
+            },
+            72,
+            24,
+        );
         let _ = render_to_text(TreeDiagram { model: tree }, 72, 24);
     }
 }

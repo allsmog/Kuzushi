@@ -22,6 +22,8 @@ pub(crate) const VALID_PIPELINES: &[&str] = &["single", "staged", "deterministic
 
 pub(crate) const VALID_BUILD_MODES: &[&str] = &["build", "refine"];
 
+pub(crate) const VALID_SEED_MODES: &[&str] = &["seeded", "fresh"];
+
 pub(crate) const VALID_ADVISORY_MODES: &[&str] = &["off", "osv"];
 
 pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
@@ -95,8 +97,13 @@ impl BuildFlavor {
             .replace('\\', "/")
     }
 
+    /// Truthful artifact provenance label: each flavor names itself, so a
+    /// standard build is never labeled as the PASTA overlay.
     pub(crate) fn provider(self) -> &'static str {
-        "randori-pasta"
+        match self {
+            Self::ThreatModel => "threat-model",
+            Self::RandoriPasta => "randori-pasta",
+        }
     }
 
     pub(crate) fn persists_document(self) -> bool {
@@ -135,7 +142,7 @@ pub(crate) struct OperatorVulnRow {
     pub(crate) description: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct BuildInput {
     pub(crate) target: PathBuf,
     pub(crate) repo_name: String,
@@ -158,6 +165,7 @@ pub(crate) struct BuildInput {
     pub(crate) model: String,
     pub(crate) pipeline: String,
     pub(crate) mode: String,
+    pub(crate) seed_mode: String,
     pub(crate) budget_usd: Option<f64>,
     pub(crate) history_depth: usize,
     pub(crate) variant_scan: bool,
@@ -174,6 +182,12 @@ impl BuildInput {
 
     pub(crate) fn is_refine(&self) -> bool {
         self.mode == "refine"
+    }
+
+    /// Fresh builds deliberately ignore the persisted model as seed context;
+    /// document identity carry-forward is unaffected.
+    pub(crate) fn is_fresh(&self) -> bool {
+        self.seed_mode == "fresh"
     }
 }
 

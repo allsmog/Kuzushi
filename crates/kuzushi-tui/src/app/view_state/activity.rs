@@ -73,6 +73,11 @@ pub struct DagTaskRow {
     pub last_label: String,
     pub severity: Option<String>,
     pub details: Vec<DagTaskDetail>,
+    /// The earlier run in this Run Focus sequence that owns the row, when
+    /// it was inherited across a run boundary. `None` = the focused run.
+    /// Header counters and status chips must never attribute a prior run's
+    /// failures to the run on screen.
+    pub prior_run_ref: Option<String>,
 }
 
 impl DagTaskRow {
@@ -89,6 +94,7 @@ impl DagTaskRow {
             last_label: String::new(),
             severity: None,
             details: Vec::new(),
+            prior_run_ref: None,
         }
     }
 }
@@ -181,6 +187,11 @@ pub struct ActivitySession {
     pub step_task_ids: BTreeMap<usize, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     pub events: VecDeque<RecordedTraceEvent>,
+    /// When a model call opened without its completion step yet (start steps
+    /// carry model metadata but no latency). Long calls are quiet by nature —
+    /// the watchdogs report "query in flight" instead of a false stall until
+    /// the call outlives the model-call watchdog.
+    open_model_call: Option<Instant>,
     runtime_cost: RuntimeCostReport,
     cost_accounting_error: Option<String>,
     durable_run_item_seq: u64,
@@ -257,14 +268,16 @@ pub struct RunFocusReceipt {
 }
 
 impl RunFocusReceipt {
+    /// One-line receipt WITHOUT cost: on Run Focus the header owns the cost
+    /// line, and this summary restating it was the third cost on one screen.
+    /// Surfaces that need cost (the phase card) append `self.cost` explicitly.
     pub fn summary(&self) -> String {
         format!(
-            "{} · {} run{} · {}s · {}",
+            "{} · {} run{} · {}s",
             self.outcome,
             self.run_count,
             if self.run_count == 1 { "" } else { "s" },
             self.elapsed_secs,
-            self.cost
         )
     }
 
@@ -351,6 +364,7 @@ impl ActivitySession {
             step_task_ids: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             events: VecDeque::with_capacity(ACTIVITY_FEED_RING_CAPACITY),
+            open_model_call: None,
             runtime_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             cost_accounting_error: None,
             durable_run_item_seq: 0,
@@ -409,6 +423,14 @@ impl ActivitySession {
             .clone()
             .or_else(|| prior.rerun_specification.clone());
         self.tasks = prior.tasks.clone();
+        // Inherited rows keep their history visible but belong to the run
+        // that produced them: counters and status chips for THIS run must
+        // not absorb a previous run's failures (item 5c).
+        for row in self.tasks.values_mut() {
+            if row.prior_run_ref.is_none() {
+                row.prior_run_ref = Some(prior.run_id.clone());
+            }
+        }
         self.task_order = prior.task_order.clone();
         self.sequence_started_at = prior.sequence_started_at;
         self.sequence_run_count = prior.sequence_run_count.saturating_add(1);
@@ -776,6 +798,7 @@ impl ActivitySession {
     }
 
     pub(crate) fn apply_step_with_cost(&mut self, step: RunTraceStep) -> Option<RuntimeCostReport> {
+        self.track_open_model_call(&step);
         let call_cost = self.record_terminal_model_call_cost(&step);
         let module_id = step.module_id.as_deref().unwrap_or("").to_string();
         if !module_id.is_empty() && is_hidden_module_id(&module_id) {
@@ -790,6 +813,26 @@ impl ActivitySession {
         };
         self.push_recorded_event(event);
         call_cost
+    }
+
+    /// A start step carries model metadata without latency; the paired
+    /// completion/refusal carries latency (or explicit call evidence) and
+    /// closes the window. Non-model steps leave the window untouched.
+    fn track_open_model_call(&mut self, step: &RunTraceStep) {
+        if step.model.is_none() {
+            return;
+        }
+        if step.latency_ms.is_some() || step.call_attempted == Some(true) {
+            self.open_model_call = None;
+        } else {
+            self.open_model_call = Some(Instant::now());
+        }
+    }
+
+    /// Age of the model call still awaiting its completion step, if any.
+    pub(crate) fn open_model_call_age(&self, now: Instant) -> Option<std::time::Duration> {
+        self.open_model_call
+            .and_then(|opened_at| now.checked_duration_since(opened_at))
     }
 
     fn record_terminal_model_call_cost(
@@ -979,6 +1022,26 @@ impl ActivitySession {
     pub(crate) fn bind_tool_task(&mut self, tool_name: &str, task_id: String) {
         self.tool_task_aliases
             .insert(collapse_doubled_tail(tool_name), task_id);
+    }
+
+    /// Bind trace-minted rows for `tool_name` onto the ONE seeded planned row
+    /// whose decoration-stripped id matches, regardless of which launch path
+    /// started the tool — otherwise a plan-seeded `threat-model:build[stride]`
+    /// row and the trace's `threat-model:build` row show as two tasks for one
+    /// logical run. Ambiguous matches (two planned rows sharing a tool) never
+    /// alias, and rows inherited from a prior run are out of scope (item 5c).
+    pub(crate) fn alias_tool_to_unique_planned_row(&mut self, tool_name: &str) {
+        let canonical = collapse_doubled_tail(tool_name);
+        let mut matching = self.tasks.values().filter(|row| {
+            row.prior_run_ref.is_none() && strip_task_decoration(&row.task_id) == canonical
+        });
+        let (Some(row), None) = (matching.next(), matching.next()) else {
+            return;
+        };
+        let task_id = row.task_id.clone();
+        if task_id != canonical {
+            self.bind_tool_task(tool_name, task_id);
+        }
     }
 
     fn task_id_for_tool(&self, tool_name: &str) -> String {
@@ -1334,6 +1397,11 @@ fn mark_active_details_canceled(row: &mut DagTaskRow) {
 /// Drop a trailing colon-segment that duplicates the one before it, so a
 /// doubled tool name (`sast:scan:scan`) collapses to `sast:scan`. Leaves normal
 /// `module:verb` ids untouched.
+/// A planned row id minus its planner decoration (`tool[variant]` → `tool`).
+fn strip_task_decoration(task_id: &str) -> &str {
+    task_id.split('[').next().unwrap_or(task_id).trim_end()
+}
+
 pub(crate) fn collapse_doubled_tail(task_id: &str) -> String {
     let segments: Vec<&str> = task_id.split(':').collect();
     let len = segments.len();
@@ -2191,6 +2259,63 @@ mod tests {
             DagTaskState::Queued
         );
         assert!(!session.tasks.contains_key("threat-model:build"));
+    }
+
+    /// C5: a tool launched outside the plan-queue path still lands its trace
+    /// rows on the one seeded planned row whose decoration-stripped id
+    /// matches, so one logical run never shows two task rows.
+    #[test]
+    fn unique_decorated_planned_row_absorbs_trace_rows_from_any_launch_path() {
+        let mut session = ActivitySession::new("run-1");
+        session.seed_task_sequence(["threat-model:build[stride]".to_string()]);
+        session.alias_tool_to_unique_planned_row("threat-model:build");
+        session.mark_task_partial("threat-model:build", "no topology");
+
+        assert_eq!(
+            session.tasks["threat-model:build[stride]"].state,
+            DagTaskState::Partial
+        );
+        assert!(!session.tasks.contains_key("threat-model:build"));
+    }
+
+    #[test]
+    fn ambiguous_planned_rows_and_prior_run_rows_never_alias() {
+        let mut session = ActivitySession::new("run-2");
+        session.seed_task_sequence([
+            "threat-model:build[stride]".to_string(),
+            "threat-model:build[pasta]".to_string(),
+        ]);
+        session.alias_tool_to_unique_planned_row("threat-model:build");
+        session.mark_task_partial("threat-model:build", "no topology");
+        // Two candidates → no alias; the trace mints its own row.
+        assert!(session.tasks.contains_key("threat-model:build"));
+
+        let mut inherited = ActivitySession::new("run-3");
+        inherited.seed_task_sequence(["secrets:scan[deep]".to_string()]);
+        inherited.tasks.get_mut("secrets:scan[deep]").unwrap().prior_run_ref =
+            Some("run-2".to_string());
+        inherited.alias_tool_to_unique_planned_row("secrets:scan");
+        inherited.mark_task_partial("secrets:scan", "x");
+        // The only match belongs to a prior run → no alias (item 5c keying).
+        assert!(inherited.tasks.contains_key("secrets:scan"));
+    }
+
+    /// C1: a start step (model metadata, no latency) opens the model-call
+    /// window; the paired completion (latency present) closes it.
+    #[test]
+    fn model_call_window_opens_on_start_and_closes_on_completion() {
+        let mut session = ActivitySession::new("r-model");
+        let mut start = RunTraceStep::new(1, "tool-progress", "querying model");
+        start.model = Some("anthropic:claude".to_string());
+        session.apply_step(start);
+        let probe = Instant::now() + std::time::Duration::from_secs(45);
+        assert!(session.open_model_call_age(probe).is_some());
+
+        let mut finish = RunTraceStep::new(2, "reasoning", "query completed");
+        finish.model = Some("anthropic:claude".to_string());
+        finish.latency_ms = Some(45_000);
+        session.apply_step(finish);
+        assert!(session.open_model_call_age(probe).is_none());
     }
 
     #[test]

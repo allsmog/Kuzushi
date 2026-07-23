@@ -133,10 +133,10 @@ pub use builtins::{
 };
 pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use contracts::{
-    canonical_tool_phase, ApprovalPolicy, BuiltinModule, DagNodeDescriptor, FileReferenceSemantics,
-    FindingStoreRequirement, ModuleKind, ModuleMetadata, OptionSpec, OptionType, PathSemantics,
-    PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect, ToolPhase, ToolPolicy,
-    WorkspaceRequirement,
+    canonical_tool_phase, ApprovalPolicy, BuiltinModule, ContinuationSupport, DagNodeDescriptor,
+    FileReferenceSemantics, FindingStoreRequirement, ModuleKind, ModuleMetadata, OptionSpec,
+    OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect,
+    ToolPhase, ToolPolicy, WorkspaceRequirement,
 };
 pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
 pub use display_name::tool_display_name;
@@ -147,7 +147,8 @@ pub use dynamic_loader::{
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
-    agent_runtime_tool_names, tool_defaults_to_workspace, tool_execution_model,
-    tool_needs_finding_store, tool_needs_runtime, tool_requires_agent_runtime,
-    tool_uses_agent_runtime, tool_uses_finding_store, tool_wants_runtime, wants_sast_runtime,
+    agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace,
+    tool_execution_model, tool_needs_finding_store, tool_needs_runtime,
+    tool_requires_agent_runtime, tool_uses_agent_runtime, tool_uses_finding_store,
+    tool_wants_runtime, wants_sast_runtime,
 };

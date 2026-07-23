@@ -7,7 +7,7 @@ size: 80x24
 KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · ● LIVE
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- run sast:scan {} scan now · next continue workspace phase · report open Report
+ run sast:scan {} scan now · next → Review · z open findings heatmap
 │▸ RECORDED ENGINE OUTCOMES        │SCAN RECEIPT
 │✓ Run … · complete · r:scan-phase │outcome completed · revision not recorded
 │                                  │result legacy inferred

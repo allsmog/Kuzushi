@@ -13,13 +13,38 @@ pub(in crate::capabilities::carlini_threat_hunt) fn require_json_object(
     }
 }
 
+/// Per-item required keys are the contract that keeps the deterministic
+/// normalizer from silently dropping real findings: a finding the model
+/// cannot anchor to filePath + startLine is re-asked by the repair pass
+/// instead of vanishing.
 pub(in crate::capabilities::carlini_threat_hunt) fn findings_schema() -> Value {
     json!({
         "type": "object",
         "required": ["findings"],
         "additionalProperties": true,
         "properties": {
-            "findings": {"type": "array", "items": {"type": "object"}}
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["title", "severity", "filePath", "startLine", "message"],
+                    "additionalProperties": true,
+                    "properties": {
+                        "title": {"type": "string"},
+                        "severity": {"type": "string", "enum": ["critical", "high", "medium", "low", "info"]},
+                        "filePath": {"type": "string", "description": "Target-relative source path of the vulnerable code"},
+                        "startLine": {"type": "integer", "minimum": 1},
+                        "endLine": {"type": "integer", "minimum": 1},
+                        "ruleId": {"type": "string"},
+                        "message": {"type": "string"},
+                        "evidence": {"type": "string"},
+                        "confidence": {"type": "string"},
+                        "likelihood": {"type": "string"},
+                        "impact": {"type": "string"},
+                        "cwe": {"type": "array", "items": {"type": "string"}}
+                    }
+                }
+            }
         }
     })
 }

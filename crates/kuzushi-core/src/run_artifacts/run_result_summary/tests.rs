@@ -49,6 +49,29 @@ fn loads_bounded_semantic_fields_from_canonical_result() {
 }
 
 #[test]
+fn condenses_multiline_summary_and_messages_to_one_line() {
+    let target = tempfile::tempdir().unwrap();
+    let output = json!({
+        "ok": true, "status": "completed",
+        "summary": "[+] Triaged 13 of 13 findings\n      tp=12  fp=1\n      cost=$3.58",
+        "warnings": ["disk low\nretry later"],
+        "errors": []
+    });
+    let record = record_result(target.path(), "run-multiline-result", &output);
+
+    let summary = load_run_result_summary(target.path(), record.run_id)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        summary.summary,
+        "[+] Triaged 13 of 13 findings · tp=12  fp=1 · cost=$3.58"
+    );
+    assert_eq!(summary.warnings, ["disk low · retry later"]);
+    assert!(!summary.summary.contains("\\n"));
+}
+
+#[test]
 fn redacts_credentials_from_untrusted_result_text() {
     let safe = safe_bounded_line("Authorization: Bearer sk-secret");
 

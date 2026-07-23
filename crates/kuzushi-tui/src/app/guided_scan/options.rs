@@ -197,6 +197,8 @@ mod tests {
             required_cli: id.required_cli(),
             cli_available: true,
             blocker: None,
+            cached_detail: None,
+            last_attempt: None,
         }
     }
 

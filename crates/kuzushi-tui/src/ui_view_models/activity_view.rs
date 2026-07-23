@@ -67,6 +67,19 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
 /// The Activity run's terminal failure, if any. Sourced from the live
 /// activity card (set by both scan refusals and tool failures) and only once
 /// nothing is still running, so an in-flight session never reads as failed.
+/// Remaining seconds for the active DAG task, ONLY when duration history for
+/// that tool exists (same estimator as the ambient footer chip). No history,
+/// no ETA — never a fabricated countdown.
+fn active_dag_task_eta_secs(app: &ShellApp, session: &ActivitySession) -> Option<u64> {
+    let row = session
+        .tasks
+        .values()
+        .find(|row| row.state == DagTaskState::Active && row.prior_run_ref.is_none())?;
+    let estimate = app.estimate_task_duration_secs(&row.task_id)?;
+    let elapsed = row.started_at?.elapsed().as_secs();
+    Some(estimate.saturating_sub(elapsed))
+}
+
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
     if session.operator_question.is_some() {
         return Some(ActivityRunOutcome::WaitingForOperator);
@@ -185,6 +198,7 @@ impl<'a> RunFocusModel<'a> {
             activity_run_outcome(self.app, self.session),
             live_tool.as_ref(),
             self.app.steer_queue().len(),
+            active_dag_task_eta_secs(self.app, self.session),
         )
     }
 

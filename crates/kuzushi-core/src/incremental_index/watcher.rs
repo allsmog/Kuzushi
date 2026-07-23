@@ -332,7 +332,6 @@ fn is_legacy_workspace_artifact(path: &Path) -> bool {
             ".kuzushi/context-snapshot.json"
                 | ".kuzushi/entry-points.json"
                 | ".kuzushi/threat-model.json"
-                | ".kuzushi/threat-model-pasta.json"
                 | ".kuzushi/cpg.bin"
                 | ".kuzushi/threat-intel/candidates.json"
         )

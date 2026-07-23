@@ -190,6 +190,28 @@
             ],
             "properties": {
               "path": {
+                "pattern": "(^|/)stages\\.jsonl$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "label": {
+                "const": "tool stage receipts"
+              },
+              "kind": {
+                "const": "jsonl"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {
                 "pattern": "(^|/)context\\.json$"
               }
             }

@@ -59,6 +59,7 @@ pub(crate) fn activity_header_model(
         outcome,
         live_tool,
         live_tool.map_or(0, |tool| tool.queued_steer_steps),
+        None,
     )
 }
 
@@ -68,10 +69,14 @@ pub(crate) fn activity_header_model_with_queue(
     outcome: Option<ActivityRunOutcome>,
     live_tool: Option<&ActivityLiveTool>,
     queued_steer_steps: usize,
+    active_task_eta_secs: Option<u64>,
 ) -> ActivityHeaderModel {
     let counts = ActivityTaskCounts::from_session(session);
     let cost = activity_cost_label(session);
-    let progress = progress_segment(&outcome, counts, live_tool, queued_steer_steps);
+    let mut progress = progress_segment(&outcome, counts, live_tool, queued_steer_steps);
+    if outcome.is_none() && counts.total > 0 {
+        progress.push_str(&active_task_extras(session, active_task_eta_secs));
+    }
     ActivityHeaderModel {
         origin_phase: session.origin_phase,
         detailed_title: detailed_title(session, route, &progress, &cost),
@@ -166,9 +171,16 @@ struct ActivityTaskCounts {
 }
 
 impl ActivityTaskCounts {
+    /// Counts cover ONLY the focused run's rows. A prior run in the same
+    /// Run Focus sequence keeps its rows visible for history, but its
+    /// failures/skips must never be attributed to the run on screen.
     fn from_session(session: &ActivitySession) -> Self {
         Self {
-            total: session.tasks.len(),
+            total: session
+                .tasks
+                .values()
+                .filter(|row| row.prior_run_ref.is_none())
+                .count(),
             done: task_count(session, DagTaskState::Done),
             running: task_count(session, DagTaskState::Active),
             canceling: task_count(session, DagTaskState::Canceling),
@@ -210,6 +222,51 @@ fn append_terminal_count(parts: &mut Vec<String>, count: usize, label: &str) {
     if count > 0 {
         parts.push(format!("{count} {label}"));
     }
+}
+
+/// Honest progress extras for the active task: a "stage N/M" fraction when
+/// the producer reports one, and an ETA only when duration history exists —
+/// never a fabricated estimate.
+fn active_task_extras(session: &ActivitySession, eta_secs: Option<u64>) -> String {
+    let mut extras = String::new();
+    if let Some((done, total)) = active_stage_fraction(session) {
+        extras.push_str(&format!("  ·  stage {done}/{total}"));
+    }
+    match eta_secs {
+        Some(0) => extras.push_str("  ·  ~any moment"),
+        Some(remaining) => extras.push_str(&format!("  ·  ~{} left", compact_secs(remaining))),
+        None => {}
+    }
+    extras
+}
+
+fn active_stage_fraction(session: &ActivitySession) -> Option<(u64, u64)> {
+    let row = session
+        .tasks
+        .values()
+        .find(|row| row.state == DagTaskState::Active && row.prior_run_ref.is_none())?;
+    stage_fraction(&row.last_label)
+}
+
+/// Parse a "stage N/M" marker out of a producer label like
+/// "research · stage 2/4". Rejects nonsense fractions instead of guessing.
+fn stage_fraction(label: &str) -> Option<(u64, u64)> {
+    let rest = &label[label.find("stage ")? + "stage ".len()..];
+    let fraction: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '/')
+        .collect();
+    let (done, total) = fraction.split_once('/')?;
+    let done: u64 = done.parse().ok()?;
+    let total: u64 = total.parse().ok()?;
+    (total > 0 && done <= total).then_some((done, total))
+}
+
+fn compact_secs(seconds: u64) -> String {
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    format!("{}m{:02}s", seconds / 60, seconds % 60)
 }
 
 fn taskless_progress(live_tool: Option<&ActivityLiveTool>) -> String {
@@ -256,7 +313,7 @@ fn task_count(session: &ActivitySession, state: DagTaskState) -> usize {
     session
         .tasks
         .values()
-        .filter(|row| row.state == state)
+        .filter(|row| row.prior_run_ref.is_none() && row.state == state)
         .count()
 }
 
@@ -342,6 +399,52 @@ mod tests {
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("feed paused"));
+    }
+
+    /// C2: the header shows a producer-reported stage fraction and an ETA
+    /// derived from real duration history — and neither without its source.
+    #[test]
+    fn header_progress_carries_stage_fraction_and_history_backed_eta() {
+        let mut session = ActivitySession::new("run-eta");
+        let mut active = task("threat-model:build", DagTaskState::Active, 0.0);
+        active.last_label = "synthesis · stage 2/4".to_string();
+        session
+            .tasks
+            .insert("threat-model:build".to_string(), active);
+
+        let model = activity_header_model_with_queue(
+            &session,
+            &ActivityRouteState::default(),
+            None,
+            None,
+            0,
+            Some(190),
+        );
+        assert!(model.summary_title.contains("stage 2/4"), "{}", model.summary_title);
+        assert!(model.summary_title.contains("~3m10s left"), "{}", model.summary_title);
+
+        let no_history = activity_header_model_with_queue(
+            &session,
+            &ActivityRouteState::default(),
+            None,
+            None,
+            0,
+            None,
+        );
+        assert!(
+            !no_history.summary_title.contains("left"),
+            "no fabricated ETA without duration history: {}",
+            no_history.summary_title
+        );
+    }
+
+    #[test]
+    fn stage_fraction_parses_labels_and_rejects_nonsense() {
+        assert_eq!(stage_fraction("research · stage 2/4"), Some((2, 4)));
+        assert_eq!(stage_fraction("stage 10/12 · gapfill"), Some((10, 12)));
+        assert_eq!(stage_fraction("no marker here"), None);
+        assert_eq!(stage_fraction("stage 5/4"), None);
+        assert_eq!(stage_fraction("stage 1/0"), None);
     }
 
     #[test]
@@ -483,6 +586,7 @@ mod tests {
             None,
             None,
             1,
+            None,
         );
 
         assert!(model.summary_title.contains("1 running"));
@@ -647,6 +751,25 @@ mod tests {
         row.state = state;
         row.cost_usd = cost_usd;
         row
+    }
+
+    /// Item 5c: rows inherited from an earlier run in the sequence stay
+    /// visible but never count against the focused run's header.
+    #[test]
+    fn header_counts_exclude_prior_run_rows() {
+        let mut session = ActivitySession::new("run-current");
+        session
+            .tasks
+            .insert("current".into(), task("current", DagTaskState::Done, 0.0));
+        let mut inherited = task("prior-failed", DagTaskState::Failing, 0.0);
+        inherited.prior_run_ref = Some("run-prior".to_string());
+        session.tasks.insert("prior-failed".into(), inherited);
+
+        let counts = ActivityTaskCounts::from_session(&session);
+
+        assert_eq!(counts.total, 1);
+        assert_eq!(counts.done, 1);
+        assert_eq!(counts.failing, 0, "prior run's failure leaked into the header");
     }
 
     fn model_cost_step(n: usize, module: &str, verb: &str, cost: f64) -> RunTraceStep {

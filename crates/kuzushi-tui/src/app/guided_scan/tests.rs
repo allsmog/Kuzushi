@@ -433,6 +433,8 @@ fn module_other_adds_without_erasing_existing_selections() {
         required_cli: None,
         cli_available: true,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     })
     .collect::<Vec<_>>();
     app.engagement.planning_picker_mut().open(
@@ -480,6 +482,8 @@ fn unavailable_module_other_stays_open_without_partial_selection() {
         required_cli: Some("codeql"),
         cli_available: false,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     };
     app.engagement
         .planning_picker_mut()
@@ -565,6 +569,8 @@ fn rerun_reselects_cached_recommended_map_artifacts() {
         required_cli: None,
         cli_available: true,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     };
     app.engagement
         .planning_picker_mut()
@@ -824,6 +830,8 @@ fn scan_picker_row(id: PlanningTaskId) -> PlanningTaskRow {
         required_cli: None,
         cli_available: true,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     }
 }
 

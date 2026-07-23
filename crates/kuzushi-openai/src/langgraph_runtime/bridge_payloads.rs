@@ -57,6 +57,9 @@ pub(crate) struct NextStepBridgeResponse {
     pub(crate) error: Option<String>,
     #[serde(default, alias = "error_class")]
     pub(crate) error_class: Option<String>,
+    /// Bounded raw-error identity (name/code/message) from the bridge.
+    #[serde(default)]
+    pub(crate) detail: Option<String>,
     #[serde(default)]
     pub(crate) status: Option<u16>,
     /// Provider-declared `Retry-After` (seconds) forwarded by the bridge so
@@ -106,6 +109,9 @@ pub(crate) struct BridgeResponse {
     pub(crate) error: Option<String>,
     #[serde(default, alias = "error_class")]
     pub(crate) error_class: Option<String>,
+    /// Bounded raw-error identity (name/code/message) from the bridge.
+    #[serde(default)]
+    pub(crate) detail: Option<String>,
     #[serde(default)]
     pub(crate) status: Option<u16>,
     /// Provider-declared `Retry-After` (seconds) forwarded by the bridge so

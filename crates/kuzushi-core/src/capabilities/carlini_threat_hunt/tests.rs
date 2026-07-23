@@ -177,7 +177,8 @@ mod tests {
             ]
         });
 
-        let findings = normalize_findings(raw, target, 10, "carlini-threat-hunt:User:0").unwrap();
+        let normalized = normalize_findings(raw, target, 10, "carlini-threat-hunt:User:0").unwrap();
+        let findings = normalized.kept;
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].file_path, "src/app.ts");
@@ -186,6 +187,52 @@ mod tests {
             Some("carlini-threat-hunt:User:0")
         );
         assert!(findings[0].message.contains("Evidence: source to sink"));
+        assert_eq!(
+            normalized.rejected.len(),
+            1,
+            "out-of-target finding must be rejected with a reason, not dropped silently"
+        );
+        assert!(normalized.rejected[0].contains("outside"));
+    }
+
+    #[test]
+    fn narrative_location_fallback_recovers_findings_without_file_path() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/gateway.go"), "package gw\n").unwrap();
+        let raw = json!({
+            "findings": [{
+                "title": "ForwardRequest lacks ownership check",
+                "severity": "high",
+                "message": "RouterRPC ForwardRequest trusts in.Uuid",
+                "evidence": "handler at src/gateway.go:42 forwards in.Uuid without ownership validation"
+            }]
+        });
+
+        let normalized = normalize_findings(raw, temp.path(), 10, "fp:0").unwrap();
+
+        assert_eq!(normalized.kept.len(), 1, "{:?}", normalized.rejected);
+        assert_eq!(normalized.kept[0].file_path, "src/gateway.go");
+        assert_eq!(normalized.kept[0].start_line, 42);
+        assert!(normalized.rejected.is_empty());
+    }
+
+    #[test]
+    fn unlocatable_finding_is_rejected_with_reason() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = json!({
+            "findings": [{
+                "title": "cache-hit bypass",
+                "severity": "high",
+                "message": "account cache-hit path skips cookie check"
+            }]
+        });
+
+        let normalized = normalize_findings(raw, temp.path(), 10, "fp:0").unwrap();
+
+        assert!(normalized.kept.is_empty());
+        assert_eq!(normalized.rejected.len(), 1);
+        assert!(normalized.rejected[0].contains("cache-hit bypass"));
     }
 
     #[test]

@@ -324,6 +324,7 @@ pub(crate) fn apply_carlini_static_profile(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn carlini_threat_hunt_report(
     target: PathBuf,
     ctx: &ToolExecutionContext<'_>,
@@ -333,6 +334,7 @@ pub(crate) fn carlini_threat_hunt_report(
     prompt_inventory_files: usize,
     threat_focused_prompt_files: usize,
     findings: Vec<Finding>,
+    rejected_count: usize,
     cost_usd: f64,
     cost_usd_exact: bool,
 ) -> Result<CarliniThreatHuntReport> {
@@ -345,6 +347,7 @@ pub(crate) fn carlini_threat_hunt_report(
         prompt_inventory_files,
         threat_focused_prompt_files,
         findings,
+        rejected_count,
         persisted,
         kb_context: Some(options.kb_context),
         cost_usd,

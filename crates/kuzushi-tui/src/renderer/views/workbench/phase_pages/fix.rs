@@ -206,6 +206,8 @@ fn render_dfd(frame: &mut Frame<'_>, area: Rect, model: &FixPhaseModel, state: P
         state,
         DfdDiagram {
             model: model.dfd.clone(),
+            // The Fix pane embeds the diagram without an inspector cursor.
+            selection: None,
         },
     );
 }

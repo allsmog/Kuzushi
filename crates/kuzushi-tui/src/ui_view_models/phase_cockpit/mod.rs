@@ -589,6 +589,7 @@ fn result_action_label(
         Select => select_action_label(phase).to_string(),
         SelectAndContinue => continue_action_label(phase).to_string(),
         SelectAndReport => "Use & Report".to_string(),
+        ContinueRun => "Continue".to_string(),
         Open => "Open".to_string(),
         Refine => "Refine".to_string(),
         RunAgain => "Run again".to_string(),

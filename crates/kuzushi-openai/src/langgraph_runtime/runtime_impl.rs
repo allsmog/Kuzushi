@@ -7,7 +7,9 @@ use kuzushi_core::{
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{public_bridge_error, public_bridge_failure, run_bridge};
+use super::bridge_process::{
+    public_bridge_error, public_bridge_failure_with_detail, run_bridge,
+};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -265,10 +267,11 @@ fn bridge_response_error(response: BridgeResponse) -> Result<BridgeAttempt> {
         response.error.as_deref(),
         response.retry_after_seconds,
     );
-    let message = public_bridge_failure(
+    let message = public_bridge_failure_with_detail(
         response.error_class.as_deref(),
         response.status,
         response.error.as_deref(),
+        response.detail.as_deref(),
     );
     let Some(failure) = failure else {
         anyhow::bail!("LangGraph bridge failed: {message}");

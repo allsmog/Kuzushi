@@ -83,18 +83,33 @@ pub(crate) fn public_bridge_error(message: &str) -> String {
     public_failure_message(class, None)
 }
 
-pub(crate) fn public_bridge_failure(
+pub(crate) fn public_bridge_failure_with_detail(
     error_class: Option<&str>,
     status: Option<u16>,
     fallback: Option<&str>,
+    detail: Option<&str>,
 ) -> String {
     let class = error_class
         .and_then(allowed_error_class)
         .or_else(|| status.map(error_class_for_status));
-    match class {
+    let message = match class {
         Some(class) => public_failure_message(class, status),
         None => public_bridge_error(fallback.unwrap_or_default()),
-    }
+    };
+    append_bridge_detail(message, detail)
+}
+
+const MAX_BRIDGE_DETAIL_CHARS: usize = 300;
+
+/// Bounded raw-error identity from the bridge, so a failure card never dead
+/// ends at "details were suppressed". Persistence redacts credential-shaped
+/// content again before the text lands in durable artifacts.
+fn append_bridge_detail(message: String, detail: Option<&str>) -> String {
+    let Some(detail) = detail.map(str::trim).filter(|detail| !detail.is_empty()) else {
+        return message;
+    };
+    let bounded = detail.chars().take(MAX_BRIDGE_DETAIL_CHARS).collect::<String>();
+    format!("{message} — detail: {bounded}")
 }
 
 fn public_failure_message(class: &str, status: Option<u16>) -> String {
@@ -105,6 +120,9 @@ fn public_failure_message(class: &str, status: Option<u16>) -> String {
         "provider_response_invalid" => "Provider returned an invalid response",
         "provider_unavailable" => "Provider is temporarily unavailable",
         "rate_limited" => "Provider rate limited the request",
+        "sdk_client_validation" => {
+            "Provider SDK rejected the request client-side before sending (invalid invocation parameters)"
+        }
         "timeout" => "Provider request timed out",
         "transport" => "Provider request failed before a response was received",
         _ => "Bridge operation failed; raw error details were suppressed",
@@ -125,6 +143,7 @@ fn allowed_error_class(class: &str) -> Option<&str> {
             | "provider_response_invalid"
             | "provider_unavailable"
             | "rate_limited"
+            | "sdk_client_validation"
             | "timeout"
             | "transport"
     )

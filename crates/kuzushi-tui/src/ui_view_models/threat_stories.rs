@@ -1,8 +1,6 @@
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
-const THREAT_STORY_VISIBLE_LIMIT: usize = 8;
-
 type StorySpec = (
     &'static str,
     Severity,
@@ -118,13 +116,39 @@ fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
 }
 
 fn story_from_threat(threat: &serde_json::Value) -> Option<ThreatStoryRow> {
-    Some(threat_story_row(
-        threat_listing_id(threat)?,
+    let listing_id = threat_listing_id(threat)?;
+    let mut row = threat_story_row(
+        listing_id.clone(),
         threat_severity(threat),
         string_field(threat, "title").unwrap_or_else(|| "untitled".to_string()),
         string_field(threat, "attackVector").unwrap_or_default(),
         first_affected_file_location(threat),
-    ))
+    );
+    row.details.extend(artifact_id_details(threat, &listing_id));
+    Some(row)
+}
+
+/// Cross-referencing threat-model.json must work in both directions: when
+/// the listed id differs from the artifact's model-emitted `id`/`stableId`,
+/// disclose them as detail rows instead of leaving the operator to guess.
+fn artifact_id_details(
+    threat: &serde_json::Value,
+    listing_id: &str,
+) -> Vec<ThreatStoryDetail> {
+    let mut details = Vec::new();
+    if let Some(id) = string_field(threat, "id").filter(|id| id != listing_id) {
+        details.push(ThreatStoryDetail {
+            label: "id     ",
+            value: id,
+        });
+    }
+    if let Some(stable) = string_field(threat, "stableId").filter(|id| id != listing_id) {
+        details.push(ThreatStoryDetail {
+            label: "stable ",
+            value: stable,
+        });
+    }
+    details
 }
 
 /// Harness display ids (T1..Tn) are stable across refines; prefer them over
@@ -187,10 +211,11 @@ fn canonical_story_model() -> ThreatStoryModel {
 }
 
 fn threat_story_model_from_rows(rows: Vec<ThreatStoryRow>) -> ThreatStoryModel {
-    let story_count = rows.len();
+    // Every story renders; the Threat view scrolls (pinned tabs) instead of
+    // silently capping the list below the advertised count.
     ThreatStoryModel {
-        header: format!("ATTACKER STORIES · {story_count}"),
-        rows: rows.into_iter().take(THREAT_STORY_VISIBLE_LIMIT).collect(),
+        header: format!("ATTACKER STORIES · {}", rows.len()),
+        rows,
     }
 }
 
@@ -251,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn threat_story_model_from_doc_caps_visible_rows() {
+    fn threat_story_model_renders_every_row_without_a_cap() {
         let doc = json!({
             "threats": [
                 {"id": "T-001", "title": "one", "impact": "high"},
@@ -269,13 +294,12 @@ mod tests {
         let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
 
         assert_eq!(model.header, "ATTACKER STORIES · 9");
-        assert_eq!(model.rows.len(), 8);
-        assert_eq!(model.rows[7].cells[0], "T-008");
+        assert_eq!(model.rows.len(), 9);
+        assert_eq!(model.rows[8].cells[0], "T-009");
     }
 
-    #[test]
-    fn threat_story_rows_prefer_harness_display_ids_and_read_new_contract_docs() {
-        let doc = json!({
+    fn new_contract_doc() -> serde_json::Value {
+        json!({
             "assets": [{"asset": "backup catalog", "sensitivity": "critical"}],
             "recommendedMitigations": [
                 {"mitigation": "pin CI actions", "threatIds": ["tm-abc"], "closesClass": "yes", "effort": "S"}
@@ -285,9 +309,12 @@ mod tests {
                  "title": "wipeout", "impact": "existential"},
                 {"id": "model-emitted-2", "title": "no display id yet", "impact": "low"}
             ]
-        });
+        })
+    }
 
-        let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+    #[test]
+    fn threat_story_rows_prefer_harness_display_ids_and_read_new_contract_docs() {
+        let model = threat_story_model_from_doc(&new_contract_doc()).expect("non-empty stories");
 
         assert_eq!(
             model.rows[0].cells[0], "T7",
@@ -301,6 +328,26 @@ mod tests {
         assert_eq!(
             model.rows[1].cells[0], "model-emitted-2",
             "id fallback when displayId absent"
+        );
+    }
+
+    #[test]
+    fn threat_story_details_disclose_artifact_ids_when_they_differ() {
+        let model = threat_story_model_from_doc(&new_contract_doc()).expect("non-empty stories");
+
+        assert!(
+            model.rows[0]
+                .details
+                .iter()
+                .any(|detail| detail.value == "model-emitted-1"),
+            "artifact id disclosed when it differs from the listing id"
+        );
+        assert!(
+            model.rows[0]
+                .details
+                .iter()
+                .any(|detail| detail.value == "tm-abc"),
+            "stableId disclosed for cross-referencing the artifact"
         );
     }
 

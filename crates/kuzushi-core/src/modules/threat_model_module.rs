@@ -47,6 +47,7 @@ fn threat_model_build_tool() -> ToolDescriptor {
         "Build a threat model for the current target.",
         threat_model_build_options(),
     )
+    .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "threat-model guidance",
         "threat-model",
@@ -91,6 +92,14 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
 }
 
 fn threat_model_generation_options() -> Vec<OptionSpec> {
+    let mut options = threat_model_pipeline_options();
+    options.extend(threat_model_budget_options());
+    options.extend(threat_model_advisory_options());
+    options.extend(threat_model_bounds_options());
+    options
+}
+
+fn threat_model_pipeline_options() -> Vec<OptionSpec> {
     vec![
         opt(
             "pipeline",
@@ -108,6 +117,19 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         .choices(&["build", "refine"])
         .default(json!("build"))
         .advanced(),
+        opt(
+            "seedMode",
+            OptionType::Enum,
+            "seeded = embed the persisted threat model as seed context for the rebuild; fresh = build from repository evidence only, ignoring the previous model (document identity still carries forward).",
+        )
+        .aliases(&["seed_mode"])
+        .choices(&["seeded", "fresh"])
+        .default(json!("seeded")),
+    ]
+}
+
+fn threat_model_budget_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "budgetUsd",
             OptionType::Float,
@@ -131,6 +153,11 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         .aliases(&["variant_scan"])
         .default(json!(true))
         .advanced(),
+    ]
+}
+
+fn threat_model_advisory_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "advisories",
             OptionType::Enum,
@@ -153,6 +180,11 @@ fn threat_model_generation_options() -> Vec<OptionSpec> {
         )
         .aliases(&["advisory_fixtures"])
         .advanced(),
+    ]
+}
+
+fn threat_model_bounds_options() -> Vec<OptionSpec> {
+    vec![
         opt("slice", OptionType::Enum, "Threat-model slice to generate.")
             .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
             .default(json!("all"))
@@ -198,10 +230,14 @@ fn threat_model_read_options() -> Vec<OptionSpec> {
 }
 
 fn threat_model_methodology_option(default: &str) -> OptionSpec {
-    opt("methodology", OptionType::Enum, "Threat-model methodology.")
-        .aliases(&["type"])
-        .choices(&["pasta", "stride", "dread"])
-        .default(json!(default))
+    opt(
+        "methodology",
+        OptionType::Enum,
+        "Threat-model methodology. Pass explicitly when the request names one (e.g. \"build the PASTA threat model\" => methodology=pasta); the artifact records whichever methodology actually ran.",
+    )
+    .aliases(&["type"])
+    .choices(&["pasta", "stride", "dread"])
+    .default(json!(default))
 }
 
 fn int_option(name: &str, aliases: &[&str], default: i64) -> OptionSpec {

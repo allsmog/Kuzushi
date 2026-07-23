@@ -144,9 +144,11 @@ impl ShellApp {
         if !self.input().is_empty() {
             return false;
         }
-        // 3D controls only apply on the attack-surface page; on 2D pages they
+        // 3D controls only apply on the attack-surface page; on the DFD page
+        // j/k drive the node/flow inspector cursor instead. Other 2D pages
         // fall through. Tab/Shift+Tab/Esc/q work on every page.
         let is_3d = self.router.scene().page().is_3d();
+        let is_dfd = matches!(self.router.scene().page(), crate::scene3d::VizPage::Dfd);
         match key.code {
             KeyCode::Tab => self.cycle_scene(1),
             KeyCode::BackTab => self.cycle_scene(-1),
@@ -160,9 +162,18 @@ impl ShellApp {
             KeyCode::Char('l') if is_3d => self.nudge_scene_yaw(1.0),
             KeyCode::Char('k') if is_3d => self.nudge_scene_pitch(1.0),
             KeyCode::Char('j') if is_3d => self.nudge_scene_pitch(-1.0),
+            KeyCode::Char('j') if is_dfd => self.cycle_dfd_selection(1),
+            KeyCode::Char('k') if is_dfd => self.cycle_dfd_selection(-1),
             _ => return false,
         }
         true
+    }
+
+    /// Move the DFD inspector cursor over the flattened nodes-then-flows list.
+    fn cycle_dfd_selection(&mut self, direction: i32) {
+        let model = crate::ui_view_models::dfd_model(self);
+        let len = crate::ui_view_models::dfd_selectable_count(&model);
+        self.router.scene_mut().cycle_dfd_selection(direction, len);
     }
 
     fn cycle_scene(&mut self, direction: i32) {

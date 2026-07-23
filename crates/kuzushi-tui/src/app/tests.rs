@@ -13729,6 +13729,23 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
                 assert!(!app.router.workbench().review().backlog);
             }
+            ViewHotkeyAction::WorkbenchReviewSearch => {
+                app.router
+                    .workbench_mut()
+                    .set_page(Some(WorkbenchPage::Review));
+                press_key(&mut app, key_event_for_trigger(binding.trigger));
+                assert!(app.router.workbench().review().search_capture);
+                // Typing is captured by the search, never the composer.
+                press_key(
+                    &mut app,
+                    KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()),
+                );
+                assert_eq!(app.router.workbench().review().search_query, "x");
+                assert!(app.input().is_empty());
+                press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+                assert!(!app.router.workbench().review().search_capture);
+                assert!(app.router.workbench().review().search_query.is_empty());
+            }
             ViewHotkeyAction::OpenNextPhase => {
                 let target = tempfile::tempdir().unwrap();
                 app.set_target(Some(target.path().to_path_buf()));
@@ -18182,6 +18199,8 @@ fn planning_test_row(id: PlanningTaskId, state: PlanningArtifactState) -> Planni
         required_cli: None,
         cli_available: true,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     }
 }
 
@@ -20984,4 +21003,108 @@ fn enter_on_the_next_investigation_plan_drawer_drafts_the_journey_command() {
     );
 
     assert_eq!(app.input(), "next");
+}
+
+#[test]
+fn threat_tab_digits_switch_tabs_from_prompt_mode_with_empty_composer() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.threat_mut().open(ThreatView::Stride);
+    app.set_shell_view(ShellView::Threat);
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('5'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.threat().view(), ThreatView::Versions);
+    assert_eq!(app.input(), "", "digit must not land in the composer");
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('2'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.threat().view(), ThreatView::Stories);
+}
+
+#[test]
+fn threat_tab_digits_yield_to_an_in_progress_composer_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.threat_mut().open(ThreatView::Stride);
+    app.set_shell_view(ShellView::Threat);
+    app.set_input("model ");
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.input(), "model 1", "draft typing must win over tab keys");
+    assert_eq!(app.router.threat().view(), ThreatView::Stride);
+}
+
+#[test]
+fn catalog_expert_toggle_fires_from_prompt_mode_with_empty_composer() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Catalog);
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+    let before = app.router.catalog().is_expanded();
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+    );
+    assert_ne!(app.router.catalog().is_expanded(), before);
+    assert_eq!(app.input(), "", "e must not land in the composer");
+
+    app.set_input("mod");
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('e'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.input(), "mode", "draft typing must win over the toggle");
+}
+
+#[test]
+fn dfd_page_j_k_cycle_the_inspector_selection_with_wrap() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        path,
+        serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "web", "name": "web", "trustZone": "app", "type": "process"},
+                    {"id": "db", "name": "db", "trustZone": "data", "type": "data-store"}
+                ],
+                "flows": [
+                    {"id": "f1", "sourceId": "web", "targetId": "db", "description": "sql"}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::Dfd);
+    app.set_shell_view(ShellView::Scene);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    // 2 nodes + 1 flow = 3 selectable items; j advances, wraps at the end.
+    for expected in [1, 2, 0] {
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+        );
+        assert_eq!(app.router.scene().dfd_selection(), expected);
+    }
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().dfd_selection(), 2, "k wraps backwards");
+    assert_eq!(app.input(), "", "selection keys never land in the composer");
 }

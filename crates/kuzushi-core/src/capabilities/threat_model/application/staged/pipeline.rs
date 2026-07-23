@@ -17,8 +17,13 @@ pub(crate) fn build_staged_threat_model(
     verb: &str,
     input: BuildInput,
 ) -> Result<Value> {
+    // Stage checkpoints give a failed run real resume coordinates; the
+    // synthesis model call itself replays free through the semantic cache
+    // on an identical re-dispatch of an unchanged workspace.
+    let checkpoints = ctx.stage_checkpoints();
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
+    let research_stage = stage_scope(&checkpoints, "research");
     let dossier = run_research(&input, ctx)?;
     emit_research(ctx, verb, &dossier);
     write_stage_artifact(
@@ -27,13 +32,44 @@ pub(crate) fn build_staged_threat_model(
         "research.json",
         &research_artifact_json(&dossier),
     )?;
+    complete_stage(research_stage, vec![stage_artifact_rel(&input, "research.json")]);
     let spend = staged_spend_limiter(ctx)?;
+    let synthesis_stage = stage_scope(&checkpoints, "synthesis");
     let mut generated = run_synthesis(runtime, ctx, flavor, verb, &input, &source_bundle, &dossier, spend.as_ref())?;
+    complete_stage(synthesis_stage, Vec::new());
     let evidence_warnings = validate_synthesis_document(&mut generated.document, &dossier);
+    let gapfill_stage = stage_scope(&checkpoints, "gapfill");
     let gap_fill = resolve_coverage(runtime, ctx, verb, &input, &dossier, &mut generated, spend.as_ref())?;
     let variants = run_optional_variant_scan(ctx, verb, &input, &mut generated)?;
     finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, variants, evidence_warnings)?;
+    complete_stage(
+        gapfill_stage,
+        vec![
+            stage_artifact_rel(&input, "coverage.json"),
+            stage_artifact_rel(&input, "gapfill.json"),
+        ],
+    );
     complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
+}
+
+pub(crate) fn stage_scope<'a>(
+    checkpoints: &'a Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>>,
+    stage: &str,
+) -> Option<crate::run_artifacts::StageGuard<'a>> {
+    checkpoints.as_ref().map(|handle| handle.stage(stage))
+}
+
+pub(crate) fn complete_stage(
+    guard: Option<crate::run_artifacts::StageGuard<'_>>,
+    artifacts: Vec<String>,
+) {
+    if let Some(guard) = guard {
+        guard.complete(artifacts);
+    }
+}
+
+fn stage_artifact_rel(input: &BuildInput, leaf: &str) -> String {
+    format!("{}/{leaf}", input.output_dir.trim_end_matches('/'))
 }
 
 #[allow(clippy::too_many_arguments)]

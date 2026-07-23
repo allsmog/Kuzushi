@@ -35,7 +35,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "modules",
         aliases: &["/modules", "/m", "m", "show modules"],
         category: ShellCommandCategory::Navigation,
-        description: "open phase-native capabilities (Expert engines with e)",
+        description: "open phase-native capabilities (press e for expert engines)",
     },
     ShellCommandSpec {
         command: "recommend",
@@ -94,10 +94,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     // Keep the typed alias visible without adding `/continue`, which would
     // shadow `/context` in Tab completion for `/con…`.
     ShellCommandSpec {
-        command: "next",
+        command: "next [fresh]",
         aliases: &["next", "/next"],
         category: ShellCommandCategory::Navigation,
-        description: "continue the engagement (alias: continue) — open the current phase's picker",
+        description: "continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the pass at the Map planner",
     },
     ShellCommandSpec {
         command: "phase <map|scan|review|prove|fix>",

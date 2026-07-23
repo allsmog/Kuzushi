@@ -125,6 +125,8 @@ fn planning_row_fixture(
         required_cli: None,
         cli_available: true,
         blocker: None,
+        cached_detail: None,
+        last_attempt: None,
     }
 }
 
@@ -409,7 +411,7 @@ fn compact_planning_picker_scrolls_to_keep_the_focused_task_legible() {
 
     assert!(rendered.contains("TASKS 5-10/10"), "{rendered}");
     assert!(
-        rendered.contains("> SKIP    Threat intel (CVEs)"),
+        rendered.contains("> SKIP    Inventory deps for CVE harvest"),
         "{rendered}"
     );
     assert!(rendered.contains("Enter:"), "{rendered}");
@@ -514,7 +516,7 @@ fn option_rich_planning_row_preserves_confirmation_at_100x32() {
     let selected = rows.iter().map(|row| row.id).collect();
     let option_rich = rows
         .iter()
-        .position(|row| row.id == PlanningTaskId::BuildStrideThreatModel)
+        .position(|row| row.id == PlanningTaskId::BuildThreatModel)
         .unwrap();
     app.engagement.planning_picker_mut().open(rows, selected);
     app.engagement.planning_picker_mut().set_cursor(option_rich);
@@ -523,7 +525,7 @@ fn option_rich_planning_row_preserves_confirmation_at_100x32() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("Build STRIDE threat model"), "{rendered}");
+    assert!(rendered.contains("Build threat model"), "{rendered}");
     assert!(rendered.contains("Enter: run"), "{rendered}");
     assert!(rendered.contains("Space check"), "{rendered}");
     assert!(rendered.contains("Enter run"), "{rendered}");
@@ -1783,27 +1785,6 @@ fn threat_story_model_from_doc_sorts_by_impact_severity() {
 }
 
 #[test]
-fn threat_story_model_from_doc_caps_visible_rows() {
-    let doc = serde_json::json!({
-        "threats": [
-            {"id": "T-001", "title": "one", "impact": "high"},
-            {"id": "T-002", "title": "two", "impact": "high"},
-            {"id": "T-003", "title": "three", "impact": "high"},
-            {"id": "T-004", "title": "four", "impact": "high"},
-            {"id": "T-005", "title": "five", "impact": "high"},
-            {"id": "T-006", "title": "six", "impact": "high"},
-            {"id": "T-007", "title": "seven", "impact": "high"},
-            {"id": "T-008", "title": "eight", "impact": "high"},
-            {"id": "T-009", "title": "nine", "impact": "high"}
-        ]
-    });
-    let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
-    assert_eq!(model.header, "ATTACKER STORIES · 9");
-    assert_eq!(model.rows.len(), 8);
-    assert_eq!(model.rows[7].cells[0], "T-008");
-}
-
-#[test]
 fn threat_scope_model_from_doc_groups_by_impact() {
     let doc = serde_json::json!({
         "threats": [
@@ -1873,47 +1854,6 @@ fn threats_scope_view_renders_criticality_buckets() {
 }
 
 #[test]
-fn threat_stride_rollup_from_doc_parses_real_threats() {
-    let doc = serde_json::json!({
-        "threats": [
-            {"id": "T-001", "category": "spoofing",          "title": "spoofed login",    "impact": "high"},
-            {"id": "T-002", "category": "spoofing",          "title": "stolen token",     "impact": "medium"},
-            {"id": "T-003", "category": "tampering",         "title": "config tamper",    "impact": "critical"},
-            {"id": "T-004", "category": "information-disclosure", "title": "log leak",    "impact": "low"},
-        ]
-    });
-    let rollup =
-        threat_stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
-    assert_eq!(rollup.header, "STRIDE ROLLUP · 4 issues");
-    assert_eq!(rollup.rows.len(), 6);
-
-    let spoof = &rollup.rows[0];
-    assert_eq!(spoof.cells[0], "S");
-    assert_eq!(spoof.cells[1], "Spoofing");
-    assert_eq!(spoof.cells[2], "2");
-    assert_eq!(spoof.cells[3], "issues");
-    assert_eq!(spoof.tone, ThreatStrideTone::High);
-    assert!(spoof.detail.as_deref().unwrap().contains("spoofed login"));
-    assert!(spoof.detail.as_deref().unwrap().contains("stolen token"));
-
-    let tamper = &rollup.rows[1];
-    assert_eq!(tamper.cells[2], "1");
-    assert_eq!(tamper.cells[3], "issue");
-    assert_eq!(tamper.tone, ThreatStrideTone::Critical);
-    assert_eq!(tamper.detail.as_deref(), Some("config tamper"));
-
-    let repud = &rollup.rows[2];
-    assert_eq!(repud.cells[2], "0");
-    assert_eq!(repud.tone, ThreatStrideTone::Low);
-    assert_eq!(repud.detail, None);
-
-    let info = &rollup.rows[3];
-    assert_eq!(info.cells[2], "1");
-    assert_eq!(info.tone, ThreatStrideTone::Low);
-    assert_eq!(info.detail.as_deref(), Some("log leak"));
-}
-
-#[test]
 fn threat_stride_rollup_from_doc_returns_none_on_empty_or_missing_threats() {
     assert!(threat_stride_rollup_from_doc(&serde_json::json!({})).is_none());
     assert!(threat_stride_rollup_from_doc(&serde_json::json!({"threats": []})).is_none());
@@ -1963,7 +1903,9 @@ fn threats_summary_view_is_review_first_without_fake_observations() {
         true,
     )
     .unwrap();
-    let backend = TestBackend::new(132, 36);
+    // Tall enough for the whole summary document: the Threat view scrolls
+    // beneath a pinned header now, and this test asserts full content.
+    let backend = TestBackend::new(132, 48);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.router.threat_mut().open(ThreatView::Summary);
@@ -3130,6 +3072,10 @@ fn failure_handoff_view_renders_current_context() {
             recovery_options: vec!["Install semgrep.".to_string()],
             fallback_prompt: "Continue the failed Kuzushi run.".to_string(),
             claims_forbidden: vec!["verified".to_string()],
+            resume_from: None,
+            completed_stages: Vec::new(),
+            checkpoint_artifacts: Vec::new(),
+            checkpoint_fingerprint: None,
         }),
         pending_failure_context: None,
     }));

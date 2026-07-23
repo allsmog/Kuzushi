@@ -142,6 +142,16 @@ impl<'a> ToolExecutionContext<'a> {
         self.trace.and_then(TraceHandle::run_observation)
     }
 
+    /// Stage-checkpoint handle installed by dispatch for
+    /// `ContinuationSupport::Staged` tools; None otherwise. Executors that
+    /// fan out to worker threads must capture the returned `Arc` before
+    /// spawning — the installation is scoped to the dispatch thread.
+    pub fn stage_checkpoints(
+        &self,
+    ) -> Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>> {
+        crate::run_artifacts::active_stage_checkpoints()
+    }
+
     pub fn run_id(&self) -> Option<String> {
         self.run_artifact_location().map(|(_, run_id)| run_id)
     }

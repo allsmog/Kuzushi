@@ -322,7 +322,7 @@ impl ShellApp {
     /// shouldn't yank the operator to a "run the tool" empty page.
     fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
         if tool_name == "threat-model:build" {
-            self.auto_open_workbench_dfd();
+            self.auto_open_threat_model_viz();
             return;
         }
         if let Some(page) = viz_page_for_tool(tool_name) {
@@ -330,6 +330,20 @@ impl ShellApp {
                 self.auto_open_viz_page(page);
             }
         }
+    }
+
+    /// Mid-plan completions must not steal the screen: the forced DFD switch
+    /// hid the next step's receipt and yanked the operator out of the flow.
+    /// A notice is enough; the deck is one `scene` away.
+    fn auto_open_threat_model_viz(&mut self) {
+        if !self.engagement.planning_queues_empty() {
+            self.log(
+                "scene",
+                "threat model ready — open with `scene` (DFD); plan continues",
+            );
+            return;
+        }
+        self.auto_open_workbench_dfd();
     }
 
     /// Resolve a completed tool's Activity DAG row to `Done` when its producer

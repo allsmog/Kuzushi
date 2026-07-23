@@ -14,6 +14,7 @@ pub(crate) fn parse_single_arg_command(
         | "file-picker" | "component" => parse_optional_single_arg_command(verb, first),
         "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
+        "next" | "continue" => parse_next_command(first, original),
         "phase" => parse_phase_command(first, original),
         "autonomy" | "posture" => parse_autonomy_command(first, original),
         _ => return None,
@@ -69,6 +70,16 @@ fn parse_actor_command(first: Option<&str>, original: &str) -> ShellCommand {
         .and_then(|value| value.parse::<usize>().ok())
         .map(ShellCommand::Actor)
         .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
+}
+
+/// `next` continues the derived phase; `next fresh` is the explicit
+/// fresh-pass affordance. Anything else is an explicit error.
+fn parse_next_command(first: Option<&str>, original: &str) -> ShellCommand {
+    match first {
+        None => ShellCommand::Next,
+        Some("fresh") => ShellCommand::NextFresh,
+        Some(_) => ShellCommand::Unknown(original.to_string()),
+    }
 }
 
 fn parse_phase_command(first: Option<&str>, original: &str) -> ShellCommand {

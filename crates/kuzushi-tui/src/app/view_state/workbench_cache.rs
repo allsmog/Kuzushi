@@ -747,7 +747,6 @@ fn is_map_artifact_path(path: &Path) -> bool {
                 ".kuzushi/context-snapshot.json"
                     | ".kuzushi/entry-points.json"
                     | ".kuzushi/threat-model.json"
-                    | ".kuzushi/threat-model-pasta.json"
                     | ".kuzushi/cpg.bin"
                     | ".kuzushi/threat-intel/candidates.json"
             )

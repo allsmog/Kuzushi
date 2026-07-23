@@ -61,7 +61,7 @@ pub(crate) fn work_liveness(app: &ShellApp) -> WorkLiveness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkbenchHint {
     pub(crate) verb: Cow<'static, str>,
-    pub(crate) label: &'static str,
+    pub(crate) label: Cow<'static, str>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -119,13 +119,13 @@ static FIX_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 
 const REPORT_HINT: WorkbenchHint = WorkbenchHint {
     verb: Cow::Borrowed("report"),
-    label: "open Report",
+    label: Cow::Borrowed("open Report"),
 };
 
 const fn hint(verb: &'static str, label: &'static str) -> WorkbenchHint {
     WorkbenchHint {
         verb: Cow::Borrowed(verb),
-        label,
+        label: Cow::Borrowed(label),
     }
 }
 
@@ -301,8 +301,28 @@ fn customize_phase_hints(
             replace_reverify_hint(hints, app);
         }
         WorkbenchPage::Review => replace_review_decision_hint(hints, app),
-        WorkbenchPage::Map | WorkbenchPage::Scan | WorkbenchPage::Prove => {}
+        WorkbenchPage::Map | WorkbenchPage::Scan => replace_next_destination_hint(hints, app),
+        WorkbenchPage::Prove => {}
     }
+}
+
+/// Item 4a: `next` runs the LEDGER-derived planner, which may not match the
+/// page on screen. The hint names the real destination so its label always
+/// agrees with what Enter would actually run.
+fn replace_next_destination_hint(hints: &mut [WorkbenchHint], app: &ShellApp) {
+    let Some(journey) = super::journey::journey_model(app) else {
+        return;
+    };
+    let Some(hint) = hints.iter_mut().find(|hint| hint.verb == "next") else {
+        return;
+    };
+    let destination = journey
+        .next_summary
+        .split(" · ")
+        .next()
+        .unwrap_or(journey.next_summary.as_str())
+        .to_string();
+    hint.label = Cow::Owned(format!("→ {destination}"));
 }
 
 pub(crate) fn workbench_reverify_control_hint(app: &ShellApp) -> String {

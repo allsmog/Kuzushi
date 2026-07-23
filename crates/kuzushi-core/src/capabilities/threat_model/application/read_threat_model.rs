@@ -191,7 +191,7 @@ pub(crate) fn methodologies_output() -> Value {
     .join("\n");
     let data = json!({
         "methodologies": VALID_METHODOLOGIES,
-        "provider": "randori-pasta",
+        "provider": BuildFlavor::ThreatModel.provider(),
     });
     crate::module_result::completed_output_result(output.clone(), output, data)
 }

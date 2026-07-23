@@ -35,6 +35,12 @@ pub struct ToolDescriptor {
     pub hidden: bool,
     #[serde(default, skip_serializing_if = "RuntimeRequirement::is_never")]
     pub runtime_requirement: RuntimeRequirement,
+    /// How a failed run of this tool can be continued. Declarative so the
+    /// planner, result card, and `resume` know without executing the tool.
+    /// `skip_serializing_if` keeps descriptor fingerprints stable for
+    /// non-adopting tools.
+    #[serde(default, skip_serializing_if = "ContinuationSupport::is_none")]
+    pub continuation: ContinuationSupport,
     /// Canonical journey phase for grouping. Always serialized so `tools --json`
     /// is explicit; `#[serde(default)]` keeps old manifests/dynamic modules
     /// (which land in OPERATE) deserializable.
@@ -68,6 +74,7 @@ impl PartialEq for ToolDescriptor {
             && self.headless == other.headless
             && self.hidden == other.hidden
             && self.runtime_requirement == other.runtime_requirement
+            && self.continuation == other.continuation
             && self.phase == other.phase
             && self.effect == other.effect
             && self.approval == other.approval
@@ -111,6 +118,33 @@ pub enum RuntimeRequirement {
 impl RuntimeRequirement {
     pub fn is_never(&self) -> bool {
         matches!(self, Self::Never)
+    }
+}
+
+/// How a failed run of a tool can be continued after re-dispatch of the
+/// same tool + input.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ContinuationSupport {
+    /// Re-dispatch restarts the tool from scratch.
+    #[default]
+    None,
+    /// The shared agent tool loop's transcript checkpoint resumes completed
+    /// turns automatically on identical re-dispatch.
+    Loop,
+    /// The tool consumes a `StageCheckpointHandle` and skips stages whose
+    /// receipts (and artifacts) survive from the failed run.
+    Staged,
+}
+
+impl ContinuationSupport {
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    /// Whether an identical re-dispatch can pick up prior paid work.
+    pub fn is_continuable(&self) -> bool {
+        !self.is_none()
     }
 }
 

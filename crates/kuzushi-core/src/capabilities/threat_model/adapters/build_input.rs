@@ -5,21 +5,15 @@ pub(crate) fn parse_build_input(
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
 ) -> Result<BuildInput> {
-    let target = resolve_target(input, ctx)?;
-    let context_mode = read_context_mode(input);
-    let run_id = Uuid::new_v4().to_string();
-    let output_dir = read_string(input, &["outputDir", "output_dir"])
-        .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id));
+    let mut build = parse_generation_build_input(input)?;
+    apply_target_build_input(&mut build, input, ctx, flavor)?;
+    Ok(build)
+}
+
+/// Generation knobs that need only the raw input value.
+fn parse_generation_build_input(input: &Value) -> Result<BuildInput> {
     Ok(BuildInput {
-        repo_name: repo_name(&target),
-        methodology: read_methodology(input, flavor.default_methodology()),
-        sources: read_source_artifacts(input, flavor, &context_mode)?,
-        seeds: read_string_list(input, &["seed"]),
-        design_doc: read_string(input, &["designDoc", "design_doc", "design"]),
         slice: read_slice(input),
-        stages: read_stages(input, flavor.tool_name())?,
-        output_dir,
-        context_mode,
         context_limit: context_limit(input),
         max_source_bytes: max_source_bytes(input),
         max_elements: read_usize(input, &["maxElements", "max_elements"], 40, 5),
@@ -27,13 +21,9 @@ pub(crate) fn parse_build_input(
         max_output_tokens: read_max_output_tokens(input),
         emit_findings: read_bool(input, &["emitFindings", "emit_findings"], false),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
-        prompt_override: Some(
-            prompt_override(input, &target)?
-                .unwrap_or_else(|| DEFAULT_THREAT_MODEL_GUIDANCE.to_string()),
-        ),
-        model: build_model(input, ctx, flavor)?,
         pipeline: read_pipeline(input)?,
         mode: read_build_mode(input)?,
+        seed_mode: read_seed_mode(input)?,
         budget_usd: read_budget_usd(input)?,
         history_depth: read_usize(input, &["historyDepth", "history_depth"], 300, 0),
         variant_scan: read_bool(input, &["variantScan", "variant_scan"], true),
@@ -43,9 +33,37 @@ pub(crate) fn parse_build_input(
             .get("advisoryFixtures")
             .or_else(|| input.get("advisory_fixtures"))
             .cloned(),
-        vulns: read_operator_vulns(input, &target)?,
-        target,
+        ..Default::default()
     })
+}
+
+/// Fields that depend on the resolved target, flavor, or execution context.
+fn apply_target_build_input(
+    build: &mut BuildInput,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+) -> Result<()> {
+    let target = resolve_target(input, ctx)?;
+    let context_mode = read_context_mode(input);
+    let run_id = Uuid::new_v4().to_string();
+    build.output_dir = read_string(input, &["outputDir", "output_dir"])
+        .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id));
+    build.repo_name = repo_name(&target);
+    build.methodology = read_methodology(input, flavor.default_methodology());
+    build.sources = read_source_artifacts(input, flavor, &context_mode)?;
+    build.seeds = read_string_list(input, &["seed"]);
+    build.design_doc = read_string(input, &["designDoc", "design_doc", "design"]);
+    build.stages = read_stages(input, flavor.tool_name())?;
+    build.prompt_override = Some(
+        prompt_override(input, &target)?
+            .unwrap_or_else(|| DEFAULT_THREAT_MODEL_GUIDANCE.to_string()),
+    );
+    build.model = build_model(input, ctx, flavor)?;
+    build.vulns = read_operator_vulns(input, &target)?;
+    build.context_mode = context_mode;
+    build.target = target;
+    Ok(())
 }
 
 const MAX_VULNS_FILE_BYTES: usize = 512 * 1024;
@@ -181,6 +199,20 @@ fn read_build_mode(input: &Value) -> Result<String> {
         );
     }
     Ok(mode)
+}
+
+fn read_seed_mode(input: &Value) -> Result<String> {
+    let Some(seed_mode) = read_string(input, &["seedMode", "seed_mode"]) else {
+        return Ok("seeded".to_string());
+    };
+    let seed_mode = seed_mode.to_lowercase();
+    if !VALID_SEED_MODES.contains(&seed_mode.as_str()) {
+        anyhow::bail!(
+            "threat-model:build seedMode must be one of {}, got {seed_mode:?}",
+            VALID_SEED_MODES.join(", ")
+        );
+    }
+    Ok(seed_mode)
 }
 
 fn read_advisories(input: &Value) -> Result<String> {
@@ -362,6 +394,31 @@ pub(crate) fn read_string_list(input: &Value, keys: &[&str]) -> Vec<String> {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod seed_mode_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn seed_mode_defaults_to_seeded_and_accepts_fresh() {
+        assert_eq!(read_seed_mode(&json!({})).unwrap(), "seeded");
+        assert_eq!(
+            read_seed_mode(&json!({"seedMode": "fresh"})).unwrap(),
+            "fresh"
+        );
+        assert_eq!(
+            read_seed_mode(&json!({"seed_mode": "SEEDED"})).unwrap(),
+            "seeded"
+        );
+    }
+
+    #[test]
+    fn unknown_seed_mode_is_rejected() {
+        let error = read_seed_mode(&json!({"seedMode": "recursive"})).unwrap_err();
+        assert!(error.to_string().contains("seedMode"));
+    }
 }
 
 #[cfg(test)]

@@ -84,6 +84,11 @@ pub enum PhaseResultAction {
     RunAgain,
     Regenerate,
     Discard,
+    /// Resume the failed run from its stage/loop checkpoint by
+    /// re-dispatching the identical recorded input. Offered only when a
+    /// live checkpoint exists — never persisted into attempt receipts,
+    /// because checkpoint state changes after the receipt is written.
+    ContinueRun,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

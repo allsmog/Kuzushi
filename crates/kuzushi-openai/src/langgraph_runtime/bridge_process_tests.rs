@@ -3,7 +3,8 @@ use super::bridge_payloads::{
 };
 use super::bridge_process::{
     bridge_near_executable, configure_bridge_process_group, default_langgraph_bridge_command,
-    mcp_binary_env_defaults, public_bridge_error, public_bridge_failure, read_bounded_pipe,
+    mcp_binary_env_defaults, public_bridge_error, public_bridge_failure_with_detail,
+    read_bounded_pipe,
     run_next_step_bridge, wait_with_output_deadline_limits,
 };
 use kuzushi_core::AgentToolPolicy;
@@ -244,7 +245,8 @@ fn public_bridge_error_suppresses_arbitrary_provider_content() {
 fn structured_bridge_failure_ignores_arbitrary_fallback_content() {
     let sentinel = "raw-provider-body-sentinel";
 
-    let public = public_bridge_failure(Some("rate_limited"), Some(429), Some(sentinel));
+    let public =
+        public_bridge_failure_with_detail(Some("rate_limited"), Some(429), Some(sentinel), None);
 
     assert_eq!(public, "Provider rate limited the request (HTTP 429).");
     assert!(!public.contains(sentinel));

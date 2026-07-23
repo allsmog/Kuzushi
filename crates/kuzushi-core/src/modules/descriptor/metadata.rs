@@ -55,6 +55,14 @@ impl ToolDescriptor {
         self
     }
 
+    pub(in crate::modules) fn with_continuation(
+        mut self,
+        continuation: ContinuationSupport,
+    ) -> Self {
+        self.continuation = continuation;
+        self
+    }
+
     pub(in crate::modules) fn with_policy(mut self, policy: ToolPolicy) -> Self {
         self.phase = policy.phase;
         self.runtime_requirement = policy.runtime_requirement;
@@ -181,6 +189,7 @@ pub(in crate::modules) fn tool_with_options(
         headless: true,
         hidden: false,
         runtime_requirement: RuntimeRequirement::Never,
+        continuation: ContinuationSupport::None,
         phase: ToolPhase::default(),
         effect: ToolEffect::default(),
         approval: ApprovalPolicy::default(),

@@ -28,8 +28,20 @@ pub(crate) fn build_actor_prompt(
     append_actor_flows(&mut lines, hunt);
     append_actor_threats(&mut lines, hunt, options);
     append_actor_mission(&mut lines, options);
+    lines.push(actor_findings_contract_line());
     lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
     lines.join("\n")
+}
+
+/// The exact per-finding shape, rendered from the same schema the
+/// structured-output contract validates against (single source of truth).
+/// Findings without a usable location are rejected by the deterministic
+/// normalizer, so the prompt says so up front.
+fn actor_findings_contract_line() -> String {
+    format!(
+        "Each finding object MUST include: title, severity (critical|high|medium|low|info), filePath (target-relative source path), startLine (1-based integer), and message. Optional: endLine, ruleId, evidence, confidence, likelihood, impact, cwe[]. Findings without filePath + startLine are rejected by a deterministic normalizer. JSON Schema for the response: {}",
+        findings_schema()
+    )
 }
 
 fn actor_prompt_preamble(target: &Path, options: &CarliniInput) -> Vec<String> {

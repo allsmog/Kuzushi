@@ -38,7 +38,7 @@ fn threat_intel_tools() -> Vec<ToolDescriptor> {
 fn threat_intel_discover_tool() -> ToolDescriptor {
     tool_with_options(
         "threat-intel:discover",
-        "Inspect dependencies and context, then write .kuzushi threat-intel candidates.",
+        "Deterministic dependency inventory (npm/cargo/pip/go/Bazel) written to .kuzushi threat-intel candidates; it does NOT research CVEs — feed the candidates into threat-intel:harvest for that.",
         vec![target_option()],
     )
     .with_policy(workspace_policy(
@@ -172,7 +172,11 @@ fn collect_packages(target: &Path) -> Result<Vec<Value>> {
     collect_npm_packages(target, &mut entries)?;
     collect_cargo_packages(target, &mut entries)?;
     collect_python_requirements(target, &mut entries)?;
-    collect_go_modules(target, &mut entries)?;
+    collect_go_modules_at(target, &target.join("go.mod"), &mut entries)?;
+    collect_bazel_module_deps(target, &mut entries)?;
+    if entries.is_empty() {
+        collect_nested_go_modules(target, &mut entries)?;
+    }
     Ok(entries)
 }
 
@@ -248,9 +252,8 @@ fn collect_python_requirements(target: &Path, entries: &mut Vec<Value>) -> Resul
     Ok(())
 }
 
-fn collect_go_modules(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
-    let path = target.join("go.mod");
-    let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+fn collect_go_modules_at(target: &Path, path: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let Some(body) = read_optional_threat_intel_input(target, path)? else {
         return Ok(());
     };
     let mut in_require = false;
@@ -274,6 +277,132 @@ fn collect_go_modules(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
         }));
     }
     Ok(())
+}
+
+/// Bazel monorepos rarely keep a root go.mod: bzlmod `bazel_dep` rows in
+/// MODULE.bazel and `go_repository` rules in WORKSPACE carry the dependency
+/// inventory instead — without this fallback a Bazel Go target produced an
+/// empty candidate set.
+fn collect_bazel_module_deps(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    for leaf in ["MODULE.bazel", "WORKSPACE", "WORKSPACE.bazel"] {
+        let path = target.join(leaf);
+        let Some(body) = read_optional_threat_intel_input(target, &path)? else {
+            continue;
+        };
+        collect_bazel_dep_lines(&body, entries);
+        collect_go_repository_rules(&body, entries);
+    }
+    Ok(())
+}
+
+fn collect_bazel_dep_lines(body: &str, entries: &mut Vec<Value>) {
+    for line in body.lines() {
+        let Some(rest) = line.trim().strip_prefix("bazel_dep(") else {
+            continue;
+        };
+        if let Some(name) = bazel_attr(rest, "name") {
+            entries.push(json!({
+                "ecosystem": "bazel",
+                "name": name,
+                "version": bazel_attr(rest, "version").unwrap_or_default(),
+                "scope": "bazel_dep",
+            }));
+        }
+    }
+}
+
+/// `go_repository(...)` rules span multiple lines; collect the
+/// importpath/version pair per rule block.
+fn collect_go_repository_rules(body: &str, entries: &mut Vec<Value>) {
+    let mut rule: Option<GoRepositoryRule> = None;
+    for line in body.lines().map(str::trim) {
+        rule = fold_go_repository_line(rule, line, entries);
+    }
+}
+
+#[derive(Default)]
+struct GoRepositoryRule {
+    importpath: Option<String>,
+    version: String,
+}
+
+fn fold_go_repository_line(
+    rule: Option<GoRepositoryRule>,
+    line: &str,
+    entries: &mut Vec<Value>,
+) -> Option<GoRepositoryRule> {
+    let Some(mut current) = rule else {
+        return line
+            .starts_with("go_repository(")
+            .then(GoRepositoryRule::default);
+    };
+    if line.starts_with(')') {
+        push_go_repository_entry(current, entries);
+        return None;
+    }
+    absorb_go_repository_attr(&mut current, line);
+    Some(current)
+}
+
+fn absorb_go_repository_attr(rule: &mut GoRepositoryRule, line: &str) {
+    if let Some(value) = bazel_attr(line, "importpath") {
+        rule.importpath = Some(value);
+    }
+    if let Some(value) = bazel_attr(line, "version").or_else(|| bazel_attr(line, "tag")) {
+        rule.version = value;
+    }
+}
+
+fn push_go_repository_entry(rule: GoRepositoryRule, entries: &mut Vec<Value>) {
+    if let Some(name) = rule.importpath {
+        entries.push(json!({
+            "ecosystem": "go",
+            "name": name,
+            "version": rule.version,
+            "scope": "go_repository",
+        }));
+    }
+}
+
+fn bazel_attr(text: &str, key: &str) -> Option<String> {
+    let spaced = format!("{key} =");
+    let tight = format!("{key}=");
+    let rest = text
+        .split(spaced.as_str())
+        .nth(1)
+        .or_else(|| text.split(tight.as_str()).nth(1))?;
+    let start = rest.find('"')? + 1;
+    let end = rest[start..].find('"')? + start;
+    Some(rest[start..end].to_string())
+}
+
+const NESTED_GO_SCAN_LIMIT: usize = 200;
+
+/// Monorepos keep per-service go.mod files below the root; a bounded
+/// first-level scan finds them when the root manifests yielded nothing.
+fn collect_nested_go_modules(target: &Path, entries: &mut Vec<Value>) -> Result<()> {
+    let Ok(children) = std::fs::read_dir(target) else {
+        return Ok(());
+    };
+    for child in children.flatten().take(NESTED_GO_SCAN_LIMIT) {
+        let path = child.path();
+        if !path.is_dir() || skipped_nested_scan_dir(&path) {
+            continue;
+        }
+        let go_mod = path.join("go.mod");
+        if go_mod.is_file() {
+            collect_go_modules_at(target, &go_mod, entries)?;
+        }
+    }
+    Ok(())
+}
+
+fn skipped_nested_scan_dir(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_none_or(|name| {
+            name.starts_with('.') || matches!(name, "vendor" | "node_modules" | "target")
+        })
 }
 
 fn go_requirement_candidate<'a>(line: &'a str, in_require: &mut bool) -> Option<&'a str> {
@@ -410,5 +539,63 @@ mod discover_input_tests {
         let error = collect_packages(target.path()).unwrap_err();
 
         assert!(error.to_string().contains("Could not parse"));
+    }
+
+    #[test]
+    fn bazel_workspace_go_repositories_yield_packages() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(
+            target.path().join("WORKSPACE"),
+            r#"
+go_repository(
+    name = "com_github_gorilla_mux",
+    importpath = "github.com/gorilla/mux",
+    version = "v1.8.0",
+)
+go_repository(
+    name = "org_golang_x_crypto",
+    importpath = "golang.org/x/crypto",
+    tag = "v0.21.0",
+)
+"#,
+        )
+        .unwrap();
+        std::fs::write(
+            target.path().join("MODULE.bazel"),
+            "bazel_dep(name = \"rules_go\", version = \"0.46.0\")\n",
+        )
+        .unwrap();
+
+        let packages = collect_packages(target.path()).unwrap();
+
+        let names: Vec<&str> = packages
+            .iter()
+            .filter_map(|entry| entry.get("name").and_then(Value::as_str))
+            .collect();
+        assert!(names.contains(&"github.com/gorilla/mux"), "{names:?}");
+        assert!(names.contains(&"golang.org/x/crypto"), "{names:?}");
+        assert!(names.contains(&"rules_go"), "{names:?}");
+        assert!(packages.iter().any(|entry| {
+            entry.get("name").and_then(Value::as_str) == Some("golang.org/x/crypto")
+                && entry.get("version").and_then(Value::as_str) == Some("v0.21.0")
+        }));
+    }
+
+    #[test]
+    fn nested_go_module_fallback_covers_monorepos_without_root_manifests() {
+        let target = tempfile::tempdir().unwrap();
+        let service = target.path().join("gateway");
+        std::fs::create_dir_all(&service).unwrap();
+        std::fs::write(
+            service.join("go.mod"),
+            "module example.com/gateway\n\nrequire github.com/pkg/errors v0.9.1\n",
+        )
+        .unwrap();
+
+        let packages = collect_packages(target.path()).unwrap();
+
+        assert!(packages.iter().any(|entry| {
+            entry.get("name").and_then(Value::as_str) == Some("github.com/pkg/errors")
+        }));
     }
 }

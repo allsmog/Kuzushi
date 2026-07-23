@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod tests;
 pub use descriptor_model::{
-    DagNodeDescriptor, FileReferenceSemantics, ModuleKind, ModuleMetadata, OptionSpec, OptionType,
-    PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
+    ContinuationSupport, DagNodeDescriptor, FileReferenceSemantics, ModuleKind, ModuleMetadata,
+    OptionSpec, OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
 };
 pub use metadata::BuiltinModule;
 pub use tool_phase::{canonical_tool_phase, ToolPhase};

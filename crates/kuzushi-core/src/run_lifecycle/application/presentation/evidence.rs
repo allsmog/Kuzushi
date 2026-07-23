@@ -131,7 +131,7 @@ fn result_summary_presentation(
     ResultSummaryPresentationV1 {
         tool: SafeText::operator_visible(&summary.tool),
         status: SafeText::operator_visible(&summary.status),
-        summary: SafeText::operator_visible(&summary.summary),
+        summary: SafeText::condensed_line(&summary.summary),
         output_lines: safe_lines(&summary.output_lines),
         output_line_count: summary.output_line_count,
         warnings: safe_lines(&summary.warnings),

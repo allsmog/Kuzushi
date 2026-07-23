@@ -282,7 +282,8 @@ fn execute_carlini_threat_hunt_run(
     // actor-spawn header in the feed. Per-actor children would require
     // threading the per-actor parent_step into run_carlini_actor_hunts;
     // for now the scope means every LLM call surfaces under the run.
-    let _actor_scope = begin_carlini_actor_scope(ctx, run.parent_step);
+    let _actor_scope =
+        begin_carlini_actor_scope(ctx, run.parent_step, run.capped.len(), total_runs);
     // The repository inventory is identical for every actor, so render its
     // untrusted-repo block once here and reuse it across the whole loop
     // instead of rebuilding the same large payload once per actor.
@@ -300,7 +301,8 @@ fn execute_carlini_threat_hunt_run(
     drop(_actor_scope);
     let mut findings = outcome.findings;
     finalize_carlini_findings(input, &mut findings, run.options.max_findings)?;
-    emit_carlini_completion(ctx, findings.len());
+    emit_carlini_rejections(ctx, &outcome.rejected);
+    emit_carlini_completion(ctx, findings.len(), outcome.rejected.len());
     carlini_threat_hunt_report(
         run.target,
         ctx,
@@ -310,6 +312,7 @@ fn execute_carlini_threat_hunt_run(
         run.inventory.len(),
         threat_focused_inventory_count(&run.inventory, &run.capped),
         findings,
+        outcome.rejected.len(),
         outcome.cost_usd,
         outcome.cost_usd_exact,
     )
@@ -448,25 +451,75 @@ fn carlini_actor_run_count(actor_count: usize, runs_per_actor: usize) -> usize {
 fn begin_carlini_actor_scope(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
+    actor_count: usize,
+    total_runs: usize,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;
     };
 
+    // Honest phase header: this scope groups the real per-actor LLM calls,
+    // not a compose/defender-critic pipeline that does not exist here.
     let phase = trace
         .child(parent)
-        .step("reasoning", "run", "compose · tool-call · defender-critic")
+        .step(
+            "reasoning",
+            "run",
+            format!("actor hunts · {actor_count} actors · {total_runs} runs"),
+        )
         .emit();
     Some(trace.parent_scope(phase))
 }
 
-fn emit_carlini_completion(ctx: &ToolExecutionContext<'_>, finding_count: usize) {
+const MAX_TRACED_REJECTIONS: usize = 10;
+
+fn emit_carlini_rejections(ctx: &ToolExecutionContext<'_>, rejected: &[String]) {
+    let Some(trace) = ctx.trace else {
+        return;
+    };
+    for reason in rejected.iter().take(MAX_TRACED_REJECTIONS) {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "run",
+                format!("finding rejected by normalizer · {reason}"),
+            )
+            .with_severity("warn")
+            .emit();
+    }
+    if rejected.len() > MAX_TRACED_REJECTIONS {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "run",
+                format!(
+                    "… {} more findings rejected by normalizer",
+                    rejected.len() - MAX_TRACED_REJECTIONS
+                ),
+            )
+            .with_severity("warn")
+            .emit();
+    }
+}
+
+fn emit_carlini_completion(
+    ctx: &ToolExecutionContext<'_>,
+    finding_count: usize,
+    rejected_count: usize,
+) {
     if let Some(trace) = ctx.trace {
+        let rejected_suffix = if rejected_count > 0 {
+            format!(" · {rejected_count} rejected by schema")
+        } else {
+            String::new()
+        };
         let _ = trace
             .step(
                 "done",
                 "run",
-                format!("carlini-threat-hunt:run complete · {finding_count} findings"),
+                format!(
+                    "carlini-threat-hunt:run complete · {finding_count} findings{rejected_suffix}"
+                ),
             )
             .emit();
     }

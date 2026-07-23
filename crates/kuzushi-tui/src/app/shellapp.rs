@@ -73,6 +73,7 @@ impl ShellApp {
         }
         self.router.set_current(view);
         if current != view {
+            self.refresh_planning_picker_on_return(view);
             self.record_session_event(
                 kuzushi_core::session_transcript::SessionEvent::ViewChanged {
                     from: Some(format!("{current:?}")),
@@ -80,6 +81,23 @@ impl ShellApp {
                 },
             );
         }
+    }
+
+    /// Returning to an already-open planning picker (nav-history pop, Esc
+    /// from a contextual deck) must re-derive row artifact reality — tools
+    /// may have completed while another view was on screen. Gated on the
+    /// staleness flag so a picker nothing ran under is left untouched.
+    fn refresh_planning_picker_on_return(&mut self, view: ShellView) {
+        if view != ShellView::PlanningPicker || !self.engagement.planning_picker().artifacts_stale()
+        {
+            return;
+        }
+        let Some(target) = self.target_owned() else {
+            return;
+        };
+        self.engagement
+            .planning_picker_mut()
+            .refresh_artifact_states(&target);
     }
 
     pub(crate) fn restore_contextual_surface_origin(&mut self) -> bool {
@@ -1399,7 +1417,8 @@ mod tests {
         assert!(notice.message.contains("run input must be JSON"));
         assert!(notice
             .message
-            .contains("Next: run <tool> (input is optional and defaults to {})"));
+            .contains("Next: run semgrep:scan (no JSON needed — defaults apply)"));
+        assert!(notice.message.contains("options semgrep:scan"));
         assert_failed_preparation_run(temp.path(), &expected_title);
     }
 

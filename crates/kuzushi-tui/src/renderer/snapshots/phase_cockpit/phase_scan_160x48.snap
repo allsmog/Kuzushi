@@ -7,7 +7,7 @@ size: 160x48
 KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · model configured openai:gpt-5.4 [auth missing]
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- run sast:scan {} scan now · next continue workspace phase · z open findings heatmap · jobs inspect run receipts · report open Report
+ run sast:scan {} scan now · next → Review · z open findings heatmap · jobs inspect run receipts · report open Report
 │▸ RECORDED ENGINE OUTCOMES                                     │SCAN RECEIPT                                   │SCOPE / PLAN
 │✓ Run SAST scan · complete · r:scan-phase                      │outcome completed · revision not recorded      │./phase-target
 │                                                               │result legacy inferred                         │recorded tool sast:scan

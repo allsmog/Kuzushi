@@ -245,7 +245,7 @@ impl SastSubtoolDispatch<'_> {
     where
         T: serde::de::DeserializeOwned,
     {
-        let output = self.run(tool_name, self.input)?;
+        let output = self.checkpointed_engine_output(tool_name, self.input)?;
         let data = output
             .get("data")
             .cloned()
@@ -262,9 +262,26 @@ impl SastSubtoolDispatch<'_> {
         crate::run_artifacts::ScanEngineStageOutcome,
     )> {
         let tool_name = "taint-iris-next:hunt";
-        let output = self.run(tool_name, &taint_iris_next_hunt_input(self.input))?;
+        let output =
+            self.checkpointed_engine_output(tool_name, &taint_iris_next_hunt_input(self.input))?;
         let outcome = scan_engine_outcome(&output);
         Ok((taint_iris_next_report_from_tool_output(&output)?, outcome))
+    }
+
+    /// Umbrella-level engine continuation: a Completed agentic engine from a
+    /// prior failed sast:scan run is reused from its checkpointed output.
+    /// Its findings already live in the findings store — reusing the report
+    /// never re-ingests them.
+    fn checkpointed_engine_output(&self, tool_name: &str, input: &Value) -> Result<Value> {
+        let stage_id = format!("engine:{tool_name}");
+        let checkpoints = crate::run_artifacts::active_stage_checkpoints();
+        if let Some(output) = reuse_completed_engine_output(checkpoints.as_deref(), &stage_id) {
+            return Ok(output);
+        }
+        let stage = checkpoints.as_deref().map(|handle| handle.stage(&stage_id));
+        let output = self.run(tool_name, input)?;
+        record_completed_engine_output(checkpoints.as_deref(), stage, &stage_id, &output);
+        Ok(output)
     }
 
     fn run(&self, tool_name: &str, input: &Value) -> Result<Value> {
@@ -279,6 +296,39 @@ impl SastSubtoolDispatch<'_> {
         )?;
         validate_sast_scan_engine_result(tool_name, &output)?;
         Ok(output)
+    }
+}
+
+fn reuse_completed_engine_output(
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    stage_id: &str,
+) -> Option<Value> {
+    let handle = handle?;
+    let receipt = handle.completed_stage(stage_id)?;
+    let output = handle.read_stage_payload(&receipt)?;
+    handle
+        .stage(stage_id)
+        .skip("reused completed engine output from prior failed run");
+    Some(output)
+}
+
+/// Only a Complete engine outcome is checkpoint-worthy; partial or failed
+/// engines must re-run on continuation.
+fn record_completed_engine_output(
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    stage: Option<crate::run_artifacts::StageGuard<'_>>,
+    stage_id: &str,
+    output: &Value,
+) {
+    if scan_engine_outcome(output) != crate::run_artifacts::ScanEngineStageOutcome::Complete {
+        return;
+    }
+    if let (Some(handle), Some(stage)) = (handle, stage) {
+        let artifacts = handle
+            .write_stage_payload(stage_id, output)
+            .into_iter()
+            .collect();
+        stage.complete(artifacts);
     }
 }
 

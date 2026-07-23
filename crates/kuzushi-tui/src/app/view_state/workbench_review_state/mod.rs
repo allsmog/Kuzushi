@@ -31,6 +31,34 @@ pub struct WorkbenchReviewState {
     /// latest verdict. Undo appends the inverse records — history is never
     /// deleted; the latest-decision-wins fold makes an append a reversal.
     pub backlog_last_batch: Vec<BacklogUndoEntry>,
+    /// Item 13: incremental search over the visible queue. Free text
+    /// fuzzy-matches title/message/path/rule id; `sev:`/`tool:`/`status:`/
+    /// `actor:` terms filter facets. Persists after Enter closes capture.
+    pub search_query: String,
+    /// True while the palette-style capture owns typing (`/` opens it) —
+    /// keys never leak into the composer.
+    pub search_capture: bool,
+}
+
+impl WorkbenchReviewState {
+    pub(crate) fn open_search_capture(&mut self) {
+        self.search_capture = true;
+    }
+
+    pub(crate) fn close_search_capture(&mut self, keep_query: bool) {
+        self.search_capture = false;
+        if !keep_query {
+            self.search_query.clear();
+        }
+    }
+
+    pub(crate) fn push_search_char(&mut self, character: char) {
+        self.search_query.push(character);
+    }
+
+    pub(crate) fn pop_search_char(&mut self) {
+        self.search_query.pop();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

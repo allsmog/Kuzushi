@@ -98,6 +98,9 @@ pub enum ShellCommand {
     /// Continue the engagement: open the phase picker at the journey's
     /// current phase (derived from workspace state when no walker is live).
     Next,
+    /// `next fresh` — explicit fresh-pass affordance: reset planner drafts
+    /// and reopen the Map planner for this revision.
+    NextFresh,
     /// Open a specific engagement phase picker without changing workspace-
     /// derived `next` semantics.
     Phase(WorkflowPhase),

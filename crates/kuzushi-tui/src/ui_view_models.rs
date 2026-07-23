@@ -325,7 +325,9 @@ pub(crate) use threat_stories::threat_story_model_from_doc;
 pub(crate) use threat_stories::{threat_story_model, ThreatStoryTone};
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
-pub(crate) use threat_stride::{threat_stride_rollup, ThreatStrideRow, ThreatStrideTone};
+pub(crate) use threat_stride::{
+    threat_stride_rollup, ThreatStrideMember, ThreatStrideRow, ThreatStrideTone,
+};
 pub(crate) use tools::{tools_model, ToolGroup, ToolRow};
 pub(crate) use transcript::{
     plain_command_result_model, transcript_model, transcript_model_from_log_index,
@@ -337,9 +339,10 @@ pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::selected_taint_flow_path;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
-    cached_risk_by_module, dfd_model, risk_by_module, taint_flow_path, taint_flow_path_for_finding,
-    AttackChain, AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap,
-    ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
+    cached_risk_by_module, dfd_model, dfd_selectable_count, dfd_selected_item, risk_by_module,
+    taint_flow_path, taint_flow_path_for_finding, AttackChain, AttackTree, DfdFlowModel, DfdKind,
+    DfdModel, DfdNodeModel, DfdSelected, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
+    TaintStageModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, work_liveness,

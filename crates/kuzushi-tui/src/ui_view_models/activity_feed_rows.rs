@@ -223,6 +223,12 @@ fn presentation_feed_rows(
     row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
+    // The Run Focus header already owns the run's cost line; the typed
+    // Terminal cell restating it here put cost on screen three times
+    // (header + this row + the receipt notice). Header wins.
+    if row.text.trim_start().starts_with("Cost · ") {
+        return Vec::new();
+    }
     let tone = presentation_row_tone(&row);
     wrapped_feed_rows(Some(row.key), BTreeSet::new(), &row.text, width, tone)
 }
@@ -492,7 +498,15 @@ fn stalled_trace_row(
         return None;
     }
     let (elapsed, source) = trace_silence_elapsed(session, now)?;
-    (elapsed.as_secs() >= STALLED_TRACE_AFTER_SECS).then(|| ActivityFeedPaneRow {
+    if elapsed.as_secs() < STALLED_TRACE_AFTER_SECS {
+        return None;
+    }
+    // An open model call is quiet by nature — name it instead of implying
+    // a stall, until it outlives the model-call watchdog.
+    if let Some(query_age) = super::activity_observability::open_query_in_flight(session, now) {
+        return Some(query_in_flight_row(query_age, width));
+    }
+    Some(ActivityFeedPaneRow {
         key: None,
         disclosed_keys: BTreeSet::new(),
         text: fit(
@@ -504,6 +518,21 @@ fn stalled_trace_row(
         ),
         tone: ActivityFeedRowTone::Warn,
     })
+}
+
+fn query_in_flight_row(query_age: Duration, width: usize) -> ActivityFeedPaneRow {
+    ActivityFeedPaneRow {
+        key: None,
+        disclosed_keys: BTreeSet::new(),
+        text: fit(
+            &format!(
+                " ◐ query in flight {} · model call awaiting response",
+                silence_duration_label(query_age)
+            ),
+            width,
+        ),
+        tone: ActivityFeedRowTone::Primary,
+    }
 }
 
 fn activity_is_live(session: &ActivitySession, running_tool: Option<&str>) -> bool {
@@ -1212,6 +1241,12 @@ mod tests {
             .iter()
             .any(|row| row.text.contains("Outcome · partial")));
         assert!(rows.iter().any(|row| row.text.contains("NEXT · inspect")));
+        // C3: the Run Focus header owns the cost line — the typed Terminal
+        // cell must not restate it in the feed.
+        assert!(
+            !rows.iter().any(|row| row.text.contains("Cost · ")),
+            "typed Cost row leaked into the Run Focus feed"
+        );
     }
 
     fn push_live_plan(

@@ -1049,6 +1049,7 @@ mod tests {
             ShellCommand::Quickstart => "quickstart",
             ShellCommand::Onboarding => "onboarding",
             ShellCommand::Next => "next",
+            ShellCommand::NextFresh => "next-fresh",
             ShellCommand::Phase(_) => "phase",
             ShellCommand::Autonomy(_) => "autonomy",
             ShellCommand::Logs => "logs",

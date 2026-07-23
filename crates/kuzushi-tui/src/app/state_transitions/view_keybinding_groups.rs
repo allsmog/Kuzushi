@@ -404,56 +404,73 @@ fn review_page_action_keybindings(backlog: bool) -> Vec<ViewKeybinding> {
             if backlog { "backlog off" } else { "backlog" },
             ViewHotkeyAction::WorkbenchBacklogToggle,
         ),
+        bind_char(
+            '/',
+            "/",
+            "search findings",
+            ViewHotkeyAction::WorkbenchReviewSearch,
+        ),
     ];
     // `1..5` are the page-switch keys, so decisions use mnemonic letters.
     if backlog {
-        bindings.extend([
-            bind_char(
-                'c',
-                "c",
-                "confirm",
-                ViewHotkeyAction::WorkbenchBacklogDecide("confirmed"),
-            ),
-            bind_char(
-                'f',
-                "f",
-                "reject-FP",
-                ViewHotkeyAction::WorkbenchBacklogDecide("rejected_false_positive"),
-            ),
-            bind_char(
-                'd',
-                "d",
-                "defer",
-                ViewHotkeyAction::WorkbenchBacklogDecide("deferred"),
-            ),
-            bind_char(
-                'w',
-                "w",
-                "needs-review",
-                ViewHotkeyAction::WorkbenchBacklogDecide("needs_review"),
-            ),
-            bind_char(
-                's',
-                "s",
-                "sev filter",
-                ViewHotkeyAction::WorkbenchBacklogSeverityCycle,
-            ),
-            bind_char(
-                't',
-                "t",
-                "tool filter",
-                ViewHotkeyAction::WorkbenchBacklogToolCycle,
-            ),
-            bind_char(
-                'X',
-                "X",
-                "defer-all",
-                ViewHotkeyAction::WorkbenchBacklogBulkDefer,
-            ),
-            bind_char('u', "u", "undo", ViewHotkeyAction::WorkbenchBacklogUndo),
-        ]);
+        bindings.extend(backlog_decision_keybindings());
     }
     bindings
+}
+
+fn backlog_decision_keybindings() -> Vec<ViewKeybinding> {
+    let mut bindings = backlog_verdict_keybindings();
+    bindings.extend([
+        bind_char(
+            's',
+            "s",
+            "sev filter",
+            ViewHotkeyAction::WorkbenchBacklogSeverityCycle,
+        ),
+        bind_char(
+            't',
+            "t",
+            "tool filter",
+            ViewHotkeyAction::WorkbenchBacklogToolCycle,
+        ),
+        bind_char(
+            'X',
+            "X",
+            "defer-all",
+            ViewHotkeyAction::WorkbenchBacklogBulkDefer,
+        ),
+        bind_char('u', "u", "undo", ViewHotkeyAction::WorkbenchBacklogUndo),
+    ]);
+    bindings
+}
+
+fn backlog_verdict_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char(
+            'c',
+            "c",
+            "confirm",
+            ViewHotkeyAction::WorkbenchBacklogDecide("confirmed"),
+        ),
+        bind_char(
+            'f',
+            "f",
+            "reject-FP",
+            ViewHotkeyAction::WorkbenchBacklogDecide("rejected_false_positive"),
+        ),
+        bind_char(
+            'd',
+            "d",
+            "defer",
+            ViewHotkeyAction::WorkbenchBacklogDecide("deferred"),
+        ),
+        bind_char(
+            'w',
+            "w",
+            "needs-review",
+            ViewHotkeyAction::WorkbenchBacklogDecide("needs_review"),
+        ),
+    ]
 }
 
 fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
@@ -487,23 +504,32 @@ fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
     ]
 }
 
-pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
-    [
-        ('1', ThreatView::Stride),
-        ('2', ThreatView::Stories),
-        ('3', ThreatView::Scope),
-        ('4', ThreatView::Summary),
-    ]
-    .into_iter()
-    .map(|(key, view)| {
-        bind_char(
-            key,
-            "1..4",
-            "switch threat view",
-            ViewHotkeyAction::ThreatView(view),
-        )
+/// Single source of truth for the Threat tab digits — consumed by the
+/// Navigate-mode keybinding table below AND the early Prompt-mode handler
+/// in key_dispatch (digits switch tabs while the composer is empty).
+pub(super) fn threat_view_for_digit(key: char) -> Option<ThreatView> {
+    Some(match key {
+        '1' => ThreatView::Stride,
+        '2' => ThreatView::Stories,
+        '3' => ThreatView::Scope,
+        '4' => ThreatView::Summary,
+        '5' => ThreatView::Versions,
+        _ => return None,
     })
-    .collect()
+}
+
+pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
+    ('1'..='5')
+        .filter_map(|key| {
+            let view = threat_view_for_digit(key)?;
+            Some(bind_char(
+                key,
+                "1..5",
+                "switch threat view",
+                ViewHotkeyAction::ThreatView(view),
+            ))
+        })
+        .collect()
 }
 
 pub(super) fn actor_detail_keybindings() -> Vec<ViewKeybinding> {

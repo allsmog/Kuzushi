@@ -24,6 +24,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "ui_view_models/auth.rs",
     // PATH / HOME process integration.
     "app/tool_runner/run_tool/background/preflight.rs", // PATH
+    "app/onboarding/task_row.rs", // PATH + KUZUSHI_CODEQL_BIN CLI presence probe
     "ui_view_models/home_cockpit.rs",                   // HOME for ~ display
     // Compatibility adapter reads (documented in CLAUDE.md).
     "app/shell_lifecycle/construction.rs", // ui.auto_open_viz compat value

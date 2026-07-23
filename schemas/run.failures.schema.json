@@ -92,6 +92,10 @@
         "error": {
           "type": "string"
         },
+        "errorClass": {
+          "type": "string",
+          "minLength": 1
+        },
         "agentThreadContext": {
           "$ref": "#/definitions/failureContext"
         }
@@ -171,6 +175,30 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "resumeFrom": {
+          "type": "string",
+          "minLength": 1
+        },
+        "completedStages": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "checkpointArtifacts": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "checkpointFingerprint": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

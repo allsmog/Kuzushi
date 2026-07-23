@@ -270,11 +270,7 @@ impl ModuleRegistry {
         require_observation: bool,
     ) -> Result<ObservedDispatchOutcome> {
         let name = prepared.tool_name.as_str();
-        let descriptor = self
-            .resolve_tool(name)
-            .with_context(|| format!("{name:?} has no dispatch descriptor"))?;
-        self.verify_prepared_dispatch_binding(&prepared, descriptor, ctx)?;
-        verify_repository_execution_input(name, &prepared.value, ctx)?;
+        let descriptor = self.verified_dispatch_descriptor(&prepared, ctx)?;
         let lifecycle = DispatchLifecycle::requested(
             ctx,
             name,
@@ -283,10 +279,9 @@ impl ModuleRegistry {
             runtime.is_some(),
             require_observation,
         )?;
-        let authorization = prepared.authorization;
         let operation_binding = prepared.binding.operation_fingerprint;
         let mut input = prepared.value;
-        let authorized_ctx = tool_context_with_authorization(ctx, authorization);
+        let authorized_ctx = tool_context_with_authorization(ctx, prepared.authorization);
         if let Err(error) = authorize_prepared_execution(
             self,
             descriptor,
@@ -298,7 +293,30 @@ impl ModuleRegistry {
         ) {
             return lifecycle.rejected(error);
         }
-        self.execute_authorized_prepared_observed(name, input, &authorized_ctx, runtime, lifecycle)
+        self.execute_authorized_prepared_observed(
+            name,
+            input,
+            &authorized_ctx,
+            runtime,
+            lifecycle,
+            operation_binding,
+        )
+    }
+
+    /// Descriptor resolution plus binding and repository-input verification
+    /// for one prepared dispatch.
+    fn verified_dispatch_descriptor(
+        &self,
+        prepared: &PreparedToolInput,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> Result<&ToolDescriptor> {
+        let name = prepared.tool_name.as_str();
+        let descriptor = self
+            .resolve_tool(name)
+            .with_context(|| format!("{name:?} has no dispatch descriptor"))?;
+        self.verify_prepared_dispatch_binding(prepared, descriptor, ctx)?;
+        verify_repository_execution_input(name, &prepared.value, ctx)?;
+        Ok(descriptor)
     }
 
     fn execute_authorized_prepared_observed(
@@ -308,6 +326,7 @@ impl ModuleRegistry {
         authorized_ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
         lifecycle: DispatchLifecycle,
+        operation_binding: [u8; 32],
     ) -> Result<ObservedDispatchOutcome> {
         lifecycle.started(&input, &authorized_ctx)?;
         let execution_trace = lifecycle.execution_trace();
@@ -318,18 +337,43 @@ impl ModuleRegistry {
         } else {
             authorized_ctx
         };
+        let stage_checkpoints =
+            self.stage_checkpoint_handle(name, &operation_binding, execution_ctx);
+        let _stage_scope =
+            crate::run_artifacts::StageCheckpointScope::install(stage_checkpoints.clone());
         let result = self.invoke_prepared_executor(name, &input, execution_ctx, runtime);
         let completion = lifecycle.pending_completion(&result);
         if result
             .as_ref()
             .is_ok_and(|output| tool_result_status(output).is_completed())
         {
+            clear_completed_stage_checkpoint(stage_checkpoints.as_deref());
             self.record_recent_tool_use(name, authorized_ctx);
         }
         Ok(ObservedDispatchOutcome {
             execution: result,
             completion,
         })
+    }
+
+    /// A `ContinuationSupport::Staged` tool executing with run artifacts
+    /// gets a checkpoint handle keyed by the operation fingerprint, so an
+    /// identical re-dispatch after a failure resumes at the failed stage.
+    fn stage_checkpoint_handle(
+        &self,
+        name: &str,
+        operation_binding: &[u8; 32],
+        ctx: &ToolExecutionContext<'_>,
+    ) -> Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>> {
+        let descriptor = self.resolve_tool(name)?;
+        if descriptor.continuation != crate::modules::ContinuationSupport::Staged {
+            return None;
+        }
+        let (target, run_id) = ctx.run_artifact_location()?;
+        let store = crate::run_artifacts::StageCheckpointStore::discover(&target, operation_binding)?;
+        Some(std::sync::Arc::new(
+            crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name),
+        ))
     }
 
     fn prepared_dispatch_binding(
@@ -1317,6 +1361,17 @@ fn workspace_prompt_source_label(workspace: &std::path::Path, path: &std::path::
         .unwrap_or(path)
         .display()
         .to_string()
+}
+
+/// Completion is the only terminal state that consumes the checkpoint;
+/// failed, partial, canceled, and interrupted runs keep it so an identical
+/// re-dispatch resumes the paid stages.
+fn clear_completed_stage_checkpoint(
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+) {
+    if let Some(handle) = handle {
+        handle.clear_checkpoint();
+    }
 }
 
 fn scoped_tool_trace(

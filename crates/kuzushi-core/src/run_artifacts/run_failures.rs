@@ -18,6 +18,10 @@ pub struct RunFailure {
     pub tool: String,
     pub status: String,
     pub error: String,
+    /// Coarse failure classification (rate-limit, timeout, transport, …)
+    /// derived from the error text; None when unclassifiable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_class: Option<String>,
     pub agent_thread_context: FailureToLlmContext,
 }
 
@@ -34,6 +38,16 @@ pub struct FailureToLlmContext {
     pub recovery_options: Vec<String>,
     pub fallback_prompt: String,
     pub claims_forbidden: Vec<String>,
+    /// Machine-usable continuation coordinates from the run's stage
+    /// checkpoint: re-dispatching the same tool + input resumes here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_from: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub completed_stages: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checkpoint_artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checkpoint_fingerprint: Option<String>,
 }
 
 const MAX_AVAILABLE_FAILURE_ARTIFACTS: usize = 12;
@@ -55,6 +69,7 @@ pub fn write_run_failures(
         tool: tool.to_string(),
         status: status.to_string(),
         error: error.to_string(),
+        error_class: failure_error_class(&error),
         agent_thread_context: failure_to_llm_context(
             target.as_ref(),
             run_id,
@@ -136,6 +151,11 @@ fn output_with_fallback_context(mut output: Value, context: FailureToLlmContext)
     output
 }
 
+fn failure_error_class(error: &str) -> Option<String> {
+    let class = crate::runtime::model_error_class_from_message(error);
+    (class != "runtime_error").then(|| class.to_string())
+}
+
 fn failure_to_llm_context(
     target: &Path,
     run_id: &str,
@@ -143,32 +163,72 @@ fn failure_to_llm_context(
     error: &str,
     artifacts: &[RunArtifact],
 ) -> FailureToLlmContext {
-    let allowed_proof_level = "artifact-review-only; runtime verification did not run".to_string();
+    let coordinates = super::checkpoint_coordinates_for_run(target, run_id);
     let missing_artifacts = missing_failure_artifacts(target, run_id, artifacts);
-    let claims_forbidden = forbidden_failure_claims();
-    let recovery_options = failure_recovery_options(tool, &missing_artifacts);
-    let next_artifacts = next_failure_artifacts(target, run_id, artifacts);
-    let fallback_prompt = failure_fallback_prompt(
-        tool,
-        error,
-        &allowed_proof_level,
-        &missing_artifacts,
-        &next_artifacts,
-        &claims_forbidden,
-        &recovery_options,
-    );
-    FailureToLlmContext {
+    let mut context = FailureToLlmContext {
         failed_stage: tool.to_string(),
         cause: error.to_string(),
         what_failed: format!("{tool} did not complete successfully: {error}"),
         artifacts_available: available_failure_artifacts(target, run_id, artifacts),
+        recovery_options: failure_recovery_options(tool, &missing_artifacts, coordinates.as_ref()),
         missing_artifacts,
-        allowed_proof_level,
-        next_files_or_artifacts_to_inspect: next_artifacts,
-        recovery_options,
-        fallback_prompt,
-        claims_forbidden,
-    }
+        allowed_proof_level: "artifact-review-only; runtime verification did not run".to_string(),
+        next_files_or_artifacts_to_inspect: next_failure_artifacts(target, run_id, artifacts),
+        fallback_prompt: String::new(),
+        claims_forbidden: forbidden_failure_claims(),
+        resume_from: None,
+        completed_stages: Vec::new(),
+        checkpoint_artifacts: Vec::new(),
+        checkpoint_fingerprint: None,
+    };
+    context.fallback_prompt = failure_context_fallback_prompt(tool, error, &context);
+    apply_checkpoint_coordinates(&mut context, tool, coordinates);
+    context
+}
+
+fn failure_context_fallback_prompt(
+    tool: &str,
+    error: &str,
+    context: &FailureToLlmContext,
+) -> String {
+    failure_fallback_prompt(
+        tool,
+        error,
+        &context.allowed_proof_level,
+        &context.missing_artifacts,
+        &context.next_files_or_artifacts_to_inspect,
+        &context.claims_forbidden,
+        &context.recovery_options,
+    )
+}
+
+/// Overlay machine-usable continuation coordinates when the failed run left
+/// a stage checkpoint behind.
+fn apply_checkpoint_coordinates(
+    context: &mut FailureToLlmContext,
+    tool: &str,
+    coordinates: Option<super::StageCheckpointCoordinates>,
+) {
+    let Some(coordinates) = coordinates else {
+        return;
+    };
+    context.failed_stage = failed_stage_label(tool, Some(&coordinates));
+    context.resume_from = coordinates.resume_from;
+    context.completed_stages = coordinates.completed_stages;
+    context.checkpoint_artifacts = coordinates.checkpoint_artifacts;
+    context.checkpoint_fingerprint = Some(coordinates.fingerprint);
+}
+
+/// The real failure point when the run left a stage checkpoint; the tool
+/// name otherwise (single-stage tools have no finer coordinate).
+fn failed_stage_label(
+    tool: &str,
+    coordinates: Option<&super::StageCheckpointCoordinates>,
+) -> String {
+    coordinates
+        .and_then(|coordinates| coordinates.resume_from.clone())
+        .map(|stage| format!("{tool} · stage {stage}"))
+        .unwrap_or_else(|| tool.to_string())
 }
 
 fn available_failure_artifacts(
@@ -329,13 +389,36 @@ fn contained_absolute_artifact(target: &Path, declared: &Path) -> Option<PathBuf
     crate::workspace::validated_workspace_descendant(&root, relative).ok()
 }
 
-fn failure_recovery_options(tool: &str, missing_artifacts: &[String]) -> Vec<String> {
-    let mut options = vec![format!("Rerun {tool} after fixing the reported cause.")];
+fn failure_recovery_options(
+    tool: &str,
+    missing_artifacts: &[String],
+    coordinates: Option<&super::StageCheckpointCoordinates>,
+) -> Vec<String> {
+    let mut options = vec![rerun_recovery_option(tool, coordinates)];
     if !missing_artifacts.is_empty() {
         options.push("Create or inspect the missing canonical artifacts before escalating.".into());
     }
     options.push("Keep follow-up claims at artifact-review-only proof level.".into());
     options
+}
+
+fn rerun_recovery_option(
+    tool: &str,
+    coordinates: Option<&super::StageCheckpointCoordinates>,
+) -> String {
+    match coordinates {
+        Some(coordinates) if !coordinates.completed_stages.is_empty() => format!(
+            "Rerun {tool} with the same input: {} completed stage(s) [{}] are checkpointed and resume automatically{}.",
+            coordinates.completed_stages.len(),
+            coordinates.completed_stages.join(", "),
+            coordinates
+                .resume_from
+                .as_deref()
+                .map(|stage| format!(", continuing at {stage}"))
+                .unwrap_or_default(),
+        ),
+        _ => format!("Rerun {tool} after fixing the reported cause."),
+    }
 }
 
 fn failure_artifact_spec() -> &'static CanonicalRunArtifactSpec {
@@ -402,6 +485,116 @@ fn forbidden_failure_claims() -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn checkpointed_failure_workspace() -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
+        fs::write(tmp.path().join("research.json"), "{}").unwrap();
+        let store =
+            super::super::StageCheckpointStore::discover(tmp.path(), &[3u8; 32]).unwrap();
+        let handle = super::super::StageCheckpointHandle::open(
+            store,
+            tmp.path(),
+            "run-checkpointed",
+            "threat-model:build",
+        );
+        handle
+            .stage("research")
+            .complete(vec!["research.json".to_string()]);
+        handle.mark_current("coverage");
+        write_run_failures(
+            tmp.path(),
+            "run-checkpointed",
+            "threat-model:build",
+            "failed",
+            "provider rate limited the request",
+            &[],
+        )
+        .unwrap();
+        tmp
+    }
+
+    #[test]
+    fn failure_context_carries_stage_checkpoint_coordinates() {
+        let tmp = checkpointed_failure_workspace();
+
+        let context = load_run_failure_context(tmp.path(), "run-checkpointed")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(context.resume_from.as_deref(), Some("coverage"));
+        assert_eq!(context.completed_stages, ["research"]);
+        assert_eq!(context.checkpoint_artifacts, ["research.json"]);
+        assert!(context.checkpoint_fingerprint.is_some());
+        assert_eq!(context.failed_stage, "threat-model:build · stage coverage");
+    }
+
+    #[test]
+    fn checkpointed_failure_discloses_resume_and_error_class() {
+        let tmp = checkpointed_failure_workspace();
+
+        let context = load_run_failure_context(tmp.path(), "run-checkpointed")
+            .unwrap()
+            .unwrap();
+        assert!(
+            context.recovery_options[0].contains("resume automatically"),
+            "{:?}",
+            context.recovery_options
+        );
+
+        let report = load_run_failures(tmp.path(), "run-checkpointed").unwrap();
+        assert_eq!(report.failures[0].error_class.as_deref(), Some("rate_limited"));
+    }
+
+    #[test]
+    fn failure_records_without_checkpoint_keep_tool_level_stage() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_run_failures(
+            tmp.path(),
+            "run-plain",
+            "secret-scan:scan",
+            "failed",
+            "scanner crashed",
+            &[],
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), "run-plain")
+            .unwrap()
+            .unwrap();
+        assert_eq!(context.failed_stage, "secret-scan:scan");
+        assert!(context.resume_from.is_none());
+        assert!(context.completed_stages.is_empty());
+    }
+
+    #[test]
+    fn pre_continuation_failure_records_still_deserialize() {
+        let legacy = serde_json::json!({
+            "runId": "run-legacy",
+            "status": "failed",
+            "failures": [{
+                "tool": "demo:tool",
+                "status": "failed",
+                "error": "boom",
+                "agentThreadContext": {
+                    "failedStage": "demo:tool",
+                    "cause": "boom",
+                    "whatFailed": "demo:tool did not complete successfully: boom",
+                    "artifactsAvailable": [],
+                    "missingArtifacts": [],
+                    "allowedProofLevel": "artifact-review-only",
+                    "nextFilesOrArtifactsToInspect": [],
+                    "recoveryOptions": [],
+                    "fallbackPrompt": "Continue the failed Kuzushi run for demo:tool.",
+                    "claimsForbidden": []
+                }
+            }]
+        });
+
+        let parsed: RunFailures = serde_json::from_value(legacy).unwrap();
+        assert!(parsed.failures[0].error_class.is_none());
+        assert!(parsed.failures[0].agent_thread_context.resume_from.is_none());
+    }
 
     #[test]
     fn persisted_failure_text_is_redacted() {

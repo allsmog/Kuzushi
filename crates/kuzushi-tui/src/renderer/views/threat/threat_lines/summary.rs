@@ -43,6 +43,7 @@ fn append_review_summary(lines: &mut Vec<Line<'static>>, review: &ThreatSummaryR
 
 fn append_surface_rows(lines: &mut Vec<Line<'static>>, review: &ThreatSummaryReview) {
     lines.push(detail("assets", &review.assets));
+    lines.push(detail("dfd nodes", &review.nodes));
     lines.push(detail("actors", &review.actors));
     lines.push(detail("data flows", &review.flows));
     lines.push(detail("trust boundaries", &review.trust_boundaries));

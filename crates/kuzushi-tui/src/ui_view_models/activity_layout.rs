@@ -34,7 +34,9 @@ pub(crate) fn activity_pane_layout(
         return ActivityPaneLayout::Focused;
     }
     if width >= ACTIVITY_WIDE_MIN_WIDTH {
-        let task_width = (width.saturating_mul(32) / 100).clamp(28, 40);
+        // 36% (28–46) keeps real task ids like `carlini-threat-hunt:run`
+        // readable; the old 32%/40-col cap truncated most two-word tools.
+        let task_width = (width.saturating_mul(36) / 100).clamp(28, 46);
         return ActivityPaneLayout::SideBySide { task_width };
     }
     let cap = (height.saturating_mul(40) / 100).max(3);
@@ -54,7 +56,7 @@ mod tests {
     fn wide_layout_is_side_by_side_independent_of_tall_terminal() {
         assert_eq!(
             activity_pane_layout(96, 80, 4),
-            ActivityPaneLayout::SideBySide { task_width: 30 }
+            ActivityPaneLayout::SideBySide { task_width: 34 }
         );
         assert_eq!(
             activity_pane_layout(78, 14, 40),

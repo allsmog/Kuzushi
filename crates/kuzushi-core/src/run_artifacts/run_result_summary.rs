@@ -188,7 +188,7 @@ fn result_tool_name(target: &Path, run_id: &str, result: &Value) -> String {
 }
 
 fn result_summary(result: &Value, status: &str) -> String {
-    value_string(result.get("summary"))
+    condensed_value_string(result.get("summary"))
         .filter(|summary| !summary.is_empty())
         .unwrap_or_else(|| format!("tool result {status}"))
 }
@@ -218,7 +218,7 @@ fn message_lines(result: &Value, field: &str) -> BoundedValues<String> {
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .filter_map(|value| value_string(Some(value)))
+            .filter_map(|value| condensed_value_string(Some(value)))
             .filter(|message| !message.is_empty()),
         MAX_MESSAGES,
     );
@@ -271,6 +271,23 @@ fn value_string(value: Option<&Value>) -> Option<String> {
         .and_then(Value::as_str)
         .map(str::trim)
         .map(safe_bounded_line)
+}
+
+fn condensed_value_string(value: Option<&Value>) -> Option<String> {
+    value.and_then(Value::as_str).map(condensed_bounded_line)
+}
+
+/// One-line projection of possibly multi-line producer text: lines are
+/// trimmed and joined with " · " before escaping, so a condensed summary or
+/// message never shows a literal `\n` where the producer meant a line break.
+fn condensed_bounded_line(value: &str) -> String {
+    let joined = value
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    safe_bounded_line(&joined)
 }
 
 fn safe_bounded_line(value: &str) -> String {

@@ -30,6 +30,7 @@ struct SharedToolPolicy {
     runtime: crate::modules::RuntimeRequirement,
     finding_store: crate::modules::FindingStoreRequirement,
     workspace: crate::modules::WorkspaceRequirement,
+    continuation: crate::modules::ContinuationSupport,
 }
 
 fn shared_tool_policies() -> &'static BTreeMap<String, SharedToolPolicy> {
@@ -46,6 +47,7 @@ fn shared_tool_policies() -> &'static BTreeMap<String, SharedToolPolicy> {
                         runtime: tool.runtime_requirement,
                         finding_store: tool.finding_store_requirement,
                         workspace: tool.workspace_requirement,
+                        continuation: tool.continuation,
                     },
                 )
             })
@@ -63,6 +65,15 @@ pub fn tool_requires_agent_runtime(tool_name: &str) -> bool {
     shared_tool_policies()
         .get(tool_name)
         .is_some_and(|policy| policy.runtime == crate::modules::RuntimeRequirement::Always)
+}
+
+/// Descriptor-declared continuation capability of a tool, for planner /
+/// result-card / `resume` surfaces that must know without executing it.
+pub fn tool_continuation(tool_name: &str) -> crate::modules::ContinuationSupport {
+    shared_tool_policies()
+        .get(tool_name)
+        .map(|policy| policy.continuation)
+        .unwrap_or_default()
 }
 
 pub fn tool_uses_finding_store(tool_name: &str) -> bool {

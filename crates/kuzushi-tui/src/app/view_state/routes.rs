@@ -1061,6 +1061,8 @@ pub struct SceneRouteState {
     pitch: f32,
     paused: bool,
     last_advance: Option<Instant>,
+    /// DFD inspector cursor over the flattened nodes-then-flows order.
+    dfd_selection: usize,
 }
 
 impl Default for SceneRouteState {
@@ -1071,6 +1073,7 @@ impl Default for SceneRouteState {
             pitch: 0.45,
             paused: false,
             last_advance: None,
+            dfd_selection: 0,
         }
     }
 }
@@ -1123,6 +1126,21 @@ impl SceneRouteState {
     pub(crate) fn nudge_pitch(&mut self, amount: f32) {
         self.paused = true;
         self.pitch = (self.pitch + amount).clamp(-1.4, 1.4);
+    }
+
+    pub(crate) fn dfd_selection(&self) -> usize {
+        self.dfd_selection
+    }
+
+    /// Cycle the DFD selection with wrap over `len` items (nodes then flows).
+    /// A shrunken model clamps the cursor instead of pointing past the end.
+    pub(crate) fn cycle_dfd_selection(&mut self, direction: i32, len: usize) {
+        if len == 0 {
+            self.dfd_selection = 0;
+            return;
+        }
+        let current = self.dfd_selection.min(len - 1) as i32;
+        self.dfd_selection = (current + direction).rem_euclid(len as i32) as usize;
     }
 
     pub(crate) fn clear_advance_baseline(&mut self) {

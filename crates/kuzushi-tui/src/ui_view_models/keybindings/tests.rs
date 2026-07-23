@@ -527,7 +527,10 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.set_input_mode(crate::InputMode::Navigate);
 
     let dfd_bindings = footer_keybindings(&app);
-    assert!(dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
+    // The DFD is a frame-rendered graph: j/k drive the inspector cursor.
+    // Advertising a scroll offset here would be false.
+    assert!(dfd_bindings.contains(&bind("j/k", "select node/flow")));
+    assert!(!dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
     assert!(dfd_bindings.contains(&bind("Tab", "next page")));
     assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
     assert!(dfd_bindings.contains(&bind("q", "leave")));

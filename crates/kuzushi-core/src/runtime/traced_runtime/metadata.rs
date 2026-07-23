@@ -47,6 +47,11 @@ pub fn model_error_class_from_message(message: &str) -> &'static str {
         || normalized.contains("credential")
     {
         "authentication"
+    } else if normalized.contains("sdk_client_validation")
+        || normalized.contains("client-side before sending")
+        || normalized.contains("invocation param")
+    {
+        "sdk_client_validation"
     } else if normalized.contains("parse")
         || normalized.contains("schema")
         || normalized.contains("invalid response")

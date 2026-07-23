@@ -199,9 +199,10 @@ fn dfd_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
             &[("threat-model:build", "map trust zones and flows")],
         );
     }
+    let crossings = model.flows.iter().filter(|flow| flow.crosses).count();
     let mut lines = vec![Line::from(vec![Span::styled(
         format!(
-            "DFD · {} nodes · {} flows · {} zones",
+            "DFD · {} nodes · {} flows · {} zones · {crossings} boundary crossings",
             model.nodes.len(),
             model.flows.len(),
             model.zones.len()
@@ -361,10 +362,21 @@ mod tests {
         let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::Dfd);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
-        assert!(text.contains("DFD · 3 nodes · 2 flows · 3 zones"));
+        // Crossing count is boundary-tag derived (zone fallback only for
+        // untagged flows) and must match the frame legend's count.
+        assert!(
+            text.contains("DFD · 3 nodes · 2 flows · 3 zones · 1 boundary crossings"),
+            "{text}"
+        );
         assert!(text.contains("Browser · entity"));
         assert!(text.contains("API server · process"));
         assert!(text.contains("Browser -> API server · https · crosses boundary"));
+        assert!(
+            text.contains("API server -> Postgres · sql\n")
+                || text.contains("API server -> Postgres · sql"),
+            "explicitly boundary-free flow must not claim a crossing: {text}"
+        );
+        assert!(!text.contains("Postgres · sql · crosses boundary"));
     }
 
     #[test]
@@ -466,8 +478,10 @@ mod tests {
                     {"id": "db", "name": "Postgres", "type": "data store", "trustZone": "data-tier"}
                 ],
                 "flows": [
-                    {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"},
-                    {"id": "f2", "sourceId": "api", "targetId": "db", "description": "sql"}
+                    {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https",
+                     "trustBoundaryIds": ["tb-edge"]},
+                    {"id": "f2", "sourceId": "api", "targetId": "db", "description": "sql",
+                     "trustBoundaryIds": []}
                 ]
             }
         })

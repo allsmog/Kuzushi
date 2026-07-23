@@ -29,14 +29,26 @@ fn suggest_shards_tool() -> ToolDescriptor {
          entry-point identifier density, test-vs-shipped heuristics). Writes \
          a commented DRAFT shards.toml under the workspace state dir for an \
          operator to edit — never installs it. No model calls.",
-        vec![opt(
-            "output",
-            OptionType::Path,
-            "Draft output path. Relative paths resolve under the target \
-             root; default .kuzushi/v3/reports/suggested-shards.toml.",
-        )
-        .aliases(&["out"])
-        .target_write()],
+        vec![
+            opt(
+                "output",
+                OptionType::Path,
+                "Draft output path. Relative paths resolve under the target \
+                 root; default .kuzushi/v3/reports/suggested-shards.toml.",
+            )
+            .aliases(&["out"])
+            .target_write(),
+            opt(
+                "emitScopes",
+                OptionType::Bool,
+                "Also materialize the shard candidates as the nested \
+                 project-scope tree (.kuzushi/project-model/scopes.json) so \
+                 planners and threat modeling see the decomposition. The \
+                 shards.toml draft stays a never-auto-installed review copy.",
+            )
+            .aliases(&["emit_scopes"])
+            .default(json!(false)),
+        ],
     )
 }
 

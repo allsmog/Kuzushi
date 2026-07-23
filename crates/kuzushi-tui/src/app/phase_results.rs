@@ -75,6 +75,7 @@ struct TypedRunResultDetails {
 pub(crate) enum PhaseResultCommand {
     Select,
     Continue,
+    ContinueRun,
     Open,
     Refine,
     RunAgain,
@@ -89,6 +90,7 @@ impl PhaseResultCommand {
             PhaseResultAction::SelectAndContinue | PhaseResultAction::SelectAndReport => {
                 Self::Continue
             }
+            PhaseResultAction::ContinueRun => Self::ContinueRun,
             PhaseResultAction::Open => Self::Open,
             PhaseResultAction::Refine => Self::Refine,
             PhaseResultAction::RunAgain => Self::RunAgain,
@@ -101,6 +103,7 @@ impl PhaseResultCommand {
         match self {
             Self::Select => "select",
             Self::Continue => "continue",
+            Self::ContinueRun => "continue_run",
             Self::Open => "open",
             Self::Refine => "refine",
             Self::RunAgain => "run_again",
@@ -113,6 +116,7 @@ impl PhaseResultCommand {
         match self {
             Self::Select => "u",
             Self::Continue => "n",
+            Self::ContinueRun => "c",
             Self::Open => "o",
             Self::Refine => "f",
             Self::RunAgain => "r",
@@ -125,6 +129,7 @@ impl PhaseResultCommand {
         match code {
             KeyCode::Char('u') => Some(Self::Select),
             KeyCode::Char('n') => Some(Self::Continue),
+            KeyCode::Char('c') => Some(Self::ContinueRun),
             KeyCode::Char('o') => Some(Self::Open),
             KeyCode::Char('f') => Some(Self::Refine),
             KeyCode::Char('r') => Some(Self::RunAgain),
@@ -208,19 +213,15 @@ impl ShellApp {
         let recommended_next = policy
             .recommended_next
             .unwrap_or_else(|| "open the result and choose a disposition".to_string());
-        let mut details = phase_result_details(
+        let rows = self.phase_result_detail_rows(
             completed,
             effective_outcome,
             &typed_receipt,
             live,
             &recommended_next,
         );
-        if let Some(row) = self.resume_checkpoint_row(effective_outcome) {
-            details.rows.push(row);
-        }
-        let detail_lines = details.rows.iter().map(|row| row.text.clone()).collect();
-        let semantic_keys = details
-            .rows
+        let detail_lines = rows.iter().map(|row| row.text.clone()).collect();
+        let semantic_keys = rows
             .iter()
             .flat_map(PhaseResultDetailRow::accounted_keys)
             .cloned()
@@ -228,7 +229,7 @@ impl ShellApp {
         PhaseResultPresentation {
             attempt_id: completed.attempt_id.clone(),
             detail_lines,
-            detail_rows: details.rows,
+            detail_rows: rows,
             semantic_keys,
             outcome,
             actions,
@@ -236,13 +237,34 @@ impl ShellApp {
         }
     }
 
-    /// Disclose a pending agent-loop checkpoint on failed/canceled results:
-    /// `r` reruns the recorded request, and the tool loop resumes from the
-    /// checkpoint instead of re-buying completed turns. Silent when no
-    /// checkpoint is waiting (single-call tools, or the loop never finished
-    /// a turn).
+    fn phase_result_detail_rows(
+        &self,
+        completed: &PhaseAttemptCompleted,
+        effective_outcome: PhaseAttemptOutcome,
+        typed_receipt: &TypedReceiptResolution,
+        live: Option<&RunFocusReceipt>,
+        recommended_next: &str,
+    ) -> Vec<PhaseResultDetailRow> {
+        let mut details = phase_result_details(
+            completed,
+            effective_outcome,
+            typed_receipt,
+            live,
+            recommended_next,
+        );
+        if let Some(row) = self.resume_checkpoint_row(completed, effective_outcome) {
+            details.rows.push(row);
+        }
+        details.rows
+    }
+
+    /// Disclose the resumable checkpoint on failed/canceled results: stage
+    /// checkpoints name the completed stages and the resume point; agent
+    /// tool loops name the completed turns. `c` resumes from the failure
+    /// point either way. Silent when no checkpoint is waiting.
     fn resume_checkpoint_row(
         &self,
+        completed: &PhaseAttemptCompleted,
         outcome: PhaseAttemptOutcome,
     ) -> Option<PhaseResultDetailRow> {
         if !matches!(
@@ -251,6 +273,31 @@ impl ShellApp {
         ) {
             return None;
         }
+        self.stage_checkpoint_row(completed)
+            .or_else(|| self.loop_checkpoint_row())
+    }
+
+    fn stage_checkpoint_row(
+        &self,
+        completed: &PhaseAttemptCompleted,
+    ) -> Option<PhaseResultDetailRow> {
+        let target = std::path::Path::new(&completed.target_snapshot.target);
+        let coordinates = completed.run_refs.iter().rev().find_map(|run_id| {
+            kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id)
+        })?;
+        let resume = coordinates
+            .resume_from
+            .as_deref()
+            .map(|stage| format!(" · resumes at {stage}"))
+            .unwrap_or_default();
+        Some(PhaseResultDetailRow::unkeyed(format!(
+            "⟲ {} completed stage(s) checkpointed [{}]{resume} — c continue from the failure point",
+            coordinates.completed_stages.len(),
+            coordinates.completed_stages.join(", "),
+        )))
+    }
+
+    fn loop_checkpoint_row(&self) -> Option<PhaseResultDetailRow> {
         let target = self.target()?;
         let newest = kuzushi_core::runtime::pending_agent_loop_checkpoints(target)
             .into_iter()
@@ -258,7 +305,7 @@ impl ShellApp {
         let turns = newest.completed_turns;
         let plural = if turns == 1 { "" } else { "s" };
         Some(PhaseResultDetailRow::unkeyed(format!(
-            "⟲ resume checkpoint saved ({turns} completed agent turn{plural}) — r run again continues from the failure point"
+            "⟲ resume checkpoint saved ({turns} completed agent turn{plural}) — c continue resumes from the failure point"
         )))
     }
 
@@ -280,6 +327,16 @@ impl ShellApp {
         completed: &PhaseAttemptCompleted,
         receipt: &TypedReceiptResolution,
     ) -> PhaseResultPolicy {
+        let mut policy = self.base_phase_result_policy(completed, receipt);
+        self.offer_continue_run(completed, &mut policy);
+        policy
+    }
+
+    fn base_phase_result_policy(
+        &self,
+        completed: &PhaseAttemptCompleted,
+        receipt: &TypedReceiptResolution,
+    ) -> PhaseResultPolicy {
         if let Some(policy) = receipt.authoritative_policy() {
             return policy;
         }
@@ -292,6 +349,53 @@ impl ShellApp {
             self.effective_phase_attempt_outcome(completed),
             live,
         )
+    }
+
+    /// A failed/canceled attempt whose run left resumable checkpoint state
+    /// gains the ContinueRun action: re-dispatching the identical recorded
+    /// input resumes at the failure point instead of restarting. Never read
+    /// from persisted receipts — checkpoint state changes after they are
+    /// written, so it is derived live every time.
+    fn offer_continue_run(
+        &self,
+        completed: &PhaseAttemptCompleted,
+        policy: &mut PhaseResultPolicy,
+    ) {
+        if !matches!(
+            completed.outcome,
+            PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled
+        ) || policy.actions.contains(&PhaseResultAction::ContinueRun)
+        {
+            return;
+        }
+        if self.continuable_failed_run(completed).is_none() {
+            return;
+        }
+        policy.actions.insert(0, PhaseResultAction::ContinueRun);
+    }
+
+    /// The failed run ref whose checkpoint can resume, when any: a stage
+    /// checkpoint naming this run as its source wins; a pending agent-loop
+    /// checkpoint applies to the recorded request of the newest run ref.
+    pub(crate) fn continuable_failed_run(
+        &self,
+        completed: &PhaseAttemptCompleted,
+    ) -> Option<String> {
+        let target = std::path::Path::new(&completed.target_snapshot.target);
+        completed
+            .run_refs
+            .iter()
+            .rev()
+            .find(|run_id| {
+                kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id)
+                    .is_some()
+            })
+            .cloned()
+            .or_else(|| {
+                let pending =
+                    !kuzushi_core::runtime::pending_agent_loop_checkpoints(target).is_empty();
+                pending.then(|| completed.run_refs.last().cloned()).flatten()
+            })
     }
 
     fn guarded_legacy_phase_result_policy(
@@ -454,9 +558,12 @@ fn legacy_result_receipt_line(
     outcome: &str,
 ) -> String {
     if let Some(receipt) = live {
+        // The card is the cost surface here (unlike Run Focus, whose header
+        // owns cost) — summary() dropped it, so append it explicitly.
         return format!(
-            "{} · {} finding delta · {} artifact delta · {} interaction(s)",
+            "{} · {} · {} finding delta · {} artifact delta · {} interaction(s)",
             receipt.summary(),
+            receipt.cost,
             receipt.changed_findings,
             receipt.changed_artifacts.len(),
             receipt.interaction_count
@@ -755,6 +862,8 @@ fn semantic_result_lines<'a>(
     operator_message: Option<&str>,
     artifact_labels: impl Iterator<Item = &'a str>,
 ) -> Vec<String> {
+    let summary = kuzushi_core::run_lifecycle::collapse_repeated_message(summary);
+    let summary = summary.as_str();
     let mut lines = vec![format!("{tool} · {status} — {summary}")];
     // The heading already shows the summary; an output whose first line
     // restates it (common for single-purpose tools) must not print twice.
@@ -765,7 +874,11 @@ fn semantic_result_lines<'a>(
     lines.extend(preview.iter().map(|line| format!("│ {line}")));
     // Failed runs carry the same error text as both output and error; the
     // card must not print it twice (once as `│ …` preview, once as `⚠ …`).
-    if let Some(message) = operator_message
+    // Old ledger records also doubled the message inside one string.
+    let message =
+        operator_message.map(kuzushi_core::run_lifecycle::collapse_repeated_message);
+    if let Some(message) = message
+        .as_deref()
         .filter(|message| *message != summary)
         .filter(|message| !preview.join("\n").contains(*message))
     {
@@ -859,7 +972,9 @@ fn preferred_phase_result_action(
     use PhaseResultAction::{Open, Select, SelectAndContinue, SelectAndReport};
 
     if matches!(outcome, Failed | Canceled) {
-        return actions.contains(&Open).then_some(Open);
+        return [PhaseResultAction::ContinueRun, Open]
+            .into_iter()
+            .find(|action| actions.contains(action));
     }
     if outcome == Partial || phase == WorkflowPhase::Fix {
         return actions.contains(&Select).then_some(Select);
@@ -1003,6 +1118,68 @@ mod tests {
             kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target),
             outcome,
         )
+    }
+
+    fn write_stage_checkpoint(target: &std::path::Path, run_id: &str) {
+        std::fs::create_dir_all(target.join(".kuzushi")).unwrap();
+        std::fs::write(target.join("research.json"), "{}").unwrap();
+        let store =
+            kuzushi_core::run_artifacts::StageCheckpointStore::discover(target, &[5u8; 32])
+                .unwrap();
+        let handle = kuzushi_core::run_artifacts::StageCheckpointHandle::open(
+            store,
+            target,
+            run_id,
+            "threat-model:build",
+        );
+        handle
+            .stage("research")
+            .complete(vec!["research.json".to_string()]);
+        handle.mark_current("gapfill");
+    }
+
+    #[test]
+    fn failed_attempt_with_stage_checkpoint_offers_continue_first() {
+        let temp = tempfile::tempdir().unwrap();
+        write_stage_checkpoint(temp.path(), "scan-run");
+        let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        let failed = app.phase_result_presentation_for(&attempt_with_outcome(
+            temp.path(),
+            PhaseAttemptOutcome::Failed,
+        ));
+
+        assert_eq!(
+            failed.actions.first(),
+            Some(&PhaseResultAction::ContinueRun),
+            "{:?}",
+            failed.actions
+        );
+        assert!(
+            failed.detail_lines.iter().any(|line| {
+                line.contains("1 completed stage(s) checkpointed [research]")
+                    && line.contains("resumes at gapfill")
+                    && line.contains("c continue")
+            }),
+            "{:?}",
+            failed.detail_lines
+        );
+    }
+
+    #[test]
+    fn completed_attempt_never_offers_continue_run() {
+        let temp = tempfile::tempdir().unwrap();
+        write_stage_checkpoint(temp.path(), "scan-run");
+        let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+
+        let completed = app.phase_result_presentation_for(&attempt_with_outcome(
+            temp.path(),
+            PhaseAttemptOutcome::Completed,
+        ));
+
+        assert!(!completed.actions.contains(&PhaseResultAction::ContinueRun));
     }
 
     #[test]

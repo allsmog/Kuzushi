@@ -295,7 +295,11 @@ fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 // the key handler; surface them so Tab/orbit/pause are discoverable.
 fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
     let mut bindings = Vec::new();
-    if !page.is_3d() {
+    if matches!(page, crate::scene3d::VizPage::Dfd) {
+        // The DFD is a frame-rendered graph: j/k drive the inspector cursor,
+        // not a scroll offset — advertising scroll here would be false.
+        bindings.push(bind("j/k", "select node/flow"));
+    } else if !page.is_3d() {
         bindings.push(bind("j/k/g/G", "scroll"));
     }
     bindings.extend([

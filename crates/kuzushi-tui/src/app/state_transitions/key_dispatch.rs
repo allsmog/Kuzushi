@@ -117,7 +117,10 @@ impl ShellApp {
     }
 
     fn handle_phase_result_escape(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if !self.phase_result_is_open()
+        // Esc keeps its composer meaning in Prompt mode; only Navigate mode
+        // with a card open uses it to return to the prompt.
+        if self.input_mode() != InputMode::Navigate
+            || !self.phase_result_is_open()
             || !key.modifiers.is_empty()
             || key.code != KeyCode::Esc
             || !self.default_composer_action_enabled("prompt_mode")
@@ -143,6 +146,9 @@ impl ShellApp {
         // before Prompt's line editor or Navigate's pane bindings can consume
         // BackTab. The shared editor state is intentionally left untouched.
         if self.handle_workbench_mode_cycle_key(key) {
+            return Some(InputUpdate::handled());
+        }
+        if self.handle_threat_tab_digit_key(key) {
             return Some(InputUpdate::handled());
         }
         None
@@ -185,9 +191,12 @@ impl ShellApp {
     }
 
     fn handle_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        // Card keys fire in BOTH input modes: Prompt mode captures them only
+        // while the composer is empty, so an in-progress draft always wins
+        // and single keys stop landing as stray prompt text ("q uickstart").
         if self.shell_view() != ShellView::Workbench
-            || self.input_mode() != InputMode::Navigate
             || !key.modifiers.is_empty()
+            || (self.input_mode() == InputMode::Prompt && !self.input().is_empty())
         {
             return None;
         }
@@ -233,7 +242,10 @@ impl ShellApp {
     }
 
     fn phase_result_is_open(&self) -> bool {
-        if self.shell_view() != ShellView::Workbench || self.input_mode() != InputMode::Navigate {
+        // The card is modal for its advertised keys in both input modes
+        // (prereq-card precedent); a non-empty Prompt draft still wins in
+        // `handle_phase_result_key`.
+        if self.shell_view() != ShellView::Workbench {
             return false;
         }
         self.phase_result_target_phase().is_some()
@@ -279,6 +291,7 @@ impl ShellApp {
         match command {
             PhaseResultCommand::Select => self.record_phase_result_selection(false),
             PhaseResultCommand::Continue => self.record_phase_result_selection(true),
+            PhaseResultCommand::ContinueRun => self.continue_phase_result_run(),
             PhaseResultCommand::Discard => self.discard_phase_result(),
             PhaseResultCommand::Open => self.open_phase_result_runs(),
             PhaseResultCommand::RunAgain => self.draft_phase_rerun(None),
@@ -289,6 +302,29 @@ impl ShellApp {
                 kuzushi_core::workflow_attempts::PhaseAttemptDerivation::Regenerate,
             )),
         }
+    }
+
+    /// `c` on a failed result: resume the recorded run from its checkpoint
+    /// via the shared `resume` mechanics (new run id, identical input; the
+    /// dispatch boundary rediscovers the checkpoint automatically).
+    fn continue_phase_result_run(&mut self) -> InputUpdate {
+        let Some(phase) = self.phase_result_target_phase() else {
+            return InputUpdate::handled();
+        };
+        let Some(record) = self.engagement.unresolved_phase_attempt(phase).cloned() else {
+            return InputUpdate::handled();
+        };
+        let Some(run_id) = self.continuable_failed_run(&record.completed) else {
+            self.log(
+                "result",
+                "no resumable checkpoint found for this attempt — use r to run again",
+            );
+            return InputUpdate::handled();
+        };
+        let effects = self.resume_session_effect(crate::app::ResumeSession {
+            run_id: Some(run_id),
+        });
+        InputUpdate::handled_with_effects(effects)
     }
 
     fn record_phase_result_selection(&mut self, continue_after: bool) -> InputUpdate {
@@ -566,7 +602,7 @@ impl ShellApp {
             .run_refs
             .iter()
             .rev()
-            .find_map(|run_id| rerun_specification(&target, run_id))
+            .find_map(|run_id| rerun_specification(self.registry(), &target, run_id))
         else {
             self.log(
                 "workflow",
@@ -692,10 +728,35 @@ impl ShellApp {
         if prereq_update.handled {
             return prereq_update;
         }
+        if self.handle_review_search_key(key) {
+            return InputUpdate::handled();
+        }
         if self.handle_overlay_key(key) {
             return InputUpdate::handled();
         }
         self.handle_shared_modal_key(key)
+    }
+
+    /// Item 13: `/` on the Review page opens a palette-style search capture
+    /// over the findings queue. While open it owns every printable key —
+    /// typing never leaks into the composer. Enter keeps the query active;
+    /// Esc clears it.
+    fn handle_review_search_key(&mut self, key: KeyEvent) -> bool {
+        if !self.router.workbench().review().search_capture {
+            return false;
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let review = self.router.workbench_mut().review_mut();
+        match key.code {
+            KeyCode::Esc => review.close_search_capture(false),
+            KeyCode::Enter => review.close_search_capture(true),
+            KeyCode::Backspace => review.pop_search_char(),
+            KeyCode::Char('c') if ctrl => return false,
+            KeyCode::Char(ch) if !ctrl && !alt => review.push_search_char(ch),
+            _ => return false,
+        }
+        true
     }
 
     fn handle_contextual_surface_key(&mut self, key: KeyEvent) -> bool {
@@ -719,7 +780,20 @@ impl ShellApp {
         if key.code == KeyCode::Esc {
             return self.restore_contextual_surface_origin();
         }
-        false
+        self.handle_catalog_expert_key(key)
+    }
+
+    /// Catalog `e` toggles expert engines from BOTH input modes; a
+    /// non-empty Prompt draft always wins so typing stays normal.
+    fn handle_catalog_expert_key(&mut self, key: KeyEvent) -> bool {
+        if self.shell_view() != ShellView::Catalog
+            || key.code != KeyCode::Char('e')
+            || !self.input().is_empty()
+        {
+            return false;
+        }
+        self.apply_view_hotkey(ViewHotkeyAction::CatalogToggleExpert)
+            .handled
     }
 
     fn handle_report_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1155,6 +1229,26 @@ impl ShellApp {
         true
     }
 
+    /// Threat tab digits fire from BOTH input modes: Prompt mode yields them
+    /// only while the composer is empty, so an in-progress draft ("model 1")
+    /// keeps typing normally.
+    fn handle_threat_tab_digit_key(&mut self, key: KeyEvent) -> bool {
+        if self.shell_view() != ShellView::Threat
+            || !key.modifiers.is_empty()
+            || (self.input_mode() == InputMode::Prompt && !self.input().is_empty())
+        {
+            return false;
+        }
+        let KeyCode::Char(digit) = key.code else {
+            return false;
+        };
+        let Some(view) = super::view_keybinding_groups::threat_view_for_digit(digit) else {
+            return false;
+        };
+        self.apply_view_hotkey(ViewHotkeyAction::ThreatView(view))
+            .handled
+    }
+
     fn enter_navigate_mode(&mut self) {
         if !self.input().is_empty() {
             self.log(
@@ -1240,7 +1334,11 @@ struct PhaseRerunDraft {
     derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
 }
 
-fn rerun_specification(target: &std::path::Path, run_id: &str) -> Option<(String, String)> {
+fn rerun_specification(
+    registry: &kuzushi_core::ModuleRegistry,
+    target: &std::path::Path,
+    run_id: &str,
+) -> Option<(String, String)> {
     let summary = kuzushi_core::load_run_summary(target, run_id).ok()?;
     let tool = summary.tool?;
     let kuzushi_core::RunArtifactRead::Ready { value, .. } =
@@ -1249,7 +1347,33 @@ fn rerun_specification(target: &std::path::Path, run_id: &str) -> Option<(String
         return None;
     };
     let input: serde_json::Value = serde_json::from_str(&value).ok()?;
-    Some((tool, input.to_string()))
+    let minimal = minimal_rerun_input(registry, &tool, input);
+    Some((tool, minimal.to_string()))
+}
+
+/// Canonical `input.json` carries every merged default; the draft the
+/// operator edits keeps only the values that differ, so the composer line
+/// stays readable instead of a several-hundred-character JSON blob.
+fn minimal_rerun_input(
+    registry: &kuzushi_core::ModuleRegistry,
+    tool: &str,
+    input: serde_json::Value,
+) -> serde_json::Value {
+    let Some(descriptor) = registry.resolve_tool(tool) else {
+        return input;
+    };
+    let serde_json::Value::Object(mut object) = input else {
+        return input;
+    };
+    object.retain(|name, value| {
+        descriptor
+            .options
+            .iter()
+            .find(|option| option.matches_name_or_alias(name))
+            .and_then(|option| option.default.as_ref())
+            .is_none_or(|default| default != value)
+    });
+    serde_json::Value::Object(object)
 }
 
 fn phase_rerun_action(

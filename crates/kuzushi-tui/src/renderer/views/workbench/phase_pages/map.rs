@@ -163,49 +163,10 @@ fn map_action_card_lines(
         return ("NEXT ACTION", decompose_first_lines(hint, width));
     }
     if model.dfd.empty_hint.is_some() || model.empty_hint.is_some() {
-        let mut lines = vec![
-            Line::styled(fit("⚠ No threat model detected", width), theme::warn()),
-            Line::styled(
-                fit(
-                    "generating one seeds scan recommendations and trust-boundary scope",
-                    width,
-                ),
-                theme::muted(),
-            ),
-            Line::styled(
-                fit("  [x] repository context and data flows", width),
-                theme::primary(),
-            ),
-            Line::styled(
-                fit("  [ ] existing PASTA model · [ ] external intel", width),
-                theme::muted(),
-            ),
-            Line::from(vec![
-                Span::styled("▸ Enter generate threat model", theme::accent()),
-                Span::styled("   Tab focus map · not now", theme::muted()),
-            ]),
-        ];
-        if let Some(hint) = model.empty_hint.as_deref() {
-            lines.insert(1, Line::styled(fit(hint, width), theme::muted()));
-        }
-        return ("NEXT ACTION", lines);
+        return ("NEXT ACTION", missing_threat_model_lines(model, width));
     }
     if model.context.state.eq_ignore_ascii_case("stale") {
-        let lines = vec![
-            Line::styled(
-                fit("⚠ threat model stale — refine recommended", width),
-                theme::warn(),
-            ),
-            Line::styled(
-                fit(&context_status_line(model), width),
-                artifact_state_style(model.context.state),
-            ),
-            Line::from(vec![
-                Span::styled("▸ Enter refine threat model", theme::accent()),
-                Span::styled("   keeps threat ids stable", theme::muted()),
-            ]),
-        ];
-        return ("NEXT ACTION", lines);
+        return ("NEXT ACTION", stale_threat_model_lines(model, width));
     }
     let mut lines = vec![Line::styled(
         fit(&context_status_line(model), width),
@@ -213,6 +174,52 @@ fn map_action_card_lines(
     )];
     lines.extend(next_scan_lines(&model.next_scans, width));
     ("PROJECT CONTEXT · NEXT SCANS", lines)
+}
+
+fn missing_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::styled(fit("⚠ No threat model detected", width), theme::warn()),
+        Line::styled(
+            fit(
+                "generating one seeds scan recommendations and trust-boundary scope",
+                width,
+            ),
+            theme::muted(),
+        ),
+        Line::styled(
+            fit("  [x] repository context and data flows", width),
+            theme::primary(),
+        ),
+        Line::styled(
+            fit("  [ ] existing threat model · [ ] external intel", width),
+            theme::muted(),
+        ),
+        Line::from(vec![
+            Span::styled("▸ Enter generate threat model", theme::accent()),
+            Span::styled("   Tab focus map · not now", theme::muted()),
+        ]),
+    ];
+    if let Some(hint) = model.empty_hint.as_deref() {
+        lines.insert(1, Line::styled(fit(hint, width), theme::muted()));
+    }
+    lines
+}
+
+fn stale_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    vec![
+        Line::styled(
+            fit("⚠ threat model stale — refine recommended", width),
+            theme::warn(),
+        ),
+        Line::styled(
+            fit(&context_status_line(model), width),
+            artifact_state_style(model.context.state),
+        ),
+        Line::from(vec![
+            Span::styled("▸ Enter refine threat model", theme::accent()),
+            Span::styled("   keeps threat ids stable", theme::muted()),
+        ]),
+    ]
 }
 
 /// Very large, still-undecomposed repositories get module decomposition as

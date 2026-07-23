@@ -157,8 +157,18 @@ fn legacy_fixture(target: &Path) -> PersistedFixture {
 
 fn assert_surface_equivalence(target: &Path, run_id: &str, fixture: PersistedFixture) {
     let surfaces = collect_surface_semantics(target, run_id, fixture);
+    // Documented Run Focus exception: its header already owns the run's cost
+    // line, so the feed intentionally omits the typed "Cost · …" row (it was
+    // the third cost on one screen). Replay, plain, and rich JSON have no
+    // header restating cost and keep the row.
+    let run_focus_expected = surfaces
+        .expected_rows
+        .iter()
+        .filter(|(_, text)| !text.starts_with("Cost · "))
+        .cloned()
+        .collect::<Vec<_>>();
     assert_eq!(
-        surfaces.live_run_focus_rows, surfaces.expected_rows,
+        surfaces.live_run_focus_rows, run_focus_expected,
         "{run_id}: Run Focus"
     );
     assert_eq!(

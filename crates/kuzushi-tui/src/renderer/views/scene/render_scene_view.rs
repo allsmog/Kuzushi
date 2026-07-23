@@ -32,6 +32,7 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         VizPage::Dfd => frame.render_widget(
             DfdDiagram {
                 model: dfd_model(app),
+                selection: Some(app.router.scene().dfd_selection()),
             },
             outer[1],
         ),

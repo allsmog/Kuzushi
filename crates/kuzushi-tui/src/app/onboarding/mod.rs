@@ -43,4 +43,7 @@ pub use target_candidates::{
     discover_target_candidates, record_recent_target, TargetCandidate, TargetCandidateScope,
 };
 pub use task_id::PlanningTaskId;
-pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, PlanningTaskRow};
+pub use task_row::{
+    artifact_state, cli_is_on_path, ArtifactState, LastAttempt, PlanningTaskRow,
+};
+pub(crate) use task_row::overlay_last_attempts;

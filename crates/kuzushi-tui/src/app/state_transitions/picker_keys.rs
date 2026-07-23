@@ -1199,21 +1199,33 @@ impl ShellApp {
             self.return_to_setup_from_editor();
             return;
         }
-        let origin = self
+        let origin_page = self
             .engagement
             .planning_picker_mut()
             .take_origin_workbench_page();
+        let origin_view = self
+            .engagement
+            .planning_picker_mut()
+            .take_origin_shell_view();
         let phase = self
             .engagement
             .current_phase()
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("closed {phase} picker"));
-        self.open_workbench();
-        // Esc means "never mind" — put the operator back on the page they
-        // came from; the findings refresh inside `open_workbench` may have
+        // Esc means "never mind" — restore the exact view the operator came
+        // from. Non-workbench origins (Threat view, Home, a contextual
+        // detour) go straight back; workbench origins restore their page,
+        // since the findings refresh inside `open_workbench` may have
         // re-derived a different one.
-        if let Some(page) = origin {
+        if let Some(view) = origin_view.filter(|view| {
+            !matches!(view, ShellView::Workbench | ShellView::PlanningPicker)
+        }) {
+            self.set_shell_view(view);
+            return;
+        }
+        self.open_workbench();
+        if let Some(page) = origin_page {
             self.set_workbench_page(page);
         }
     }

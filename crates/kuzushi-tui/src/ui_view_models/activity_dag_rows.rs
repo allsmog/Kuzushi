@@ -248,10 +248,27 @@ fn task_pane_rows(
     width: usize,
     now: Instant,
 ) -> Vec<ActivityDagPaneRow> {
-    let mut out = vec![ActivityDagPaneRow {
-        text: dag_row_text(row, width, now, index == route.task_cursor),
-        tone: dag_row_tone(row.state),
-    }];
+    // Rows inherited from an earlier run in the sequence stay visible for
+    // history but render muted with an explicit tag — their states are that
+    // run's outcome, not this one's (item 5c).
+    let (text, tone) = if row.prior_run_ref.is_some() {
+        (
+            fit(
+                &format!(
+                    "{} · prior run",
+                    dag_row_text(row, width, now, index == route.task_cursor).trim_end()
+                ),
+                width,
+            ),
+            ActivityDagRowTone::Muted,
+        )
+    } else {
+        (
+            dag_row_text(row, width, now, index == route.task_cursor),
+            dag_row_tone(row.state),
+        )
+    };
+    let mut out = vec![ActivityDagPaneRow { text, tone }];
     if should_show_task_details(route, row) {
         out.extend(task_detail_rows(row, width));
     } else if let Some(text) = dag_active_substep_text(row, width) {

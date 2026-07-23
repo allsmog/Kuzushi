@@ -9,7 +9,10 @@ use kuzushi_core::{Finding, Severity};
 use std::collections::BTreeMap;
 
 mod dfd;
-pub(crate) use dfd::{dfd_model, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel};
+pub(crate) use dfd::{
+    dfd_model, dfd_selectable_count, dfd_selected_item, DfdFlowModel, DfdKind, DfdModel,
+    DfdNodeModel, DfdSelected,
+};
 
 // ── Risk by module (shared by heatmap + terrain) ──────────────────────────
 

@@ -4,8 +4,10 @@
 //! deck; the retired whole-screen Workbench ASCII projection no longer owns a
 //! second diagram representation.
 
-const MAX_NODES: usize = 18;
-const MAX_FLOWS: usize = 14;
+// Generous bounds — real models stay well under; the renderer pages per zone
+// instead of silently dropping topology.
+const MAX_NODES: usize = 64;
+const MAX_FLOWS: usize = 64;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdNode {
     pub(crate) id: String,
@@ -21,6 +23,8 @@ pub(crate) struct DfdFlow {
     pub(crate) target: String,
     pub(crate) label: String,
     pub(crate) crosses: bool,
+    /// Trust-boundary ids the doc tags on this flow (may be empty).
+    pub(crate) boundary_ids: Vec<String>,
 }
 
 pub(crate) fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
@@ -65,14 +69,43 @@ pub(crate) fn parse_flows(doc: &serde_json::Value, nodes: &[DfdNode]) -> Vec<Dfd
 fn flow_from_value(value: &serde_json::Value, nodes: &[DfdNode]) -> Option<DfdFlow> {
     let source_id = string_field(value, "sourceId")?;
     let target_id = string_field(value, "targetId")?;
-    let source_zone = zone_of(nodes, &source_id);
-    let target_zone = zone_of(nodes, &target_id);
+    let boundary_ids = trust_boundary_ids(value);
     Some(DfdFlow {
         source: display_name(nodes, &source_id),
         target: display_name(nodes, &target_id),
         label: string_field(value, "description").unwrap_or_default(),
-        crosses: source_zone != target_zone,
+        crosses: flow_crosses(value, &boundary_ids, nodes, &source_id, &target_id),
+        boundary_ids,
     })
+}
+
+fn trust_boundary_ids(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("trustBoundaryIds")
+        .and_then(serde_json::Value::as_array)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(ToString::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A flow crosses a trust boundary when the doc explicitly tags it with
+/// boundary ids; docs without the field fall back to zone inequality. This
+/// keeps the legend's crossing count consistent with the model's own
+/// boundary list instead of over/under-counting from zone names alone.
+fn flow_crosses(
+    value: &serde_json::Value,
+    boundary_ids: &[String],
+    nodes: &[DfdNode],
+    source_id: &str,
+    target_id: &str,
+) -> bool {
+    if value.get("trustBoundaryIds").is_some() {
+        return !boundary_ids.is_empty();
+    }
+    zone_of(nodes, source_id) != zone_of(nodes, target_id)
 }
 
 pub(crate) fn zones_in_order(nodes: &[DfdNode]) -> Vec<String> {
@@ -148,5 +181,35 @@ mod tests {
     fn parser_is_empty_when_the_artifact_has_no_nodes() {
         assert!(parse_nodes(&json!({})).is_empty());
         assert!(parse_nodes(&json!({"dfd": {"nodes": []}})).is_empty());
+    }
+
+    #[test]
+    fn boundary_tags_decide_crossings_with_zone_inequality_as_fallback() {
+        let doc = json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "a", "name": "A", "trustZone": "app-tier"},
+                    {"id": "b", "name": "B", "trustZone": "app-tier"},
+                    {"id": "c", "name": "C", "trustZone": "data-tier"}
+                ],
+                "flows": [
+                    // Same zone but explicitly tagged: crosses.
+                    {"id": "f1", "sourceId": "a", "targetId": "b", "trustBoundaryIds": ["tb-1"]},
+                    // Different zones but explicitly tagged as boundary-free: does not cross.
+                    {"id": "f2", "sourceId": "a", "targetId": "c", "trustBoundaryIds": []},
+                    // No tag field: zone-inequality fallback.
+                    {"id": "f3", "sourceId": "a", "targetId": "c"},
+                    {"id": "f4", "sourceId": "a", "targetId": "b"}
+                ]
+            }
+        });
+        let nodes = parse_nodes(&doc);
+        let flows = parse_flows(&doc, &nodes);
+
+        assert!(flows[0].crosses, "boundary tag wins over same-zone");
+        assert_eq!(flows[0].boundary_ids, ["tb-1"]);
+        assert!(!flows[1].crosses, "explicit empty tag list wins over zones");
+        assert!(flows[2].crosses, "untagged flows fall back to zones");
+        assert!(!flows[3].crosses);
     }
 }

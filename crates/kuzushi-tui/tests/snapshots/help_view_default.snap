@@ -21,7 +21,7 @@ report - export the engagement report with a durable receipt
   aliases / examples: /report
 aim [focus] - seed the engagement harness from the Workbench AIM page
   aliases / examples: aim, /aim, aim sqli, aim idor
-modules - open phase-native capabilities (Expert engines with e)
+modules - open phase-native capabilities (press e for expert engines)
   aliases / examples: /modules, /m, m, show modules
 recommend - open phase-native recommended capabilities
   aliases / examples: /recommend, rec, /rec
@@ -41,8 +41,9 @@ quickstart - first-run guided setup
   aliases / examples: /quickstart
 setup - review target, Map plan, model/credentials, prompt, and budget readiness
   aliases / examples: /setup, onboarding, /onboarding, /planning
-next - continue the engagement (alias: continue) — open the current phase's picker
-  aliases / examples: /next
+next [fresh] - continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the
+pass at the Map planner
+  aliases / examples: next, /next
 phase <map|scan|review|prove|fix> - open a specific engagement phase picker
   aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
 autonomy [recon|scan|review|prove|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling

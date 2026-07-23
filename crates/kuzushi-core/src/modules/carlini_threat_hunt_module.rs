@@ -28,6 +28,7 @@ fn carlini_threat_hunt_tool() -> ToolDescriptor {
         "Compatibility alias for offense-review:threat-hunt; runs scoped agents over the active threat model.",
         carlini_threat_hunt_options(),
     )
+    .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "offensive review mission",
         "carlini-threat-hunt",

@@ -7,7 +7,7 @@ size: 120x36
 KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not built · model unconfigured · module all
  Map ● · Scan ○ · Review ○ · Prove ○ · Fix ○
  ▸ NEXT build or explicitly skip the current-revision map
- next continue workspace phase · context build build context · jobs inspect prior runs · z open visualization
+ next → Map · context build build context · jobs inspect prior runs · z open visualization
 │PROJECT CONTEXT
 │./failure-target · rev:checking…
 │checking durable map artifacts…

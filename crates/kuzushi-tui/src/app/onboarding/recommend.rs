@@ -52,15 +52,23 @@ pub fn model_recommended_in_phase(
 }
 
 fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
+    if let Some(preselect) = ledger_preselect(row) {
+        return preselect;
+    }
     use PlanningTaskId::*;
     match row.id {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
         AttachFiles => false,
         GatherRepoContext | MapEntryPoints => missing_artifact(row),
+        // Decomposition is the honest first move on big monorepos, but the
+        // deterministic profile cannot see repo size here — the Map page's
+        // decompose-first card carries that signal; the row stays opt-in.
+        DecomposeModules => false,
         // Keep first value fast and predictable. These remain visible as
         // deliberate Deep map work instead of silently starting database or
         // model-backed construction from the default plan.
-        BuildStrideThreatModel | BuildCodePropertyGraph | BuildCodeQlDatabase => false,
+        BuildThreatModel | BuildStrideThreatModel | BuildCodePropertyGraph
+        | BuildCodeQlDatabase => false,
         // Reverse-engineering artifacts only matter for binary/APK targets.
         BuildXRay => target.kind.is_reverse_engineering_target() && missing_artifact(row),
         ReverseEngineerBinary => {
@@ -69,14 +77,14 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         // Specialized / second-methodology builds are opt-in. Harness
         // authoring spends model dollars and needs an engine checkout.
         BuildPastaThreatModel | ThreatIntelCves | MapFuzzAuthor => false,
-        // Scan source surfaces; specialized systems hunts
-        // are visible only when `task_applies_to_target` found matching code.
-        ScanSecrets => true,
-        ScanSemgrep => source_like(target.kind),
-        // Deep/model-backed hunts stay opt-in. CodeQL in particular needs a
-        // compatible database/build plan; CLI presence alone is not proof.
-        ScanCodeql | ScanAgenticSast | HuntTaint => false,
-        HuntThreatModel => true,
+        // The model-backed hunts ARE the Scan phase's value: agentic SAST and
+        // the threat-model-driven hunt are pre-checked; deterministic
+        // scanners are quick add-ons the operator opts into.
+        ScanAgenticSast | HuntThreatModel => true,
+        ScanSecrets | ScanSemgrep => false,
+        // CodeQL needs a compatible database/build plan; CLI presence alone
+        // is not proof. Taint needs a CPG build first.
+        ScanCodeql | HuntTaint => false,
         HuntSystems => false,
         // Fuzzing runs the external engine for many minutes — deliberate opt-in.
         ScanFuzz => false,
@@ -86,6 +94,25 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         // 掛 KAKE · fix — always report; patching is a deliberate opt-in.
         BuildReport => true,
         PatchFindings => false,
+    }
+}
+
+/// Item 5b: reality-aware pre-check overriding the static table. A
+/// FAILED-but-resumable attempt is pre-checked so Enter continues it from
+/// its checkpoint; an action task that already completed this pass is never
+/// silently re-checked (the static table would invert both).
+fn ledger_preselect(row: &PlanningTaskRow) -> Option<bool> {
+    use super::task_row::LastAttempt;
+    match &row.last_attempt {
+        Some(LastAttempt::Failed {
+            resumable: true, ..
+        }) => Some(true),
+        Some(LastAttempt::Completed)
+            if matches!(row.artifact_state, ArtifactState::Action) =>
+        {
+            Some(false)
+        }
+        _ => None,
     }
 }
 
@@ -107,13 +134,6 @@ fn missing_artifact(row: &PlanningTaskRow) -> bool {
     matches!(
         row.artifact_state,
         ArtifactState::Missing | ArtifactState::Invalid
-    )
-}
-
-fn source_like(kind: TargetKind) -> bool {
-    matches!(
-        kind,
-        TargetKind::Source | TargetKind::JvmApp | TargetKind::AndroidApk
     )
 }
 
@@ -173,13 +193,13 @@ mod tests {
             recommended_tasks_for_phase(WorkflowPhase::Map, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::GatherRepoContext));
         assert!(picked.contains(&PlanningTaskId::MapEntryPoints));
-        assert!(!picked.contains(&PlanningTaskId::BuildStrideThreatModel));
+        assert!(!picked.contains(&PlanningTaskId::BuildThreatModel));
         assert!(!picked.contains(&PlanningTaskId::BuildCodePropertyGraph));
         assert!(!picked.contains(&PlanningTaskId::BuildCodeQlDatabase));
         // No reverse-engineering on a plain source tree.
         assert!(!picked.contains(&PlanningTaskId::ReverseEngineerBinary));
-        // PASTA / threat-intel stay opt-in.
-        assert!(!picked.contains(&PlanningTaskId::BuildPastaThreatModel));
+        // Threat-intel stays opt-in.
+        assert!(!picked.contains(&PlanningTaskId::ThreatIntelCves));
     }
 
     #[test]
@@ -196,16 +216,26 @@ mod tests {
         let rows = rows_for(WorkflowPhase::Scan);
         let c_source = recommended_tasks_for_phase(WorkflowPhase::Scan, c_profile(), &rows);
         assert!(!c_source.contains(&PlanningTaskId::HuntUseAfterFree));
-        assert!(c_source.contains(&PlanningTaskId::ScanSecrets));
+        assert!(c_source.contains(&PlanningTaskId::ScanAgenticSast));
 
         let source =
             recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
-        assert!(source.contains(&PlanningTaskId::ScanSecrets));
-        assert!(source.contains(&PlanningTaskId::ScanSemgrep));
         assert!(!source.contains(&PlanningTaskId::ScanCodeql));
-        assert!(!source.contains(&PlanningTaskId::ScanAgenticSast));
         assert!(!source.contains(&PlanningTaskId::HuntTaint));
+    }
+
+    /// Item 10: the model-backed hunts are the Scan default; deterministic
+    /// scanners are opt-in add-ons.
+    #[test]
+    fn scan_defaults_to_model_backed_hunts_with_deterministic_addons_unchecked() {
+        let rows = rows_for(WorkflowPhase::Scan);
+        let picked =
+            recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
+        assert!(picked.contains(&PlanningTaskId::ScanAgenticSast));
+        assert!(picked.contains(&PlanningTaskId::HuntThreatModel));
+        assert!(!picked.contains(&PlanningTaskId::ScanSecrets));
+        assert!(!picked.contains(&PlanningTaskId::ScanSemgrep));
     }
 
     #[test]

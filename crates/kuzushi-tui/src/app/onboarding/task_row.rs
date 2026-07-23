@@ -1,5 +1,6 @@
 use super::task_id::PlanningTaskId;
 use kuzushi_core::workspace::ArtifactState as CoreArtifactState;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -20,6 +21,26 @@ pub struct PlanningTaskRow {
     pub required_cli: Option<&'static str>,
     pub cli_available: bool,
     pub blocker: Option<String>,
+    /// Honest cache identity for the merged threat-model row: the live
+    /// artifact's real methodology plus its ledger version ("stride v4").
+    /// None for other rows or when nothing is cached.
+    pub cached_detail: Option<String>,
+    /// Most recent terminal run outcome for this task's tool, overlaid from
+    /// the run ledger by `overlay_last_attempts`. Drives honest
+    /// preselection: failed-but-resumable ⇒ pre-checked continue; work
+    /// completed this pass is never silently re-checked.
+    pub last_attempt: Option<LastAttempt>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LastAttempt {
+    Completed,
+    Failed {
+        /// The tool declares continuation and left resumable state behind —
+        /// re-running the same task resumes instead of restarting.
+        resumable: bool,
+        resume_from: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +71,7 @@ impl PlanningTaskRow {
             // placeholder under the workspace state dir.
             None => (target.join(".kuzushi"), ArtifactState::Action, None),
         };
+        let cached_detail = cached_row_detail(task, target, artifact_state);
         Self {
             id: task,
             label: task.label(),
@@ -61,21 +83,9 @@ impl PlanningTaskRow {
             required_cli,
             cli_available,
             blocker,
+            cached_detail,
+            last_attempt: None,
         }
-    }
-
-    #[cfg(test)]
-    /// Whether this row should be pre-checked when the picker first opens.
-    /// An artifact-building row is pre-checked when its artifact is missing or
-    /// invalid AND its required CLI is available. Action rows are opt-in here
-    /// (the recommender supplies their preselection in the phase walker).
-    pub fn pre_checked(&self) -> bool {
-        if matches!(self.artifact_state, ArtifactState::Action) {
-            return false;
-        }
-        self.cli_available
-            && !matches!(self.artifact_state, ArtifactState::Cached)
-            && !forced_off_by_default(self.id)
     }
 
     #[cfg(test)]
@@ -103,12 +113,101 @@ impl PlanningTaskRow {
     }
 }
 
-#[cfg(test)]
-/// PASTA is opt-in even when its artifact is missing — STRIDE is the
-/// default methodology and we don't want to spend two LLM passes by
-/// default.
-fn forced_off_by_default(task: PlanningTaskId) -> bool {
-    matches!(task, PlanningTaskId::BuildPastaThreatModel)
+const LAST_ATTEMPT_SCAN_LIMIT: usize = 50;
+
+/// Overlay each row's most recent terminal run outcome from the run ledger
+/// (bounded newest-first scan). Called at picker build and refresh so
+/// preselection reflects what actually happened, not a static table.
+pub(crate) fn overlay_last_attempts(rows: &mut [PlanningTaskRow], target: &Path) {
+    let newest = newest_terminal_runs(target);
+    for row in rows.iter_mut() {
+        row.last_attempt = newest
+            .get(row.tool_name)
+            .and_then(|(status, run_id)| last_attempt(target, row, status, run_id));
+    }
+}
+
+/// Newest terminal (status, run id) per tool from the run ledger.
+fn newest_terminal_runs(target: &Path) -> BTreeMap<String, (String, String)> {
+    let mut newest = BTreeMap::new();
+    let Ok(entries) =
+        kuzushi_core::list_recent_run_summary_entries(target, LAST_ATTEMPT_SCAN_LIMIT)
+    else {
+        return newest;
+    };
+    for entry in entries {
+        let kuzushi_core::RunSummaryEntryState::Ready(summary) = entry.state else {
+            continue;
+        };
+        let Some(tool) = summary.tool else {
+            continue;
+        };
+        if terminal_run_status(&summary.status) {
+            newest.entry(tool).or_insert((summary.status, entry.run_id));
+        }
+    }
+    newest
+}
+
+fn terminal_run_status(status: &str) -> bool {
+    matches!(
+        status,
+        "completed" | "failed" | "partial" | "interrupted" | "canceled"
+    )
+}
+
+fn last_attempt(
+    target: &Path,
+    row: &PlanningTaskRow,
+    status: &str,
+    run_id: &str,
+) -> Option<LastAttempt> {
+    match status {
+        "completed" => Some(LastAttempt::Completed),
+        "failed" | "partial" | "interrupted" => Some(failed_attempt(target, row, run_id)),
+        _ => None,
+    }
+}
+
+fn failed_attempt(target: &Path, row: &PlanningTaskRow, run_id: &str) -> LastAttempt {
+    let continuation = kuzushi_core::modules::tool_continuation(row.tool_name);
+    let coordinates =
+        kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id);
+    let resumable = continuation.is_continuable()
+        && (coordinates.is_some()
+            || matches!(
+                continuation,
+                kuzushi_core::modules::ContinuationSupport::Loop
+            ));
+    LastAttempt::Failed {
+        resumable,
+        resume_from: coordinates.and_then(|coordinates| coordinates.resume_from),
+    }
+}
+
+/// The live threat model's real methodology + ledger version, so the picker
+/// says "cached · stride v4" instead of guessing from the row that built it.
+fn cached_row_detail(
+    task: PlanningTaskId,
+    target: &Path,
+    state: ArtifactState,
+) -> Option<String> {
+    if task != PlanningTaskId::BuildThreatModel || state != ArtifactState::Cached {
+        return None;
+    }
+    let document = kuzushi_core::load_persistent_threat_model(target)?;
+    let methodology = document
+        .get("methodology")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("unknown")
+        .to_string();
+    let version = kuzushi_core::list_threat_model_versions(target, 1)
+        .ok()
+        .and_then(|versions| versions.first().map(|record| record.id));
+    Some(match version {
+        Some(version) => format!("{methodology} v{version}"),
+        None => methodology,
+    })
 }
 
 fn task_workspace_blocker(task: PlanningTaskId, target: &Path) -> Option<String> {
@@ -229,10 +328,11 @@ mod tests {
     }
 
     #[test]
-    fn pasta_defaults_off_even_when_missing() {
+    fn merged_threat_model_row_probes_the_live_artifact() {
         let tmp = tempfile::tempdir().unwrap();
-        let row = PlanningTaskRow::for_task(PlanningTaskId::BuildPastaThreatModel, tmp.path());
-        assert!(!row.pre_checked());
+        let row = PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, tmp.path());
+        assert!(row.artifact_path.ends_with(".kuzushi/threat-model.json"));
+        assert_eq!(row.artifact_state, ArtifactState::Missing);
     }
 
     #[test]

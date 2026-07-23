@@ -25,10 +25,12 @@ mod run_result_summary;
 mod run_summary_store;
 mod running;
 mod scan_stage;
+mod stage_checkpoint;
 #[cfg(test)]
 mod tests;
 mod tool_output_cost;
 mod tool_run_failure_result;
+mod tool_stage;
 mod tool_run_record;
 mod tool_run_record_events;
 mod trace_cost;
@@ -80,12 +82,20 @@ pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
     RunSummary, RunTargetGitMetadata, RunTraceStep,
 };
+pub use stage_checkpoint::{
+    active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
+    PendingStageCheckpoint, StageCheckpointCoordinates, StageCheckpointHandle,
+    StageCheckpointScope, StageCheckpointStore, StageGuard,
+};
 pub use scan_stage::{
     load_scan_stage_data, PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta,
     ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost, ScanStageData,
     ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
 pub use tool_output_cost::tool_run_output_cost_report;
+pub use tool_stage::{
+    append_tool_stage_receipt, load_tool_stage_receipts, ToolStageReceipt, TOOL_STAGES_JSONL_FILE,
+};
 pub(crate) use tool_run_record::terminal_result_digest;
 pub use tool_run_record::{
     record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,

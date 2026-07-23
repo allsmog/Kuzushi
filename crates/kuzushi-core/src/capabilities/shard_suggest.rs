@@ -61,7 +61,62 @@ pub fn execute_suggest_shards(input: &Value, ctx: &ToolExecutionContext<'_>) -> 
     rank_candidates(&mut candidates);
     let draft = render_draft(root, &candidates, &excluded);
     let path = write_draft(root, input, &draft)?;
-    Ok(suggest_result(&path, &candidates, &excluded, draft))
+    let scopes_path = emit_scopes_if_requested(root, input, &candidates)?;
+    Ok(suggest_result(
+        &path,
+        scopes_path.as_deref(),
+        &candidates,
+        &excluded,
+        draft,
+    ))
+}
+
+/// `emitScopes=true` (the planner's DecomposeModules preset) closes the
+/// decomposition loop: the same deterministic candidates become the nested
+/// project-scope tree that planners and threat modeling consume. The TOML
+/// draft above remains a never-auto-installed review copy.
+fn emit_scopes_if_requested(
+    root: &Path,
+    input: &Value,
+    candidates: &[ShardCandidate],
+) -> Result<Option<PathBuf>> {
+    let requested = input
+        .get("emitScopes")
+        .or_else(|| input.get("emit_scopes"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !requested {
+        return Ok(None);
+    }
+    let tree = scope_tree_from_candidates(root, candidates);
+    crate::workspace::save_nested_project_scopes(root, &tree).map(Some)
+}
+
+fn scope_tree_from_candidates(
+    root: &Path,
+    candidates: &[ShardCandidate],
+) -> crate::workspace::NestedProjectScopeTree {
+    use crate::workspace::{NestedProjectKind, NestedProjectScope};
+    let mut scopes = vec![NestedProjectScope {
+        id: crate::workspace::ROOT_SCOPE_ID.to_string(),
+        parent: None,
+        kind: NestedProjectKind::Root,
+        rel_path: ".".to_string(),
+        inherited_sections: Vec::new(),
+    }];
+    scopes.extend(candidates.iter().map(|candidate| NestedProjectScope {
+        id: candidate.shard_name(),
+        parent: Some(crate::workspace::ROOT_SCOPE_ID.to_string()),
+        kind: NestedProjectKind::EntrypointCluster,
+        rel_path: candidate.relative_path.clone(),
+        inherited_sections: Vec::new(),
+    }));
+    let _ = root;
+    crate::workspace::NestedProjectScopeTree {
+        schema_version: 1,
+        root: crate::workspace::ROOT_SCOPE_ID.to_string(),
+        scopes,
+    }
 }
 
 #[derive(Default)]
@@ -352,13 +407,17 @@ fn draft_path(root: &Path, input: &Value) -> Result<PathBuf> {
 
 fn suggest_result(
     path: &Path,
+    scopes_path: Option<&Path>,
     candidates: &[ShardCandidate],
     excluded: &[String],
     draft: String,
 ) -> Value {
     let oversized = candidates.iter().filter(|c| c.oversized).count();
+    let scopes_line = scopes_path
+        .map(|path| format!("\nScope tree materialized at {}.", path.display()))
+        .unwrap_or_default();
     let output = format!(
-        "pack:suggest-shards proposed {} shard scope(s) ({} oversized, {} non-shipped dir(s) excluded) — draft at {}\nReview and edit the draft; it is never auto-installed.",
+        "pack:suggest-shards proposed {} shard scope(s) ({} oversized, {} non-shipped dir(s) excluded) — draft at {}\nReview and edit the draft; it is never auto-installed.{scopes_line}",
         candidates.len(),
         oversized,
         excluded.len(),
@@ -369,6 +428,7 @@ fn suggest_result(
         output,
         json!({
             "draftPath": path.display().to_string(),
+            "scopesPath": scopes_path.map(|path| path.display().to_string()),
             "shardCount": candidates.len(),
             "oversizedCount": oversized,
             "excluded": excluded,

@@ -93,6 +93,7 @@ pub(crate) fn complete_threat_model_build(
     mut generated: GeneratedThreatModel,
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
+    stamp_build_seed_lineage(&mut generated.document, &input)?;
     finalize_document_identity(&mut generated.document, &input.target)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
@@ -107,6 +108,35 @@ pub(crate) fn complete_threat_model_build(
         "build",
         artifacts.persisted,
     );
+    finish_threat_model_build(
+        ctx,
+        flavor,
+        verb,
+        input,
+        generated,
+        source_bundle,
+        artifacts,
+        has_concrete_content,
+        cost,
+        version_warning,
+    )
+}
+
+/// Summary lines, terminal trace step, and the result envelope for a
+/// finished build.
+#[allow(clippy::too_many_arguments)]
+fn finish_threat_model_build(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    mut generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+    artifacts: ThreatModelArtifacts,
+    has_concrete_content: bool,
+    cost: crate::runtime::RuntimeCostReport,
+    version_warning: Option<String>,
+) -> Result<Value> {
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
     let mut lines = threat_model_output_lines(
@@ -131,6 +161,21 @@ pub(crate) fn complete_threat_model_build(
         lines,
         source_bundle,
     )
+}
+
+/// Seed lineage runs before persistence, while the live model on disk is
+/// still the exact document that seeded the prompt. Refine always derives
+/// from the persisted model, so it records as seeded.
+fn stamp_build_seed_lineage(document: &mut Value, input: &BuildInput) -> Result<()> {
+    let used_seed = input.is_refine() || !input.is_fresh();
+    let seed_mode = if used_seed { "seeded" } else { "fresh" };
+    let previous = if used_seed {
+        try_load_persistent_threat_model(&input.target)?
+    } else {
+        None
+    };
+    stamp_seed_lineage(document, seed_mode, previous.as_ref());
+    Ok(())
 }
 
 /// Contract identity pass on the finished document: content-addressed
@@ -422,7 +467,10 @@ fn generate_threat_model_document(
     grounding: &PromptGrounding,
 ) -> Result<GeneratedThreatModel> {
     let prompt = threat_model_prompt(input, source_bundle, grounding)?;
+    let checkpoints = ctx.stage_checkpoints();
+    let synthesis_stage = stage_scope(&checkpoints, "synthesis");
     let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
+    complete_stage(synthesis_stage, Vec::new());
     let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
     generated.cost_usd = costed.cost_usd;
     generated.cost_usd_exact = costed.cost_usd_exact;
@@ -435,7 +483,13 @@ fn threat_model_prompt(
     source_bundle: &ThreatModelSourceBundle,
     grounding: &PromptGrounding,
 ) -> Result<String> {
-    let previous_model = try_load_persistent_threat_model(&input.target)?;
+    // seedMode=fresh builds from repository evidence only; the persisted
+    // model is deliberately not embedded as seed context.
+    let previous_model = if input.is_fresh() {
+        None
+    } else {
+        try_load_persistent_threat_model(&input.target)?
+    };
     build_agent_prompt(input, previous_model.as_ref(), source_bundle, grounding)
 }
 

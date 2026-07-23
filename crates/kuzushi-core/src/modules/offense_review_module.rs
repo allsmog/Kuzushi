@@ -28,6 +28,7 @@ fn threat_hunt_tool() -> ToolDescriptor {
         "Run bounded offensive review agents over selected actors and threats from the active threat model.",
         carlini_threat_hunt_options(),
     )
+    .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "offensive review mission",
         "offense-review",

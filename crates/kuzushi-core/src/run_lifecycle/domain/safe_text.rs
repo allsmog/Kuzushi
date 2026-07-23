@@ -60,6 +60,36 @@ impl std::fmt::Display for SafeText {
     }
 }
 
+/// Collapse an error message that is an exact self-concatenation. Old
+/// ledger records doubled the public failure text ("X. X", "X · X",
+/// "X: X", across a newline); presentation collapses the duplicate
+/// without ever rewriting persisted data.
+pub fn collapse_repeated_message(text: &str) -> String {
+    let trimmed = text.trim();
+    for separator in ["\n", " · ", ": ", "; ", ". ", " — ", " "] {
+        if let Some(half) = exact_half(trimmed, separator) {
+            return half.to_string();
+        }
+    }
+    trimmed.to_string()
+}
+
+fn exact_half<'a>(text: &'a str, separator: &str) -> Option<&'a str> {
+    let mut start = 0;
+    while let Some(position) = text[start..].find(separator) {
+        let index = start + position;
+        let left = text[..index].trim();
+        let right = text[index + separator.len()..].trim();
+        if !left.is_empty()
+            && left.trim_end_matches('.') == right.trim_end_matches('.')
+        {
+            return Some(left);
+        }
+        start = index + separator.len();
+    }
+    None
+}
+
 fn escape_controls(value: &str) -> String {
     value
         .chars()
@@ -84,6 +114,31 @@ fn bound_chars(value: &str, maximum: usize) -> String {
     let mut bounded = value.chars().take(maximum - 1).collect::<String>();
     bounded.push('…');
     bounded
+}
+
+#[cfg(test)]
+mod collapse_repeated_message_tests {
+    use super::collapse_repeated_message;
+
+    #[test]
+    fn doubled_rate_limit_message_renders_once() {
+        assert_eq!(
+            collapse_repeated_message(
+                "Provider rate limited the request (HTTP 429). Provider rate limited the request (HTTP 429)."
+            ),
+            "Provider rate limited the request (HTTP 429)"
+        );
+        assert_eq!(
+            collapse_repeated_message("bridge failed · bridge failed"),
+            "bridge failed"
+        );
+    }
+
+    #[test]
+    fn distinct_messages_are_untouched() {
+        let text = "Provider rate limited the request. Retry in 60s.";
+        assert_eq!(collapse_repeated_message(text), text);
+    }
 }
 
 #[cfg(test)]

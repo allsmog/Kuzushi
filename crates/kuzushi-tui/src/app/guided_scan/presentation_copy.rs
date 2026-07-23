@@ -232,6 +232,7 @@ fn phase_result_action_label(phase: WorkflowPhase, action: PhaseResultAction) ->
         (WorkflowPhase::Map, Select) => "Use map",
         (WorkflowPhase::Scan, Select) => "Use scan",
         (_, SelectAndReport) => "Use & Report",
+        (_, ContinueRun) => "Continue from checkpoint",
         (_, Open) => "Open run evidence",
         (_, Refine) => "Refine",
         (_, RunAgain) => "Run again",
@@ -254,6 +255,9 @@ fn phase_result_action_description(
         SelectAndContinue => "Select this attempt and follow the reality-derived next phase.",
         SelectAndReport => "Select this attempt and open the report exit.",
         Select => "Select this attempt without leaving the current phase page.",
+        ContinueRun => {
+            "Resume the failed run from its checkpoint; completed stages are not re-bought."
+        }
         Open => "Inspect the canonical run receipt and trace.",
         Refine => "Draft a refinement from the exact rerun specification.",
         RunAgain => "Repeat the recorded tool and input.",

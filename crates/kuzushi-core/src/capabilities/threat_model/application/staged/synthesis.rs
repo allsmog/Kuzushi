@@ -11,7 +11,13 @@ pub(crate) fn staged_synthesis_prompt(
     source_bundle: &ThreatModelSourceBundle,
     dossier: &ResearchDossier,
 ) -> Result<String> {
-    let previous_model = try_load_persistent_threat_model(&input.target)?;
+    // seedMode=fresh builds from repository evidence only; the persisted
+    // model is deliberately not embedded as seed context.
+    let previous_model = if input.is_fresh() {
+        None
+    } else {
+        try_load_persistent_threat_model(&input.target)?
+    };
     let base = build_agent_prompt(
         input,
         previous_model.as_ref(),

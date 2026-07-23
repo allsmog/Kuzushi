@@ -188,11 +188,14 @@ pub(in crate::capabilities::threat_model) fn dread_rating(score: f64) -> &'stati
     }
 }
 
-pub(in crate::capabilities::threat_model) fn methodology_label(methodology: &str) -> &'static str {
+/// Truthful display label: known methodologies get their canonical spelling,
+/// anything else echoes uppercased — never mislabeled as another methodology.
+pub(in crate::capabilities::threat_model) fn methodology_label(methodology: &str) -> String {
     match methodology {
-        "stride" => "STRIDE",
-        "dread" => "DREAD",
-        _ => "PASTA",
+        "stride" => "STRIDE".to_string(),
+        "dread" => "DREAD".to_string(),
+        "pasta" => "PASTA".to_string(),
+        other => other.to_uppercase(),
     }
 }
 
@@ -222,5 +225,22 @@ pub(in crate::capabilities::threat_model) fn append_top_threats(
             .and_then(Value::as_str)
             .unwrap_or("unknown");
         lines.push(format!("  - [{category}] {title} (impact={impact})"));
+    }
+}
+
+#[cfg(test)]
+mod methodology_label_tests {
+    use super::methodology_label;
+
+    #[test]
+    fn known_methodologies_get_canonical_labels() {
+        assert_eq!(methodology_label("stride"), "STRIDE");
+        assert_eq!(methodology_label("dread"), "DREAD");
+        assert_eq!(methodology_label("pasta"), "PASTA");
+    }
+
+    #[test]
+    fn unknown_methodology_echoes_uppercased_instead_of_claiming_pasta() {
+        assert_eq!(methodology_label("linddun"), "LINDDUN");
     }
 }

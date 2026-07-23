@@ -225,6 +225,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
             active_findings_filter_label(app).as_str(),
             active_component_rel_path(app).as_deref(),
             backlog_reconciliation_state(app),
+            review_search_chip(app).as_deref(),
         ),
         cursor: app.router.findings().cursor().min(total.saturating_sub(1)),
         empty: empty_state(app),
@@ -242,6 +243,76 @@ struct BacklogReconciliationState {
     active: bool,
     severity: Option<&'static str>,
     tool: Option<String>,
+}
+
+#[cfg(test)]
+mod search_terms_tests {
+    use super::*;
+
+    fn finding(title: &str, severity: kuzushi_core::findings::Severity) -> Finding {
+        let mut finding = Finding::new_tool(
+            "carlini-threat-hunt",
+            "carlini-threat-hunt/finding",
+            "src/gateway.go",
+            42,
+            None,
+            severity,
+            title,
+        );
+        finding.title = title.to_string();
+        finding.actor_fingerprint = Some("carlini-threat-hunt:RouterRPC:0".to_string());
+        finding
+    }
+
+    fn empty_review_index() -> EffectiveReviewStateIndex {
+        EffectiveReviewStateIndex::from_findings_and_decisions(&[], &[])
+    }
+
+    #[test]
+    fn free_words_fuzzy_match_across_title_message_path_and_rule() {
+        let terms = parse_search_terms("gateway uuid");
+        let hit = finding(
+            "ForwardRequest trusts in.Uuid",
+            kuzushi_core::findings::Severity::High,
+        );
+        let miss = finding("cookie bypass", kuzushi_core::findings::Severity::High);
+
+        let review = empty_review_index();
+        assert!(finding_matches_search(&hit, &terms, &review));
+        assert!(!finding_matches_search(&miss, &terms, &review));
+    }
+
+    #[test]
+    fn facet_terms_filter_severity_tool_and_actor() {
+        let review = empty_review_index();
+        let high = finding("t", kuzushi_core::findings::Severity::High);
+
+        assert!(finding_matches_search(
+            &high,
+            &parse_search_terms("sev:high tool:carlini actor:routerrpc"),
+            &review,
+        ));
+        assert!(!finding_matches_search(
+            &high,
+            &parse_search_terms("sev:low"),
+            &review,
+        ));
+        assert!(finding_matches_search(
+            &high,
+            &parse_search_terms("status:open"),
+            &review,
+        ));
+    }
+}
+
+/// The active search chip: the live capture draft (suffixed with the caret
+/// marker) or the committed query.
+fn review_search_chip(app: &ShellApp) -> Option<String> {
+    let review = app.router.workbench().review();
+    if review.search_capture {
+        return Some(format!("{}\u{2038}", review.search_query));
+    }
+    (!review.search_query.trim().is_empty()).then(|| review.search_query.clone())
 }
 
 fn backlog_reconciliation_state(app: &ShellApp) -> BacklogReconciliationState {
@@ -262,16 +333,9 @@ fn findings_reconciliation_header(
     active_filter: &str,
     component: Option<&str>,
     backlog: BacklogReconciliationState,
+    search: Option<&str>,
 ) -> String {
-    let mut filters = combined_filter_label(active_filter, component);
-    if backlog.active {
-        if let Some(severity) = backlog.severity {
-            filters = join_filter_label(filters, format!("sev:{severity}"));
-        }
-        if let Some(tool) = backlog.tool.as_deref() {
-            filters = join_filter_label(filters, format!("tool:{tool}"));
-        }
-    }
+    let filters = reconciliation_filter_chips(active_filter, component, &backlog, search);
     let review = if backlog.active { "open" } else { "all" };
     let sort = if backlog.active {
         "severity"
@@ -279,6 +343,33 @@ fn findings_reconciliation_header(
         "priority"
     };
     format!("showing {total} of {loaded} · filters:{filters} · review:{review} · sorted by {sort}")
+}
+
+fn reconciliation_filter_chips(
+    active_filter: &str,
+    component: Option<&str>,
+    backlog: &BacklogReconciliationState,
+    search: Option<&str>,
+) -> String {
+    let filters = combined_filter_label(active_filter, component);
+    let filters = backlog_filter_chips(filters, backlog);
+    match search {
+        Some(query) => join_filter_label(filters, format!("search:\"{query}\"")),
+        None => filters,
+    }
+}
+
+fn backlog_filter_chips(mut filters: String, backlog: &BacklogReconciliationState) -> String {
+    if !backlog.active {
+        return filters;
+    }
+    if let Some(severity) = backlog.severity {
+        filters = join_filter_label(filters, format!("sev:{severity}"));
+    }
+    if let Some(tool) = backlog.tool.as_deref() {
+        filters = join_filter_label(filters, format!("tool:{tool}"));
+    }
+    filters
 }
 
 fn join_filter_label(current: String, chip: String) -> String {
@@ -682,7 +773,114 @@ pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(Strin
     };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
     let filtered = active_filter_finding_alias_indices(app, component_filtered);
-    backlog_open_only_finding_alias_indices(app, filtered)
+    let searched = search_filtered_finding_alias_indices(app, filtered);
+    backlog_open_only_finding_alias_indices(app, searched)
+}
+
+/// Item 13: the Review search query narrows the visible queue. Free words
+/// fuzzy-match title/message/path/rule id; `sev:`/`tool:`/`status:`/`actor:`
+/// terms filter facets. Empty query is a no-op; plain output shares this
+/// pipeline, so parity is automatic.
+fn search_filtered_finding_alias_indices(
+    app: &ShellApp,
+    visible: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
+    let query = app.router.workbench().review().search_query.clone();
+    if query.trim().is_empty() {
+        return visible;
+    }
+    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+        app.findings(),
+        app.review_decisions(),
+    );
+    let terms = parse_search_terms(&query);
+    visible
+        .into_iter()
+        .filter(|(_, index)| {
+            app.findings().get(*index).is_some_and(|finding| {
+                finding_matches_search(finding, &terms, &review_index)
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Default)]
+struct FindingSearchTerms {
+    words: Vec<String>,
+    severity: Option<String>,
+    tool: Option<String>,
+    status: Option<String>,
+    actor: Option<String>,
+}
+
+fn parse_search_terms(query: &str) -> FindingSearchTerms {
+    let mut terms = FindingSearchTerms::default();
+    for token in query.split_whitespace() {
+        match token.split_once(':') {
+            Some(("sev" | "severity", value)) => terms.severity = Some(value.to_lowercase()),
+            Some(("tool", value)) => terms.tool = Some(value.to_lowercase()),
+            Some(("status", value)) => terms.status = Some(value.to_lowercase()),
+            Some(("actor", value)) => terms.actor = Some(value.to_lowercase()),
+            _ => terms.words.push(token.to_lowercase()),
+        }
+    }
+    terms
+}
+
+fn finding_matches_search(
+    finding: &Finding,
+    terms: &FindingSearchTerms,
+    review_index: &EffectiveReviewStateIndex,
+) -> bool {
+    if !search_facets_match(finding, terms, review_index) {
+        return false;
+    }
+    if terms.words.is_empty() {
+        return true;
+    }
+    let haystack = format!(
+        "{} {} {} {}",
+        finding.title, finding.message, finding.file_path, finding.rule_id
+    )
+    .to_lowercase();
+    terms
+        .words
+        .iter()
+        .all(|word| kuzushi_core::text::fuzzy::subsequence_score(&haystack, word).is_some())
+}
+
+fn search_facets_match(
+    finding: &Finding,
+    terms: &FindingSearchTerms,
+    review_index: &EffectiveReviewStateIndex,
+) -> bool {
+    let severity_ok = terms
+        .severity
+        .as_deref()
+        .is_none_or(|wanted| finding.severity.as_str().eq_ignore_ascii_case(wanted));
+    let tool_ok = terms
+        .tool
+        .as_deref()
+        .is_none_or(|wanted| finding.tool.to_lowercase().contains(wanted));
+    let actor_ok = terms.actor.as_deref().is_none_or(|wanted| {
+        finding
+            .actor_fingerprint
+            .as_deref()
+            .is_some_and(|actor| actor.to_lowercase().contains(wanted))
+    });
+    let status_ok = terms.status.as_deref().is_none_or(|wanted| {
+        search_status_label(finding, review_index).contains(wanted)
+    });
+    severity_ok && tool_ok && actor_ok && status_ok
+}
+
+/// The status facet matches what the queue displays: the effective review
+/// decision when one exists, "open" otherwise.
+fn search_status_label(finding: &Finding, review_index: &EffectiveReviewStateIndex) -> String {
+    review_index
+        .effective_decision_for(finding)
+        .map(|decision| format!("{decision:?}").to_lowercase())
+        .unwrap_or_else(|| "open".to_string())
 }
 
 pub(crate) fn review_backlog_active(app: &ShellApp) -> bool {

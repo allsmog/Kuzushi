@@ -11,7 +11,9 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         // 組 KUMI-KATA · map — everything starts from repo context.
         AttachFiles | GatherRepoContext => &[],
         MapEntryPoints => &[GatherRepoContext],
+        DecomposeModules => &[GatherRepoContext],
         BuildXRay => &[GatherRepoContext],
+        BuildThreatModel => &[GatherRepoContext],
         BuildStrideThreatModel => &[GatherRepoContext],
         BuildPastaThreatModel => &[GatherRepoContext],
         BuildCodePropertyGraph => &[GatherRepoContext],
@@ -25,7 +27,7 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         ScanCodeql => &[BuildCodeQlDatabase],
         ScanAgenticSast => &[GatherRepoContext],
         HuntTaint => &[BuildCodePropertyGraph],
-        HuntThreatModel => &[BuildStrideThreatModel],
+        HuntThreatModel => &[BuildThreatModel],
         HuntSystems => &[GatherRepoContext],
         ScanFuzz => &[GatherRepoContext],
         HuntUseAfterFree => &[GatherRepoContext],

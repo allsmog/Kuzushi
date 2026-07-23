@@ -188,6 +188,8 @@ mod tests {
             required_cli: id.required_cli(),
             cli_available: id.required_cli().is_none(),
             blocker: None,
+            cached_detail: None,
+            last_attempt: None,
         }
     }
 
@@ -358,6 +360,8 @@ mod tests {
             required_cli: Some("codeql"),
             cli_available: false,
             blocker: None,
+            cached_detail: None,
+            last_attempt: None,
         }];
         let mut selected = BTreeSet::new();
         let outcome = toggle_planning_row(BuildCodeQlDatabase, &rows, &mut selected);

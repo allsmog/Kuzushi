@@ -61,7 +61,9 @@ fn failure_text(value: &str, fallback: &str) -> String {
     if value.trim().is_empty() {
         fallback.to_string()
     } else {
-        value.to_string()
+        // Old ledger records doubled the public failure message inside one
+        // string; render it once without rewriting persisted data.
+        kuzushi_core::run_lifecycle::collapse_repeated_message(value)
     }
 }
 
@@ -307,6 +309,10 @@ mod tests {
             recovery_options: vec!["Install semgrep.".to_string(), "Rerun scan.".to_string()],
             fallback_prompt: "Continue the failed Kuzushi run.".to_string(),
             claims_forbidden: Vec::new(),
+            resume_from: None,
+            completed_stages: Vec::new(),
+            checkpoint_artifacts: Vec::new(),
+            checkpoint_fingerprint: None,
         });
 
         assert_eq!(
@@ -338,6 +344,10 @@ mod tests {
             recovery_options: numbered_items("recovery", 15),
             fallback_prompt: "Continue the failed Kuzushi run.".to_string(),
             claims_forbidden: numbered_items("claim", 15),
+            resume_from: None,
+            completed_stages: Vec::new(),
+            checkpoint_artifacts: Vec::new(),
+            checkpoint_fingerprint: None,
         });
 
         let missing = row_value(&model, "missing");

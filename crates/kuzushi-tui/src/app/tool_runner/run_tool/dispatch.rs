@@ -193,7 +193,9 @@ impl ShellApp {
                 );
                 self.log(
                     "error",
-                    format!("{error}. Next: run <tool> (input is optional and defaults to {{}})"),
+                    format!(
+                        "{error}. Next: run {tool_name} (no JSON needed — defaults apply), or browse knobs with options {tool_name} and set <name> <value>"
+                    ),
                 );
                 None
             }

@@ -354,12 +354,31 @@ fn push_active_phase_header(
 ) {
     push_header_identity(app, phase.label(), width, lines);
     push_phase_rail(app, width, lines);
-    lines.push(muted(&format!(
+    lines.push(muted(&phase_position_line(app, phase)));
+}
+
+/// One phase vocabulary on screen: when the planner is browsing a phase
+/// other than the ledger-derived current one, say so explicitly instead of
+/// letting the title, rail, and status line contradict each other.
+fn phase_position_line(app: &ShellApp, phase: WorkflowPhase) -> String {
+    let base = format!(
         "phase {} of {} — {}",
         phase.position(),
         WorkflowPhase::ORDER.len(),
         phase.intent()
-    )));
+    );
+    let Some(current) = journey_model(app).map(|journey| journey.current) else {
+        return base;
+    };
+    if current == phase {
+        return base;
+    }
+    format!(
+        "planning {} · engagement is in {} — Enter runs {} steps",
+        phase.label(),
+        current.title(),
+        phase.label()
+    )
 }
 
 fn push_unphased_plan_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
@@ -515,11 +534,19 @@ fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
             theme::success().add_modifier(Modifier::BOLD),
         ),
         Span::styled(headline, theme::primary()),
-        Span::styled(
-            " · phase map starts a fresh Map pass".to_string(),
-            theme::muted(),
-        ),
+        Span::styled(fresh_pass_hint(app), theme::muted()),
     ])
+}
+
+/// The fresh-pass affordance names the phase this picker is actually on;
+/// the old static "phase map" clause claimed a Map reset on every phase.
+fn fresh_pass_hint(app: &ShellApp) -> String {
+    let phase = app
+        .engagement
+        .current_phase()
+        .map(|phase| phase.label().to_ascii_lowercase())
+        .unwrap_or_else(|| "map".to_string());
+    format!(" · next fresh restarts the pass · phase {phase} reopens this planner")
 }
 
 fn revisiting_cached_artifact_phase(app: &ShellApp) -> bool {
@@ -753,10 +780,14 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
     if !matches!(row.artifact_state, PlanningArtifactState::Cached) {
         return None;
     }
+    let cached = match row.cached_detail.as_deref() {
+        Some(detail) => format!("cached · {detail}"),
+        None => "cached".to_string(),
+    };
     if let Some(cli) = row.required_cli.filter(|_| !row.cli_available) {
-        return Some(format!("cached — rebuild needs {cli}"));
+        return Some(format!("{cached} — rebuild needs {cli}"));
     }
-    (outcome == RowOutcome::Reuse).then(|| "cached — press g to rebuild".to_string())
+    (outcome == RowOutcome::Reuse).then(|| format!("{cached} — press g to rebuild"))
 }
 
 fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
@@ -782,12 +813,38 @@ fn model_readiness_message(
 }
 
 fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
+    if let Some(note) = last_attempt_note(row) {
+        return with_cost(row, &note);
+    }
     match outcome {
         RowOutcome::Run if app.engagement.planning_picker().rebuild().contains(&row.id) => {
             with_cost(row, "rebuild (overwrites cache)")
         }
         RowOutcome::Run | RowOutcome::Skip => with_cost(row, artifact_reason(row)),
         RowOutcome::Reuse | RowOutcome::Blocked => unreachable!("handled above"),
+    }
+}
+
+/// Honest ledger note: a resumable failed attempt continues instead of
+/// restarting; an already-completed action is disclosed as done this pass.
+fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
+    use crate::app::LastAttempt;
+    match row.last_attempt.as_ref()? {
+        LastAttempt::Failed {
+            resumable: true,
+            resume_from: Some(stage),
+        } => Some(format!("continue · resumes at {stage}")),
+        LastAttempt::Failed {
+            resumable: true,
+            resume_from: None,
+        } => Some("continue from checkpoint".to_string()),
+        LastAttempt::Failed { .. } => Some("failed last pass".to_string()),
+        LastAttempt::Completed
+            if matches!(row.artifact_state, PlanningArtifactState::Action) =>
+        {
+            Some("done this pass".to_string())
+        }
+        LastAttempt::Completed => None,
     }
 }
 

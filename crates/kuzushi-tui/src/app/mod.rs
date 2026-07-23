@@ -176,7 +176,8 @@ pub use onboarding::{
     model_recommended_in_phase, recommended_tasks_for_phase, record_recent_target, row_disposition,
     skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
     ArtifactState as PlanningArtifactState, AuthMethodRow, AuthMethodRowKind, FailedPlanningTask,
-    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PickerFocus, PlanningOptionEdit,
+    InitialOnboardingPhase, LastAttempt, OnboardingInputs, PendingRetry, PickerFocus,
+    PlanningOptionEdit,
     PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition, TargetCandidate,
     TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };

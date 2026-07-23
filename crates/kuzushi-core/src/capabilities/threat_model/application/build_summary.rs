@@ -133,7 +133,6 @@ fn threat_model_build_header_lines(
         ),
         format!("  Method:   {}", methodology_label(&input.methodology)),
         format!("  Slice:    {}", input.slice),
-        format!("  Provider: {}", BuildFlavor::ThreatModel.provider()),
         format!("  Stages:   {}", input.stages.join(", ")),
         format!("  Artifact: {}", input.output_dir),
         format!(

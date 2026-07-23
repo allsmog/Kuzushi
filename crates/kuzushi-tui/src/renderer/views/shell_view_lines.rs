@@ -79,10 +79,13 @@ fn threat_run_shell_view_lines(
 ) -> Option<Vec<Line<'static>>> {
     Some(match view {
         ShellView::Tune => tune_lines(app, area),
-        ShellView::Threat => default_scrolled_lines(
-            app,
-            area,
+        // Pin the context strip + tab bar so long story/member lists scroll
+        // beneath a stable header (Help/Tools pattern).
+        ShellView::Threat => pinned_document_viewport_lines(
             threat_lines(app, area, app.router.threat().view()),
+            area.height,
+            default_scroll_offset(app),
+            4,
         ),
         ShellView::ThreatEditor => threat_editor_lines(app, area),
         ShellView::PromptsEditor => prompts_lines(app, area),
@@ -278,6 +281,26 @@ mod tests {
             assert_ne!(top, tail, "{view:?} ignored the default scroll offset");
             assert_eq!(tail_lines.len(), area.height as usize, "{view:?}");
         }
+    }
+
+    /// A1: the Threat view scrolls its document beneath a pinned header —
+    /// context strip + blank + tab nav + blank stay visible at any offset.
+    #[test]
+    fn threat_view_keeps_the_tab_nav_pinned_while_scrolling() {
+        let area = Rect::new(0, 0, 80, 6);
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let document = threat_lines(&app, area, app.router.threat().view());
+        assert!(
+            document.len() > area.height as usize,
+            "fixture document must overflow the viewport to exercise pinning"
+        );
+
+        app.router.default_scroll_mut().tail();
+        let tail = rendered_text(shell_view_lines_for(&app, area, ShellView::Threat));
+        assert!(
+            tail.contains("1 STRIDE"),
+            "tab nav must stay pinned under scroll:\n{tail}"
+        );
     }
 
     fn rendered_text(lines: Vec<Line<'static>>) -> String {

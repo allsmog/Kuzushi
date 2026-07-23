@@ -54,11 +54,11 @@ fn scan_hints() -> Vec<WorkbenchHint> {
     vec![
         WorkbenchHint {
             verb: Cow::Borrowed("run sast:scan {}"),
-            label: "scan now",
+            label: std::borrow::Cow::Borrowed("scan now"),
         },
         WorkbenchHint {
             verb: Cow::Borrowed("next"),
-            label: "continue workspace phase",
+            label: std::borrow::Cow::Borrowed("continue workspace phase"),
         },
     ]
 }

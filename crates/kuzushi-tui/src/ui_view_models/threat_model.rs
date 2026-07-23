@@ -15,6 +15,7 @@ pub(crate) struct ThreatSummaryReview {
     pub(crate) summary: String,
     pub(crate) threats: String,
     pub(crate) assets: String,
+    pub(crate) nodes: String,
     pub(crate) actors: String,
     pub(crate) flows: String,
     pub(crate) trust_boundaries: String,
@@ -46,7 +47,11 @@ impl ThreatSummaryReview {
             status: "current persisted model".to_string(),
             summary: doc_summary(doc),
             threats: count_label(array_len(doc.get("threats")), "threat"),
-            assets: count_label(node_count(doc), "asset"),
+            // The document-level assets table is the asset count; DFD nodes
+            // are a separate statistic (conflating them read "assets 13"
+            // against an artifact with 6 assets).
+            assets: count_label(asset_count(doc), "asset"),
+            nodes: count_label(node_count(doc), "node"),
             actors: count_label(actor_count(doc), "actor"),
             flows: count_label(array_len(doc.pointer("/dfd/flows")), "data flow"),
             trust_boundaries: count_label(
@@ -73,6 +78,7 @@ impl ThreatSummaryReview {
             summary: "build or import a threat model to populate this view".to_string(),
             threats: "—".to_string(),
             assets: "—".to_string(),
+            nodes: "—".to_string(),
             actors: "—".to_string(),
             flows: "—".to_string(),
             trust_boundaries: "—".to_string(),
@@ -91,6 +97,7 @@ impl ThreatSummaryReview {
             summary: "select a target before loading threat-model artifacts".to_string(),
             threats: "—".to_string(),
             assets: "—".to_string(),
+            nodes: "—".to_string(),
             actors: "—".to_string(),
             flows: "—".to_string(),
             trust_boundaries: "—".to_string(),
@@ -107,6 +114,7 @@ impl ThreatSummaryReview {
             summary: format!("malformed {}", threat_model_relative_path()),
             threats: "unknown".to_string(),
             assets: "unknown".to_string(),
+            nodes: "unknown".to_string(),
             actors: "unknown".to_string(),
             flows: "unknown".to_string(),
             trust_boundaries: "unknown".to_string(),
@@ -125,6 +133,7 @@ impl ThreatSummaryReview {
             summary: format!("{} is not a file", threat_model_relative_path()),
             threats: "unknown".to_string(),
             assets: "unknown".to_string(),
+            nodes: "unknown".to_string(),
             actors: "unknown".to_string(),
             flows: "unknown".to_string(),
             trust_boundaries: "unknown".to_string(),
@@ -189,11 +198,49 @@ fn doc_summary(doc: &serde_json::Value) -> String {
                 .and_then(serde_json::Value::as_str)
         })
         .map(ToString::to_string)
+        .or_else(|| structured_summary_rollup(doc))
         .unwrap_or_else(|| "current threat model loaded; narrative summary unknown".to_string())
+}
+
+/// The contract's `/summary` is a structured rollup (total / bySeverity /
+/// byCategory), not prose — render the rollup instead of claiming the
+/// narrative summary is unknown.
+fn structured_summary_rollup(doc: &serde_json::Value) -> Option<String> {
+    let summary = doc.get("summary")?.as_object()?;
+    let total = summary.get("total").and_then(serde_json::Value::as_u64)?;
+    let mut parts = vec![format!("{total} threats")];
+    if let Some(severity) = rollup_counts(summary.get("bySeverity")) {
+        parts.push(severity);
+    }
+    if let Some(category) = rollup_counts(summary.get("byCategory")) {
+        parts.push(category);
+    }
+    Some(parts.join(" — "))
+}
+
+fn rollup_counts(value: Option<&serde_json::Value>) -> Option<String> {
+    let counts = value?.as_object()?;
+    let rendered = counts
+        .iter()
+        .filter_map(|(name, count)| {
+            count
+                .as_u64()
+                .filter(|count| *count > 0)
+                .map(|count| format!("{count} {name}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (!rendered.is_empty()).then_some(rendered)
 }
 
 fn node_count(doc: &serde_json::Value) -> Option<usize> {
     array_len(doc.pointer("/dfd/nodes"))
+}
+
+/// Prefer the document's own assets table; older documents without one fall
+/// back to the DFD node count (the pre-contract behavior).
+fn asset_count(doc: &serde_json::Value) -> Option<usize> {
+    array_len(doc.get("assets")).or_else(|| node_count(doc))
 }
 
 fn actor_count(doc: &serde_json::Value) -> Option<usize> {
@@ -293,7 +340,8 @@ mod tests {
         assert_eq!(review.status, "current persisted model");
         assert_eq!(review.summary, "checkout threat model");
         assert_eq!(review.threats, "2");
-        assert_eq!(review.assets, "3");
+        assert_eq!(review.assets, "3", "no assets table falls back to nodes");
+        assert_eq!(review.nodes, "3");
         assert_eq!(review.actors, "2");
         assert_eq!(review.flows, "1");
         assert_eq!(review.trust_boundaries, "1");

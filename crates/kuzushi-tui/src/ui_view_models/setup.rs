@@ -191,7 +191,7 @@ mod tests {
         app.engagement
             .planning_picker_mut()
             .selected_mut()
-            .insert(PlanningTaskId::BuildStrideThreatModel);
+            .insert(PlanningTaskId::BuildThreatModel);
         let model = setup_readiness_model(&app);
         assert!(!model.can_start);
         assert_eq!(model.first_blocker, Some(2));
@@ -205,7 +205,7 @@ mod tests {
         app.engagement
             .planning_picker_mut()
             .selected_mut()
-            .insert(PlanningTaskId::BuildStrideThreatModel);
+            .insert(PlanningTaskId::BuildThreatModel);
 
         let model = setup_readiness_model(&app);
 

@@ -219,9 +219,12 @@ impl ShellApp {
             return false;
         };
         // Capture where the operator actually was before the picker takes
-        // over, so Esc can restore that page instead of a re-derived one.
-        let origin = (self.shell_view() == ShellView::Workbench)
+        // over, so Esc can restore that exact view instead of a re-derived
+        // one. Phase navigation from inside the picker keeps the original.
+        let origin_page = (self.shell_view() == ShellView::Workbench)
             .then(|| crate::ui_view_models::active_workbench_page(self));
+        let origin_view =
+            (self.shell_view() != ShellView::PlanningPicker).then(|| self.shell_view());
         let (profile, pending) = self.phase_picker_target_profile(&target_root);
         let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
         self.engagement
@@ -232,7 +235,12 @@ impl ShellApp {
             .set_return_to_setup(false);
         self.engagement
             .planning_picker_mut()
-            .set_origin_workbench_page(origin);
+            .set_origin_workbench_page(origin_page);
+        if let Some(view) = origin_view {
+            self.engagement
+                .planning_picker_mut()
+                .set_origin_shell_view(Some(view));
+        }
         self.engagement.set_phase(phase);
         true
     }
@@ -341,10 +349,11 @@ impl ShellApp {
         profile: crate::app::TargetProfile,
         target_root: &std::path::Path,
     ) -> (Vec<PlanningTaskRow>, BTreeSet<PlanningTaskId>) {
-        let rows = crate::app::applicable_tasks_for_phase(phase, profile)
+        let mut rows = crate::app::applicable_tasks_for_phase(phase, profile)
             .into_iter()
             .map(|task| PlanningTaskRow::for_task(task, target_root))
             .collect::<Vec<_>>();
+        crate::app::onboarding::overlay_last_attempts(&mut rows, target_root);
         let mut selected = phase_preselection(phase, profile, &rows);
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);

@@ -650,7 +650,7 @@ terminal receipt. Planned task identities are authoritative; do not rebuild a
 second checklist from trace labels or special-case `context:build`.
 
 Run Focus has one pure geometry contract shared by render, scrolling, and hit
-testing: width ≥78 is Steps/Output side by side (Steps 32%, clamped to 28–40,
+testing: width ≥78 is Steps/Output side by side (Steps 36%, clamped to 28–46,
 Output at least 48); width 50–77 stacks vertically with Steps content-sized and
 capped at 40% of the body; width <50 or body height <14 uses one viewport and
 Tab switches Steps/Output. Terminal height alone must not stack a wide screen.

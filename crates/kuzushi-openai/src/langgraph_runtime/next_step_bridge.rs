@@ -7,7 +7,7 @@ use super::bridge_payloads::{
     BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    public_bridge_failure, run_next_step_bridge, run_next_step_preflight_bridge,
+    public_bridge_failure_with_detail, run_next_step_bridge, run_next_step_preflight_bridge,
 };
 use super::runtime_config::LangGraphRuntime;
 use super::transport_retry;
@@ -140,10 +140,11 @@ fn ensure_next_step_response_ok(
     response: NextStepBridgeResponse,
 ) -> Result<Observed<AgentLoopStep>> {
     if !response.ok {
-        let message = public_bridge_failure(
+        let message = public_bridge_failure_with_detail(
             response.error_class.as_deref(),
             response.status,
             response.error.as_deref(),
+            response.detail.as_deref(),
         );
         anyhow::bail!("LangGraph next-step bridge failed: {message}");
     }
@@ -154,10 +155,11 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
     if response.ok {
         return Ok(());
     }
-    let message = public_bridge_failure(
+    let message = public_bridge_failure_with_detail(
         response.error_class.as_deref(),
         response.status,
         response.error.as_deref(),
+        response.detail.as_deref(),
     );
     anyhow::bail!("LangGraph next-step preflight failed: {message}")
 }

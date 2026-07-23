@@ -340,8 +340,8 @@ impl ShellApp {
         command: &ShellCommand,
     ) -> Option<Vec<ShellEffect>> {
         match command {
-            ShellCommand::Next => {
-                self.open_next_phase_picker();
+            ShellCommand::Next | ShellCommand::NextFresh => {
+                self.reduce_next_command(matches!(command, ShellCommand::NextFresh));
                 Some(Vec::new())
             }
             ShellCommand::Onboarding => {
@@ -604,7 +604,7 @@ impl ShellApp {
         self.log(
             "capability",
             format!(
-                "showing {count} phase-native {} · press Esc, then e for expert engines",
+                "showing {count} phase-native {} · press e for expert engines",
                 if count == 1 { "action" } else { "actions" }
             ),
         );
@@ -692,6 +692,28 @@ impl ShellApp {
             .borrow_mut()
             .invalidate_map_artifacts();
         self.open_phase_picker(phase);
+    }
+
+    fn reduce_next_command(&mut self, fresh: bool) {
+        if fresh {
+            self.start_fresh_pass();
+        } else {
+            self.open_next_phase_picker();
+        }
+    }
+
+    /// Item 4c: the explicit "start a fresh pass" affordance. Clears the
+    /// operator's per-phase draft selections and reopens the Map planner for
+    /// this revision. Recorded reality is untouched — completed attempts
+    /// stay in the ledger, and the journey re-derives from whatever the new
+    /// pass actually runs.
+    fn start_fresh_pass(&mut self) {
+        self.engagement.planning_picker_mut().reset_phase_drafts();
+        self.log(
+            "phase",
+            "fresh pass — Map planner reopened; prior attempts stay recorded and new Map runs re-derive the journey",
+        );
+        self.open_requested_phase_picker(crate::app::WorkflowPhase::Map);
     }
 
     fn open_project_model_view(&mut self) {

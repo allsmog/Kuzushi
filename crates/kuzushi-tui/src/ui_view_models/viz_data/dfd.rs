@@ -23,6 +23,7 @@ pub(crate) struct DfdFlowModel {
     pub to: String,
     pub crosses: bool,
     pub label: String,
+    pub boundary_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -100,8 +101,31 @@ fn project_dfd_flows(flows: &[DfdFlow]) -> Vec<DfdFlowModel> {
             to: flow.target.clone(),
             crosses: flow.crosses,
             label: flow.label.clone(),
+            boundary_ids: flow.boundary_ids.clone(),
         })
         .collect()
+}
+
+/// Selection cursor item over the flattened nodes-then-flows order the `j`/`k`
+/// keys cycle through on the DFD deck.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DfdSelected<'a> {
+    Node(&'a DfdNodeModel),
+    Flow(&'a DfdFlowModel),
+}
+
+pub(crate) fn dfd_selectable_count(model: &DfdModel) -> usize {
+    model.nodes.len() + model.flows.len()
+}
+
+pub(crate) fn dfd_selected_item(model: &DfdModel, index: usize) -> Option<DfdSelected<'_>> {
+    if let Some(node) = model.nodes.get(index) {
+        return Some(DfdSelected::Node(node));
+    }
+    model
+        .flows
+        .get(index.wrapping_sub(model.nodes.len()))
+        .map(DfdSelected::Flow)
 }
 
 fn scope_placeholder_hint(target: Option<&std::path::Path>) -> String {

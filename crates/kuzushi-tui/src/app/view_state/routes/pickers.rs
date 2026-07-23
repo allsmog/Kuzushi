@@ -377,6 +377,13 @@ pub struct PlanningPickerRouteState {
     /// the picker restores it instead of re-deriving a page from refreshed
     /// reality (which could teleport, e.g. Map → Prove after Esc).
     origin_workbench_page: Option<crate::app::WorkbenchPage>,
+    /// The shell view the operator came from, captured for EVERY entry path
+    /// (Tab detours, result cards, contextual decks — not just Workbench).
+    /// Esc restores it instead of teleporting to a re-derived phase page.
+    origin_shell_view: Option<crate::app::ShellView>,
+    /// Tools completed since the rows were built: the checklist snapshot no
+    /// longer matches on-disk reality and must refresh before it is shown.
+    artifacts_stale: bool,
 }
 
 impl PlanningPickerRouteState {
@@ -441,6 +448,53 @@ impl PlanningPickerRouteState {
         self.draft_rebuild.insert(phase, self.rebuild.clone());
     }
 
+    /// `next fresh`: drop remembered per-phase draft selections so the
+    /// reopened planner shows honest defaults instead of a stale pass.
+    pub(crate) fn reset_phase_drafts(&mut self) {
+        self.draft_selected.clear();
+        self.draft_rebuild.clear();
+    }
+
+    /// A tool finished since the rows were built; the next time the picker
+    /// is shown it must re-derive artifact reality first.
+    pub(crate) fn mark_artifacts_stale(&mut self) {
+        if !self.tasks.is_empty() {
+            self.artifacts_stale = true;
+        }
+    }
+
+    pub(crate) fn artifacts_stale(&self) -> bool {
+        self.artifacts_stale
+    }
+
+    /// Re-derive every row's on-disk artifact reality and drop now-cached
+    /// artifact tasks from the live and drafted selections. Called whenever
+    /// the picker becomes visible again after tools ran: the checklist must
+    /// show reality, never the snapshot from when it first opened.
+    pub(crate) fn refresh_artifact_states(&mut self, target: &std::path::Path) {
+        self.artifacts_stale = false;
+        if self.tasks.is_empty() {
+            return;
+        }
+        self.tasks = self
+            .tasks
+            .iter()
+            .map(|row| PlanningTaskRow::for_task(row.id, target))
+            .collect();
+        crate::app::onboarding::overlay_last_attempts(&mut self.tasks, target);
+        let now_cached: BTreeSet<PlanningTaskId> = self
+            .tasks
+            .iter()
+            .filter(|row| matches!(row.artifact_state, PlanningArtifactState::Cached))
+            .filter(|row| !self.rebuild.contains(&row.id))
+            .map(|row| row.id)
+            .collect();
+        self.selected.retain(|task| !now_cached.contains(task));
+        for draft in self.draft_selected.values_mut() {
+            draft.retain(|task| !now_cached.contains(task));
+        }
+    }
+
     fn reset_open_state(&mut self) {
         self.cursor = first_selected_planning_row(&self.tasks, &self.selected);
         self.focus = PickerFocus::List;
@@ -459,6 +513,14 @@ impl PlanningPickerRouteState {
 
     pub(crate) fn set_origin_workbench_page(&mut self, page: Option<crate::app::WorkbenchPage>) {
         self.origin_workbench_page = page;
+    }
+
+    pub(crate) fn set_origin_shell_view(&mut self, view: Option<crate::app::ShellView>) {
+        self.origin_shell_view = view;
+    }
+
+    pub(crate) fn take_origin_shell_view(&mut self) -> Option<crate::app::ShellView> {
+        self.origin_shell_view.take()
     }
 
     pub(crate) fn take_origin_workbench_page(&mut self) -> Option<crate::app::WorkbenchPage> {
@@ -752,6 +814,8 @@ mod tests {
             required_cli: None,
             cli_available: true,
             blocker: None,
+            cached_detail: None,
+            last_attempt: None,
         }
     }
 }

@@ -9,6 +9,8 @@ const PUBLIC_FAILURES = Object.freeze({
   provider_response_invalid: "Provider returned an invalid response.",
   provider_unavailable: "Provider is temporarily unavailable.",
   rate_limited: "Provider rate limited the request.",
+  sdk_client_validation:
+    "Provider SDK rejected the request client-side before sending (invalid invocation parameters).",
   timeout: "Provider request timed out.",
   transport: "Provider request failed before a response was received.",
 });
@@ -41,13 +43,27 @@ export function invalidProviderResponseError() {
 export function bridgeErrorResponse(error) {
   const failure = classifyBridgeError(error);
   const retryAfterSeconds = retryAfterSecondsFromError(error);
+  const detail = bridgeErrorDetail(error);
   return {
     ok: false,
     error: publicFailureMessage(failure.errorClass, failure.status),
     errorClass: failure.errorClass,
     ...(failure.status === undefined ? {} : { status: failure.status }),
     ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
+    ...(detail === undefined ? {} : { detail }),
   };
+}
+
+const MAX_DETAIL_CHARS = 300;
+
+/** Bounded, single-line raw error identity (name/code/message) so a failure
+ * never disappears into "details were suppressed". The Rust side redacts
+ * credential-shaped content again before anything is persisted. */
+export function bridgeErrorDetail(error) {
+  const parts = [error?.name, error?.code ?? error?.cause?.code, error?.message]
+    .filter((part) => typeof part === "string" && part.length > 0);
+  if (parts.length === 0) return undefined;
+  return parts.join(": ").replaceAll(/\s+/g, " ").slice(0, MAX_DETAIL_CHARS);
 }
 
 const RETRY_AFTER_MAX_SECONDS = 300;
@@ -87,8 +103,22 @@ function errorClassFromShape(error) {
     rateLimitClass(name, message) ??
     timeoutClass(code, message) ??
     transportClass(name, code, message) ??
+    sdkClientValidationClass(name, message) ??
     "bridge_internal"
   );
+}
+
+// LangChain provider adapters validate invocation params client-side (e.g.
+// `temperature` pinned on an adaptive-thinking-only model) and throw before
+// any network call. Without this class the failure lands in bridge_internal
+// and the actionable cause is invisible to the operator.
+function sdkClientValidationClass(name, message) {
+  const validationName = name.includes("invocationparam") || name.includes("invalidargument");
+  const validationMessage =
+    message.includes("invocation param") ||
+    message.includes("not compatible with") ||
+    (message.includes("temperature") && message.includes("thinking"));
+  return validationName || validationMessage ? "sdk_client_validation" : undefined;
 }
 
 // Some SDK layers wrap provider 429s (e.g. `RateLimitCapacityError`) without

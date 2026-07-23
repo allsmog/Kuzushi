@@ -48,6 +48,9 @@ impl ShellApp {
     /// move within the focused pane (FINDINGS cursor, or other pane scroll),
     /// `g/G` jump, and `Enter` selects the cursored finding.
     fn apply_workbench_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
+        if let Some(update) = self.apply_workbench_draft_hotkey(action) {
+            return Some(update);
+        }
         match action {
             ViewHotkeyAction::WorkbenchCyclePane => self.cycle_workbench_pane(false),
             ViewHotkeyAction::WorkbenchCyclePanePrev => self.cycle_workbench_pane(true),
@@ -67,40 +70,42 @@ impl ShellApp {
                 self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).prev())
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
-            ViewHotkeyAction::WorkbenchValidate => return Some(self.draft_workbench_validation()),
-            ViewHotkeyAction::WorkbenchInvestigationBoundary => {
-                return Some(self.toggle_workbench_investigation_boundary());
-            }
-            ViewHotkeyAction::WorkbenchDeferProof => {
-                return Some(self.draft_workbench_proof_deferral())
-            }
-            ViewHotkeyAction::WorkbenchReverifyPatch => {
-                return Some(self.draft_workbench_patch_reverification())
-            }
-            ViewHotkeyAction::WorkbenchSuppress => return Some(self.draft_workbench_suppression()),
-            ViewHotkeyAction::WorkbenchInvariantHunt => {
-                return Some(self.draft_workbench_invariant_hunt())
-            }
-            ViewHotkeyAction::WorkbenchOrderChain => return Some(self.draft_workbench_chain()),
-            ViewHotkeyAction::WorkbenchChainFold => return Some(self.draft_workbench_chain_fold()),
-            ViewHotkeyAction::WorkbenchTraceView => {
-                return Some(self.toggle_workbench_trace_view())
-            }
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::WorkbenchBacklogToggle => self.toggle_review_backlog_preset(),
-            ViewHotkeyAction::WorkbenchBacklogDecide(verdict) => {
-                return Some(self.apply_backlog_one_key_decision(verdict))
-            }
+            ViewHotkeyAction::WorkbenchReviewSearch => self.open_review_search(),
             ViewHotkeyAction::WorkbenchBacklogSeverityCycle => self.cycle_backlog_severity_filter(),
             ViewHotkeyAction::WorkbenchBacklogToolCycle => self.cycle_backlog_tool_filter(),
-            ViewHotkeyAction::WorkbenchBacklogBulkDefer => {
-                return Some(self.apply_backlog_bulk_defer())
-            }
-            ViewHotkeyAction::WorkbenchBacklogUndo => return Some(self.apply_backlog_undo()),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
             _ => return None,
         }
         Some(InputUpdate::handled())
+    }
+
+    /// Workbench actions that produce their own `InputUpdate` (drafts and
+    /// one-key decisions), split from the unit-returning navigation arms.
+    fn apply_workbench_draft_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
+        let update = match action {
+            ViewHotkeyAction::WorkbenchValidate => self.draft_workbench_validation(),
+            ViewHotkeyAction::WorkbenchInvestigationBoundary => {
+                self.toggle_workbench_investigation_boundary()
+            }
+            ViewHotkeyAction::WorkbenchDeferProof => self.draft_workbench_proof_deferral(),
+            ViewHotkeyAction::WorkbenchReverifyPatch => {
+                self.draft_workbench_patch_reverification()
+            }
+            ViewHotkeyAction::WorkbenchSuppress => self.draft_workbench_suppression(),
+            ViewHotkeyAction::WorkbenchInvariantHunt => self.draft_workbench_invariant_hunt(),
+            ViewHotkeyAction::WorkbenchOrderChain => self.draft_workbench_chain(),
+            ViewHotkeyAction::WorkbenchChainFold => self.draft_workbench_chain_fold(),
+            ViewHotkeyAction::WorkbenchTraceView => self.toggle_workbench_trace_view(),
+            ViewHotkeyAction::WorkbenchBacklogDecide(verdict) => {
+                self.apply_backlog_one_key_decision(verdict)
+            }
+            ViewHotkeyAction::WorkbenchBacklogBulkDefer => self.apply_backlog_bulk_defer(),
+            ViewHotkeyAction::WorkbenchBacklogUndo => self.apply_backlog_undo(),
+            _ => return None,
+        };
+        Some(update)
     }
 
     pub(crate) fn set_workbench_page(&mut self, page: WorkbenchPage) {
@@ -291,7 +296,7 @@ impl ShellApp {
         };
         let (command, note) = if map.decompose_first.is_some() {
             (
-                "run pack:suggest-shards {}",
+                "run pack:suggest-shards {\"emitScopes\": true}",
                 "module-decomposition draft loaded — Enter to propose scoped modules",
             )
         } else if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
@@ -599,6 +604,15 @@ impl ShellApp {
         } else {
             InputUpdate::ignored()
         }
+    }
+
+    /// Item 13: `/` opens the palette-style search capture over the queue.
+    fn open_review_search(&mut self) {
+        self.router.workbench_mut().review_mut().open_search_capture();
+        self.log(
+            "review",
+            "search: type to filter · sev:/tool:/status:/actor: facets · Enter keep · Esc clear",
+        );
     }
 
     fn toggle_review_backlog_preset(&mut self) {
