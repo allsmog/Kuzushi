@@ -1,5 +1,5 @@
 use super::*;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 impl FindingStore {
     pub(crate) fn verified_finding_evidence(
@@ -82,17 +82,7 @@ fn citation_matches_disk(target_root: &Path, evidence: &FindingEvidence) -> bool
     haystack.contains(&snippet)
 }
 
-fn safe_target_path(target_root: &Path, raw_path: &str) -> Option<PathBuf> {
-    let mut relative = PathBuf::new();
-    for component in Path::new(raw_path.trim()).components() {
-        match component {
-            Component::Normal(part) => relative.push(part),
-            Component::CurDir => {}
-            Component::RootDir | Component::Prefix(_) | Component::ParentDir => return None,
-        }
-    }
-    Some(target_root.join(relative))
-}
+use crate::findings::domain::safe_target_path;
 
 fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
     if line == 0 {

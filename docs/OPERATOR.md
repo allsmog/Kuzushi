@@ -349,7 +349,21 @@ diff mining in `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`,
 `ndiff:hunt-variants`.
 
 **Threat modeling & intel** — `threat-model:build`, `threat-model:read`,
-`threat-model:methodologies`; PASTA-style `randori:pasta` +
+`threat-model:verify` (grounds the persisted document against the
+target: every cited path must exist with a sane line number, the
+documented `provenance.revision` is compared to HEAD — tri-state, a
+non-git target is unknown rather than failed — and coverage is
+re-measured against fresh grounding surfaces; the
+`verified`/`stale`/`failed` verdict is stamped onto the document, and
+`write=false` reports without saving), `threat-model:import` (the
+explicit front door for externally-authored documents: `path` or an
+inline `document` is normalized, verified, stamped with `import`
+provenance, and persisted — a user-edited live model is never
+overwritten without `force=true` — then recorded in the versions
+ledger with source `import`; the agentic-sast digest and carlini hunts
+prepend a staleness warning when the live document's revision no
+longer matches HEAD, and `threats use <n>` re-verifies after every
+restore), `threat-model:methodologies`; PASTA-style `randori:pasta` +
 `randori:threat-model`; `threat-intel:discover`, `threat-intel:harvest`,
 `threat-intel:apply`, `threat-intel:list`; lead generation
 `threat-leads:build` + `threat-leads:read`; system X-ray `x-ray:run`,
@@ -366,7 +380,15 @@ the strategy to the code-reading deep auditor), `triage:chain-hunt`
 (model-backed attack-chain composition over confirmed findings — two or
 more findings where one enables or escalates another, validated against
 real fingerprints and persisted as open `chains/model` findings for the
-next triage pass), `verify:finding`,
+next triage pass), `triage:dedupe` (model-driven corpus dedupe across
+all runs and tools: a judge model proposes duplicate groups over the
+fingerprint-keyed ledger, code validates every membership, groups below
+0.8 confidence escalate to one bounded code-reading confirmation pass,
+and confirmed duplicates rekey onto their canonical finding with a
+`false_positive`/`duplicate` verdict and `[duplicate_of=…]` rationale;
+`dryRun=true` reports groups without writing, and `triage:run
+dedupe=true` runs the same pass before bulk triage so settled
+duplicates never burn triage spend), `verify:finding`,
 `verify:exploit`, `patch:finding` (then `patch:reverify`),
 `trace:expand` (bounded read-only agent that deepens a finding's
 data-flow path and appends the recovered hops to the static-evidence
@@ -375,6 +397,14 @@ Trace screen), `findings:list`, `findings:dismiss`, `findings:chains`
 (deterministic entry→pivot→impact chain candidates over confirmed
 findings, per code surface — no model calls; `C` on the Review page
 opens the chain-artifacts view that renders the same fold),
+`findings:ground` (runtime-free re-grounding of every open finding's
+citation against the target tree: reports grounded / line-drift /
+file-missing counts at the current revision and appends one audit
+event per newly stale anchor — descriptive only, a missing file flags
+the finding for honest triage and never retires it; imported findings
+are grounded automatically at ingest, grounded rows gaining a real
+disk citation and stale rows a `grounding:` message annotation plus a
+prompt note in deep triage),
 `suppress:add`, `suppress:list`, `suppress:remove`, `report:build`,
 `report:sarif`.
 
@@ -406,14 +436,23 @@ verdict, and per-step model spend lands in the run trace. `fuzz:import`
 folds an existing engine ledger into the findings store without running
 the engine; `fuzz:prove` runs the engine's per-finding impact pass over
 verified findings that lack an impact verdict and refreshes the import;
-`fuzz:sweep` builds a sanitizer-variant fuzzer for one engine target
-(`sanitizer` = `msan` uninitialized-read oracle or `tsan` race oracle)
-and replays its corpus in keep-going mode with benign-input baseline
-subtraction, reporting input-dependent signature groups ranked
-write-first; `fuzz:differential` replays the corpus through N replay
-`commands` (fork vs upstream, or one command as a metamorphic
-self-check) and ranks divergences crash-split first — the
-silent-wrong-data oracle the crash lane never fires on;
+`fuzz:sweep` builds a sanitizer-variant fuzzer (`sanitizer` = `msan`
+uninitialized-read oracle or `tsan` race oracle) and replays its corpus
+in keep-going mode with benign-input baseline subtraction, reporting
+input-dependent signature groups ranked write-first — omit `afeTarget`
+to sweep every built target in turn (the engine rebuilds prebuilt dep
+archives under the variant sanitizer from a target's
+`.localfuzz/sanitizer-deps.json` recipe when one is declared);
+`fuzz:differential` replays the corpus through N replay `commands`
+(fork vs upstream, or one command as a metamorphic self-check) and
+ranks divergences crash-split first — the silent-wrong-data oracle the
+crash lane never fires on; omit `commands` for auto mode, where the
+engine resolves and builds implementations from the target's
+`.localfuzz/differential.json` recipe or its `bin/<t>/replay*`
+binaries and honestly skips targets with fewer than two (omit
+`afeTarget` too to replay every built target). Both sweep and
+differential surface in the planner's Scan phase as opt-in tasks that
+dispatch with no options;
 `fuzz:status` is a read-only workspace probe. Campaign plan
 rows dispatch both job tools with shard names mapped to engine targets
 (`shard` → `afeTarget`); pass `seasonPrompts=false` when planning fuzz

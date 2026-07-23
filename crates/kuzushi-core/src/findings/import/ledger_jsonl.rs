@@ -5,10 +5,10 @@
 //! see prior history. Rows are tolerant-parsed: a row missing its file
 //! or title is counted as skipped instead of failing the import.
 
-use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
+use crate::findings::{ground_finding_location, Finding, FindingEvidence, FindingStore, GroundingStatus, Severity};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const LEDGER_IMPORT_MAX_BYTES: usize = 64 * 1024 * 1024;
 
@@ -57,8 +57,9 @@ pub fn import_ledger_jsonl(
         .with_context(|| format!("Could not read findings ledger {}", path.display()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = ledger_import_run_id(tool_label, &body);
+    let grounding = LedgerGrounding::for_target(workspace.root());
     let (imported, skipped) = store.with_run_lifecycle(&run_id, workspace.root(), || {
-        persist_ledger_rows(&store, &run_id, &body, tool_label)
+        persist_ledger_rows(&store, &run_id, &body, tool_label, &grounding)
     })?;
     Ok(LedgerImportSummary {
         run_id,
@@ -84,12 +85,13 @@ fn persist_ledger_rows(
     run_id: &str,
     body: &str,
     tool_label: &str,
+    grounding: &LedgerGrounding,
 ) -> Result<((usize, usize), usize)> {
     let mut findings = Vec::new();
     let mut skipped = 0usize;
     for line in body.lines().map(str::trim).filter(|l| !l.is_empty()) {
         match parse_ledger_row(line) {
-            Some(row) => findings.push(build_ledger_finding(&row, tool_label)),
+            Some(row) => findings.push(build_ledger_finding(&row, tool_label, grounding)),
             None => skipped += 1,
         }
     }
@@ -145,7 +147,48 @@ fn ledger_line_number(value: &serde_json::Value) -> Option<u32> {
     value.as_str()?.trim().parse().ok()
 }
 
-fn build_ledger_finding(row: &LedgerRow, tool_label: &str) -> Finding {
+/// Grounding context computed once per import: the target root and its
+/// current HEAD (None outside a git checkout).
+pub(crate) struct LedgerGrounding {
+    root: PathBuf,
+    revision: Option<String>,
+}
+
+impl LedgerGrounding {
+    pub(crate) fn for_target(root: &Path) -> Self {
+        Self {
+            root: root.to_path_buf(),
+            revision: crate::workspace::target_git_metadata(root).map(|metadata| metadata.sha),
+        }
+    }
+
+    fn ground(&self, row: &LedgerRow) -> (GroundingStatus, Option<String>) {
+        let status = ground_finding_location(
+            &self.root,
+            &row.file,
+            row.line,
+            "",
+            self.revision.as_deref(),
+        );
+        let cited_line = status
+            .is_grounded()
+            .then(|| disk_line_text(&self.root, &row.file, row.line))
+            .flatten();
+        (status, cited_line)
+    }
+}
+
+fn disk_line_text(root: &Path, file: &str, line: u32) -> Option<String> {
+    let path = crate::findings::domain::safe_target_path(root, file)?;
+    let source = crate::bounded_file::read_utf8_text_within(root, &path, 8 * 1024 * 1024).ok()?;
+    source
+        .lines()
+        .nth(line.saturating_sub(1) as usize)
+        .map(|text| text.trim_end().to_string())
+        .filter(|text| !text.trim().is_empty())
+}
+
+fn build_ledger_finding(row: &LedgerRow, tool_label: &str, grounding: &LedgerGrounding) -> Finding {
     let mut finding = Finding::new_tool(
         tool_label,
         ledger_rule_id(row),
@@ -167,7 +210,58 @@ fn build_ledger_finding(row: &LedgerRow, tool_label: &str) -> Finding {
         &finding.title,
         &finding.message,
     );
-    finding.with_evidence(vec![ledger_evidence(row)])
+    let (status, cited_line) = grounding.ground(row);
+    // The annotation lands after the fingerprint seed is fixed: grounding
+    // varies with the checked-out revision and must never fork identity.
+    if let Some(note) = grounding_annotation(&status) {
+        finding.message.push_str(&format!("\n{note}"));
+    }
+    let mut evidence = vec![ledger_evidence(row)];
+    if let Some(text) = cited_line {
+        evidence.push(citation_evidence(row, text));
+    }
+    finding.grounding = Some(status);
+    finding.with_evidence(evidence)
+}
+
+/// One message annotation line for stale anchors (severity-ceiling
+/// convention: recorded mechanically, never re-litigated in prompts).
+fn grounding_annotation(status: &GroundingStatus) -> Option<String> {
+    let revision = |revision: &Option<String>| {
+        revision
+            .as_deref()
+            .map(|sha| sha.chars().take(12).collect::<String>())
+            .unwrap_or_else(|| "non-git target".to_string())
+    };
+    match status {
+        GroundingStatus::Grounded { .. } | GroundingStatus::NotApplicable => None,
+        GroundingStatus::LineDrift {
+            nearest_line,
+            revision: rev,
+        } => Some(format!(
+            "grounding: line_drift (nearest line {nearest_line}) at {}",
+            revision(rev)
+        )),
+        GroundingStatus::FileMissing { revision: rev } => {
+            Some(format!("grounding: file_missing at {}", revision(rev)))
+        }
+    }
+}
+
+/// Grounded rows carry a real disk citation, so the store's
+/// disk-verification pass applies to imported evidence exactly as it does
+/// to native scanner evidence.
+fn citation_evidence(row: &LedgerRow, cited_line: String) -> FindingEvidence {
+    FindingEvidence {
+        kind: "code".to_string(),
+        file_path: row.file.trim().to_string(),
+        line: row.line,
+        snippet: cited_line,
+        rationale: "Import grounding: cited line read from the target tree".to_string(),
+        confidence: ledger_confidence(&row.verdict),
+        request_blob: None,
+        response_blob: None,
+    }
 }
 
 /// The title stays the first message line; the precondition chain
@@ -390,6 +484,7 @@ mod tests {
         let partial = build_ledger_finding(
             &parse_ledger_row(row_a).unwrap(),
             "external-corpus",
+            &LedgerGrounding::for_target(workspace.root()),
         );
         store.insert_findings(&run_id, &[partial]).unwrap();
         drop(store);
@@ -412,6 +507,72 @@ mod tests {
     }
 
     #[test]
+    fn grounded_rows_gain_verified_citation_evidence() {
+        let (temp, workspace) = fixture_workspace();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/real.cpp"),
+            "int main() {\n    system(user_input);\n    return 0;\n}\n",
+        )
+        .unwrap();
+        let ledger = write_ledger(
+            temp.path(),
+            concat!(
+                r#"{"file":"src/real.cpp","line":2,"title":"command injection (CWE-78)","severity":"P1"}"#,
+                "\n",
+            ),
+        );
+
+        import_ledger_jsonl(&workspace, &ledger, "external-corpus").unwrap();
+
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert!(
+            matches!(finding.grounding, Some(GroundingStatus::Grounded { .. })),
+            "grounding: {:?}",
+            finding.grounding
+        );
+        assert!(
+            !finding.message.contains("grounding:"),
+            "grounded rows carry no stale-anchor annotation"
+        );
+        let citation = finding
+            .evidence
+            .iter()
+            .find(|item| item.snippet.contains("system(user_input)"))
+            .expect("citation evidence with the real disk line");
+        assert_eq!(
+            citation.kind, "code",
+            "the disk-verification pass must keep the citation, not downgrade it"
+        );
+    }
+
+    #[test]
+    fn missing_file_rows_are_annotated_but_still_imported() {
+        let (temp, workspace) = fixture_workspace();
+        let ledger = write_ledger(
+            temp.path(),
+            concat!(
+                r#"{"file":"src/gone.cpp","line":9,"title":"stale citation (CWE-787)","severity":"P1"}"#,
+                "\n",
+            ),
+        );
+
+        let summary = import_ledger_jsonl(&workspace, &ledger, "external-corpus").unwrap();
+
+        assert_eq!(summary.imported, 1, "grounding never drops rows");
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert!(
+            matches!(finding.grounding, Some(GroundingStatus::FileMissing { .. })),
+            "grounding: {:?}",
+            finding.grounding
+        );
+        assert!(finding.message.contains("grounding: file_missing at"));
+        assert_eq!(finding.evidence.len(), 1, "no fabricated citation");
+    }
+
+    #[test]
     fn corpus_alias_fields_parse() {
         let row = parse_ledger_row(
             r#"{"_file":"src/x.cpp","_line":7,"summary":"t","tier":"P1","rule":"authz-missing","triage_verdict":"FALSE_POSITIVE"}"#,
@@ -429,7 +590,12 @@ mod tests {
             r#"{"file":"src/a.cpp","line":1,"title":"OOB write","precondition":"paired-peer","trust_boundary":"peer -> /sd/** write"}"#,
         )
         .unwrap();
-        let finding = build_ledger_finding(&row, "external-corpus");
+        let temp = tempfile::tempdir().unwrap();
+        let finding = build_ledger_finding(
+            &row,
+            "external-corpus",
+            &LedgerGrounding::for_target(temp.path()),
+        );
         assert_eq!(finding.title, "OOB write");
         assert!(finding.message.contains("precondition: paired-peer"));
         assert!(finding.message.contains("trust boundary: peer -> /sd/** write"));

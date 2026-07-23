@@ -6,6 +6,7 @@ mod finding_evidence;
 mod finding_identities;
 mod finding_lists;
 mod finding_lookup;
+mod finding_rekeys;
 mod finding_sources;
 mod finding_writes;
 mod observation_reads;
@@ -22,6 +23,7 @@ mod v3_commit_target;
 mod v3_finding_reads;
 
 pub(in crate::findings::persistence::open) use finding_identities::FindingIdentityAssignment;
+pub use finding_rekeys::ModelRekeyRequest;
 pub use observation_reads::ObservationSourceRef;
 pub use suppression_events::SuppressionLifecycleEvent;
 pub use threat_model_versions::{threat_model_document_sha256, ThreatModelVersionRecord};

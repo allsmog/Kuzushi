@@ -420,6 +420,13 @@ mod tests {
         assert!(tool_needs_runtime("exploit-chain:scan", &json!({})));
         assert!(tool_needs_runtime("uaf-hunt:hunt", &json!({})));
         assert!(!tool_needs_runtime("findings:list", &json!({})));
+        // Of the corpus-honesty verbs, only the model-driven dedupe judge
+        // needs a runtime; grounding and threat-model verify/import are
+        // deterministic.
+        assert!(tool_needs_runtime("triage:dedupe", &json!({})));
+        assert!(!tool_needs_runtime("findings:ground", &json!({})));
+        assert!(!tool_needs_runtime("threat-model:verify", &json!({})));
+        assert!(!tool_needs_runtime("threat-model:import", &json!({})));
     }
 
     #[test]

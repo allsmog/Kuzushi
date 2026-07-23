@@ -124,6 +124,9 @@ fn build_deep_audit_request(
 
 fn deep_audit_user_prompt(cfg: &DeepAuditConfig, finding: &Finding) -> String {
     let mut user_prompt = render_user_prompt(finding);
+    if let Some(note) = crate::findings::grounding_prompt_note(finding) {
+        user_prompt.push_str(&format!("\n\nGrounding note: {note}"));
+    }
     if cfg.include_static_evidence {
         append_static_evidence_prompt(&mut user_prompt, cfg, finding);
     }

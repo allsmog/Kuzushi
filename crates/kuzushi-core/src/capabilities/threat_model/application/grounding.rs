@@ -23,12 +23,19 @@ pub(crate) fn load_prompt_grounding(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PromptGrounding> {
-    let mut surfaces = top_ranked_surfaces(&input.target, input.max_elements)?;
-    surfaces.extend(infra_surface_rows(&input.target));
     Ok(PromptGrounding {
-        surfaces,
+        surfaces: grounding_surfaces(&input.target, input.max_elements)?,
         confirmed_findings: confirmed_finding_rows(ctx)?,
     })
+}
+
+/// Context-free grounding surfaces (ranked code surfaces + infra rows) —
+/// shared by prompt grounding and document verification, so coverage is
+/// always measured against the same ground truth the build saw.
+pub(crate) fn grounding_surfaces(target: &Path, max_elements: usize) -> Result<Vec<AttackSurface>> {
+    let mut surfaces = top_ranked_surfaces(target, max_elements)?;
+    surfaces.extend(infra_surface_rows(target));
+    Ok(surfaces)
 }
 
 const MAX_INFRA_SURFACE_ROWS: usize = 24;

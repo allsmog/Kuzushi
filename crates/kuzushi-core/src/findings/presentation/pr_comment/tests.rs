@@ -5,6 +5,7 @@ mod tests {
 
     fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         Finding { impact: None, category: None, exploit_scenario: None, preconditions: Vec::new(),
+            grounding: None,
             id: None,
             scan_id: None,
             identity_id: None,
