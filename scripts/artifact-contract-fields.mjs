@@ -28,7 +28,7 @@ export const failureHandoffFields = [
 
 export const schemaAliasContractFields = ["camelCase", "runId", "startedAtUnix"];
 
-export const reportJsonlAliasFields = ["module_id", "cost_usd", "prompt_hash"];
+export const reportLifecycleFields = ["schemaVersion", "item", "type"];
 
 export const runAttackSurfaceSchemaFields = [
   "attack-surface.json",
@@ -253,7 +253,7 @@ export const runSummarySchemaFields = [
   "envFingerprint",
   "targetGit",
   "llmCalls",
-  "traceMalformedLines",
+  "lifecycleMalformedItems",
   "promptHash",
   "latencyMs",
   "costUsd",
@@ -304,18 +304,19 @@ export const runThreatModelSchemaFields = [
   "degradation",
 ];
 
-export const runTraceSchemaFields = [
-  "n",
-  "kind",
-  "label",
-  "latency_ms",
-  "cost_usd",
-  "module_id",
-  "verb",
-  "parent_step",
-  "severity",
-  "started_at_ms",
-  "model",
-  "provider",
-  "prompt_hash",
+export const runItemsSchemaFields = [
+  "schemaVersion",
+  "seq",
+  "eventId",
+  "itemId",
+  "runId",
+  "taskId",
+  "callId",
+  "parentItemId",
+  "source",
+  "occurredAtMs",
+  "prevEventHash",
+  "eventHash",
+  "item",
+  "type",
 ];

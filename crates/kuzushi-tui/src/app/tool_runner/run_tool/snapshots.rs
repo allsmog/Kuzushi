@@ -132,12 +132,6 @@ fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
     true
 }
 
-pub(crate) fn recon_snapshot_from_result(result: &serde_json::Value) -> Option<ReconSnapshot> {
-    let data = result.get("data")?;
-    let tool_name = data_string(data, "tool")?;
-    recon_snapshot_from_data(&tool_name, data)
-}
-
 fn recon_snapshot_from_data(tool_name: &str, data: &serde_json::Value) -> Option<ReconSnapshot> {
     tool_name.starts_with("recon:").then(|| ReconSnapshot {
         hosts: recon_hosts(data),

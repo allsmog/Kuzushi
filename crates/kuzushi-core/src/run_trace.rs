@@ -4,6 +4,5 @@
 //! Producers emit trace steps; UI and reports read the resulting artifacts.
 
 pub use crate::run_artifacts::{
-    append_run_trace_step, current_parent_step, next_run_trace_step_number, BroadcastSink,
-    JsonlSink, ParentScope, RunTraceStep, TraceHandle, TraceSink, TraceStepBuilder,
+    current_parent_step, with_parent_step, ParentScope, RunActivityBuilder, TraceHandle,
 };

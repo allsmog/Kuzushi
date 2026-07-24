@@ -41,7 +41,6 @@ pub(crate) struct JobHub {
     rx: Receiver<StampedShellEvent>,
     next_generation: u64,
     slots: BTreeMap<JobKind, JobSlot>,
-    trace_budget: LiveTraceBudget,
     wake: Option<TerminalLoopWake>,
 }
 
@@ -59,7 +58,6 @@ impl Default for JobHub {
             rx,
             next_generation: 0,
             slots: BTreeMap::new(),
-            trace_budget: LiveTraceBudget::new(),
             wake: None,
         }
     }
@@ -210,14 +208,6 @@ impl JobHub {
         self.slots.remove(&kind);
     }
 
-    pub(crate) fn trace_budget(&self) -> LiveTraceBudget {
-        self.trace_budget.clone()
-    }
-
-    pub(crate) fn take_dropped_live_trace_count(&self) -> usize {
-        self.trace_budget.take_dropped_live()
-    }
-
     #[cfg(test)]
     pub(crate) fn drain(&mut self, limit: usize) -> Vec<ShellEvent> {
         let mut events = Vec::with_capacity(limit);
@@ -236,7 +226,6 @@ impl JobHub {
             Ok(stamped) => stamped,
             Err(TryRecvError::Empty | TryRecvError::Disconnected) => return JobDrainResult::Empty,
         };
-        self.release_trace_slot(&stamped.event);
         if self.is_current_generation(stamped.kind, stamped.generation) {
             JobDrainResult::Event(stamped.event)
         } else {
@@ -252,11 +241,5 @@ impl JobHub {
         self.slots
             .get(&kind)
             .is_some_and(|slot| slot.generation == generation)
-    }
-
-    fn release_trace_slot(&self, event: &ShellEvent) {
-        if matches!(event, ShellEvent::Trace(_)) {
-            self.trace_budget.release();
-        }
     }
 }

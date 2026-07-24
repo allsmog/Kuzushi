@@ -194,60 +194,33 @@ impl ShellApp {
 }
 
 fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) -> anyhow::Result<()> {
-    let trace = append_agent_terminal_trace_step(
-        record.target.as_deref(),
-        &record.run_id,
-        "llm",
-        &format!("answer ({answer_chars} chars)"),
-        record.latency_ms,
-        &record.audit,
-    );
-    let terminal = record_agent_run_completed(
+    record_agent_run_completed(
         record.target.as_deref(),
         &record.run_id,
         answer_chars,
         record.latency_ms,
         &record.audit,
-    );
-    trace.and(terminal)
+    )
 }
 
 fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) -> anyhow::Result<()> {
     let safe_error = kuzushi_core::runtime::safe_model_failure_message(error);
-    let trace = append_agent_terminal_trace_step(
-        record.target.as_deref(),
-        &record.run_id,
-        "refused",
-        &safe_error,
-        record.latency_ms,
-        &record.audit,
-    );
-    let terminal = record_agent_run_failed(
+    record_agent_run_failed(
         record.target.as_deref(),
         &record.run_id,
         &safe_error,
         &record.audit,
-    );
-    trace.and(terminal)
+    )
 }
 
 fn record_agent_trace_canceled(record: &AgentRunRecord, reason: &str) -> anyhow::Result<()> {
     let safe_reason = persisted_agent_cancellation(reason);
-    let trace = append_agent_terminal_trace_step(
-        record.target.as_deref(),
-        &record.run_id,
-        "refused",
-        &safe_reason,
-        record.latency_ms,
-        &record.audit,
-    );
-    let terminal = record_agent_run_canceled(
+    record_agent_run_canceled(
         record.target.as_deref(),
         &record.run_id,
         &safe_reason,
         &record.audit,
-    );
-    trace.and(terminal)
+    )
 }
 
 fn persisted_agent_cancellation(reason: &str) -> String {

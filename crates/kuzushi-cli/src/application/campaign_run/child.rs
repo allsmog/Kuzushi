@@ -177,27 +177,67 @@ mod tests {
         path
     }
 
-    fn write_over_cap_trace(target: &Path, run_id: &str, usd: f64) {
-        let path = kuzushi_core::run_artifacts::run_artifact_path(target, run_id, "trace.jsonl");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        // Newline-terminated like every real trace append: the incremental
-        // poller defers a newline-less tail as torn.
-        std::fs::write(
-            path,
-            format!(
-                "{}\n",
-                r#"{"n":1,"kind":"reasoning","label":"model","latency_ms":1,"cost_usd":USD,"model":"m","provider":"p","prompt_hash":"h"}"#
-                    .replace("USD", &usd.to_string())
-            ),
-        )
-        .unwrap();
+    fn write_over_cap_lifecycle(target: &Path, run_id: &str, usd: f64) {
+        use kuzushi_core::run_lifecycle::{RunCallId, RunItemId, RunItemWriter};
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        let item_id = RunItemId::new();
+        let call_id = RunCallId::new();
+        write_model_start(&writer, item_id, call_id);
+        write_model_finish(&writer, item_id, call_id, usd);
+    }
+
+    fn write_model_start(
+        writer: &kuzushi_core::run_lifecycle::RunItemWriter,
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        call_id: kuzushi_core::run_lifecycle::RunCallId,
+    ) {
+        use kuzushi_core::run_lifecycle::*;
+        let item = RunItemV1::ModelCallStarted {
+            provider: SafeText::operator_visible("test"),
+            model: SafeText::operator_visible("test:model"),
+            operation_fingerprint: OperationFingerprint::from_bytes(b"campaign"),
+        };
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(item_id, RunItemSource::Runtime, item).with_call(call_id),
+            )
+            .unwrap();
+    }
+
+    fn write_model_finish(
+        writer: &kuzushi_core::run_lifecycle::RunItemWriter,
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        call_id: kuzushi_core::run_lifecycle::RunCallId,
+        usd: f64,
+    ) {
+        use kuzushi_core::run_lifecycle::*;
+        let cost = kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(usd, "campaign test").unwrap(),
+        );
+        let item = RunItemV1::ModelCallFinished {
+            provider: SafeText::operator_visible("test"),
+            model: SafeText::operator_visible("test:model"),
+            status: RunItemStatus::Completed,
+            latency_ms: 1,
+            usage: ModelUsage {
+                input_tokens: None,
+                output_tokens: None,
+            },
+            cost,
+            error_class: None,
+        };
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(item_id, RunItemSource::Runtime, item).with_call(call_id),
+            )
+            .unwrap();
     }
 
     #[tokio::test]
     async fn a_running_child_over_its_job_budget_is_killed_and_reported_over_budget() {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "sleeper", "sleep 30");
-        write_over_cap_trace(tmp.path(), "burning", 9.9);
+        write_over_cap_lifecycle(tmp.path(), "burning", 9.9);
         let (_tx, rx) = tokio::sync::watch::channel(false);
         let started = std::time::Instant::now();
         let report = run_child(&spec(tmp.path(), binary, "burning", Some(5.0)), rx)
@@ -214,8 +254,8 @@ mod tests {
     async fn an_unbudgeted_child_never_polls_and_completes_on_its_exit_code() {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "clean-exit", "exit 0");
-        // A trace far over any cap must be ignored when no cap is set.
-        write_over_cap_trace(tmp.path(), "uncapped", 99.0);
+        // Lifecycle spend far over any cap must be ignored when no cap is set.
+        write_over_cap_lifecycle(tmp.path(), "uncapped", 99.0);
         let (_tx, rx) = tokio::sync::watch::channel(false);
         let report = run_child(&spec(tmp.path(), binary, "uncapped", None), rx)
             .await
@@ -266,7 +306,7 @@ mod tests {
     async fn a_budgeted_child_under_its_cap_runs_to_completion() {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "cheap", "exit 0");
-        write_over_cap_trace(tmp.path(), "cheap-run", 0.5);
+        write_over_cap_lifecycle(tmp.path(), "cheap-run", 0.5);
         let (_tx, rx) = tokio::sync::watch::channel(false);
         let report = run_child(&spec(tmp.path(), binary, "cheap-run", Some(5.0)), rx)
             .await

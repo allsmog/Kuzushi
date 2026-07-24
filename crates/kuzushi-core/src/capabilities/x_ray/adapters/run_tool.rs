@@ -78,7 +78,7 @@ fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Resul
 fn finish_x_ray_run(
     input: &XRayRunInput,
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     content: XRayArtifactContent,
     cost: crate::runtime::RuntimeCostReport,
 ) -> Result<Value> {
@@ -98,7 +98,7 @@ fn finish_x_ray_run(
     x_ray_response(render_x_ray_run_summary(&data), data_json, &data)
 }
 
-fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<usize> {
+fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -112,7 +112,7 @@ fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Opt
 
 fn emit_x_ray_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -123,7 +123,7 @@ fn emit_x_ray_progress(
 
 fn begin_x_ray_agent_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

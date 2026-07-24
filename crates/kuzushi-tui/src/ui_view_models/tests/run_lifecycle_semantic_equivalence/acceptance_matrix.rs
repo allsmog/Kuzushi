@@ -72,10 +72,11 @@ fn acceptance_fixture_discloses_loss_and_preserves_cost_usage_and_result_identit
     assert_partial_contract(&kuzushi_core::run_lifecycle::present_run(&partial.read));
 }
 
-fn terminal_statuses() -> [RunItemStatus; 6] {
+fn terminal_statuses() -> [RunItemStatus; 7] {
     [
         RunItemStatus::Completed,
         RunItemStatus::Partial,
+        RunItemStatus::Blocked,
         RunItemStatus::Failed,
         RunItemStatus::Canceled,
         RunItemStatus::Interrupted,

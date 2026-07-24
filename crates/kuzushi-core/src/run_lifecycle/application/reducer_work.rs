@@ -88,11 +88,11 @@ fn required_task_id(envelope: &RunItemEnvelopeV1) -> Result<RunTaskId> {
         .ok_or_else(|| anyhow::anyhow!("task update lacks task ID"))
 }
 
-fn ensure_initial_state(source: RunItemSource, status: RunItemStatus, context: &str) -> Result<()> {
-    if !status.is_terminal() || source == RunItemSource::LegacyReconstruction {
+fn ensure_initial_state(_source: RunItemSource, status: RunItemStatus, context: &str) -> Result<()> {
+    if !status.is_terminal() {
         return Ok(());
     }
-    anyhow::bail!("{context} first appeared terminal without legacy reconstruction")
+    anyhow::bail!("{context} first appeared terminal")
 }
 
 fn ensure_no_terminal_regression(

@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn shell_event_reports_kind_and_terminal_state() {
     assert_eq!(
-        ShellEvent::Trace(RunTraceStep::new(1, "reasoning", "step")).kind(),
+        ShellEvent::RunItem(test_run_item(1, "step")).kind(),
         JobKind::Run
     );
     assert!(!ShellEvent::Scan(ScanEvent::Stage("running".to_string())).is_terminal());
@@ -114,17 +114,15 @@ fn jobhub_try_start_preserves_the_single_live_job() {
 fn jobhub_preserves_send_order_for_current_generation() {
     let mut hub = JobHub::default();
     let ticket = hub.start(JobKind::Run, "scan");
-    ticket.send(ShellEvent::Trace(RunTraceStep::new(
-        1,
-        "reasoning",
-        "first",
-    )));
+    ticket.send(ShellEvent::RunItem(test_run_item(1, "first")));
     ticket.send(ShellEvent::Scan(ScanEvent::Stage("second".to_string())));
     ticket.complete();
 
     let events = hub.drain(8);
     assert_eq!(events.len(), 2);
-    assert!(matches!(&events[0], ShellEvent::Trace(step) if step.label == "first"));
+    assert!(matches!(&events[0], ShellEvent::RunItem(item)
+        if matches!(&item.item, kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. }
+            if message.as_str() == "first")));
     assert!(matches!(events[1], ShellEvent::Scan(ScanEvent::Stage(_))));
 }
 
@@ -360,20 +358,20 @@ fn spawn_job_worker_formats_non_string_panic_payloads() {
     ));
 }
 
-#[test]
-fn drain_releases_trace_budget_slots() {
-    let mut hub = JobHub::default();
-    let budget = hub.trace_budget();
-    assert!(budget.reserve_for_test());
-    let ticket = hub.start(JobKind::Run, "scan");
-    ticket.send(ShellEvent::Trace(RunTraceStep::new(
-        1,
-        "reasoning",
-        "reserved",
-    )));
-    ticket.complete();
-
-    assert_eq!(budget.pending(), 1);
-    assert_eq!(hub.drain(8).len(), 1);
-    assert_eq!(budget.pending(), 0);
+fn test_run_item(seq: u64, message: &str) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {
+    use kuzushi_core::run_lifecycle::{
+        DiagnosticLevel, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemV1, SafeText,
+    };
+    RunItemEnvelopeV1::new(
+        seq,
+        RunId::parse("run-jobs-test").unwrap(),
+        RunItemId::new(),
+        RunItemSource::Workflow,
+        RunItemV1::DiagnosticNotice {
+            level: DiagnosticLevel::Info,
+            message: SafeText::operator_visible(message),
+        },
+        None,
+    )
+    .unwrap()
 }

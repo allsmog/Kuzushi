@@ -1,7 +1,7 @@
 use super::*;
 use crate::run_lifecycle::{
-    load_run_projection, read_run_items, DiagnosticLevel, OperationFingerprint, ProjectionHealth,
-    RunCallId, RunItemId, RunItemRecord, RunItemSource, RunItemV1, SafeText,
+    load_run_projection, read_run_items, DiagnosticLevel, ProjectionHealth, RunItemId,
+    RunItemRecord, RunItemSource, RunItemV1, SafeText,
 };
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
@@ -118,8 +118,12 @@ fn delivery_cursor_faults_on_truncation_and_replacement() {
 
     std::fs::remove_file(&path).unwrap();
     let writer = super::super::RunItemWriter::open(target.path(), &run_id, None).unwrap();
-    let replacement_first = writer.emit_and_flush(diagnostic("replacement first")).unwrap();
-    let replacement_second = writer.emit_and_flush(diagnostic("replacement second")).unwrap();
+    let replacement_first = writer
+        .emit_and_flush(diagnostic("replacement first"))
+        .unwrap();
+    let replacement_second = writer
+        .emit_and_flush(diagnostic("replacement second"))
+        .unwrap();
     writer.shutdown().unwrap();
     let mut replaced = DeliveryCursor::open(target.path(), &run_id, 0).unwrap();
     replaced.read_through(replacement_first.seq).unwrap();
@@ -158,7 +162,10 @@ fn delivery_cursor_rolls_back_after_post_read_verification_failure() {
     std::fs::remove_file(&path).unwrap();
     std::fs::rename(&displaced, &path).unwrap();
     let items = cursor.read_through(2).unwrap();
-    assert_eq!(items.iter().map(|item| item.seq).collect::<Vec<_>>(), [1, 2]);
+    assert_eq!(
+        items.iter().map(|item| item.seq).collect::<Vec<_>>(),
+        [1, 2]
+    );
 }
 
 #[cfg(unix)]
@@ -211,22 +218,19 @@ fn derivative_failure_is_reported_without_blocking_canonical_item_delivery() {
         Some(fault_subscriber),
     )
     .unwrap();
-    let events_path = crate::run_artifacts::run_dir(target.path(), &run_id).join("events.jsonl");
-    std::fs::create_dir(&events_path).unwrap();
+    let log_dir = poison_storage_log(target.path());
 
-    let committed = writer.emit_and_flush(requested_call()).unwrap();
+    let committed = writer.emit_and_flush(terminal_outcome()).unwrap();
     let fault = fault_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
     let delivered_seq = item_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
 
-    assert_eq!(
-        fault.stage,
-        RunItemDeliveryFailureStage::CompatibilityProjection
-    );
+    assert_eq!(fault.stage, RunItemDeliveryFailureStage::StorageProjection);
     assert_eq!(fault.durable_seq, committed.seq);
     assert_eq!(delivered_seq, committed.seq);
     writer.shutdown().unwrap();
     let read = read_run_items(target.path(), &run_id).unwrap().unwrap();
     assert_eq!(read.health, ProjectionHealth::Healthy);
+    std::fs::remove_file(log_dir).unwrap();
 }
 
 #[test]
@@ -243,13 +247,11 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
         None,
     )
     .unwrap();
-    let committed = writer.emit_and_flush(requested_call()).unwrap();
+    let committed = writer.emit_and_flush(terminal_outcome()).unwrap();
     initial_receiver
         .recv_timeout(Duration::from_secs(2))
         .unwrap();
     writer.shutdown().unwrap();
-    let events_path = crate::run_artifacts::run_dir(target.path(), &run_id).join("events.jsonl");
-    std::fs::remove_file(&events_path).unwrap();
     let (derivative_subscriber, derivative_receiver) = derivative_range_channel();
     let reopened = super::super::RunItemWriter::open_with_derivative_delivery_subscriber(
         target.path(),
@@ -266,15 +268,13 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
         .unwrap();
     reopened.shutdown().unwrap();
     assert_eq!(range.through_seq, committed.seq);
-    assert!(std::fs::read_to_string(events_path)
-        .unwrap()
-        .contains(&format!("[typed:{}]", committed.event_hash)));
+    assert_eq!(
+        storage_event_occurrences(target.path(), &committed.event_hash),
+        1
+    );
 }
 
-fn derivative_range_channel() -> (
-    DerivativeRangeSubscriber,
-    mpsc::Receiver<CommittedRange>,
-) {
+fn derivative_range_channel() -> (DerivativeRangeSubscriber, mpsc::Receiver<CommittedRange>) {
     let (sender, receiver) = mpsc::channel();
     let subscriber = Arc::new(move |range| sender.send(range).unwrap());
     (subscriber, receiver)
@@ -284,7 +284,6 @@ fn derivative_range_channel() -> (
 fn derivative_fault_retries_from_its_last_applied_sequence() {
     let target = tempfile::tempdir().unwrap();
     let run_id = crate::run_artifacts::new_run_id("derivative-retry");
-    let events_path = crate::run_artifacts::run_dir(target.path(), &run_id).join("events.jsonl");
     let channels = derivative_retry_channels();
     let writer = super::super::RunItemWriter::open_with_derivative_delivery_subscriber(
         target.path(),
@@ -295,12 +294,20 @@ fn derivative_fault_retries_from_its_last_applied_sequence() {
         Some(channels.fault_subscriber),
     )
     .unwrap();
-    std::fs::create_dir(&events_path).unwrap();
-    let first = writer.emit_and_flush(requested_call()).unwrap();
-    let fault = channels.faults.recv_timeout(Duration::from_secs(2)).unwrap();
-    std::fs::remove_dir(&events_path).unwrap();
-    let second = writer.emit_and_flush(requested_call()).unwrap();
-    let applied = channels.derivatives.recv_timeout(Duration::from_secs(2)).unwrap();
+    let log_dir = poison_storage_log(target.path());
+    let first = writer.emit_and_flush(terminal_outcome()).unwrap();
+    let fault = channels
+        .faults
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    std::fs::remove_file(&log_dir).unwrap();
+    let second = writer
+        .emit_and_flush(diagnostic("retry storage derivative"))
+        .unwrap();
+    let applied = channels
+        .derivatives
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
     let delivered = [
         channels.items.recv_timeout(Duration::from_secs(2)).unwrap(),
         channels.items.recv_timeout(Duration::from_secs(2)).unwrap(),
@@ -315,11 +322,11 @@ fn derivative_fault_retries_from_its_last_applied_sequence() {
 }
 
 #[test]
-fn compatibility_derivative_redelivery_is_idempotent() {
+fn terminal_storage_derivative_redelivery_is_idempotent() {
     let target = tempfile::tempdir().unwrap();
     let run_id = crate::run_artifacts::new_run_id("derivative-idempotency");
     let writer = super::super::RunItemWriter::open(target.path(), &run_id, None).unwrap();
-    writer.emit_and_flush(requested_call()).unwrap();
+    writer.emit_and_flush(terminal_outcome()).unwrap();
     writer.shutdown().unwrap();
     let read = read_run_items(target.path(), &run_id).unwrap().unwrap();
 
@@ -330,7 +337,7 @@ fn compatibility_derivative_redelivery_is_idempotent() {
             &read.items,
             0,
         )
-            .is_empty()
+        .is_empty()
     );
     assert!(
         super::super::writer_derivatives::deliver_committed_derivatives(
@@ -339,16 +346,10 @@ fn compatibility_derivative_redelivery_is_idempotent() {
             &read.items,
             0,
         )
-            .is_empty()
+        .is_empty()
     );
-    let marker = format!("[typed:{}]", read.items[0].event_hash);
-    let events = crate::run_artifacts::load_run_events(target.path(), &run_id).unwrap();
     assert_eq!(
-        events
-            .events
-            .iter()
-            .filter(|event| event.message.contains(&marker))
-            .count(),
+        storage_event_occurrences(target.path(), &read.items[0].event_hash),
         1
     );
 }
@@ -364,17 +365,37 @@ fn diagnostic(message: &str) -> RunItemRecord {
     )
 }
 
-fn requested_call() -> RunItemRecord {
+fn terminal_outcome() -> RunItemRecord {
     RunItemRecord::new(
         RunItemId::new(),
-        RunItemSource::Dispatch,
-        RunItemV1::ToolCallRequested {
-            tool_name: SafeText::operator_visible("security:scan"),
-            operation_fingerprint: OperationFingerprint::from_bytes(b"derivative-test"),
-            safe_option_names: Vec::new(),
+        RunItemSource::Persistence,
+        RunItemV1::TerminalOutcome {
+            status: crate::run_lifecycle::RunItemStatus::Completed,
+            summary: SafeText::operator_visible("Run completed"),
+            cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
+            continuation: crate::run_lifecycle::WorkflowContinuation::NoFurtherAction {
+                reason: SafeText::operator_visible("Run completed"),
+            },
         },
     )
-    .with_call(RunCallId::new())
+}
+
+fn poison_storage_log(target: &std::path::Path) -> std::path::PathBuf {
+    let workspace = crate::workspace::WorkspaceTarget::new(target).unwrap();
+    let log_dir = workspace.event_log_dir();
+    std::fs::create_dir_all(log_dir.parent().unwrap()).unwrap();
+    std::fs::write(&log_dir, "not a directory").unwrap();
+    log_dir
+}
+
+fn storage_event_occurrences(target: &std::path::Path, event_hash: &str) -> usize {
+    let workspace = crate::workspace::WorkspaceTarget::new(target).unwrap();
+    std::fs::read_dir(workspace.event_log_dir())
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .map(|body| body.matches(event_hash).count())
+        .sum()
 }
 
 struct DerivativeRetryChannels {

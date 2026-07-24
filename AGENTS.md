@@ -520,7 +520,7 @@ is expected to behave identically and should be filed as a parity bug.
   target-scoped run artifacts; transcript run events link to those artifacts by
   `runId` instead of duplicating their payloads.
 - **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
-  dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
+  dispatch now mint a `runId` and write `run.json`, `items.jsonl`,
   and input/result JSON. They do not produce scan-specific `triage.jsonl`,
   `verify.jsonl`, or `patch.jsonl` unless the tool itself emits them.
 - **Rust `ToolExecutionContext.workspace` is an optional resolved
@@ -668,17 +668,15 @@ row. `s` opens a compact editor that accepts only valid `run <tool> …`; `b`
 backgrounds without cancellation and restores the captured origin.
 
 - **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
-  Rust module emits at least `start` + `done` steps; multi-phase modules
+  Rust module instruments its semantic task and calls; multi-phase modules
   (`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
-  `taint-iris-next:finding-review`, `carlini-threat-hunt:run`, etc.) emit reasoning sub-steps via
-  `trace.child(parent)`.
-- **Schema**: `RunTraceStep` (v2) carries `module_id`, `verb`,
-  `parent_step`, `severity`, `started_at_ms`. All optional, backwards-
-  compatible with v1 trace.jsonl files.
-- **Transport**: `BroadcastSink` writes to `<run>/trace.jsonl` AND fans
-  events into an `mpsc::Sender<RunTraceStep>` consumed by
-  `ShellApp::drain_trace_events` and applied to `ActivitySession` via
-  `apply_step`.
+  `taint-iris-next:finding-review`, `carlini-threat-hunt:run`, etc.) emit bounded
+  progress and safe reasoning beneath the owning task/call identity.
+- **Schema**: `RunItemV1` is the sole durable execution lifecycle in
+  `items.jsonl`, with stable item, task, call, question, and attempt identity.
+- **Transport**: committed typed items fan out to `ShellEvent::RunItem`; the
+  same durable stream drives `ActivitySession`, replay, plain mode, and CLI
+  trace output.
 - **Projection**: window the retained event ring before formatting and build
   output rows once per frame. Plain output consumes the same model and emits
   Steps followed by Output without side-by-side truncation.

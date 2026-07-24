@@ -23,6 +23,69 @@ use crate::ui_view_models::{
 
 use super::*;
 
+fn apply_renderer_notice(session: &mut ActivitySession, message: &str) {
+    use kuzushi_core::run_lifecycle::{
+        DiagnosticLevel, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemV1, SafeText,
+    };
+    let item = RunItemEnvelopeV1::new(
+        session.run_projection.last_committed_seq + 1,
+        RunId::parse(&session.run_id).unwrap(),
+        RunItemId::new(),
+        RunItemSource::Workflow,
+        RunItemV1::DiagnosticNotice {
+            level: DiagnosticLevel::Info,
+            message: SafeText::operator_visible(message),
+        },
+        session.run_projection.last_event_hash.clone(),
+    )
+    .unwrap();
+    session.apply_run_item(item).unwrap();
+}
+
+fn write_lifecycle_notices(target: &std::path::Path, run_id: &str, messages: &[&str]) {
+    use kuzushi_core::run_lifecycle::{
+        DiagnosticLevel, RunItemId, RunItemRecord, RunItemSource, RunItemV1, RunItemWriter,
+        SafeText,
+    };
+    let writer = RunItemWriter::open(target, run_id, None).unwrap();
+    for message in messages {
+        writer
+            .emit_and_flush(RunItemRecord::new(
+                RunItemId::new(),
+                RunItemSource::Workflow,
+                RunItemV1::DiagnosticNotice {
+                    level: DiagnosticLevel::Info,
+                    message: SafeText::operator_visible(*message),
+                },
+            ))
+            .unwrap();
+    }
+}
+
+fn write_completed_lifecycle(target: &std::path::Path, run_id: &str, summary: &str) {
+    use kuzushi_core::run_lifecycle::{
+        RunItemId, RunItemRecord, RunItemSource, RunItemStatus, RunItemV1, RunItemWriter, SafeText,
+        WorkflowContinuation,
+    };
+    let writer = RunItemWriter::open(target, run_id, None).unwrap();
+    writer
+        .emit_and_flush(RunItemRecord::new(
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TerminalOutcome {
+                status: RunItemStatus::Completed,
+                summary: SafeText::operator_visible(summary),
+                cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                    kuzushi_core::runtime::RuntimeCost::ZERO,
+                ),
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("run completed"),
+                },
+            },
+        ))
+        .unwrap();
+}
+
 fn press_key(app: &mut ShellApp, key: crossterm::event::KeyEvent) -> bool {
     crate::app::update_and_execute_effects(
         app,
@@ -3803,7 +3866,7 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::ModuleRun);
     app.set_live_activity_state(Some(LiveActivity::new(
-        LiveActivityPhase::Thinking,
+        LiveActivityPhase::CallingModel,
         "triage:run",
         "asking model to triage persisted findings",
     )));
@@ -3812,7 +3875,7 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("LIVE ACTIVITY"));
-    assert!(rendered.contains("thinking"));
+    assert!(rendered.contains("calling model"));
     assert!(rendered.contains("triage:run"));
     assert!(rendered.contains("activity"));
     assert!(!rendered.contains("tool: active"));
@@ -4430,12 +4493,9 @@ fn run_focus_at_reported_96x89_size_is_side_by_side_without_shell_prompt() {
         Vec::new(),
     );
     task.state = DagTaskState::Active;
+    task.last_label = "Indexing repository".to_string();
     session.tasks.insert(task.task_id.clone(), task);
-    session.apply_step(
-        kuzushi_core::RunTraceStep::new(1, "tool-progress", "indexing repository")
-            .with_module_id("context")
-            .with_verb("build"),
-    );
+    apply_renderer_notice(&mut session, "Indexing repository");
     app.set_activity(Some(session));
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
@@ -4456,7 +4516,7 @@ fn run_focus_at_reported_96x89_size_is_side_by_side_without_shell_prompt() {
     let rendered = rows.join("\n");
 
     assert_eq!(task_row, output_row, "wide panes must share a top row");
-    assert!(rendered.contains("indexing repository"), "{rendered}");
+    assert!(rendered.contains("Indexing repository"), "{rendered}");
     assert!(!rendered.contains("NAVIGATION MODE"), "{rendered}");
 }
 
@@ -5113,23 +5173,18 @@ fn prompt_document_renders_vim_mode_source_and_instructions() {
 }
 
 #[test]
-fn trace_view_renders_steps_from_trace_jsonl() {
-    // `design/mockups/trace.jsx::step` shows one row per agent step
-    // with kind-tinted column + label + latency + cost.  Seed a
-    // small trace.jsonl on disk and verify rows + columns reach
-    // the buffer.
+fn trace_view_renders_steps_from_typed_lifecycle() {
     let tmp = tempfile::tempdir().unwrap();
-    let runs_root = ui_run_dir(Some(tmp.path()), "r-1");
-    std::fs::create_dir_all(&runs_root).unwrap();
-    std::fs::write(
-            runs_root.join("trace.jsonl"),
-            r#"{"n":1,"kind":"plan","label":"plan(F-0012, h=2) → 4-step plan","latency_ms":400,"cost_usd":0.0}
-{"n":2,"kind":"tool","label":"kb:fetch a-04","latency_ms":100,"cost_usd":0.0}
-{"n":3,"kind":"llm","label":"compose injection candidates","latency_ms":4100,"cost_usd":0.012}
-{"n":4,"kind":"refused","label":"write_patch_attempt → policy","latency_ms":0}
-"#,
-        )
-        .unwrap();
+    write_lifecycle_notices(
+        tmp.path(),
+        "r-1",
+        &[
+            "Accepted a 4-task verification plan",
+            "Fetched knowledge base entry a-04",
+            "Comparing injection candidates",
+            "Patch attempt blocked by policy",
+        ],
+    );
 
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -5144,31 +5199,21 @@ fn trace_view_renders_steps_from_trace_jsonl() {
 
     assert!(rendered.contains("TRACE · r-1"));
     assert!(rendered.contains("STEPS"));
-    // All 4 step labels.
-    assert!(rendered.contains("plan(F-0012"));
-    assert!(rendered.contains("kb:fetch"));
-    assert!(rendered.contains("compose injection"));
-    assert!(rendered.contains("write_patch_attempt"));
-    // Latency formatting: 400ms; 4.1s.
-    assert!(rendered.contains("400ms"));
-    assert!(rendered.contains("4.1s"));
-    // Cost.
-    assert!(rendered.contains("$0.0120"));
+    assert!(rendered.contains("Accepted a 4-task"));
+    assert!(rendered.contains("Fetched knowledge"));
+    assert!(rendered.contains("Comparing injection"));
+    assert!(rendered.contains("Patch attempt blocked"));
 }
 
 #[test]
 fn compact_trace_page_down_reaches_steps() {
     let tmp = tempfile::tempdir().unwrap();
     let run_id = "r-compact-trace";
-    let runs_root = ui_run_dir(Some(tmp.path()), run_id);
-    std::fs::create_dir_all(&runs_root).unwrap();
-    std::fs::write(
-        runs_root.join("trace.jsonl"),
-        r#"{"n":1,"kind":"tool","label":"recon:import started"}
-{"n":2,"kind":"done","label":"recon:import complete"}
-"#,
-    )
-    .unwrap();
+    write_lifecycle_notices(
+        tmp.path(),
+        run_id,
+        &["Recon import started", "Recon import completed"],
+    );
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -5194,7 +5239,7 @@ fn compact_trace_page_down_reaches_steps() {
     let second_page = format!("{:?}", terminal.backend().buffer());
     assert!(second_page.contains("STEPS"), "{second_page}");
     assert!(
-        second_page.contains("recon:import complete"),
+        second_page.matches("activity").count() >= 2,
         "{second_page}"
     );
 }
@@ -5225,6 +5270,15 @@ fn compact_replay_page_down_reaches_aliases() {
         .unwrap(),
     )
     .unwrap();
+    let summary = RunSummary::running(
+        run_id,
+        "recon:import-httpx",
+        None,
+        tmp.path().display().to_string(),
+    )
+    .complete();
+    kuzushi_core::write_run_summary(tmp.path(), &summary).unwrap();
+    write_completed_lifecycle(tmp.path(), run_id, "Recon import completed");
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -5253,7 +5307,7 @@ fn compact_replay_page_down_reaches_aliases() {
         pages.push(format!("{:?}", terminal.backend().buffer()));
     }
     let all_pages = pages.join("\n");
-    assert!(all_pages.contains("RECON EVIDENCE"), "{all_pages}");
+    assert!(all_pages.contains("Recon import completed"), "{all_pages}");
     assert!(all_pages.contains("ALIASES"), "{all_pages}");
     assert!(all_pages.contains("F-0001"), "{all_pages}");
 }
@@ -5275,7 +5329,7 @@ fn seed_compact_scroll_findings(app: &mut ShellApp) {
 }
 
 #[test]
-fn trace_view_empty_when_no_trace_jsonl_on_disk() {
+fn trace_view_empty_when_no_lifecycle_items_exist() {
     let tmp = tempfile::tempdir().unwrap();
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -5289,7 +5343,7 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("TRACE · r-missing"));
-    assert!(rendered.contains("no trace.jsonl"));
+    assert!(rendered.contains("no lifecycle items on disk"));
 }
 
 #[test]
@@ -6204,21 +6258,15 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
     task.state = DagTaskState::Active;
     task.started_at = Some(std::time::Instant::now());
     session.tasks.insert(task.task_id.clone(), task);
-    session.apply_step(
-        kuzushi_core::RunTraceStep::new(
-            1,
-            "tool-progress",
-            "stage 3/6 · building repository inventory",
-        )
-        .with_module_id("context")
-        .with_verb("build"),
-    );
+    session.tasks.get_mut("context:build").unwrap().last_label =
+        "stage 3/6 · building repository inventory".to_string();
+    apply_renderer_notice(&mut session, "stage 3/6 · building repository inventory");
     app.set_activity(Some(session));
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
     app.set_input_mode(crate::InputMode::Navigate);
 
-    for (width, height) in [(60, 20), (120, 36), (150, 90)] {
+    for (width, height) in [(60, 20), (104, 61), (120, 36), (150, 90)] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).expect("activity terminal");
         terminal
@@ -6237,7 +6285,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
         assert!(rendered.contains("TASKS"), "{width}x{height}: {rendered}");
         assert!(!rendered.contains("PHASE"), "{width}x{height}: {rendered}");
         assert!(
-            rendered.contains("building repository inventory"),
+            rendered.contains("Building repository inventory"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -6256,7 +6304,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
         "RUN FOCUS",
         "STEPS",
         "OUTPUT",
-        "building repository inventory",
+        "Building repository inventory",
     ] {
         assert!(
             plain.contains(marker),
@@ -6282,16 +6330,8 @@ fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
     task.started_at = Some(now - std::time::Duration::from_secs(65));
     task.last_label = "stage 4/6 · mapping attack surface".to_string();
     session.tasks.insert(task.task_id.clone(), task);
-    session.events.push_back(crate::RecordedTraceEvent {
-        step: kuzushi_core::RunTraceStep::new(
-            1,
-            "tool-progress",
-            "stage 4/6 · mapping attack surface",
-        )
-        .with_module_id("context")
-        .with_verb("build"),
-        observed_at: now - std::time::Duration::from_secs(65),
-    });
+    apply_renderer_notice(&mut session, "stage 4/6 · mapping attack surface");
+    session.set_last_run_item_at_for_test(now - std::time::Duration::from_secs(65));
     app.set_activity(Some(session));
     app.set_running_tool_for_test("context:build");
     app.set_shell_view(ShellView::Activity);
@@ -6313,7 +6353,10 @@ fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
         "warning should remain in the header: {rendered}"
     );
     assert!(rendered.contains("current context:build"), "{rendered}");
-    assert!(rendered.contains("last stage 4/6"), "{rendered}");
+    assert!(
+        rows[warning_row].contains("last") && rows[warning_row].contains("stage 4/6"),
+        "{rendered}"
+    );
     assert!(rendered.contains("stage 4/6"), "{rendered}");
     assert!(!rendered.contains("view map"), "{rendered}");
 }

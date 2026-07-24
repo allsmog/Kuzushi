@@ -76,6 +76,18 @@ impl RunObservationHandle {
         scoped
     }
 
+    pub(crate) fn for_call_progress(
+        &self,
+        call_id: crate::run_lifecycle::RunCallId,
+        item_id: RunItemId,
+    ) -> Self {
+        let mut scoped = self.clone();
+        scoped.trace = scoped
+            .trace
+            .with_run_call_scope(call_id, item_id, self.parent_item_id);
+        scoped
+    }
+
     pub(crate) fn parent_item_id(&self) -> Option<RunItemId> {
         self.parent_item_id
     }

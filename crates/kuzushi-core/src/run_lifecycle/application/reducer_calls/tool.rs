@@ -1,6 +1,5 @@
-use super::super::super::super::{CallKind, RunProjection};
-use super::super::ensure_legacy;
-use super::{ensure_call_identity, new_call, required_call_id};
+use super::super::super::super::RunProjection;
+use super::{ensure_call_identity, required_call_id};
 use crate::run_lifecycle::{
     ArtifactReference, RunCallId, RunItemEnvelopeV1, RunItemStatus, SafeText,
 };
@@ -13,27 +12,14 @@ pub(in crate::run_lifecycle::application) fn reject_tool_call(
 ) -> Result<()> {
     let call_id = required_call_id(envelope)?;
     let Some(call) = projection.calls.get_mut(&call_id) else {
-        ensure_legacy(envelope, "call rejection without request")?;
-        insert_legacy_tool_finish(
-            projection,
-            envelope,
-            call_id,
-            RunItemStatus::Failed,
-            RuntimeCostReport::UNAVAILABLE,
-            None,
-            Vec::new(),
-            0,
-            1,
-        );
-        return Ok(());
+        anyhow::bail!("call rejection without request");
     };
     anyhow::ensure!(
         call.status == RunItemStatus::Pending,
         "call rejected after start"
     );
     ensure_call_identity(call, envelope)?;
-    call.status = RunItemStatus::Failed;
-    call.completed_at_ms = Some(envelope.occurred_at_ms);
+    call.status = RunItemStatus::Blocked;
     call.error_count = 1;
     Ok(())
 }
@@ -64,19 +50,7 @@ pub(in crate::run_lifecycle::application) fn finish_tool_call(
     )? {
         return Ok(());
     }
-    ensure_legacy(envelope, "call finish without start")?;
-    insert_legacy_tool_finish(
-        projection,
-        envelope,
-        call_id,
-        status,
-        cost,
-        result_artifact.clone(),
-        preview,
-        warning_count,
-        error_count,
-    );
-    Ok(())
+    anyhow::bail!("call finish without start")
 }
 
 fn validate_result_artifact(
@@ -130,34 +104,6 @@ fn same_canonical_result(left: &ArtifactReference, right: &ArtifactReference) ->
 }
 
 #[allow(clippy::too_many_arguments)]
-fn insert_legacy_tool_finish(
-    projection: &mut RunProjection,
-    envelope: &RunItemEnvelopeV1,
-    call_id: RunCallId,
-    status: RunItemStatus,
-    cost: RuntimeCostReport,
-    result_artifact: Option<ArtifactReference>,
-    preview: Vec<SafeText>,
-    warning_count: u64,
-    error_count: u64,
-) {
-    let mut call = new_call(
-        envelope,
-        CallKind::Tool,
-        &SafeText::operator_visible("legacy call"),
-        status,
-    );
-    call.completed_at_ms = Some(envelope.occurred_at_ms);
-    call.cost = cost;
-    call.result_artifact = result_artifact;
-    call.preview = preview;
-    call.warning_count = warning_count;
-    call.error_count = error_count;
-    projection.calls.insert(call_id, call);
-    projection.call_order.push(call_id);
-}
-
-#[allow(clippy::too_many_arguments)]
 fn update_existing_tool_call(
     projection: &mut RunProjection,
     envelope: &RunItemEnvelopeV1,
@@ -172,9 +118,13 @@ fn update_existing_tool_call(
     let Some(call) = projection.calls.get_mut(&call_id) else {
         return Ok(false);
     };
-    let pre_start_terminal = matches!(status, RunItemStatus::Skipped | RunItemStatus::Failed);
+    let pre_start_terminal = matches!(
+        status,
+        RunItemStatus::Skipped | RunItemStatus::Blocked | RunItemStatus::Failed
+    );
     let valid = call.status == RunItemStatus::Running
-        || (pre_start_terminal && call.status == RunItemStatus::Pending);
+        || (pre_start_terminal
+            && matches!(call.status, RunItemStatus::Pending | RunItemStatus::Blocked));
     anyhow::ensure!(valid, "call finished from invalid state");
     ensure_call_identity(call, envelope)?;
     call.status = status;

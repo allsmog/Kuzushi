@@ -57,7 +57,6 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
                 path: PathBuf::from(run_id).join(leaf),
             })
         }
-        ViewHydrationKey::RunTrace { .. } => ViewHydrationValue::RunTrace(None),
         ViewHydrationKey::RunProjection { .. } => {
             ViewHydrationValue::RunProjection(Err("missing fixture projection".to_string()))
         }
@@ -207,7 +206,7 @@ fn contextual_run_views_hydrate_the_visible_surface() {
     app.restore_contextual_surface_origin();
     app.open_trace_for_test("run-trace");
     let trace_keys = active_view_hydration_keys(&app);
-    assert!(trace_keys.contains(&ViewHydrationKey::RunTrace {
+    assert!(trace_keys.contains(&ViewHydrationKey::RunProjection {
         run_id: "run-trace".to_string(),
     }));
 }

@@ -317,12 +317,40 @@ fn scripted_replay_hydrates_artifacts_before_plain_rendering() {
         kuzushi_core::RunSummary::running(run_id, "tool", None, temp.path().display().to_string())
             .complete();
     kuzushi_core::write_run_summary(temp.path(), &summary).unwrap();
+    let observation =
+        kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(temp.path(), run_id).unwrap();
+    observation
+        .emit(kuzushi_core::run_lifecycle::RunItemRecord::new(
+            kuzushi_core::run_lifecycle::RunItemId::new(),
+            kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+            kuzushi_core::run_lifecycle::RunItemV1::TerminalOutcome {
+                status: RunItemStatus::Completed,
+                summary: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                    "Replay fixture completed",
+                ),
+                cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                    kuzushi_core::runtime::RuntimeCost::ZERO,
+                ),
+                continuation: kuzushi_core::run_lifecycle::WorkflowContinuation::NoFurtherAction {
+                    reason: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                        "run completed",
+                    ),
+                },
+            },
+        ))
+        .unwrap();
+    observation.flush().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
 
     let report = execute_plain_scripted_session(&mut app, &[&format!("replay {run_id}")], 180);
 
-    assert!(report.output.contains("run.json"), "{}", report.output);
+    assert!(report.output.contains("OUTCOME"), "{}", report.output);
+    assert!(
+        report.output.contains("Replay fixture completed"),
+        "{}",
+        report.output
+    );
     assert!(
         !report.output.contains("loading artifact"),
         "{}",

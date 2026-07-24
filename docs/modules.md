@@ -322,7 +322,7 @@ model policy.
 Anything that looks like `model = X ?? "anthropic:claude-..."` is the
 silent-fallback pattern the audit removed and must not return.
 
-### 8.1. Rust-side: `ctx.trace` (live module-progress feed)
+### 8.1. Rust-side: `ctx.trace` (typed lifecycle convenience)
 
 Rust-native modules — anything in `crates/kuzushi-core/src/modules/**` — get
 an additional optional handle on `ToolExecutionContext`:
@@ -338,8 +338,8 @@ pub struct ToolExecutionContext<'a> {
 }
 ```
 
-When the shell starts a tool or scan it constructs a `TraceHandle` that
-wraps a `BroadcastSink` (file + mpsc channel). The dispatch wrapper in
+When a mode starts a tool or scan it constructs a `TraceHandle` backed by the
+run's `RunItemWriter`. The dispatch wrapper in
 `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` auto-stamps the
 handle with the calling tool's `module_id` derived from the qualified tool
 name (`semgrep:scan` → `semgrep`), so producer code only needs:
@@ -362,15 +362,15 @@ if let Some(trace) = ctx.trace {
 
 | Method | Purpose |
 |---|---|
-| `trace.step(kind, verb, label)` | Build a `TraceStepBuilder`. Auto-stamps `module_id` and increments the per-run `n` counter. |
-| `.with_latency_ms(ms)` / `.with_cost_usd(c)` / `.with_severity(s)` | Optional metadata. `severity == "danger"` flips the row to `Failing`. |
-| `.emit() -> usize` | Records the step and returns its `n` so callers can pass it to `child(n)`. |
-| `trace.child(parent_step)` | Returns a clone of the handle that auto-fills `parent_step` on subsequent `step(...)` calls. |
+| `trace.step(kind, verb, label)` | Build a bounded typed activity item. Shared dispatch emits call start/finish separately. |
+| `.with_progress(completed, total)` / `.with_severity(s)` | Attach truthful known counts or diagnostic severity. |
+| `.emit() -> RunItemId` | Records the item and returns stable identity for child linkage. |
+| `trace.child(parent_item)` | Returns a clone that attaches subsequent activity under that item. |
 | `trace.for_module(module_id)` | Override the auto-stamped module (e.g. for sub-actor stamping). |
 
-Drop-without-emit is supported: `TraceStepBuilder` records on `Drop` if
+Drop-without-emit is supported: the activity builder records on `Drop` if
 `.emit()` wasn't called, so the simplest pattern is just to ignore the
-returned `usize`.
+returned `RunItemId`.
 
 `cancellation` is the one shared cancellation capability for native scanners,
 nested `sast:scan` subtools, dynamic hosts, and runtime bridges. Code that
@@ -385,25 +385,26 @@ so cross-module categorization stays consistent):
 
 | Kind | When |
 |---|---|
-| `tool` | Top-level tool start/complete boundary. |
-| `done` | Final step. Promotes the row to `Done` in the left pane. |
-| `reasoning` | LLM/agent reasoning phase (e.g. `evidence-collect`, `cwe-select`). |
-| `tool-start` / `tool-progress` / `tool-complete` | Sub-tool calls inside an agentic run. Use with `child(parent)`. |
-| `refused` / `failing` | Severity = `danger`; flips the row to Failing in the dashboard. |
+| `tool-progress` | Coalescible, operator-visible progress for the owning call. |
+| `reasoning` | Bounded `SafeReasoningSummary` when attached to a call. |
+| other labels | Bounded `DiagnosticNotice`; they never create task or call state. |
+
+Semantic start and terminal state come from `RunTaskHandle`, shared tool-call
+dispatch, and typed model-call instrumentation—not from these labels.
 
 ### 8.2. Per-LLM-call tracing via `TracedRuntime` + `parent_scope`
 
-Beyond the explicit `ctx.trace.step(...)` boundaries above, **every LLM
-call is auto-traced**. The dispatch wrapper at
+Beyond the explicit `ctx.trace.step(...)` boundaries above, **every model
+call is lifecycle-instrumented**. The dispatch wrapper at
 `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` wraps the incoming
 `AgentRuntime` in a `TracedRuntime` (defined in
 `crates/kuzushi-core/src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
 call to `runtime.query_blocking`, `runtime.next_step_blocking`,
 `runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
-emits a `kind="reasoning"` (or `tool-progress` / `done` for loop
-iterations) step with `latency_ms` and `cost_usd` populated from the
-provider response. Producers don't have to thread the trace handle into
-their LLM call sites.
+emits correlated `ModelCallStarted` and `ModelCallFinished` items. The finish
+records provider, selected model, status, latency, usage, and cost when known;
+successful calls may add one bounded `SafeReasoningSummary`. Producers don't
+have to thread the observation handle into their model call sites.
 
 To group several LLM calls under a labelled phase header, push a
 **parent_scope** RAII guard before the LLM region:
@@ -420,8 +421,8 @@ let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
 drop(_scope);
 ```
 
-Inside `_scope`, every step emitted by `TracedRuntime` (or by the
-producer itself) carries `parent_step = Some(phase)`, so the renderer
+Inside `_scope`, every item emitted by `TracedRuntime` (or by the
+producer itself) carries `parent_item_id = Some(phase)`, so the renderer
 indents the row under the phase header in the right pane. The scope is
 per-thread; nested scopes form a stack and pop in LIFO order on drop.
 
@@ -446,20 +447,20 @@ routes are direct registry queries, the phase capability projection,
 Optional adapter packages do not become visible merely by existing in
 `node_modules`; adapter configuration must be explicit.
 
-Headless `kuzushi run` creates a JSONL trace handle for run artifacts. Some
-test/eval or compatibility contexts may still leave `ctx.trace` as `None`; the
+Headless `kuzushi run` creates the same typed observation handle as scan and
+shell. Some isolated test/eval contexts may still leave `ctx.trace` as `None`; the
 `if let Some(...)` guard should always short-circuit cleanly.
 
-The trace handle is the compatibility facade over a `RunObservationHandle`.
-Shared dispatch emits versioned task/tool/model items to `items.jsonl`; trace
+The trace handle is a producer convenience facade over a `RunObservationHandle`.
+Shared dispatch emits versioned task/tool/model items to `items.jsonl`; live
 labels remain bounded diagnostics and are not a semantic replay protocol. Tool
 inputs persist only an operation fingerprint and safe option names, and model
 items never persist prompts or response text.
 
 See `crates/kuzushi-core/src/run_artifacts/trace_handle.rs` for the
 implementation and
-`crates/kuzushi-tui/tests/activity_dag_fixture.rs` for end-to-end
-integration tests showing how to drive the view from a fake DAG.
+`crates/kuzushi-core/src/run_lifecycle/application/presentation/tests.rs` for
+projection examples.
 
 ## 9. `reportActivity` vs `reportOutput`
 

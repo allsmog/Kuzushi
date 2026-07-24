@@ -1158,11 +1158,7 @@ impl ShellApp {
         let Some(session) = self.activity() else {
             return false;
         };
-        let event_count = if session.run_projection.timeline.is_empty() {
-            session.events.len()
-        } else {
-            session.run_projection.timeline.len()
-        };
+        let event_count = session.event_count();
         let route = self.router.activity_mut();
         match action {
             ViewHotkeyAction::ActivityTabPaneFocus => route.toggle_pane_focus(),

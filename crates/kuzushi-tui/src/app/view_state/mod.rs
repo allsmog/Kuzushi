@@ -46,7 +46,6 @@ mod update_available;
 mod workbench_cache;
 mod workbench_review_state;
 mod workbench_zoom;
-pub use activity::is_hidden_module_id;
 pub use activity::ActivityRouteState;
 pub use activity::ActivitySession;
 pub use activity::DagTaskDetail;
@@ -54,9 +53,7 @@ pub use activity::DagTaskDetailState;
 pub use activity::DagTaskRow;
 pub use activity::DagTaskState;
 pub use activity::PaneFocus;
-pub use activity::RecordedTraceEvent;
 pub use activity::SubsystemAggregate;
-pub use activity::ACTIVITY_FEED_RING_CAPACITY;
 pub use activity::{RunFocusOrigin, RunFocusReceipt, RunFocusSteerEditor};
 pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
 pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
@@ -126,8 +123,7 @@ pub use update_available::{UpdateAvailableFooter, UpdateAvailableSnapshot, Updat
 pub(crate) use workbench_cache::{
     harness_file_path, DfdModelCacheKey, DirectoryListingState, JsonFileState, PathState,
     ProjectScopeTreeState, PromptMutationsState, ReviewQueueCacheKey, RiskByModuleCacheKey,
-    RunTraceCacheState, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
-    WorkbenchCache,
+    StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey, WorkbenchCache,
 };
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;

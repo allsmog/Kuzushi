@@ -371,7 +371,7 @@ mod tests {
         let result = export(tmp.path(), &store, json!({ "output": "out/custom.sarif" }));
 
         assert_eq!(result["data"]["resultCount"], 0);
-        let expected = tmp.path().join("out/custom.sarif");
+        let expected = std::fs::canonicalize(tmp.path().join("out/custom.sarif")).unwrap();
         assert_eq!(
             result["data"]["path"].as_str().unwrap(),
             expected.display().to_string()

@@ -10,7 +10,7 @@ use crate::{ActivitySession, DagTaskState, ShellApp};
 pub(crate) fn ambient_progress_chip(app: &ShellApp) -> Option<String> {
     let session = app.activity()?;
     let subject = live_subject(app, session)?;
-    let background = if app.tool_is_ambient(&subject.name) {
+    let background = if session.run_focus_backgrounded || app.tool_is_ambient(&subject.name) {
         " (background)"
     } else {
         ""
@@ -38,7 +38,7 @@ struct LiveSubject {
 fn live_subject(app: &ShellApp, session: &ActivitySession) -> Option<LiveSubject> {
     if let Some(row) = active_task(session) {
         return Some(LiveSubject {
-            name: row.task_id.clone(),
+            name: row.operator_name().to_string(),
             elapsed_secs: row
                 .started_at
                 .map(|started| started.elapsed().as_secs())

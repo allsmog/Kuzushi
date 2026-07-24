@@ -6,10 +6,7 @@ pub(super) fn jsonl_summary(file: &str, body: &str) -> Option<String> {
     if file == run_events_artifact_leaf() {
         return events_summary(body);
     }
-    if file == run_trace_artifact_leaf() {
-        return trace_summary(body);
-    }
-    if file == "items.jsonl" {
+    if file == run_items_artifact_leaf() {
         return run_items_summary(body);
     }
     None
@@ -42,10 +39,9 @@ fn run_events_artifact_leaf() -> &'static str {
         .leaf
 }
 
-fn run_trace_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("trace.jsonl")
-        .expect("runtime trace artifact must be in shared canonical spec")
-        .leaf
+fn run_items_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("items.jsonl")
+        .map_or("items.jsonl", |spec| spec.leaf)
 }
 
 fn events_summary(body: &str) -> Option<String> {
@@ -61,27 +57,6 @@ fn events_summary(body: &str) -> Option<String> {
         parts.extend(tool_segment(&lines.values));
         parts.extend(event_span_segment(&lines.values));
         parts.extend(artifact_count_segment(&lines.values));
-        parts.extend(malformed_line_segment(&lines));
-        return Some(parts.join(", "));
-    }
-    malformed_jsonl_summary(&lines)
-}
-
-fn trace_summary(body: &str) -> Option<String> {
-    let lines = json_lines(body);
-    if lines.values.iter().any(|step| trace_label(step).is_some()) {
-        let mut parts = vec![format!("{} step(s)", lines.values.len())];
-        parts.extend(count_segment("kinds", string_counts(&lines.values, "kind")));
-        parts.extend(count_segment(
-            "severity",
-            string_counts(&lines.values, "severity"),
-        ));
-        parts.extend(trace_module_segment(&lines.values));
-        parts.extend(trace_verb_segment(&lines.values));
-        parts.extend(trace_child_step_segment(&lines.values));
-        parts.extend(llm_call_segment(&lines.values));
-        parts.extend(trace_latency_segment(&lines.values));
-        parts.extend(trace_cost_segment(&lines.values));
         parts.extend(malformed_line_segment(&lines));
         return Some(parts.join(", "));
     }
@@ -185,82 +160,6 @@ fn artifact_value_present(value: &Value) -> bool {
             .is_some_and(|path| !path.trim().is_empty()),
         _ => false,
     }
-}
-
-fn trace_label(step: &Value) -> Option<&str> {
-    step.get("label").and_then(Value::as_str)
-}
-
-fn trace_module_segment(steps: &[Value]) -> Option<String> {
-    let modules = unique_string_values_at(steps, &["module_id"]);
-    (!modules.is_empty()).then(|| format!("modules {}", modules.join(", ")))
-}
-
-fn trace_verb_segment(steps: &[Value]) -> Option<String> {
-    let verbs = unique_string_values_at(steps, &["verb"]);
-    (!verbs.is_empty()).then(|| format!("verbs {}", verbs.join(", ")))
-}
-
-fn trace_child_step_segment(steps: &[Value]) -> Option<String> {
-    let count = steps
-        .iter()
-        .filter(|step| u64_at(step, &["parent_step"]).is_some())
-        .count();
-    (count > 0).then(|| format!("child steps {count}"))
-}
-
-fn llm_call_segment(steps: &[Value]) -> Option<String> {
-    let count = steps
-        .iter()
-        .filter(|step| trace_step_has_llm_metadata(step))
-        .count();
-    (count > 0).then(|| format!("llm calls {count}"))
-}
-
-fn trace_step_has_llm_metadata(step: &Value) -> bool {
-    string_at(step, &["model", "provider", "prompt_hash"]).is_some()
-}
-
-fn trace_latency_segment(steps: &[Value]) -> Option<String> {
-    let mut latencies = steps
-        .iter()
-        .filter_map(|step| u64_at(step, &["latency_ms"]));
-    match latencies.try_fold(0_u64, u64::checked_add) {
-        Some(0) => None,
-        Some(latency) => Some(format!("latency {latency}ms")),
-        None => Some("latency invalid".to_string()),
-    }
-}
-
-fn trace_cost_segment(steps: &[Value]) -> Option<String> {
-    let costs = steps
-        .iter()
-        .filter_map(|step| number_at(step, &["cost_usd"]))
-        .collect::<Vec<_>>();
-    if costs.is_empty() {
-        return None;
-    }
-    match checked_trace_cost_sum(costs) {
-        Some(cost) if cost > 0.0 => Some(format!("cost ${cost:.6}")),
-        Some(_) => None,
-        None => Some("cost invalid".to_string()),
-    }
-}
-
-fn checked_trace_cost_sum(costs: impl IntoIterator<Item = f64>) -> Option<f64> {
-    costs.into_iter().try_fold(0.0, |total, cost| {
-        if !cost.is_finite() || cost < 0.0 {
-            return None;
-        }
-        let next = total + cost;
-        next.is_finite().then_some(next)
-    })
-}
-
-fn number_at<'a>(value: &'a Value, keys: &[&str]) -> Option<f64> {
-    keys.iter()
-        .filter_map(|key| value.get(*key))
-        .find_map(Value::as_f64)
 }
 
 fn u64_at(value: &Value, keys: &[&str]) -> Option<u64> {

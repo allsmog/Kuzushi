@@ -12,15 +12,6 @@ pub(crate) fn recent_module_activity_lines(
     module_activity_lines(recent_module_activity_model(app, module_id, take))
 }
 
-pub(crate) fn recon_snapshot_activity_lines(
-    snapshot: &crate::ReconSnapshot,
-    take: usize,
-) -> Vec<Line<'static>> {
-    module_activity_lines(crate::ui_view_models::recon_snapshot_activity_model(
-        snapshot, take,
-    ))
-}
-
 fn module_activity_lines(model: ModuleActivityModel) -> Vec<Line<'static>> {
     model.rows.into_iter().map(module_activity_line).collect()
 }

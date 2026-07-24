@@ -632,14 +632,12 @@ primary = "gpt-5.5"
             Some("invalid_response")
         );
 
-        for artifact in ["items.jsonl", "trace.jsonl"] {
-            assert_artifact_excludes(
-                target.path(),
-                &run_id,
-                artifact,
-                "raw-model-response-sentinel",
-            );
-        }
+        assert_artifact_excludes(
+            target.path(),
+            &run_id,
+            "items.jsonl",
+            "raw-model-response-sentinel",
+        );
     }
 
     #[test]

@@ -46,7 +46,6 @@ pub(crate) enum ShellEffect {
     RecordAgentRun(AgentRunRecord),
     RecordPromptMutation(PromptMutationRecord),
     RecordScanRun(ScanRunRecord),
-    RecordScanStageTrace(ScanStageTraceRecord),
     RecordToolRun(ToolRunRecordEffect),
     RefreshContextView,
     RefreshFindings(FindingsRefresh),
@@ -342,12 +341,6 @@ pub(crate) enum ScanRunOutcome {
     Interrupted {
         reason: String,
     },
-}
-
-pub(crate) struct ScanStageTraceRecord {
-    pub(crate) target: Option<PathBuf>,
-    pub(crate) run_id: String,
-    pub(crate) stage: String,
 }
 
 pub(crate) struct ToolRunRecordEffect {
@@ -946,9 +939,7 @@ impl ShellApp {
 
     pub(super) fn open_activity_effect(&mut self, open: ActivityOpen) {
         if self.activity().is_none() {
-            let mut session =
-                ActivitySession::new(open.run_id.unwrap_or_else(manual_activity_run_id));
-            session.seed_from_registry_legacy(self.registry());
+            let session = ActivitySession::new(open.run_id.unwrap_or_else(manual_activity_run_id));
             self.set_activity(Some(session));
         }
         self.set_shell_view(ShellView::Activity);

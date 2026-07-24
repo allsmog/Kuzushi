@@ -79,7 +79,15 @@ fn resolve_run_input(input: String) -> Result<String> {
 }
 
 fn prepare_failure_output(tool: &str, error: &str) -> serde_json::Value {
-    failed_tool_output(tool, error, serde_json::json!([]))
+    let mut output = failed_tool_output(tool, error, serde_json::json!([]));
+    if let Some(object) = output.as_object_mut() {
+        object.insert("status".to_string(), serde_json::json!("blocked"));
+        object.insert(
+            "summary".to_string(),
+            serde_json::json!(format!("{tool} blocked before execution")),
+        );
+    }
+    output
 }
 
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
@@ -89,7 +97,7 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         Ok(runtime) => runtime,
         Err(error) => {
             let message = error.to_string();
-            let output = cli_failed_tool_output(run, &message);
+            let output = cli_blocked_tool_output(run, &message);
             return Ok(cli_output_after_persistence(
                 run,
                 output,
@@ -121,6 +129,18 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         Ok(outcome) => handle_cli_observed_tool_result(run, outcome, trace.as_ref()),
         Err(error) => handle_cli_tool_result(run, Err(error), trace.as_ref()),
     }
+}
+
+fn cli_blocked_tool_output(run: &PreparedCliToolRun, error: &str) -> serde_json::Value {
+    let mut output = cli_failed_tool_output(run, error);
+    if let Some(object) = output.as_object_mut() {
+        object.insert("status".to_string(), serde_json::json!("blocked"));
+        object.insert(
+            "summary".to_string(),
+            serde_json::json!(format!("{} blocked before dispatch", run.input.tool_name())),
+        );
+    }
+    output
 }
 
 fn mark_trace_task_running(trace: Option<&TraceHandle>) -> Result<()> {
@@ -204,9 +224,7 @@ fn cli_tool_trace(run: &PreparedCliToolRun) -> Result<Option<TraceHandle>> {
         &run.run_id,
     )?
     .start_root_task(&run.task_title)?;
-    Ok(Some(
-        observation.trace_handle().for_tool(&run.tool).child(1),
-    ))
+    Ok(Some(observation.trace_handle().for_tool(&run.tool)))
 }
 
 fn active_cli_tool_runtime<'a>(

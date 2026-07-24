@@ -2,7 +2,6 @@ use super::*;
 
 #[derive(Debug)]
 pub(crate) enum ShellEvent {
-    Trace(RunTraceStep),
     RunItem(kuzushi_core::run_lifecycle::RunItemEnvelopeV1),
     RunItemsDurable {
         run_id: String,
@@ -64,8 +63,7 @@ impl ShellEvent {
 
     pub(crate) fn kind(&self) -> JobKind {
         match self {
-            Self::Trace(_)
-            | Self::RunItem(_)
+            Self::RunItem(_)
             | Self::RunItemsDurable { .. }
             | Self::RunItemsDerivativesApplied { .. }
             | Self::RunItemsFault { .. }
@@ -83,8 +81,7 @@ impl ShellEvent {
 
     pub(crate) fn is_terminal(&self) -> bool {
         match self {
-            Self::Trace(_)
-            | Self::RunItem(_)
+            Self::RunItem(_)
             | Self::RunItemsDurable { .. }
             | Self::RunItemsDerivativesApplied { .. }
             | Self::RunItemsFault { .. }
@@ -136,9 +133,6 @@ impl ShellEvent {
 
 fn disconnected_job_audit() -> AgentCallAudit {
     AgentCallAudit {
-        model: "unknown".to_string(),
-        provider: "unknown".to_string(),
-        prompt_hash: "jobhub-panic-guard".to_string(),
         cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
         call_attempted: true,
     }

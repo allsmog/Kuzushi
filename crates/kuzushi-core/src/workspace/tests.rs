@@ -1076,7 +1076,7 @@ mod tests {
             provider_spend_unresolved: false,
             call_attempted: None,
         }])
-        .with_trace_malformed_lines(malformed_trace.then_some(1));
+        .with_lifecycle_malformed_items(malformed_trace.then_some(1));
         write_run_summary(workspace.root(), &summary).unwrap();
     }
 

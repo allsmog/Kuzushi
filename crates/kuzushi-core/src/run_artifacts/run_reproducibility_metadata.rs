@@ -1,4 +1,4 @@
-use super::llm_audit::load_run_trace_audit;
+use super::llm_audit::load_run_lifecycle_audit;
 use super::{RunEnvFingerprint, RunHouseRuleFingerprint, RunPromptOverrideFingerprint, RunSummary};
 use crate::workspace::target_git_metadata;
 use std::fs;
@@ -14,21 +14,21 @@ pub(crate) fn summary_with_dynamic_metadata(target: &Path, summary: &RunSummary)
     let summary = summary_with_env_fingerprint(summary);
     let summary = summary_with_cli_args(summary);
     let summary = summary_with_target_git(target, summary);
-    summary_with_trace_metadata(target, &summary)
+    summary_with_lifecycle_metadata(target, &summary)
 }
 
-pub(crate) fn summary_with_trace_metadata(target: &Path, summary: &RunSummary) -> RunSummary {
+pub(crate) fn summary_with_lifecycle_metadata(target: &Path, summary: &RunSummary) -> RunSummary {
     summary_with_llm_audit(target, summary.clone())
 }
 
 fn summary_with_llm_audit(target: &Path, summary: RunSummary) -> RunSummary {
-    let audit = load_run_trace_audit(target, &summary.run_id);
+    let audit = load_run_lifecycle_audit(target, &summary.run_id);
     let mut summary = summary;
     if !audit.llm_calls.is_empty() {
         summary = summary.with_llm_calls(audit.llm_calls);
     }
     if audit.malformed_lines > 0 {
-        summary = summary.with_trace_malformed_lines(Some(audit.malformed_lines));
+        summary = summary.with_lifecycle_malformed_items(Some(audit.malformed_lines));
     }
     summary
 }

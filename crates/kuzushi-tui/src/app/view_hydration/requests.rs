@@ -222,7 +222,7 @@ fn append_selected_proof_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     else {
         return;
     };
-    keys.push(run_artifact_key(&run_id, "trace.jsonl"));
+    keys.push(run_artifact_key(&run_id, "items.jsonl"));
 }
 
 fn append_prompt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
@@ -313,7 +313,7 @@ fn append_run_json_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     keys.push(run_artifact_key(run_id, "findings.json"));
 }
 
-fn append_replay_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
+fn append_replay_keys(_app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     if run_id.is_empty() {
         return;
     }
@@ -321,33 +321,16 @@ fn append_replay_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>, run_id: 
     keys.push(ViewHydrationKey::RunProjection {
         run_id: run_id.to_string(),
     });
-    let Some(target) = app.target() else {
-        return;
-    };
-    let state = app
-        .workbench_cache()
-        .borrow()
-        .cached_run_projection(target, run_id);
-    if matches!(
-        state,
-        ViewDataState::Ready(Ok(kuzushi_core::run_lifecycle::RunProjectionRead {
-            source: kuzushi_core::run_lifecycle::RunProjectionSource::Legacy,
-            ..
-        }))
-    ) {
-        keys.push(run_artifact_key(run_id, "result.json"));
-        keys.push(run_artifact_key(run_id, "triage.jsonl"));
-    }
 }
 
 fn append_trace_keys(keys: &mut Vec<ViewHydrationKey>, run_id: &str) {
     if run_id.is_empty() {
         return;
     }
-    for leaf in ["trace.jsonl", "triage.jsonl", "verify.jsonl", "patch.jsonl"] {
+    for leaf in ["items.jsonl", "triage.jsonl", "verify.jsonl", "patch.jsonl"] {
         keys.push(run_artifact_key(run_id, leaf));
     }
-    keys.push(ViewHydrationKey::RunTrace {
+    keys.push(ViewHydrationKey::RunProjection {
         run_id: run_id.to_string(),
     });
 }

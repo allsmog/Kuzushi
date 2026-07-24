@@ -42,7 +42,7 @@ fn hydrate_reference_security_artifacts(app: &mut ShellApp, target: &Path) {
             },
             ViewHydrationKey::RunArtifactText {
                 run_id: "verify-phase-run".to_string(),
-                leaf: "trace.jsonl".to_string(),
+                leaf: "items.jsonl".to_string(),
             },
         ],
     );

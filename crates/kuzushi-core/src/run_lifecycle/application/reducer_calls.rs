@@ -1,5 +1,4 @@
 use super::super::super::{CallKind, CallProjection, RunProjection};
-use super::ensure_legacy;
 use crate::run_lifecycle::{ModelUsage, RunCallId, RunItemEnvelopeV1, RunItemStatus, SafeText};
 use crate::runtime::RuntimeCostReport;
 use anyhow::Result;
@@ -52,14 +51,7 @@ pub(super) fn start_call(
         call.started_at_ms = Some(envelope.occurred_at_ms);
         return Ok(());
     }
-    ensure_legacy(envelope, "call start without request")?;
-    let mut call = new_call(envelope, kind, label, RunItemStatus::Running);
-    call.runtime = runtime.clone();
-    call.model = model.clone();
-    call.started_at_ms = Some(envelope.occurred_at_ms);
-    projection.calls.insert(call_id, call);
-    projection.call_order.push(call_id);
-    Ok(())
+    anyhow::bail!("call start without request")
 }
 
 pub(super) fn require_running_call(

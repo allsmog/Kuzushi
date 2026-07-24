@@ -1,33 +1,5 @@
 use super::*;
 pub(crate) use super::*;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
-
-pub(super) fn short_label(text: &str, max: usize) -> String {
-    let cleaned = text.replace('\n', " ");
-    if UnicodeWidthStr::width(cleaned.as_str()) <= max {
-        cleaned
-    } else if max == 0 {
-        String::new()
-    } else {
-        let mut out = take_display_columns(&cleaned, max.saturating_sub(1));
-        out.push('…');
-        out
-    }
-}
-
-fn take_display_columns(value: &str, max: usize) -> String {
-    let mut width = 0usize;
-    let mut out = String::new();
-    for ch in value.chars() {
-        let next = width + UnicodeWidthChar::width(ch).unwrap_or(0);
-        if next > max {
-            break;
-        }
-        out.push(ch);
-        width = next;
-    }
-    out
-}
 
 /// Write minimal run metadata so the runs ledger can list synthetic shell
 /// runs alongside real artefacts. Existing metadata is terminalized in place;
@@ -235,28 +207,6 @@ fn canonical_run_status(status: &str) -> &'static str {
     }
 }
 
-/// Append a single `TraceStep`-shaped JSON object to the trace.jsonl
-/// for the given `run_id` under `<target>/.kuzushi/v3/runs/<run_id>/`.
-/// No-ops on any I/O error so a missing target dir or read-only mount
-/// doesn't crash a worker — trace writes are observability, not a
-/// correctness contract.  `kind` is the renderer's tint key:
-/// `plan` / `tool` / `llm` / `critic` / `refused`.
-pub fn append_trace_step(
-    target: Option<&std::path::Path>,
-    run_id: &str,
-    kind: &str,
-    label: &str,
-    latency_ms: Option<u64>,
-    cost_usd: Option<f64>,
-) {
-    let Some(target) = target else { return };
-    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
-        .with_latency_ms(latency_ms)
-        .with_cost_usd(cost_usd);
-    let _ =
-        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step);
-}
-
 #[cfg(test)]
 mod run_summary_pid_tests {
     use super::write_run_summary;
@@ -288,26 +238,4 @@ mod run_summary_pid_tests {
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.process_id, None);
     }
-}
-
-/// Append an application-level agent terminal marker.
-///
-/// The runtime already owns the cost-bearing model-call row. This marker is
-/// explicitly not another call, so canonical cost reconciliation cannot count
-/// the same provider settlement twice.
-pub(crate) fn append_agent_terminal_trace_step(
-    target: Option<&std::path::Path>,
-    run_id: &str,
-    kind: &str,
-    label: &str,
-    latency_ms: Option<u64>,
-    audit: &AgentCallAudit,
-) -> anyhow::Result<()> {
-    let Some(target) = target else { return Ok(()) };
-    let step = kuzushi_core::RunTraceStep::new(0, kind.to_string(), label.to_string())
-        .with_latency_ms(latency_ms)
-        .with_call_attempted(false)
-        .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
-    kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
-        .map(|_| ())
 }

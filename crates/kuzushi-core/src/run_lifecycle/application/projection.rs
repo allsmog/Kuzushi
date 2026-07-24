@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum ProjectionHealth {
     Healthy,
-    LegacyLossy,
     Degraded {
         valid_through_seq: u64,
         reason: String,

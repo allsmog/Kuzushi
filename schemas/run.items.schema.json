@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.items.schema.json",
+  "title": "Kuzushi Run Lifecycle Item V1",
+  "description": "Canonical schema for each JSON line in .kuzushi/v3/runs/<runId>/items.jsonl.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "seq",
+    "eventId",
+    "itemId",
+    "runId",
+    "source",
+    "occurredAtMs",
+    "eventHash",
+    "item"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "eventId": { "$ref": "#/definitions/identity" },
+    "itemId": { "$ref": "#/definitions/identity" },
+    "runId": { "$ref": "#/definitions/identity" },
+    "taskId": { "$ref": "#/definitions/identity" },
+    "callId": { "$ref": "#/definitions/identity" },
+    "parentItemId": { "$ref": "#/definitions/identity" },
+    "attemptId": { "$ref": "#/definitions/identity" },
+    "phase": { "type": "string", "minLength": 1 },
+    "source": { "$ref": "#/definitions/runItemSource" },
+    "occurredAtMs": { "type": "integer", "minimum": 0 },
+    "prevEventHash": { "type": "string", "minLength": 1 },
+    "eventHash": { "type": "string", "minLength": 1 },
+    "item": { "$ref": "#/definitions/runItem" }
+  },
+  "definitions": {
+    "identity": { "type": "string", "minLength": 1 },
+    "runItemSource": {
+      "type": "string",
+      "enum": ["dispatch", "runtime", "workflow", "operator", "persistence"]
+    },
+    "runItemType": {
+      "type": "string",
+      "enum": [
+        "plan_updated",
+        "task_updated",
+        "tool_call_requested",
+        "tool_call_rejected",
+        "tool_call_started",
+        "tool_call_progress",
+        "tool_call_finished",
+        "model_call_started",
+        "model_call_finished",
+        "safe_reasoning_summary",
+        "artifact_produced",
+        "finding_delta",
+        "diagnostic_notice",
+        "operator_question",
+        "operator_decision",
+        "terminal_outcome",
+        "phase_receipt",
+        "progress_truncated"
+      ]
+    },
+    "runItem": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "$ref": "#/definitions/runItemType" },
+        "status": { "type": "string" },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "tool_name": { "type": "string" },
+        "message": { "type": "string" },
+        "completed": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 },
+        "provider": { "type": "string" },
+        "model": { "type": "string" },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "summary": { "type": "string" },
+        "text": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

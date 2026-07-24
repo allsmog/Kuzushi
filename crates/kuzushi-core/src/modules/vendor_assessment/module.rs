@@ -271,7 +271,7 @@ fn assess_tool(
     Ok(result)
 }
 
-fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> Option<usize> {
+fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -285,7 +285,7 @@ fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> 
 
 fn emit_vendor_assessment_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -299,7 +299,7 @@ fn emit_vendor_assessment_progress(
 
 fn begin_vendor_assessment_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

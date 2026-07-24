@@ -54,7 +54,7 @@ impl ShellApp {
             "timed out after {timeout:?} waiting for job tool worker; running={:?}; job_running={}; activity_events={}; drains={drain_count}; changed_drains={changed_count}; recent log: [{}]",
             self.running_tool_name(),
             self.jobs().is_running(JobKind::Run),
-            self.activity().map(|activity| activity.events.len()).unwrap_or(0),
+            self.activity().map(ActivitySession::event_count).unwrap_or(0),
             self.log_lines()
                 .iter()
                 .rev()

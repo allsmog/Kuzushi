@@ -33,8 +33,6 @@ mod recent_module_activity_lines;
 pub(crate) use append_findings_preview::streaming_cursor_line;
 pub(crate) use from_app::module_run_lines;
 pub(crate) use module_lines::module_lines;
+pub(crate) use recent_module_activity_lines::recent_module_activity_lines;
 #[cfg(test)]
 pub(crate) use recent_module_activity_lines::transcript_finding_line;
-pub(crate) use recent_module_activity_lines::{
-    recent_module_activity_lines, recon_snapshot_activity_lines,
-};

@@ -30,7 +30,7 @@ struct UafHuntRun<'a> {
     options: UafHuntInput,
     runtime: &'a dyn AgentRuntime,
     request: AgentToolLoopRequest,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 }
 
 struct UafHuntLoopOutcome {
@@ -136,7 +136,7 @@ fn finish_uaf_hunt_run(
     })
 }
 
-fn emit_uaf_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+fn emit_uaf_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -150,7 +150,7 @@ fn emit_uaf_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<
 
 fn emit_uaf_hunt_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     emit_uaf_hunt_child(ctx, parent_step, "tool-progress", label);
@@ -158,7 +158,7 @@ fn emit_uaf_hunt_progress(
 
 fn emit_uaf_hunt_child(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     kind: &str,
     label: impl Into<String>,
 ) {
@@ -170,7 +170,7 @@ fn emit_uaf_hunt_child(
 
 fn begin_uaf_hunt_agent_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

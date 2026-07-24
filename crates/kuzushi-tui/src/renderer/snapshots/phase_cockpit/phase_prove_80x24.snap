@@ -24,7 +24,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 │ c  Generate attack chain model prerequisites, trust transitions, and...
 │ 5  Draft patch           open Fix with this finding to stage a remediation
 │ x  Mark false positive   draft suppress — records a durable review...
-run route · Review 3/5 · ⛭ fix ·...         6 findings / 1 crit / 2 high / 2 med
+run route · ⠋ context:build · 42s · 1/2...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◎ PROVE › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

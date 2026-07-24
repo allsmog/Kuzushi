@@ -47,13 +47,19 @@ fn execution_annotation_is_monotonic_and_forbids_automatic_retry() {
 }
 
 #[test]
-fn reserve_recovery_allows_only_partial_or_failed_inspection_items() {
+fn reserve_recovery_preserves_exceptional_inspection_items() {
     for status in [RunItemStatus::Completed, RunItemStatus::Skipped] {
         assert!(inspection_records(status)
             .iter()
             .all(|record| !writer_worker::reserve_recovery_eligible_record(record)));
     }
-    for status in [RunItemStatus::Partial, RunItemStatus::Failed] {
+    for status in [
+        RunItemStatus::Partial,
+        RunItemStatus::Blocked,
+        RunItemStatus::Failed,
+        RunItemStatus::Canceled,
+        RunItemStatus::Interrupted,
+    ] {
         assert!(inspection_records(status)
             .iter()
             .all(writer_worker::reserve_recovery_eligible_record));

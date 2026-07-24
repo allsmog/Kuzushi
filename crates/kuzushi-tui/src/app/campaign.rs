@@ -442,7 +442,7 @@ mod tests {
 
     #[test]
     fn kill_and_reap_reports_an_already_exited_dispatcher() {
-        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let mut child = std::process::Command::new("true").spawn().unwrap();
         let pid = child.id();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while child.try_wait().unwrap().is_none() {
@@ -458,7 +458,7 @@ mod tests {
     #[test]
     fn deck_refresh_reaps_an_exited_dispatcher_and_clears_its_pid() {
         let (_temp, mut app) = deck_app();
-        let child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let child = std::process::Command::new("true").spawn().unwrap();
         let pid = child.id();
         app.runtime_state.set_dispatcher_child(Some(child));
         app.router.campaign_mut().dispatcher_pid = Some(pid);
@@ -515,7 +515,7 @@ mod tests {
     #[test]
     fn an_exited_dispatcher_never_blocks_the_next_launch() {
         let (_temp, mut app) = deck_app();
-        let mut child = std::process::Command::new("/bin/true").spawn().unwrap();
+        let mut child = std::process::Command::new("true").spawn().unwrap();
         let pid = child.id();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while child.try_wait().unwrap().is_none() {

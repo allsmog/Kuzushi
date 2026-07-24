@@ -4,9 +4,8 @@ use cache_entries::{
     project_scope_tree_for_target, run_summary_index_from_entries, CompletionValuesCache,
     DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
     LatestRunPointerCache, PathStateCache, ProjectModelDocumentCache, PromptMutationsCache,
-    RunArtifactTextCache, RunProjectionCache, RunSummaryEntriesCache, RunTraceCache,
-    ScanRecommendationsCache, ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache,
-    TargetProfileCache,
+    RunArtifactTextCache, RunProjectionCache, RunSummaryEntriesCache, ScanRecommendationsCache,
+    ScopeTreeCache, SourceFileCache, StrategyQueueCache, TargetBaseCache, TargetProfileCache,
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};
@@ -48,7 +47,7 @@ mod tests;
 mod view_model_fragments;
 pub(crate) use cache_entries::{
     DirectoryListingState, JsonFileState, PathState, ProjectScopeTreeState, PromptMutationsState,
-    RunTraceCacheState, StrategyQueueState,
+    StrategyQueueState,
 };
 pub(crate) use view_model_fragments::{
     DfdModelCacheKey, ReviewQueueCacheKey, RiskByModuleCacheKey, VisibleFindingProjection,
@@ -80,7 +79,6 @@ pub(crate) struct WorkbenchCache {
     json_files: BTreeMap<PathBuf, JsonFileCache>,
     path_states: BTreeMap<PathBuf, PathStateCache>,
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
-    run_traces: BTreeMap<(PathBuf, String), RunTraceCache>,
     run_projections: BTreeMap<(PathBuf, String), RunProjectionCache>,
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
@@ -159,23 +157,6 @@ impl WorkbenchCache {
                 ViewDataState::Ready(JsonFileState::Unreadable)
             }
         }
-    }
-
-    pub(crate) fn cached_run_trace(
-        &self,
-        target: &Path,
-        run_id: &str,
-    ) -> ViewDataState<RunTraceCacheState> {
-        let map_key = (target.to_path_buf(), run_id.to_string());
-        if let Some(cache) = self.run_traces.get(&map_key) {
-            return ViewDataState::Ready(cache.state.clone());
-        }
-        self.loading_state(
-            target,
-            &ViewHydrationKey::RunTrace {
-                run_id: run_id.to_string(),
-            },
-        )
     }
 
     pub(crate) fn cached_run_projection(
@@ -412,7 +393,6 @@ impl WorkbenchCache {
         self.directory_listings.clear();
         self.file_completion_values = None;
         self.bump_completion_generation();
-        self.run_traces.clear();
         self.run_projections.clear();
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
@@ -442,14 +422,12 @@ impl WorkbenchCache {
         self.run_artifact_texts
             .values()
             .map(|entry| entry.bytes)
-            .chain(self.run_traces.values().map(|entry| entry.bytes))
             .chain(self.run_projections.values().map(|entry| entry.bytes))
             .fold(0, usize::saturating_add)
     }
 
     fn evict_large_run_cache_entry_except(&mut self, keep: &LargeRunCacheKey) -> bool {
         evict_artifact_text_except(&mut self.run_artifact_texts, keep)
-            || evict_run_trace_except(&mut self.run_traces, keep)
             || evict_run_projection_except(&mut self.run_projections, keep)
     }
 
@@ -457,9 +435,6 @@ impl WorkbenchCache {
         match key {
             LargeRunCacheKey::Artifact(key) => {
                 self.run_artifact_texts.remove(key);
-            }
-            LargeRunCacheKey::Trace(key) => {
-                self.run_traces.remove(key);
             }
             LargeRunCacheKey::Projection(key) => {
                 self.run_projections.remove(key);
@@ -558,7 +533,6 @@ impl WorkbenchCache {
             self.invalidate_one_run_cache(roots.target, run_id);
             return;
         }
-        invalidate_cached_trace(&mut self.run_traces, roots.target, &roots.runs, &path);
         invalidate_cached_run_artifact_text(
             &mut self.run_artifact_texts,
             roots.target,
@@ -580,8 +554,6 @@ impl WorkbenchCache {
     }
 
     fn invalidate_target_run_caches(&mut self, target: &Path) {
-        self.run_traces
-            .retain(|(cached_target, _), _| cached_target != target);
         self.run_projections
             .retain(|(cached_target, _), _| cached_target != target);
         self.run_artifact_texts
@@ -594,7 +566,6 @@ impl WorkbenchCache {
 
     fn invalidate_one_run_cache(&mut self, target: &Path, run_id: &str) {
         let key = (target.to_path_buf(), run_id.to_string());
-        self.run_traces.remove(&key);
         self.run_projections.remove(&key);
         self.run_artifact_texts
             .retain(|(cached_target, cached_run, _), _| {
@@ -855,32 +826,9 @@ fn run_metadata_path_changed(path: &Path, runs_root: &Path) -> bool {
     })
 }
 
-fn invalidate_cached_trace(
-    traces: &mut BTreeMap<(PathBuf, String), RunTraceCache>,
-    target: &Path,
-    runs_root: &Path,
-    path: &Path,
-) {
-    let Some(run_id) = path
-        .strip_prefix(runs_root)
-        .ok()
-        .filter(|relative| {
-            relative
-                .file_name()
-                .is_some_and(|name| name == "trace.jsonl")
-        })
-        .and_then(|relative| relative.components().next())
-        .and_then(|component| component.as_os_str().to_str())
-    else {
-        return;
-    };
-    traces.remove(&(target.to_path_buf(), run_id.to_string()));
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum LargeRunCacheKey {
     Artifact((PathBuf, String, String)),
-    Trace((PathBuf, String)),
     Projection((PathBuf, String)),
 }
 
@@ -890,18 +838,6 @@ fn evict_artifact_text_except(
 ) -> bool {
     let protected = match keep {
         LargeRunCacheKey::Artifact(key) => Some(key),
-        _ => None,
-    };
-    let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
-    candidate.is_some_and(|key| entries.remove(&key).is_some())
-}
-
-fn evict_run_trace_except(
-    entries: &mut BTreeMap<(PathBuf, String), RunTraceCache>,
-    keep: &LargeRunCacheKey,
-) -> bool {
-    let protected = match keep {
-        LargeRunCacheKey::Trace(key) => Some(key),
         _ => None,
     };
     let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
@@ -927,16 +863,6 @@ fn run_artifact_text_bytes(state: &kuzushi_core::RunArtifactTextRead) -> usize {
         | kuzushi_core::RunArtifactRead::Unreadable { error, .. } => error.len(),
         _ => 1,
     }
-}
-
-fn run_trace_bytes(state: &RunTraceCacheState) -> usize {
-    let RunTraceCacheState::Ready(read) = state else {
-        return 1;
-    };
-    read.steps
-        .iter()
-        .map(serialized_bytes)
-        .fold(0, usize::saturating_add)
 }
 
 fn run_projection_bytes(

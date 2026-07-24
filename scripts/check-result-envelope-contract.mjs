@@ -55,7 +55,7 @@ const checks = [
     file: "crates/kuzushi-core/src/report/tests.rs",
     tokens: [
       "report_artifact_manifest_summary_uses_only_canonical_fields",
-      "labels run metadata, runtime trace",
+      "labels run metadata, run events, semantic run items, failure handoff",
     ],
   },
   {

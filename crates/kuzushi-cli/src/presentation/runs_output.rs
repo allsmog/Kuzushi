@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use kuzushi_core::{runs_root, RunSummary, WorkspaceTarget};
-use std::path::Path;
 use std::time::Duration;
 
 use super::scan_ci::format_duration;
@@ -138,83 +137,36 @@ pub(crate) fn runs_show_output(summary: &RunSummary, json: bool) -> Result<Strin
     Ok(run_summary_plain(summary))
 }
 
-pub(crate) fn runs_trace_output(trace_path: &Path, body: &str, json: bool) -> Result<String> {
+pub(crate) fn runs_trace_output(
+    read: &kuzushi_core::run_lifecycle::RunProjectionRead,
+    json: bool,
+) -> Result<String> {
     if json {
-        let steps = parse_trace_json_lines(trace_path, body)?;
-        return Ok(format!("{}\n", serde_json::to_string_pretty(&steps)?));
+        return Ok(format!(
+            "{}\n",
+            serde_json::to_string_pretty(&read.projection.timeline)?
+        ));
     }
-    runs_trace_plain(trace_path, body)
+    Ok(runs_trace_plain(read))
 }
 
-pub(crate) fn parse_trace_json_lines(
-    trace_path: &Path,
-    body: &str,
-) -> Result<Vec<serde_json::Value>> {
-    body.lines()
-        .filter(|line| !line.trim().is_empty())
-        .map(serde_json::from_str::<serde_json::Value>)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .with_context(|| format!("Could not parse {}", trace_path.display()))
-}
-
-pub(crate) fn runs_trace_plain(trace_path: &Path, body: &str) -> Result<String> {
-    let steps = parse_trace_json_lines(trace_path, body)?;
-    if steps.is_empty() {
-        return Ok(String::new());
+pub(crate) fn runs_trace_plain(read: &kuzushi_core::run_lifecycle::RunProjectionRead) -> String {
+    let presentation = kuzushi_core::run_lifecycle::present_run(read);
+    let run_id = read
+        .projection
+        .run_id
+        .as_ref()
+        .map(|run_id| run_id.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let mut lines = vec![format!("Run trace · {run_id}"), "TIMELINE".to_string()];
+    let timeline = presentation.timeline_text_rows();
+    if timeline.is_empty() {
+        lines.push("No lifecycle activity recorded".to_string());
+    } else {
+        lines.extend(timeline.into_iter().map(|row| row.text));
     }
-
-    let mut lines = steps.iter().map(format_trace_step_row).collect::<Vec<_>>();
     lines.push(String::new());
-    Ok(lines.join("\n"))
-}
-
-fn format_trace_step_row(step: &serde_json::Value) -> String {
-    let n = step
-        .get("n")
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(0);
-    let kind = step
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("step");
-    let label = step
-        .get("label")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("(no label)");
-    let module_verb = format_trace_module_verb(step);
-    let parent = step
-        .get("parent_step")
-        .and_then(serde_json::Value::as_u64)
-        .map(|parent| format!(" parent={parent}"))
-        .unwrap_or_default();
-    let latency = step
-        .get("latency_ms")
-        .and_then(serde_json::Value::as_u64)
-        .map(|ms| format!(" {ms}ms"))
-        .unwrap_or_default();
-    let cost = step
-        .get("cost_usd")
-        .and_then(serde_json::Value::as_f64)
-        .map(|cost| format!(" ${cost:.4}"))
-        .unwrap_or_default();
-    let severity = step
-        .get("severity")
-        .and_then(serde_json::Value::as_str)
-        .map(|severity| format!(" sev={severity}"))
-        .unwrap_or_default();
-
-    format!("{n:>3}  {kind:<10}  {module_verb:<26}  {label}{parent}{latency}{cost}{severity}")
-}
-
-fn format_trace_module_verb(step: &serde_json::Value) -> String {
-    match (
-        step.get("module_id").and_then(serde_json::Value::as_str),
-        step.get("verb").and_then(serde_json::Value::as_str),
-    ) {
-        (Some(module), Some(verb)) => format!("[{module}:{verb}]"),
-        (Some(module), None) => format!("[{module}]"),
-        _ => "[-]".to_string(),
-    }
+    lines.join("\n")
 }
 
 pub(crate) fn run_summary_plain(summary: &RunSummary) -> String {

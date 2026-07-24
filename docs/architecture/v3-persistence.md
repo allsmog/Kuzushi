@@ -28,7 +28,6 @@ Target-owned state lives under:
     run.json
     items.jsonl
     events.jsonl
-    trace.jsonl
     input.json
     result.json
     failures.json

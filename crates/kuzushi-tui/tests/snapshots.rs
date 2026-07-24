@@ -26,7 +26,35 @@ fn render_at_120(app: &mut ShellApp) -> String {
             line.time_secs = SNAPSHOT_LOG_TIME;
         }
     }
-    strip_line_end_whitespace(&render_plain_app(app, SNAPSHOT_WIDTH))
+    normalize_clock_times(&strip_line_end_whitespace(&render_plain_app(
+        app,
+        SNAPSHOT_WIDTH,
+    )))
+}
+
+fn normalize_clock_times(output: &str) -> String {
+    output
+        .lines()
+        .map(|line| {
+            let bytes = line.as_bytes();
+            let Some(index) = bytes.windows(8).position(|window| {
+                window[0].is_ascii_digit()
+                    && window[1].is_ascii_digit()
+                    && window[2] == b':'
+                    && window[3].is_ascii_digit()
+                    && window[4].is_ascii_digit()
+                    && window[5] == b':'
+                    && window[6].is_ascii_digit()
+                    && window[7].is_ascii_digit()
+            }) else {
+                return line.to_string();
+            };
+            let mut normalized = line.to_string();
+            normalized.replace_range(index..index + 8, "22:13:20");
+            normalized
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn strip_line_end_whitespace(output: &str) -> String {
@@ -462,75 +490,133 @@ fn options_view_for_sast_scan() {
 
 #[test]
 fn activity_view_default_split_pane() {
-    use kuzushi_core::RunTraceStep;
+    use kuzushi_core::run_lifecycle::{
+        OperationFingerprint, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemRecord,
+        RunItemSource, RunItemStatus, RunItemV1, RunTaskId, SafeText,
+    };
     use kuzushi_tui::ActivitySession;
 
     let mut app = fresh_app();
-    // Seed a deterministic ActivitySession so the snapshot doesn't drift
-    // with wall-clock-derived run ids and timestamps.
     let mut session = ActivitySession::new("r-snapshot");
-    let stable_ts = 1_700_000_000_000u64;
-    let seeds: &[(usize, &str, &str, &str, &str, Option<usize>)] = &[
-        (1, "tool", "context", "build", "context:build start", None),
-        (
-            2,
-            "done",
-            "context",
-            "build",
-            "context:build complete · 412 files",
-            None,
-        ),
-        (3, "tool", "semgrep", "scan", "semgrep start", None),
-        (
-            4,
-            "done",
-            "semgrep",
-            "scan",
-            "semgrep complete · 14 findings",
-            None,
-        ),
-        (5, "tool", "triage", "run", "triage start", None),
-        (
-            6,
-            "reasoning",
-            "triage",
-            "run",
-            "evidence-collect · stage1 kept 14/14",
-            Some(5),
-        ),
-        (
-            7,
-            "reasoning",
-            "triage",
-            "run",
-            "verdict=likely-tp severity=high",
-            Some(5),
-        ),
-        (
-            8,
-            "tool",
-            "pipeline",
-            "task-selector",
-            "task-selector ran",
-            None,
-        ),
-    ];
-    for (n, kind, module, verb, label, parent) in seeds {
-        let mut step = RunTraceStep::new(*n, *kind, *label)
-            .with_module_id(*module)
-            .with_verb(*verb)
-            .with_started_at_ms(stable_ts);
-        if let Some(p) = parent {
-            step = step.with_parent_step(*p);
-        }
-        session.apply_step(step);
+    let task_ids = [RunTaskId::new(), RunTaskId::new(), RunTaskId::new()];
+    let plan_item = RunItemId::new();
+    let mut records = vec![RunItemRecord::new(
+        plan_item,
+        RunItemSource::Workflow,
+        RunItemV1::PlanUpdated {
+            revision: 1,
+            title: SafeText::operator_visible("SAST scan"),
+            status: RunItemStatus::Running,
+            task_ids: task_ids.to_vec(),
+        },
+    )];
+    for (task_id, title) in
+        task_ids
+            .into_iter()
+            .zip(["Build repository context", "Run Semgrep", "Triage findings"])
+    {
+        records.push(
+            RunItemRecord::new(
+                RunItemId::new(),
+                RunItemSource::Workflow,
+                RunItemV1::TaskUpdated {
+                    title: SafeText::operator_visible(title),
+                    status: RunItemStatus::Pending,
+                    detail: None,
+                },
+            )
+            .with_task(task_id),
+        );
     }
-    let snapshot_instant = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    for row in session.tasks.values_mut() {
-        row.started_at = Some(snapshot_instant);
-        if row.completed_at.is_some() {
-            row.completed_at = Some(snapshot_instant);
+    for (index, detail) in [
+        "Repository context built · 412 files",
+        "Semgrep completed · 14 findings",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for status in [RunItemStatus::Running, RunItemStatus::Completed] {
+            records.push(
+                RunItemRecord::new(
+                    records[index + 1].item_id,
+                    RunItemSource::Workflow,
+                    RunItemV1::TaskUpdated {
+                        title: SafeText::operator_visible(if index == 0 {
+                            "Build repository context"
+                        } else {
+                            "Run Semgrep"
+                        }),
+                        status,
+                        detail: (status == RunItemStatus::Completed)
+                            .then(|| SafeText::operator_visible(detail)),
+                    },
+                )
+                .with_task(task_ids[index]),
+            );
         }
+    }
+    records.push(
+        RunItemRecord::new(
+            records[3].item_id,
+            RunItemSource::Workflow,
+            RunItemV1::TaskUpdated {
+                title: SafeText::operator_visible("Triage findings"),
+                status: RunItemStatus::Running,
+                detail: Some(SafeText::operator_visible("Comparing candidate findings")),
+            },
+        )
+        .with_task(task_ids[2]),
+    );
+    let call_id = RunCallId::new();
+    let call_item = RunItemId::new();
+    records.push(
+        RunItemRecord::new(
+            call_item,
+            RunItemSource::Dispatch,
+            RunItemV1::ToolCallRequested {
+                tool_name: SafeText::operator_visible("triage:run"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"snapshot"),
+                safe_option_names: Vec::new(),
+            },
+        )
+        .with_task(task_ids[2])
+        .with_call(call_id),
+    );
+    records.push(
+        RunItemRecord::new(
+            call_item,
+            RunItemSource::Dispatch,
+            RunItemV1::ToolCallStarted {
+                tool_name: SafeText::operator_visible("triage:run"),
+                runtime: Some(SafeText::operator_visible("agent")),
+                model: Some(SafeText::operator_visible("openai:gpt-test")),
+            },
+        )
+        .with_task(task_ids[2])
+        .with_call(call_id),
+    );
+    records.push(
+        RunItemRecord::new(
+            call_item,
+            RunItemSource::Runtime,
+            RunItemV1::ToolCallProgress {
+                message: SafeText::operator_visible("Collecting evidence"),
+                completed: Some(14),
+                total: Some(14),
+            },
+        )
+        .with_task(task_ids[2])
+        .with_call(call_id)
+        .with_parent(call_item),
+    );
+    let run_id = RunId::parse("r-snapshot").unwrap();
+    let mut previous = None;
+    for (index, record) in records.into_iter().enumerate() {
+        let item =
+            RunItemEnvelopeV1::from_record(index as u64 + 1, run_id.clone(), record, previous)
+                .unwrap();
+        previous = Some(item.event_hash.clone());
+        session.apply_run_item(item).unwrap();
     }
     app.set_activity(Some(session));
     app.set_shell_view(ShellView::Activity);

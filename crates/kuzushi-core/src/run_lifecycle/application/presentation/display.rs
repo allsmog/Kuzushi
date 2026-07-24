@@ -69,6 +69,7 @@ impl RunPresentationPayloadV1 {
             Self::ModelCall(value) => Some(value.status),
             Self::Terminal(value) => Some(value.status),
             Self::PhaseReceipt(value) => Some(value.status),
+            Self::LifecycleEvent(value) => value.status,
             _ => None,
         }
     }
@@ -102,7 +103,6 @@ fn text_rows_for_cell(
 fn source_label(source: &RunProjectionSource) -> &'static str {
     match source {
         RunProjectionSource::TypedV1 => "typed v1",
-        RunProjectionSource::Legacy => "legacy lossy",
     }
 }
 

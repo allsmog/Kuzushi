@@ -319,7 +319,20 @@ fn prove_requires_persisted_verification_and_trace_for_replay() {
 
     let run_dir = kuzushi_core::run_dir(tmp.path(), "verify-run");
     std::fs::create_dir_all(&run_dir).expect("run dir");
-    std::fs::write(run_dir.join("trace.jsonl"), "{}\n").expect("trace");
+    let writer = kuzushi_core::run_lifecycle::RunItemWriter::open(tmp.path(), "verify-run", None)
+        .expect("lifecycle writer");
+    writer
+        .emit_and_flush(kuzushi_core::run_lifecycle::RunItemRecord::new(
+            kuzushi_core::run_lifecycle::RunItemId::new(),
+            kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+            kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+                level: kuzushi_core::run_lifecycle::DiagnosticLevel::Info,
+                message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                    "Verification replay available",
+                ),
+            },
+        ))
+        .expect("lifecycle item");
     app.hydrate_all_view_data_for_test();
     let replay = phase_cockpit_model_for_phase(&app, WorkflowPhase::Prove);
     let PhaseCockpitBody::Prove(replay) = replay.body else {
@@ -581,7 +594,7 @@ fn inspecting_another_page_does_not_forge_the_next_action() {
 }
 
 #[test]
-fn restarted_result_card_restores_durable_metadata_and_typed_actions() {
+fn legacy_restarted_result_card_requires_typed_run_evidence() {
     let target = tempfile::tempdir().expect("temp target");
     let completed = PhaseAttemptCompleted::new(
         WorkflowPhase::Scan,
@@ -594,7 +607,7 @@ fn restarted_result_card_restores_durable_metadata_and_typed_actions() {
         elapsed_secs: 19,
         cost: "$0.4200".to_string(),
         changed_findings: 4,
-        changed_artifacts: vec!["result.json".to_string(), "trace.jsonl".to_string()],
+        changed_artifacts: vec!["result.json".to_string(), "items.jsonl".to_string()],
         interaction_count: 2,
         rerun_specification: Some("run semgrep:scan".to_string()),
         actions: vec![
@@ -620,16 +633,14 @@ fn restarted_result_card_restores_durable_metadata_and_typed_actions() {
     assert_eq!(
         card.actions,
         vec![
-            PhaseResultAction::Select,
-            PhaseResultAction::SelectAndContinue,
             PhaseResultAction::Open,
-            PhaseResultAction::Refine,
+            PhaseResultAction::RunAgain,
+            PhaseResultAction::Discard,
         ]
     );
-    assert!(card.detail.contains("2 runs · 19s · $0.4200"));
-    assert!(card.detail.contains("4 finding delta"));
-    assert!(card.detail.contains("2 interaction(s)"));
-    assert_eq!(card.recommended, "acknowledge the partial Scan");
+    assert!(card.detail.contains("typed phase receipt degraded"));
+    assert!(!card.detail.contains("$0.4200"));
+    assert!(card.recommended.contains("typed phase receipt is degraded"));
     assert_eq!(card.control_hint, "Esc Navigate to resolve this result");
 }
 

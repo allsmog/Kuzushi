@@ -356,7 +356,6 @@ fn verbose_segment(verbose: bool) -> &'static str {
 mod tests {
     use super::*;
     use crate::DagTaskRow;
-    use kuzushi_core::RunTraceStep;
 
     #[test]
     fn waiting_operator_question_overrides_terminal_looking_progress() {
@@ -384,8 +383,9 @@ mod tests {
             "triage:run".to_string(),
             task("triage:run", DagTaskState::Active, 0.25),
         );
-        session.apply_step(model_cost_step(1, "context", "build", 0.125));
-        session.apply_step(model_cost_step(2, "triage", "run", 0.25));
+        session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(0.375, "test").unwrap(),
+        ));
         let mut route = ActivityRouteState::default();
         route.paused = true;
         route.verbose_subsystems = true;
@@ -456,35 +456,9 @@ mod tests {
     }
 
     #[test]
-    fn activity_header_rejects_negative_cost() {
-        let mut session = ActivitySession::new("tool-negative-zero");
-        session.tasks.insert(
-            "sast:scan".to_string(),
-            task("sast:scan", DagTaskState::Active, 0.0),
-        );
-        session.apply_step(model_cost_step(1, "sast", "scan", -0.00001));
-
-        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
-
-        assert!(model.detailed_title.contains("cost accounting error"));
-    }
-
-    #[test]
-    fn activity_header_rejects_finite_cost_overflow() {
-        let mut session = ActivitySession::new("tool-overflow");
-        session.apply_step(model_cost_step(1, "sast", "scan", f64::MAX));
-        session.apply_step(model_cost_step(2, "sast", "scan", f64::MAX));
-
-        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
-
-        assert!(model.detailed_title.contains("cost accounting error"));
-        assert!(!model.detailed_title.contains("inf"));
-    }
-
-    #[test]
     fn activity_header_surfaces_missing_provider_usage_as_incomplete() {
         let mut session = ActivitySession::new("tool-incomplete");
-        session.apply_step(model_call_step(1, "sast", "scan", None));
+        session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
 
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
@@ -781,18 +755,5 @@ mod tests {
             counts.failing, 0,
             "prior run's failure leaked into the header"
         );
-    }
-
-    fn model_cost_step(n: usize, module: &str, verb: &str, cost: f64) -> RunTraceStep {
-        model_call_step(n, module, verb, Some(cost))
-    }
-
-    fn model_call_step(n: usize, module: &str, verb: &str, cost: Option<f64>) -> RunTraceStep {
-        RunTraceStep::new(n, "reasoning", "model response")
-            .with_module_id(module)
-            .with_verb(verb)
-            .with_latency_ms(Some(10))
-            .with_cost_usd(cost)
-            .with_model_metadata("test:model", "test", format!("hash-{n}"))
     }
 }

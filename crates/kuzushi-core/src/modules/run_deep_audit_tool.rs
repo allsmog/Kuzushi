@@ -49,7 +49,7 @@ struct DeepAuditOptions {
     passes: u32,
 }
 
-fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>) -> Option<usize> {
+fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -63,7 +63,7 @@ fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>)
 
 fn emit_deep_audit_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -77,7 +77,7 @@ fn emit_deep_audit_progress(
 
 fn begin_deep_audit_agent_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

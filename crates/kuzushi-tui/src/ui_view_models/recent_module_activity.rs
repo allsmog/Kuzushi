@@ -108,14 +108,6 @@ fn recon_snapshot_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActiv
     rows
 }
 
-pub(crate) fn recon_snapshot_activity_model(
-    snapshot: &ReconSnapshot,
-    take: usize,
-) -> ModuleActivityModel {
-    ModuleActivityModel {
-        rows: recon_snapshot_rows(snapshot, take),
-    }
-}
 fn recon_service_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
     snapshot
         .services

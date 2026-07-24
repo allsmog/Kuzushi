@@ -18,8 +18,7 @@ past runs from disk alone?**
 | ----------------- | --------------------------------------- | -------------------- | ---------- |
 | `run.json`        | Rust run artifact substrate             | scan/tool run start and completion | **yes** |
 | `items.jsonl`     | Rust run-lifecycle observation writer   | typed, hash-linked semantic lifecycle | new typed runs; authoritative for replay |
-| `events.jsonl`    | typed-item compatibility projector      | legacy lifecycle compatibility | compatibility release |
-| `trace.jsonl`     | Rust `TraceHandle` / TUI broadcast sink | bounded diagnostics and model/tool audit | compatibility release; non-authoritative for typed replay |
+| `events.jsonl`    | typed terminal storage derivative       | target-wide terminal run facts | **yes** |
 | `input.json`      | Rust tool-run recorder                  | canonical prepared input | dispatched tools, including scan |
 | `result.json`     | Rust tool-run recorder                  | normalized result envelope | dispatched tools, including scan |
 | `scan-input.json`, `triage.jsonl`, `verify.jsonl`, `patch.jsonl` | Rust SAST umbrella | SAST pipeline lifecycle | `sast:scan` |
@@ -55,7 +54,7 @@ CLI and TUI replay surfaces consume that on-disk format directly.
 | **Threat-model digest** (`.kuzushi/threat-model.json`) | yes in Rust `run.json` when present |
 | **Loaded module specifiers** (`--load`, package paths) | yes (`loadedModules`; Rust static registry entries are recorded as `builtin:<id>`) |
 | Findings list                                   | yes (v3 findings projection; some producers may also declare JSON exports) |
-| Per-event audit trail                           | yes (`items.jsonl`; legacy fallback uses `events.jsonl` and `trace.jsonl`) |
+| Per-event audit trail                           | yes (`items.jsonl`) |
 
 CLI and shell both consume this bundle for run list/show/trace and diff. There
 is no general `kuzushi runs query` surface yet; operators can still process the

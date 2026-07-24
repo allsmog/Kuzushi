@@ -101,7 +101,7 @@ impl ShellApp {
         self.set_plan_abort_requested(false);
         self.log("plan", format!("planning: {}", start.goal));
         self.set_live_activity(LiveActivity::new(
-            LiveActivityPhase::Thinking,
+            LiveActivityPhase::CallingModel,
             "plan",
             "asking model for a structured proposal",
         ));

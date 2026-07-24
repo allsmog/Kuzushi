@@ -238,18 +238,6 @@ impl ShellApp {
             .begin_run_cost_tracking(run_id, runtime_backed);
     }
 
-    pub(crate) fn observe_run_cost_report(
-        &mut self,
-        run_id: &str,
-        cost: kuzushi_core::runtime::RuntimeCostReport,
-    ) {
-        if let Err(error) = self.session_mut().observe_run_cost_report(run_id, cost) {
-            self.report_cost_accounting_error(error);
-            return;
-        }
-        self.maybe_trigger_budget_halt();
-    }
-
     pub(crate) fn settle_run_cost_report(
         &mut self,
         run_id: &str,
@@ -282,20 +270,6 @@ impl ShellApp {
         } else {
             self.record_cost_report(cost);
         }
-    }
-
-    pub(crate) fn mark_run_cost_incomplete(&mut self, run_id: &str) {
-        if let Err(error) = self.session_mut().mark_run_cost_incomplete(run_id) {
-            self.report_cost_accounting_error(error);
-            return;
-        }
-        if let Some(activity) = self
-            .activity_mut()
-            .filter(|activity| activity.run_id == run_id)
-        {
-            activity.mark_runtime_cost_incomplete();
-        }
-        self.maybe_trigger_budget_halt();
     }
 
     pub(crate) fn report_cost_accounting_error(&mut self, error: impl std::fmt::Display) {

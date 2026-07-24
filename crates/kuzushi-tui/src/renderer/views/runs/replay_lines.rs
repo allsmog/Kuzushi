@@ -19,7 +19,6 @@ pub(crate) fn replay_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line
     }
     if !typed {
         append_run_artifacts(&mut lines, &model.artifacts, area.width);
-        append_recon_evidence(&mut lines, model.recon.as_ref(), area.width);
     }
     if model.metadata_missing {
         lines.push(blank());
@@ -86,45 +85,6 @@ fn presentation_row_line(
     }
 }
 
-fn append_recon_evidence(
-    lines: &mut Vec<Line<'static>>,
-    snapshot: Option<&crate::ReconSnapshot>,
-    width: u16,
-) {
-    let Some(snapshot) = snapshot else {
-        return;
-    };
-    lines.push(blank());
-    lines.push(divider("RECON EVIDENCE", width));
-    lines.push(detail(
-        "source",
-        snapshot.last_tool.as_deref().unwrap_or("recon"),
-    ));
-    lines.push(detail(
-        "counts",
-        &format!(
-            "{} hosts · {} services · {} notes",
-            snapshot.hosts.len(),
-            snapshot.services.len(),
-            snapshot.notes.len()
-        ),
-    ));
-    lines.extend(recon_snapshot_activity_lines(snapshot, 8));
-    let overflow = replay_recon_row_count(snapshot).saturating_sub(8);
-    if overflow > 0 {
-        lines.push(muted(&format!("(+{overflow} more recon evidence rows)")));
-    }
-}
-
-fn replay_recon_row_count(snapshot: &crate::ReconSnapshot) -> usize {
-    let assets = if snapshot.services.is_empty() {
-        snapshot.hosts.len()
-    } else {
-        snapshot.services.len()
-    };
-    assets + snapshot.notes.len()
-}
-
 pub(crate) fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<'static>> {
     let model = trace_model(app, run_id);
     let mut lines = context_strip(app, area);
@@ -141,11 +101,9 @@ pub(crate) fn trace_lines(app: &ShellApp, area: Rect, run_id: &str) -> Vec<Line<
     if model.steps.is_empty() {
         lines.push(blank());
         if model.trace_exists {
-            lines.push(muted("(trace.jsonl is empty)"));
+            lines.push(muted("(lifecycle is empty)"));
         } else {
-            lines.push(muted(
-                "(no trace.jsonl on disk; trace artefacts ship with agentic / patch / verify runs)",
-            ));
+            lines.push(muted("(no lifecycle items on disk)"));
         }
     } else {
         lines.push(blank());
@@ -216,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn replay_renders_structured_recon_result_evidence() {
+    fn typed_replay_does_not_infer_semantics_from_raw_result_json() {
         let temp = tempfile::tempdir().expect("replay target");
         let run_id = "run-recon-replay";
         let run_dir = kuzushi_core::run_dir(temp.path(), run_id);
@@ -226,6 +184,7 @@ mod tests {
             serde_json::to_vec_pretty(&recon_result()).expect("result json"),
         )
         .expect("write result");
+        seed_completed_replay(temp.path(), run_id);
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
         app.open_replay_for_test(run_id);
@@ -237,10 +196,45 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert!(rendered.contains("RECON EVIDENCE"), "{rendered}");
-        assert!(rendered.contains("acme.example"), "{rendered}");
-        assert!(rendered.contains("443"), "{rendered}");
-        assert!(rendered.contains("status-code"), "{rendered}");
+        assert!(rendered.contains("OUTCOME"), "{rendered}");
+        assert!(rendered.contains("Recon import completed"), "{rendered}");
+        assert!(!rendered.contains("RECON EVIDENCE"), "{rendered}");
+        assert!(!rendered.contains("acme.example"), "{rendered}");
+    }
+
+    fn seed_completed_replay(target: &std::path::Path, run_id: &str) {
+        let summary = kuzushi_core::RunSummary::running(
+            run_id,
+            "recon:import",
+            None,
+            target.display().to_string(),
+        )
+        .complete();
+        kuzushi_core::write_run_summary(target, &summary).expect("run summary");
+        let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)
+            .expect("typed lifecycle");
+        observation
+            .emit(kuzushi_core::run_lifecycle::RunItemRecord::new(
+                kuzushi_core::run_lifecycle::RunItemId::new(),
+                kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+                kuzushi_core::run_lifecycle::RunItemV1::TerminalOutcome {
+                    status: kuzushi_core::run_lifecycle::RunItemStatus::Completed,
+                    summary: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                        "Recon import completed",
+                    ),
+                    cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                        kuzushi_core::runtime::RuntimeCost::ZERO,
+                    ),
+                    continuation:
+                        kuzushi_core::run_lifecycle::WorkflowContinuation::NoFurtherAction {
+                            reason: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                                "run completed",
+                            ),
+                        },
+                },
+            ))
+            .expect("terminal lifecycle item");
+        observation.flush().expect("flush lifecycle");
     }
 
     fn recon_result() -> serde_json::Value {

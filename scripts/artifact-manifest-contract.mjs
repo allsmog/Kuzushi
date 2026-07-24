@@ -106,18 +106,18 @@ export function checkReportJsonlArtifactSummary(root) {
     source.includes("fn run_events_artifact_leaf() -> &'static str")
       ? null
       : "report JSONL summary must centralize run events artifact leaf",
-    source.includes('canonical_run_artifact_spec("trace.jsonl")')
+    source.includes('canonical_run_artifact_spec("items.jsonl")')
       ? null
-      : "report JSONL summary must use shared runtime trace artifact spec",
-    source.includes("fn run_trace_artifact_leaf() -> &'static str")
+      : "report JSONL summary must use shared lifecycle item artifact spec",
+    source.includes("fn run_items_artifact_leaf() -> &'static str")
       ? null
-      : "report JSONL summary must centralize runtime trace artifact leaf",
+      : "report JSONL summary must centralize lifecycle item artifact leaf",
     source.includes("file == run_events_artifact_leaf()")
       ? null
       : "report JSONL summary must dispatch events through shared artifact leaf",
-    source.includes("file == run_trace_artifact_leaf()")
+    source.includes("file == run_items_artifact_leaf()")
       ? null
-      : "report JSONL summary must dispatch trace through shared artifact leaf",
+      : "report JSONL summary must dispatch lifecycle items through shared artifact leaf",
   ].filter(Boolean);
 }
 
@@ -1662,12 +1662,8 @@ const cliRunsPathRequirementsByFile = {
   "crates/kuzushi-cli/src/application/runs.rs": [
     { needle: "runs_root(", message: "CLI runs show must use runs_root" },
     {
-      needle: "read_run_artifact_text(",
-      message: "CLI runs trace must use the safe artifact reader",
-    },
-    {
-      needle: 'canonical_run_artifact_spec("trace.jsonl")',
-      message: "CLI runs trace must use shared trace artifact spec",
+      needle: "load_run_projection(",
+      message: "CLI runs trace must load the typed lifecycle projection",
     },
   ],
   "crates/kuzushi-cli/src/application/runs_diff.rs": [
@@ -1922,7 +1918,7 @@ function tuiRunsRootConsumerFailure(root, file) {
 }
 
 function homeCockpitExpectedArtifacts() {
-  const timelineArtifacts = new Set(["run.json", "events.jsonl", "trace.jsonl"]);
+  const timelineArtifacts = new Set(["run.json", "events.jsonl", "items.jsonl"]);
   return requiredRunArtifacts.filter((artifact) => !timelineArtifacts.has(artifact));
 }
 

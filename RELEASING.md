@@ -181,18 +181,13 @@ is reserved for watchdog escalation, process loss, and abnormal shutdown. No
 existing artifact is rewritten, and readers that already tolerate unknown
 additive status values require no data migration.
 
-## Typed run-lifecycle compatibility window (unreleased)
+## Typed run-lifecycle cutover (unreleased)
 
-For this major release, new runs write authoritative
-`runs/<runId>/items.jsonl` and dual-write compatibility `events.jsonl` and
-diagnostic `trace.jsonl`. New phase attempts write reference-only
-`phase-attempts.v2.jsonl` plus the unchanged workflow-v1 record. Readers prefer
-typed/v2 data and disclose degraded or lossy fallback; no existing run or
-ledger is rewritten in place.
-
-At the next major cut, stop writing legacy run events/traces and workflow-v1
-records for new executions only. Keep legacy readers indefinitely. Before that
-cut, verify live/replay/plain/JSON projection equivalence and document the
+New runs write `runs/<runId>/items.jsonl` as the sole authoritative execution
+lifecycle. The former diagnostic trace stream and its compatibility reader were
+removed before release. `events.jsonl` remains only as a target-storage
+derivative for terminal run facts; it is not a progress source. Verify
+live/replay/plain/JSON projection equivalence and document the
 minimum reader version. Never add lifecycle fields to the current `run.json`
 or workflow-v1 wire shapes because older readers deny unknown fields.
 

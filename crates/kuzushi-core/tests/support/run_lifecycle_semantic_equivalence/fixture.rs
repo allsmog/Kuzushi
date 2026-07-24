@@ -143,9 +143,10 @@ fn status_ordinal(status: RunItemStatus) -> u128 {
         RunItemStatus::Completed => 1,
         RunItemStatus::Partial => 2,
         RunItemStatus::Skipped => 3,
-        RunItemStatus::Failed => 4,
-        RunItemStatus::Canceled => 5,
-        RunItemStatus::Interrupted => 6,
+        RunItemStatus::Blocked => 4,
+        RunItemStatus::Failed => 5,
+        RunItemStatus::Canceled => 6,
+        RunItemStatus::Interrupted => 7,
         RunItemStatus::Pending | RunItemStatus::Running => 0,
     }
 }

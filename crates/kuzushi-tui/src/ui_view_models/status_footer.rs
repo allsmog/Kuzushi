@@ -45,13 +45,12 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
-    let mut segments = vec![routing_mode_segment(app)];
+    // Activity is ambient safety state, so keep it immediately after routing.
+    // Lower-priority journey/model chips may truncate at narrow widths without
+    // hiding the fact that work is still executing in the background.
+    let mut segments = vec![routing_mode_segment(app), activity.label];
     segments.extend(optional_active_chips(app));
-    segments.extend([
-        view_status_segment(app),
-        model_footer_segment(app),
-        activity.label,
-    ]);
+    segments.extend([view_status_segment(app), model_footer_segment(app)]);
     segments
 }
 

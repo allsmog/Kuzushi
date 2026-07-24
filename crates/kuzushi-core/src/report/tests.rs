@@ -15,8 +15,8 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
     let source_run_dir = run_dir(temp.path(), "run-source");
     fs::write(source_run_dir.join("events.jsonl"), "{\"kind\":\"tool\"}\n").unwrap();
     fs::write(
-        source_run_dir.join("trace.jsonl"),
-        "{\"kind\":\"reasoning\"}\n{\"kind\":\"done\"}\n",
+        source_run_dir.join("items.jsonl"),
+        "{\"schemaVersion\":1,\"item\":{\"type\":\"task_updated\"}}\n{\"schemaVersion\":1,\"item\":{\"type\":\"terminal_outcome\"}}\n",
     )
     .unwrap();
     write_run_artifact_json(
@@ -95,7 +95,7 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
         .contains("events.jsonl: present - 1 line(s)"));
     assert!(report
         .report_markdown
-        .contains("trace.jsonl: present - 2 line(s)"));
+        .contains("items.jsonl: present - 2 semantic item(s), types task_updated=1, terminal_outcome=1"));
     assert!(report
         .report_markdown
         .contains("report.md: present - generated report"));
@@ -218,7 +218,7 @@ fn report_marks_sarif_missing_runs_as_malformed() {
 }
 
 #[test]
-fn report_summarizes_run_event_and_trace_jsonl_shapes() {
+fn report_summarizes_run_event_and_lifecycle_jsonl_shapes() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-jsonl", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -233,11 +233,11 @@ fn report_summarizes_run_event_and_trace_jsonl_shapes() {
     )
     .unwrap();
     fs::write(
-        dir.join("trace.jsonl"),
+        dir.join("items.jsonl"),
         [
-            r#"{"n":1,"kind":"reasoning","label":"plan","severity":"info","verb":"query","model":"openai:gpt-test","provider":"openai","latency_ms":40,"parent_step":0,"cost_usd":0.01}"#,
-            r#"{"n":2,"kind":"tool-progress","label":"scan","severity":"warn","verb":"scan","latency_ms":2,"parent_step":0}"#,
-            r#"{"n":3,"kind":"done","label":"complete"}"#,
+            r#"{"schemaVersion":1,"item":{"type":"safe_reasoning_summary"}}"#,
+            r#"{"schemaVersion":1,"item":{"type":"tool_call_progress"}}"#,
+            r#"{"schemaVersion":1,"item":{"type":"tool_call_finished"}}"#,
         ]
         .join("\n"),
     )
@@ -249,7 +249,7 @@ fn report_summarizes_run_event_and_trace_jsonl_shapes() {
         "events.jsonl: present - 2 event(s), kinds tool=2, status completed=1, started=1, tools agentic-sast:scan, span 5s, artifacts 1"
     ));
     assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 3 step(s), kinds done=1, reasoning=1, tool-progress=1, severity info=1, warn=1, verbs query, scan, child steps 2, llm calls 1, latency 42ms, cost $0.010000"
+        "items.jsonl: present - 3 semantic item(s), types safe_reasoning_summary=1, tool_call_finished=1, tool_call_progress=1"
     ));
 }
 
@@ -268,7 +268,7 @@ fn report_summarizes_malformed_jsonl_lines() {
         .join("\n"),
     )
     .unwrap();
-    fs::write(dir.join("trace.jsonl"), "{not-json\n").unwrap();
+    fs::write(dir.join("items.jsonl"), "{not-json\n").unwrap();
 
     let report = build_run_report(temp.path(), Some("run-bad-jsonl")).unwrap();
 
@@ -277,7 +277,7 @@ fn report_summarizes_malformed_jsonl_lines() {
     ));
     assert!(report
         .report_markdown
-        .contains("trace.jsonl: present - malformed JSONL line(s) 1"));
+        .contains("items.jsonl: present - malformed JSONL line(s) 1"));
 }
 
 #[test]
@@ -296,8 +296,12 @@ fn report_summarizes_non_object_jsonl_rows_as_malformed() {
     )
     .unwrap();
     fs::write(
-        dir.join("trace.jsonl"),
-        [r#"{"n":1,"kind":"reasoning","label":"query"}"#, "[]"].join("\n"),
+        dir.join("items.jsonl"),
+        [
+            r#"{"schemaVersion":1,"item":{"type":"safe_reasoning_summary"}}"#,
+            "[]",
+        ]
+        .join("\n"),
     )
     .unwrap();
 
@@ -308,7 +312,7 @@ fn report_summarizes_non_object_jsonl_rows_as_malformed() {
     ));
     assert!(report
         .report_markdown
-        .contains("trace.jsonl: present - 1 step(s), kinds reasoning=1, malformed line(s) 1"));
+        .contains("items.jsonl: present - 1 semantic item(s), types safe_reasoning_summary=1, malformed line(s) 1"));
 }
 
 #[test]
@@ -318,9 +322,9 @@ fn report_surfaces_non_file_jsonl_artifacts_as_present_malformed() {
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-non-file-jsonl");
     fs::remove_file(dir.join("events.jsonl")).unwrap();
-    fs::remove_file(dir.join("trace.jsonl")).unwrap();
+    fs::remove_file(dir.join("items.jsonl")).unwrap();
     fs::create_dir(dir.join("events.jsonl")).unwrap();
-    fs::create_dir(dir.join("trace.jsonl")).unwrap();
+    fs::create_dir(dir.join("items.jsonl")).unwrap();
 
     let report = build_run_report(temp.path(), Some("run-non-file-jsonl")).unwrap();
 
@@ -329,13 +333,13 @@ fn report_surfaces_non_file_jsonl_artifacts_as_present_malformed() {
         .contains("events.jsonl: present - text artifact is not a file"));
     assert!(report
         .report_markdown
-        .contains("trace.jsonl: present - text artifact is not a file"));
+        .contains("items.jsonl: present - text artifact is not a file"));
     assert!(!report
         .report_markdown
         .contains("canonical artifact events.jsonl is missing"));
     assert!(!report
         .report_markdown
-        .contains("canonical artifact trace.jsonl is missing"));
+        .contains("canonical artifact items.jsonl is missing"));
 }
 
 #[test]
@@ -478,150 +482,6 @@ fn report_ignores_empty_event_artifacts() {
 
     assert!(report.report_markdown.contains(
         "events.jsonl: present - 3 event(s), kinds tool=3, status completed=2, started=1, tools sast:scan, span 2s, artifacts 1"
-    ));
-}
-
-#[test]
-fn report_summarizes_canonical_trace_cost() {
-    let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-cost", "agentic-sast:scan");
-    write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-cost");
-    fs::write(
-        dir.join("trace.jsonl"),
-        [
-            r#"{"n":1,"kind":"reasoning","label":"plan","model":"openai:gpt-test","provider":"openai","cost_usd":0.02}"#,
-            r#"{"n":2,"kind":"done","label":"complete","cost_usd":0.01}"#,
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-
-    let report = build_run_report(temp.path(), Some("run-trace-cost")).unwrap();
-
-    assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 2 step(s), kinds done=1, reasoning=1, llm calls 1, cost $0.030000"
-    ));
-}
-
-#[test]
-fn report_marks_overflowing_trace_totals_invalid() {
-    let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-overflow", "agentic-sast:scan");
-    write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-overflow");
-    fs::write(
-        dir.join("trace.jsonl"),
-        [
-            serde_json::to_string(&json!({
-                "n": 1,
-                "kind": "reasoning",
-                "label": "first",
-                "cost_usd": f64::MAX,
-                "latency_ms": u64::MAX,
-            }))
-            .unwrap(),
-            serde_json::to_string(&json!({
-                "n": 2,
-                "kind": "done",
-                "label": "second",
-                "cost_usd": f64::MAX,
-                "latency_ms": 1,
-            }))
-            .unwrap(),
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-
-    let report = build_run_report(temp.path(), Some("run-trace-overflow")).unwrap();
-
-    assert!(
-        report.report_markdown.contains("latency invalid"),
-        "{}",
-        report.report_markdown
-    );
-    assert!(
-        report.report_markdown.contains("cost invalid"),
-        "{}",
-        report.report_markdown
-    );
-    assert!(
-        !report.report_markdown.contains("cost $inf"),
-        "{}",
-        report.report_markdown
-    );
-}
-
-#[test]
-fn report_counts_prompt_hash_only_trace_llm_calls() {
-    let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-prompt-hash", "triage:run");
-    write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-prompt-hash");
-    fs::write(
-        dir.join("trace.jsonl"),
-        [
-            r#"{"n":1,"kind":"reasoning","label":"plan","prompt_hash":"fnv1a64:abc"}"#,
-            r#"{"n":2,"kind":"reasoning","label":"review","prompt_hash":"fnv1a64:def"}"#,
-            r#"{"n":3,"kind":"done","label":"complete"}"#,
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-
-    let report = build_run_report(temp.path(), Some("run-trace-prompt-hash")).unwrap();
-
-    assert!(report
-        .report_markdown
-        .contains("trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 2"));
-}
-
-#[test]
-fn report_ignores_empty_trace_llm_metadata() {
-    let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-empty-llm", "triage:run");
-    write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-empty-llm");
-    fs::write(
-        dir.join("trace.jsonl"),
-        [
-            r#"{"n":1,"kind":"reasoning","label":"plan","prompt_hash":"  "}"#,
-            r#"{"n":2,"kind":"reasoning","label":"review","provider":""}"#,
-            r#"{"n":3,"kind":"done","label":"complete","prompt_hash":"fnv1a64:def"}"#,
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-
-    let report = build_run_report(temp.path(), Some("run-trace-empty-llm")).unwrap();
-
-    assert!(report
-        .report_markdown
-        .contains("trace.jsonl: present - 3 step(s), kinds done=1, reasoning=2, llm calls 1"));
-}
-
-#[test]
-fn report_summarizes_canonical_trace_modules() {
-    let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-modules", "triage:run");
-    write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-modules");
-    fs::write(
-        dir.join("trace.jsonl"),
-        [
-            r#"{"n":1,"kind":"tool","label":"triage started","module_id":"triage"}"#,
-            r#"{"n":2,"kind":"reasoning","label":"verify evidence","module_id":"verify"}"#,
-            r#"{"n":3,"kind":"done","label":"triage done","module_id":"triage"}"#,
-        ]
-        .join("\n"),
-    )
-    .unwrap();
-
-    let report = build_run_report(temp.path(), Some("run-trace-modules")).unwrap();
-
-    assert!(report.report_markdown.contains(
-        "trace.jsonl: present - 3 step(s), kinds done=1, reasoning=1, tool=1, modules triage, verify"
     ));
 }
 
@@ -986,7 +846,7 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
     ));
     assert!(report
         .report_markdown
-        .contains("labels run metadata, run events, runtime trace, failure handoff"));
+        .contains("labels run metadata, run events, semantic run items, failure handoff"));
 }
 
 #[test]
@@ -1033,7 +893,7 @@ fn report_summarizes_canonical_run_metadata_and_manifest() {
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
                 {"label": "run events", "path": "events.jsonl", "kind": "jsonl"},
-                {"label": "runtime trace", "path": "trace.jsonl", "kind": "jsonl"}
+                {"label": "semantic run items", "path": "items.jsonl", "kind": "jsonl"}
             ]
         }))
         .unwrap(),
@@ -1050,7 +910,7 @@ fn report_summarizes_canonical_run_metadata_and_manifest() {
         report.report_markdown
     );
     assert!(report.report_markdown.contains(
-        "artifacts.json: present - 3 artifact(s), kinds json=1, jsonl=2, canonical 3, labels run metadata, run events, runtime trace"
+        "artifacts.json: present - 3 artifact(s), kinds json=1, jsonl=2, canonical 3, labels run metadata, run events, semantic run items"
     ));
 }
 
@@ -1066,7 +926,7 @@ fn report_summarizes_canonical_artifact_manifest_fields() {
             "runId": "run-manifest-canonical",
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
-                {"label": "runtime trace", "path": "trace.jsonl", "kind": "jsonl"},
+                {"label": "semantic run items", "path": "items.jsonl", "kind": "jsonl"},
                 {"label": "prompt overrides", "path": ".kuzushi/prompts", "kind": "directory"},
                 {"label": "SARIF report", "path": "report.sarif", "kind": "sarif"},
                 {"label": "tool input", "path": "input.json", "kind": "json"},
@@ -1081,19 +941,19 @@ fn report_summarizes_canonical_artifact_manifest_fields() {
 
     assert!(
         report.report_markdown.contains(
-            "artifacts.json: present - 6 artifact(s), kinds directory=1, json=3, jsonl=1, sarif=1, canonical 2, optional SARIF report, tool inputs tool input, tool results tool result, labels run metadata, runtime trace, prompt overrides, SARIF report"
+            "artifacts.json: present - 6 artifact(s), kinds directory=1, json=3, jsonl=1, sarif=1, canonical 2, optional SARIF report, tool inputs tool input, tool results tool result, labels run metadata, semantic run items, prompt overrides, SARIF report"
         ),
         "{}",
         report.report_markdown
     );
     assert!(report
         .report_markdown
-        .contains("- runtime trace (jsonl) - trace.jsonl"));
+        .contains("- semantic run items (jsonl) - items.jsonl"));
     assert!(report
         .report_markdown
         .contains("- prompt overrides (directory) - .kuzushi/prompts"));
-    assert_eq!(report.declared_artifacts[1].label, "runtime trace");
-    assert_eq!(report.declared_artifacts[1].path, "trace.jsonl");
+    assert_eq!(report.declared_artifacts[1].label, "semantic run items");
+    assert_eq!(report.declared_artifacts[1].path, "items.jsonl");
     assert_eq!(report.declared_artifacts[1].kind, "jsonl");
     assert_eq!(report.declared_artifacts[3].label, "SARIF report");
     assert_eq!(report.declared_artifacts[3].path, "report.sarif");
@@ -1109,11 +969,11 @@ fn report_summarizes_canonical_artifact_manifest_fields() {
 
     assert_eq!(
         output["data"]["declaredArtifacts"][1]["label"],
-        json!("runtime trace")
+        json!("semantic run items")
     );
     assert_eq!(
         output["data"]["declaredArtifacts"][1]["path"],
-        json!("trace.jsonl")
+        json!("items.jsonl")
     );
     assert_eq!(
         output["data"]["declaredArtifacts"][1]["kind"],
@@ -1173,7 +1033,7 @@ fn report_artifact_manifest_summary_uses_only_canonical_fields() {
             "runId": "run-manifest-canonical-fields-only",
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
-                {"label": "runtime trace", "path": "trace.jsonl", "kind": "jsonl"}
+                {"label": "semantic run items", "path": "items.jsonl", "kind": "jsonl"}
             ]
         }))
         .unwrap(),
@@ -1183,7 +1043,7 @@ fn report_artifact_manifest_summary_uses_only_canonical_fields() {
     let report = build_run_report(temp.path(), Some("run-manifest-canonical-fields-only")).unwrap();
 
     assert!(report.report_markdown.contains(
-        "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, canonical 2, labels run metadata, runtime trace"
+        "artifacts.json: present - 2 artifact(s), kinds json=1, jsonl=1, canonical 2, labels run metadata, semantic run items"
     ));
 }
 
@@ -1397,7 +1257,7 @@ fn report_fails_on_unknown_manifest_artifact_field() {
                 {
                     "label": "run metadata",
                     "path": "run.json",
-                    "filePath": "trace.jsonl",
+                    "filePath": "rogue.jsonl",
                     "kind": "json"
                 }
             ]

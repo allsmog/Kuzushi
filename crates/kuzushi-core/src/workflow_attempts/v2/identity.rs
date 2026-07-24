@@ -47,7 +47,7 @@ fn read_run_reference(target: &Path, run_id: &str) -> RunReferenceEvidence {
     };
     let content_identity = match read_snapshot_evidence(target, run_id) {
         SnapshotEvidence::Verified(identity) => identity,
-        SnapshotEvidence::Absent | SnapshotEvidence::Unverified => {
+        SnapshotEvidence::Absent => {
             identity_from_initial_git(summary.target_git.as_ref())
         }
         SnapshotEvidence::Invalid => {

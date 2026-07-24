@@ -40,7 +40,7 @@ impl<'a> RunbookRuntime<'a> {
 
     /// Emit a manifest-checked step. Runbooks are implemented as Rust code;
     /// the manifest provides stable labels for Activity and snapshot tests.
-    pub fn enter_step(&self, step_id: &str) -> Result<Option<usize>> {
+    pub fn enter_step(&self, step_id: &str) -> Result<Option<crate::run_lifecycle::RunItemId>> {
         self.manifest.assert_step(step_id)?;
         let Some(trace) = self.trace else {
             return Ok(None);
@@ -53,7 +53,7 @@ impl<'a> RunbookRuntime<'a> {
         ))
     }
 
-    pub fn parent_scope(&self, parent: Option<usize>) -> Option<ParentScope> {
+    pub fn parent_scope(&self, parent: Option<crate::run_lifecycle::RunItemId>) -> Option<ParentScope> {
         match (self.trace, parent) {
             (Some(trace), Some(parent)) => Some(trace.parent_scope(parent)),
             _ => None,

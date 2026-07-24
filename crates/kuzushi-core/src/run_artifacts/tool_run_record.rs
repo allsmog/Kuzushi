@@ -1,12 +1,11 @@
 use super::canonical_run_files::record_report_artifacts;
 use super::output_declared_artifacts::record_output_declared_artifacts;
 use super::tool_run_failure_result::failed_tool_result_with_context;
-use super::tool_run_record_events::{
-    append_done_trace, append_failed_trace, append_started_event, append_started_trace,
-};
+use super::tool_run_record_events::append_started_event;
 use super::*;
 use crate::artifact_contract::{tool_input_artifact_spec, tool_result_artifact_spec};
 use crate::module_result::{normalize_module_result, tool_result_status, ToolResultStatus};
+use crate::run_lifecycle::RunItemStatus;
 use crate::runtime::RuntimeCostReport;
 use serde_json::json;
 
@@ -79,7 +78,6 @@ pub fn try_record_tool_run_started_with_reproducibility(
     summary = summary.with_artifact(input_artifact.clone());
     write_run_summary(record.target, &summary)?;
     append_started_event(record, Some(input_artifact))?;
-    append_started_trace(record)?;
     Ok(())
 }
 
@@ -143,8 +141,6 @@ fn try_record_tool_run_complete_with_settlement(
         );
     }
     emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    let exact_cost = tool_run_output_cost_report(&prepared.output)?.exact_usd();
-    let _ = append_done_trace(record, prepared.status, exact_cost);
     Ok(())
 }
 
@@ -248,12 +244,16 @@ fn try_record_tool_run_failed_with_settlement(
     completion: Option<crate::modules::PendingToolCallCompletion>,
     execution_may_have_occurred_without_completion: bool,
 ) -> Result<()> {
+    let terminal_status = unsuccessful_terminal_status(
+        completion.as_ref(),
+        execution_may_have_occurred_without_completion,
+    );
     let (_guard, prepared, mut completion) = lock_and_prepare_terminal_result(
         record,
         observation,
         completion,
         execution_may_have_occurred_without_completion,
-        || prepare_failed_result(record, error),
+        || prepare_unsuccessful_result(record, error, terminal_status),
     )?;
     let cost = completion
         .as_ref()
@@ -275,7 +275,6 @@ fn try_record_tool_run_failed_with_settlement(
         );
     }
     emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    let _ = append_failed_trace(record);
     Ok(())
 }
 
@@ -317,38 +316,73 @@ fn lock_and_prepare_terminal_result<T>(
     Ok((guard, prepared, completion))
 }
 
-struct PreparedFailedResult {
+fn unsuccessful_terminal_status(
+    completion: Option<&crate::modules::PendingToolCallCompletion>,
+    execution_may_have_occurred_without_completion: bool,
+) -> RunItemStatus {
+    match completion.map(crate::modules::PendingToolCallCompletion::terminal_status) {
+        Some(RunItemStatus::Blocked) => RunItemStatus::Blocked,
+        None if !execution_may_have_occurred_without_completion => RunItemStatus::Blocked,
+        _ => RunItemStatus::Failed,
+    }
+}
+
+struct PreparedUnsuccessfulResult {
     output: Value,
     summary: RunSummary,
 }
 
-fn prepare_failed_result(record: ToolRunRecord<'_>, error: &str) -> Result<PreparedFailedResult> {
-    let terminal_digest = terminal_result_digest("failed", &json!({ "error": error }));
-    validate_terminalization(record, "failed", &terminal_digest)?;
+fn prepare_unsuccessful_result(
+    record: ToolRunRecord<'_>,
+    error: &str,
+    status: RunItemStatus,
+) -> Result<PreparedUnsuccessfulResult> {
+    let status = unsuccessful_status_label(status);
+    let terminal_digest = terminal_result_digest(status, &json!({ "error": error }));
+    validate_terminalization(record, status, &terminal_digest)?;
     let mut artifacts = existing_run_artifacts(record)?;
-    let mut summary = failed_summary(record, error, &artifacts)?;
+    let mut summary = unsuccessful_summary(record, error, &artifacts, status)?;
     let failure = write_run_failures(
         record.target,
         record.run_id,
         record.tool,
-        "failed",
+        status,
         error,
         &artifacts,
     )?;
     artifacts.push(failure.clone());
     summary = summary.with_artifact(failure);
-    let output = failed_tool_result_with_context(
+    let mut output = failed_tool_result_with_context(
         record.target,
         record.run_id,
         record.tool,
         error,
         &artifacts,
     );
+    set_unsuccessful_output_status(&mut output, record.tool, status);
     let result = result_artifact(record, &output)?;
     summary = summary
         .with_artifact(result)
         .with_terminal_result_sha256(Some(terminal_digest));
-    Ok(PreparedFailedResult { output, summary })
+    Ok(PreparedUnsuccessfulResult { output, summary })
+}
+
+fn unsuccessful_status_label(status: RunItemStatus) -> &'static str {
+    if status == RunItemStatus::Blocked {
+        "blocked"
+    } else {
+        "failed"
+    }
+}
+
+fn set_unsuccessful_output_status(output: &mut Value, tool: &str, status: &str) {
+    let Some(object) = output.as_object_mut() else {
+        return;
+    };
+    object.insert("status".to_string(), json!(status));
+    if status == "blocked" {
+        object.insert("summary".to_string(), json!(format!("{tool} blocked")));
+    }
 }
 
 pub fn record_tool_run_canceled(record: ToolRunRecord<'_>, reason: &str) {
@@ -473,7 +507,7 @@ fn try_record_reason_terminal(
     }
     let producing_call = settle_call_without_result(completion)?;
     emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    append_done_trace(record, status, None)
+    Ok(())
 }
 
 struct PreparedReasonTerminal {
@@ -513,7 +547,7 @@ fn reason_terminal_summary(
         seed.interrupted(reason)
     };
     Ok(
-        summary.with_cost_report(super::trace_cost::trace_cost_report(
+        summary.with_cost_report(super::lifecycle_cost::lifecycle_cost_report(
             record.target,
             record.run_id,
         )?),
@@ -748,13 +782,13 @@ fn completed_summary(
 ) -> Result<RunSummary> {
     let seed = summary_seed(record)?;
     let output_cost = tool_run_output_cost_report(output)?;
-    let trace_cost = super::trace_cost::trace_cost_report(record.target, record.run_id)?;
-    let terminal_cost = super::trace_cost::reconcile_terminal_cost_reports(
+    let lifecycle_cost = super::lifecycle_cost::lifecycle_cost_report(record.target, record.run_id)?;
+    let terminal_cost = super::lifecycle_cost::reconcile_terminal_cost_reports(
         output_cost,
-        trace_cost,
+        lifecycle_cost,
         "tool terminal",
     )?;
-    let cost = super::trace_cost::reconcile_terminal_cost_reports(
+    let cost = super::lifecycle_cost::reconcile_terminal_cost_reports(
         seed.checked_cost_report()?,
         terminal_cost,
         "tool terminal seed",
@@ -827,16 +861,21 @@ fn apply_output_status(status: &str, mut summary: RunSummary, output: &Value) ->
     summary
 }
 
-fn failed_summary(
+fn unsuccessful_summary(
     record: ToolRunRecord<'_>,
     error: &str,
     artifacts: &[RunArtifact],
+    status: &str,
 ) -> Result<RunSummary> {
-    let cost = super::trace_cost::trace_cost_report(record.target, record.run_id)?;
+    let cost = super::lifecycle_cost::lifecycle_cost_report(record.target, record.run_id)?;
+    let summary = summary_seed(record)?;
+    let summary = if status == "blocked" {
+        summary.blocked(error.to_string())
+    } else {
+        summary.failed(error.to_string())
+    };
     Ok(artifacts.iter().cloned().fold(
-        summary_seed(record)?
-            .failed(error.to_string())
-            .with_cost_report(cost),
+        summary.with_cost_report(cost),
         RunSummary::with_artifact,
     ))
 }
@@ -913,7 +952,13 @@ fn ensure_same_terminal_content(
 fn is_terminal_run_status(status: &str) -> bool {
     matches!(
         status,
-        "completed" | "partial" | "skipped" | "failed" | "canceled" | "interrupted"
+        "completed"
+            | "partial"
+            | "skipped"
+            | "blocked"
+            | "failed"
+            | "canceled"
+            | "interrupted"
     )
 }
 

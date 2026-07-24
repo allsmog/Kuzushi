@@ -35,8 +35,7 @@ mod tests {
         should_emit_shell_startup_progress,
     };
     use crate::presentation::{
-        parse_trace_json_lines, run_summary_plain, runs_list_output, runs_show_output,
-        runs_trace_output,
+        run_summary_plain, runs_list_output, runs_show_output, runs_trace_output,
     };
     use crate::tool_requirements::{
         run_tool_workspace, run_tool_workspace_for_input, tool_defaults_to_workspace,
@@ -1148,47 +1147,63 @@ mod tests {
     }
 
     #[test]
-    fn trace_json_parser_skips_blank_lines_and_reports_values() {
-        let steps = parse_trace_json_lines(
-            Path::new("/tmp/trace.jsonl"),
-            "\n{\"n\":1,\"kind\":\"plan\"}\n\n{\"n\":2,\"kind\":\"llm\"}\n",
-        )
-        .unwrap();
-
-        assert_eq!(steps.len(), 2);
-        assert_eq!(steps[0]["kind"], "plan");
-        assert_eq!(steps[1]["n"], 2);
-    }
-
-    #[test]
     fn runs_trace_output_covers_plain_and_json() {
-        let body = "{\"n\":1,\"kind\":\"plan\",\"label\":\"draft\"}\n";
+        let read = typed_tool_trace_fixture();
 
-        let plain = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, false).unwrap();
-        assert!(plain.contains("plan"));
-        assert!(plain.contains("draft"));
-        assert!(plain.contains("[-]"));
-        let json = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, true).unwrap();
-        assert!(json.contains("\"kind\": \"plan\""));
+        let plain = runs_trace_output(&read, false).unwrap();
+        assert!(plain.contains("Semgrep") && plain.contains("started"));
+        assert!(plain.contains("Scanning repository files · 421/832"));
+        assert!(plain.contains("7 findings"));
+        let json = runs_trace_output(&read, true).unwrap();
+        assert!(json.contains("\"tool_call_progress\""));
         assert!(json.ends_with('\n'));
     }
 
-    #[test]
-    fn runs_trace_output_renders_module_and_verb_columns() {
-        let body = "{\"n\":1,\"kind\":\"tool\",\"label\":\"semgrep started\",\
-                    \"module_id\":\"semgrep\",\"verb\":\"scan\"}\n\
-                    {\"n\":2,\"kind\":\"reasoning\",\"label\":\"clustering\",\
-                    \"module_id\":\"taint-iris\",\"verb\":\"hunt\",\"parent_step\":1,\
-                    \"latency_ms\":143,\"cost_usd\":0.0021,\"severity\":\"info\"}\n";
-
-        let plain = runs_trace_output(Path::new("/tmp/trace.jsonl"), body, false).unwrap();
-
-        assert!(plain.contains("[semgrep:scan]"));
-        assert!(plain.contains("[taint-iris:hunt]"));
-        assert!(plain.contains("parent=1"));
-        assert!(plain.contains("143ms"));
-        assert!(plain.contains("$0.0021"));
-        assert!(plain.contains("sev=info"));
+    fn typed_tool_trace_fixture() -> kuzushi_core::run_lifecycle::RunProjectionRead {
+        use kuzushi_core::run_lifecycle::{
+            OperationFingerprint, RunCallId, RunItemId, RunItemRecord, RunItemSource,
+            RunItemStatus, RunItemV1, RunItemWriter, SafeText,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = kuzushi_core::new_run_id("cli-trace");
+        let writer = RunItemWriter::open(tmp.path(), &run_id, None).unwrap();
+        let item_id = RunItemId::new();
+        let call_id = RunCallId::new();
+        let record =
+            |item| RunItemRecord::new(item_id, RunItemSource::Dispatch, item).with_call(call_id);
+        writer
+            .emit_and_flush(record(RunItemV1::ToolCallRequested {
+                tool_name: SafeText::operator_visible("semgrep:scan"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"cli trace"),
+                safe_option_names: Vec::new(),
+            }))
+            .unwrap();
+        writer
+            .emit_and_flush(record(RunItemV1::ToolCallStarted {
+                tool_name: SafeText::operator_visible("semgrep:scan"),
+                runtime: None,
+                model: None,
+            }))
+            .unwrap();
+        writer
+            .emit_and_flush(record(RunItemV1::ToolCallProgress {
+                message: SafeText::operator_visible("Scanning repository files"),
+                completed: Some(421),
+                total: Some(832),
+            }))
+            .unwrap();
+        writer
+            .emit_and_flush(record(RunItemV1::ToolCallFinished {
+                status: RunItemStatus::Completed,
+                cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                result_artifact: None,
+                preview: vec![SafeText::operator_visible("7 findings")],
+                warning_count: 0,
+                error_count: 0,
+            }))
+            .unwrap();
+        writer.shutdown().unwrap();
+        kuzushi_core::run_lifecycle::load_run_projection(tmp.path(), &run_id).unwrap()
     }
 
     #[test]

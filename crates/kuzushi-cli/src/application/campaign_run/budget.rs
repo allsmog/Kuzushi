@@ -3,14 +3,12 @@
 //!
 //! The campaign-level `--budget` is checked between dispatches only; a
 //! running job used to spend unbounded (measured: $32 against a $15 cap).
-//! This module closes that hole. The child's canonical `trace.jsonl` is
+//! This module closes that hole. The child's canonical `items.jsonl` is
 //! appended live by the run, so polling its summed terminal model-call
 //! cost gives the dispatcher a bounded view of in-flight spend without a
 //! side channel.
 
-use kuzushi_core::run_artifacts::{
-    run_artifact_path, terminal_model_call_cost_report, RunTraceStep,
-};
+use kuzushi_core::run_artifacts::{run_artifact_path, terminal_model_call_cost_report};
 use std::path::Path;
 
 /// The ceiling for one job: the tightest of the dispatcher-wide
@@ -27,15 +25,15 @@ fn positive(value: Option<f64>) -> Option<f64> {
     value.filter(|usd| *usd > 0.0)
 }
 
-/// Sum of terminal model-call costs observed so far in a run's live trace.
+/// Sum of terminal model-call costs observed so far in a run's lifecycle.
 ///
-/// Tolerant by design: a live trace can end in a torn line mid-append and a
+/// Tolerant by design: a live lifecycle stream can end in a torn line mid-append and a
 /// dead poll must not kill a healthy job, so unparsable lines and invalid
-/// cost rows are skipped rather than treated as evidence. Missing trace =
-/// $0 spent — the strict variant (`trace_cost_report`) remains the
+/// cost rows are skipped rather than treated as evidence. A missing stream =
+/// $0 spent — the strict lifecycle cost reader remains the
 /// settlement-time accounting path.
 pub(super) fn live_run_spend_usd(target: &Path, run_id: &str) -> f64 {
-    let Ok(body) = std::fs::read_to_string(run_artifact_path(target, run_id, "trace.jsonl")) else {
+    let Ok(body) = std::fs::read_to_string(run_artifact_path(target, run_id, "items.jsonl")) else {
         return 0.0;
     };
     sum_terminal_call_costs(&body)
@@ -45,15 +43,17 @@ fn sum_terminal_call_costs(lines: &str) -> f64 {
     lines
         .lines()
         .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| serde_json::from_str::<RunTraceStep>(line).ok())
-        .filter_map(|step| terminal_model_call_cost_report(&step).ok().flatten())
+        .filter_map(|line| {
+            serde_json::from_str::<kuzushi_core::run_lifecycle::RunItemEnvelopeV1>(line).ok()
+        })
+        .filter_map(|envelope| terminal_model_call_cost_report(&envelope.item))
         .map(|report| report.observed_usd())
         .sum::<f64>()
         + 0.0
 }
 
 /// Incremental live-spend poller: remembers the byte offset of the last
-/// complete line it folded, so a 2-second poll over a multi-hour trace
+/// complete line it folded, so a 2-second poll over a multi-hour lifecycle
 /// reads only the appended tail instead of re-folding from byte 0 every
 /// tick (which made a long job's polling cost quadratic).
 pub(super) struct LiveSpendPoller {
@@ -65,7 +65,7 @@ pub(super) struct LiveSpendPoller {
 impl LiveSpendPoller {
     pub(super) fn new(target: &Path, run_id: &str) -> Self {
         Self {
-            path: run_artifact_path(target, run_id, "trace.jsonl"),
+            path: run_artifact_path(target, run_id, "items.jsonl"),
             offset: 0,
             spent: 0.0,
         }
@@ -73,7 +73,7 @@ impl LiveSpendPoller {
 
     /// Fold any newly appended complete lines and return total spend so
     /// far. Same tolerance contract as `live_run_spend_usd`: a missing or
-    /// unreadable trace reports the last known total, torn tails wait for
+    /// unreadable stream reports the last known total, torn tails wait for
     /// their newline.
     pub(super) fn poll(&mut self) -> f64 {
         use std::io::{Read, Seek, SeekFrom};
@@ -101,6 +101,39 @@ impl LiveSpendPoller {
 mod tests {
     use super::*;
 
+    fn terminal_line(run_id: &str, n: u64, usd: f64) -> String {
+        use kuzushi_core::run_lifecycle::{
+            ModelUsage, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
+            RunItemStatus, RunItemV1, SafeText,
+        };
+        let cost = kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(usd, "campaign test").unwrap(),
+        );
+        let envelope = RunItemEnvelopeV1::new(
+            n + 1,
+            RunId::parse(run_id).unwrap(),
+            RunItemId::new(),
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallFinished {
+                provider: SafeText::operator_visible("test"),
+                model: SafeText::operator_visible("test:model"),
+                status: RunItemStatus::Completed,
+                latency_ms: 1,
+                usage: ModelUsage {
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+                cost,
+                error_class: None,
+            },
+            None,
+        )
+        .unwrap()
+        .with_call(RunCallId::new())
+        .unwrap();
+        serde_json::to_string(&envelope).unwrap()
+    }
+
     #[test]
     fn effective_budget_takes_the_tightest_present_cap() {
         assert_eq!(effective_job_budget(None, None), None);
@@ -116,45 +149,36 @@ mod tests {
     #[test]
     fn live_spend_sums_terminal_calls_and_survives_a_torn_tail() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = run_artifact_path(tmp.path(), "live", "trace.jsonl");
+        let path = run_artifact_path(tmp.path(), "live", "items.jsonl");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let terminal = |n: usize, usd: f64| {
-            format!(
-                r#"{{"n":{n},"kind":"reasoning","label":"model","latency_ms":1,"cost_usd":{usd},"model":"m","provider":"p","prompt_hash":"h"}}"#
-            )
-        };
         let body = format!(
             "{}\n{}\n{}\n{}",
-            terminal(1, 0.4),
-            r#"{"n":2,"kind":"tool","label":"grep"}"#, // non-call row: no cost
-            terminal(3, 0.35),
-            r#"{"n":4,"kind":"reasoning","la"#, // torn live append
+            terminal_line("live", 1, 0.4),
+            r#"{"unrelated":true}"#,
+            terminal_line("live", 3, 0.35),
+            r#"{"schemaVersion":1,"seq"#,
         );
         std::fs::write(&path, body).unwrap();
         assert!((live_run_spend_usd(tmp.path(), "live") - 0.75).abs() < 1e-12);
     }
 
     #[test]
-    fn live_spend_is_zero_before_the_trace_exists() {
+    fn live_spend_is_zero_before_the_lifecycle_exists() {
         let tmp = tempfile::tempdir().unwrap();
         assert_eq!(live_run_spend_usd(tmp.path(), "absent"), 0.0);
     }
 
-    /// A 4-hour job's trace (100k lines) must not be re-folded from byte 0
+    /// A 4-hour job's lifecycle (100k lines) must not be re-folded from byte 0
     /// on every 2-second poll: after the first fold, a no-growth poll reads
     /// only file metadata + EOF and stays in the low-millisecond range, and
     /// appended tails fold incrementally with torn tails deferred.
     #[test]
-    fn incremental_poll_over_100k_line_trace_reads_only_the_tail() {
+    fn incremental_poll_over_100k_lifecycle_reads_only_the_tail() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = run_artifact_path(tmp.path(), "long", "trace.jsonl");
+        let path = run_artifact_path(tmp.path(), "long", "items.jsonl");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let terminal = |n: usize| {
-            format!(
-                r#"{{"n":{n},"kind":"reasoning","label":"model","latency_ms":1,"cost_usd":0.001,"model":"m","provider":"p","prompt_hash":"h"}}"#
-            )
-        };
-        let body = (0..100_000).map(terminal).collect::<Vec<_>>().join("\n") + "\n";
+        let terminal = terminal_line("long", 0, 0.001);
+        let body = vec![terminal; 100_000].join("\n") + "\n";
         std::fs::write(&path, &body).unwrap();
 
         let mut poller = LiveSpendPoller::new(tmp.path(), "long");
@@ -178,10 +202,11 @@ mod tests {
             .open(&path)
             .unwrap();
         use std::io::Write;
-        write!(file, "{}", &terminal(100_000)[..40]).unwrap();
+        let next = terminal_line("long", 100_000, 0.001);
+        write!(file, "{}", &next[..40]).unwrap();
         file.flush().unwrap();
         assert!((poller.poll() - 100.0).abs() < 1e-6, "torn tail must wait");
-        writeln!(file, "{}", &terminal(100_000)[40..]).unwrap();
+        writeln!(file, "{}", &next[40..]).unwrap();
         file.flush().unwrap();
         assert!((poller.poll() - 100.001).abs() < 1e-6);
     }

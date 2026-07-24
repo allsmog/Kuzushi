@@ -2,28 +2,17 @@
 mod tests {
     use super::super::*;
 
-    use std::sync::{Arc, Mutex};
+    use std::sync::Mutex;
 
     use crate::config::V2Config;
     use crate::findings::{FindingStore, TriageOutcome};
-    use crate::run_artifacts::{RunTraceStep, TraceHandle, TraceSink};
+    use crate::run_artifacts::TraceHandle;
     use crate::runtime::{AgentQueryRequest, AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
     use tempfile::tempdir;
 
     struct TaintNextRuntime {
         queries: Mutex<Vec<AgentQueryRequest>>,
-    }
-
-    #[derive(Default)]
-    struct VecTraceSink {
-        steps: Mutex<Vec<RunTraceStep>>,
-    }
-
-    impl TraceSink for VecTraceSink {
-        fn record(&self, step: &RunTraceStep) {
-            self.steps.lock().unwrap().push(step.clone());
-        }
     }
 
     impl TaintNextRuntime {
@@ -564,8 +553,8 @@ mod tests {
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let config = V2Config::default();
-        let sink = Arc::new(VecTraceSink::default());
-        let trace = TraceHandle::new(sink.clone()).for_tool("taint-iris-next:hunt");
+        let trace = TraceHandle::jsonl(temp.path(), "taint-plan-trace")
+            .for_tool("taint-iris-next:hunt");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -578,11 +567,11 @@ mod tests {
         run_taint_iris_next_report(&json!({"mode": "plan", "maxCatalogEntries": 1}), &ctx, None)
             .unwrap();
 
-        let steps = sink.steps.lock().unwrap();
-        let labels = steps
-            .iter()
-            .map(|step| step.label.as_str())
-            .collect::<Vec<_>>();
+        trace.item_writer().unwrap().flush().unwrap();
+        let read = crate::run_lifecycle::read_run_items(temp.path(), "taint-plan-trace")
+            .unwrap()
+            .unwrap();
+        let labels = lifecycle_messages(&read.items);
         assert!(labels.iter().any(|label| label.contains("plan · load")));
         assert!(labels.iter().any(|label| label.contains("plan ·")));
         assert!(labels
@@ -590,14 +579,25 @@ mod tests {
             .any(|label| label.contains("evidence · collect")));
         assert!(labels.iter().any(|label| label.contains("agent · compose")));
         assert!(labels.iter().any(|label| label.contains("planned")));
-        let start_step = steps[0].n;
-        assert!(steps
+        let start_step = read.items[0].item_id;
+        assert!(read.items
             .iter()
-            .filter(|step| step.kind == "tool-progress")
-            .all(|step| step.parent_step == Some(start_step)));
-        assert!(steps
-            .iter()
-            .all(|step| step.module_id.as_deref() == Some("taint-iris-next")));
+            .skip(1)
+            .filter(|item| matches!(item.item, crate::run_lifecycle::RunItemV1::SafeReasoningSummary { .. }))
+            .all(|item| item.parent_item_id == Some(start_step)));
+        assert!(read.items.last().is_some_and(|item| {
+            matches!(item.item, crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. })
+                && item.parent_item_id.is_none()
+        }));
+    }
+
+    fn lifecycle_messages(items: &[crate::run_lifecycle::RunItemEnvelopeV1]) -> Vec<&str> {
+        items.iter().filter_map(|item| match &item.item {
+            crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => Some(message.as_str()),
+            crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => Some(text.as_str()),
+            crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => Some(message.as_str()),
+            _ => None,
+        }).collect()
     }
 
     #[test]

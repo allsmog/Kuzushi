@@ -17,10 +17,19 @@ pub(super) fn display_lines(payload: &RunPresentationPayloadV1) -> Vec<String> {
         RunPresentationPayloadV1::Decision(value) => decision_lines(value),
         RunPresentationPayloadV1::Progress(value) => progress_lines(value),
         RunPresentationPayloadV1::SafeReasoning(value) => {
-            vec![format!("Reasoning: {}", value.text)]
+            vec![format!(
+                "{}    ↳ {}",
+                event_time(value.occurred_at_ms),
+                value.text
+            )]
         }
         RunPresentationPayloadV1::Diagnostic(value) => {
-            vec![format!("{:?}: {}", value.level, value.message)]
+            vec![format!(
+                "{}  {} {}",
+                event_time(value.occurred_at_ms),
+                diagnostic_glyph(&value.level),
+                value.message
+            )]
         }
         RunPresentationPayloadV1::Terminal(value) => terminal_lines(value),
         RunPresentationPayloadV1::PhaseReceipt(value) => phase_receipt_lines(value),
@@ -28,6 +37,7 @@ pub(super) fn display_lines(payload: &RunPresentationPayloadV1) -> Vec<String> {
             "Progress: {} update(s) omitted at source",
             value.omitted_count
         )],
+        RunPresentationPayloadV1::LifecycleEvent(value) => lifecycle_event_lines(value),
     }
 }
 
@@ -204,11 +214,150 @@ fn decision_lines(value: &DecisionPresentationV1) -> Vec<String> {
 
 fn progress_lines(value: &ProgressPresentationV1) -> Vec<String> {
     let amount = match (value.completed, value.total) {
-        (Some(completed), Some(total)) => format!(" {completed}/{total}"),
-        (Some(completed), None) => format!(" {completed}"),
+        (Some(completed), Some(total)) => format!(" · {completed}/{total}"),
         _ => String::new(),
     };
-    vec![format!("Progress{amount} · {}", value.message)]
+    vec![format!(
+        "{}  ⠹ {}{amount}",
+        event_time(value.occurred_at_ms),
+        value.message
+    )]
+}
+
+fn lifecycle_event_lines(value: &LifecycleEventPresentationV1) -> Vec<String> {
+    let action = lifecycle_event_action(value);
+    let detail = value
+        .detail
+        .as_ref()
+        .map(|detail| format!(" · {detail}"))
+        .unwrap_or_default();
+    let metrics = lifecycle_event_metrics(value);
+    vec![format!(
+        "{}  {} {action}{detail}{metrics}",
+        event_time(value.occurred_at_ms),
+        lifecycle_event_glyph(value)
+    )]
+}
+
+fn lifecycle_event_action(value: &LifecycleEventPresentationV1) -> String {
+    use LifecycleEventKindV1::*;
+    match value.kind {
+        Plan => work_action("Plan", value),
+        Task => work_action("", value),
+        ToolRequested => format!("Queued {}", tool_label(&value.subject)),
+        ToolRejected => format!("Blocked {} before start", tool_label(&value.subject)),
+        ToolStarted => format!("{} started", tool_label(&value.subject)),
+        ToolFinished => format!(
+            "{} {}",
+            tool_label(&value.subject),
+            terminal_verb(value.status)
+        ),
+        ModelStarted => format!("Calling {}", value.subject),
+        ModelFinished => format!("Model call {} · {}", terminal_verb(value.status), value.subject),
+        ArtifactProduced => format!("Produced {}", value.subject),
+        FindingsChanged => format!("Findings changed · {}", value.subject),
+        OperatorQuestion if value.status == Some(RunItemStatus::Completed) => {
+            format!("Asked operator · {}", value.subject)
+        }
+        OperatorQuestion => format!("Waiting for operator input · {}", value.subject),
+        OperatorDecision => format!("Operator decision recorded · {}", value.subject),
+        TerminalOutcome => format!("Run {} · {}", terminal_verb(value.status), value.subject),
+        PhaseReceipt => format!("Phase receipt {}", terminal_verb(value.status)),
+    }
+}
+
+fn work_action(prefix: &str, value: &LifecycleEventPresentationV1) -> String {
+    let name = if prefix.is_empty() {
+        value.subject.to_string()
+    } else {
+        format!("{prefix} · {}", value.subject)
+    };
+    match value.status {
+        Some(RunItemStatus::Pending) => format!("Queued {name}"),
+        Some(RunItemStatus::Running) => format!("{name} started"),
+        status => format!("{name} {}", terminal_verb(status)),
+    }
+}
+
+fn lifecycle_event_glyph(value: &LifecycleEventPresentationV1) -> &'static str {
+    use LifecycleEventKindV1::*;
+    match value.kind {
+        OperatorQuestion => "?",
+        OperatorDecision | ArtifactProduced | FindingsChanged => "✓",
+        ToolStarted | ModelStarted => "→",
+        ToolRequested => "·",
+        _ => status_glyph(value.status),
+    }
+}
+
+fn status_glyph(status: Option<RunItemStatus>) -> &'static str {
+    match status {
+        Some(RunItemStatus::Completed) => "✓",
+        Some(RunItemStatus::Partial) => "⚠",
+        Some(RunItemStatus::Skipped) => "⊘",
+        Some(RunItemStatus::Blocked) => "▣",
+        Some(RunItemStatus::Failed | RunItemStatus::Interrupted) => "✗",
+        Some(RunItemStatus::Canceled) => "×",
+        Some(RunItemStatus::Running) => "→",
+        Some(RunItemStatus::Pending) | None => "·",
+    }
+}
+
+fn terminal_verb(status: Option<RunItemStatus>) -> &'static str {
+    match status {
+        Some(RunItemStatus::Completed) => "completed",
+        Some(RunItemStatus::Partial) => "partial",
+        Some(RunItemStatus::Skipped) => "skipped",
+        Some(RunItemStatus::Blocked) => "blocked",
+        Some(RunItemStatus::Failed) => "failed",
+        Some(RunItemStatus::Canceled) => "canceled",
+        Some(RunItemStatus::Interrupted) => "interrupted",
+        Some(RunItemStatus::Pending) => "queued",
+        Some(RunItemStatus::Running) => "running",
+        None => "updated",
+    }
+}
+
+fn tool_label(value: &SafeText) -> String {
+    crate::modules::tool_display_name(value.as_str())
+}
+
+fn lifecycle_event_metrics(value: &LifecycleEventPresentationV1) -> String {
+    let latency = value
+        .latency_ms
+        .map(|latency| format!(" · {}", duration_label(latency)))
+        .unwrap_or_default();
+    let cost = value.cost.map_or_else(String::new, |cost| {
+        if cost.is_unavailable() && value.kind == LifecycleEventKindV1::ToolFinished {
+            String::new()
+        } else {
+            format!(" · {}", cost_label(cost))
+        }
+    });
+    format!("{latency}{cost}")
+}
+
+fn duration_label(milliseconds: u64) -> String {
+    if milliseconds < 1_000 {
+        return format!("{milliseconds}ms");
+    }
+    format!("{:.1}s", milliseconds as f64 / 1_000.0)
+}
+
+fn event_time(milliseconds: u64) -> String {
+    let seconds = milliseconds / 1_000;
+    let hours = (seconds / 3_600) % 24;
+    let minutes = (seconds / 60) % 60;
+    let seconds = seconds % 60;
+    format!("{hours:02}:{minutes:02}:{seconds:02}")
+}
+
+fn diagnostic_glyph(level: &DiagnosticLevel) -> &'static str {
+    match level {
+        DiagnosticLevel::Info => "·",
+        DiagnosticLevel::Warning => "⚠",
+        DiagnosticLevel::Error => "✗",
+    }
 }
 
 fn terminal_lines(value: &TerminalPresentationV1) -> Vec<String> {

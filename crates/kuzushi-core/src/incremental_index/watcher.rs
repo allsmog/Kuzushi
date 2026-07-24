@@ -304,7 +304,7 @@ fn runtime_state_path(root: &Path, path: &Path) -> Option<PathBuf> {
 
 /// Per-write internals that flood notify while a headless scan writes into
 /// the same workspace — the watcher storm that pinned a core: run-dir
-/// contents (live `trace.jsonl` appends, child logs) except the terminal
+/// contents (live `items.jsonl` appends, child logs) except the terminal
 /// `done.json` sentinel, event-log segment appends (one fsync'd write per
 /// observation), and content-store blobs. External store progress still
 /// surfaces through the projection sqlite main file on WAL checkpoint and
@@ -410,7 +410,7 @@ mod tests {
     fn store_write_burst_produces_no_watcher_work() {
         let root = Path::new("/tmp/workspace");
         let churn = [
-            ".kuzushi/v3/runs/run-1/trace.jsonl",
+            ".kuzushi/v3/runs/run-1/items.jsonl",
             ".kuzushi/v3/runs/run-1/summary.json",
             ".kuzushi/v3/log/events-000000.jsonl",
             ".kuzushi/v3/objects/ab/abcdef",

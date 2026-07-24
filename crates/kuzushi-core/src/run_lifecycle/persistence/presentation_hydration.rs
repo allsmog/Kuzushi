@@ -44,7 +44,7 @@ fn result_status_matches(status: RunItemStatus, result: &str) -> bool {
         RunItemStatus::Completed => result == "completed",
         RunItemStatus::Partial => result == "partial",
         RunItemStatus::Skipped => result == "skipped",
-        RunItemStatus::Failed => result == "failed",
+        RunItemStatus::Blocked | RunItemStatus::Failed => result == "failed",
         RunItemStatus::Canceled | RunItemStatus::Interrupted => result == "failed",
         RunItemStatus::Pending | RunItemStatus::Running => false,
     }
@@ -58,6 +58,7 @@ mod tests {
     fn terminal_status_matching_is_exhaustive() {
         assert!(result_status_matches(RunItemStatus::Completed, "completed"));
         assert!(result_status_matches(RunItemStatus::Interrupted, "failed"));
+        assert!(result_status_matches(RunItemStatus::Blocked, "failed"));
         assert!(!result_status_matches(RunItemStatus::Partial, "completed"));
         assert!(!result_status_matches(RunItemStatus::Running, "completed"));
     }

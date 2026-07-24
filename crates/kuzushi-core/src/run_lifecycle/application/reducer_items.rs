@@ -1,5 +1,5 @@
 use super::super::{CallKind, RunProjection};
-use crate::run_lifecycle::{RunItemEnvelopeV1, RunItemSource, RunItemV1};
+use crate::run_lifecycle::{RunItemEnvelopeV1, RunItemV1};
 use anyhow::Result;
 
 #[path = "reducer_calls.rs"]
@@ -156,12 +156,4 @@ fn apply_finished_model_call(
         *cost,
         error_class,
     )
-}
-
-pub(super) fn ensure_legacy(envelope: &RunItemEnvelopeV1, message: &str) -> Result<()> {
-    anyhow::ensure!(
-        envelope.source == RunItemSource::LegacyReconstruction,
-        "{message}"
-    );
-    Ok(())
 }

@@ -44,8 +44,7 @@ Every run should converge on these files:
 | --- | --- |
 | `run.json` | Run metadata: canonical `runId`, kind, tool, target, status, `startedAtUnix`/completed time, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
 | `items.jsonl` | Authoritative versioned semantic run lifecycle with stable item/task/call/attempt identities, monotonic sequence, and a hash chain. |
-| `events.jsonl` | Compatibility projection from committed typed items during the current major release. Legacy readers remain supported. |
-| `trace.jsonl` | Non-authoritative bounded diagnostics/model audit during the compatibility release. It never contains prompts or model-response previews. |
+| `events.jsonl` | Target-storage derivative for terminal run facts. It is not an execution-progress source. |
 | `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/failed runs. |
 | `report.md` | Human-readable report for the run. |
 | `artifacts.json` | Manifest of written artifacts with label/path/kind and CAS object references when available. |
@@ -110,10 +109,10 @@ An active cancellation request is presented as `canceling` in the TUI but is
 not persisted as a terminal run status. Existing `interrupted` artifacts remain
 valid and keep their original abnormal-termination meaning.
 
-Writers persist the `running` summary, prepared input, and start event/trace
+Writers persist the `running` summary, prepared input, and initial lifecycle items
 before dispatch. On completion they persist `result.json` and the terminal
 `run.json`, durably append and flush the typed terminal item, and only then
-repair compatibility event/trace rows. A committed-item subscriber is notified
+repair target-storage derivatives. A committed-item subscriber is notified
 after `sync_data`, so live Run Focus cannot outrun replay durability.
 
 One pure `RunProjection` reducer drives committed live updates, restarted
@@ -123,14 +122,14 @@ valid prefix and disclose a degraded projection; readers never skip forward.
 
 Terminal artifact settlement is idempotently repairable; tool execution is
 never retried automatically. Reapplying the same terminal status may restore
-missing result state or a derivative event/trace row without duplicating an
+missing result state or a derivative storage event without duplicating an
 existing row. A conflicting terminal status is rejected instead of rewriting
 history.
 
 If a persisted `running` summary names a process that no longer exists, read
 repair converts it to `interrupted`, clears the process id, refreshes the
 canonical failure/report markers, and appends a canonical `run` interruption
-event plus a refused trace step.
+event plus a typed interrupted terminal outcome.
 
 Operators can prune accumulated run directories with
 `kuzushi runs prune --older-than-days <n>` and/or `--keep-last <n>`.
@@ -141,7 +140,7 @@ pointing at the newest remaining run.
 `schemas/run.summary.schema.json` is the machine-readable contract for
 standard `run.json` metadata. It covers required run
 identity/status/timing fields, optional tool/model/cost/error/reproducibility
-fields, LLM audit call metadata, malformed trace JSONL row counts when present,
+fields, LLM audit call metadata, malformed lifecycle JSONL row counts when present,
 target git metadata, and artifact manifest entries embedded in the run summary.
 Published npm packages expose these files through `kuzushi/schemas/*`, for example
 `kuzushi/schemas/run.summary.schema.json`.
@@ -165,14 +164,11 @@ assigns the authoritative monotonic sequence number while holding that lock.
 Run events use canonical `atUnix`, `tool`, and `artifact` fields only; obsolete
 event aliases are rejected instead of normalized. Event artifacts use the
 canonical `artifact` object with `"label"`, `"path"`, and `"kind"` fields.
-`schemas/run.trace.schema.json` is the machine-readable contract for each JSON
-line in `trace.jsonl`, including trace step identity, optional module/verb
-metadata, parent-step linkage, severity, timing, and LLM audit metadata.
-Trace and summary LLM-audit vocabularies include `plan`, `llm`, and `critic`
-records emitted by the agent planning path.
-Trace streams use canonical snake_case fields only, including `module_id`,
-`parent_step`, `started_at_ms`, `cost_usd`, and `prompt_hash`; obsolete
-camelCase trace aliases are rejected instead of normalized.
+`schemas/run.items.schema.json` is the machine-readable contract for each JSON
+line in `items.jsonl`. It covers typed plan, task, tool, model, interaction,
+artifact, diagnostic, receipt, and terminal items plus their stable identities.
+Lifecycle envelopes use the published camelCase JSON names, including
+`schemaVersion`, while each nested `item` carries its tagged `type`.
 Context, attack-surface, threat-model, recommendations, strategy, findings, and
 proof payloads are no longer canonical per-run snapshot files. A tool may still
 emit any of those as explicit artifacts through `artifacts.json`, but the product
@@ -205,7 +201,6 @@ The current Rust substrate already writes:
 - `.kuzushi/v3/runs/<runId>/run.json`
 - `.kuzushi/v3/runs/<runId>/items.jsonl`
 - `.kuzushi/v3/runs/<runId>/events.jsonl`
-- `.kuzushi/v3/runs/<runId>/trace.jsonl`
 - `.kuzushi/v3/runs/<runId>/input.json`
 - `.kuzushi/v3/runs/<runId>/result.json`
 - `.kuzushi/v3/runs/<runId>/scan-input.json`, `triage.jsonl`,

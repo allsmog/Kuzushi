@@ -124,11 +124,8 @@ impl ShellApp {
     fn mark_scan_activity_canceled(&mut self, summary_line: &str) {
         if let Some(session) = self.activity_mut() {
             session.mark_active_tasks_canceled();
-            session.apply_step(
-                kuzushi_core::RunTraceStep::new(0, "tool", short_label(summary_line, 320))
-                    .with_module_id("scan"),
-            );
         }
+        let _ = summary_line;
     }
 
     /// Count the findings currently persisted for the active target — the
@@ -165,14 +162,8 @@ impl ShellApp {
     pub(super) fn mark_scan_activity_failed(&mut self, error: &str) {
         if let Some(session) = self.activity_mut() {
             session.mark_incomplete_tasks_after_failure();
-            session.apply_step(
-                // 320 keeps the full remedy available to the Activity feed (which
-                // wraps error rows); the on-disk trace artifact keeps its own cap.
-                kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 320))
-                    .with_module_id("scan")
-                    .with_severity("danger"),
-            );
         }
+        let _ = error;
     }
 
     fn scan_failure_artifact_effect(
@@ -466,12 +457,57 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        let step = kuzushi_core::RunTraceStep::new(0, "refused", "provider failed")
-            .with_call_attempted(true)
-            .with_cost_usd(Some(cost))
-            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:scan");
-        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+        let writer =
+            kuzushi_core::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
+        let report = kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(cost, "scan test").unwrap(),
+        );
+        let item_id = kuzushi_core::run_lifecycle::RunItemId::new();
+        let call_id = kuzushi_core::run_lifecycle::RunCallId::new();
+        writer
+            .emit_and_flush(test_scan_model_started(item_id).with_call(call_id))
             .unwrap();
+        writer
+            .emit_and_flush(test_scan_model_failed(item_id, report).with_call(call_id))
+            .unwrap();
+    }
+
+    fn test_scan_model_started(
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+    ) -> kuzushi_core::run_lifecycle::RunItemRecord {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemRecord::new(
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallStarted {
+                provider: SafeText::operator_visible("openai"),
+                model: SafeText::operator_visible("openai:gpt-test"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"scan test"),
+            },
+        )
+    }
+
+    fn test_scan_model_failed(
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) -> kuzushi_core::run_lifecycle::RunItemRecord {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemRecord::new(
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallFinished {
+                provider: SafeText::operator_visible("openai"),
+                model: SafeText::operator_visible("openai:gpt-test"),
+                status: RunItemStatus::Failed,
+                latency_ms: 1,
+                usage: ModelUsage {
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+                cost,
+                error_class: Some(SafeText::operator_visible("provider_error")),
+            },
+        )
     }
 
     fn running_cost_scan_app(target: &std::path::Path, run_id: &str) -> ShellApp {

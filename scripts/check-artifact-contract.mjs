@@ -7,7 +7,7 @@ import {
   runEventsSchemaFields,
   runFailuresSchemaFields,
   runSummarySchemaFields,
-  runTraceSchemaFields,
+  runItemsSchemaFields,
   schemaAliasContractFields,
 } from "./artifact-contract-fields.mjs";
 import {
@@ -186,7 +186,7 @@ const checks = [
     label: "tool input artifact regression",
     file: "crates/kuzushi-core/src/run_artifacts/tests.rs",
     artifacts: toolInputArtifacts,
-    functions: ["tool_run_start_records_input_summary_event_and_trace"],
+    functions: ["tool_run_start_records_input_summary_and_event"],
   },
   {
     label: "tool result envelope artifact regression",
@@ -231,9 +231,9 @@ const checks = [
     artifacts: ["events.jsonl", ...runEventsSchemaFields],
   },
   {
-    label: "run trace schema",
-    file: "schemas/run.trace.schema.json",
-    artifacts: ["trace.jsonl", ...runTraceSchemaFields],
+    label: "run lifecycle items schema",
+    file: "schemas/run.items.schema.json",
+    artifacts: ["items.jsonl", ...runItemsSchemaFields],
   },
 ];
 

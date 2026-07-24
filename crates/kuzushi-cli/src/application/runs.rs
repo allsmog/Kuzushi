@@ -2,11 +2,7 @@ use crate::command::RunsCommand;
 use crate::presentation::{runs_list_output, runs_show_output, runs_trace_output};
 use crate::support::require_cli_target;
 use anyhow::{bail, Context, Result};
-use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
-use kuzushi_core::{
-    list_run_summaries, load_run_summary, read_run_artifact_text, runs_root, RunSummary,
-    WorkspaceTarget,
-};
+use kuzushi_core::{list_run_summaries, load_run_summary, runs_root, RunSummary, WorkspaceTarget};
 use std::path::PathBuf;
 
 use super::runs_diff::runs_diff_command;
@@ -86,7 +82,7 @@ fn normalize_run_status(status: &str) -> Result<String> {
     if run_status_allowed(&normalized) {
         return Ok(normalized);
     }
-    bail!("unknown run status {status:?}; expected running, completed, failed, canceled, interrupted, partial, or skipped")
+    bail!("unknown run status {status:?}; expected running, completed, blocked, failed, canceled, interrupted, partial, or skipped")
 }
 
 fn normalized_status_text(status: &str) -> String {
@@ -96,7 +92,14 @@ fn normalized_status_text(status: &str) -> String {
 fn run_status_allowed(status: &str) -> bool {
     matches!(
         status,
-        "running" | "completed" | "failed" | "canceled" | "interrupted" | "partial" | "skipped"
+        "running"
+            | "completed"
+            | "blocked"
+            | "failed"
+            | "canceled"
+            | "interrupted"
+            | "partial"
+            | "skipped"
     )
 }
 
@@ -114,17 +117,9 @@ pub(crate) fn runs_show_command(target: PathBuf, run_id: &str, json: bool) -> Re
 
 pub(crate) fn runs_trace_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
     let workspace = WorkspaceTarget::new(target)?;
-    let (trace_path, body) =
-        read_run_artifact_text(workspace.root(), run_id, run_trace_artifact_leaf())
-            .require("Run trace")?;
-    print!("{}", runs_trace_output(&trace_path, &body, json)?);
+    let read = kuzushi_core::run_lifecycle::load_run_projection(workspace.root(), run_id)?;
+    print!("{}", runs_trace_output(&read, json)?);
     Ok(())
-}
-
-fn run_trace_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("trace.jsonl")
-        .expect("trace artifact must be in shared canonical spec")
-        .leaf
 }
 
 #[cfg(test)]
@@ -153,7 +148,7 @@ mod tests {
         let error =
             runs_trace_command(target.path().to_path_buf(), "../outside", false).unwrap_err();
 
-        assert!(error.to_string().contains("unsafe"));
+        assert!(error.to_string().contains("run id"));
     }
 
     #[cfg(unix)]
@@ -163,16 +158,16 @@ mod tests {
 
         let target = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        std::fs::write(outside.path().join("trace.jsonl"), "outside").unwrap();
+        std::fs::write(outside.path().join("items.jsonl"), "outside").unwrap();
         let runs = kuzushi_core::runs_root(target.path());
         std::fs::create_dir_all(&runs).unwrap();
         symlink(outside.path(), runs.join("run-link")).unwrap();
 
         let error = runs_trace_command(target.path().to_path_buf(), "run-link", false).unwrap_err();
 
-        assert!(error.to_string().contains("unsafe"));
+        assert!(error.to_string().contains("symlink"));
         assert_eq!(
-            std::fs::read_to_string(outside.path().join("trace.jsonl")).unwrap(),
+            std::fs::read_to_string(outside.path().join("items.jsonl")).unwrap(),
             "outside"
         );
     }

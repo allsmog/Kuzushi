@@ -58,17 +58,25 @@ fn latest_run_artifact(root: &Path, leaf: &str) -> PathBuf {
     kuzushi_core::run_artifacts::run_artifact_path(root, &latest_run_id(root), leaf)
 }
 
+fn assert_blocked_run_bundle(root: &Path, kind: &str, tool: &str) -> (PathBuf, Value) {
+    assert_run_bundle(root, kind, tool, "blocked")
+}
+
 fn assert_failed_run_bundle(root: &Path, kind: &str, tool: &str) -> (PathBuf, Value) {
+    assert_run_bundle(root, kind, tool, "failed")
+}
+
+fn assert_run_bundle(root: &Path, kind: &str, tool: &str, status: &str) -> (PathBuf, Value) {
     let run_dir = latest_run_dir(root);
     let run_json = fs::read_to_string(latest_run_artifact(root, "run.json")).unwrap();
     let failures = fs::read_to_string(latest_run_artifact(root, "failures.json")).unwrap();
     let failure_json: Value = serde_json::from_str(&failures).unwrap();
 
     assert_canonical_run_files(&run_dir);
-    assert!(run_json.contains("\"status\": \"failed\""));
+    assert!(run_json.contains(&format!("\"status\": \"{status}\"")));
     assert!(run_json.contains(&format!("\"kind\": \"{kind}\"")));
     assert!(run_json.contains(&format!("\"tool\": \"{tool}\"")));
-    assert_eq!(failure_json["status"], "failed");
+    assert_eq!(failure_json["status"], status);
     assert_eq!(failure_json["failures"][0]["tool"], tool);
     (run_dir, failure_json)
 }
@@ -77,7 +85,7 @@ fn assert_canonical_run_files(run_dir: &Path) {
     for leaf in [
         "run.json",
         "events.jsonl",
-        "trace.jsonl",
+        "items.jsonl",
         "failures.json",
         "report.md",
         "artifacts.json",
@@ -303,7 +311,7 @@ fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
     assert!(stderr.contains("`kuzushi run .` is shell-only"), "{stderr}");
     assert!(stderr.contains("use <module>"), "{stderr}");
     assert!(stderr.contains("context:build"), "{stderr}");
-    let _ = assert_failed_run_bundle(tmp.path(), "run", ".");
+    let _ = assert_blocked_run_bundle(tmp.path(), "run", ".");
     let run_json = fs::read_to_string(latest_run_artifact(tmp.path(), "run.json")).unwrap();
     let failures = fs::read_to_string(latest_run_artifact(tmp.path(), "failures.json")).unwrap();
 
@@ -1041,17 +1049,10 @@ fn npm_package_runtime_surface_is_rust_only() {
     assert!(files.contains(&"NOTICE"));
     assert!(files.contains(&"UPSTREAM_CODEX.md"));
     assert!(files.contains(&"LICENSES"));
-    for removed in [
-        "!dist/cli",
-        "!dist/cli.d.ts",
-        "!dist/cli.js",
-        "!dist/cli.js.map",
-    ] {
-        assert!(
-            files.contains(&removed),
-            "package files should exclude old TS CLI artifact {removed}"
-        );
-    }
+    assert!(
+        files.iter().all(|entry| !entry.starts_with("dist/cli")),
+        "package files should not publish the deleted TS CLI"
+    );
 
     let dependencies = package
         .get("dependencies")
@@ -1211,7 +1212,6 @@ fn failed_run_writes_failure_handoff_context() {
         .unwrap()
         .path();
     let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
-    let events = fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
     let artifacts = fs::read_to_string(run_dir.join("artifacts.json")).unwrap();
 
     assert_canonical_run_files(&run_dir);
@@ -1221,7 +1221,16 @@ fn failed_run_writes_failure_handoff_context() {
     assert!(failures.contains("input.json"));
     assert!(artifacts.contains("input.json"));
     assert!(artifacts.contains("failures.json"));
-    assert!(events.contains("\"status\":\"failed\""));
+    let run_id = run_dir.file_name().unwrap().to_string_lossy();
+    let projection = kuzushi_core::run_lifecycle::load_run_projection(tmp.path(), &run_id).unwrap();
+    assert_eq!(
+        projection
+            .projection
+            .terminal
+            .as_ref()
+            .map(|terminal| terminal.status),
+        Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+    );
 }
 
 #[test]
@@ -1251,7 +1260,7 @@ fn targetless_run_writes_artifacts_under_current_directory() {
 }
 
 #[test]
-fn malformed_run_input_writes_failed_artifact_bundle() {
+fn malformed_run_input_writes_blocked_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -1264,17 +1273,17 @@ fn malformed_run_input_writes_failed_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "malformed input should fail");
-    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let (run_dir, failure_json) = assert_blocked_run_bundle(tmp.path(), "run", "config:show");
     let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
     let report = fs::read_to_string(latest_run_artifact(tmp.path(), "report.md")).unwrap();
 
     assert!(input.contains("rawInput"));
     assert_eq!(failure_json["failures"][0]["error"], "--input must be JSON");
-    assert!(report.contains("Status: failed"));
+    assert!(report.contains("Status: blocked"));
 }
 
 #[test]
-fn malformed_run_option_writes_failed_artifact_bundle() {
+fn malformed_run_option_writes_blocked_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -1288,7 +1297,7 @@ fn malformed_run_option_writes_failed_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "malformed --option should fail");
-    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let (run_dir, failure_json) = assert_blocked_run_bundle(tmp.path(), "run", "config:show");
     let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
 
     assert_eq!(
@@ -1299,7 +1308,7 @@ fn malformed_run_option_writes_failed_artifact_bundle() {
 }
 
 #[test]
-fn unknown_run_tool_writes_failed_artifact_bundle() {
+fn unknown_run_tool_writes_blocked_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
@@ -1312,7 +1321,7 @@ fn unknown_run_tool_writes_failed_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "unknown run tool should fail");
-    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "missing:tool");
+    let (run_dir, failure_json) = assert_blocked_run_bundle(tmp.path(), "run", "missing:tool");
     let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
 
     assert!(failure_json["failures"][0]["error"]
@@ -1369,7 +1378,7 @@ fn seed_untriaged_finding(repo: &Path) {
 }
 
 #[test]
-fn invalid_config_writes_failed_run_artifact_bundle() {
+fn invalid_config_writes_blocked_run_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
@@ -1383,7 +1392,7 @@ fn invalid_config_writes_failed_run_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "invalid config should fail");
-    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let (run_dir, failure_json) = assert_blocked_run_bundle(tmp.path(), "run", "config:show");
     let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
 
     assert!(failure_json.to_string().contains("provider:model"));
@@ -1391,7 +1400,7 @@ fn invalid_config_writes_failed_run_artifact_bundle() {
 }
 
 #[test]
-fn scan_invalid_config_writes_failed_run_artifact_bundle() {
+fn scan_invalid_config_writes_blocked_run_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
@@ -1407,7 +1416,7 @@ fn scan_invalid_config_writes_failed_run_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "invalid scan config should fail");
-    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+    let (_, failure_json) = assert_blocked_run_bundle(&repo, "scan", "sast:scan");
 
     assert!(failure_json.to_string().contains("provider:model"));
 }
@@ -1435,7 +1444,7 @@ fn scan_missing_explicit_target_does_not_write_artifacts_under_cwd() {
 }
 
 #[test]
-fn scan_invalid_since_writes_failed_run_artifact_bundle() {
+fn scan_invalid_since_writes_blocked_run_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
@@ -1451,7 +1460,7 @@ fn scan_invalid_since_writes_failed_run_artifact_bundle() {
         .unwrap();
 
     assert!(!output.status.success(), "invalid scan --since should fail");
-    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+    let (_, failure_json) = assert_blocked_run_bundle(&repo, "scan", "sast:scan");
 
     assert_eq!(
         failure_json["failures"][0]["error"],
@@ -1460,7 +1469,7 @@ fn scan_invalid_since_writes_failed_run_artifact_bundle() {
 }
 
 #[test]
-fn scan_invalid_budget_writes_failed_run_artifact_bundle() {
+fn scan_invalid_budget_writes_blocked_run_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
@@ -1479,7 +1488,7 @@ fn scan_invalid_budget_writes_failed_run_artifact_bundle() {
         !output.status.success(),
         "invalid scan --budget should fail"
     );
-    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+    let (_, failure_json) = assert_blocked_run_bundle(&repo, "scan", "sast:scan");
 
     assert!(failure_json["failures"][0]["error"]
         .as_str()

@@ -36,7 +36,7 @@ fn run_scoped_verify_finding(
     runtime: Option<&dyn AgentRuntime>,
     workspace_root: &Path,
     store: &FindingStore,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<Value> {
     let _verify_scope = begin_verify_scope(ctx, parent_step);
     let result = crate::verification::adapters::run_verify_finding_tool(
@@ -52,7 +52,7 @@ fn run_scoped_verify_finding(
     result
 }
 
-fn emit_verify_start(ctx: &ToolExecutionContext<'_>, fingerprint: &str) -> Option<usize> {
+fn emit_verify_start(ctx: &ToolExecutionContext<'_>, fingerprint: &str) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -66,7 +66,7 @@ fn emit_verify_start(ctx: &ToolExecutionContext<'_>, fingerprint: &str) -> Optio
 
 fn emit_verify_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -80,7 +80,7 @@ fn emit_verify_progress(
 
 fn begin_verify_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

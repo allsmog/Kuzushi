@@ -1,7 +1,7 @@
 use super::*;
 use kuzushi_core::workspace::ProjectModelDocument;
 use kuzushi_core::{
-    LatestRunPointerState, RunArtifactTextRead, RunSummaryEntry, RunTargetGitMetadata, RunTraceRead,
+    LatestRunPointerState, RunArtifactTextRead, RunSummaryEntry, RunTargetGitMetadata,
 };
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -132,9 +132,6 @@ pub(crate) enum ViewHydrationKey {
         run_id: String,
         leaf: String,
     },
-    RunTrace {
-        run_id: String,
-    },
     RunProjection {
         run_id: String,
     },
@@ -192,7 +189,6 @@ pub(crate) enum ViewHydrationValue {
     LatestRunPointer(LatestRunPointerState),
     RunSummaryEntries(RunSummaryEntriesState),
     RunArtifactText(RunArtifactTextRead),
-    RunTrace(Option<RunTraceRead>),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),

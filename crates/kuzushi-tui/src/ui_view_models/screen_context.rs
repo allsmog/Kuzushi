@@ -477,19 +477,19 @@ fn visible_run_diff_rows(app: &ShellApp, left: &str, right: &str) -> Vec<String>
 fn visible_activity_rows(app: &ShellApp) -> Vec<String> {
     app.activity()
         .map(|activity| {
-            activity
-                .events
-                .iter()
+            let presentation =
+                kuzushi_core::run_lifecycle::present_projection_with_hydration_and_health(
+                    &activity.run_projection,
+                    kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1,
+                    &activity.run_presentation_hydration,
+                    activity.effective_run_lifecycle_health(),
+                );
+            presentation
+                .timeline_text_rows()
+                .into_iter()
                 .rev()
                 .take(VISIBLE_ROW_LIMIT)
-                .map(|event| {
-                    bounded_row(format!(
-                        "{} {} {}",
-                        event.step.kind,
-                        event.step.verb.as_deref().unwrap_or("-"),
-                        event.step.label
-                    ))
-                })
+                .map(|row| bounded_row(row.text))
                 .collect()
         })
         .unwrap_or_default()

@@ -55,6 +55,9 @@ impl RunItemPersistencePolicy {
                 *redaction_policy_version == RUN_ITEM_REDACTION_POLICY_VERSION,
                 "unsupported reasoning-summary redaction policy"
             ),
+            RunItemV1::ToolCallProgress {
+                completed, total, ..
+            } => validate_progress(*completed, *total)?,
             RunItemV1::FindingDelta { delta } => validate_finding_delta(delta)?,
             RunItemV1::TerminalOutcome { status, .. } => {
                 ensure_terminal(*status, "run outcome")?;
@@ -66,7 +69,6 @@ impl RunItemPersistencePolicy {
             RunItemV1::TaskUpdated { .. }
             | RunItemV1::ToolCallRejected { .. }
             | RunItemV1::ToolCallStarted { .. }
-            | RunItemV1::ToolCallProgress { .. }
             | RunItemV1::ModelCallStarted { .. }
             | RunItemV1::ArtifactProduced { .. }
             | RunItemV1::OperatorDecision { .. }
@@ -74,6 +76,18 @@ impl RunItemPersistencePolicy {
         }
         Ok(())
     }
+}
+
+fn validate_progress(completed: Option<u64>, total: Option<u64>) -> Result<()> {
+    anyhow::ensure!(
+        completed.is_some() == total.is_some(),
+        "progress completed and total must appear together"
+    );
+    if let (Some(completed), Some(total)) = (completed, total) {
+        anyhow::ensure!(total > 0, "progress total must be positive");
+        anyhow::ensure!(completed <= total, "progress cannot exceed its total");
+    }
+    Ok(())
 }
 
 fn validate_collection_bounds(item: &RunItemV1) -> Result<()> {

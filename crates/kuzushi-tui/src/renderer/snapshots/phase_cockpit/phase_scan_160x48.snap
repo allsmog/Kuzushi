@@ -48,7 +48,7 @@ KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · �
 │                                                               │                                               │
 │                                                               │                                               │
 │                                                               │                                               │
-run route · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4 · ⠋ context:build · 42s · 1/2                                   6 findings / 1 crit / 2 high / 2 med
+run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4                                   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

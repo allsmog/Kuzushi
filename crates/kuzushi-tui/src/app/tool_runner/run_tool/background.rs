@@ -233,13 +233,7 @@ impl ShellApp {
         seed: BackgroundToolRunSeed,
         ticket: JobTicket,
     ) -> Option<BackgroundToolDispatch> {
-        prepare_background_tool_dispatch(
-            self.registry(),
-            self.config(),
-            seed,
-            ticket,
-            self.jobs().trace_budget(),
-        )
+        prepare_background_tool_dispatch(self.registry(), self.config(), seed, ticket)
     }
 
     fn background_tool_run_seed(

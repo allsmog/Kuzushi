@@ -43,7 +43,7 @@ fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
     for leaf in [
         "run.json",
         "events.jsonl",
-        "trace.jsonl",
+        "items.jsonl",
         "failures.json",
         "report.md",
         "artifacts.json",
@@ -2962,7 +2962,7 @@ fn run_threat_model_read_loads_pasta_artifacts_without_runtime() {
 }
 
 #[test]
-fn run_threat_model_build_without_model_degrades_deterministically() {
+fn run_threat_model_build_without_model_fails_without_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2979,14 +2979,12 @@ fn run_threat_model_build_without_model_degrades_deterministically() {
 
     assert!(
         !output.status.success(),
-        "partial results must be machine-readable and exit nonzero"
+        "missing model must be machine-readable and exit nonzero"
     );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
-    assert_eq!(
-        body.pointer("/data/provider").and_then(Value::as_str),
-        Some("deterministic")
-    );
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("failed"));
+    assert!(body.pointer("/data/provider").is_none());
+    assert!(body.to_string().contains("explicit model"));
 }
 
 #[test]

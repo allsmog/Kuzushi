@@ -19,6 +19,38 @@ pub enum RunPresentationPayloadV1 {
     Terminal(TerminalPresentationV1),
     PhaseReceipt(PhaseReceiptPresentationV1),
     ProgressDisclosure(ProgressDisclosurePresentationV1),
+    LifecycleEvent(LifecycleEventPresentationV1),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleEventKindV1 {
+    Plan,
+    Task,
+    ToolRequested,
+    ToolRejected,
+    ToolStarted,
+    ToolFinished,
+    ModelStarted,
+    ModelFinished,
+    ArtifactProduced,
+    FindingsChanged,
+    OperatorQuestion,
+    OperatorDecision,
+    TerminalOutcome,
+    PhaseReceipt,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LifecycleEventPresentationV1 {
+    pub kind: LifecycleEventKindV1,
+    pub occurred_at_ms: u64,
+    pub subject: SafeText,
+    pub status: Option<RunItemStatus>,
+    pub detail: Option<SafeText>,
+    pub latency_ms: Option<u64>,
+    pub cost: Option<RuntimeCostReport>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

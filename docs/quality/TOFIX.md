@@ -29,12 +29,12 @@ findings, including curl findings, do not belong here.
   and input artifact. New live tool runs include `processId`; summary
   inventory/load repairs dead `running` entries to `interrupted` when the
   owning process no longer exists.
-- `systems-hunt` now emits an explicit trace step listing every selected
+- `systems-hunt` now emits a bounded lifecycle diagnostic listing every selected
   surface file, start line, and kind before the invariant/trigger/finding
   LLM phase.
 - Tool-loop modules now have a runtime preflight hook. `uaf-hunt:hunt` calls
   it before spawning clang or entering the agent loop, and the traced runtime
-  records preflight success/failure in `trace.jsonl`. For OpenAI/Codex models
+  records preflight success/failure in `items.jsonl`. For OpenAI/Codex models
   the bridge now checks Responses API access up front instead of failing at
   step 0 after analysis setup has started.
 - `threat-intel:harvest` now declares its documented JSON-only `cves` input

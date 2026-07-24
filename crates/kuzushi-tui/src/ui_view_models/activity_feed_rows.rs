@@ -1,10 +1,11 @@
 use super::activity_feed_pause::activity_feed_pause_model;
 use super::activity_feed_placeholder::activity_feed_placeholder_model;
-use crate::{ActivityRouteState, ActivitySession, DagTaskState, RecordedTraceEvent};
+use crate::renderer::shared::text::{display_width, fit};
+use crate::{ActivityRouteState, ActivitySession, DagTaskState};
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
-const STALLED_TRACE_AFTER_SECS: u64 = 30;
+const STALLED_PROGRESS_AFTER_SECS: u64 = 30;
 const LIVE_OUTPUT_EVENT_WINDOW: usize = 512;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,11 +39,10 @@ pub(crate) fn activity_feed_pane_rows(
     running_tool: Option<&str>,
     now: Instant,
 ) -> Vec<ActivityFeedPaneRow> {
-    let typed = !session.run_projection.timeline.is_empty();
-    let (mut rows, overflow) = visible_feed_rows(session, route, width, typed);
-    prepend_feed_overflow_row(&mut rows, overflow, width, typed);
-    append_feed_status_rows(&mut rows, session, route, running_tool, width, typed);
-    if let Some(row) = stalled_trace_row(session, route, width, running_tool, now) {
+    let (mut rows, overflow) = visible_feed_rows(session, route, width);
+    prepend_feed_overflow_row(&mut rows, overflow, width);
+    append_feed_status_rows(&mut rows, session, route, running_tool, width);
+    if let Some(row) = stalled_progress_row(session, route, width, running_tool, now) {
         rows.push(row);
     }
     rows
@@ -61,33 +61,6 @@ pub(crate) fn activity_feed_viewport_rows(
 }
 
 fn visible_feed_rows(
-    session: &ActivitySession,
-    route: &ActivityRouteState,
-    width: usize,
-    typed: bool,
-) -> (Vec<ActivityFeedPaneRow>, FeedOverflow) {
-    if typed {
-        return visible_typed_rows(session, route, width);
-    }
-    let visible_count = visible_event_count(session.events.len(), route);
-    let window_start = visible_count.saturating_sub(LIVE_OUTPUT_EVENT_WINDOW);
-    let rows = session
-        .events
-        .iter()
-        .take(visible_count)
-        .skip(window_start)
-        .flat_map(|event| feed_event_rows(event, route.verbose_subsystems, width))
-        .collect();
-    (
-        rows,
-        FeedOverflow {
-            count: window_start,
-            disclosed_keys: BTreeSet::new(),
-        },
-    )
-}
-
-fn visible_typed_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
     width: usize,
@@ -119,10 +92,54 @@ fn typed_presentation_rows(
         health,
     );
     let mut rows = Vec::new();
-    append_typed_health_rows(&mut rows, &presentation, width);
-    append_typed_summary_rows(&mut rows, &presentation, width);
-    let overflow = append_typed_timeline_rows(&mut rows, &presentation, width);
+    if route.paused || route.verbose_subsystems || !lifecycle_health_is_normal(&presentation.health)
+    {
+        append_typed_health_rows(&mut rows, &presentation, width);
+    }
+    if route.verbose_subsystems {
+        append_typed_summary_rows(&mut rows, &presentation, width);
+    } else {
+        append_typed_summary_disclosure(&mut rows, &presentation, width);
+    }
+    let overflow =
+        append_typed_timeline_rows(&mut rows, &presentation, width, route.verbose_subsystems);
     (rows, overflow)
+}
+
+fn append_typed_summary_disclosure(
+    rows: &mut Vec<ActivityFeedPaneRow>,
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    width: usize,
+) {
+    let keys = presentation
+        .summary
+        .iter()
+        .flat_map(|section| section.cells.iter().map(|cell| cell.key.clone()))
+        .collect::<BTreeSet<_>>();
+    if keys.is_empty() {
+        return;
+    }
+    rows.push(ActivityFeedPaneRow {
+        key: None,
+        disclosed_keys: keys,
+        text: fit(" + run details available · V expands", width),
+        tone: ActivityFeedRowTone::Subtle,
+    });
+}
+
+fn lifecycle_health_is_normal(health: &kuzushi_core::run_lifecycle::RunLifecycleHealth) -> bool {
+    use kuzushi_core::run_lifecycle::{
+        ProjectionHealth, RunDeliveryHealth, RunDerivativeDeliveryHealth, RunDurabilityHealth,
+        RunProgressFidelity,
+    };
+    matches!(health.integrity, ProjectionHealth::Healthy)
+        && matches!(health.durability, RunDurabilityHealth::Durable { .. })
+        && matches!(health.progress, RunProgressFidelity::Complete)
+        && matches!(health.delivery, RunDeliveryHealth::Current { .. })
+        && matches!(
+            health.derivative_delivery,
+            RunDerivativeDeliveryHealth::NotObserved | RunDerivativeDeliveryHealth::Current { .. }
+        )
 }
 
 fn append_typed_health_rows(
@@ -186,28 +203,65 @@ fn append_typed_timeline_rows(
     rows: &mut Vec<ActivityFeedPaneRow>,
     presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
     width: usize,
+    verbose: bool,
 ) -> FeedOverflow {
     let timeline = presentation.timeline_text_rows();
     if timeline.is_empty() {
         return FeedOverflow::default();
     }
-    let omitted = timeline.len().saturating_sub(LIVE_OUTPUT_EVENT_WINDOW);
-    let disclosed_keys = timeline
+    let (visible, hidden) = typed_timeline_visibility(&timeline, verbose);
+    let omitted = visible.len().saturating_sub(LIVE_OUTPUT_EVENT_WINDOW);
+    let disclosed_keys = visible
         .iter()
         .take(omitted)
         .map(|row| row.key.clone())
         .collect();
-    rows.push(feed_section_row("TIMELINE", width));
+    rows.push(feed_section_row("ACTIVITY", width));
+    append_hidden_detail_row(rows, &hidden, width);
     rows.extend(
-        timeline
+        visible
             .into_iter()
             .skip(omitted)
-            .flat_map(|row| presentation_feed_rows(row, width)),
+            .flat_map(|row| presentation_feed_rows(row.clone(), width)),
     );
     FeedOverflow {
         count: omitted,
         disclosed_keys,
     }
+}
+
+fn typed_timeline_visibility<'a>(
+    timeline: &'a [kuzushi_core::run_lifecycle::RunPresentationTextRowV1],
+    verbose: bool,
+) -> (
+    Vec<&'a kuzushi_core::run_lifecycle::RunPresentationTextRowV1>,
+    Vec<&'a kuzushi_core::run_lifecycle::RunPresentationTextRowV1>,
+) {
+    let is_visible = |row: &&kuzushi_core::run_lifecycle::RunPresentationTextRowV1| {
+        verbose || row.importance != kuzushi_core::run_lifecycle::RunCellImportanceV1::Detail
+    };
+    let visible = timeline.iter().filter(is_visible).collect();
+    let hidden = timeline.iter().filter(|row| !is_visible(row)).collect();
+    (visible, hidden)
+}
+
+fn append_hidden_detail_row(
+    rows: &mut Vec<ActivityFeedPaneRow>,
+    hidden: &[&kuzushi_core::run_lifecycle::RunPresentationTextRowV1],
+    width: usize,
+) {
+    if hidden.is_empty() {
+        return;
+    }
+    rows.push(ActivityFeedPaneRow {
+        key: None,
+        disclosed_keys: hidden.iter().map(|row| row.key.clone()).collect(),
+        text: fit(
+            &format!("    +{} low-level event(s) · V shows details", hidden.len()),
+            width,
+        ),
+        tone: ActivityFeedRowTone::Subtle,
+    });
 }
 
 fn feed_section_row(label: &str, width: usize) -> ActivityFeedPaneRow {
@@ -253,19 +307,13 @@ fn prepend_feed_overflow_row(
     rows: &mut Vec<ActivityFeedPaneRow>,
     overflow: FeedOverflow,
     width: usize,
-    typed: bool,
 ) {
     if overflow.count > 0 {
-        let detailed = if typed {
-            let noun = pluralized(overflow.count, "timeline row", "timeline rows");
-            format!(
-                " {} {noun} omitted from Run Focus · inspect trace/replay",
-                overflow.count,
-            )
-        } else {
-            let noun = pluralized(overflow.count, "older event", "older events");
-            format!(" {} {noun} retained in trace/replay", overflow.count,)
-        };
+        let noun = pluralized(overflow.count, "timeline row", "timeline rows");
+        let detailed = format!(
+            " {} {noun} omitted from Run Focus · inspect trace/replay",
+            overflow.count,
+        );
         let compact = format!(" +{} timeline · replay", overflow.count);
         let text = disclosure_text(detailed, compact, width);
         rows.insert(
@@ -288,24 +336,15 @@ fn pluralized(count: usize, singular: &'static str, plural: &'static str) -> &'s
     }
 }
 
-fn visible_event_count(available: usize, route: &ActivityRouteState) -> usize {
-    route
-        .paused_event_count
-        .map(|count| count.min(available))
-        .unwrap_or(available)
-}
-
 fn append_feed_status_rows(
     rows: &mut Vec<ActivityFeedPaneRow>,
     session: &ActivitySession,
     route: &ActivityRouteState,
     running_tool: Option<&str>,
     width: usize,
-    typed: bool,
 ) {
     prepend_feed_pause_row(rows, route);
     append_feed_placeholder_row(rows, session, route, running_tool);
-    append_legacy_terminal_rows(rows, session, width, typed);
     append_feed_acknowledgement(rows, session, width);
 }
 
@@ -342,17 +381,6 @@ fn append_feed_placeholder_row(
     }
 }
 
-fn append_legacy_terminal_rows(
-    rows: &mut Vec<ActivityFeedPaneRow>,
-    session: &ActivitySession,
-    width: usize,
-    typed: bool,
-) {
-    if !typed {
-        append_terminal_result_rows(rows, session, width);
-    }
-}
-
 fn append_feed_acknowledgement(
     rows: &mut Vec<ActivityFeedPaneRow>,
     session: &ActivitySession,
@@ -368,126 +396,7 @@ fn append_feed_acknowledgement(
     }
 }
 
-fn append_terminal_result_rows(
-    rows: &mut Vec<ActivityFeedPaneRow>,
-    session: &ActivitySession,
-    width: usize,
-) {
-    let Some(receipt) = session.run_focus_receipt.as_ref() else {
-        return;
-    };
-    for result in &receipt.result_summaries {
-        push_terminal_result(rows, result, width);
-    }
-}
-
-fn push_terminal_result(
-    rows: &mut Vec<ActivityFeedPaneRow>,
-    result: &kuzushi_core::run_artifacts::RunResultSummary,
-    width: usize,
-) {
-    rows.push(result_row(
-        format!(
-            " {} RESULT · {} · {}",
-            result_glyph(&result.status),
-            result.tool,
-            result.status
-        ),
-        result_tone(&result.status),
-        width,
-    ));
-    rows.push(result_row(
-        format!("    {}", result.summary),
-        ActivityFeedRowTone::Primary,
-        width,
-    ));
-    let output_budget = if result.status == "completed" { 3 } else { 5 };
-    for line in result.operator_output_preview(output_budget) {
-        rows.push(result_row(
-            format!("    │ {line}"),
-            ActivityFeedRowTone::Muted,
-            width,
-        ));
-    }
-    push_result_messages(rows, result, width);
-    push_result_artifacts(rows, result, width);
-}
-
-fn push_result_messages(
-    rows: &mut Vec<ActivityFeedPaneRow>,
-    result: &kuzushi_core::run_artifacts::RunResultSummary,
-    width: usize,
-) {
-    for warning in result.warnings.iter().take(2) {
-        rows.push(result_row(
-            format!("    ⚠ {warning}"),
-            ActivityFeedRowTone::Warn,
-            width,
-        ));
-    }
-    for error in result.errors.iter().take(2) {
-        rows.push(result_row(
-            format!("    ✗ {error}"),
-            ActivityFeedRowTone::Danger,
-            width,
-        ));
-    }
-}
-
-fn push_result_artifacts(
-    rows: &mut Vec<ActivityFeedPaneRow>,
-    result: &kuzushi_core::run_artifacts::RunResultSummary,
-    width: usize,
-) {
-    if result.artifacts.is_empty() {
-        return;
-    }
-    let labels = result
-        .artifacts
-        .iter()
-        .take(3)
-        .map(|artifact| artifact.label.as_str())
-        .collect::<Vec<_>>()
-        .join(" · ");
-    let overflow = result.artifacts.len().saturating_sub(3);
-    let suffix = (overflow > 0)
-        .then(|| format!(" · +{overflow} more"))
-        .unwrap_or_default();
-    rows.push(result_row(
-        format!("    ↳ artifacts: {labels}{suffix}"),
-        ActivityFeedRowTone::Primary,
-        width,
-    ));
-}
-
-fn result_row(text: String, tone: ActivityFeedRowTone, width: usize) -> ActivityFeedPaneRow {
-    ActivityFeedPaneRow {
-        key: None,
-        disclosed_keys: BTreeSet::new(),
-        text: fit(&text, width),
-        tone,
-    }
-}
-
-fn result_tone(status: &str) -> ActivityFeedRowTone {
-    match status {
-        "completed" => ActivityFeedRowTone::Success,
-        "failed" => ActivityFeedRowTone::Danger,
-        "partial" => ActivityFeedRowTone::Warn,
-        _ => ActivityFeedRowTone::Muted,
-    }
-}
-
-fn result_glyph(status: &str) -> &'static str {
-    match status {
-        "completed" => "✓",
-        "failed" => "✗",
-        "partial" => "⚠",
-        _ => "·",
-    }
-}
-
-fn stalled_trace_row(
+fn stalled_progress_row(
     session: &ActivitySession,
     route: &ActivityRouteState,
     width: usize,
@@ -497,8 +406,8 @@ fn stalled_trace_row(
     if route.paused || !activity_is_live(session, running_tool) {
         return None;
     }
-    let (elapsed, source) = trace_silence_elapsed(session, now)?;
-    if elapsed.as_secs() < STALLED_TRACE_AFTER_SECS {
+    let (elapsed, source) = progress_silence_elapsed(session, now)?;
+    if elapsed.as_secs() < STALLED_PROGRESS_AFTER_SECS {
         return None;
     }
     // An open model call is quiet by nature — name it instead of implying
@@ -511,7 +420,7 @@ fn stalled_trace_row(
         disclosed_keys: BTreeSet::new(),
         text: fit(
             &format!(
-                " ⚠ no trace output for {} since {source}",
+                " ⚠ no progress signal for {} since {source}",
                 silence_duration_label(elapsed)
             ),
             width,
@@ -543,14 +452,14 @@ fn activity_is_live(session: &ActivitySession, running_tool: Option<&str>) -> bo
             .any(|row| row.state == DagTaskState::Active)
 }
 
-fn trace_silence_elapsed(
+fn progress_silence_elapsed(
     session: &ActivitySession,
     now: Instant,
 ) -> Option<(Duration, &'static str)> {
-    if let Some(event) = session.events.back() {
+    if let Some(observed_at) = session.last_run_item_at() {
         return now
-            .checked_duration_since(event.observed_at)
-            .map(|elapsed| (elapsed, "last trace event"));
+            .checked_duration_since(observed_at)
+            .map(|elapsed| (elapsed, "last lifecycle event"));
     }
     now.checked_duration_since(session.started_at)
         .map(|elapsed| (elapsed, "run start"))
@@ -571,6 +480,7 @@ fn presentation_status_tone(
     match status {
         Completed => ActivityFeedRowTone::Success,
         Partial => ActivityFeedRowTone::Warn,
+        Blocked => ActivityFeedRowTone::Warn,
         Failed | Interrupted => ActivityFeedRowTone::Danger,
         Canceled | Skipped | Pending => ActivityFeedRowTone::Muted,
         Running => ActivityFeedRowTone::Primary,
@@ -586,92 +496,6 @@ fn diagnostic_tone(level: &kuzushi_core::run_lifecycle::DiagnosticLevel) -> Acti
     }
 }
 
-/// One event, one or more pane rows. Error rows (danger severity, refusals)
-/// carry the remedy the operator must read, so they wrap onto indented
-/// continuation rows; routine progress events stay single-line. The scroll
-/// model counts produced rows, so multi-row events tail and clamp correctly.
-fn feed_event_rows(
-    event: &RecordedTraceEvent,
-    verbose_subsystems: bool,
-    width: usize,
-) -> Vec<ActivityFeedPaneRow> {
-    let Some(text) = feed_event_text(event, verbose_subsystems) else {
-        return Vec::new();
-    };
-    let tone = feed_event_tone(event);
-    if !matches!(
-        tone,
-        ActivityFeedRowTone::Danger | ActivityFeedRowTone::Warn
-    ) {
-        return vec![ActivityFeedPaneRow {
-            key: None,
-            disclosed_keys: BTreeSet::new(),
-            text: fit(&text, width),
-            tone,
-        }];
-    }
-    crate::renderer::shared::text::wrap_text(&text, width.max(16))
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| ActivityFeedPaneRow {
-            key: None,
-            disclosed_keys: BTreeSet::new(),
-            text: if index == 0 {
-                chunk
-            } else {
-                format!("    {chunk}")
-            },
-            tone,
-        })
-        .collect()
-}
-
-fn feed_event_text(event: &RecordedTraceEvent, verbose_subsystems: bool) -> Option<String> {
-    if feed_event_is_hidden(event, verbose_subsystems) {
-        return None;
-    }
-    Some(format!(
-        "{ts} {indent}{glyph} {tag} {label}",
-        ts = feed_event_timestamp(event),
-        indent = feed_event_indent(event),
-        glyph = feed_event_glyph(event),
-        tag = feed_event_tag(event),
-        label = event.step.label
-    ))
-}
-
-fn feed_event_is_hidden(event: &RecordedTraceEvent, verbose_subsystems: bool) -> bool {
-    let module_id = event.step.module_id.as_deref().unwrap_or("");
-    !verbose_subsystems && !module_id.is_empty() && crate::app::is_hidden_module_id(module_id)
-}
-
-fn feed_event_timestamp(event: &RecordedTraceEvent) -> String {
-    event
-        .step
-        .started_at_ms
-        .map(format_hh_mm_ss_from_ms)
-        .unwrap_or_else(now_hh_mm_ss)
-}
-
-fn feed_event_tag(event: &RecordedTraceEvent) -> String {
-    match (event.step.module_id.as_deref(), event.step.verb.as_deref()) {
-        (Some(module), Some(verb)) => format!(
-            "[{}]",
-            crate::app::collapse_doubled_tail(&format!("{module}:{verb}"))
-        ),
-        (Some(module), None) => format!("[{module}]"),
-        _ => format!("[{}]", event.step.kind),
-    }
-}
-
-fn feed_event_indent(event: &RecordedTraceEvent) -> &'static str {
-    if event.step.parent_step.is_some() {
-        "  ↳ "
-    } else {
-        " "
-    }
-}
-
 fn wrapped_feed_rows(
     key: Option<kuzushi_core::run_lifecycle::RunCellKey>,
     disclosed_keys: BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
@@ -680,7 +504,12 @@ fn wrapped_feed_rows(
     tone: ActivityFeedRowTone,
 ) -> Vec<ActivityFeedPaneRow> {
     let body_width = width.saturating_sub(1).max(1);
-    crate::renderer::shared::text::wrap_text(text, body_width)
+    let chunks = if display_width(text) <= body_width {
+        vec![text.to_string()]
+    } else {
+        crate::renderer::shared::text::wrap_text(text, body_width)
+    };
+    chunks
         .into_iter()
         .map(|chunk| ActivityFeedPaneRow {
             key: key.clone(),
@@ -816,75 +645,9 @@ fn accounted_feed_keys(
         .collect()
 }
 
-fn feed_event_glyph(event: &RecordedTraceEvent) -> &'static str {
-    match event.step.severity.as_deref() {
-        Some("danger") => "✗",
-        _ => match event.step.kind.as_str() {
-            "tool" | "tool-start" => "⏵",
-            "done" | "tool-complete" => "✓",
-            "refused" => "✗",
-            "reasoning" | "tool-progress" => "…",
-            "finding" | "find" => "◇",
-            _ => "·",
-        },
-    }
-}
-
-fn feed_event_tone(event: &RecordedTraceEvent) -> ActivityFeedRowTone {
-    severity_event_tone(event).unwrap_or_else(|| kind_event_tone(event.step.kind.as_str()))
-}
-
-fn severity_event_tone(event: &RecordedTraceEvent) -> Option<ActivityFeedRowTone> {
-    match event.step.severity.as_deref()? {
-        "danger" => Some(ActivityFeedRowTone::Danger),
-        "warn" => Some(ActivityFeedRowTone::Warn),
-        _ => None,
-    }
-}
-
-fn kind_event_tone(kind: &str) -> ActivityFeedRowTone {
-    match kind {
-        "tool" | "tool-start" => ActivityFeedRowTone::Primary,
-        "done" | "tool-complete" => ActivityFeedRowTone::Success,
-        "reasoning" | "tool-progress" => ActivityFeedRowTone::Muted,
-        "refused" => ActivityFeedRowTone::Danger,
-        "finding" | "find" => ActivityFeedRowTone::Warn,
-        _ => ActivityFeedRowTone::Subtle,
-    }
-}
-
-fn format_hh_mm_ss_from_ms(ms: u64) -> String {
-    let secs_in_day = 86_400u64;
-    let secs = (ms / 1000) % secs_in_day;
-    let h = secs / 3600;
-    let m = (secs % 3600) / 60;
-    let s = secs % 60;
-    format!("{h:02}:{m:02}:{s:02}")
-}
-
-fn now_hh_mm_ss() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    format_hh_mm_ss_from_ms(secs * 1000)
-}
-
-fn fit(value: &str, width: usize) -> String {
-    let len = value.chars().count();
-    if len <= width {
-        return value.to_string();
-    }
-    if width <= 1 {
-        return value.chars().take(width).collect();
-    }
-    format!("{}…", value.chars().take(width - 1).collect::<String>())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::RunTraceStep;
 
     #[test]
     fn typed_live_output_uses_canonical_keys_and_all_preview_lines() {
@@ -899,15 +662,20 @@ mod tests {
         );
         let presentation =
             present_projection(&session.run_projection, RunProjectionSource::TypedV1);
-        let rendered_keys = rows
-            .iter()
-            .filter_map(|row| row.key.clone())
-            .collect::<std::collections::BTreeSet<_>>();
-
-        assert_eq!(rendered_keys, presentation.semantic_keys());
+        assert_eq!(accounted_feed_keys(&rows), presentation.semantic_keys());
         assert!(rows.iter().any(|row| row.text.contains("preview one")));
-        assert!(rows.iter().any(|row| row.text.contains("preview two")));
         assert!(rows
+            .iter()
+            .any(|row| row.text.contains("Indexing repository files · 421/832")));
+        assert!(!rows.iter().any(|row| row.text.contains("preview two")));
+        assert!(!rows.iter().any(|row| row.text.contains("Call ")));
+        assert!(!rows.iter().any(|row| row.text.contains("HEALTH")));
+
+        let mut route = ActivityRouteState::default();
+        route.verbose_subsystems = true;
+        let verbose = activity_feed_pane_rows(&session, &route, 180, None, Instant::now());
+        assert!(verbose.iter().any(|row| row.text.contains("preview two")));
+        assert!(verbose
             .iter()
             .any(|row| row.text.contains("warnings=1 errors=0")));
     }
@@ -985,10 +753,14 @@ mod tests {
     }
 
     fn assert_resolved_question_rows(rows: &[ActivityFeedPaneRow]) {
-        assert!(rows.iter().any(|row| row.text.contains("resolved")));
-        assert!(!rows.iter().any(|row| {
-            row.text.contains("Choose the scan scope.") || row.text.contains("Changed files")
-        }));
+        assert!(rows.iter().any(|row| row.text.contains("Asked operator")));
+        assert!(rows
+            .iter()
+            .any(|row| row.text.contains("Operator decision recorded")));
+        assert!(!rows
+            .iter()
+            .any(|row| row.text.contains("Waiting for operator input")));
+        assert!(!rows.iter().any(|row| row.text.contains("Changed files")));
     }
 
     fn assert_resolved_question_source(
@@ -1076,7 +848,9 @@ mod tests {
         let mut session = typed_live_session();
         append_timeline_notices(&mut session, LIVE_OUTPUT_EVENT_WINDOW + 4);
 
-        let rows = typed_rows(&session);
+        let mut route = ActivityRouteState::default();
+        route.verbose_subsystems = true;
+        let rows = activity_feed_pane_rows(&session, &route, 180, None, Instant::now());
         let expected = present_projection(&session.run_projection, RunProjectionSource::TypedV1)
             .semantic_keys();
         let rendered = rows
@@ -1090,7 +864,9 @@ mod tests {
             .expect("bounded timeline disclosure");
 
         assert!(rows.iter().any(|row| row.text.contains("map target")));
-        assert_eq!(omitted, 4);
+        let expected_omitted =
+            presentation_timeline_len(&session).saturating_sub(LIVE_OUTPUT_EVENT_WINDOW);
+        assert_eq!(omitted, expected_omitted);
         assert!(disclosure
             .text
             .contains(&format!("{omitted} timeline rows")));
@@ -1101,7 +877,8 @@ mod tests {
     #[test]
     fn narrow_typed_run_focus_wraps_without_losing_source_keys() {
         use kuzushi_core::run_lifecycle::{present_projection, RunProjectionSource};
-        let session = typed_live_session();
+        let mut session = typed_live_session();
+        append_timeline_notices(&mut session, 1);
         let rows = activity_feed_pane_rows(
             &session,
             &ActivityRouteState::default(),
@@ -1113,7 +890,10 @@ mod tests {
             .semantic_keys();
 
         assert_eq!(accounted_feed_keys(&rows), expected);
-        assert!(rows.iter().all(|row| row.text.chars().count() <= 24));
+        assert!(rows
+            .iter()
+            .all(|row| crate::renderer::shared::text::display_width(&row.text) <= 24));
+        assert!(rows.iter().any(|row| row.text.contains("比较候选路径")));
         assert!(!rows
             .iter()
             .filter(|row| row.key.is_some())
@@ -1151,6 +931,13 @@ mod tests {
         )
     }
 
+    fn presentation_timeline_len(session: &ActivitySession) -> usize {
+        use kuzushi_core::run_lifecycle::{present_projection, RunProjectionSource};
+        present_projection(&session.run_projection, RunProjectionSource::TypedV1)
+            .timeline_text_rows()
+            .len()
+    }
+
     fn append_timeline_notices(session: &mut ActivitySession, count: usize) {
         use kuzushi_core::run_lifecycle::*;
         let run_id = RunId::parse("run-live-presentation").unwrap();
@@ -1167,7 +954,7 @@ mod tests {
                 RunItemSource::Workflow,
                 RunItemV1::DiagnosticNotice {
                     level: DiagnosticLevel::Info,
-                    message: SafeText::operator_visible(format!("notice {index}")),
+                    message: SafeText::operator_visible(format!("notice {index} · 比较候选路径")),
                 },
                 previous,
             )
@@ -1232,6 +1019,7 @@ mod tests {
         for forbidden in [
             "Plan r1 · completed",
             "Outcome · completed",
+            "Run completed",
             "NEXT · open Report",
         ] {
             assert!(!rows.iter().any(|row| row.text.contains(forbidden)));
@@ -1296,7 +1084,30 @@ mod tests {
     ) {
         push_live_call_request(items, run_id, task_id, call_id, item_id);
         push_live_call_start(items, run_id, task_id, call_id, item_id);
+        push_live_call_progress(items, run_id, task_id, call_id, item_id);
         push_live_call_finish(items, run_id, task_id, call_id, item_id);
+    }
+
+    fn push_live_call_progress(
+        items: &mut Vec<kuzushi_core::run_lifecycle::RunItemEnvelopeV1>,
+        run_id: &kuzushi_core::run_lifecycle::RunId,
+        task_id: kuzushi_core::run_lifecycle::RunTaskId,
+        call_id: kuzushi_core::run_lifecycle::RunCallId,
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+    ) {
+        use kuzushi_core::run_lifecycle::*;
+        push_call_item(
+            items,
+            run_id,
+            item_id,
+            task_id,
+            call_id,
+            RunItemV1::ToolCallProgress {
+                message: SafeText::operator_visible("Indexing repository files"),
+                completed: Some(421),
+                total: Some(832),
+            },
+        );
     }
 
     fn push_live_call_request(
@@ -1420,207 +1231,5 @@ mod tests {
             .with_call(call_id)
             .unwrap();
         items.push(envelope);
-    }
-
-    #[test]
-    fn activity_feed_pane_rows_filters_hidden_events_until_verbose() {
-        let mut session = ActivitySession::new("r-1");
-        let mut route = ActivityRouteState::default();
-        session.apply_step(
-            RunTraceStep::new(1, "reasoning", "index")
-                .with_module_id("pipeline")
-                .with_started_at_ms(3_661_000),
-        );
-
-        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].text.contains("hidden subsystem event"));
-        assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
-
-        route.verbose_subsystems = true;
-        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].text.contains("[pipeline]"));
-        assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
-    }
-
-    #[test]
-    fn activity_feed_pane_rows_adds_pause_before_events() {
-        let mut session = ActivitySession::new("r-1");
-        let mut route = ActivityRouteState::default();
-        route.paused = true;
-        session.apply_step(
-            RunTraceStep::new(1, "done", "complete")
-                .with_module_id("semgrep")
-                .with_verb("scan")
-                .with_started_at_ms(42_000),
-        );
-
-        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
-
-        assert_eq!(rows[0].tone, ActivityFeedRowTone::Warn);
-        assert!(rows[0].text.contains("paused"));
-        assert_eq!(rows[1].tone, ActivityFeedRowTone::Success);
-        assert!(rows[1].text.contains("[semgrep:scan]"));
-    }
-
-    #[test]
-    fn activity_feed_retains_operator_answer_acknowledgement_after_completion() {
-        let mut session = ActivitySession::new("r-1");
-        session.operator_answer_acknowledgement =
-            Some("accepted Repository · run resumed".to_string());
-        let route = ActivityRouteState::default();
-
-        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
-
-        let acknowledgement = rows.last().expect("answer acknowledgement");
-        assert_eq!(acknowledgement.tone, ActivityFeedRowTone::Success);
-        assert!(acknowledgement.text.contains("accepted Repository"));
-    }
-
-    #[test]
-    fn terminal_result_rows_preserve_output_warning_and_artifact_semantics() {
-        let mut session = ActivitySession::new("r-result");
-        session.mark_run_focus_terminal_pending("partial");
-        session
-            .run_focus_receipt
-            .as_mut()
-            .expect("terminal receipt")
-            .result_summaries
-            .push(partial_result_summary_fixture());
-
-        let rows = activity_feed_pane_rows(
-            &session,
-            &ActivityRouteState::default(),
-            120,
-            None,
-            Instant::now(),
-        );
-
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("RESULT · threat-model:build · partial")));
-        assert!(rows.iter().any(|row| row.text.contains("Threats: 0")));
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("Cost: >=$0.0000 (incomplete)")));
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("select another target")));
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("normalized threat model")));
-    }
-
-    fn partial_result_summary_fixture() -> kuzushi_core::run_artifacts::RunResultSummary {
-        kuzushi_core::run_artifacts::RunResultSummary {
-            run_id: "r-result".to_string(),
-            tool: "threat-model:build".to_string(),
-            status: "partial".to_string(),
-            summary: "no concrete threat-model evidence".to_string(),
-            output_lines: [
-                "Method: STRIDE",
-                "Saved: previous model preserved",
-                "Threats: 0",
-                "DFD: 1 node",
-                "Findings: 0",
-                "Cost: >=$0.0000 (incomplete)",
-            ]
-            .into_iter()
-            .map(str::to_string)
-            .collect(),
-            output_line_count: 6,
-            warnings: vec!["select another target".to_string()],
-            warning_count: 1,
-            errors: Vec::new(),
-            error_count: 0,
-            artifacts: vec![kuzushi_core::RunArtifact {
-                label: "normalized threat model".to_string(),
-                path: "threat-model.json".to_string(),
-                kind: "json".to_string(),
-            }],
-            artifact_count: 1,
-        }
-    }
-
-    #[test]
-    fn activity_feed_pane_rows_warns_when_live_trace_output_stalls() {
-        let now = Instant::now();
-        let mut session = ActivitySession::new("r-1");
-        let route = ActivityRouteState::default();
-        session.started_at = now - Duration::from_secs(60);
-        session.events.push_back(RecordedTraceEvent {
-            step: RunTraceStep::new(1, "reasoning", "started").with_module_id("triage"),
-            observed_at: now - Duration::from_secs(45),
-        });
-
-        let rows = activity_feed_pane_rows(&session, &route, 80, Some("triage:run"), now);
-
-        let stalled = rows
-            .iter()
-            .find(|row| row.text.contains("no trace output"))
-            .expect("stalled trace row");
-        assert_eq!(stalled.tone, ActivityFeedRowTone::Warn);
-        assert!(stalled.text.contains("45s since last trace event"));
-    }
-
-    #[test]
-    fn activity_feed_pane_rows_warns_when_live_run_never_emits_trace() {
-        let now = Instant::now();
-        let mut session = ActivitySession::new("r-1");
-        let route = ActivityRouteState::default();
-        session.started_at = now - Duration::from_secs(31);
-
-        let rows = activity_feed_pane_rows(&session, &route, 80, Some("threat-model:build"), now);
-
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("waiting for its first trace event")));
-        assert!(rows
-            .iter()
-            .any(|row| row.text.contains("31s since run start")));
-    }
-
-    #[test]
-    fn activity_feed_pane_rows_does_not_warn_for_idle_or_paused_sessions() {
-        let now = Instant::now();
-        let mut session = ActivitySession::new("r-1");
-        let mut route = ActivityRouteState::default();
-        session.started_at = now - Duration::from_secs(90);
-
-        let idle_rows = activity_feed_pane_rows(&session, &route, 80, None, now);
-        assert!(!idle_rows
-            .iter()
-            .any(|row| row.text.contains("no trace output")));
-
-        route.paused = true;
-        let paused_rows = activity_feed_pane_rows(&session, &route, 80, Some("sast:scan"), now);
-        assert!(!paused_rows
-            .iter()
-            .any(|row| row.text.contains("no trace output")));
-    }
-
-    #[test]
-    fn live_output_windows_events_before_formatting() {
-        let mut session = ActivitySession::new("r-window");
-        for index in 0..600 {
-            session.apply_step(
-                RunTraceStep::new(index, "reasoning", format!("event-{index:03}"))
-                    .with_module_id("semgrep")
-                    .with_verb("run"),
-            );
-        }
-
-        let rows = activity_feed_pane_rows(
-            &session,
-            &ActivityRouteState::default(),
-            120,
-            None,
-            Instant::now(),
-        );
-
-        assert!(rows[0].text.contains("88 older events retained"));
-        assert!(!rows.iter().any(|row| row.text.contains("event-087")));
-        assert!(rows.iter().any(|row| row.text.contains("event-599")));
     }
 }

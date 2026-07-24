@@ -8,7 +8,6 @@ use std::path::Path;
 #[serde(rename_all = "snake_case")]
 pub enum RunProjectionSource {
     TypedV1,
-    Legacy,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,11 +28,8 @@ pub struct RunProjectionRead {
 pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<RunItemRead>> {
     let target = target.as_ref();
     let run_id = RunId::parse(run_id)?;
-    let path = crate::run_artifacts::checked_run_artifact_path(
-        target,
-        run_id.as_str(),
-        "items.jsonl",
-    )?;
+    let path =
+        crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
     let Some(reader) = open_stream(target, &path)? else {
         return Ok(None);
     };
@@ -46,7 +42,7 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
     let path =
         crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
     let Some(reader) = open_stream(target, &path)? else {
-        return legacy_projection(run_id.as_str());
+        anyhow::bail!("typed lifecycle is missing for run {}", run_id.as_str())
     };
     let mut projection = RunProjection {
         run_id: Some(run_id.clone()),
@@ -66,8 +62,7 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
 }
 
 fn open_stream(root: &Path, path: &Path) -> Result<Option<RunItemStreamReader>> {
-    RunItemStreamReader::open_within(root, path)
-        .with_context(|| format!("open {}", path.display()))
+    RunItemStreamReader::open_within(root, path).with_context(|| format!("open {}", path.display()))
 }
 
 fn reduce_lines(mut reader: RunItemStreamReader, projection: &mut RunProjection) {
@@ -119,20 +114,4 @@ fn read_lines(mut reader: RunItemStreamReader) -> RunItemRead {
 fn next_item(reader: &mut RunItemStreamReader) -> Result<Option<RunItemEnvelopeV1>, String> {
     let record = reader.next_record().map_err(|error| error.to_string())?;
     record.map(parse_record).transpose()
-}
-
-fn legacy_projection(run_id: &str) -> Result<RunProjectionRead> {
-    super::super::record_legacy_fallback();
-    let mut projection = RunProjection {
-        run_id: Some(RunId::parse(run_id)?),
-        health: ProjectionHealth::LegacyLossy,
-        ..RunProjection::default()
-    };
-    projection.degrade("typed run items are unavailable for this legacy run");
-    projection.health = ProjectionHealth::LegacyLossy;
-    Ok(RunProjectionRead {
-        projection,
-        source: RunProjectionSource::Legacy,
-        presentation_hydration: super::super::application::RunPresentationHydrationV1::default(),
-    })
 }

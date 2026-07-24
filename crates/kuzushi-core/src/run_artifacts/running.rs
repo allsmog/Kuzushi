@@ -55,7 +55,7 @@ pub struct RunTargetGitMetadata {
     pub dirty: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunSummary {
     pub run_id: String,
@@ -123,7 +123,7 @@ pub struct RunSummary {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub llm_calls: Vec<RunLlmCallAudit>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub trace_malformed_lines: Option<usize>,
+    pub lifecycle_malformed_items: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cli_args: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -158,21 +158,8 @@ impl RunSummary {
             prompt_spine_version: Some(crate::prompts::PROMPT_SPINE_VERSION.to_string()),
             git_sha: build_git_sha(),
             git_branch: build_git_branch(),
-            model: None,
-            config_hash: None,
             platform: Some(runtime_platform()),
-            house_rules: Vec::new(),
-            prompt_overrides: Vec::new(),
-            threat_model_sha256: None,
-            threat_model_source: None,
-            threat_model_resolved_via: None,
-            env_fingerprint: Vec::new(),
-            target_git: None,
-            llm_calls: Vec::new(),
-            trace_malformed_lines: None,
-            cli_args: Vec::new(),
-            loaded_modules: Vec::new(),
-            artifacts: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -187,6 +174,14 @@ impl RunSummary {
         self.status = "failed".to_string();
         self.completed_at_unix = Some(now_unix());
         self.error = Some(error.into());
+        self.process_id = None;
+        self
+    }
+
+    pub fn blocked(mut self, reason: impl Into<String>) -> Self {
+        self.status = "blocked".to_string();
+        self.completed_at_unix = Some(now_unix());
+        self.error = Some(reason.into());
         self.process_id = None;
         self
     }
@@ -303,7 +298,7 @@ impl RunSummary {
         self.target_git = source.target_git.clone();
         self.cli_args = source.cli_args.clone();
         self.loaded_modules = source.loaded_modules.clone();
-        self.trace_malformed_lines = source.trace_malformed_lines;
+        self.lifecycle_malformed_items = source.lifecycle_malformed_items;
         self.terminal_result_sha256 = source
             .terminal_result_sha256
             .clone()
@@ -332,8 +327,8 @@ impl RunSummary {
         self
     }
 
-    pub fn with_trace_malformed_lines(mut self, malformed_lines: Option<usize>) -> Self {
-        self.trace_malformed_lines = malformed_lines.filter(|count| *count > 0);
+    pub fn with_lifecycle_malformed_items(mut self, malformed_items: Option<usize>) -> Self {
+        self.lifecycle_malformed_items = malformed_items.filter(|count| *count > 0);
         self
     }
 
@@ -434,43 +429,4 @@ const fn is_false(value: &bool) -> bool {
 
 fn runtime_platform() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
-}
-
-// schema v2: adds module/feed metadata and optional LLM audit fields. All new
-// fields are optional so older trace.jsonl files round-trip without rewrites.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
-pub struct RunTraceStep {
-    pub n: usize,
-    pub kind: String,
-    pub label: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latency_ms: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub observed_cost_usd: Option<f64>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub provider_spend_unresolved: bool,
-    /// Explicit invocation evidence for new trace producers. `None` preserves
-    /// compatibility with schema-v2 rows whose terminal-call status must be
-    /// recovered from the legacy metadata shape.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub call_attempted: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub module_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verb: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_step: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub severity: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub started_at_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_hash: Option<String>,
 }

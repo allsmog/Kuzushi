@@ -127,7 +127,7 @@ fn terminal(label: &'static str, tone: ActivityHeartbeatTone) -> TerminalHeartbe
 fn current_subject(session: &ActivitySession, running_tool: Option<&str>) -> String {
     running_tool
         .map(str::to_string)
-        .or_else(|| active_task(session).map(|task| task.task_id.clone()))
+        .or_else(|| active_task(session).map(|task| task.operator_name().to_string()))
         .unwrap_or_else(|| "run finalization".to_string())
 }
 
@@ -146,11 +146,18 @@ pub(crate) fn open_query_in_flight(session: &ActivitySession, now: Instant) -> O
 }
 
 fn progress_signal(session: &ActivitySession, now: Instant) -> (Duration, String) {
-    let (observed_at, label) = session
-        .events
-        .back()
-        .map(|event| (event.observed_at, event.step.label.clone()))
-        .unwrap_or((session.started_at, "run started".to_string()));
+    let observed_at = session.last_run_item_at().unwrap_or(session.started_at);
+    let presentation = kuzushi_core::run_lifecycle::present_projection_with_hydration_and_health(
+        &session.run_projection,
+        kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1,
+        &session.run_presentation_hydration,
+        session.effective_run_lifecycle_health(),
+    );
+    let label = presentation
+        .timeline_text_rows()
+        .last()
+        .map(|row| row.text.clone())
+        .unwrap_or_else(|| "run started".to_string());
     (
         now.checked_duration_since(observed_at).unwrap_or_default(),
         label,
@@ -168,17 +175,31 @@ fn age_label(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RecordedTraceEvent;
-    use kuzushi_core::{RunTraceStep, WorkflowPhase};
+    use kuzushi_core::WorkflowPhase;
 
     #[test]
     fn stale_live_activity_names_the_current_tool_and_last_real_signal() {
         let now = Instant::now();
         let mut session = ActivitySession::for_phase("context-run", WorkflowPhase::Map);
-        session.events.push_back(RecordedTraceEvent {
-            step: RunTraceStep::new(1, "tool-progress", "building repository inventory"),
-            observed_at: now - Duration::from_secs(45),
-        });
+        session
+            .apply_run_item(
+                kuzushi_core::run_lifecycle::RunItemEnvelopeV1::new(
+                    1,
+                    kuzushi_core::run_lifecycle::RunId::parse("context-run").unwrap(),
+                    kuzushi_core::run_lifecycle::RunItemId::new(),
+                    kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+                    kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+                        level: kuzushi_core::run_lifecycle::DiagnosticLevel::Info,
+                        message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                            "Building repository inventory",
+                        ),
+                    },
+                    None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        session.set_last_run_item_at_for_test(now - Duration::from_secs(45));
 
         let model = activity_heartbeat_model(&session, Some("context:build"), true, None, now);
 
@@ -194,7 +215,7 @@ mod tests {
             model.text
         );
         assert!(
-            model.text.contains("building repository inventory"),
+            model.text.contains("Building repository inventory"),
             "{}",
             model.text
         );
@@ -205,9 +226,26 @@ mod tests {
     #[test]
     fn open_model_call_reports_query_in_flight_instead_of_a_false_stall() {
         let mut session = ActivitySession::for_phase("model-run", WorkflowPhase::Scan);
-        let mut start = RunTraceStep::new(1, "tool-progress", "threat-model synthesis");
-        start.model = Some("anthropic:claude".to_string());
-        session.apply_step(start);
+        use kuzushi_core::run_lifecycle::{
+            OperationFingerprint, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
+            RunItemV1, SafeText,
+        };
+        let start = RunItemEnvelopeV1::new(
+            1,
+            RunId::parse("model-run").unwrap(),
+            RunItemId::new(),
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallStarted {
+                provider: SafeText::operator_visible("anthropic"),
+                model: SafeText::operator_visible("claude"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"threat-model synthesis"),
+            },
+            None,
+        )
+        .unwrap()
+        .with_call(RunCallId::new())
+        .unwrap();
+        session.apply_run_item(start).unwrap();
 
         let stale_probe = Instant::now() + Duration::from_secs(45);
         let model = activity_heartbeat_model(

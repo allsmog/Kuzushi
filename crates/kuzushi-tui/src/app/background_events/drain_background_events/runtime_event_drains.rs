@@ -68,8 +68,6 @@ impl ShellApp {
             }
             outcome.time_slice_exhausted = inspected + 1 == JOB_DRAIN_LIMIT;
         }
-        let dropped = self.jobs().take_dropped_live_trace_count();
-        outcome.changed |= self.report_dropped_live_trace(dropped);
         outcome
     }
 
@@ -405,7 +403,6 @@ impl ShellApp {
 
     fn apply_current_job_event(&mut self, event: ShellEvent) -> Vec<ShellEffect> {
         match event {
-            ShellEvent::Trace(step) => self.apply_trace_event(step),
             ShellEvent::RunItem(item) => self.apply_committed_run_item(item),
             ShellEvent::RunItemsDurable { run_id, range } => {
                 self.apply_run_item_high_watermark(run_id, range)
@@ -442,11 +439,6 @@ impl ShellApp {
                 Vec::new()
             }
         }
-    }
-
-    fn apply_trace_event(&mut self, step: kuzushi_core::RunTraceStep) -> Vec<ShellEffect> {
-        self.apply_trace_step(step);
-        Vec::new()
     }
 
     fn apply_committed_run_item(
@@ -543,8 +535,7 @@ impl ShellApp {
 
     fn job_event_finishes_slot(&self, event: &ShellEvent) -> bool {
         match event {
-            ShellEvent::Trace(_)
-            | ShellEvent::RunItem(_)
+            ShellEvent::RunItem(_)
             | ShellEvent::RunItemsDurable { .. }
             | ShellEvent::RunItemsDerivativesApplied { .. }
             | ShellEvent::RunItemsFault { .. }
@@ -708,46 +699,6 @@ impl ShellApp {
                 answer: None,
             },
         );
-    }
-
-    fn apply_trace_step(&mut self, step: RunTraceStep) {
-        let (run_id, cost, error) = {
-            let session =
-                self.activity_or_insert_with(|| ActivitySession::new(default_activity_run_id()));
-            let cost = session.apply_step_with_cost(step);
-            let error = session
-                .runtime_cost_report()
-                .err()
-                .map(|error| error.to_string());
-            (session.run_id.clone(), cost, error)
-        };
-        if let Some(error) = error {
-            self.report_cost_accounting_error(error);
-        } else if let Some(cost) = cost {
-            self.observe_run_cost_report(&run_id, cost);
-        }
-    }
-
-    fn report_dropped_live_trace(&mut self, dropped: usize) -> bool {
-        if dropped == 0 {
-            return false;
-        }
-        self.log(
-            "activity",
-            format!("dropped {dropped} live trace UI frame(s); trace.jsonl remains authoritative"),
-        );
-        let Some(run_id) = self.activity().map(|activity| activity.run_id.clone()) else {
-            return true;
-        };
-        if !self.session().run_may_call_provider(&run_id) {
-            return true;
-        }
-        self.mark_run_cost_incomplete(&run_id);
-        self.log(
-            "cost",
-            format!("{dropped} live trace frame(s) dropped; run cost is incomplete until terminal reconciliation"),
-        );
-        true
     }
 
     fn clear_finished_job(&mut self, kind: JobKind) {
@@ -1345,8 +1296,7 @@ fn run_focus_event_outcome(event: &ShellEvent) -> String {
         | ShellEvent::Threat(ThreatPatchEvent::Proposed { .. } | ThreatPatchEvent::Answer { .. }) => {
             "completed"
         }
-        ShellEvent::Trace(_)
-        | ShellEvent::RunItem(_)
+        ShellEvent::RunItem(_)
         | ShellEvent::RunItemsDurable { .. }
         | ShellEvent::RunItemsDerivativesApplied { .. }
         | ShellEvent::RunItemsFault { .. }
@@ -1536,7 +1486,7 @@ mod run_focus_completion_tests {
         };
         let mut session = completed_live_session("run-derivative-only");
         session.record_run_item_delivery_fault(RunItemDeliveryFault {
-            stage: RunItemDeliveryFailureStage::CompatibilityProjection,
+            stage: RunItemDeliveryFailureStage::StorageProjection,
             applied_seq: 0,
             durable_seq: 1,
             detail: SafeText::operator_visible("compatibility projection failed"),

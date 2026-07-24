@@ -150,7 +150,7 @@ SIGKILL-at-any-write-point enumeration:
 | `events.jsonl` (campaign) | Torn tail possible (plain append). | History-only artifact; no reader folds it into state. |
 | `plan.json` | Never torn: `write_json_atomic`, and it is written **after** per-job scope/prompt materialization, so a mid-plan kill leaves no committed plan pointing at half-materialized files. | Re-run `campaign:plan`. |
 | `done.json` | Staged `.done.json.tmp` + rename; requires the run dir to exist; written last. | Missing `done.json` = non-terminal; `jobs` renders disk `running` rows without a live twin as Stale. |
-| `trace.jsonl` | Torn tail possible. | All folds are torn-tail tolerant (budget guard tested; settlement path skips unparsable tails). |
+| `items.jsonl` | Torn tail possible. | The live budget fold is torn-tail tolerant; strict settlement reads the last valid lifecycle prefix. |
 | v3 event-log segments | **Was a store-bricker** (fixed, below). | — |
 | Ledger import | **Left partial rows under a dead run** (fixed, below). | — |
 
@@ -191,11 +191,10 @@ SIGKILL-at-any-write-point enumeration:
 
 ## Item 5 — Cost accounting and budget guards
 
-Audited every model-cost read/sum: `trace.jsonl` folds (`budget.rs`
-`live_run_spend_usd` and settlement-time `trace_cost.rs` — both parse the
-typed `RunTraceStep`, so the snake_case `cost_usd` schema is enforced by
-serde and a camelCase-misread-$0 fold is structurally impossible),
-`summary.json` (settle prefers `summary.cost_usd`, else the live trace —
+Audited every model-cost read/sum: `items.jsonl` folds (`budget.rs`
+`live_run_spend_usd` and settlement-time `lifecycle_cost.rs` — both parse
+typed `RunItemV1::ModelCallFinished` costs, so incomplete provider spend
+remains explicit), `summary.json` (settle prefers `summary.cost_usd`, else the typed lifecycle —
 never both), the campaign snapshot/trend/ci folds (single source:
 `queue.json` `costUsd`, camelCase per that document's serde contract), the
 run-summary LLM call ledger (invariant: `cost_usd` XOR `observed_cost_usd`
@@ -256,7 +255,7 @@ Root cause: the notify watcher recursively watches the target root including
 `.kuzushi/v3/`, and `runtime_state_path` classified **everything** under it
 as a state-artifact event. A headless scan writing into the same workspace
 generates one fsync'd event-log segment append, WAL touches, content-store
-blob writes, and live `trace.jsonl` appends *per observation* — each one
+blob writes, and live `items.jsonl` appends *per lifecycle item* — each one
 woke the shell (the wake itself is coalesced, but every drain re-armed the
 debounce and refreshed every ~150 ms for the whole scan, pinning a core).
 Source-change classification already ignored `.kuzushi` and the TUI already
@@ -353,7 +352,7 @@ Scenario walkthroughs (artifacts only):
    line with run id and live spend; events.jsonl records the `over-budget`
    transition (tsMs, jobId, runId, exitCode:null, park reason); the child's
    stdout+stderr are durable in `campaigns/<id>/logs/<runId>.log`; the run's
-   `trace.jsonl` (torn-tail tolerant) shows spend up to the kill; no
+   `items.jsonl` (torn-tail tolerant) shows spend up to the kill; no
    `done.json` = honestly non-terminal. Fully reconstructable.
 2. **Dispatcher SIGKILLed mid-campaign.** events.jsonl ends without
    `dispatch-end`; rows stay `running`; job children die with the guard
@@ -362,7 +361,7 @@ Scenario walkthroughs (artifacts only):
    appends a `recovered-stale-running` event per row with the orphaned run
    id, so the timeline explains itself. Test:
    `dead_dispatcher_recovery_is_recorded_in_the_event_log`.
-3. **Run died before done.json.** Run dir holds run.json/trace.jsonl; the
+3. **Run died before done.json.** Run dir holds run.json/items.jsonl; the
    jobs registry renders the disk `running` row as Stale ("running?"); the
    queue recovery event (above) closes the loop for campaign-owned runs.
 
@@ -371,7 +370,7 @@ queue.json rows, every events.jsonl transition detail, the per-attempt log
 filename, and the `.kuzushi/v3/runs/<runId>/` artifact dir — grep-by-run-id
 works across all files. Child stderr is durable (piped to the attempt log,
 never terminal-only). Timestamps: epoch-ms UTC (`tsMs`) in events.jsonl,
-`started_at_ms` in trace steps, ISO-UTC in the bridge debug log; monotonic
+`occurredAtMs` in lifecycle items, ISO-UTC in the bridge debug log; monotonic
 within a file up to wall-clock steps (no monotonic-clock field — accepted).
 
 ## Item L2 — Sensitive content in logs
@@ -379,10 +378,10 @@ within a file up to wall-clock steps (no monotonic-clock field — accepted).
 Findings (mostly already-correct designs, now documented as policy in
 OPERATOR.md §8.1):
 
-- **trace.jsonl does NOT persist prompts/completions** — `TracedRuntime`
-  records model/provider/latency/cost plus `prompt_len` and `prompt_hash`
-  only. Verified in `runtime/traced_runtime.rs` and the `RunTraceStep`
-  schema.
+- **`items.jsonl` does NOT persist prompts/completions** — `TracedRuntime`
+  records bounded model/provider/latency/usage/cost telemetry plus an
+  operation fingerprint only. Verified in `runtime/traced_runtime.rs` and
+  the `RunItemV1` schema.
 - **`.kuzushi/` is proof-excluded from the target's git**, not merely
   gitignored: init runs `git check-ignore` probes over generated state
   paths (runs, log, objects, sqlite, worktrees) and fails loudly if any is
@@ -410,7 +409,7 @@ Append-only inventory and bounds:
 | `~/.kuzushi/bridge-debug.log` | **Was unbounded — fixed:** one-generation rotation at 5 MB in the bridge. |
 | `dispatcher.log` | Truncated on every launch (`File::create`). Pre-existing. |
 | per-attempt `<runId>.log` | Fresh file per dispatch; size bounded by the job timeout; count bounded by the never-reset dispatch counter. |
-| `trace.jsonl` | Bounded by run lifetime; `runs prune` handles retention. |
+| `items.jsonl` | Bounded by coalescing and run lifetime; `runs prune` handles retention. |
 | `trend-history.jsonl` | 90-snapshot window (the reference behavior). |
 
 Error-swallowing sweep over the store/sentinel/watcher paths: every
@@ -447,13 +446,13 @@ term that grew with history size, and the plan test pins it).
 ## Item P4 — Re-parse and polling economics
 
 - **Budget-guard poll (fixed — the confirmed O(n²)).** `live_run_spend_usd`
-  re-read and re-parsed the entire trace.jsonl every 2 s, so a long job's
+  re-read and re-parsed the entire items.jsonl every 2 s, so a long job's
   cumulative polling cost was quadratic. The dispatcher now uses
   `LiveSpendPoller`: it remembers the byte offset of the last complete
   line, folds only appended tails, defers newline-less torn tails until
   their newline lands, and reports the last known total on read errors.
-  Test: `incremental_poll_over_100k_line_trace_reads_only_the_tail` —
-  a 100k-line (4-hour-scale) trace folds once, then steady-state polls
+  Test: `incremental_poll_over_100k_lifecycle_reads_only_the_tail` —
+  a 100k-line (4-hour-scale) lifecycle folds once, then steady-state polls
   are asserted under 5 ms each and torn appends defer/fold correctly.
   The settlement-time fallback still uses the strict full fold (runs once).
 - **Deck/status re-reads: justified as cheap.** `campaign:status` and the

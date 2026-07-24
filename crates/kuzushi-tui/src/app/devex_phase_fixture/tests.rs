@@ -100,7 +100,7 @@ fn shared_reference_seed_populates_every_phase_projection() {
         .is_some());
     assert_eq!(app.domain().exploit_chains().len(), 1);
     assert!(app.engagement.pending_patch().is_some());
-    assert_eq!(app.activity().expect("activity").events.len(), 10);
+    assert_eq!(app.activity().expect("activity").event_count(), 10);
     assert_eq!(app.session().session_budget_usd(), Some(2.0));
     let journey = crate::ui_view_models::journey_model(&app).expect("fixture journey");
     assert!(journey.progress.map_artifacts_built);
@@ -122,7 +122,7 @@ fn reference_seed_invalidates_missing_dfd_and_replay_cache_entries() {
         app.workbench_cache().borrow_mut().run_artifact_text(
             target.path(),
             "verify-phase-run",
-            "trace.jsonl"
+            "items.jsonl"
         ),
         kuzushi_core::RunArtifactRead::Missing { .. }
     ));
@@ -135,7 +135,7 @@ fn reference_seed_invalidates_missing_dfd_and_replay_cache_entries() {
         app.workbench_cache().borrow_mut().run_artifact_text(
             target.path(),
             "verify-phase-run",
-            "trace.jsonl"
+            "items.jsonl"
         ),
         kuzushi_core::RunArtifactRead::Ready { .. }
     ));

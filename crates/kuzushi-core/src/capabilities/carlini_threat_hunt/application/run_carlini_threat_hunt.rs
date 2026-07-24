@@ -19,7 +19,7 @@ pub fn run_carlini_threat_hunt_report(
 
 struct CarliniThreatHuntRun<'a> {
     target: PathBuf,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     debug_artifacts: Option<CarliniDebugArtifacts>,
     options: CarliniInput,
     runtime: &'a dyn AgentRuntime,
@@ -37,7 +37,7 @@ pub(crate) struct CarliniDebugArtifacts {
 
 struct CarliniThreatHuntScope {
     target: PathBuf,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     actors: ActorsResult,
     threat_model_warning: Option<String>,
 }
@@ -56,7 +56,11 @@ fn prepare_carlini_threat_hunt_run<'a>(
     let scope = prepare_carlini_threat_hunt_scope(input, ctx)?;
     let execution = prepare_carlini_execution_inputs(input, ctx, runtime, &scope.target)?;
     let capped = capped_actor_hunts(scope.actors, execution.options.max_actors);
-    emit_carlini_progress(ctx, scope.parent_step, "inventory · collect actor-focused snippets");
+    emit_carlini_progress(
+        ctx,
+        scope.parent_step,
+        "inventory · collect actor-focused snippets",
+    );
     let inventory = collect_carlini_inventory(&scope.target, &capped)?;
     emit_carlini_progress(
         ctx,
@@ -275,8 +279,7 @@ fn resolve_carlini_actor_hunts(
     ensure_carlini_actor_inputs(&document, target, &actors, ctx)?;
     // Consumption honesty: a stale or verification-failed threat model still
     // grounds the hunt, but every actor prompt leads with the warning.
-    let warning =
-        crate::capabilities::threat_model::verification_warning(&document, target);
+    let warning = crate::capabilities::threat_model::verification_warning(&document, target);
     Ok((actors, warning))
 }
 
@@ -329,7 +332,10 @@ fn execute_carlini_threat_hunt_run(
     )
 }
 
-fn emit_carlini_start_step(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+fn emit_carlini_start_step(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -422,7 +428,7 @@ fn emit_carlini_refusal(ctx: &ToolExecutionContext<'_>, label: &str) {
 
 fn emit_carlini_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -437,7 +443,7 @@ fn emit_carlini_progress(
 
 fn emit_carlini_actor_spawn(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     actor_count: usize,
     runs_per_actor: usize,
 ) {
@@ -461,7 +467,7 @@ fn carlini_actor_run_count(actor_count: usize, runs_per_actor: usize) -> usize {
 
 fn begin_carlini_actor_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     actor_count: usize,
     total_runs: usize,
 ) -> Option<crate::run_artifacts::ParentScope> {

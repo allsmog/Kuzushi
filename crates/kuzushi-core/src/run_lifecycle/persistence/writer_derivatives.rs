@@ -206,34 +206,13 @@ pub(super) fn deliver_committed_derivatives(
     applied_seq: u64,
 ) -> Vec<RunItemDeliveryFault> {
     let durable_seq = items.last().map_or(applied_seq, |item| item.seq);
-    let mut faults = compatibility_faults(target, run_id, items, applied_seq, durable_seq);
-    faults.extend(bridge_terminal_items(
+    bridge_terminal_items(
         target,
         run_id,
         items,
         applied_seq,
         durable_seq,
-    ));
-    faults
-}
-
-fn compatibility_faults(
-    target: &Path,
-    run_id: &str,
-    items: &[RunItemEnvelopeV1],
-    applied_seq: u64,
-    durable_seq: u64,
-) -> Vec<RunItemDeliveryFault> {
-    let Err(error) = crate::run_artifacts::append_compat_run_item_events(target, run_id, items)
-    else {
-        return Vec::new();
-    };
-    vec![RunItemDeliveryFault::new(
-        RunItemDeliveryFailureStage::CompatibilityProjection,
-        applied_seq,
-        durable_seq,
-        format!("compatibility event projection failed: {error}"),
-    )]
+    )
 }
 
 fn bridge_terminal_items(

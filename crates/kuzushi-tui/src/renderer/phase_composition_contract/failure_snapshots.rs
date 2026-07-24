@@ -15,8 +15,7 @@
 use super::contract::TerminalProfile;
 use super::*;
 use kuzushi_core::workflow_attempts::{
-    append_phase_attempt_completed, phase_attempt_ledger_path, PhaseAttemptCompleted,
-    PhaseAttemptOutcome, PhaseTargetSnapshot,
+    phase_attempt_ledger_path, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
 };
 use kuzushi_core::{V2Config, WorkflowPhase, WorkspaceTarget};
 use std::fs;
@@ -147,10 +146,12 @@ impl FailureFixture {
 }
 
 fn persist_scenario_attempt(scenario: &FailureScenario, target: &Path) -> String {
-    let attempt_id = format!("attempt-{}", scenario.slug);
+    let run_id = format!("run-{}", scenario.slug);
+    persist_scenario_lifecycle(target, &run_id, scenario.outcome);
+    let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new().to_string();
     let mut completed = PhaseAttemptCompleted::new(
         scenario.phase,
-        vec![format!("run-{}", scenario.slug)],
+        vec![run_id],
         PhaseTargetSnapshot::capture(target),
         scenario.outcome,
     )
@@ -158,11 +159,59 @@ fn persist_scenario_attempt(scenario: &FailureScenario, target: &Path) -> String
     if let Some(reason) = scenario.blocked_reason {
         completed = completed.with_selection_blocked(reason);
     }
-    append_phase_attempt_completed(target, completed).expect("persist failure attempt");
+    kuzushi_core::workflow_attempts::append_phase_attempt_completed_with_v2(target, completed)
+        .expect("persist typed failure attempt");
     if scenario.corrupt_ledger {
         corrupt_ledger_tail(target);
     }
     attempt_id
+}
+
+fn persist_scenario_lifecycle(target: &Path, run_id: &str, outcome: PhaseAttemptOutcome) {
+    use kuzushi_core::run_lifecycle::*;
+    let status = scenario_status(outcome);
+    let mut summary = kuzushi_core::RunSummary::running(
+        run_id,
+        "fixture",
+        Some("fixture:failure".to_string()),
+        target.display().to_string(),
+    );
+    summary.status = status.label().to_string();
+    summary.completed_at_unix = Some(summary.started_at_unix);
+    kuzushi_core::write_run_summary(target, &summary).unwrap();
+    let observation = RunObservationHandle::jsonl(target, run_id).expect("failure observation");
+    let mut plan = observation
+        .start_plan("Failure scenario", ["Execute scenario".to_string()])
+        .expect("failure plan");
+    let task = plan.tasks()[0].clone();
+    plan.update_and_flush(RunItemStatus::Running).unwrap();
+    task.update_and_flush(RunItemStatus::Running, None).unwrap();
+    task.update_and_flush(status, None).unwrap();
+    plan.update_and_flush(status).unwrap();
+    observation
+        .emit_and_flush(RunItemRecord::new(
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TerminalOutcome {
+                status,
+                summary: SafeText::operator_visible(format!("scenario {}", status.label())),
+                cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("inspect the scenario result"),
+                },
+            },
+        ))
+        .unwrap();
+}
+
+fn scenario_status(outcome: PhaseAttemptOutcome) -> kuzushi_core::run_lifecycle::RunItemStatus {
+    use kuzushi_core::run_lifecycle::RunItemStatus;
+    match outcome {
+        PhaseAttemptOutcome::Completed => RunItemStatus::Completed,
+        PhaseAttemptOutcome::Partial => RunItemStatus::Partial,
+        PhaseAttemptOutcome::Failed => RunItemStatus::Failed,
+        PhaseAttemptOutcome::Canceled => RunItemStatus::Canceled,
+    }
 }
 
 /// Appends one malformed event line so recovery keeps the valid prefix

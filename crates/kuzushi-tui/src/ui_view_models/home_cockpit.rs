@@ -16,8 +16,7 @@ use kuzushi_core::{
 };
 use std::path::{Path, PathBuf};
 
-const HOME_TIMELINE_ARTIFACTS: [&str; 4] =
-    ["run.json", "items.jsonl", "events.jsonl", "trace.jsonl"];
+const HOME_TIMELINE_ARTIFACTS: [&str; 3] = ["run.json", "items.jsonl", "events.jsonl"];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
 const HOME_TOP_RISK_LIMIT: usize = 3;
 const HOME_COMMANDS: [&str; 6] = [

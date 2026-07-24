@@ -91,12 +91,6 @@ pub(crate) enum DirectoryListingState {
     Unreadable,
 }
 
-#[derive(Debug, Clone)]
-pub(crate) enum RunTraceCacheState {
-    Ready(kuzushi_core::RunTraceRead),
-    Invalid,
-}
-
 #[derive(Debug)]
 pub(super) struct RunProjectionCache {
     pub(super) state: Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
@@ -218,12 +212,6 @@ pub(super) struct PathStateCache {
 #[derive(Debug)]
 pub(super) struct DirectoryListingCache {
     pub(super) state: DirectoryListingState,
-}
-
-#[derive(Debug)]
-pub(super) struct RunTraceCache {
-    pub(super) state: RunTraceCacheState,
-    pub(super) bytes: usize,
 }
 
 #[derive(Debug)]

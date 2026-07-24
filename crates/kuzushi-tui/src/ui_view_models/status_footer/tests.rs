@@ -211,9 +211,9 @@ fn status_footer_model_prefers_active_scan_status() {
         model.left_segments,
         [
             "run route",
+            "running: semgrep",
             "capabilities",
             "openai:gpt-5.2",
-            "running: semgrep"
         ]
     );
 }
@@ -231,9 +231,9 @@ fn status_footer_model_reflects_active_tool_model_override() {
         model.left_segments,
         [
             "run route",
+            "triage:run: active",
             "capabilities",
             "openai:gpt-tool (tool)",
-            "triage:run: active"
         ]
     );
 }

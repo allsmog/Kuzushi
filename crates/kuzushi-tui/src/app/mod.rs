@@ -106,8 +106,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::modules::ModuleKind;
 use kuzushi_core::{
     AgenticSastReport, CarliniThreatHuntReport, ExecutionAuthorization, Finding, ModuleRegistry,
-    PreparedToolInput, RunTraceStep, ScanCancellation, ScanProgress, ToolOptionStore, V2Config,
-    WorkspaceTarget,
+    PreparedToolInput, ScanCancellation, ScanProgress, ToolOptionStore, V2Config, WorkspaceTarget,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -209,9 +208,8 @@ pub use view_state::{
     InterruptionView, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter,
     OptionsScreenFooter, OptionsScreenSnapshot, OptionsScreenStatus, OptionsView, PaneFocus,
     PlanChange, PlanProposal, PromptDocumentMode, PromptDocumentState, PromptsAction, PwnView,
-    ReconSnapshot, RecordedTraceEvent, SastTasksFooter, SastTasksSnapshot, SastTasksStatus,
-    ScanPanelState, SetupEditor, SetupRouteState, SetupRowId, ShellView, SubsystemAggregate,
-    ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchSurfaceScroll,
-    WorkspaceView,
+    ReconSnapshot, SastTasksFooter, SastTasksSnapshot, SastTasksStatus, ScanPanelState,
+    SetupEditor, SetupRouteState, SetupRowId, ShellView, SubsystemAggregate, ThreatPatch,
+    ThreatView, ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchSurfaceScroll, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

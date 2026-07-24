@@ -137,7 +137,7 @@ fn run_trace_exists(app: &ShellApp, run_id: &str) -> bool {
     matches!(
         app.workbench_cache()
             .borrow()
-            .cached_run_artifact_text(target, run_id, "trace.jsonl"),
+            .cached_run_artifact_text(target, run_id, "items.jsonl"),
         ViewDataState::Ready(RunArtifactRead::Ready { value, .. }) if !value.is_empty()
     )
 }

@@ -313,27 +313,6 @@ fn typed_artifact_without_a_known_terminal_call_degrades() {
 }
 
 #[test]
-fn explicit_legacy_reconstruction_may_retain_an_uncorrelated_artifact() {
-    let artifact_id = RunItemId::new();
-    let artifact = RunItemEnvelopeV1::new(
-        1,
-        run_id(),
-        artifact_id,
-        RunItemSource::LegacyReconstruction,
-        RunItemV1::ArtifactProduced {
-            artifact: artifact_reference(RunItemId::new()),
-        },
-        None,
-    )
-    .unwrap();
-
-    let projection = reduce_run_items([artifact]);
-
-    assert_eq!(projection.health, ProjectionHealth::Healthy);
-    assert!(projection.artifacts.contains_key(&artifact_id));
-}
-
-#[test]
 fn artifact_cannot_retroactively_become_a_rejected_calls_result() {
     let item_id = RunItemId::new();
     let call_id = RunCallId::new();
@@ -368,7 +347,9 @@ fn artifact_cannot_retroactively_become_a_rejected_calls_result() {
             artifact: artifact_reference(item_id),
         },
         Some(&rejected),
-    );
+    )
+    .with_call(call_id)
+    .unwrap();
     let projection = reduce_run_items([requested, rejected, result]);
 
     assert!(matches!(
@@ -377,7 +358,7 @@ fn artifact_cannot_retroactively_become_a_rejected_calls_result() {
             if reason.contains("result artifact was not linked by call settlement")
     ));
     let call = &projection.calls[&call_id];
-    assert_eq!(call.status, RunItemStatus::Failed);
+    assert_eq!(call.status, RunItemStatus::Blocked);
     assert!(call.result_artifact.is_none());
     assert!(call.related_artifact_ids.is_empty());
     assert!(!projection.artifacts.contains_key(&result_id));
@@ -423,7 +404,9 @@ fn deferred_pre_start_failure_may_settle_with_its_exact_result_artifact() {
             artifact: result.clone(),
         },
         Some(&finished),
-    );
+    )
+    .with_call(call_id)
+    .unwrap();
 
     let projection = reduce_run_items([requested, finished, produced]);
 
@@ -1113,11 +1096,11 @@ fn preparation_rejection_preserves_identity_without_raw_option_values() {
             .terminal
             .as_ref()
             .map(|terminal| terminal.status),
-        Some(RunItemStatus::Failed)
+        Some(RunItemStatus::Blocked)
     );
     assert_eq!(
         read.projection.plan.as_ref().map(|plan| plan.status),
-        Some(RunItemStatus::Failed)
+        Some(RunItemStatus::Blocked)
     );
     assert_eq!(
         read.projection
@@ -1125,7 +1108,7 @@ fn preparation_rejection_preserves_identity_without_raw_option_values() {
             .values()
             .next()
             .map(|call| call.status),
-        Some(RunItemStatus::Failed)
+        Some(RunItemStatus::Blocked)
     );
     let stream = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
         target.path(),
@@ -1338,6 +1321,20 @@ fn coalescing_discloses_all_omitted_progress_before_terminal_delivery() {
         read.items.last().map(|item| &item.item),
         Some(RunItemV1::TerminalOutcome { .. })
     ));
+}
+
+#[test]
+fn exact_progress_requires_a_truthful_completed_total_pair() {
+    let progress = |completed, total| RunItemV1::ToolCallProgress {
+        message: SafeText::operator_visible("Indexing repository files"),
+        completed,
+        total,
+    };
+
+    assert!(RunItemPersistencePolicy::validate(&progress(None, None)).is_ok());
+    assert!(RunItemPersistencePolicy::validate(&progress(Some(421), Some(832))).is_ok());
+    assert!(RunItemPersistencePolicy::validate(&progress(Some(421), None)).is_err());
+    assert!(RunItemPersistencePolicy::validate(&progress(Some(833), Some(832))).is_err());
 }
 
 #[test]

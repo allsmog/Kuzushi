@@ -257,8 +257,8 @@ pub(crate) use pwn::{
 };
 pub(crate) use quit_confirm::{quit_confirm_model, QuitConfirmModel};
 pub(crate) use recent_module_activity::{
-    recent_module_activity_model, recon_snapshot_activity_model, ModuleActivityKind,
-    ModuleActivityModel, ModuleActivityRow, ModuleActivityTone,
+    recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
+    ModuleActivityTone,
 };
 pub(crate) use recommendation::{
     recommendation_artifact_needs_refresh, recommendation_components, recommendation_model,

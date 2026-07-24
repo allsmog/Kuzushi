@@ -157,7 +157,7 @@ impl ShellApp {
         let message = message.into();
         self.log("threats", message.clone());
         self.set_live_activity(LiveActivity::new(
-            LiveActivityPhase::Thinking,
+            LiveActivityPhase::CallingModel,
             "threat model",
             message,
         ));

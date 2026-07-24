@@ -19,7 +19,7 @@ pub fn run_systems_hunt_report(
 
 struct SystemsHuntRun<'a> {
     target: PathBuf,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     options: SystemsHuntInput,
     context: SystemsContextOutput,
     runtime: &'a dyn AgentRuntime,
@@ -151,7 +151,7 @@ fn query_systems_hunt_with_scope(
 
 fn begin_systems_hunt_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;
@@ -200,7 +200,7 @@ fn apply_systems_hunt_whitebox_profile(
     Ok(())
 }
 
-fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -214,7 +214,7 @@ fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Opt
 
 fn emit_systems_hunt_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -252,7 +252,7 @@ fn emit_systems_hunt_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) 
 
 fn emit_selected_systems_surfaces(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     context: &SystemsContextOutput,
 ) {
     emit_systems_hunt_progress(ctx, parent_step, selected_surfaces_trace_label(context));

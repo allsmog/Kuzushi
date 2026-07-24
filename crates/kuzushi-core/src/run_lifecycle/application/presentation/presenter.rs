@@ -44,7 +44,7 @@ pub fn present_projection_with_hydration_and_health(
         source,
         health,
         summary: summary_sections(projection, &details, hydration, quarantine.as_ref()),
-        timeline: timeline::timeline_cells(projection),
+        timeline: timeline::timeline_cells(projection, quarantine.as_ref()),
         terminal_status: projection
             .terminal
             .as_ref()

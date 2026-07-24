@@ -2,7 +2,7 @@ use super::canonical_run_files::{
     ensure_canonical_run_files, restore_canonical_run_file_placeholders,
 };
 use super::run_reproducibility_metadata::{
-    summary_with_dynamic_metadata, summary_with_trace_metadata,
+    summary_with_dynamic_metadata, summary_with_lifecycle_metadata,
 };
 use super::{checked_latest_run_path, checked_run_artifact_path, checked_runs_root, RunSummary};
 use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
@@ -18,7 +18,7 @@ const RECOVERED_INTERRUPTION_ARTIFACTS: [&str; 6] = [
     "failures.json",
     "artifacts.json",
     "events.jsonl",
-    "trace.jsonl",
+    "items.jsonl",
     "report.md",
 ];
 
@@ -147,7 +147,7 @@ fn summary_for_write(
     next.started_at_unix = existing.started_at_unix;
     next = next.with_reproducibility_from(&existing);
     (
-        summary_with_trace_metadata(target, &next),
+        summary_with_lifecycle_metadata(target, &next),
         super::run_history_index::SummaryIndexTransition::Existing,
     )
 }
@@ -835,7 +835,7 @@ fn recover_interrupted_summary_under_lock(
     validate_recovery_digest(&current, &digest)?;
     let current_cost = current.checked_cost_report()?;
     let recovered_cost = if current_cost.is_unavailable() {
-        super::trace_cost::trace_cost_report(target, &current.run_id)?
+        super::lifecycle_cost::lifecycle_cost_report(target, &current.run_id)?
     } else {
         current_cost
     };
@@ -919,8 +919,13 @@ fn persist_recovered_interruption(target: &Path, mut repaired: RunSummary) -> Re
     )?;
     repaired = repaired.with_artifact(artifact);
     ensure_canonical_run_files(target, &repaired.run_id, "interrupted")?;
+    crate::run_lifecycle::emit_recovered_interruption(
+        target,
+        &repaired.run_id,
+        &reason,
+        repaired.checked_cost_report()?,
+    )?;
     super::tool_run_record_events::append_recovered_interruption_event(target, &repaired, &reason)?;
-    super::tool_run_record_events::append_recovered_interruption_trace(target, &repaired)?;
     write_run_summary(target, &repaired)?;
     Ok(repaired)
 }
@@ -1059,13 +1064,7 @@ mod liveness_tests {
         );
         append_recovery_cost_step(tmp.path(), run_id, 2, "model one", Some(0.01), false);
         append_recovery_cost_step(tmp.path(), run_id, 3, "model two", Some(0.02), false);
-        crate::run_artifacts::append_run_trace_step_with_next_number(
-            tmp.path(),
-            run_id,
-            &crate::run_artifacts::RunTraceStep::new(4, "completion", "summary")
-                .with_cost_usd(Some(0.75)),
-        )
-        .unwrap();
+        append_recovery_cost_step(tmp.path(), run_id, 4, "summary", None, true);
 
         let repaired = load_run_summary(tmp.path(), run_id).unwrap();
 
@@ -1075,7 +1074,7 @@ mod liveness_tests {
 
     #[cfg(unix)]
     #[test]
-    fn interrupted_recovery_preserves_incomplete_observed_trace_cost() {
+    fn interrupted_recovery_preserves_incomplete_observed_lifecycle_cost() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-dead-pid-incomplete-cost";
         let summary = RunSummary::running(run_id, "scan", None, "target")
@@ -1111,7 +1110,7 @@ mod liveness_tests {
 
     #[cfg(unix)]
     #[test]
-    fn interrupted_trace_cost_overflow_fails_before_recovery_persistence() {
+    fn interrupted_lifecycle_cost_overflow_fails_before_recovery_persistence() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-dead-pid-cost-overflow";
         let summary = RunSummary::running(run_id, "scan", None, "target")
@@ -1136,15 +1135,89 @@ mod liveness_tests {
         cost_usd: Option<f64>,
         preflight: bool,
     ) {
-        let mut step = crate::run_artifacts::RunTraceStep::new(sequence, "reasoning", label)
-            .with_latency_ms(Some(1))
-            .with_model_metadata("openai:gpt-test", "openai", format!("hash-{sequence}"))
-            .with_cost_usd(cost_usd);
+        let writer = crate::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
         if preflight {
-            step = step.with_verb("next-step");
+            append_recovery_preflight(writer, label);
+            return;
         }
-        crate::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+        append_recovery_model_step(writer, sequence, label, cost_usd);
+    }
+
+    #[cfg(unix)]
+    fn append_recovery_preflight(writer: crate::run_lifecycle::RunItemWriter, label: &str) {
+        use crate::run_lifecycle::*;
+        let item = RunItemV1::DiagnosticNotice {
+            level: DiagnosticLevel::Info,
+            message: SafeText::operator_visible(label),
+        };
+        writer
+            .emit_and_flush(RunItemRecord::new(
+                RunItemId::new(),
+                RunItemSource::Runtime,
+                item,
+            ))
             .unwrap();
+        writer.shutdown().unwrap();
+    }
+
+    #[cfg(unix)]
+    fn append_recovery_model_step(
+        writer: crate::run_lifecycle::RunItemWriter,
+        sequence: usize,
+        label: &str,
+        cost_usd: Option<f64>,
+    ) {
+        let item_id = crate::run_lifecycle::RunItemId::new();
+        let call_id = crate::run_lifecycle::RunCallId::new();
+        let record = |item| {
+            crate::run_lifecycle::RunItemRecord::new(
+                item_id,
+                crate::run_lifecycle::RunItemSource::Runtime,
+                item,
+            )
+            .with_call(call_id)
+        };
+        writer.emit_and_flush(record(recovery_model_start(label))).unwrap();
+        writer
+            .emit_and_flush(record(recovery_model_finish(sequence, cost_usd)))
+            .unwrap();
+        writer.shutdown().unwrap();
+    }
+
+    #[cfg(unix)]
+    fn recovery_model_start(label: &str) -> crate::run_lifecycle::RunItemV1 {
+        use crate::run_lifecycle::*;
+        RunItemV1::ModelCallStarted {
+            provider: SafeText::operator_visible("openai"),
+            model: SafeText::operator_visible("openai:gpt-test"),
+            operation_fingerprint: OperationFingerprint::from_bytes(label.as_bytes()),
+        }
+    }
+
+    #[cfg(unix)]
+    fn recovery_model_finish(
+        sequence: usize,
+        cost_usd: Option<f64>,
+    ) -> crate::run_lifecycle::RunItemV1 {
+        use crate::run_lifecycle::*;
+        let cost = cost_usd.map_or(
+            crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            |value| crate::runtime::RuntimeCostReport::known(
+                crate::runtime::RuntimeCost::from_usd(value, "recovery test").unwrap(),
+            ),
+        );
+        RunItemV1::ModelCallFinished {
+            provider: SafeText::operator_visible("openai"),
+            model: SafeText::operator_visible("openai:gpt-test"),
+            status: RunItemStatus::Completed,
+            latency_ms: sequence as u64,
+            usage: ModelUsage {
+                input_tokens: None,
+                output_tokens: None,
+            },
+            cost,
+            error_class: None,
+        }
     }
 
     #[cfg(unix)]
@@ -1190,7 +1263,7 @@ mod liveness_tests {
         let summary = RunSummary::running(run_id, "scan", None, "target").with_process_id(u32::MAX);
         write_run_summary(tmp.path(), &summary).unwrap();
         let first = load_run_summary(tmp.path(), run_id).unwrap();
-        for leaf in ["result.json", "events.jsonl", "trace.jsonl"] {
+        for leaf in ["result.json", "events.jsonl"] {
             fs::remove_file(crate::run_artifacts::run_artifact_path(
                 tmp.path(),
                 run_id,
@@ -1235,9 +1308,18 @@ mod liveness_tests {
     #[cfg(unix)]
     fn assert_single_recovery_records(target: &Path, run_id: &str) {
         let events = read_run_artifact(target, run_id, "events.jsonl");
-        let trace = read_run_artifact(target, run_id, "trace.jsonl");
         assert_eq!(events.matches("\"status\":\"interrupted\"").count(), 1);
-        assert_eq!(trace.matches("run interrupted during recovery").count(), 1);
+        let projection = crate::run_lifecycle::load_run_projection(target, run_id)
+            .unwrap()
+            .projection;
+        assert_eq!(
+            projection
+                .timeline
+                .iter()
+                .filter(|item| matches!(item.item, crate::run_lifecycle::RunItemV1::TerminalOutcome { status: crate::run_lifecycle::RunItemStatus::Interrupted, .. }))
+                .count(),
+            1
+        );
     }
 
     #[cfg(unix)]
@@ -1263,8 +1345,13 @@ mod liveness_tests {
         let events = read_run_artifact(target, run_id, "events.jsonl");
         assert!(events.contains("\"kind\":\"run\""));
         assert!(events.contains("\"status\":\"interrupted\""));
-        let trace = read_run_artifact(target, run_id, "trace.jsonl");
-        assert!(trace.contains("\"kind\":\"refused\""));
+        let projection = crate::run_lifecycle::load_run_projection(target, run_id)
+            .unwrap()
+            .projection;
+        assert_eq!(
+            projection.terminal.map(|terminal| terminal.status),
+            Some(crate::run_lifecycle::RunItemStatus::Interrupted)
+        );
     }
 
     #[cfg(unix)]

@@ -139,6 +139,9 @@ fn optional_plain_retry_lines(app: &ShellApp, width: usize) -> Vec<String> {
 }
 
 fn optional_plain_run_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    if app.shell_view() == ShellView::Activity {
+        return Vec::new();
+    }
     if let Some(model) = plain_run_projection_model(app) {
         return with_trailing_blank(plain_run_projection_lines(model, width));
     }

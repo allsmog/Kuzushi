@@ -175,14 +175,21 @@ fn seed_threat_model(target: &Path) -> Result<(), String> {
 }
 
 fn seed_replay_trace(target: &Path) -> Result<(), String> {
-    let run_dir = kuzushi_core::run_dir(target, "verify-phase-run");
-    fs::create_dir_all(&run_dir).map_err(|error| io_error("create", &run_dir, error))?;
-    let trace = run_dir.join("trace.jsonl");
-    fs::write(
-        &trace,
-        "{\"n\":1,\"kind\":\"proof\",\"label\":\"payload reproduced\"}\n",
-    )
-    .map_err(|error| io_error("write", &trace, error))
+    let writer = kuzushi_core::run_lifecycle::RunItemWriter::open(target, "verify-phase-run", None)
+        .map_err(|error| format!("open lifecycle fixture: {error}"))?;
+    writer
+        .emit_and_flush(kuzushi_core::run_lifecycle::RunItemRecord::new(
+            kuzushi_core::run_lifecycle::RunItemId::new(),
+            kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+            kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+                level: kuzushi_core::run_lifecycle::DiagnosticLevel::Info,
+                message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                    "Payload reproduced",
+                ),
+            },
+        ))
+        .map(|_| ())
+        .map_err(|error| format!("write lifecycle fixture: {error}"))
 }
 
 fn io_error(action: &str, path: &Path, error: std::io::Error) -> String {

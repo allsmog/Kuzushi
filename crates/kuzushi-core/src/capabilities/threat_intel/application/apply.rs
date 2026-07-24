@@ -66,7 +66,7 @@ fn apply_threat_intel_entries(
         &ToolExecutionContext<'_>,
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> ThreatIntelApplyResult {
     let mut applied = ThreatIntelApplyResult {
         results: Vec::with_capacity(entries.len()),
@@ -90,7 +90,7 @@ fn apply_threat_intel_entries(
 
 fn emit_threat_intel_apply_entry(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
 ) {
     emit_threat_intel_apply_progress(
@@ -105,7 +105,7 @@ fn emit_threat_intel_apply_start(
     catalog_path: &Path,
     entry_count: usize,
     dispatch_live: bool,
-) -> Option<usize> {
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         let mode = if dispatch_live { "live" } else { "dry-run" };
         trace
@@ -123,7 +123,7 @@ fn emit_threat_intel_apply_start(
 
 fn emit_threat_intel_apply_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -137,7 +137,7 @@ fn emit_threat_intel_apply_progress(
 
 fn begin_threat_intel_apply_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

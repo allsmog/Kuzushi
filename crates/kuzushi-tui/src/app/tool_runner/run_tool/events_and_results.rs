@@ -521,7 +521,7 @@ impl ShellApp {
     /// A failed tool reports only an error string, so unlike the success path
     /// there is no result JSON carrying `costUsd`. The per-LLM-call spend has
     /// already streamed into the Activity session's DAG rows (the same
-    /// `cost_usd` trace steps that land in trace.jsonl), so credit that sum to
+    /// terminal model-call items in `items.jsonl`), so credit that sum to
     /// the session cost meter — a `triage:run` that burns real dollars before
     /// a final provider error must not read as $0. Mirrors
     /// `record_tool_result_cost` (success path) and `record_agent_cost`
@@ -553,7 +553,7 @@ impl ShellApp {
             return Ok(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
         }
         let report = match state.target.as_deref() {
-            Some(target) => kuzushi_core::run_artifacts::trace_cost_report(target, run_id),
+            Some(target) => kuzushi_core::run_artifacts::lifecycle_cost_report(target, run_id),
             None => self.activity().map_or(
                 Ok(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE),
                 |session| session.runtime_cost_report(),
@@ -562,24 +562,14 @@ impl ShellApp {
         Ok(report)
     }
 
-    /// Flip the failed tool's Activity DAG row to `Failing` so the progress
-    /// pane stops spinning and reflects the error. The tool's producer bails on
-    /// failure before emitting a terminal trace step, so we synthesize one here
-    /// (mirrors `mark_scan_activity_failed` for the scan pipeline).
+    /// Flip incomplete Activity tasks to failure. The producer's typed
+    /// terminal item remains the authoritative failure detail.
     fn mark_tool_activity_failed(&mut self, tool_name: &str, error: &str) {
         let Some(session) = self.activity_mut() else {
             return;
         };
-        let (module_id, verb) = tool_name.split_once(':').unwrap_or((tool_name, "run"));
-        session.apply_step(
-            // 320 keeps the full remedy available to the Activity feed (which
-            // wraps error rows); the on-disk trace artifact keeps its own cap.
-            kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 320))
-                .with_module_id(module_id)
-                .with_verb(verb)
-                .with_severity("danger"),
-        );
         session.mark_incomplete_tasks_after_failure();
+        let _ = (tool_name, error);
     }
 
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {
@@ -1005,7 +995,6 @@ mod tests {
         load_run_summary, try_record_tool_run_canceled,
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
-    use kuzushi_core::RunTraceStep;
 
     fn app_with_tool_session(tool_name: &str, run_id: &str) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -1015,23 +1004,79 @@ mod tests {
         app
     }
 
-    fn stream_llm_cost_steps(app: &mut ShellApp, module_id: &str, verb: &str, costs: &[f64]) {
+    fn stream_llm_cost_steps(app: &mut ShellApp, _module_id: &str, _verb: &str, costs: &[f64]) {
         let session = app.activity_mut().expect("activity session");
-        session.apply_step(
-            RunTraceStep::new(0, "tool", format!("{module_id}:{verb} start"))
-                .with_module_id(module_id)
-                .with_verb(verb),
-        );
-        for (n, cost) in costs.iter().enumerate() {
-            session.apply_step(
-                RunTraceStep::new(n + 1, "reasoning", "llm call")
-                    .with_module_id(module_id)
-                    .with_verb(verb)
-                    .with_latency_ms(Some(10))
-                    .with_cost_usd(Some(*cost))
-                    .with_model_metadata("test:model", "test", format!("prompt-{n}")),
-            );
+        for cost in costs {
+            apply_model_cost(session, *cost);
         }
+    }
+
+    fn apply_model_cost(session: &mut ActivitySession, cost_usd: f64) {
+        use kuzushi_core::run_lifecycle::{RunCallId, RunItemId};
+        let seq = session.run_projection.last_committed_seq + 1;
+        let cost = kuzushi_core::runtime::RuntimeCost::from_usd(cost_usd, "test").unwrap();
+        let item_id = RunItemId::new();
+        let call_id = RunCallId::new();
+        let started = test_model_started(session, seq, item_id, call_id);
+        session.apply_run_item(started).unwrap();
+        let finished = test_model_finished(session, seq + 1, item_id, call_id, cost);
+        session.apply_run_item(finished).unwrap();
+    }
+
+    fn test_model_started(
+        session: &ActivitySession,
+        seq: u64,
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        call_id: kuzushi_core::run_lifecycle::RunCallId,
+    ) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemEnvelopeV1::new(
+            seq,
+            RunId::parse(&session.run_id).unwrap(),
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallStarted {
+                provider: SafeText::operator_visible("test"),
+                model: SafeText::operator_visible("test:model"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"test model call"),
+            },
+            session.run_projection.last_event_hash.clone(),
+        )
+        .unwrap()
+        .with_call(call_id)
+        .unwrap()
+    }
+
+    fn test_model_finished(
+        session: &ActivitySession,
+        seq: u64,
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        call_id: kuzushi_core::run_lifecycle::RunCallId,
+        cost: kuzushi_core::runtime::RuntimeCost,
+    ) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemEnvelopeV1::new(
+            seq,
+            RunId::parse(&session.run_id).unwrap(),
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallFinished {
+                provider: SafeText::operator_visible("test"),
+                model: SafeText::operator_visible("test:model"),
+                status: RunItemStatus::Completed,
+                latency_ms: 10,
+                usage: ModelUsage {
+                    input_tokens: Some(1),
+                    output_tokens: Some(1),
+                },
+                cost: kuzushi_core::runtime::RuntimeCostReport::known(cost),
+                error_class: None,
+            },
+            session.run_projection.last_event_hash.clone(),
+        )
+        .unwrap()
+        .with_call(call_id)
+        .unwrap()
     }
 
     #[test]

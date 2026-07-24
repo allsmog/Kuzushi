@@ -345,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_prepare_commits_workspace_snapshot_before_dispatch() {
+    fn scan_prepare_commits_hash_only_workspace_identity_before_dispatch() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
         std::fs::write(tmp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn scan_prepare_rejection_has_failed_task_call_and_exact_artifacts() {
+    fn scan_prepare_rejection_has_blocked_call_and_exact_artifacts() {
         let target = tempfile::tempdir().unwrap();
         let error = prepare_scan_command_with_requested_input(
             &target.path().to_path_buf(),
@@ -390,16 +390,23 @@ mod tests {
             .unwrap()
             .pop()
             .unwrap();
-        let read =
-            kuzushi_core::run_lifecycle::load_run_projection(target.path(), &entry.run_id).unwrap();
-        let call = read.projection.calls.values().next().unwrap();
+        assert_blocked_rejection(target.path(), &entry.run_id);
+    }
+
+    fn assert_blocked_rejection(target: &std::path::Path, run_id: &str) {
+        use kuzushi_core::run_lifecycle::RunItemStatus;
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target, run_id).unwrap();
         assert_eq!(
-            call.status,
-            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+            kuzushi_core::load_run_summary(target, run_id)
+                .unwrap()
+                .status,
+            "blocked"
         );
+        let call = read.projection.calls.values().next().unwrap();
+        assert_eq!(call.status, RunItemStatus::Blocked);
         assert_eq!(
             read.projection.terminal.as_ref().map(|item| item.status),
-            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+            Some(RunItemStatus::Blocked)
         );
         assert!(read
             .projection

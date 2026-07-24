@@ -16,7 +16,10 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
-          │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │receipt · partial · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...       │
+          │Outcome · partial · scenario partial                                                              │
+          │3 run ledger cell(s) omitted from the result card · inspect replay                                │
+          │8 timeline cell(s) omitted from the result card · inspect replay                                  │
           │lineage: target rev unrecorded                                                                    │
           │next: live run settlement is not healthy and durable; inspect the run before continuing           │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
@@ -25,9 +28,6 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           │1/3 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
           │                                                                                                  │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-
-
-
 
 
 

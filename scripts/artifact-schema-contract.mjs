@@ -48,21 +48,28 @@ const producerFixturesBySchema = {
       },
     },
   ],
-  "schemas/run.trace.schema.json": [
-    { name: "agent plan", value: { n: 1, kind: "plan", label: "ask operator question" } },
+  "schemas/run.items.schema.json": [
     {
-      name: "agent llm answer",
+      name: "tool progress lifecycle item",
       value: {
-        n: 2,
-        kind: "llm",
-        label: "answer (42 chars)",
-        latency_ms: 120,
-        [FIXTURE_MODEL_FIELD]: "openai:gpt-test",
-        provider: "openai",
-        prompt_hash: "fnv1a64:test",
+        schemaVersion: 1,
+        seq: 3,
+        eventId: "event-1",
+        itemId: "item-1",
+        runId: "run-1",
+        callId: "call-1",
+        source: "runtime",
+        occurredAtMs: 120,
+        prevEventHash: "sha256:previous",
+        eventHash: "sha256:current",
+        item: {
+          type: "tool_call_progress",
+          message: "Scanning files",
+          completed: 12,
+          total: 40,
+        },
       },
     },
-    { name: "agent critic", value: { n: 3, kind: "critic", label: "critic review" } },
   ],
   "schemas/run.summary.schema.json": [
     {
@@ -154,7 +161,7 @@ const requiredAliasGroupsBySchema = {
   ],
   "schemas/run.summary.schema.json": [
     { path: [], kind: "required", fields: ["runId", "startedAtUnix"] },
-    { path: [], kind: "declared", fields: ["traceMalformedLines"] },
+    { path: [], kind: "declared", fields: ["lifecycleMalformedItems"] },
     { path: ["definitions", "llmCall"], kind: "required", fields: ["promptHash"] },
     {
       path: ["definitions", "llmCall"],
@@ -163,19 +170,23 @@ const requiredAliasGroupsBySchema = {
     },
     ...artifactFieldGroups,
   ],
-  "schemas/run.trace.schema.json": [
+  "schemas/run.items.schema.json": [
     {
       path: [],
-      kind: "declared",
+      kind: "required",
       fields: [
-        "latency_ms",
-        "cost_usd",
-        "module_id",
-        "parent_step",
-        "started_at_ms",
-        "prompt_hash",
+        "schemaVersion",
+        "seq",
+        "eventId",
+        "itemId",
+        "runId",
+        "source",
+        "occurredAtMs",
+        "eventHash",
+        "item",
       ],
     },
+    { path: ["definitions", "runItem"], kind: "required", fields: ["type"] },
   ],
 };
 
@@ -223,7 +234,7 @@ const runSummaryStatusSpec = {
   values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"],
   refs: [],
 };
-const traceKindValues = [
+const llmCallKindValues = [
   "tool",
   "reasoning",
   "tool-progress",
@@ -260,18 +271,37 @@ const schemaEnumSpecs = {
     },
     artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),
   ],
-  "schemas/run.trace.schema.json": [
+  "schemas/run.items.schema.json": [
     {
-      name: "traceKind",
-      path: ["definitions", "traceKind"],
-      values: traceKindValues,
-      refs: [["properties", "kind"]],
+      name: "runItemType",
+      path: ["definitions", "runItemType"],
+      values: [
+        "plan_updated",
+        "task_updated",
+        "tool_call_requested",
+        "tool_call_rejected",
+        "tool_call_started",
+        "tool_call_progress",
+        "tool_call_finished",
+        "model_call_started",
+        "model_call_finished",
+        "safe_reasoning_summary",
+        "artifact_produced",
+        "finding_delta",
+        "diagnostic_notice",
+        "operator_question",
+        "operator_decision",
+        "terminal_outcome",
+        "phase_receipt",
+        "progress_truncated",
+      ],
+      refs: [["definitions", "runItem", "properties", "type"]],
     },
     {
-      name: "traceSeverity",
-      path: ["definitions", "traceSeverity"],
-      values: ["info", "warn", "danger"],
-      refs: [["properties", "severity"]],
+      name: "runItemSource",
+      path: ["definitions", "runItemSource"],
+      values: ["dispatch", "runtime", "workflow", "operator", "persistence"],
+      refs: [["properties", "source"]],
     },
   ],
   "schemas/run.summary.schema.json": [
@@ -285,7 +315,7 @@ const schemaEnumSpecs = {
     {
       name: "llmCallKind",
       path: ["definitions", "llmCallKind"],
-      values: traceKindValues,
+      values: llmCallKindValues,
       refs: [["definitions", "llmCall", "properties", "kind"]],
     },
     artifactKindSpec([["definitions", "artifact", "properties", "kind"]]),

@@ -8,14 +8,14 @@ pub(crate) fn active_stage_label(app: &ShellApp) -> Option<&'static str> {
             running_or_aborting(
                 app.planner_running(),
                 app.plan_abort_requested(),
-                "thinking",
+                "building plan",
             )
         })
         .or_else(|| {
             running_or_aborting(
                 app.threat_worker_running(),
                 app.threat_abort_requested(),
-                "thinking",
+                "updating threat model",
             )
         })
 }
@@ -32,8 +32,9 @@ fn scan_stage(app: &ShellApp) -> Option<&'static str> {
 }
 
 fn agent_chat_stage(app: &ShellApp) -> Option<&'static str> {
-    app.agent_chat()
-        .and_then(|agent| running_or_aborting(agent.running, agent.abort_requested, "thinking"))
+    app.agent_chat().and_then(|agent| {
+        running_or_aborting(agent.running, agent.abort_requested, "calling model")
+    })
 }
 
 fn running_or_aborting(

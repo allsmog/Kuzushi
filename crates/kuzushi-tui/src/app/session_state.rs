@@ -259,17 +259,6 @@ impl SessionState {
             });
     }
 
-    pub(crate) fn observe_run_cost_report(
-        &mut self,
-        run_id: &str,
-        cost: RuntimeCostReport,
-    ) -> anyhow::Result<RuntimeCostReport> {
-        self.begin_run_cost_tracking(run_id, true);
-        let current = self.run_costs[run_id].report;
-        let report = current.checked_add(cost, "live run cost total")?;
-        self.replace_run_report(run_id, report, false)
-    }
-
     pub(crate) fn settle_run_cost_report(
         &mut self,
         run_id: &str,
@@ -281,21 +270,6 @@ impl SessionState {
         let current = self.run_costs[run_id];
         let report = normalized_terminal_report(current, reported)?;
         self.replace_run_report(run_id, report, true)
-    }
-
-    pub(crate) fn mark_run_cost_incomplete(
-        &mut self,
-        run_id: &str,
-    ) -> anyhow::Result<RuntimeCostReport> {
-        self.begin_run_cost_tracking(run_id, true);
-        let report = self.run_costs[run_id].report.mark_incomplete();
-        self.replace_run_report(run_id, report, false)
-    }
-
-    pub(crate) fn run_may_call_provider(&self, run_id: &str) -> bool {
-        self.run_costs
-            .get(run_id)
-            .is_some_and(|entry| entry.provider_call_possible)
     }
 
     fn replace_run_report(
@@ -407,15 +381,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn live_run_cost_is_replaced_by_terminal_receipt_without_double_counting() {
+    fn terminal_receipt_is_idempotent_without_double_counting() {
         let mut session = test_session();
         session.begin_run_cost_tracking("run-1", true);
-        session
-            .observe_run_cost_report("run-1", exact(0.1))
-            .unwrap();
-        session
-            .observe_run_cost_report("run-1", exact(0.2))
-            .unwrap();
 
         session.settle_run_cost_report("run-1", exact(0.3)).unwrap();
         session.settle_run_cost_report("run-1", exact(0.3)).unwrap();
@@ -444,12 +412,10 @@ mod tests {
     }
 
     #[test]
-    fn terminal_receipt_cannot_lower_live_observed_spend() {
+    fn repeated_terminal_receipt_cannot_lower_settled_spend() {
         let mut session = test_session();
         session.begin_run_cost_tracking("run-1", true);
-        session
-            .observe_run_cost_report("run-1", exact(0.4))
-            .unwrap();
+        session.settle_run_cost_report("run-1", exact(0.4)).unwrap();
 
         let error = session
             .settle_run_cost_report("run-1", exact(0.3))

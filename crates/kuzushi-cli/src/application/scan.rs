@@ -1029,7 +1029,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_scan_dispatch_persists_typed_terminal_lifecycle() {
+    fn rejected_scan_dispatch_persists_blocked_typed_lifecycle() {
         let target = tempfile::tempdir().unwrap();
         let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
         let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
@@ -1052,18 +1052,24 @@ mod tests {
         let read = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id).unwrap();
         assert_eq!(
             read.projection.terminal.map(|terminal| terminal.status),
-            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Blocked)
         );
         let call = read.projection.calls.values().next().unwrap();
         assert_eq!(
             call.status,
-            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
         );
         assert!(read
             .projection
             .artifacts
             .values()
             .all(|artifact| artifact.producing_item_id == call.item_id));
+        assert_eq!(
+            kuzushi_core::load_run_summary(target.path(), run_id)
+                .unwrap()
+                .status,
+            "blocked"
+        );
     }
 
     #[test]

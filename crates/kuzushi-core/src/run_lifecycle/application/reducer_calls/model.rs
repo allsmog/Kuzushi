@@ -1,7 +1,6 @@
 use super::super::super::super::{CallKind, CallProjection, RunProjection};
-use super::super::ensure_legacy;
 use super::{ensure_call_identity, new_call, required_call_id};
-use crate::run_lifecycle::{ModelUsage, RunCallId, RunItemEnvelopeV1, RunItemStatus, SafeText};
+use crate::run_lifecycle::{ModelUsage, RunItemEnvelopeV1, RunItemStatus, SafeText};
 use crate::runtime::RuntimeCostReport;
 use anyhow::Result;
 
@@ -38,11 +37,13 @@ pub(in crate::run_lifecycle::application) fn apply_model_finished(
     error_class: &Option<SafeText>,
 ) -> Result<()> {
     let call_id = required_call_id(envelope)?;
-    ensure_model_call_exists(projection, envelope, call_id, model)?;
+    let first_model_receipt = !projection.calls.values().any(|call| {
+        call.kind == CallKind::Model && call.status.is_terminal()
+    });
     let call = projection
         .calls
         .get_mut(&call_id)
-        .expect("model call was inserted above");
+        .ok_or_else(|| anyhow::anyhow!("model finish without start"))?;
     validate_model_finish(call, envelope, provider, model, status)?;
     apply_model_finish(
         call,
@@ -55,28 +56,13 @@ pub(in crate::run_lifecycle::application) fn apply_model_finished(
         cost,
         error_class,
     );
-    projection.observed_model_cost = projection
-        .observed_model_cost
-        .checked_add(cost, "run lifecycle model cost")?;
-    Ok(())
-}
-
-fn ensure_model_call_exists(
-    projection: &mut RunProjection,
-    envelope: &RunItemEnvelopeV1,
-    call_id: RunCallId,
-    model: &SafeText,
-) -> Result<()> {
-    if let std::collections::btree_map::Entry::Vacant(entry) = projection.calls.entry(call_id) {
-        ensure_legacy(envelope, "model finish without start")?;
-        entry.insert(new_call(
-            envelope,
-            CallKind::Model,
-            model,
-            RunItemStatus::Running,
-        ));
-        projection.call_order.push(call_id);
-    }
+    projection.observed_model_cost = if first_model_receipt {
+        cost
+    } else {
+        projection
+            .observed_model_cost
+            .checked_add(cost, "run lifecycle model cost")?
+    };
     Ok(())
 }
 

@@ -87,7 +87,7 @@ fn background_tool_trace(
             .start_root_task(format!("Run {tool_name}"))?
             .trace_handle(),
     };
-    Ok(trace.for_tool(tool_name).child(1))
+    Ok(trace.for_tool(tool_name))
 }
 
 fn authorize_background_prepared_input(

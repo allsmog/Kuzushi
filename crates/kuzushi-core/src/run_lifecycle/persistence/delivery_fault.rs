@@ -10,7 +10,6 @@ pub enum RunItemDeliveryFailureStage {
     DerivativeReadStream,
     DerivativeEmptyBatch,
     DerivativeSubscriber,
-    CompatibilityProjection,
     StorageProjection,
 }
 
@@ -30,7 +29,6 @@ impl RunItemDeliveryFault {
             RunItemDeliveryFailureStage::DerivativeReadStream
                 | RunItemDeliveryFailureStage::DerivativeEmptyBatch
                 | RunItemDeliveryFailureStage::DerivativeSubscriber
-                | RunItemDeliveryFailureStage::CompatibilityProjection
                 | RunItemDeliveryFailureStage::StorageProjection
         )
     }

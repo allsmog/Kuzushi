@@ -25,7 +25,7 @@ pub(super) struct DispatchLifecycle {
 pub struct ToolCallIdentity {
     pub call_id: RunCallId,
     pub item_id: RunItemId,
-    pub task_id: crate::run_lifecycle::RunTaskId,
+    pub task_id: Option<crate::run_lifecycle::RunTaskId>,
     pub parent_item_id: Option<RunItemId>,
 }
 
@@ -63,12 +63,7 @@ impl DispatchLifecycle {
         );
         let task_id = inherited_observation
             .as_ref()
-            .map(|handle| {
-                handle
-                    .inheritable_dispatch_task_id()
-                    .ok_or_else(|| anyhow::anyhow!("observed dispatch lacks a semantic task scope"))
-            })
-            .transpose()?;
+            .and_then(RunObservationHandle::inheritable_dispatch_task_id);
         let lifecycle = Self {
             observation: inherited_observation,
             task_id,
@@ -82,6 +77,7 @@ impl DispatchLifecycle {
     }
 
     pub(super) fn rejected(self, error: anyhow::Error) -> Result<ObservedDispatchOutcome> {
+        self.emit_rejection("dispatch_policy", &error.to_string())?;
         let completion = self.rejected_completion();
         Ok(ObservedDispatchOutcome {
             execution: Err(error),
@@ -111,14 +107,11 @@ impl DispatchLifecycle {
 
     pub(super) fn pending_completion(self, result: &Result<Value>) -> PendingToolCallCompletion {
         let (status, cost, preview, warning_count, error_count) = result_fields(result);
-        let identity = self.task_id.map(|task_id| ToolCallIdentity {
+        let identity = self.observation.as_ref().map(|observation| ToolCallIdentity {
             call_id: self.call_id,
             item_id: self.call_item_id,
-            task_id,
-            parent_item_id: self
-                .observation
-                .as_ref()
-                .and_then(RunObservationHandle::parent_item_id),
+            task_id: self.task_id,
+            parent_item_id: observation.parent_item_id(),
         });
         PendingToolCallCompletion {
             observation: self.observation,
@@ -135,7 +128,12 @@ impl DispatchLifecycle {
     pub(super) fn execution_trace(&self) -> Option<crate::run_artifacts::TraceHandle> {
         self.observation
             .as_ref()
-            .map(|observation| observation.with_parent(self.call_item_id).trace_handle())
+            .map(|observation| {
+                observation
+                    .for_call_progress(self.call_id, self.call_item_id)
+                    .with_parent(self.call_item_id)
+                    .trace_handle()
+            })
     }
 
     fn emit_request(&self, operation_binding: [u8; 32], input: &Value) -> Result<()> {
@@ -160,6 +158,20 @@ impl DispatchLifecycle {
         )
     }
 
+    fn emit_rejection(&self, reason_class: &str, detail: &str) -> Result<()> {
+        self.emit_and_flush(
+            RunItemRecord::new(
+                self.call_item_id,
+                RunItemSource::Dispatch,
+                RunItemV1::ToolCallRejected {
+                    reason_class: SafeText::operator_visible(reason_class),
+                    detail: SafeText::condensed_line(detail),
+                },
+            )
+            .with_call(self.call_id),
+        )
+    }
+
     fn emit(&self, record: RunItemRecord) -> Result<()> {
         if let Some(observation) = self.observation.as_ref() {
             observation.emit(record)?;
@@ -175,19 +187,16 @@ impl DispatchLifecycle {
     }
 
     fn rejected_completion(self) -> PendingToolCallCompletion {
-        let identity = self.task_id.map(|task_id| ToolCallIdentity {
+        let identity = self.observation.as_ref().map(|observation| ToolCallIdentity {
             call_id: self.call_id,
             item_id: self.call_item_id,
-            task_id,
-            parent_item_id: self
-                .observation
-                .as_ref()
-                .and_then(RunObservationHandle::parent_item_id),
+            task_id: self.task_id,
+            parent_item_id: observation.parent_item_id(),
         });
         PendingToolCallCompletion {
             observation: self.observation,
             identity,
-            status: RunItemStatus::Failed,
+            status: RunItemStatus::Blocked,
             cost: RuntimeCostReport::UNAVAILABLE,
             preview: vec![SafeText::preview_line(
                 "request rejected before execution (dispatch_policy)",

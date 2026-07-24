@@ -375,13 +375,6 @@ fn run_root_and_run_directory_changes_evict_all_derived_run_caches() {
 
 fn seed_run_caches(cache: &mut WorkbenchCache, target: &Path, run_id: &str) {
     let key = (target.to_path_buf(), run_id.to_string());
-    cache.run_traces.insert(
-        key.clone(),
-        RunTraceCache {
-            state: RunTraceCacheState::Invalid,
-            bytes: 1,
-        },
-    );
     cache.run_projections.insert(
         key.clone(),
         RunProjectionCache {
@@ -409,7 +402,6 @@ fn seed_run_caches(cache: &mut WorkbenchCache, target: &Path, run_id: &str) {
 
 fn assert_run_cache_absent(cache: &WorkbenchCache, target: &Path, run_id: &str) {
     let key = (target.to_path_buf(), run_id.to_string());
-    assert!(!cache.run_traces.contains_key(&key));
     assert!(!cache.run_projections.contains_key(&key));
     assert!(!cache
         .run_artifact_texts
@@ -420,7 +412,6 @@ fn assert_run_cache_absent(cache: &WorkbenchCache, target: &Path, run_id: &str) 
 
 fn assert_run_cache_present(cache: &WorkbenchCache, target: &Path, run_id: &str) {
     let key = (target.to_path_buf(), run_id.to_string());
-    assert!(cache.run_traces.contains_key(&key));
     assert!(cache.run_projections.contains_key(&key));
     assert!(cache
         .run_artifact_texts

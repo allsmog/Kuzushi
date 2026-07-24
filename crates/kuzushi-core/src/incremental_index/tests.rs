@@ -261,14 +261,14 @@ fn watcher_ignores_owned_state_but_keeps_policy_signals() {
 
 #[test]
 fn state_aware_watcher_reports_v3_path_without_indexing_it() {
-    // Per-write run internals (live trace.jsonl appends) are the watcher
+    // Per-write run internals (live items.jsonl appends) are the watcher
     // storm source and are deliberately suppressed; the terminal done.json
     // sentinel and non-run v3 state still surface as state paths, never as
     // indexable changes.
     let event = Event::new(EventKind::Modify(ModifyKind::Data(
         notify::event::DataChange::Any,
     )))
-    .add_path("/repo/.kuzushi/v3/runs/run-1/trace.jsonl".into())
+    .add_path("/repo/.kuzushi/v3/runs/run-1/items.jsonl".into())
     .add_path("/repo/.kuzushi/v3/runs/run-1/done.json".into())
     .add_path("/repo/.kuzushi/v3/campaigns/camp/queue.json".into());
 

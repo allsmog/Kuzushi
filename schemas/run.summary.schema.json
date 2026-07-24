@@ -25,6 +25,7 @@
       "enum": [
         "running",
         "completed",
+        "blocked",
         "failed",
         "canceled",
         "interrupted",
@@ -124,7 +125,7 @@
         "$ref": "#/definitions/llmCall"
       }
     },
-    "traceMalformedLines": {
+    "lifecycleMalformedItems": {
       "type": "integer",
       "minimum": 1
     },

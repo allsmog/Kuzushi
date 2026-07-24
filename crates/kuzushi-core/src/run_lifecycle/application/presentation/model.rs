@@ -63,6 +63,7 @@ pub enum RunCellRoleV1 {
     TerminalOutcome,
     PhaseReceipt,
     ProgressDisclosure,
+    LifecycleEvent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

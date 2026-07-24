@@ -63,17 +63,17 @@ pub fn emit_preparation_rejection(
         .task_handle()
         .ok_or_else(|| anyhow::anyhow!("preparation rejection lacks a semantic task"))?;
     task.update_and_flush(
-        RunItemStatus::Failed,
+        RunItemStatus::Blocked,
         Some("request rejected before tool execution"),
     )?;
     if let Some(plan) = created_plan.as_mut() {
-        plan.update_and_flush(RunItemStatus::Failed)?;
+        plan.update_and_flush(RunItemStatus::Blocked)?;
     }
     scoped.emit_and_flush(RunItemRecord::new(
         RunItemId::new(),
         RunItemSource::Workflow,
         RunItemV1::TerminalOutcome {
-            status: RunItemStatus::Failed,
+            status: RunItemStatus::Blocked,
             summary: SafeText::condensed_line(detail),
             cost: RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
             continuation: WorkflowContinuation::NoFurtherAction {

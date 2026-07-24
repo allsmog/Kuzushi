@@ -101,7 +101,7 @@ fn classify_triage_findings(
 
 fn run_triage_stage2_with_scope(
     ctx: &ToolExecutionContext<'_>,
-    evidence_phase: Option<usize>,
+    evidence_phase: Option<crate::run_lifecycle::RunItemId>,
     run: &PreparedTriageRun<'_>,
     execution: &TriageExecution<'_>,
     kept: Vec<Finding>,
@@ -157,7 +157,7 @@ fn emit_triage_evidence_phase(
     ctx: &ToolExecutionContext<'_>,
     input: &TriageRunInput,
     stage1: &PrefilteredTriageFindings,
-) -> Option<usize> {
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -176,7 +176,7 @@ fn emit_triage_evidence_phase(
 
 fn begin_triage_llm_scope(
     ctx: &ToolExecutionContext<'_>,
-    evidence_phase: Option<usize>,
+    evidence_phase: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     match (ctx.trace, evidence_phase) {
         (Some(trace), Some(_parent)) => {
@@ -191,11 +191,7 @@ fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
     if let Some(trace) = ctx.trace {
         let cost = stats.cost_report();
         let label = triage_done_label(stats, cost);
-        let mut step = trace.step("done", "run", label);
-        if let Some(exact) = cost.exact_usd() {
-            step = step.with_cost_usd(exact);
-        }
-        let _ = step.emit();
+        let _ = trace.step("done", "run", label).emit();
     }
 }
 

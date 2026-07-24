@@ -43,7 +43,7 @@ pub fn run_patch_finding(
 
 fn finish_patch_finding(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     resources: &PatchResources<'_>,
     candidate: &ConfirmedPatchFinding,
     execution: &PatchExecution<'_>,
@@ -87,7 +87,7 @@ fn patch_resources<'a>(ctx: &'a ToolExecutionContext<'a>) -> Result<PatchResourc
     Ok(PatchResources { workspace, store })
 }
 
-fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) -> Option<usize> {
+fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -101,7 +101,7 @@ fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) -
 
 fn emit_patch_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -252,7 +252,7 @@ struct PatchAttemptOutcome {
 
 fn run_patch_attempts(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -309,7 +309,7 @@ impl PatchAttemptState {
 
 fn run_and_record_patch_attempt(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -366,7 +366,7 @@ struct SinglePatchAttempt {
 
 fn run_single_patch_attempt(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -407,7 +407,7 @@ fn run_single_patch_attempt(
 
 fn synthesize_patch_with_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -430,7 +430,7 @@ fn synthesize_patch_with_scope(
 
 fn synthesize_patch_in_checkout(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     worktree: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -472,7 +472,7 @@ fn synthesize_patch_in_checkout(
 
 fn emit_patch_guardrail_check(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     attempt: usize,
 ) {
     // Validation phase doesn't make LLM calls but logs a checkpoint.

@@ -114,7 +114,7 @@ fn result_artifact(producing_item_id: RunItemId) -> ArtifactReference {
 }
 
 #[test]
-fn observed_dispatch_without_semantic_task_fails_before_call_lifecycle_starts() {
+fn taskless_single_tool_dispatch_keeps_one_correlated_call_without_fake_task() {
     let target = tempfile::tempdir().unwrap();
     let run_id = "tool-unscoped-dispatch-test";
     let trace = RunObservationHandle::jsonl(target.path(), run_id)
@@ -122,24 +122,28 @@ fn observed_dispatch_without_semantic_task_fails_before_call_lifecycle_starts() 
         .trace_handle();
     let config = V2Config::default();
 
-    let error = match DispatchLifecycle::requested(
+    let lifecycle = request_and_start(
         &context(&config, &trace),
         "sast:scan",
         [3; 32],
-        &json!({"tasks": ["secret-scan"]}),
-        false,
-        true,
-    ) {
-        Ok(_) => panic!("observed dispatch without a semantic task must fail"),
-        Err(error) => error,
-    };
-
-    assert!(error.to_string().contains("semantic task scope"), "{error}");
-    let read = read_run_items(target.path(), run_id).unwrap().unwrap();
-    assert!(
-        read.items.is_empty(),
-        "failure must precede lifecycle emission"
+        json!({"tasks": ["secret-scan"]}),
     );
+    lifecycle
+        .execution_trace()
+        .unwrap()
+        .step("tool-progress", "scan", "Running secret scan")
+        .emit();
+    let identity = finish_success(lifecycle, "clean");
+
+    let read = read_run_items(target.path(), run_id).unwrap().unwrap();
+    let calls = call_items(&read.items, identity);
+    assert_eq!(identity.task_id, None);
+    assert_eq!(calls.len(), 4);
+    assert!(calls.iter().all(|item| item.task_id.is_none()));
+    assert!(!read.items.iter().any(|item| matches!(
+        item.item,
+        RunItemV1::TaskUpdated { .. } | RunItemV1::PlanUpdated { .. }
+    )));
 }
 
 #[test]
@@ -171,7 +175,7 @@ fn workflow_task_owns_root_call_without_phantom_tool_task() {
         1
     );
     assert_workflow_owns_only_semantic_task(&read.items, task_id);
-    assert_eq!(identity.task_id, task_id);
+    assert_eq!(identity.task_id, Some(task_id));
     assert!(identity.parent_item_id.is_none());
     let calls = call_items(&read.items, identity);
     assert_eq!(
@@ -215,8 +219,8 @@ fn nested_dispatch_inherits_semantic_task_and_only_parents_calls() {
     let read = read_run_items(target.path(), run_id).unwrap().unwrap();
     assert_eq!(read.health, ProjectionHealth::Healthy);
     assert_workflow_owns_only_semantic_task(&read.items, task_id);
-    assert_eq!(parent_identity.task_id, task_id);
-    assert_eq!(nested_identity.task_id, task_id);
+    assert_eq!(parent_identity.task_id, Some(task_id));
+    assert_eq!(nested_identity.task_id, Some(task_id));
     assert!(parent_identity.parent_item_id.is_none());
     assert_eq!(
         nested_identity.parent_item_id,
@@ -266,6 +270,59 @@ fn tool_call_started_is_durable_before_executor_completion() {
 }
 
 #[test]
+fn execution_trace_bridges_safe_progress_into_the_owning_call() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = "tool-progress-bridge-test";
+    let (task, task_id) = start_semantic_task(&target, run_id);
+    let trace = task.observation().trace_handle();
+    let config = V2Config::default();
+    let lifecycle = request_and_start(
+        &context(&config, &trace),
+        "secret-scan:scan",
+        [9; 32],
+        json!({"target": "."}),
+    );
+    let execution = lifecycle.execution_trace().unwrap();
+    execution
+        .step("tool-progress", "scan", "Indexing repository files")
+        .with_progress(421, 832)
+        .emit();
+    execution
+        .step("reasoning", "scan", "Comparing candidate source-to-sink paths")
+        .emit();
+    let identity = finish_success(lifecycle, "7 findings");
+
+    let read = read_run_items(target.path(), run_id).unwrap().unwrap();
+    let calls = call_items(&read.items, identity);
+    assert!(calls.iter().any(|envelope| matches!(
+        envelope.item,
+        RunItemV1::ToolCallProgress {
+            completed: Some(421),
+            total: Some(832),
+            ..
+        }
+    )));
+    assert!(calls.iter().any(|envelope| matches!(
+        envelope.item,
+        RunItemV1::SafeReasoningSummary { .. }
+    )));
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|envelope| matches!(envelope.item, RunItemV1::ToolCallFinished { .. }))
+            .count(),
+        1
+    );
+    assert!(calls.iter().all(|envelope| envelope.task_id == Some(task_id)));
+    assert!(calls.iter().all(|envelope| match envelope.item {
+        RunItemV1::ToolCallProgress { .. } | RunItemV1::SafeReasoningSummary { .. } => {
+            envelope.parent_item_id == Some(identity.item_id)
+        }
+        _ => envelope.parent_item_id.is_none(),
+    }));
+}
+
+#[test]
 fn deferred_dispatch_rejection_settles_once_with_exact_result_linkage() {
     let target = tempfile::tempdir().unwrap();
     let run_id = "tool-rejected-identity-test";
@@ -292,15 +349,16 @@ fn deferred_dispatch_rejection_settles_once_with_exact_result_linkage() {
         .completion
         .finish(Some(result_artifact(identity.item_id)))
         .unwrap();
-    assert_eq!(identity.task_id, task_id);
+    assert_eq!(identity.task_id, Some(task_id));
 
     let read = read_run_items(target.path(), run_id).unwrap().unwrap();
     let calls = call_items(&read.items, identity);
-    assert_eq!(calls.len(), 2, "one request and one durable finish");
+    assert_eq!(calls.len(), 3, "request, rejection, and finish must be durable");
+    assert!(matches!(calls[1].item, RunItemV1::ToolCallRejected { .. }));
     assert!(matches!(
-        calls[1].item,
+        calls[2].item,
         RunItemV1::ToolCallFinished {
-            status: RunItemStatus::Failed,
+            status: RunItemStatus::Blocked,
             result_artifact: Some(_),
             ..
         }
@@ -341,20 +399,21 @@ fn application_rejection_settles_once_with_exact_durable_result() {
 
     let read = read_run_items(target.path(), run_id).unwrap().unwrap();
     let calls = call_items(&read.items, identity);
-    assert_eq!(calls.len(), 2, "one request and one durable finish");
+    assert_eq!(calls.len(), 3, "request, rejection, and finish must be durable");
     assert!(matches!(calls[0].item, RunItemV1::ToolCallRequested { .. }));
+    assert!(matches!(calls[1].item, RunItemV1::ToolCallRejected { .. }));
     assert!(matches!(
-        calls[1].item,
+        calls[2].item,
         RunItemV1::ToolCallFinished {
-            status: RunItemStatus::Failed,
+            status: RunItemStatus::Blocked,
             result_artifact: Some(_),
             ..
         }
     ));
-    assert_eq!(calls[1].task_id, Some(task_id));
+    assert_eq!(calls[2].task_id, Some(task_id));
     assert!(!calls.iter().any(|item| matches!(
         item.item,
-        RunItemV1::ToolCallStarted { .. } | RunItemV1::ToolCallRejected { .. }
+        RunItemV1::ToolCallStarted { .. }
     )));
 
     let projection = crate::run_lifecycle::load_run_projection(target.path(), run_id)

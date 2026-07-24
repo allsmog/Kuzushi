@@ -4,28 +4,17 @@ use super::application::{normalize_uaf_hunt_findings, run_uaf_hunt_report};
 use crate::config::V2Config;
 use crate::findings::TriageOutcome;
 use crate::modules::ToolExecutionContext;
-use crate::run_artifacts::{RunTraceStep, TraceHandle, TraceSink};
+use crate::run_artifacts::TraceHandle;
 use crate::runtime::{
     AgentLoopStep, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry, ToolCall, TriageRequest,
 };
 use anyhow::Result;
 use serde_json::json;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 use tempfile::tempdir;
 
 struct ScriptedUafRuntime {
     steps: Mutex<Vec<AgentLoopStep>>,
-}
-
-#[derive(Default)]
-struct VecTraceSink {
-    steps: Mutex<Vec<RunTraceStep>>,
-}
-
-impl TraceSink for VecTraceSink {
-    fn record(&self, step: &RunTraceStep) {
-        self.steps.lock().unwrap().push(step.clone());
-    }
 }
 
 impl ScriptedUafRuntime {
@@ -406,8 +395,7 @@ done
     ]);
     let mut config = V2Config::default();
     config.model = Some("anthropic:claude-haiku-4-5".to_string());
-    let sink = Arc::new(VecTraceSink::default());
-    let trace = TraceHandle::new(sink.clone()).for_tool("uaf-hunt:hunt");
+    let trace = TraceHandle::jsonl(dir.path(), "uaf-hunt-trace").for_tool("uaf-hunt:hunt");
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: None,
@@ -425,11 +413,16 @@ done
     assert_eq!(report.cost_usd, 0.03);
     assert!(report.first_clang_error.is_none());
 
-    let steps = sink.steps.lock().unwrap();
-    let labels = steps
-        .iter()
-        .map(|step| step.label.as_str())
-        .collect::<Vec<_>>();
+    trace.item_writer().unwrap().flush().unwrap();
+    let read = crate::run_lifecycle::read_run_items(dir.path(), "uaf-hunt-trace")
+        .unwrap()
+        .unwrap();
+    let labels = read.items.iter().filter_map(|item| match &item.item {
+        crate::run_lifecycle::RunItemV1::DiagnosticNotice { message, .. } => Some(message.as_str()),
+        crate::run_lifecycle::RunItemV1::SafeReasoningSummary { text, .. } => Some(text.as_str()),
+        crate::run_lifecycle::RunItemV1::ToolCallProgress { message, .. } => Some(message.as_str()),
+        _ => None,
+    }).collect::<Vec<_>>();
     assert!(labels
         .iter()
         .any(|label| label.contains("agent · preflight")));
@@ -438,9 +431,13 @@ done
     assert!(labels
         .iter()
         .any(|label| label.contains("complete · 1 findings")));
-    let start_step = steps[0].n;
-    assert!(steps
+    let start_step = read.items[0].item_id;
+    assert!(read.items
         .iter()
-        .filter(|step| step.kind == "tool-progress")
-        .all(|step| step.parent_step == Some(start_step)));
+        .skip(1)
+        .any(|item| item.parent_item_id == Some(start_step)));
+    assert!(read.items.last().is_some_and(|item| {
+        matches!(item.item, crate::run_lifecycle::RunItemV1::DiagnosticNotice { .. })
+            && item.parent_item_id.is_none()
+    }));
 }

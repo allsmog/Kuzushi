@@ -65,14 +65,6 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
         "ui_view_models/run_timeline.rs",
         "run metadata artifact must be in shared canonical spec",
     ),
-    (
-        "ui_view_models/run_trace.rs",
-        "run metadata artifact must be in shared canonical spec",
-    ),
-    (
-        "ui_view_models/run_trace.rs",
-        "trace artifact must be in shared canonical spec",
-    ),
 ];
 
 // Split so this file never matches its own detection patterns.

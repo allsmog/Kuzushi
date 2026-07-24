@@ -47,7 +47,7 @@ pub(crate) fn run_taint_iris_next_report(
 
 fn traced_taint_iris_next_plan(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     target: &Path,
     options: TaintIrisNextInput,
 ) -> Result<TaintIrisNextPlan> {
@@ -59,7 +59,7 @@ fn traced_taint_iris_next_plan(
 
 fn traced_taint_iris_next_evidence(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
     emit_taint_iris_next_progress(
@@ -114,7 +114,7 @@ pub(crate) fn run_taint_iris_next_hunt(
     plan: &TaintIrisNextPlan,
     evidence: &TaintIrisNextEvidenceResult,
     agent_prompt: &str,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<TaintIrisNextReport> {
     let execution =
         prepare_taint_iris_next_agent_execution(input, ctx, runtime, target, plan, parent_step)?;
@@ -160,7 +160,7 @@ fn prepare_taint_iris_next_agent_execution<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
     target: &Path,
     plan: &TaintIrisNextPlan,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<TaintIrisNextAgentExecution<'a>> {
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
@@ -188,7 +188,7 @@ fn apply_taint_iris_next_whitebox_profile(
     mark_whitebox_static_findings(&mut agent.findings, StaticProofState::SourceSinkLinked)
 }
 
-fn emit_taint_iris_next_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+fn emit_taint_iris_next_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -202,7 +202,7 @@ fn emit_taint_iris_next_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> 
 
 fn emit_taint_iris_next_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     emit_taint_iris_next_child(ctx, parent_step, "tool-progress", label);
@@ -210,7 +210,7 @@ fn emit_taint_iris_next_progress(
 
 fn emit_taint_iris_next_child(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     kind: &str,
     label: impl Into<String>,
 ) {
@@ -222,7 +222,7 @@ fn emit_taint_iris_next_child(
 
 fn begin_taint_iris_next_agent_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

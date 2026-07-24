@@ -1,9 +1,7 @@
-use crate::{
-    app::{RunTraceCacheState, ViewDataState},
-    ReconSnapshot, ShellApp,
+use crate::{app::ViewDataState, ShellApp};
+use kuzushi_core::{
+    run_artifacts::canonical_run_artifact_spec, RunArtifactRead, RunArtifactTextRead,
 };
-use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
-use kuzushi_core::{RunArtifactRead, RunArtifactTextRead, RunTraceStep};
 
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
@@ -30,7 +28,6 @@ pub(crate) struct ReplayModel {
     pub(crate) projection_error: Option<String>,
     pub(crate) artifacts: Vec<RunArtifactDetail>,
     pub(crate) metadata_missing: bool,
-    pub(crate) recon: Option<ReconSnapshot>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,9 +61,6 @@ pub(crate) struct TraceStep {
 
 pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
     let (projection, projection_error) = replay_projection(app, run_id);
-    let typed = projection.as_ref().is_some_and(|read| {
-        read.source == kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
-    });
     let metadata = run_metadata_artifact_detail(app, run_id);
     let result = run_artifact_detail(app, run_id, "result", RUN_RESULT_FILE);
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
@@ -83,9 +77,6 @@ pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
             result.into_display(),
             triage.into_display(),
         ],
-        recon: (!typed)
-            .then(|| replay_recon_snapshot(app, run_id))
-            .flatten(),
     }
 }
 
@@ -110,20 +101,8 @@ fn replay_projection(
     }
 }
 
-fn replay_recon_snapshot(app: &ShellApp, run_id: &str) -> Option<ReconSnapshot> {
-    let ViewDataState::Ready(RunArtifactRead::Ready { value, .. }) =
-        cached_artifact_text(app, run_id, RUN_RESULT_FILE)
-    else {
-        return None;
-    };
-    serde_json::from_str(&value)
-        .ok()
-        .and_then(|result| crate::app::recon_snapshot_from_result(&result))
-        .filter(ReconSnapshot::has_evidence)
-}
-
 pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
-    let trace = run_artifact_detail(app, run_id, "trace", run_trace_artifact_leaf());
+    let trace = run_artifact_detail(app, run_id, "lifecycle", run_items_artifact_leaf());
     let triage = run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE);
     let verify = run_artifact_detail(app, run_id, "verify", RUN_VERIFY_FILE);
     let patch = run_artifact_detail(app, run_id, "patch", RUN_PATCH_FILE);
@@ -200,15 +179,11 @@ fn cached_artifact_text(
 }
 
 fn run_metadata_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("run.json")
-        .expect("run metadata artifact must be in shared canonical spec")
-        .leaf
+    canonical_run_artifact_spec("run.json").map_or("run.json", |spec| spec.leaf)
 }
 
-fn run_trace_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("trace.jsonl")
-        .expect("trace artifact must be in shared canonical spec")
-        .leaf
+fn run_items_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("items.jsonl").map_or("items.jsonl", |spec| spec.leaf)
 }
 
 fn trace_steps(app: &ShellApp, run_id: &str, state: RunArtifactState) -> Vec<TraceStep> {
@@ -219,56 +194,62 @@ fn trace_steps(app: &ShellApp, run_id: &str, state: RunArtifactState) -> Vec<Tra
         RunArtifactState::Loading => return Vec::new(),
         RunArtifactState::File => {}
     }
-    let Some(target) = app.target() else {
-        return Vec::new();
+    let (read, error) = replay_projection(app, run_id);
+    let Some(read) = read else {
+        return error
+            .map(|error| vec![lifecycle_read_error_step(error)])
+            .unwrap_or_default();
     };
-    match app
-        .workbench_cache()
-        .borrow()
-        .cached_run_trace(target, run_id)
-    {
-        ViewDataState::Ready(RunTraceCacheState::Ready(read)) => {
-            trace_steps_from_core_read(read.steps, read.malformed_lines)
-        }
-        ViewDataState::Ready(RunTraceCacheState::Invalid) => vec![malformed_trace_artifact_step()],
-        ViewDataState::NotRequested | ViewDataState::Loading => Vec::new(),
+    kuzushi_core::run_lifecycle::present_run(&read)
+        .timeline_text_rows()
+        .into_iter()
+        .enumerate()
+        .map(|(index, row)| trace_step_from_timeline(index, row))
+        .collect()
+}
+
+fn trace_step_from_timeline(
+    index: usize,
+    row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1,
+) -> TraceStep {
+    TraceStep {
+        n: index + 1,
+        kind: row
+            .status
+            .map(|status| status.label().to_string())
+            .unwrap_or_else(|| "activity".to_string()),
+        label: row.text,
+        latency_ms: None,
+        cost_usd: None,
+        module_id: None,
+        verb: None,
+        parent_step: None,
+        severity: row.diagnostic_level.map(diagnostic_severity),
+        started_at_ms: None,
     }
 }
 
-fn trace_steps_from_core_read(steps: Vec<RunTraceStep>, malformed_lines: usize) -> Vec<TraceStep> {
-    let next_number = steps.iter().map(|step| step.n).max().unwrap_or(0) + 1;
-    let mut projected = steps.into_iter().map(TraceStep::from).collect::<Vec<_>>();
-    if malformed_lines > 0 {
-        projected.push(TraceStep {
-            n: next_number,
-            kind: "malformed".to_string(),
-            label: format!("{malformed_lines} malformed trace JSONL line(s) ignored"),
-            latency_ms: None,
-            cost_usd: None,
-            module_id: None,
-            verb: None,
-            parent_step: None,
-            severity: Some("warn".to_string()),
-            started_at_ms: None,
-        });
+fn diagnostic_severity(level: kuzushi_core::run_lifecycle::DiagnosticLevel) -> String {
+    match level {
+        kuzushi_core::run_lifecycle::DiagnosticLevel::Info => "info",
+        kuzushi_core::run_lifecycle::DiagnosticLevel::Warning => "warn",
+        kuzushi_core::run_lifecycle::DiagnosticLevel::Error => "danger",
     }
-    projected
+    .to_string()
 }
 
-impl From<RunTraceStep> for TraceStep {
-    fn from(step: RunTraceStep) -> Self {
-        Self {
-            n: step.n,
-            kind: step.kind,
-            label: step.label,
-            latency_ms: step.latency_ms,
-            cost_usd: step.cost_usd,
-            module_id: step.module_id,
-            verb: step.verb,
-            parent_step: step.parent_step,
-            severity: step.severity,
-            started_at_ms: step.started_at_ms,
-        }
+fn lifecycle_read_error_step(error: String) -> TraceStep {
+    TraceStep {
+        n: 1,
+        kind: "malformed".to_string(),
+        label: format!("could not read lifecycle: {error}"),
+        latency_ms: None,
+        cost_usd: None,
+        module_id: None,
+        verb: None,
+        parent_step: None,
+        severity: Some("warn".to_string()),
+        started_at_ms: None,
     }
 }
 
@@ -276,7 +257,7 @@ fn malformed_trace_artifact_step() -> TraceStep {
     TraceStep {
         n: 1,
         kind: "malformed".to_string(),
-        label: "malformed trace artifact".to_string(),
+        label: "malformed lifecycle artifact".to_string(),
         latency_ms: None,
         cost_usd: None,
         module_id: None,
@@ -291,7 +272,7 @@ fn non_file_trace_artifact_step() -> TraceStep {
     TraceStep {
         n: 1,
         kind: "malformed".to_string(),
-        label: "trace artifact path is not a file".to_string(),
+        label: "lifecycle artifact path is not a file".to_string(),
         latency_ms: None,
         cost_usd: None,
         module_id: None,
@@ -451,7 +432,7 @@ mod tests {
         let model = trace_model(&app, "../../outside\nrun");
 
         assert!(!model.trace_exists);
-        assert_eq!(model.steps[0].label, "malformed trace artifact");
+        assert_eq!(model.steps[0].label, "malformed lifecycle artifact");
         assert!(model
             .artifacts
             .iter()
@@ -460,49 +441,6 @@ mod tests {
             .artifacts
             .iter()
             .all(|artifact| artifact.state_label() == Some("INVALID")));
-    }
-
-    #[test]
-    fn trace_steps_project_the_canonical_core_schema() {
-        let steps = trace_steps_from_core_read(
-            vec![RunTraceStep {
-                n: 1,
-                kind: "reasoning".to_string(),
-                label: "query".to_string(),
-                latency_ms: Some(25),
-                cost_usd: Some(0.02),
-                observed_cost_usd: None,
-                provider_spend_unresolved: false,
-                call_attempted: None,
-                module_id: Some("triage".to_string()),
-                verb: Some("run".to_string()),
-                parent_step: Some(7),
-                severity: Some("info".to_string()),
-                started_at_ms: Some(1_700_000_000_000),
-                model: None,
-                provider: None,
-                prompt_hash: None,
-            }],
-            0,
-        );
-
-        assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0].latency_ms, Some(25));
-        assert_eq!(steps[0].cost_usd, Some(0.02));
-        assert_eq!(steps[0].module_id.as_deref(), Some("triage"));
-        assert_eq!(steps[0].parent_step, Some(7));
-        assert_eq!(steps[0].started_at_ms, Some(1_700_000_000_000));
-    }
-
-    #[test]
-    fn trace_steps_summarize_malformed_canonical_rows() {
-        let steps = trace_steps_from_core_read(Vec::new(), 2);
-
-        assert_eq!(steps.len(), 1);
-        assert_eq!(steps[0].n, 1);
-        assert_eq!(steps[0].kind, "malformed");
-        assert_eq!(steps[0].severity.as_deref(), Some("warn"));
-        assert_eq!(steps[0].label, "2 malformed trace JSONL line(s) ignored");
     }
 
     #[test]
@@ -562,7 +500,7 @@ mod tests {
     fn trace_model_surfaces_non_file_trace_artifact_as_invalid() {
         let temp = tempfile::tempdir().unwrap();
         let run_dir = kuzushi_core::run_dir(temp.path(), "r-invalid-trace");
-        std::fs::create_dir_all(run_dir.join(run_trace_artifact_leaf())).unwrap();
+        std::fs::create_dir_all(run_dir.join(run_items_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
         hydrate_trace(&mut app, "r-invalid-trace");
@@ -570,18 +508,21 @@ mod tests {
         let model = trace_model(&app, "r-invalid-trace");
 
         assert!(!model.trace_exists);
-        assert_eq!(model.artifacts[0].label, "trace");
-        assert!(model.artifacts[0].detail.ends_with("trace.jsonl"));
+        assert_eq!(model.artifacts[0].label, "lifecycle");
+        assert!(model.artifacts[0].detail.ends_with("items.jsonl"));
         assert_eq!(model.artifacts[0].state_label(), Some("NOT A FILE"));
         assert_eq!(model.steps.len(), 1);
-        assert_eq!(model.steps[0].label, "trace artifact path is not a file");
+        assert_eq!(
+            model.steps[0].label,
+            "lifecycle artifact path is not a file"
+        );
     }
 
     #[test]
     fn trace_steps_surface_non_utf8_trace_artifact() {
         let temp = tempfile::tempdir().unwrap();
         let run_id = "r-non-utf8";
-        let path = kuzushi_core::run_dir(temp.path(), run_id).join(run_trace_artifact_leaf());
+        let path = kuzushi_core::run_dir(temp.path(), run_id).join(run_items_artifact_leaf());
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -592,7 +533,7 @@ mod tests {
 
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].kind, "malformed");
-        assert_eq!(steps[0].label, "malformed trace artifact");
+        assert_eq!(steps[0].label, "malformed lifecycle artifact");
     }
 
     fn named_finding(fingerprint: &str, title: &str) -> Finding {

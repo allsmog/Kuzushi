@@ -16,6 +16,7 @@ pub enum RunItemStatus {
     Completed,
     Partial,
     Skipped,
+    Blocked,
     Failed,
     Canceled,
     Interrupted,
@@ -33,6 +34,7 @@ impl RunItemStatus {
             Self::Completed => "completed",
             Self::Partial => "partial",
             Self::Skipped => "skipped",
+            Self::Blocked => "blocked",
             Self::Failed => "failed",
             Self::Canceled => "canceled",
             Self::Interrupted => "interrupted",
@@ -296,7 +298,7 @@ impl RunItemV1 {
             | Self::ModelCallFinished { status, .. }
             | Self::TerminalOutcome { status, .. }
             | Self::PhaseReceipt { status, .. } => Some(*status),
-            Self::ToolCallRejected { .. } => Some(RunItemStatus::Failed),
+            Self::ToolCallRejected { .. } => Some(RunItemStatus::Blocked),
             Self::ToolCallStarted { .. } | Self::ModelCallStarted { .. } => {
                 Some(RunItemStatus::Running)
             }

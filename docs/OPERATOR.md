@@ -279,8 +279,9 @@ tooling half:
 What each durable artifact may contain, decided and enforced (2026-07
 hardening audit):
 
-- **`trace.jsonl` (per run) — redacted by design.** LLM calls record model,
-  provider, latency, cost, `prompt_len`, and a `prompt_hash` — never raw
+- **`items.jsonl` (per run) — typed and redacted by design.** Model lifecycle
+  items record provider, selected model, latency, bounded usage and cost when
+  known — never raw
   prompts or completions. Scanned source reaches disk only through the
   findings store (evidence snippets/provenance blobs), which is the
   product's job, not a logging side effect.

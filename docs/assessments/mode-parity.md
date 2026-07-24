@@ -120,7 +120,7 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.
 - **Pipeline JSONL artifacts are scan-owned.** All three write the canonical run bundle:
-  `run.json`, `events.jsonl`, `trace.jsonl`, `failures.json`,
+  `run.json`, `events.jsonl`, `items.jsonl`, `failures.json`,
   `report.md`, and `artifacts.json`, plus `input.json` and `result.json` for the
   dispatched tool. These are the shared tool input/result artifacts. SAST scan
   orchestration additionally owns declared
@@ -176,13 +176,13 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   runs capture route, phase/pane, input mode, scroll, pinned finding, and
   auto-return ownership. The final chain/plan/steer outcome restores that exact
   origin with one accumulated receipt; background and manually inspected work
-  never auto-navigate. Run trace schema and chain → plan → steer ordering remain
+  never auto-navigate. Typed lifecycle schema and chain → plan → steer ordering remain
   shared and unchanged.
 - **Lifecycle semantics are mode-shared.** Scan, shell, and run all reach the
   typed stream through the shared preparation/dispatch boundary. Shell alone
   subscribes to committed items for Run Focus and operator questions.
-  `events.jsonl` and `trace.jsonl` are compatibility/diagnostic projections,
-  not alternative semantic sources.
+  `events.jsonl` is a terminal storage derivative, not an alternative semantic
+  execution source.
 - **Contextual surfaces are shell-only.** Help, Controls, and Capabilities are
   modal; Jobs, Replay, Trace, and visualizations are scrollable full-frame
   decks. Replacing one utility retains the original workflow origin; Esc

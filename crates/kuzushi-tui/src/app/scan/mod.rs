@@ -3,19 +3,14 @@ pub(crate) use super::*;
 
 #[cfg(test)]
 use self::artifacts::{append_run_status_event, write_run_failure_handoff};
-use self::artifacts::{append_trace_step, short_label};
 use self::findings::short_fingerprint;
-use self::workers::{scan_worker, LiveTraceBudget};
+use self::workers::scan_worker;
 use self::{with_next_step, ScanEvent, ScanPanelState, ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::modules::ToolExecutionContext;
-use kuzushi_core::{
-    new_run_id, next_run_trace_step_number, JsonlSink, RunTraceStep, ScanCancellation, TraceHandle,
-    TraceSink, WorkspaceTarget,
-};
+use kuzushi_core::{new_run_id, ScanCancellation, TraceHandle, WorkspaceTarget};
 pub(crate) use start_scan::*;
 use std::path::PathBuf;
-use std::sync::Arc;
 pub(crate) use truncate_ascii::*;
 mod start_scan;
 #[cfg(test)]

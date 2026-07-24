@@ -142,11 +142,11 @@ mapped below.
 ### 12. Make Activity Progress Honest
 
 - Decision: accept
-- Reason: Current Activity is trace-backed; Fable's stall/outcome guidance
+- Reason: Activity is lifecycle-backed; Fable's stall/outcome guidance
   reinforces existing semantics.
 - Domain impact: avoids confusing stale animation with actual work.
-- Implementation notes: Activity rows should derive from real `RunTraceStep`
-  events and run terminal status. Add elapsed/last-event age where feasible.
+- Implementation notes: Activity rows should derive from real `RunItemV1`
+  items and run terminal status. Add elapsed/last-event age where feasible.
   Completion should produce a persistent outcome banner; zero-result runs must
   not auto-open empty artifact views.
 

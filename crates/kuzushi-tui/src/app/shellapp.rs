@@ -1419,7 +1419,7 @@ mod tests {
             .message
             .contains("Next: run semgrep:scan (no JSON needed — defaults apply)"));
         assert!(notice.message.contains("options semgrep:scan"));
-        assert_failed_preparation_run(temp.path(), &expected_title);
+        assert_blocked_preparation_run(temp.path(), &expected_title);
     }
 
     #[test]
@@ -1442,10 +1442,10 @@ mod tests {
         });
 
         assert!(effects.is_empty());
-        assert_failed_preparation_run(temp.path(), &expected_title);
+        assert_blocked_preparation_run(temp.path(), &expected_title);
     }
 
-    fn assert_failed_preparation_run(target: &std::path::Path, expected_title: &str) {
+    fn assert_blocked_preparation_run(target: &std::path::Path, expected_title: &str) {
         let entry = kuzushi_core::list_recent_run_summary_entries(target, 1)
             .unwrap()
             .pop()
@@ -1453,14 +1453,14 @@ mod tests {
         let read = kuzushi_core::run_lifecycle::load_run_projection(target, &entry.run_id).unwrap();
         assert_eq!(
             read.projection.terminal.as_ref().map(|item| item.status),
-            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Blocked)
         );
         let task = read.projection.tasks.values().next().unwrap();
         assert_eq!(task.title.as_str(), expected_title);
         let call = read.projection.calls.values().next().unwrap();
         assert_eq!(
             call.status,
-            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
         );
         assert!(!read.projection.artifacts.is_empty());
         assert!(read

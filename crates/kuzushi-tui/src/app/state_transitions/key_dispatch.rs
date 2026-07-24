@@ -1593,9 +1593,44 @@ mod tests {
             Some(attempt_tool.to_string()),
             workspace.root().display().to_string(),
         );
-        summary.status = "complete".to_string();
+        summary.status = "completed".to_string();
         summary.completed_at_unix = Some(summary.started_at_unix);
         kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        write_completed_fix_lifecycle(workspace.root(), attempt_run_id, attempt_tool);
+    }
+
+    fn write_completed_fix_lifecycle(target: &std::path::Path, run_id: &str, tool: &str) {
+        use kuzushi_core::run_lifecycle::*;
+        let observation = RunObservationHandle::jsonl(target, run_id).unwrap();
+        let mut plan = observation
+            .start_plan("Fix finding", ["Prepare patch result".to_string()])
+            .unwrap();
+        let task = plan.tasks()[0].clone();
+        plan.update_and_flush(RunItemStatus::Running).unwrap();
+        task.update_and_flush(RunItemStatus::Running, None).unwrap();
+        task.update_and_flush(RunItemStatus::Completed, None)
+            .unwrap();
+        plan.update_and_flush(RunItemStatus::Completed).unwrap();
+        observation
+            .emit_and_flush(RunItemRecord::new(
+                RunItemId::new(),
+                RunItemSource::Workflow,
+                RunItemV1::TerminalOutcome {
+                    status: RunItemStatus::Completed,
+                    summary: SafeText::operator_visible("Patch candidate completed"),
+                    cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                        kuzushi_core::runtime::RuntimeCost::ZERO,
+                    ),
+                    continuation: WorkflowContinuation::NoFurtherAction {
+                        reason: SafeText::operator_visible(if tool == "patch:reverify" {
+                            "re-verification passed; acknowledge this verified remediation"
+                        } else {
+                            "review the candidate; Apply remains separately authorized"
+                        }),
+                    },
+                },
+            ))
+            .unwrap();
     }
 
     fn append_fix_result_attempt(
@@ -1603,8 +1638,7 @@ mod tests {
         attempt_run_id: &str,
     ) -> String {
         use kuzushi_core::workflow_attempts::{
-            append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome,
-            PhaseTargetSnapshot,
+            PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
         };
 
         let completed = PhaseAttemptCompleted::new(
@@ -1613,9 +1647,14 @@ mod tests {
             PhaseTargetSnapshot::capture(workspace.root()),
             PhaseAttemptOutcome::Completed,
         )
+        .with_attempt_id(kuzushi_core::run_lifecycle::RunAttemptId::new().to_string())
         .with_receipt(fix_result_receipt());
         let attempt_id = completed.attempt_id.clone();
-        append_phase_attempt_completed(workspace.root(), completed).unwrap();
+        kuzushi_core::workflow_attempts::append_phase_attempt_completed_with_v2(
+            workspace.root(),
+            completed,
+        )
+        .unwrap();
         attempt_id
     }
 
@@ -1958,7 +1997,6 @@ mod tests {
                 PhaseResultAction::Select,
                 PhaseResultAction::Open,
                 PhaseResultAction::RunAgain,
-                PhaseResultAction::Discard,
             ]
         );
         assert!(card.control_hint.contains("u Acknowledge verified"));
@@ -1966,7 +2004,7 @@ mod tests {
         assert!(!card.control_hint.contains("Refine"));
         assert_eq!(
             card.recommended,
-            "re-verification passed; acknowledge this verified remediation"
+            "none · re-verification passed; acknowledge this verified remediation"
         );
     }
 
@@ -2025,11 +2063,18 @@ mod tests {
             .expect("unresolved Fix result");
 
         assert!(card.control_hint.contains("u Select patch"));
-        assert!(card.control_hint.contains("f Refine"));
+        assert_eq!(
+            card.actions,
+            vec![
+                kuzushi_core::workflow_attempts::PhaseResultAction::Select,
+                kuzushi_core::workflow_attempts::PhaseResultAction::Open,
+                kuzushi_core::workflow_attempts::PhaseResultAction::RunAgain,
+            ]
+        );
         assert!(!card.control_hint.contains("Acknowledge verified"));
         assert_eq!(
             card.recommended,
-            "review the candidate; Apply remains separately authorized"
+            "none · review the candidate; Apply remains separately authorized"
         );
         assert!(app
             .engagement
@@ -2054,7 +2099,7 @@ mod tests {
         assert!(!card.control_hint.contains("Acknowledge verified"));
         assert_eq!(
             card.recommended,
-            "review the candidate; Apply remains separately authorized"
+            "none · review the candidate; Apply remains separately authorized"
         );
     }
 

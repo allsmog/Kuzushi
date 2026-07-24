@@ -76,7 +76,7 @@ fn collect_agentic_sast_findings(
     runtime: &dyn AgentRuntime,
     run: &AgenticSastRun,
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let mut result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
     emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
@@ -94,7 +94,7 @@ fn query_agentic_sast_with_scope(
     runtime: &dyn AgentRuntime,
     run: &AgenticSastRun,
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     let _llm_scope = begin_agentic_sast_child_scope(
         ctx,
@@ -111,7 +111,7 @@ fn review_agentic_sast_with_scope(
     run: &AgenticSastRun,
     findings: Vec<Finding>,
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     if run.options.passes != 2 || findings.is_empty() {
         return Ok(CostedStructuredJson {
@@ -160,7 +160,7 @@ fn agentic_sast_report(
     }
 }
 
-fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun) -> Option<usize> {
+fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -178,7 +178,7 @@ fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun)
 
 fn emit_agentic_sast_inventory_count(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     inventory_count: usize,
 ) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
@@ -195,7 +195,7 @@ fn emit_agentic_sast_inventory_count(
 
 fn emit_agentic_sast_validation_count(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     finding_count: usize,
 ) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
@@ -212,7 +212,7 @@ fn emit_agentic_sast_validation_count(
 
 fn emit_agentic_sast_persisted(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     finding_count: usize,
     persisted: Option<&AgenticSastPersistedRun>,
 ) {
@@ -270,7 +270,7 @@ fn emit_agentic_sast_finding_delta(
 
 fn begin_agentic_sast_child_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: &str,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let trace = ctx.trace?;

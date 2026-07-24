@@ -33,9 +33,8 @@ mod tool_run_failure_result;
 mod tool_stage;
 mod tool_run_record;
 mod tool_run_record_events;
-mod trace_cost;
+mod lifecycle_cost;
 mod trace_handle;
-mod trace_step_builder;
 mod write_run_artifact_json;
 mod write_run_artifact_text;
 
@@ -47,7 +46,6 @@ pub use run_artifact_reader::{
     read_run_artifact_bytes, read_run_artifact_text, resolve_run_artifact_path,
     RunArtifactBytesRead, RunArtifactRead, RunArtifactTextRead, MAX_RUN_ARTIFACT_READ_BYTES,
 };
-pub(crate) use run_events::append_compat_run_item_events;
 pub use run_events::{
     append_run_event, load_run_events, next_run_event_number, RunEvent, RunEventRead,
     RunInteractionAudit,
@@ -80,7 +78,7 @@ pub use run_summary_store::{
 };
 pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
-    RunSummary, RunTargetGitMetadata, RunTraceStep,
+    RunSummary, RunTargetGitMetadata,
 };
 pub use stage_checkpoint::{
     active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
@@ -112,17 +110,13 @@ pub use tool_run_record::{
     try_record_tool_run_refused_observed, try_record_tool_run_refused_settled,
     try_record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
-pub use trace_cost::{
-    reconcile_terminal_cost_reports, terminal_model_call_cost_report, trace_cost_report,
+pub use lifecycle_cost::{
+    lifecycle_cost_report, reconcile_terminal_cost_reports, terminal_model_call_cost_report,
 };
 pub use trace_handle::{
-    current_parent_step, with_parent_step, BroadcastSink, JsonlSink, ParentScope, TraceHandle,
-    TraceSink, TraceStepBuilder,
+    current_parent_step, with_parent_step, ParentScope, RunActivityBuilder, TraceHandle,
 };
-pub use write_run_artifact_json::{
-    append_run_trace_step, append_run_trace_step_with_next_number, load_run_trace,
-    next_run_trace_step_number, write_run_artifact_json, RunTraceRead,
-};
+pub use write_run_artifact_json::write_run_artifact_json;
 pub(crate) use write_run_artifact_text::write_run_artifact_text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,6 @@
 use crossterm::event::KeyCode;
 use kuzushi_core::workflow_attempts::{
-    assess_map_evidence, collect_map_evidence, insufficient_map_evidence_message,
-    MapEvidenceAdequacy, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseResultAction,
+    PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseResultAction,
 };
 use kuzushi_core::WorkflowPhase;
 
@@ -205,8 +204,7 @@ impl ShellApp {
         let typed_receipt = TypedReceiptResolution::resolve(completed);
         let policy = self.phase_result_policy_with_receipt(completed, &typed_receipt);
         let live = self.matching_live_result_receipt(&completed.attempt_id);
-        let fallback_outcome = self.effective_phase_attempt_outcome(completed);
-        let effective_outcome = typed_receipt.outcome_or(fallback_outcome);
+        let effective_outcome = typed_receipt.outcome();
         let outcome = format!("{effective_outcome:?}").to_ascii_lowercase();
         let actions =
             ordered_phase_result_actions(completed.phase, effective_outcome, &policy.actions);
@@ -327,28 +325,13 @@ impl ShellApp {
         completed: &PhaseAttemptCompleted,
         receipt: &TypedReceiptResolution,
     ) -> PhaseResultPolicy {
-        let mut policy = self.base_phase_result_policy(completed, receipt);
+        let mut policy = if let Some(reason) = self.effective_phase_attempt_blocker(completed) {
+            selection_blocked_result_policy(&reason)
+        } else {
+            receipt.authoritative_policy()
+        };
         self.offer_continue_run(completed, &mut policy);
         policy
-    }
-
-    fn base_phase_result_policy(
-        &self,
-        completed: &PhaseAttemptCompleted,
-        receipt: &TypedReceiptResolution,
-    ) -> PhaseResultPolicy {
-        if let Some(policy) = receipt.authoritative_policy() {
-            return policy;
-        }
-        if let Some(policy) = self.guarded_legacy_phase_result_policy(completed) {
-            return policy;
-        }
-        let live = self.matching_live_result_receipt(&completed.attempt_id);
-        legacy_receipt_result_policy(
-            completed,
-            self.effective_phase_attempt_outcome(completed),
-            live,
-        )
     }
 
     /// A failed/canceled attempt whose run left resumable checkpoint state
@@ -400,28 +383,6 @@ impl ShellApp {
             })
     }
 
-    fn guarded_legacy_phase_result_policy(
-        &self,
-        completed: &PhaseAttemptCompleted,
-    ) -> Option<PhaseResultPolicy> {
-        if self.engagement.phase_attempt_projection_is_degraded() {
-            return Some(selection_blocked_result_policy(
-                "workflow attempt ledger is degraded; repair it before selecting results",
-            ));
-        }
-        if let Some(reason) = self.effective_phase_attempt_blocker(completed) {
-            return Some(selection_blocked_result_policy(&reason));
-        }
-        if self.verified_remediation_run_refs(
-            completed.phase,
-            completed.outcome,
-            &completed.run_refs,
-        ) {
-            return Some(verified_remediation_result_policy());
-        }
-        None
-    }
-
     pub(crate) fn effective_phase_attempt_outcome(
         &self,
         completed: &PhaseAttemptCompleted,
@@ -445,10 +406,16 @@ impl ShellApp {
         ) {
             return None;
         }
+        if self.engagement.phase_attempt_projection_is_degraded() {
+            return Some(
+                "phase result ledger is degraded; repair it before selecting this result"
+                    .to_string(),
+            );
+        }
         if let Some(reason) = completed.selection_blocked_reason.as_ref() {
             return Some(reason.clone());
         }
-        legacy_map_evidence_blocker(completed)
+        None
     }
 
     pub(crate) fn verified_remediation_result_is_open(&self, phase: WorkflowPhase) -> bool {
@@ -609,35 +576,16 @@ fn durable_receipt_cost_label(cost: &str) -> String {
 
 fn terminal_result_details(
     completed: &PhaseAttemptCompleted,
-    typed_receipt: &TypedReceiptResolution,
+    _typed_receipt: &TypedReceiptResolution,
     live: Option<&RunFocusReceipt>,
 ) -> PhaseResultDetails {
-    if typed_receipt.is_legacy_lossy() {
-        return legacy_terminal_result_details(completed, live);
-    }
+    let _ = live;
     if let Some(typed) = typed_durable_result_details(completed) {
         return typed;
     }
     legacy_phase_result_details(vec![
         "typed run result unavailable — inspect the referenced run".to_string(),
     ])
-}
-
-fn legacy_terminal_result_details(
-    completed: &PhaseAttemptCompleted,
-    live: Option<&RunFocusReceipt>,
-) -> PhaseResultDetails {
-    if let Some(result) = live.and_then(focused_live_result) {
-        return legacy_phase_result_details(result_summary_lines(result));
-    }
-    let lines = legacy_durable_result_summary(completed)
-        .as_ref()
-        .map(result_summary_lines)
-        .unwrap_or_default();
-    if lines.is_empty() {
-        return typed_durable_result_details(completed).unwrap_or_default();
-    }
-    legacy_phase_result_details(lines)
 }
 
 fn legacy_phase_result_details(lines: Vec<String>) -> PhaseResultDetails {
@@ -647,34 +595,6 @@ fn legacy_phase_result_details(lines: Vec<String>) -> PhaseResultDetails {
             .map(PhaseResultDetailRow::unkeyed)
             .collect(),
     }
-}
-
-fn focused_live_result(
-    receipt: &RunFocusReceipt,
-) -> Option<&kuzushi_core::run_artifacts::RunResultSummary> {
-    receipt
-        .result_summaries
-        .iter()
-        .find(|result| matches!(result.status.as_str(), "failed" | "partial"))
-        .or_else(|| receipt.result_summaries.last())
-}
-
-fn legacy_durable_result_summary(
-    completed: &PhaseAttemptCompleted,
-) -> Option<kuzushi_core::run_artifacts::RunResultSummary> {
-    let target = std::path::Path::new(&completed.target_snapshot.target);
-    let mut fallback = None;
-    for run_id in &completed.run_refs {
-        let Ok(Some(result)) = kuzushi_core::run_artifacts::load_run_result_summary(target, run_id)
-        else {
-            continue;
-        };
-        if matches!(result.status.as_str(), "failed" | "partial") {
-            return Some(result);
-        }
-        fallback = Some(result);
-    }
-    fallback
 }
 
 fn typed_durable_result_details(completed: &PhaseAttemptCompleted) -> Option<PhaseResultDetails> {
@@ -836,100 +756,6 @@ fn phase_card_shows_cell(
         Kind::Evidence => !matches!(cell.payload, Payload::Artifact(_)),
         Kind::Work => false,
     }
-}
-
-fn result_summary_lines(result: &kuzushi_core::run_artifacts::RunResultSummary) -> Vec<String> {
-    semantic_result_lines(
-        &result.tool,
-        &result.status,
-        &result.summary,
-        result.operator_output_preview(5).into_iter(),
-        result
-            .errors
-            .first()
-            .or_else(|| result.warnings.first())
-            .map(String::as_str),
-        result
-            .artifacts
-            .iter()
-            .map(|artifact| artifact.label.as_str()),
-    )
-}
-
-fn semantic_result_lines<'a>(
-    tool: &str,
-    status: &str,
-    summary: &str,
-    output_lines: impl Iterator<Item = &'a str>,
-    operator_message: Option<&str>,
-    artifact_labels: impl Iterator<Item = &'a str>,
-) -> Vec<String> {
-    let summary = kuzushi_core::run_lifecycle::collapse_repeated_message(summary);
-    let summary = summary.as_str();
-    let mut lines = vec![format!("{tool} · {status} — {summary}")];
-    // The heading already shows the summary; an output whose first line
-    // restates it (common for single-purpose tools) must not print twice.
-    let preview: Vec<&str> = output_lines
-        .filter(|line| *line != summary)
-        .take(5)
-        .collect();
-    lines.extend(preview.iter().map(|line| format!("│ {line}")));
-    // Failed runs carry the same error text as both output and error; the
-    // card must not print it twice (once as `│ …` preview, once as `⚠ …`).
-    // Old ledger records also doubled the message inside one string.
-    let message = operator_message.map(kuzushi_core::run_lifecycle::collapse_repeated_message);
-    if let Some(message) = message
-        .as_deref()
-        .filter(|message| *message != summary)
-        .filter(|message| !preview.join("\n").contains(*message))
-    {
-        lines.push(format!("⚠ {message}"));
-    }
-    let labels = artifact_labels.take(3).collect::<Vec<_>>();
-    if !labels.is_empty() {
-        lines.push(format!("artifacts: {}", labels.join(" · ")));
-    }
-    lines
-}
-
-fn legacy_receipt_result_policy(
-    completed: &PhaseAttemptCompleted,
-    outcome: PhaseAttemptOutcome,
-    live: Option<&RunFocusReceipt>,
-) -> PhaseResultPolicy {
-    let fallback = phase_result_policy(Some(completed.phase), outcome, false);
-    let actions = live
-        .map(|receipt| receipt.actions.clone())
-        .or_else(|| {
-            completed
-                .receipt
-                .as_ref()
-                .map(|receipt| receipt.actions.clone())
-        })
-        .unwrap_or(fallback.actions);
-    let recommended_next = live
-        .and_then(|receipt| receipt.recommended_next.clone())
-        .or_else(|| {
-            completed
-                .receipt
-                .as_ref()
-                .and_then(|receipt| receipt.recommended_next.clone())
-        })
-        .or(fallback.recommended_next);
-    PhaseResultPolicy {
-        actions,
-        recommended_next,
-    }
-}
-
-fn legacy_map_evidence_blocker(completed: &PhaseAttemptCompleted) -> Option<String> {
-    if completed.phase != WorkflowPhase::Map {
-        return None;
-    }
-    let target = std::path::Path::new(&completed.target_snapshot.target);
-    let facts = collect_map_evidence(target, &completed.run_refs);
-    (assess_map_evidence(&facts) == MapEvidenceAdequacy::Inadequate)
-        .then(|| insufficient_map_evidence_message(target))
 }
 
 fn selection_blocked_result_policy(reason: &str) -> PhaseResultPolicy {
@@ -1213,32 +1039,6 @@ mod tests {
             .any(|line| line.contains("resume checkpoint")));
     }
 
-    #[test]
-    fn receipt_result_lines_surface_the_harness_markdown_artifact_label() {
-        let lines = semantic_result_lines(
-            "threat-model:build",
-            "ok",
-            "threat model built",
-            std::iter::empty(),
-            None,
-            [
-                "normalized threat model",
-                "harness-schema threat model (markdown)",
-                "persistent threat model",
-            ]
-            .into_iter(),
-        );
-
-        let artifacts_line = lines
-            .iter()
-            .find(|line| line.starts_with("artifacts:"))
-            .expect("receipt lines include an artifacts row");
-        assert!(
-            artifacts_line.contains("harness-schema threat model (markdown)"),
-            "markdown artifact label must be visible in the receipt: {artifacts_line}"
-        );
-    }
-
     fn assert_contains_detail(presentation: &PhaseResultPresentation, expected: &str) {
         assert!(
             presentation
@@ -1396,11 +1196,11 @@ mod tests {
     }
 
     #[test]
-    fn evidence_empty_legacy_map_projects_as_blocked_partial() {
+    fn untyped_map_record_does_not_invent_an_evidence_blocker() {
         let target = tempfile::tempdir().unwrap();
         let completed = PhaseAttemptCompleted::new(
             WorkflowPhase::Map,
-            vec!["legacy-map-run".to_string()],
+            vec!["untyped-map-run".to_string()],
             kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target.path()),
             PhaseAttemptOutcome::Completed,
         );
@@ -1408,16 +1208,13 @@ mod tests {
 
         assert_eq!(
             app.effective_phase_attempt_outcome(&completed),
-            PhaseAttemptOutcome::Partial
+            PhaseAttemptOutcome::Completed
         );
-        assert!(app
-            .effective_phase_attempt_blocker(&completed)
-            .unwrap()
-            .contains("no map evidence"));
+        assert_eq!(app.effective_phase_attempt_blocker(&completed), None);
     }
 
     #[test]
-    fn workflow_v1_result_presentation_uses_receipt_metadata_without_copying_results() {
+    fn workflow_v1_result_is_explicitly_degraded_after_the_typed_cutover() {
         let target = tempfile::tempdir().unwrap();
         record_partial_threat_model_result(target.path());
         let completed = durable_partial_attempt(target.path());
@@ -1426,16 +1223,12 @@ mod tests {
         let presentation = app.phase_result_presentation_for(&completed);
 
         assert_eq!(presentation.outcome, "partial");
-        assert_contains_detail(&presentation, "Cost: >=$0.0000 (incomplete)");
-        assert_contains_detail(&presentation, "choose a target with analyzable evidence");
-        for expected in [
-            "threat-model:build · partial",
-            "Threats: 0",
-            "previous model preserved",
-            "normalized-threat-model.json",
-        ] {
-            assert_contains_detail(&presentation, expected);
-        }
+        assert_contains_detail(&presentation, "typed phase receipt degraded");
+        assert_contains_detail(&presentation, "attempt identity is not typed");
+        assert!(!presentation
+            .detail_lines
+            .iter()
+            .any(|line| line.contains("Cost: >=$0.0000")));
     }
 
     #[test]
@@ -1823,18 +1616,21 @@ mod tests {
             RunItemStatus::Completed | RunItemStatus::Skipped => PhaseAttemptOutcome::Completed,
             RunItemStatus::Partial => PhaseAttemptOutcome::Partial,
             RunItemStatus::Canceled => PhaseAttemptOutcome::Canceled,
-            RunItemStatus::Failed | RunItemStatus::Interrupted => PhaseAttemptOutcome::Failed,
+            RunItemStatus::Blocked | RunItemStatus::Failed | RunItemStatus::Interrupted => {
+                PhaseAttemptOutcome::Failed
+            }
             RunItemStatus::Pending | RunItemStatus::Running => {
                 unreachable!("terminal-status fixture received a nonterminal status")
             }
         }
     }
 
-    fn terminal_statuses() -> [kuzushi_core::run_lifecycle::RunItemStatus; 6] {
+    fn terminal_statuses() -> [kuzushi_core::run_lifecycle::RunItemStatus; 7] {
         use kuzushi_core::run_lifecycle::RunItemStatus;
         [
             RunItemStatus::Completed,
             RunItemStatus::Partial,
+            RunItemStatus::Blocked,
             RunItemStatus::Failed,
             RunItemStatus::Canceled,
             RunItemStatus::Interrupted,

@@ -36,7 +36,6 @@ pub(in crate::modules) fn write_sast_run_metadata(
     );
     crate::run_artifacts::write_run_summary(workspace.root(), &summary)?;
     append_sast_run_started_event_if_empty(workspace, run_id)?;
-    append_sast_started_trace_if_empty(workspace, run_id)?;
     if defer_sast_terminal_to_dispatch(workspace.root(), run_id, observation)? {
         return Ok(());
     }
@@ -98,16 +97,6 @@ fn append_sast_run_started_event_if_empty(workspace: &WorkspaceTarget, run_id: &
     )
     .with_tool("sast:scan");
     crate::run_artifacts::append_run_event(workspace.root(), run_id, &event)?;
-    Ok(())
-}
-
-fn append_sast_started_trace_if_empty(workspace: &WorkspaceTarget, run_id: &str) -> Result<()> {
-    if crate::run_artifacts::next_run_trace_step_number(workspace.root(), run_id) != 1 {
-        return Ok(());
-    }
-    let step = crate::run_artifacts::RunTraceStep::new(0, "tool", "sast:scan started")
-        .with_tool_name("sast:scan");
-    crate::run_artifacts::append_run_trace_step_with_next_number(workspace.root(), run_id, &step)?;
     Ok(())
 }
 
@@ -186,8 +175,8 @@ mod tests {
         .unwrap();
         let summary = crate::run_artifacts::load_run_summary(workspace.root(), &run_id).unwrap();
         let events = wait_for_run_text(&workspace, &run_id, "events.jsonl", status);
-        let trace = read_run_text(&workspace, &run_id, "trace.jsonl");
-        (summary, events, trace)
+        let lifecycle = read_run_text(&workspace, &run_id, "items.jsonl");
+        (summary, events, lifecycle)
     }
 
     fn read_run_text(workspace: &WorkspaceTarget, run_id: &str, leaf: &str) -> String {
@@ -212,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn write_sast_run_metadata_records_events_and_trace() {
+    fn write_sast_run_metadata_records_events_and_lifecycle() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let run_id = "scan-events";
@@ -234,37 +223,38 @@ mod tests {
         .unwrap();
 
         let events = wait_for_run_text(&workspace, run_id, "events.jsonl", "completed");
-        let trace = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
+        let lifecycle = std::fs::read_to_string(crate::run_artifacts::run_artifact_path(
             workspace.root(),
             run_id,
-            "trace.jsonl",
+            "items.jsonl",
         ))
         .unwrap();
 
         assert!(events.contains("\"status\":\"started\""), "{events}");
-        assert!(events.contains("\"status\":\"completed\""), "{events}");
-        assert!(trace.contains("sast:scan started"), "{trace}");
-        assert!(trace.contains("sast:scan complete"), "{trace}");
+        assert!(lifecycle.contains("terminal_outcome"), "{lifecycle}");
+        assert!(lifecycle.contains("completed"), "{lifecycle}");
     }
 
     #[test]
     fn write_sast_run_metadata_preserves_partial_status() {
-        let (summary, events, trace) = record_status("partial", true);
+        let (summary, events, lifecycle) = record_status("partial", true);
 
         assert_eq!(summary.status, "partial");
         assert_eq!(summary.error.as_deref(), Some("scan partial"));
-        assert_eq!(events.matches("\"status\":\"partial\"").count(), 1);
-        assert!(trace.contains("sast:scan partial"), "{trace}");
+        assert!(!events.contains("\"status\":\"partial\""));
+        assert!(lifecycle.contains("\"status\":\"partial\""), "{lifecycle}");
+        assert!(lifecycle.contains("\"summary\":\"scan partial\""), "{lifecycle}");
     }
 
     #[test]
     fn write_sast_run_metadata_preserves_failed_status() {
-        let (summary, events, trace) = record_status("failed", false);
+        let (summary, events, lifecycle) = record_status("failed", false);
 
         assert_eq!(summary.status, "failed");
         assert_eq!(summary.error.as_deref(), Some("scan failed"));
-        assert_eq!(events.matches("\"status\":\"failed\"").count(), 1);
-        assert!(trace.contains("sast:scan failed"), "{trace}");
+        assert!(!events.contains("\"status\":\"failed\""));
+        assert!(lifecycle.contains("\"status\":\"failed\""), "{lifecycle}");
+        assert!(lifecycle.contains("\"summary\":\"scan failed\""), "{lifecycle}");
     }
 
     #[test]

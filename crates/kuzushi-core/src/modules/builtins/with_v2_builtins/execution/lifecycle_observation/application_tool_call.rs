@@ -14,6 +14,12 @@ impl ApplicationToolCall {
     ) -> Result<PendingToolCallCompletion> {
         let identity = application_call_identity(&observation)?;
         emit_application_call_requested(&observation, identity, tool_name, input)?;
+        emit_application_call_rejected(
+            &observation,
+            identity,
+            reason_class,
+            detail,
+        )?;
         Ok(rejected_completion(
             observation,
             identity,
@@ -69,7 +75,9 @@ impl ApplicationToolCall {
 
     /// Scope executor-owned child activity beneath this exact tool call.
     pub fn execution_observation(&self) -> RunObservationHandle {
-        self.observation.with_parent(self.identity.item_id)
+        self.observation
+            .for_call_progress(self.identity.call_id, self.identity.item_id)
+            .with_parent(self.identity.item_id)
     }
 }
 
@@ -82,7 +90,7 @@ fn rejected_completion(
     PendingToolCallCompletion {
         observation: Some(observation),
         identity: Some(identity),
-        status: RunItemStatus::Failed,
+        status: RunItemStatus::Blocked,
         cost: RuntimeCostReport::UNAVAILABLE,
         preview: vec![SafeText::preview_line(format!(
             "request rejected before execution ({reason_class}): {detail}"
@@ -93,14 +101,32 @@ fn rejected_completion(
     }
 }
 
+fn emit_application_call_rejected(
+    observation: &RunObservationHandle,
+    identity: ToolCallIdentity,
+    reason_class: &str,
+    detail: &str,
+) -> Result<()> {
+    observation
+        .emit_and_flush(
+            RunItemRecord::new(
+                identity.item_id,
+                RunItemSource::Dispatch,
+                RunItemV1::ToolCallRejected {
+                    reason_class: SafeText::operator_visible(reason_class),
+                    detail: SafeText::condensed_line(detail),
+                },
+            )
+            .with_call(identity.call_id),
+        )
+        .map(drop)
+}
+
 fn application_call_identity(observation: &RunObservationHandle) -> Result<ToolCallIdentity> {
-    let task_id = observation
-        .inheritable_dispatch_task_id()
-        .ok_or_else(|| anyhow::anyhow!("application call lacks a semantic task scope"))?;
     Ok(ToolCallIdentity {
         call_id: RunCallId::new(),
         item_id: RunItemId::new(),
-        task_id,
+        task_id: observation.inheritable_dispatch_task_id(),
         parent_item_id: observation.parent_item_id(),
     })
 }

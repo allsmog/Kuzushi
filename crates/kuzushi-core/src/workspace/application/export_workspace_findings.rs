@@ -144,7 +144,7 @@ fn benchmark_audit_for_runs(
         }
         let summary = load_run_summary(workspace.root(), run_id)?;
         ensure_terminal_benchmark_summary(&summary)?;
-        complete &= summary.trace_malformed_lines.unwrap_or(0) == 0;
+        complete &= summary.lifecycle_malformed_items.unwrap_or(0) == 0;
         let cost = summary.checked_cost_report()?;
         complete &= cost.is_complete() || cost.is_unavailable();
         llm_call_count = llm_call_count

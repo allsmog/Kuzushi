@@ -6,25 +6,25 @@ assertion_line: 89
 
  -- RUN FOCUS  run r-snapshot  ·  2/3 done  ·  1 running ---------------------------------------------------------------
 target:none  ·  context not built  ·  execution:none · receipt pending  ·  0 findings
- * LIVE · current triage:run · last progress 0s ago · task-selector ran
+ * LIVE · current Triage findings · last progress 0s ago · 22:13:20  * Collecting evidence · 14/14
  -- STEPS --------------------------------------------------------------------------------------------------------------
-# + Build project context                                                                                           <…
-  + Run Semgrep scan                                                                                                <…
-  * Triage findings                                                                                                 <…
-     + triage start
-     + evidence-collect
-     + stage1 kept 14/14
-     ↳ verdict=likely-tp severity=high
- ⤳ subsystems (1)  active · hidden — V to expand · task-selector ran
+# + Build repository context                                                                                       <1s
+  + Run Semgrep                                                                                                    <1s
+  * Triage findings                                                                                                <1s
+     ↳ triage:run · Collecting evidence · 14/14
  legend: + done · * active · ⚠ partial · ! fail · x canceled · ⊘ skipped · · queued
  -- OUTPUT -------------------------------------------------------------------------------------------------------------
-22:13:20  ⏵ [context:build] context:build start
-22:13:20  + [context:build] context:build complete · 412 files
-22:13:20  ⏵ [semgrep:scan] semgrep start
-22:13:20  + [semgrep:scan] semgrep complete · 14 findings
-22:13:20  ⏵ [triage:run] triage start
-22:13:20   ↳ … [triage:run] evidence-collect · stage1 kept 14/14
-22:13:20   ↳ … [triage:run] verdict=likely-tp severity=high
+ + run details available · V expands
+ -- ACTIVITY
+    +4 low-level event(s) · V shows details
+ 22:13:20  > Plan · SAST scan started · revision 1
+ 22:13:20  > Build repository context started
+ 22:13:20  + Build repository context completed · Repository context built · 412 files
+ 22:13:20  > Run Semgrep started
+ 22:13:20  + Run Semgrep completed · Semgrep completed · 14 findings
+ 22:13:20  > Triage findings started · Comparing candidate findings
+ 22:13:20  > Triage findings started
+ 22:13:20  * Collecting evidence · 14/14
 
  * FOCUS  [j/k] select a task to inspect
  j/k/g/G scroll   Tab pane   V verbose   Space pause   x reset view   Enter focus   b background   s steer

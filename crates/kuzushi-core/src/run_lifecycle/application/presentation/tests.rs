@@ -26,6 +26,62 @@ fn semantic_keys_are_stable_and_progress_loss_is_disclosed() {
 }
 
 #[test]
+fn typed_timeline_reads_as_actions_instead_of_protocol_records() {
+    let run_id = RunId::parse("run-readable-timeline").unwrap();
+    let item_id = RunItemId::new();
+    let call_id = RunCallId::new();
+    let requested = requested_item(&run_id, item_id).with_call(call_id).unwrap();
+    let started = started_item(&run_id, item_id, &requested)
+        .with_call(call_id)
+        .unwrap();
+    let progress = envelope(
+        3,
+        &run_id,
+        item_id,
+        RunItemV1::ToolCallProgress {
+            message: SafeText::operator_visible("Scanning repository files"),
+            completed: Some(421),
+            total: Some(832),
+        },
+        Some(&started),
+    )
+    .with_call(call_id)
+    .unwrap();
+    let finished = envelope(
+        4,
+        &run_id,
+        item_id,
+        RunItemV1::ToolCallFinished {
+            status: RunItemStatus::Completed,
+            cost: RuntimeCostReport::UNAVAILABLE,
+            result_artifact: None,
+            preview: vec![SafeText::preview_line("7 findings")],
+            warning_count: 0,
+            error_count: 0,
+        },
+        Some(&progress),
+    )
+    .with_call(call_id)
+    .unwrap();
+    let projection = super::super::reduce_run_items([requested, started, progress, finished]);
+    let lines = present_projection(&projection, RunProjectionSource::TypedV1)
+        .timeline_text_rows()
+        .into_iter()
+        .map(|row| row.text)
+        .collect::<Vec<_>>();
+
+    assert!(lines.iter().any(|line| line.contains("Semgrep") && line.contains("started")));
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("Scanning repository files · 421/832")));
+    assert!(lines
+        .iter()
+        .any(|line| line.contains("completed") && line.contains("7 findings")));
+    assert!(!lines.iter().any(|line| line.contains("Call ")));
+    assert!(!lines.iter().any(|line| line.contains('%')));
+}
+
+#[test]
 fn verified_result_is_keyed_by_digest_and_discloses_omissions() {
     let run_id = RunId::parse("run-presentation-result").unwrap();
     let item_id = RunItemId::new();

@@ -1,3 +1,4 @@
+use crate::renderer::shared::text::{display_width, fit};
 use crate::theme::{self, ThemeConfig};
 use crate::{
     ActivityRouteState, ActivitySession, DagTaskDetail, DagTaskDetailState, DagTaskRow,
@@ -134,7 +135,7 @@ fn should_show_taskless_live_row(
     route: &ActivityRouteState,
     running_tool: Option<&str>,
 ) -> bool {
-    rows.is_empty() && running_tool.is_some() && !route.paused && session.events.is_empty()
+    rows.is_empty() && running_tool.is_some() && !route.paused && session.event_count() == 0
 }
 
 fn ensure_activity_rows(mut rows: Vec<ActivityDagPaneRow>) -> Vec<ActivityDagPaneRow> {
@@ -210,18 +211,23 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) ->
     };
     let marker = if selected { "▌" } else { " " };
     let right_reserve: usize = 9;
-    let task_pad = width.saturating_sub(right_reserve + 3).max(8);
+    let task_pad = width.saturating_sub(right_reserve + 4).max(8);
     let task_label = fit(&task_display_label(row), task_pad);
+    let task_label = pad_to_columns(&task_label, task_pad);
     let elapsed = elapsed_label(row, now);
     let body = format!(
-        "{marker} {symbol} {task:<task_pad$} {elapsed:>8}",
+        "{marker} {symbol} {task} {elapsed:>8}",
         marker = marker,
         symbol = symbol,
         task = task_label,
-        task_pad = task_pad,
         elapsed = elapsed,
     );
     fit(&body, width)
+}
+
+fn pad_to_columns(value: &str, width: usize) -> String {
+    let padding = width.saturating_sub(display_width(value));
+    format!("{value}{}", " ".repeat(padding))
 }
 
 fn task_display_label(row: &DagTaskRow) -> String {
@@ -403,22 +409,10 @@ fn elapsed_label(row: &DagTaskRow, now: Instant) -> String {
     }
 }
 
-fn fit(value: &str, width: usize) -> String {
-    let len = value.chars().count();
-    if len <= width {
-        return value.to_string();
-    }
-    if width <= 1 {
-        return value.chars().take(width).collect();
-    }
-    format!("{}…", value.chars().take(width - 1).collect::<String>())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{DagTaskDetail, DagTaskDetailState, SubsystemAggregate};
-    use kuzushi_core::RunTraceStep;
 
     #[test]
     fn activity_dag_pane_rows_projects_tasks_and_subsystems() {
@@ -459,6 +453,20 @@ mod tests {
     }
 
     #[test]
+    fn wide_task_labels_keep_elapsed_column_inside_terminal_width() {
+        let row = DagTaskRow::queued(
+            "索引 repository files".to_string(),
+            "context".to_string(),
+            Vec::new(),
+        );
+
+        let text = dag_row_text(&row, 40, Instant::now(), false);
+
+        assert_eq!(display_width(&text), 40);
+        assert!(text.ends_with("       -"), "{text:?}");
+    }
+
+    #[test]
     fn never_started_skipped_tasks_stay_collapsed_until_verbose() {
         let mut session = ActivitySession::new("r-1");
         let mut row =
@@ -471,24 +479,6 @@ mod tests {
         let rows = activity_dag_pane_rows(&session, &route, 60, Instant::now(), None);
         assert!(rows.iter().any(|row| row.text.contains("1 not run")));
         assert!(!rows.iter().any(|row| row.text.contains("codeql:scan")));
-    }
-
-    #[test]
-    fn subsystem_row_turns_failing_on_hidden_module_error() {
-        let mut session = ActivitySession::new("r-1");
-        session.apply_step(
-            RunTraceStep::new(1, "refused", "pipeline failed")
-                .with_module_id("pipeline")
-                .with_verb("prepare")
-                .with_severity("danger"),
-        );
-
-        let route = ActivityRouteState::default();
-        let rows = activity_dag_pane_rows(&session, &route, 60, Instant::now(), None);
-
-        assert!(rows[0].text.contains("subsystems (1)"));
-        assert!(rows[0].text.contains("failing"));
-        assert_eq!(rows[0].tone, ActivityDagRowTone::Failing);
     }
 
     #[test]
@@ -572,25 +562,5 @@ mod tests {
 
         assert_eq!(spinner_frame_for_config(now, reduced), SPINNER_FRAMES[0]);
         assert!(SPINNER_FRAMES.contains(&spinner_frame_for_config(now, animated)));
-    }
-
-    #[test]
-    fn activity_dag_pane_rows_never_duplicates_output_events() {
-        let mut session = ActivitySession::new("r-1");
-        for index in 0..12 {
-            session.apply_step(
-                RunTraceStep::new(index + 1, "reasoning", format!("event {index}"))
-                    .with_module_id("triage")
-                    .with_verb("run")
-                    .with_started_at_ms(42_000 + index as u64),
-            );
-        }
-
-        let route = ActivityRouteState::default();
-        let rows = activity_dag_pane_rows(&session, &route, 80, Instant::now(), None);
-
-        assert_eq!(rows.len(), 1);
-        assert!(rows[0].text.contains("no task rows yet"));
-        assert!(rows.iter().all(|row| !row.text.contains("event")));
     }
 }

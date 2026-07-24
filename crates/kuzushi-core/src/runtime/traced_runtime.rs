@@ -13,6 +13,7 @@ pub struct TracedRuntime<'a> {
     trace: TraceHandle,
 }
 
+#[derive(Clone, Copy)]
 struct ModelCallLifecycle {
     call_id: crate::run_lifecycle::RunCallId,
     item_id: crate::run_lifecycle::RunItemId,
@@ -25,16 +26,11 @@ impl<'a> TracedRuntime<'a> {
 
     fn record_model_call_start(
         &self,
-        verb: &str,
-        label: String,
+        _verb: &str,
+        _label: String,
         model: &str,
         prompt_hash: &str,
     ) -> Result<ModelCallLifecycle> {
-        let _ = self
-            .trace
-            .step("tool-progress", verb, label)
-            .with_model_metadata(model, model_provider(model), prompt_hash)
-            .emit();
         let lifecycle = ModelCallLifecycle {
             call_id: crate::run_lifecycle::RunCallId::new(),
             item_id: crate::run_lifecycle::RunItemId::new(),
@@ -64,23 +60,13 @@ impl<'a> TracedRuntime<'a> {
     fn record_query(
         &self,
         verb: &str,
-        prompt_len: usize,
         model: &str,
-        prompt_hash: &str,
         result: &Result<Observed<AgentQueryResponse>>,
         elapsed_ms: u64,
         lifecycle: ModelCallLifecycle,
     ) -> Result<()> {
-        match result {
-            Ok(response) => self.record_successful_query(
-                verb,
-                prompt_len,
-                model,
-                prompt_hash,
-                &response.value,
-                elapsed_ms,
-            ),
-            Err(error) => self.record_failed_query(verb, model, prompt_hash, error, elapsed_ms),
+        if let Err(error) = result {
+            self.record_failed_query(verb, error);
         }
         let (cost, usage, error_class) = observed_query_telemetry(result);
         self.record_model_call_finish(
@@ -94,42 +80,10 @@ impl<'a> TracedRuntime<'a> {
         )
     }
 
-    fn record_successful_query(
-        &self,
-        verb: &str,
-        prompt_len: usize,
-        model: &str,
-        prompt_hash: &str,
-        response: &AgentQueryResponse,
-        elapsed_ms: u64,
-    ) {
-        let label = format!("{verb} completed · {prompt_len} chars in");
-        let mut step = self
-            .trace
-            .step("reasoning", verb, label)
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, model_provider(model), prompt_hash)
-            .with_call_attempted(true);
-        if let Ok(cost) = response.checked_cost_report() {
-            step = step.with_cost_report(cost);
-        }
-        let _ = step.emit();
-    }
-
-    fn record_failed_query(
-        &self,
-        verb: &str,
-        model: &str,
-        prompt_hash: &str,
-        error: &anyhow::Error,
-        elapsed_ms: u64,
-    ) {
+    fn record_failed_query(&self, verb: &str, error: &anyhow::Error) {
         let _ = self
             .trace
             .step("refused", verb, safe_error_label(verb, error))
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, model_provider(model), prompt_hash)
-            .with_call_attempted(true)
             .with_severity("danger")
             .emit();
     }
@@ -138,15 +92,11 @@ impl<'a> TracedRuntime<'a> {
         &self,
         result: &Result<Observed<TriageOutcome>>,
         model: &str,
-        prompt_hash: &str,
         elapsed_ms: u64,
         lifecycle: ModelCallLifecycle,
     ) -> Result<()> {
-        match result {
-            Ok(outcome) => {
-                self.record_successful_triage(&outcome.value, model, prompt_hash, elapsed_ms)
-            }
-            Err(error) => self.record_failed_triage(error, model, prompt_hash, elapsed_ms),
+        if let Err(error) = result {
+            self.record_failed_triage(error);
         }
         let cost = result
             .as_ref()
@@ -169,38 +119,10 @@ impl<'a> TracedRuntime<'a> {
         )
     }
 
-    fn record_successful_triage(
-        &self,
-        outcome: &TriageOutcome,
-        model: &str,
-        prompt_hash: &str,
-        elapsed_ms: u64,
-    ) {
-        let mut step = self
-            .trace
-            .step("reasoning", "triage", "triage completed")
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, model_provider(model), prompt_hash)
-            .with_call_attempted(true);
-        if let Ok(cost) = crate::runtime::triage_cost_report(outcome) {
-            step = step.with_cost_report(cost);
-        }
-        let _ = step.emit();
-    }
-
-    fn record_failed_triage(
-        &self,
-        error: &anyhow::Error,
-        model: &str,
-        prompt_hash: &str,
-        elapsed_ms: u64,
-    ) {
+    fn record_failed_triage(&self, error: &anyhow::Error) {
         let _ = self
             .trace
             .step("refused", "triage", safe_error_label("triage", error))
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, model_provider(model), prompt_hash)
-            .with_call_attempted(true)
             .with_severity("danger")
             .emit();
     }
@@ -211,18 +133,9 @@ impl<'a> TracedRuntime<'a> {
         elapsed_ms: u64,
         history_len: usize,
         model: &str,
-        prompt_hash: &str,
         lifecycle: ModelCallLifecycle,
     ) -> Result<()> {
-        let provider = model_provider(model);
-        self.record_step_trace(
-            result,
-            elapsed_ms,
-            history_len,
-            model,
-            provider,
-            prompt_hash,
-        );
+        self.record_step_trace(result, history_len);
         let (cost, usage) = observed_step_telemetry(result);
         let error_class = model_call_error_class(result, usage);
         self.record_model_call_finish(
@@ -239,39 +152,18 @@ impl<'a> TracedRuntime<'a> {
     fn record_step_trace(
         &self,
         result: &Result<Observed<AgentLoopStep>>,
-        elapsed_ms: u64,
         history_len: usize,
-        model: &str,
-        provider: &str,
-        prompt_hash: &str,
     ) {
         match result {
             Ok(Observed {
-                value: AgentLoopStep::ToolCall { call, cost_usd },
+                value: AgentLoopStep::ToolCall { call, cost_usd: _ },
                 ..
-            }) => self.record_tool_call_step(
-                call,
-                *cost_usd,
-                elapsed_ms,
-                history_len,
-                model,
-                provider,
-                prompt_hash,
-            ),
+            }) => self.record_tool_call_step(call, history_len),
             Ok(Observed {
-                value: AgentLoopStep::Final { cost_usd, .. },
+                value: AgentLoopStep::Final { cost_usd: _, .. },
                 ..
-            }) => self.record_final_step(
-                *cost_usd,
-                elapsed_ms,
-                history_len,
-                model,
-                provider,
-                prompt_hash,
-            ),
-            Err(error) => {
-                self.record_step_error(error, elapsed_ms, model, provider, prompt_hash);
-            }
+            }) => self.record_final_step(history_len),
+            Err(error) => self.record_step_error(error),
         }
     }
 
@@ -288,6 +180,9 @@ impl<'a> TracedRuntime<'a> {
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
         };
+        if succeeded {
+            self.record_model_response_summary(&observation, lifecycle)?;
+        }
         observation.emit(
             crate::run_lifecycle::RunItemRecord::new(
                 lifecycle.item_id,
@@ -312,67 +207,50 @@ impl<'a> TracedRuntime<'a> {
         )
     }
 
-    fn record_tool_call_step(
+    fn record_model_response_summary(
         &self,
-        call: &ToolCall,
-        cost_usd: Option<f64>,
-        elapsed_ms: u64,
-        history_len: usize,
-        model: &str,
-        provider: &str,
-        prompt_hash: &str,
-    ) {
-        let mut step = self
+        observation: &crate::run_lifecycle::RunObservationHandle,
+        lifecycle: ModelCallLifecycle,
+    ) -> Result<()> {
+        observation
+            .for_call_progress(lifecycle.call_id, lifecycle.item_id)
+            .with_parent(lifecycle.item_id)
+            .emit_coalescible(crate::run_lifecycle::RunItemRecord::new(
+                crate::run_lifecycle::RunItemId::new(),
+                crate::run_lifecycle::RunItemSource::Runtime,
+                crate::run_lifecycle::RunItemV1::SafeReasoningSummary {
+                    text: crate::run_lifecycle::SafeText::operator_visible(
+                        "Model response received",
+                    ),
+                    redaction_policy_version:
+                        crate::run_lifecycle::RUN_ITEM_REDACTION_POLICY_VERSION,
+                },
+            ))
+            .map(drop)
+    }
+
+    fn record_tool_call_step(&self, call: &ToolCall, history_len: usize) {
+        let _ = self
             .trace
             .step(
                 "tool-progress",
                 "next-step",
                 tool_call_label(call, history_len),
             )
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash)
-            .with_call_attempted(true);
-        if let Some(cost) = cost_usd {
-            step = step.with_cost_usd(cost);
-        }
-        let _ = step.emit();
+            .emit();
     }
 
-    fn record_final_step(
-        &self,
-        cost_usd: Option<f64>,
-        elapsed_ms: u64,
-        history_len: usize,
-        model: &str,
-        provider: &str,
-        prompt_hash: &str,
-    ) {
-        let mut step = self
+    fn record_final_step(&self, history_len: usize) {
+        let _ = self
             .trace
             .step("done", "next-step", final_label(history_len))
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash)
-            .with_call_attempted(true);
-        if let Some(cost) = cost_usd {
-            step = step.with_cost_usd(cost);
-        }
-        let _ = step.emit();
+            .emit();
     }
 
-    fn record_step_error(
-        &self,
-        error: &anyhow::Error,
-        elapsed_ms: u64,
-        model: &str,
-        provider: &str,
-        prompt_hash: &str,
-    ) {
+    fn record_step_error(&self, error: &anyhow::Error) {
         let _ = self
             .trace
             .step("refused", "next-step", safe_error_label("step", error))
-            .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash)
-            .with_call_attempted(true)
             .with_severity("danger")
             .emit();
     }
@@ -456,9 +334,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             "query",
-            prompt_len,
             &model,
-            &prompt_hash,
             &result,
             start.elapsed().as_millis() as u64,
             lifecycle,
@@ -496,9 +372,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             "query",
-            prompt_len,
             &model,
-            &prompt_hash,
             &result,
             start.elapsed().as_millis() as u64,
             lifecycle,
@@ -531,7 +405,6 @@ impl AgentRuntime for TracedRuntime<'_> {
         self.record_triage_result(
             &result,
             &model,
-            &prompt_hash,
             start.elapsed().as_millis() as u64,
             lifecycle,
         )?;
@@ -574,26 +447,18 @@ impl AgentRuntime for TracedRuntime<'_> {
             start.elapsed().as_millis() as u64,
             history.len(),
             &model,
-            &prompt_hash,
             lifecycle,
         )?;
         result
     }
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
-        let start = Instant::now();
-        let model = request.model.clone();
-        let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
-        let provider = model_provider(&model);
         let result = self.inner.preflight_tool_loop_blocking(request);
-        let elapsed_ms = start.elapsed().as_millis() as u64;
         match &result {
             Ok(()) => {
                 let _ = self
                     .trace
                     .step("tool-progress", "next-step", "tool-loop preflight ok")
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(&model, provider, &prompt_hash)
                     .emit();
             }
             Err(error) => {
@@ -604,8 +469,6 @@ impl AgentRuntime for TracedRuntime<'_> {
                         "next-step",
                         safe_error_label("tool-loop preflight", &error),
                     )
-                    .with_latency_ms(elapsed_ms)
-                    .with_model_metadata(&model, provider, &prompt_hash)
                     .with_severity("danger")
                     .emit();
             }
@@ -648,9 +511,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             verb,
-            prompt_len,
             &model,
-            &prompt_hash,
             &result,
             start.elapsed().as_millis() as u64,
             lifecycle,

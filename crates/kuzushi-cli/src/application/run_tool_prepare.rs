@@ -474,7 +474,7 @@ fn record_cli_preparation_rejection(
         target,
         run_id,
         tool,
-        &serde_json::json!({ "status": "failed" }),
+        &serde_json::json!({ "status": "blocked" }),
         super::run_exit::EXIT_RUN_PREPARE_FAILED,
     ) {
         eprintln!("kuzushi: warning: done sentinel not written: {sentinel}");
@@ -692,13 +692,19 @@ export default {
     }
 
     #[test]
-    fn prepare_failure_persists_a_typed_rejected_call_and_failed_terminal() {
+    fn prepare_rejection_persists_a_typed_blocked_call_and_terminal() {
         let target = tempfile::tempdir().unwrap();
         let error = reject_unknown_cli_option(target.path());
         assert!(error.to_string().contains("unknown"));
 
         let (run_id, read) = load_latest_preparation_rejection(target.path());
-        assert_failed_preparation_projection(&read);
+        assert_blocked_preparation_projection(&read);
+        assert_eq!(
+            kuzushi_core::load_run_summary(target.path(), &run_id)
+                .unwrap()
+                .status,
+            "blocked"
+        );
         assert_rejection_artifact_correlation(&read);
         assert_items_redact_raw_input(target.path(), &run_id);
     }
@@ -728,7 +734,9 @@ export default {
         (entry.run_id, read)
     }
 
-    fn assert_failed_preparation_projection(read: &kuzushi_core::run_lifecycle::RunProjectionRead) {
+    fn assert_blocked_preparation_projection(
+        read: &kuzushi_core::run_lifecycle::RunProjectionRead,
+    ) {
         assert_eq!(
             read.source,
             kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1
@@ -738,14 +746,14 @@ export default {
         let call = read.projection.calls.values().next().unwrap();
         assert_eq!(
             call.status,
-            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
         );
         assert_eq!(
             read.projection
                 .terminal
                 .as_ref()
                 .map(|terminal| terminal.status),
-            Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+            Some(kuzushi_core::run_lifecycle::RunItemStatus::Blocked)
         );
     }
 

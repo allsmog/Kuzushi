@@ -1,7 +1,6 @@
 use super::super::super::{
     PhaseReceiptProjection, QuestionDecisionProjection, QuestionProjection, RunProjection,
 };
-use super::ensure_legacy;
 use crate::run_lifecycle::{OperatorDecisionValue, RunItemEnvelopeV1, RunItemV1, RunQuestionId};
 use anyhow::Result;
 
@@ -44,14 +43,11 @@ fn apply_artifact(
         .calls
         .iter_mut()
         .find(|(_, call)| call.item_id == artifact.producing_item_id);
-    if producer.is_none() {
-        ensure_legacy(envelope, "artifact references an unknown producing call")?;
-    }
-    if let Some((call_id, call)) = producer {
-        validate_artifact_call_scope(envelope, *call_id)?;
-        validate_producing_call(call, artifact)?;
-        call.related_artifact_ids.push(envelope.item_id);
-    }
+    let (call_id, call) = producer
+        .ok_or_else(|| anyhow::anyhow!("artifact references an unknown producing call"))?;
+    validate_artifact_call_scope(envelope, *call_id)?;
+    validate_producing_call(call, artifact)?;
+    call.related_artifact_ids.push(envelope.item_id);
     anyhow::ensure!(
         !projection.artifacts.contains_key(&envelope.item_id),
         "artifact item ID was produced twice"
@@ -66,11 +62,9 @@ fn validate_artifact_call_scope(
     envelope: &RunItemEnvelopeV1,
     producing_call_id: crate::run_lifecycle::RunCallId,
 ) -> Result<()> {
-    let Some(call_id) = envelope.call_id else {
-        // `call_id` was optional in already-persisted typed-v1 artifacts. New
-        // writers always set it, while old streams remain readable.
-        return Ok(());
-    };
+    let call_id = envelope
+        .call_id
+        .ok_or_else(|| anyhow::anyhow!("artifact lacks call scope"))?;
     anyhow::ensure!(
         call_id == producing_call_id,
         "artifact call scope does not match its producing call"
@@ -155,8 +149,7 @@ fn apply_decision(
     authorization_scope: &crate::run_lifecycle::SafeText,
 ) -> Result<()> {
     if !projection.questions.contains_key(&question_id) {
-        ensure_legacy(envelope, "decision has no question")?;
-        return Ok(());
+        anyhow::bail!("decision has no question");
     }
     let question = projection
         .questions

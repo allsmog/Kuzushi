@@ -1,6 +1,5 @@
 use super::TargetContentIdentity;
-use crate::run_artifacts::RunArtifactRead;
-use crate::run_lifecycle::{ArtifactReference, ProjectionHealth, RunProjectionSource, SafeText};
+use crate::run_lifecycle::{ArtifactReference, ProjectionHealth, SafeText};
 use rusqlite::OptionalExtension;
 use std::path::Path;
 
@@ -18,7 +17,6 @@ const TREE_HASH_POINTERS: &[&str] = &[
 pub(super) enum SnapshotEvidence {
     Absent,
     Verified(TargetContentIdentity),
-    Unverified,
     Invalid,
 }
 
@@ -31,10 +29,7 @@ pub(super) fn read_snapshot_evidence(target: &Path, run_id: &str) -> SnapshotEvi
     let Ok(read) = crate::run_lifecycle::load_run_projection(target, run_id) else {
         return SnapshotEvidence::Invalid;
     };
-    match read.source {
-        RunProjectionSource::TypedV1 => typed_snapshot_evidence(target, run_id, &read.projection),
-        RunProjectionSource::Legacy => legacy_snapshot_evidence(target, run_id),
-    }
+    typed_snapshot_evidence(target, run_id, &read.projection)
 }
 
 fn typed_snapshot_evidence(
@@ -77,25 +72,6 @@ fn exact_result_reference(
         [reference] => Ok(Some(*reference)),
         _ => Err(()),
     }
-}
-
-fn legacy_snapshot_evidence(target: &Path, run_id: &str) -> SnapshotEvidence {
-    match crate::read_run_artifact_text(target, run_id, "result.json") {
-        RunArtifactRead::Missing { .. } => SnapshotEvidence::Absent,
-        RunArtifactRead::Ready { value, .. } => match snapshot_claim_from_body(&value) {
-            Ok(None) => SnapshotEvidence::Absent,
-            Ok(Some(_)) => SnapshotEvidence::Unverified,
-            Err(()) => SnapshotEvidence::Invalid,
-        },
-        RunArtifactRead::NonFile { .. }
-        | RunArtifactRead::Unsafe { .. }
-        | RunArtifactRead::Unreadable { .. } => SnapshotEvidence::Invalid,
-    }
-}
-
-fn snapshot_claim_from_body(body: &str) -> Result<Option<SnapshotClaim>, ()> {
-    let value = serde_json::from_str::<serde_json::Value>(body).map_err(|_| ())?;
-    snapshot_claim(&value)
 }
 
 fn snapshot_claim(value: &serde_json::Value) -> Result<Option<SnapshotClaim>, ()> {

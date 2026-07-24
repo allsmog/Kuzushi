@@ -7,7 +7,6 @@ mod tests {
     };
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
     use std::fs;
-    use std::io::Write;
     use std::path::Path;
     use std::process::Command;
     use std::sync::{Arc, Barrier};
@@ -353,96 +352,7 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn trace_step_v2_round_trip_preserves_new_fields() {
-        let step = RunTraceStep::new(7, "tool", "semgrep started")
-            .with_latency_ms(Some(143))
-            .with_cost_usd(Some(0.0021))
-            .with_module_id("semgrep")
-            .with_verb("scan")
-            .with_parent_step(3)
-            .with_severity("warn")
-            .with_started_at_ms(1_700_000_000_000)
-            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123");
-
-        let json = serde_json::to_string(&step).unwrap();
-        let parsed: RunTraceStep = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(parsed, step);
-        assert!(json.contains("\"module_id\":\"semgrep\""));
-        assert!(json.contains("\"parent_step\":3"));
-        assert!(json.contains("\"started_at_ms\":1700000000000"));
-        assert!(json.contains("\"model\":\"openai:gpt-test\""));
-        assert!(json.contains("\"provider\":\"openai\""));
-        assert!(json.contains("\"prompt_hash\":\"fnv1a64:abc123\""));
-    }
-
-    #[test]
-    fn trace_step_v1_forward_compat_leaves_new_fields_none() {
-        let v1 = "{\"n\":1,\"kind\":\"tool\",\"label\":\"context:build started\"}";
-        let parsed: RunTraceStep = serde_json::from_str(v1).unwrap();
-
-        assert_eq!(parsed.n, 1);
-        assert_eq!(parsed.kind, "tool");
-        assert_eq!(parsed.label, "context:build started");
-        assert!(parsed.module_id.is_none());
-        assert!(parsed.verb.is_none());
-        assert!(parsed.parent_step.is_none());
-        assert!(parsed.severity.is_none());
-        assert!(parsed.started_at_ms.is_none());
-        assert!(parsed.model.is_none());
-        assert!(parsed.provider.is_none());
-        assert!(parsed.prompt_hash.is_none());
-    }
-
-    #[test]
-    fn trace_step_rejects_obsolete_camel_case_reader_aliases() {
-        let json = serde_json::json!({
-            "n": 4,
-            "kind": "reasoning",
-            "label": "query",
-            "latencyMs": 25,
-            "costUsd": 0.02,
-            "moduleId": "triage",
-            "verb": "run",
-            "parentStep": 3,
-            "severity": "info",
-            "startedAtMs": 1_700_000_000_000u64,
-            "model": "openai:gpt-test",
-            "provider": "openai",
-            "promptHash": "fnv1a64:abc"
-        });
-
-        let error = serde_json::from_value::<RunTraceStep>(json).unwrap_err();
-
-        assert!(error.to_string().contains("unknown field"));
-    }
-
-    #[test]
-    fn trace_step_v2_omits_unset_optional_fields_from_serialized_form() {
-        let step = RunTraceStep::new(1, "tool", "context:build started");
-        let json = serde_json::to_string(&step).unwrap();
-
-        assert!(!json.contains("module_id"));
-        assert!(!json.contains("verb"));
-        assert!(!json.contains("parent_step"));
-        assert!(!json.contains("severity"));
-        assert!(!json.contains("started_at_ms"));
-        assert!(!json.contains("model"));
-        assert!(!json.contains("provider"));
-        assert!(!json.contains("prompt_hash"));
-    }
-
-    #[test]
-    fn trace_step_can_derive_module_and_verb_from_tool_name() {
-        let step =
-            RunTraceStep::new(1, "tool", "semgrep:scan started").with_tool_name("semgrep:scan");
-
-        assert_eq!(step.module_id.as_deref(), Some("semgrep"));
-        assert_eq!(step.verb.as_deref(), Some("scan"));
-    }
-
-    #[test]
+     #[test]
     fn run_event_numbering_counts_malformed_rows_and_uses_max_n() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-event-numbering";
@@ -482,112 +392,7 @@ mod tests {
         assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
     }
 
-    #[test]
-    fn run_trace_numbering_advances_past_malformed_tail_rows() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-trace-malformed-tail";
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
-        fs::write(
-            &trace_path,
-            [r#"{"n":1,"kind":"reasoning","label":"query"}"#, "{not-json"].join("\n"),
-        )
-        .unwrap();
-
-        assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
-    }
-
-    #[test]
-    fn trace_append_paths_reject_invalid_cost_before_write() {
-        let tmp = tempfile::tempdir().unwrap();
-        for (index, invalid) in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY]
-            .into_iter()
-            .enumerate()
-        {
-            let direct_id = format!("invalid-trace-direct-{index}");
-            let numbered_id = format!("invalid-trace-numbered-{index}");
-            let step = RunTraceStep::new(1, "reasoning", "invalid").with_cost_usd(Some(invalid));
-
-            assert!(append_run_trace_step(tmp.path(), &direct_id, &step).is_err());
-            assert!(
-                append_run_trace_step_with_next_number(tmp.path(), &numbered_id, &step).is_err()
-            );
-            assert!(!run_artifact_path(tmp.path(), &direct_id, "trace.jsonl").exists());
-            assert!(!run_artifact_path(tmp.path(), &numbered_id, "trace.jsonl").exists());
-        }
-    }
-
-    #[test]
-    fn trace_loaders_count_negative_cost_as_malformed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-invalid-trace-cost";
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
-        fs::write(
-            &trace_path,
-            [
-                r#"{"n":1,"kind":"reasoning","label":"invalid","cost_usd":-1.0,"latency_ms":1,"model":"m","provider":"p","prompt_hash":"h"}"#,
-                r#"{"n":2,"kind":"reasoning","label":"valid","cost_usd":0.0,"latency_ms":1,"model":"m","provider":"p","prompt_hash":"h"}"#,
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-
-        let trace = load_run_trace(tmp.path(), run_id).unwrap();
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", None, "target").complete(),
-        )
-        .unwrap();
-        let summary = load_run_summary(tmp.path(), run_id).unwrap();
-
-        assert_eq!(trace.steps.len(), 1);
-        assert_eq!(trace.malformed_lines, 1);
-        assert_eq!(summary.llm_calls.len(), 1);
-        assert_eq!(summary.trace_malformed_lines, Some(1));
-    }
-
-    #[test]
-    fn typed_run_readers_report_malformed_rows_without_hiding_valid_records() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-typed-readers";
-        append_run_event(
-            tmp.path(),
-            run_id,
-            &RunEvent::new(0, "tool", "started", "start"),
-        )
-        .unwrap();
-        append_run_trace_step_with_next_number(
-            tmp.path(),
-            run_id,
-            &RunTraceStep::new(0, "tool", "start"),
-        )
-        .unwrap();
-        let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::OpenOptions::new()
-            .append(true)
-            .open(events_path)
-            .unwrap()
-            .write_all(b"{not-json\n")
-            .unwrap();
-        fs::OpenOptions::new()
-            .append(true)
-            .open(trace_path)
-            .unwrap()
-            .write_all(b"[]\n")
-            .unwrap();
-
-        let events = load_run_events(tmp.path(), run_id).unwrap();
-        let trace = load_run_trace(tmp.path(), run_id).unwrap();
-
-        assert_eq!(events.events.len(), 1);
-        assert_eq!(events.malformed_lines, 1);
-        assert_eq!(trace.steps.len(), 1);
-        assert_eq!(trace.malformed_lines, 1);
-    }
-
-    #[test]
+     #[test]
     fn concurrent_run_event_writers_assign_unique_monotonic_numbers() {
         const WRITERS: usize = 16;
         let tmp = tempfile::tempdir().unwrap();
@@ -695,33 +500,7 @@ mod tests {
         }
     }
 
-    #[test]
-    fn run_jsonl_numbering_advances_past_non_object_rows() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-jsonl-non-object-tail";
-        let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::create_dir_all(events_path.parent().unwrap()).unwrap();
-        fs::write(
-            &events_path,
-            [
-                r#"{"n":1,"kind":"tool","status":"started","message":"start","atUnix":1}"#,
-                "[]",
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-        fs::write(
-            &trace_path,
-            [r#"{"n":1,"kind":"reasoning","label":"query"}"#, "[]"].join("\n"),
-        )
-        .unwrap();
-
-        assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
-        assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
-    }
-
-    #[test]
+     #[test]
     fn run_event_rejects_obsolete_tool_and_time_aliases() {
         let obsolete = serde_json::from_str::<RunEvent>(
             r#"{"n":1,"kind":"tool","status":"started","message":"ask","at_unix":1,"tool_name":"agent:ask"}"#,
@@ -774,142 +553,7 @@ mod tests {
         assert!(event.artifact.is_none());
     }
 
-    #[test]
-    fn run_summary_rolls_up_llm_audit_metadata_from_trace() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-llm-audit";
-        append_run_trace_step(
-            tmp.path(),
-            run_id,
-            &RunTraceStep::new(2, "tool-progress", "query · starting")
-                .with_verb("query")
-                .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123"),
-        )
-        .unwrap();
-        append_run_trace_step(
-            tmp.path(),
-            run_id,
-            &RunTraceStep::new(3, "reasoning", "query · answer")
-                .with_verb("query")
-                .with_latency_ms(Some(42))
-                .with_cost_usd(Some(0.0042))
-                .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123"),
-        )
-        .unwrap();
-
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete()
-                .with_cost(Some(0.0042)),
-        )
-        .unwrap();
-
-        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
-        assert_eq!(loaded.llm_calls.len(), 1);
-        assert_eq!(loaded.llm_calls[0].model, "openai:gpt-test");
-        assert_eq!(loaded.llm_calls[0].provider, "openai");
-        assert_eq!(loaded.llm_calls[0].prompt_hash, "fnv1a64:abc123");
-        assert_eq!(loaded.llm_calls[0].cost_usd, Some(0.0042));
-
-        let metadata =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
-        assert!(metadata.contains("\"llmCalls\""));
-        assert!(metadata.contains("\"promptHash\": \"fnv1a64:abc123\""));
-        assert!(!metadata.contains("query · answer"));
-    }
-
-    #[test]
-    fn run_summary_records_malformed_trace_line_count() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-llm-audit-malformed";
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
-        fs::write(
-            &trace_path,
-            [
-                serde_json::to_string(
-                    &RunTraceStep::new(1, "reasoning", "query").with_model_metadata(
-                        "openai:gpt-test",
-                        "openai",
-                        "fnv1a64:abc123",
-                    ),
-                )
-                .unwrap(),
-                "{not-json".to_string(),
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-
-        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
-        assert_eq!(loaded.llm_calls.len(), 1);
-        assert_eq!(loaded.trace_malformed_lines, Some(1));
-
-        let metadata =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
-        assert!(metadata.contains("\"traceMalformedLines\": 1"));
-    }
-
-    #[test]
-    fn run_summary_records_non_object_trace_line_count() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-llm-audit-non-object";
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
-        fs::write(
-            &trace_path,
-            [
-                serde_json::to_string(
-                    &RunTraceStep::new(1, "reasoning", "query").with_model_metadata(
-                        "openai:gpt-test",
-                        "openai",
-                        "fnv1a64:abc123",
-                    ),
-                )
-                .unwrap(),
-                "[]".to_string(),
-            ]
-            .join("\n"),
-        )
-        .unwrap();
-
-        write_run_summary(
-            tmp.path(),
-            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
-                .complete(),
-        )
-        .unwrap();
-
-        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
-        assert_eq!(loaded.llm_calls.len(), 1);
-        assert_eq!(loaded.trace_malformed_lines, Some(1));
-
-        let metadata =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
-        assert!(metadata.contains("\"traceMalformedLines\": 1"));
-    }
-
-    #[test]
-    fn run_trace_audit_marks_non_file_trace_artifact_malformed() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-llm-audit-non-file";
-        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
-
-        let audit = crate::run_artifacts::llm_audit::load_run_trace_audit(tmp.path(), run_id);
-
-        assert!(audit.llm_calls.is_empty());
-        assert_eq!(audit.malformed_lines, 1);
-    }
-
-    #[test]
+     #[test]
     fn run_summary_records_available_reproducibility_metadata() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-repro-metadata";
@@ -1179,44 +823,7 @@ mod tests {
         assert_canonical_artifact_schema(artifact_schema);
     }
 
-    #[test]
-    fn run_trace_schema_matches_serialized_keys() {
-        let schema = run_trace_schema();
-        let value = serde_json::to_value(representative_trace_step()).unwrap();
-
-        assert_required_schema_fields_exist(&schema, &value);
-        assert_serialized_fields_are_declared(&schema, &value);
-    }
-
-    #[test]
-    fn run_trace_schema_declares_only_canonical_fields() {
-        let schema = run_trace_schema();
-
-        assert_schema_declares_fields(
-            &schema,
-            &[
-                "latency_ms",
-                "cost_usd",
-                "module_id",
-                "parent_step",
-                "started_at_ms",
-                "prompt_hash",
-            ],
-        );
-        assert_schema_declares_no_fields(
-            &schema,
-            &[
-                "latencyMs",
-                "costUsd",
-                "moduleId",
-                "parentStep",
-                "startedAtMs",
-                "promptHash",
-            ],
-        );
-    }
-
-    #[test]
+     #[test]
     fn run_summary_records_house_rule_fingerprints() {
         let tmp = tempfile::tempdir().unwrap();
         write_house_rule(tmp.path(), "semgrep", "prefer reachable sinks");
@@ -1602,19 +1209,11 @@ mod tests {
             Some(predicted_model.to_string()),
             None,
         );
+        let writer = crate::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
         for (index, model) in observed_models.iter().enumerate() {
-            append_run_trace_step(
-                target,
-                run_id,
-                &RunTraceStep::new(index + 1, "reasoning", "role-routed model call")
-                    .with_model_metadata(
-                        *model,
-                        crate::runtime::model_provider(model),
-                        format!("fnv1a64:receipt-{index}"),
-                    ),
-            )
-            .unwrap();
+            emit_test_model_call(&writer, model, index + 1, Some(0.0));
         }
+        writer.shutdown().unwrap();
         record_tool_run_complete(record, &serde_json::json!({"status": "completed"}));
     }
 
@@ -1810,7 +1409,7 @@ mod tests {
                     {
                         "label": "run metadata",
                         "path": "run.json",
-                        "filePath": "trace.jsonl",
+                        "filePath": "rogue.jsonl",
                         "kind": "json"
                     }
                 ]
@@ -2909,7 +2508,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_summary_artifact_and_trace_under_run_dir() {
+    fn writes_summary_and_lifecycle_artifacts_under_run_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("tool");
         let summary = RunSummary::running(
@@ -2937,12 +2536,6 @@ mod tests {
         let artifact =
             write_run_artifact_json(tmp.path(), &run_id, "result.json", "tool result", &result)
                 .unwrap();
-        append_run_trace_step(
-            tmp.path(),
-            &run_id,
-            &RunTraceStep::new(1, "tool", "context:build started"),
-        )
-        .unwrap();
         write_run_summary(tmp.path(), &summary.complete().with_artifact(artifact)).unwrap();
 
         let loaded = load_run_summary(tmp.path(), &run_id).unwrap();
@@ -2968,9 +2561,7 @@ mod tests {
         assert_manifest_has(&manifest_artifacts, "run.json");
         assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
         assert_manifest_has(&manifest_artifacts, "result.json");
-        let trace =
-            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "trace.jsonl")).unwrap();
-        assert!(trace.contains("context:build started"));
+        assert!(run_artifact_path(tmp.path(), &run_id, "items.jsonl").is_file());
     }
 
     #[test]
@@ -3155,20 +2746,7 @@ mod tests {
         assert!(error.to_string().contains("events.jsonl"));
     }
 
-    #[test]
-    fn append_run_trace_step_rejects_non_file_trace_target() {
-        let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-non-file-trace";
-        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
-        let step = RunTraceStep::new(1, "tool", "context:build");
-
-        let error = append_run_trace_step(tmp.path(), run_id, &step).unwrap_err();
-
-        assert!(error.to_string().contains("Run trace target is not a file"));
-        assert!(error.to_string().contains("trace.jsonl"));
-    }
-
-    #[test]
+     #[test]
     fn run_summary_with_artifact_normalizes_direct_artifact_values() {
         let summary = RunSummary::running("run-summary-artifact", "tool", None, "target")
             .with_artifact(RunArtifact {
@@ -3443,13 +3021,36 @@ mod tests {
         for leaf in [
             "run.json",
             "events.jsonl",
-            "trace.jsonl",
+            "items.jsonl",
             "failures.json",
             "report.md",
             "artifacts.json",
         ] {
             assert!(dir.join(leaf).exists(), "missing canonical artifact {leaf}");
         }
+    }
+
+    fn terminal_item_count(items: &[crate::run_lifecycle::RunItemEnvelopeV1]) -> usize {
+        items
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.item,
+                    crate::run_lifecycle::RunItemV1::TerminalOutcome { .. }
+                )
+            })
+            .count()
+    }
+
+    fn terminal_item_status(
+        items: &[crate::run_lifecycle::RunItemEnvelopeV1],
+    ) -> Option<&str> {
+        items.iter().find_map(|item| match &item.item {
+            crate::run_lifecycle::RunItemV1::TerminalOutcome { status, .. } => {
+                Some(status.label())
+            }
+            _ => None,
+        })
     }
 
     fn assert_retired_snapshot_artifacts_absent(target: &Path, run_id: &str) {
@@ -3630,7 +3231,7 @@ mod tests {
         assert_eq!(context.cause, "LLM enrichment is unsupported");
         assert!(context
             .missing_artifacts
-            .contains(&"trace.jsonl".to_string()));
+            .contains(&"items.jsonl".to_string()));
         assert!(!context
             .missing_artifacts
             .contains(&"context.json".to_string()));
@@ -3842,7 +3443,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_start_records_input_summary_event_and_trace() {
+    fn tool_run_start_records_input_summary_and_event() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-start";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
@@ -3863,9 +3464,6 @@ mod tests {
             fs::read_to_string(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
         assert!(events.contains("\"status\":\"started\""));
         assert!(events.contains("\"artifact\""));
-        let trace =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
-        assert!(trace.contains("context:build started"));
     }
 
     #[test]
@@ -4030,7 +3628,7 @@ mod tests {
     }
 
     #[test]
-    fn repeated_terminalization_is_idempotent_and_does_not_duplicate_events() {
+    fn repeated_terminalization_is_idempotent_and_does_not_duplicate_lifecycle() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-idempotent-terminal";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
@@ -4052,20 +3650,10 @@ mod tests {
         try_record_tool_run_complete(record, &output).unwrap();
         try_record_tool_run_complete(record, &output).unwrap();
 
-        let events =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
-        let terminal_events = events
-            .lines()
-            .filter(|line| line.contains("\"status\":\"completed\""))
-            .count();
-        let trace =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
-        assert_eq!(terminal_events, 1, "{events}");
-        assert_eq!(
-            trace.matches("context:build complete").count(),
-            1,
-            "{trace}"
-        );
+        let read = crate::run_lifecycle::read_run_items(tmp.path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal_item_count(&read.items), 1);
     }
 
     #[test]
@@ -4128,15 +3716,10 @@ mod tests {
             .iter()
             .filter_map(|outcome| outcome.as_ref().err())
             .any(|error| error.to_string().contains("different result content")));
-        let events = load_run_events(target.as_path(), run_id).unwrap();
-        assert_eq!(
-            events
-                .events
-                .iter()
-                .filter(|event| event.status == "completed")
-                .count(),
-            1
-        );
+        let read = crate::run_lifecycle::read_run_items(target.as_path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal_item_count(&read.items), 1);
     }
 
     #[test]
@@ -4204,18 +3787,15 @@ mod tests {
         assert_eq!(outcomes.iter().filter(|result| result.is_ok()).count(), 1);
         let summary = load_run_summary(target.as_path(), run_id).unwrap();
         assert!(matches!(summary.status.as_str(), "completed" | "failed"));
-        let events = load_run_events(target.as_path(), run_id).unwrap();
-        let terminals = events
-            .events
-            .iter()
-            .filter(|event| matches!(event.status.as_str(), "completed" | "failed"))
-            .collect::<Vec<_>>();
-        assert_eq!(terminals.len(), 1);
-        assert_eq!(terminals[0].status, summary.status);
+        let read = crate::run_lifecycle::read_run_items(target.as_path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal_item_count(&read.items), 1);
+        assert_eq!(terminal_item_status(&read.items), Some(summary.status.as_str()));
     }
 
     #[test]
-    fn repeated_terminalization_repairs_missing_result_and_trace_without_duplicate_event() {
+    fn repeated_terminalization_repairs_missing_result_without_duplicate_lifecycle() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-repair-terminal";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
@@ -4236,31 +3816,13 @@ mod tests {
         try_record_tool_run_complete(record, &output).unwrap();
 
         fs::remove_file(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
-        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
-        let trace = fs::read_to_string(&trace_path).unwrap();
-        let trace_without_terminal = trace
-            .lines()
-            .filter(|line| !line.contains("context:build complete"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        fs::write(&trace_path, format!("{trace_without_terminal}\n")).unwrap();
-
         try_record_tool_run_complete(record, &output).unwrap();
 
         assert!(run_artifact_path(tmp.path(), run_id, "result.json").is_file());
-        let events =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
-        let trace = fs::read_to_string(trace_path).unwrap();
-        assert_eq!(
-            events.matches("\"status\":\"completed\"").count(),
-            1,
-            "{events}"
-        );
-        assert_eq!(
-            trace.matches("context:build complete").count(),
-            1,
-            "{trace}"
-        );
+        let read = crate::run_lifecycle::read_run_items(tmp.path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(terminal_item_count(&read.items), 1);
     }
 
     #[test]
@@ -4983,10 +4545,16 @@ mod tests {
             .unwrap()
             .iter()
             .any(|claim| claim == "verified claim"));
-        let trace =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
-        assert!(trace.contains("\"kind\":\"tool-progress\""));
-        assert!(trace.contains("\"severity\":\"warn\""));
+        let read = crate::run_lifecycle::read_run_items(tmp.path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert!(read.items.iter().any(|item| matches!(
+            item.item,
+            crate::run_lifecycle::RunItemV1::TerminalOutcome {
+                status: crate::run_lifecycle::RunItemStatus::Partial,
+                ..
+            }
+        )));
     }
 
     #[test]
@@ -5055,7 +4623,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_tool_summary_uses_exact_costed_model_steps_from_its_trace() {
+    fn failed_tool_summary_uses_exact_costed_model_lifecycle_items() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-failed-costed-trace";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
@@ -5067,19 +4635,11 @@ mod tests {
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert!((summary.cost_usd.unwrap() - 0.03).abs() < 1e-9);
-        let trace = load_run_trace(tmp.path(), run_id).unwrap();
-        assert_eq!(
-            trace
-                .steps
-                .iter()
-                .filter_map(|step| step.cost_usd)
-                .sum::<f64>(),
-            0.03
-        );
+        assert_eq!(lifecycle_cost_report(tmp.path(), run_id).unwrap().exact_usd(), Some(0.03));
     }
 
     #[test]
-    fn canceled_tool_summary_uses_exact_trace_cost_without_terminal_double_count() {
+    fn canceled_tool_summary_uses_exact_lifecycle_cost_without_terminal_double_count() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-canceled-costed-trace";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
@@ -5091,12 +4651,11 @@ mod tests {
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert_eq!(summary.cost_usd, Some(0.04));
-        let trace = load_run_trace(tmp.path(), run_id).unwrap();
-        assert_eq!(
-            trace.steps.iter().filter_map(|step| step.cost_usd).count(),
-            1,
-            "terminal trace must not repeat the derived cost"
-        );
+        let read = crate::run_lifecycle::read_run_items(tmp.path(), run_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(read.items.iter().filter(|item| matches!(item.item,
+            crate::run_lifecycle::RunItemV1::ModelCallFinished { .. })).count(), 1);
     }
 
     #[test]
@@ -5182,27 +4741,72 @@ mod tests {
     }
 
     fn append_terminal_model_trace(target: &Path, run_id: &str, n: usize, cost_usd: Option<f64>) {
-        append_run_trace_step_with_next_number(
-            target,
-            run_id,
-            &RunTraceStep::new(n, "reasoning", format!("model call {n}"))
-                .with_latency_ms(Some(1))
-                .with_model_metadata("openai:gpt-test", "openai", format!("hash-{n}"))
-                .with_cost_usd(cost_usd),
-        )
-        .unwrap();
+        let writer = crate::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
+        emit_test_model_call(&writer, "openai:gpt-test", n, cost_usd);
     }
 
     fn append_model_preflight_trace(target: &Path, run_id: &str, n: usize) {
-        append_run_trace_step_with_next_number(
-            target,
-            run_id,
-            &RunTraceStep::new(n, "tool-progress", "tool-loop preflight ok")
-                .with_verb("next-step")
-                .with_latency_ms(Some(1))
-                .with_model_metadata("openai:gpt-test", "openai", format!("hash-{n}")),
-        )
-        .unwrap();
+        let writer = crate::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
+        writer.emit_and_flush(crate::run_lifecycle::RunItemRecord::new(
+            crate::run_lifecycle::RunItemId::new(),
+            crate::run_lifecycle::RunItemSource::Runtime,
+            crate::run_lifecycle::RunItemV1::DiagnosticNotice {
+                level: crate::run_lifecycle::DiagnosticLevel::Info,
+                message: crate::run_lifecycle::SafeText::operator_visible(format!(
+                    "tool-loop preflight {n}"
+                )),
+            },
+        )).unwrap();
+    }
+
+    fn emit_test_model_call(
+        writer: &crate::run_lifecycle::RunItemWriter,
+        model: &str,
+        n: usize,
+        cost_usd: Option<f64>,
+    ) {
+        let call_id = crate::run_lifecycle::RunCallId::new();
+        let item_id = crate::run_lifecycle::RunItemId::new();
+        writer
+            .emit(crate::run_lifecycle::RunItemRecord::new(
+                item_id,
+                crate::run_lifecycle::RunItemSource::Runtime,
+                crate::run_lifecycle::RunItemV1::ModelCallStarted {
+                    provider: crate::run_lifecycle::SafeText::operator_visible(
+                        crate::runtime::model_provider(model),
+                    ),
+                    model: crate::run_lifecycle::SafeText::operator_visible(model),
+                    operation_fingerprint: crate::run_lifecycle::OperationFingerprint::from_bytes(
+                        format!("model fixture {n}").as_bytes(),
+                    ),
+                },
+            )
+            .with_call(call_id))
+            .unwrap();
+        let cost = cost_usd.map_or(
+            crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            |value| crate::runtime::RuntimeCostReport::known(
+                crate::runtime::RuntimeCost::from_usd(value, "model fixture").unwrap(),
+            ),
+        );
+        writer.emit_and_flush(crate::run_lifecycle::RunItemRecord::new(
+            item_id,
+            crate::run_lifecycle::RunItemSource::Runtime,
+            crate::run_lifecycle::RunItemV1::ModelCallFinished {
+                provider: crate::run_lifecycle::SafeText::operator_visible(
+                    crate::runtime::model_provider(model),
+                ),
+                model: crate::run_lifecycle::SafeText::operator_visible(model),
+                status: crate::run_lifecycle::RunItemStatus::Completed,
+                latency_ms: n as u64,
+                usage: crate::run_lifecycle::ModelUsage {
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+                cost,
+                error_class: None,
+            },
+        ).with_call(call_id)).unwrap();
     }
 
     #[test]
@@ -6070,10 +5674,6 @@ mod tests {
         serde_json::from_str(include_str!("../../../../schemas/run.events.schema.json")).unwrap()
     }
 
-    fn run_trace_schema() -> serde_json::Value {
-        serde_json::from_str(include_str!("../../../../schemas/run.trace.schema.json")).unwrap()
-    }
-
     #[test]
     fn published_schemas_cover_real_scan_and_agent_producer_kinds() {
         let event_kinds = &run_event_schema()["definitions"]["eventKind"]["enum"];
@@ -6084,15 +5684,9 @@ mod tests {
                 .contains(&serde_json::json!(kind)));
         }
 
-        let trace_schema = run_trace_schema();
-        let trace_kinds = &trace_schema["definitions"]["traceKind"]["enum"];
         let summary_schema = run_summary_schema();
         let llm_kinds = &summary_schema["definitions"]["llmCallKind"]["enum"];
         for kind in ["plan", "llm", "critic"] {
-            assert!(trace_kinds
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!(kind)));
             assert!(llm_kinds
                 .as_array()
                 .unwrap()
@@ -6179,7 +5773,7 @@ mod tests {
             provider_spend_unresolved: false,
             call_attempted: Some(true),
         }])
-        .with_trace_malformed_lines(Some(1))
+        .with_lifecycle_malformed_items(Some(1))
         .with_artifact(RunArtifact {
             label: "result".to_string(),
             path: representative_run_artifact_path("run-schema", "result.json"),
@@ -6240,18 +5834,6 @@ mod tests {
                 path: representative_run_artifact_path("run-event", "input.json"),
                 kind: "json".to_string(),
             })
-    }
-
-    fn representative_trace_step() -> RunTraceStep {
-        RunTraceStep::new(2, "reasoning", "triage query")
-            .with_latency_ms(Some(120))
-            .with_cost_usd(Some(0.02))
-            .with_module_id("triage")
-            .with_verb("run")
-            .with_parent_step(1)
-            .with_severity("info")
-            .with_started_at_ms(1_700_000_000_000)
-            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc")
     }
 
     fn assert_required_schema_fields_exist(schema: &serde_json::Value, value: &serde_json::Value) {
@@ -6571,9 +6153,9 @@ mod tests {
                 .contains("\"kind\":\"run\"")
         );
         assert!(
-            fs::read_to_string(run_artifact_path(tmp.path(), "run-stale", "trace.jsonl"))
+            fs::read_to_string(run_artifact_path(tmp.path(), "run-stale", "items.jsonl"))
                 .unwrap()
-                .contains("\"kind\":\"refused\"")
+                .contains("\"type\":\"terminal_outcome\"")
         );
     }
 }

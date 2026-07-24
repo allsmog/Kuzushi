@@ -35,7 +35,6 @@ pub(super) use background_tool_worker::PlanEvent;
 pub(super) use background_tool_worker::ScanEvent;
 pub(super) use background_tool_worker::ThreatPatchEvent;
 pub(super) use background_tool_worker::ToolEvent;
-pub(super) use live_trace::LiveTraceBudget;
 #[cfg(test)]
 pub(super) use parse_plan_json::parse_plan_json;
 pub(super) use parse_threat_patch_json::merge_json;

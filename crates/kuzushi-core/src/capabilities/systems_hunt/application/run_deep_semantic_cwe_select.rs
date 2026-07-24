@@ -16,7 +16,7 @@ struct DeepSemanticCweSelectRun<'a> {
     runtime: &'a dyn AgentRuntime,
     model: String,
     inventory: Vec<(String, String)>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 }
 
 fn prepare_deep_semantic_cwe_select<'a>(
@@ -57,7 +57,7 @@ fn deep_semantic_cwe_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn 
 
 fn collect_deep_semantic_cwe_inventory(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     target: &Path,
 ) -> Result<Vec<(String, String)>> {
     emit_deep_semantic_progress(
@@ -141,7 +141,7 @@ pub(crate) fn run_deep_semantic_hunt_report(
 
 struct DeepSemanticHuntRun<'a> {
     target: PathBuf,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     options: SystemsHuntInput,
     runtime: &'a dyn AgentRuntime,
     model: String,
@@ -312,7 +312,7 @@ fn emit_deep_semantic_start(
     ctx: &ToolExecutionContext<'_>,
     verb: &str,
     label: impl Into<String>,
-) -> Option<usize> {
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -326,7 +326,7 @@ fn emit_deep_semantic_start(
 
 fn emit_deep_semantic_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     verb: &str,
     label: impl Into<String>,
 ) {
@@ -341,7 +341,7 @@ fn emit_deep_semantic_progress(
 
 fn begin_deep_semantic_child_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     verb: &str,
     label: &str,
 ) -> Option<crate::run_artifacts::ParentScope> {

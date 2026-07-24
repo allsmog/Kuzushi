@@ -25,7 +25,7 @@ impl ShellApp {
         let Some(target) = self.scan_target_owned() else {
             return Ok(reported);
         };
-        let traced = kuzushi_core::run_artifacts::trace_cost_report(target, run_id)?;
+        let traced = kuzushi_core::run_artifacts::lifecycle_cost_report(target, run_id)?;
         kuzushi_core::run_artifacts::reconcile_terminal_cost_reports(
             reported,
             traced,

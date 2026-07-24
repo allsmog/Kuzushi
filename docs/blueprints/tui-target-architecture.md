@@ -1,8 +1,8 @@
 # Blueprint: kuzushi-tui target architecture (no-compat rewrite)
 
-Status: proposal. Supersedes the incremental framing of
-`jobhub-unified-events.md` (its `JobHub` design is kept, as the effect
-runtime's job component). Scope: `crates/kuzushi-tui` internals only —
+Status: proposal. The retired unified-event sketch's `JobHub` design is
+kept as the effect runtime's job component, while run activity now enters
+through the typed lifecycle. Scope: `crates/kuzushi-tui` internals only —
 the CLI entry, `kuzushi-core` dispatch boundary, `.kuzushi` artifacts,
 and plain-mode output contracts are unchanged.
 

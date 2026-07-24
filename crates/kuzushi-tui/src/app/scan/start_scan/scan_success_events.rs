@@ -674,10 +674,10 @@ fn write_scan_terminal_summary(
         )
     });
     let prior_cost = seed.checked_cost_report()?;
-    let trace_cost = kuzushi_core::run_artifacts::trace_cost_report(target, run_id)?;
+    let lifecycle_cost = kuzushi_core::run_artifacts::lifecycle_cost_report(target, run_id)?;
     let cost = kuzushi_core::run_artifacts::reconcile_terminal_cost_reports(
         prior_cost,
-        trace_cost,
+        lifecycle_cost,
         "scan lifecycle terminal",
     )?;
     let seed = seed.with_findings(findings_count.map(|count| count as u64));
@@ -1240,23 +1240,71 @@ mod tests {
     }
 
     fn append_test_scan_cost(target: &std::path::Path, run_id: &str, cost: f64) {
-        let step = kuzushi_core::RunTraceStep::new(0, "reasoning", "scan model call")
-            .with_call_attempted(true)
-            .with_cost_usd(Some(cost))
-            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:scan");
-        kuzushi_core::run_artifacts::append_run_trace_step_with_next_number(target, run_id, &step)
+        let writer =
+            kuzushi_core::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
+        let report = kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::from_usd(cost, "scan test").unwrap(),
+        );
+        let item_id = kuzushi_core::run_lifecycle::RunItemId::new();
+        let call_id = kuzushi_core::run_lifecycle::RunCallId::new();
+        writer
+            .emit_and_flush(test_scan_model_started(item_id).with_call(call_id))
+            .unwrap();
+        writer
+            .emit_and_flush(test_scan_model_finished(item_id, report).with_call(call_id))
             .unwrap();
     }
 
+    fn test_scan_model_started(
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+    ) -> kuzushi_core::run_lifecycle::RunItemRecord {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemRecord::new(
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallStarted {
+                provider: SafeText::operator_visible("openai"),
+                model: SafeText::operator_visible("openai:gpt-test"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"scan test"),
+            },
+        )
+    }
+
+    fn test_scan_model_finished(
+        item_id: kuzushi_core::run_lifecycle::RunItemId,
+        cost: kuzushi_core::runtime::RuntimeCostReport,
+    ) -> kuzushi_core::run_lifecycle::RunItemRecord {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemRecord::new(
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallFinished {
+                provider: SafeText::operator_visible("openai"),
+                model: SafeText::operator_visible("openai:gpt-test"),
+                status: RunItemStatus::Completed,
+                latency_ms: 1,
+                usage: ModelUsage {
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+                cost,
+                error_class: None,
+            },
+        )
+    }
+
     fn terminal_scan_event_count(target: &std::path::Path, run_id: &str, status: &str) -> usize {
-        let events = std::fs::read_to_string(kuzushi_core::run_artifacts::run_artifact_path(
+        let items = std::fs::read_to_string(kuzushi_core::run_artifacts::run_artifact_path(
             target,
             run_id,
-            "events.jsonl",
+            "items.jsonl",
         ))
         .unwrap();
         let needle = format!(r#""status":"{status}""#);
-        events.lines().filter(|line| line.contains(&needle)).count()
+        items
+            .lines()
+            .filter(|line| line.contains("terminal_outcome") && line.contains(&needle))
+            .count()
     }
 
     fn wait_for_terminal_scan_event_count(
@@ -1273,7 +1321,7 @@ mod tests {
             }
             assert!(
                 std::time::Instant::now() < deadline,
-                "timed out waiting for {expected} {status} event(s); found {count}"
+                "timed out waiting for {expected} {status} lifecycle outcome(s); found {count}"
             );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }

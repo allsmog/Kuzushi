@@ -59,9 +59,6 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
                 kuzushi_core::read_run_artifact_text(target, run_id, leaf),
             ))
         }
-        ViewHydrationKey::RunTrace { run_id } => Some(ViewHydrationValue::RunTrace(
-            kuzushi_core::load_run_trace(target, run_id).ok(),
-        )),
         ViewHydrationKey::RunProjection { run_id } => Some(ViewHydrationValue::RunProjection(
             kuzushi_core::run_lifecycle::load_run_projection(target, run_id)
                 .map_err(|error| error.to_string()),

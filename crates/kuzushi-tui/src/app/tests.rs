@@ -6,13 +6,9 @@ fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
         .workbench()
         .focus_for(crate::ui_view_models::active_workbench_page(app))
 }
-#[path = "../ui_view_models/tests/run_lifecycle_semantic_equivalence.rs"]
-mod run_lifecycle_semantic_equivalence_tests;
-
 use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
 use super::artifacts::{
-    append_run_status_event, append_trace_step, record_agent_run_started,
-    write_run_failure_handoff, write_run_summary,
+    append_run_status_event, record_agent_run_started, write_run_failure_handoff, write_run_summary,
 };
 use super::command_router::unknown_command_message;
 use super::findings::{
@@ -36,6 +32,40 @@ use kuzushi_core::{
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
+
+fn seed_activity_task(
+    session: &mut ActivitySession,
+    tool_name: &str,
+    state: DagTaskState,
+    detail: &str,
+) {
+    session.seed_task_sequence(vec![tool_name.to_string()]);
+    let row = session.tasks.get_mut(tool_name).unwrap();
+    row.state = state;
+    row.started_at = Some(std::time::Instant::now());
+    row.completed_at = (!matches!(state, DagTaskState::Active | DagTaskState::Canceling))
+        .then(std::time::Instant::now);
+    row.last_label = detail.to_string();
+}
+
+fn apply_activity_notice(session: &mut ActivitySession, message: &str) {
+    use kuzushi_core::run_lifecycle::{
+        DiagnosticLevel, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemV1, SafeText,
+    };
+    let item = RunItemEnvelopeV1::new(
+        session.run_projection.last_committed_seq + 1,
+        RunId::parse(&session.run_id).unwrap(),
+        RunItemId::new(),
+        RunItemSource::Workflow,
+        RunItemV1::DiagnosticNotice {
+            level: DiagnosticLevel::Info,
+            message: SafeText::operator_visible(message),
+        },
+        session.run_projection.last_event_hash.clone(),
+    )
+    .unwrap();
+    session.apply_run_item(item).unwrap();
+}
 
 /// Serializes tests that mutate process-wide provider-key env vars.
 /// `EnvVarGuard` only saves/restores a variable's value; it does not stop
@@ -464,7 +494,7 @@ fn trusted_workflow_auto_accept_explicitly_starts_missing_prereq() {
 #[test]
 fn live_activity_phase_labels_cover_long_running_states() {
     let phases = [
-        LiveActivityPhase::Thinking,
+        LiveActivityPhase::CallingModel,
         LiveActivityPhase::Reading,
         LiveActivityPhase::Searching,
         LiveActivityPhase::RunningTool,
@@ -482,7 +512,7 @@ fn live_activity_phase_labels_cover_long_running_states() {
     assert_eq!(
         labels,
         vec![
-            "thinking",
+            "calling model",
             "reading",
             "searching",
             "running tool",
@@ -502,7 +532,7 @@ fn live_activity_phase_labels_cover_long_running_states() {
 fn taint_iris_next_activity_phases_match_split_runtime_boundary() {
     assert_eq!(
         live_activity_for_tool("taint-iris-next:finding-review", "reviewing").phase,
-        LiveActivityPhase::Thinking
+        LiveActivityPhase::CallingModel
     );
     assert_eq!(
         live_activity_for_tool("taint-iris-next:dataflow-plan", "planning").phase,
@@ -518,7 +548,7 @@ fn taint_iris_next_activity_phases_match_split_runtime_boundary() {
 fn offense_review_threat_hunt_activity_is_model_backed() {
     assert_eq!(
         live_activity_for_tool("offense-review:threat-hunt", "hunting").phase,
-        LiveActivityPhase::Thinking
+        LiveActivityPhase::CallingModel
     );
 }
 
@@ -1993,7 +2023,6 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::RecordAgentRun(_)
         | ShellEffect::RecordPromptMutation(_)
         | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordScanStageTrace(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
         | ShellEffect::RecordProofDeferral(_)
@@ -2159,7 +2188,6 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::RecordAgentRun(_)
         | ShellEffect::RecordPromptMutation(_)
         | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordScanStageTrace(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
         | ShellEffect::RecordProofDeferral(_)
@@ -2266,7 +2294,6 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::RecordAgentRun(_)
         | ShellEffect::RecordPromptMutation(_)
         | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordScanStageTrace(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
         | ShellEffect::RecordProofDeferral(_)
@@ -2356,7 +2383,6 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::RecordAgentRun(_)
         | ShellEffect::RecordPromptMutation(_)
         | ShellEffect::RecordScanRun(_)
-        | ShellEffect::RecordScanStageTrace(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
         | ShellEffect::RecordProofDeferral(_)
@@ -3731,7 +3757,6 @@ enum EffectKind {
     RecordAgentRun,
     RecordPromptMutation,
     RecordScanRun,
-    RecordScanStageTrace,
     RecordToolRun,
     RecordReviewDecision,
     RecordProofDeferral,
@@ -3816,7 +3841,6 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::RecordAgentRun(_) => EffectKind::RecordAgentRun,
         ShellEffect::RecordPromptMutation(_) => EffectKind::RecordPromptMutation,
         ShellEffect::RecordScanRun(_) => EffectKind::RecordScanRun,
-        ShellEffect::RecordScanStageTrace(_) => EffectKind::RecordScanStageTrace,
         ShellEffect::RecordToolRun(_) => EffectKind::RecordToolRun,
         ShellEffect::RecordReviewDecision(_) => EffectKind::RecordReviewDecision,
         ShellEffect::RecordProofDeferral(_) => EffectKind::RecordProofDeferral,
@@ -4592,12 +4616,12 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
         app.activity().map(|session| session.run_id.as_str()),
         Some("run-1")
     );
-    let events_path = kuzushi_core::run_dir(workspace.root(), "run-1").join("events.jsonl");
-    let events_before = std::fs::read_to_string(&events_path).unwrap();
+    let items_path = kuzushi_core::run_dir(workspace.root(), "run-1").join("items.jsonl");
+    let items_before = std::fs::read_to_string(&items_path).unwrap_or_default();
     EffectRuntime::execute(&mut app, effects);
 
-    let events_after = wait_for_file_text(&events_path, r#""status":"completed""#);
-    assert_ne!(events_after, events_before);
+    let items_after = wait_for_file_text(&items_path, r#""status":"completed""#);
+    assert_ne!(items_after, items_before);
 
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
@@ -4609,9 +4633,8 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
         kuzushi_core::stable_finding_alias(app.findings(), "aaaa1111").as_deref(),
         Some("F-0001")
     );
-    let events = fs::read_to_string(events_path).unwrap();
-    assert!(events.contains(r#""status":"completed""#));
-    assert!(events.contains(r#""tool":"sast:scan""#));
+    assert!(items_after.contains(r#""type":"terminal_outcome""#));
+    assert!(items_after.contains(r#""status":"completed""#));
 }
 
 #[test]
@@ -5104,10 +5127,17 @@ fn workspace_export_findings_to_temp_path() {
 
     assert_eq!(app.shell_view(), ShellView::Workspace);
     assert_eq!(app.domain().workspace_view().findings_count, Some(1));
+    let recorded = app
+        .domain()
+        .workspace_view()
+        .last_export
+        .as_deref()
+        .expect("successful export path");
     assert_eq!(
-        app.domain().workspace_view().last_export.as_deref(),
-        Some(output.as_path())
+        recorded.file_name().and_then(|name| name.to_str()),
+        Some("findings.json")
     );
+    assert!(recorded.is_file());
     let exported: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
     assert_eq!(exported["count"], serde_json::json!(1));
@@ -5727,10 +5757,17 @@ fn workspace_export_accepts_explicit_markdown_bundle_format() {
         }),
     );
 
+    let recorded = app
+        .domain()
+        .workspace_view()
+        .last_export
+        .as_deref()
+        .expect("successful export path");
     assert_eq!(
-        app.domain().workspace_view().last_export.as_deref(),
-        Some(output.as_path())
+        recorded.file_name().and_then(|name| name.to_str()),
+        Some("bundle")
     );
+    assert!(recorded.is_dir());
     assert!(output.join("README.md").is_file());
     assert!(output.join("manifest.json").is_file());
     assert!(app
@@ -14159,7 +14196,21 @@ fn prove_z_opens_its_persisted_replay() {
     *app.selected_finding_mut() = Some(finding);
     let run_dir = kuzushi_core::run_dir(target.path(), "verify-replay");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(run_dir.join("trace.jsonl"), "{}\n").unwrap();
+    let writer =
+        kuzushi_core::run_lifecycle::RunItemWriter::open(target.path(), "verify-replay", None)
+            .unwrap();
+    writer
+        .emit_and_flush(kuzushi_core::run_lifecycle::RunItemRecord::new(
+            kuzushi_core::run_lifecycle::RunItemId::new(),
+            kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+            kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+                level: kuzushi_core::run_lifecycle::DiagnosticLevel::Info,
+                message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                    "Verification replay available",
+                ),
+            },
+        ))
+        .unwrap();
     app.set_shell_view(ShellView::Workbench);
     app.set_input_mode(crate::InputMode::Navigate);
     app.router
@@ -15332,12 +15383,12 @@ fn agent_answer_event_does_not_duplicate_the_runtime_model_call() {
         .iter()
         .any(|artifact| artifact.path.ends_with("result.json")));
     assert!(summary.llm_calls.is_empty());
-    let events = wait_for_file_text(
-        &kuzushi_core::run_dir(tmp.path(), "agent-answer").join("events.jsonl"),
+    let items = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "agent-answer").join("items.jsonl"),
         r#""status":"completed""#,
     );
-    assert!(events.contains(r#""status":"completed""#));
-    assert!(events.contains(r#""tool":"agent:ask""#));
+    assert!(items.contains(r#""type":"terminal_outcome""#));
+    assert!(items.contains(r#""status":"completed""#));
 }
 
 #[test]
@@ -15432,18 +15483,18 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         .agent_thread_context
         .fallback_prompt
         .contains("model request failed (runtime_error)"));
-    for artifact in ["items.jsonl", "trace.jsonl", "result.json", "failures.json"] {
+    for artifact in ["items.jsonl", "result.json", "failures.json"] {
         let contents =
             fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join(artifact))
                 .unwrap();
         assert!(!contents.contains("RAW_RESPONSE_SENTINEL"), "{artifact}");
     }
-    let events = wait_for_file_text(
-        &kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"),
+    let items = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "agent-failed").join("items.jsonl"),
         r#""status":"failed""#,
     );
-    assert!(events.contains(r#""status":"failed""#));
-    assert!(events.contains(r#""tool":"agent:ask""#));
+    assert!(items.contains(r#""type":"terminal_outcome""#));
+    assert!(items.contains(r#""status":"failed""#));
     app.finish_session_transcript("completed");
     let transcript = transcript_store.read(&session_id).unwrap();
     assert!(!transcript.raw_jsonl.contains("RAW_RESPONSE_SENTINEL"));
@@ -15505,23 +15556,6 @@ fn agent_pre_call_failure_persists_explicit_no_call_zero() {
     let summary = load_run_summary(tmp.path(), "agent-pre-call").unwrap();
     assert_eq!(summary.cost_usd, Some(0.0));
     assert!(summary.llm_calls.is_empty());
-    let trace = kuzushi_core::run_artifacts::load_run_trace(tmp.path(), "agent-pre-call").unwrap();
-    let pre_call = trace
-        .steps
-        .iter()
-        .find(|step| step.call_attempted == Some(false))
-        .expect("explicit pre-call audit row");
-    assert_eq!(pre_call.cost_usd, None);
-    assert_eq!(pre_call.observed_cost_usd, None);
-    assert!(!pre_call.provider_spend_unresolved);
-    assert_eq!(
-        trace
-            .steps
-            .iter()
-            .filter(|step| step.call_attempted == Some(false))
-            .count(),
-        1
-    );
 }
 
 #[test]
@@ -15638,12 +15672,12 @@ fn scan_failure_event_records_bounded_failure_handoff() {
         .agent_thread_context
         .fallback_prompt
         .contains("semgrep binary missing"));
-    let events = wait_for_file_text(
-        &kuzushi_core::run_dir(tmp.path(), "scan-failed").join("events.jsonl"),
+    let items = wait_for_file_text(
+        &kuzushi_core::run_dir(tmp.path(), "scan-failed").join("items.jsonl"),
         r#""status":"failed""#,
     );
-    assert!(events.contains(r#""status":"failed""#));
-    assert!(events.contains(r#""tool":"sast:scan""#));
+    assert!(items.contains(r#""type":"terminal_outcome""#));
+    assert!(items.contains(r#""status":"failed""#));
 }
 
 #[test]
@@ -15880,11 +15914,11 @@ fn tool_failure_marks_activity_dag_row_failing() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("run-1")));
     app.set_running_tool_for_test("cpg:build");
-    // Seed the row as the start step would, leaving it Active/running.
-    app.activity_mut().unwrap().apply_step(
-        kuzushi_core::RunTraceStep::new(0, "tool", "cpg:build start")
-            .with_module_id("cpg")
-            .with_verb("build"),
+    seed_activity_task(
+        app.activity_mut().unwrap(),
+        "cpg:build",
+        DagTaskState::Active,
+        "Building CPG",
     );
     assert_eq!(
         app.activity().unwrap().tasks["cpg:build"].state,
@@ -16055,10 +16089,11 @@ fn terminal_tool_artifact_failure_retains_result_and_marks_activity_partial() {
     app.set_activity(Some(ActivitySession::new(run_id)));
     app.set_running_tool_for_test("context:build");
     app.set_active_tool_run_id_for_test(run_id);
-    app.activity_mut().unwrap().apply_step(
-        RunTraceStep::new(0, "tool", "context build start")
-            .with_module_id("context")
-            .with_verb("build"),
+    seed_activity_task(
+        app.activity_mut().unwrap(),
+        "context:build",
+        DagTaskState::Active,
+        "Building repository context",
     );
 
     let effects = app.apply_tool_event(ToolEvent::Finished {
@@ -16194,10 +16229,11 @@ fn partial_tool_result_retains_snapshot_without_success_or_continuation() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("tool-partial-flow")));
     app.set_running_tool_for_test("taint-iris:hunt");
-    app.activity_mut().unwrap().apply_step(
-        RunTraceStep::new(0, "tool", "taint hunt start")
-            .with_module_id("taint-iris")
-            .with_verb("hunt"),
+    seed_activity_task(
+        app.activity_mut().unwrap(),
+        "taint-iris:hunt",
+        DagTaskState::Active,
+        "Tracing source-to-sink paths",
     );
     app.engagement
         .queue_plan(vec![crate::app::PlanningTaskId::HuntTaint]);
@@ -16261,10 +16297,11 @@ fn failed_result_envelope_does_not_apply_snapshot_or_continue() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("tool-failed-flow")));
     app.set_running_tool_for_test("taint-iris:hunt");
-    app.activity_mut().unwrap().apply_step(
-        RunTraceStep::new(0, "tool", "taint hunt start")
-            .with_module_id("taint-iris")
-            .with_verb("hunt"),
+    seed_activity_task(
+        app.activity_mut().unwrap(),
+        "taint-iris:hunt",
+        DagTaskState::Active,
+        "Tracing source-to-sink paths",
     );
     app.engagement.set_pending_chain(PrereqChain::new(
         Vec::new(),
@@ -16314,10 +16351,11 @@ fn skipped_result_is_neutral_terminal_and_never_continues() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("tool-skipped")));
     app.set_running_tool_for_test("context:build");
-    app.activity_mut().unwrap().apply_step(
-        RunTraceStep::new(0, "tool", "context start")
-            .with_module_id("context")
-            .with_verb("build"),
+    seed_activity_task(
+        app.activity_mut().unwrap(),
+        "context:build",
+        DagTaskState::Active,
+        "Building repository context",
     );
     app.engagement
         .queue_plan(vec![crate::app::PlanningTaskId::GatherRepoContext]);
@@ -16943,50 +16981,6 @@ fn pending_confirm_esc_denies_once_without_navigation() {
 }
 
 #[test]
-fn append_trace_step_writes_jsonl_under_target() {
-    // The trace writer should land at
-    // <target>/.kuzushi/v3/runs/<runId>/trace.jsonl with one JSON
-    // object per line.
-    let tmp = tempfile::tempdir().unwrap();
-    append_trace_step(
-        Some(tmp.path()),
-        "agent-42",
-        "plan",
-        "ask demo question",
-        Some(400),
-        None,
-    );
-    append_trace_step(
-        Some(tmp.path()),
-        "agent-42",
-        "llm",
-        "answer (24 chars)",
-        Some(1200),
-        Some(0.012),
-    );
-    let path = run_dir(tmp.path(), "agent-42").join("trace.jsonl");
-    let body = std::fs::read_to_string(&path).expect("trace.jsonl");
-    let lines: Vec<&str> = body.lines().collect();
-    assert_eq!(lines.len(), 2);
-    let first: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-    assert_eq!(first["n"], 1);
-    assert_eq!(first["kind"], "plan");
-    assert_eq!(first["label"], "ask demo question");
-    assert_eq!(first["latency_ms"], 400);
-    let second: serde_json::Value = serde_json::from_str(lines[1]).unwrap();
-    assert_eq!(second["n"], 2);
-    assert_eq!(second["kind"], "llm");
-    assert_eq!(second["cost_usd"], 0.012);
-}
-
-#[test]
-fn append_trace_step_no_op_when_target_is_none() {
-    // Sanity: passing None must not pollute the cwd.  The function
-    // returns silently.
-    append_trace_step(None, "agent-x", "plan", "no target", None, None);
-}
-
-#[test]
 fn write_run_summary_writes_canonical_run_metadata_under_target() {
     let tmp = tempfile::tempdir().unwrap();
     write_run_summary(Some(tmp.path()), "r-1", "complete", Some(11), "/tmp/demo");
@@ -17437,21 +17431,17 @@ fn reset_during_run_job_preserves_run_identity() {
 
 #[test]
 fn reset_finished_activity_preserves_completed_run() {
-    use kuzushi_core::RunTraceStep;
-
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Activity);
     let mut session = ActivitySession::new("run-finished");
-    session.apply_step(
-        RunTraceStep::new(1, "tool", "triage start")
-            .with_module_id("triage")
-            .with_verb("run"),
+    seed_activity_task(
+        &mut session,
+        "triage:run",
+        DagTaskState::Done,
+        "Triage completed",
     );
-    session.apply_step(
-        RunTraceStep::new(2, "done", "triage complete")
-            .with_module_id("triage")
-            .with_verb("run"),
-    );
+    apply_activity_notice(&mut session, "Triage started");
+    apply_activity_notice(&mut session, "Triage completed");
     app.set_activity(Some(session));
     let route = app.router.activity_mut();
     route.focus_task = Some("triage:run".to_string());
@@ -17474,7 +17464,7 @@ fn reset_finished_activity_preserves_completed_run() {
         .expect("completed task row preserved");
     assert_eq!(session.run_id, "run-finished");
     assert_eq!(row.state, DagTaskState::Done);
-    assert_eq!(session.events.len(), 2);
+    assert_eq!(session.event_count(), 2);
     let route = app.router.activity();
     assert_eq!(route.focus_task, None);
     assert_eq!(route.feed_scroll, 0);
@@ -17683,22 +17673,16 @@ fn activity_enter_targets_the_visible_task_cursor() {
 
 #[test]
 fn activity_live_output_omits_redundant_task_page() {
-    use kuzushi_core::RunTraceStep;
-
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Activity);
     let session = app.activity_mut().unwrap();
-    session.apply_step(
-        RunTraceStep::new(1, "tool", "triage start")
-            .with_module_id("triage")
-            .with_verb("run"),
+    seed_activity_task(
+        session,
+        "triage:run",
+        DagTaskState::Active,
+        "Collecting evidence",
     );
-    session.apply_step(
-        RunTraceStep::new(2, "reasoning", "evidence collect")
-            .with_module_id("triage")
-            .with_verb("run")
-            .with_parent_step(1),
-    );
+    apply_activity_notice(session, "Collecting evidence");
     app.router.activity_mut().focus_task = Some("triage:run".to_string());
 
     let output = render_plain_app(&app, 120);
@@ -17706,37 +17690,38 @@ fn activity_live_output_omits_redundant_task_page() {
     assert!(!output.contains("[task]"), "{output}");
     assert!(!output.contains("── TASK ─"), "{output}");
     assert!(output.contains("triage:run"));
-    assert!(output.contains("evidence collect"));
+    assert!(output.contains("Collecting evidence"));
 }
 
 #[test]
 fn activity_view_renders_dag_rows_and_feed_events() {
-    use kuzushi_core::RunTraceStep;
-
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Activity);
     let session = app.activity_mut().unwrap();
-    session.apply_step(
-        RunTraceStep::new(1, "tool", "started")
-            .with_module_id("semgrep")
-            .with_verb("scan"),
+    seed_activity_task(
+        session,
+        "semgrep:scan",
+        DagTaskState::Done,
+        "Semgrep completed",
     );
-    session.apply_step(
-        RunTraceStep::new(2, "reasoning", "verdict=likely-tp")
-            .with_module_id("triage")
-            .with_verb("run"),
+    seed_activity_task(
+        session,
+        "triage:run",
+        DagTaskState::Active,
+        "Comparing candidates",
     );
-    session.apply_step(
-        RunTraceStep::new(3, "tool", "task-selector ran")
-            .with_module_id("pipeline")
-            .with_verb("task-selector"),
-    );
+    session.subsystem_aggregate.total_count = 1;
+    session.subsystem_aggregate.active_count = 1;
+    session.subsystem_aggregate.state = DagTaskState::Active;
+    session.subsystem_aggregate.last_label = "Selecting tasks".to_string();
+    apply_activity_notice(session, "Semgrep completed");
+    apply_activity_notice(session, "Comparing candidate findings");
 
     // Use the lower-level renderer directly since we already have an open
     // Activity view + populated session.
     let output = crate::renderer::render_plain_app(&app, 100);
-    assert!(output.contains("semgrep:scan"));
-    assert!(output.contains("triage:run"));
+    assert!(output.contains("Semgrep"), "{output}");
+    assert!(output.contains("Triage"), "{output}");
     assert!(
         output.contains("subsystems"),
         "hidden pipeline:* events should collapse into the subsystems aggregate, output was: {output}"
@@ -19153,60 +19138,18 @@ fn job_scan_completion_returns_record_scan_effect_without_inline_artifacts() {
         result.effects.as_slice(),
         [ShellEffect::RecordScanRun(_)]
     ));
-    let events_path = kuzushi_core::run_dir(workspace.root(), "scan-job").join("events.jsonl");
-    let events_before = std::fs::read_to_string(&events_path).unwrap();
+    let items_path = kuzushi_core::run_dir(workspace.root(), "scan-job").join("items.jsonl");
+    let items_before = std::fs::read_to_string(&items_path).unwrap_or_default();
     assert!(!app.log_lines().iter().any(|line| line.prefix == "result"));
     EffectRuntime::execute(&mut app, result.effects);
-    assert!(events_path.exists());
-    let events_after = wait_for_file_text(&events_path, r#""status":"completed""#);
-    assert_ne!(events_after, events_before);
+    assert!(items_path.exists());
+    let items_after = wait_for_file_text(&items_path, r#""status":"completed""#);
+    assert_ne!(items_after, items_before);
+    assert!(items_after.contains(r#""type":"terminal_outcome""#));
     assert!(app
         .log_lines()
         .iter()
         .any(|line| line.prefix == "result" && line.body.contains("pass")));
-}
-
-#[test]
-fn job_scan_stage_returns_trace_effect_without_inline_artifact_write() {
-    let dir = tempfile::tempdir().expect("temp target");
-    let workspace = WorkspaceTarget::new(dir.path()).expect("workspace");
-    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.set_scan_panel(Some(ScanPanelState {
-        run_id: Some("scan-stage".to_string()),
-        target: workspace.root().to_path_buf(),
-        stage: "queued".to_string(),
-        findings_count: 0,
-        running: true,
-        abort_requested: false,
-        error: None,
-    }));
-    app.set_activity(Some(ActivitySession::new("scan-stage")));
-
-    let result = update(
-        &mut app,
-        Msg::Job(ShellEvent::Scan(ScanEvent::Stage(
-            "running semgrep".to_string(),
-        ))),
-    );
-
-    assert!(result.changed);
-    assert_eq!(
-        app.scan().map(|scan| scan.stage.as_str()),
-        Some("running semgrep")
-    );
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.prefix == "scan" && line.body == "running semgrep"));
-    assert!(matches!(
-        result.effects.as_slice(),
-        [ShellEffect::RecordScanStageTrace(_)]
-    ));
-    let trace_path = kuzushi_core::run_dir(workspace.root(), "scan-stage").join("trace.jsonl");
-    assert!(!trace_path.exists());
-    EffectRuntime::execute(&mut app, result.effects);
-    let trace = fs::read_to_string(trace_path).expect("trace.jsonl");
-    assert!(trace.contains("running semgrep"), "{trace}");
 }
 
 #[test]
@@ -20332,10 +20275,11 @@ fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let _run_ticket = app.jobs_mut().start(JobKind::Run, "triage:run");
     let mut session = ActivitySession::new("r-1");
-    session.apply_step(
-        RunTraceStep::new(1, "tool", "triage start")
-            .with_module_id("triage")
-            .with_verb("run"),
+    seed_activity_task(
+        &mut session,
+        "triage:run",
+        DagTaskState::Active,
+        "Triage started",
     );
     app.set_activity(Some(session));
 

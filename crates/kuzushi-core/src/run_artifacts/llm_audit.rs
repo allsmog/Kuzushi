@@ -1,94 +1,73 @@
-use super::{read_run_artifact_text, RunArtifactRead, RunLlmCallAudit, RunTraceStep};
-use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
-use serde_json::Value;
+use super::RunLlmCallAudit;
+use crate::run_lifecycle::{read_run_items, ProjectionHealth, RunCallId, RunItemV1};
+use std::collections::BTreeMap;
 use std::path::Path;
 
-pub(crate) struct RunTraceAudit {
+pub(crate) struct RunLifecycleAudit {
     pub(crate) llm_calls: Vec<RunLlmCallAudit>,
     pub(crate) malformed_lines: usize,
 }
 
-pub(crate) fn load_run_trace_audit(target: &Path, run_id: &str) -> RunTraceAudit {
-    match read_run_artifact_text(target, run_id, run_trace_audit_spec().leaf) {
-        RunArtifactRead::Ready { value, .. } => trace_audit_from_jsonl(&value),
-        RunArtifactRead::Missing { .. } => empty_trace_audit(),
-        RunArtifactRead::NonFile { .. }
-        | RunArtifactRead::Unsafe { .. }
-        | RunArtifactRead::Unreadable { .. } => invalid_trace_audit(),
-    }
+pub(crate) fn load_run_lifecycle_audit(target: &Path, run_id: &str) -> RunLifecycleAudit {
+    let Ok(Some(read)) = read_run_items(target, run_id) else {
+        return empty_audit();
+    };
+    let malformed_lines = usize::from(matches!(read.health, ProjectionHealth::Degraded { .. }));
+    let fingerprints = model_fingerprints(&read.items);
+    let llm_calls = read
+        .items
+        .into_iter()
+        .filter_map(|envelope| audit_call(envelope, &fingerprints))
+        .collect();
+    RunLifecycleAudit { llm_calls, malformed_lines }
 }
 
-fn run_trace_audit_spec() -> &'static CanonicalRunArtifactSpec {
-    canonical_run_artifact_spec("trace.jsonl")
-        .expect("runtime trace audit artifact must be in shared spec")
+fn empty_audit() -> RunLifecycleAudit {
+    RunLifecycleAudit { llm_calls: Vec::new(), malformed_lines: 0 }
 }
 
-fn empty_trace_audit() -> RunTraceAudit {
-    RunTraceAudit {
-        llm_calls: Vec::new(),
-        malformed_lines: 0,
-    }
-}
-
-fn invalid_trace_audit() -> RunTraceAudit {
-    RunTraceAudit {
-        llm_calls: Vec::new(),
-        malformed_lines: 1,
-    }
-}
-
-fn trace_audit_from_jsonl(body: &str) -> RunTraceAudit {
-    let mut llm_calls = Vec::new();
-    let mut malformed_lines = 0usize;
-    for line in body.lines().filter(|line| !line.trim().is_empty()) {
-        match trace_step_from_line(line) {
-            Ok(step) => {
-                if let Some(call) = audit_call_from_trace_step(step) {
-                    llm_calls.push(call);
-                }
+fn model_fingerprints(
+    items: &[crate::run_lifecycle::RunItemEnvelopeV1],
+) -> BTreeMap<RunCallId, String> {
+    items
+        .iter()
+        .filter_map(|envelope| match (&envelope.call_id, &envelope.item) {
+            (Some(call_id), RunItemV1::ModelCallStarted { operation_fingerprint, .. }) => {
+                Some((*call_id, operation_fingerprint.as_str().to_string()))
             }
-            Err(_) => malformed_lines += 1,
-        }
-    }
-    RunTraceAudit {
-        llm_calls,
-        malformed_lines,
-    }
+            _ => None,
+        })
+        .collect()
 }
 
-fn trace_step_from_line(line: &str) -> anyhow::Result<RunTraceStep> {
-    let value = serde_json::from_str::<Value>(line)?;
-    let step = serde_json::from_value(value)?;
-    super::write_run_artifact_json::validate_trace_step_cost(&step)?;
-    Ok(step)
-}
-
-fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {
-    if !is_llm_audit_step(&step) {
+fn audit_call(
+    envelope: crate::run_lifecycle::RunItemEnvelopeV1,
+    fingerprints: &BTreeMap<RunCallId, String>,
+) -> Option<RunLlmCallAudit> {
+    let RunItemV1::ModelCallFinished {
+        provider,
+        model,
+        status,
+        latency_ms,
+        cost,
+        ..
+    } = envelope.item else {
         return None;
-    }
+    };
     Some(RunLlmCallAudit {
-        n: step.n,
-        kind: step.kind,
-        verb: step.verb,
-        model: step.model?,
-        provider: step.provider?,
-        prompt_hash: step.prompt_hash?,
-        latency_ms: step.latency_ms,
-        cost_usd: step.cost_usd,
-        observed_cost_usd: step.observed_cost_usd,
-        provider_spend_unresolved: step.provider_spend_unresolved,
-        call_attempted: step.call_attempted,
+        n: envelope.seq as usize,
+        kind: status.label().to_string(),
+        verb: None,
+        model: model.to_string(),
+        provider: provider.to_string(),
+        prompt_hash: envelope
+            .call_id
+            .and_then(|call_id| fingerprints.get(&call_id).cloned())
+            .unwrap_or_else(|| "unavailable".to_string()),
+        latency_ms: Some(latency_ms),
+        cost_usd: cost.exact_usd(),
+        observed_cost_usd: (!cost.is_complete()).then(|| cost.observed_usd()),
+        provider_spend_unresolved: !cost.is_complete(),
+        call_attempted: Some(true),
     })
-}
-
-fn is_llm_audit_step(step: &RunTraceStep) -> bool {
-    if step.call_attempted == Some(false) {
-        return false;
-    }
-    step.kind == "reasoning"
-        || step.latency_ms.is_some()
-        || step.cost_usd.is_some()
-        || step.observed_cost_usd.is_some()
-        || step.call_attempted == Some(true)
 }

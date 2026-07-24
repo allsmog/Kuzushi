@@ -49,9 +49,6 @@ impl WorkbenchCache {
             ViewHydrationKey::RunArtifactText { run_id, leaf } => self
                 .cached_run_artifact_text(target, run_id, leaf)
                 .is_not_requested(),
-            ViewHydrationKey::RunTrace { run_id } => {
-                self.cached_run_trace(target, run_id).is_not_requested()
-            }
             ViewHydrationKey::RunProjection { run_id } => self
                 .cached_run_projection(target, run_id)
                 .is_not_requested(),
@@ -162,9 +159,6 @@ impl WorkbenchCache {
                 ViewHydrationKey::RunArtifactText { run_id, leaf },
                 ViewHydrationValue::RunArtifactText(state),
             ) => self.store_run_artifact_text(target, run_id, leaf, state),
-            (ViewHydrationKey::RunTrace { run_id }, ViewHydrationValue::RunTrace(read)) => {
-                self.store_run_trace(target, run_id, read)
-            }
             (
                 ViewHydrationKey::RunProjection { run_id },
                 ViewHydrationValue::RunProjection(state),
@@ -206,26 +200,6 @@ impl WorkbenchCache {
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
         self.trim_large_run_caches(&LargeRunCacheKey::Artifact(key));
-    }
-
-    fn store_run_trace(
-        &mut self,
-        target: PathBuf,
-        run_id: String,
-        read: Option<kuzushi_core::RunTraceRead>,
-    ) {
-        let state = read
-            .map(RunTraceCacheState::Ready)
-            .unwrap_or(RunTraceCacheState::Invalid);
-        let key = (target, run_id);
-        let bytes = run_trace_bytes(&state);
-        insert_bounded(
-            &mut self.run_traces,
-            key.clone(),
-            RunTraceCache { state, bytes },
-            MAX_RUN_CACHE_ENTRIES,
-        );
-        self.trim_large_run_caches(&LargeRunCacheKey::Trace(key));
     }
 
     pub(super) fn store_run_projection(
@@ -465,7 +439,6 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         ViewHydrationKey::LatestRunPointer
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
-        | ViewHydrationKey::RunTrace { .. }
         | ViewHydrationKey::RunProjection { .. }
         | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
         ViewHydrationKey::GitMetadata

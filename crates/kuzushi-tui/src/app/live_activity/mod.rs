@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LiveActivityPhase {
-    Thinking,
+    CallingModel,
     Reading,
     Searching,
     RunningTool,
@@ -48,7 +48,7 @@ impl LiveActivity {
 impl LiveActivityPhase {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Thinking => "thinking",
+            Self::CallingModel => "calling model",
             Self::Reading => "reading",
             Self::Searching => "searching",
             Self::RunningTool => "running tool",
@@ -201,7 +201,7 @@ pub(crate) fn live_activity_for_prereq_step(step: &PrereqStep, final_tool: &str)
 
 fn live_activity_phase_for_tool(tool_name: &str) -> LiveActivityPhase {
     if model_backed_tool(tool_name) {
-        return LiveActivityPhase::Thinking;
+        return LiveActivityPhase::CallingModel;
     }
     if reading_tool(tool_name) {
         return LiveActivityPhase::Reading;

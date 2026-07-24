@@ -30,10 +30,6 @@ const AUDITED_PANIC_SITES: &[(&str, &str)] = &[
         "report/artifact_summary/jsonl.rs",
         "run events artifact must be in shared canonical spec",
     ),
-    (
-        "report/artifact_summary/jsonl.rs",
-        "runtime trace artifact must be in shared canonical spec",
-    ),
     // Internal routing invariant: core manifests are dispatched to the
     // extended analyzer before this match arm can be reached.
     (

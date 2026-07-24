@@ -44,9 +44,10 @@ pub fn ensure_workspace_output_dir(
 /// component. Does not create directories; callers own parent creation so a
 /// failed operation leaves no partial artifacts.
 pub fn resolve_contained_output_path(root: impl AsRef<Path>, output: &Path) -> Result<PathBuf> {
-    let root = canonical_workspace_root(root.as_ref())?;
-    let relative = contained_relative_output(&root, output)?;
-    validated_workspace_descendant(&root, &relative)
+    let supplied_root = root.as_ref();
+    let canonical_root = canonical_workspace_root(supplied_root)?;
+    let relative = contained_relative_output(supplied_root, &canonical_root, output)?;
+    validated_workspace_descendant(&canonical_root, &relative)
 }
 
 /// Resolve a report/export destination with a state-directory default.
@@ -71,20 +72,44 @@ pub fn resolve_report_output_path(
     }
 }
 
-fn contained_relative_output(root: &Path, output: &Path) -> Result<PathBuf> {
+fn contained_relative_output(
+    supplied_root: &Path,
+    canonical_root: &Path,
+    output: &Path,
+) -> Result<PathBuf> {
     if !output.is_absolute() {
         return Ok(output.to_path_buf());
     }
-    output
-        .strip_prefix(root)
+    let canonical_output = canonicalize_with_missing_tail(output)?;
+    canonical_output
+        .strip_prefix(canonical_root)
+        .or_else(|_| output.strip_prefix(supplied_root))
         .map(Path::to_path_buf)
         .map_err(|_| {
             anyhow::anyhow!(
                 "output path {} is outside the workspace root {}",
                 output.display(),
-                root.display()
+                canonical_root.display()
             )
         })
+}
+
+fn canonicalize_with_missing_tail(path: &Path) -> Result<PathBuf> {
+    let mut existing = path;
+    let mut missing = Vec::new();
+    while !existing.exists() {
+        let name = existing
+            .file_name()
+            .context("absolute output path has no existing ancestor")?;
+        missing.push(name.to_os_string());
+        existing = existing
+            .parent()
+            .context("absolute output path has no existing ancestor")?;
+    }
+    let mut canonical = fs::canonicalize(existing)
+        .with_context(|| format!("Could not resolve output ancestor {}", existing.display()))?;
+    canonical.extend(missing.into_iter().rev());
+    Ok(canonical)
 }
 
 pub fn prepare_workspace_output_path(

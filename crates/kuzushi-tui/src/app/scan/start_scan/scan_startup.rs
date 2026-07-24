@@ -78,18 +78,16 @@ impl ShellApp {
         let Some(ticket) = self.try_start_exclusive_job(JobKind::Run, "scan") else {
             return;
         };
-        let trace_budget = self.jobs().trace_budget();
         let attempt_id = kuzushi_core::run_lifecycle::RunAttemptId::new();
         let task_id = kuzushi_core::run_lifecycle::RunTaskId::new();
-        let trace_handle =
-            match prepare_scan_launch(&request, &ticket, trace_budget, Some(attempt_id), task_id) {
-                Ok(trace) => trace,
-                Err(error) => {
-                    ticket.fail(format!("could not start scan: {error:#}"));
-                    ticket.complete();
-                    return;
-                }
-            };
+        let trace_handle = match prepare_scan_launch(&request, &ticket, Some(attempt_id), task_id) {
+            Ok(trace) => trace,
+            Err(error) => {
+                ticket.fail(format!("could not start scan: {error:#}"));
+                ticket.complete();
+                return;
+            }
+        };
         let cancel = ticket.cancel.clone();
 
         self.begin_run_cost_tracking(&request.run_id, runtime_backed);
@@ -331,7 +329,6 @@ fn initialized_scan_workspace(target: &PathBuf) -> Result<WorkspaceTarget> {
 fn prepare_scan_launch(
     request: &ScanStartRequest,
     ticket: &JobTicket,
-    trace_budget: LiveTraceBudget,
     attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
     task_id: kuzushi_core::run_lifecycle::RunTaskId,
 ) -> Result<TraceHandle> {
@@ -340,7 +337,6 @@ fn prepare_scan_launch(
         &request.target_root,
         &request.run_id,
         ticket.sink(),
-        trace_budget,
         attempt_id,
         task_id,
     );
@@ -348,7 +344,7 @@ fn prepare_scan_launch(
 }
 
 fn fail_persisted_scan_launch(request: &ScanStartRequest, error: anyhow::Error) -> anyhow::Error {
-    let message = format!("typed scan trace could not start: {error:#}");
+    let message = format!("typed scan lifecycle could not start: {error:#}");
     let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
         &request.target_root,
         &request.run_id,
@@ -357,9 +353,31 @@ fn fail_persisted_scan_launch(request: &ScanStartRequest, error: anyhow::Error) 
     );
     match kuzushi_core::run_artifacts::try_record_tool_run_failed(record, &message) {
         Ok(()) => anyhow::anyhow!(message),
-        Err(finalization) => anyhow::anyhow!(
-            "{message}; additionally, scan start failure finalization reported: {finalization:#}"
-        ),
+        Err(finalization) => {
+            let fallback = persist_unobservable_scan_failure(request, &message);
+            anyhow::anyhow!(
+                "{message}; typed finalization reported: {finalization:#}; metadata fallback: {fallback}"
+            )
+        }
+    }
+}
+
+fn persist_unobservable_scan_failure(request: &ScanStartRequest, message: &str) -> String {
+    let metadata = kuzushi_core::run_artifacts::run_artifact_path(
+        &request.target_root,
+        &request.run_id,
+        "run.json",
+    );
+    let result = std::fs::read_to_string(metadata)
+        .map_err(anyhow::Error::from)
+        .and_then(|value| {
+            serde_json::from_str::<kuzushi_core::RunSummary>(&value).map_err(Into::into)
+        })
+        .map(|summary| summary.failed(message))
+        .and_then(|summary| kuzushi_core::write_run_summary(&request.target_root, &summary));
+    match result {
+        Ok(_) => "recorded failed run without lifecycle fidelity".to_string(),
+        Err(error) => format!("failed ({error:#})"),
     }
 }
 
@@ -458,7 +476,6 @@ mod tests {
         let launched = prepare_scan_launch(
             &request,
             &ticket,
-            LiveTraceBudget::new(),
             Some(kuzushi_core::run_lifecycle::RunAttemptId::new()),
             kuzushi_core::run_lifecycle::RunTaskId::new(),
         );
@@ -475,9 +492,9 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let run_id = "scan-trace-start-failed";
         let request = test_scan_start_request(target.path(), run_id);
-        let items_path =
-            kuzushi_core::run_artifacts::run_artifact_path(target.path(), run_id, "items.jsonl");
-        std::fs::create_dir_all(items_path).unwrap();
+        let items_lock =
+            kuzushi_core::run_artifacts::run_artifact_path(target.path(), run_id, "items.lock");
+        std::fs::create_dir_all(items_lock).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         app.start_prepared_scan(request);
@@ -487,7 +504,7 @@ mod tests {
         assert!(summary
             .error
             .as_deref()
-            .is_some_and(|error| error.contains("typed scan trace could not start")));
+            .is_some_and(|error| error.contains("typed scan lifecycle could not start")));
         assert!(app.scan().is_none());
         assert!(app.activity().is_none());
     }

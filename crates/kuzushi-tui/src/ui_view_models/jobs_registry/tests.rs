@@ -3,8 +3,7 @@ use crate::app::{JobKind, QueuedCommand, ViewHydrationKey};
 use crate::ui_view_models::activity_header::activity_header_model;
 use crate::{ActivityRouteState, ActivitySession};
 use kuzushi_core::{
-    write_run_summary, RunSummary, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue,
-    RunTraceStep, V2Config,
+    write_run_summary, RunSummary, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue, V2Config,
 };
 use tempfile::TempDir;
 
@@ -154,11 +153,8 @@ fn jobs_and_run_focus_agree_while_live_run_is_canceling() {
     let (_temp, mut app) = app_with_target();
     let _ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
     let mut session = ActivitySession::new("tool-500-canceling");
-    session.apply_step(
-        RunTraceStep::new(1, "tool", "semgrep start")
-            .with_module_id("semgrep")
-            .with_verb("scan"),
-    );
+    session.seed_task_sequence(vec!["semgrep:scan".to_string()]);
+    session.tasks.get_mut("semgrep:scan").unwrap().state = crate::DagTaskState::Active;
     session.mark_active_tasks_canceling();
 
     let run_focus = activity_header_model(&session, &ActivityRouteState::default(), None, None);

@@ -36,7 +36,6 @@ fn derivative_delivery_label(delivery: &RunDerivativeDeliveryHealth) -> String {
 fn integrity_label(integrity: &ProjectionHealth) -> String {
     match integrity {
         ProjectionHealth::Healthy => "Stream: healthy".to_string(),
-        ProjectionHealth::LegacyLossy => "Stream: legacy and lossy".to_string(),
         ProjectionHealth::Degraded {
             valid_through_seq,
             reason,

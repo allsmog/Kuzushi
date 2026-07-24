@@ -1,8 +1,9 @@
 use crate::modules::ToolCallIdentity;
 use crate::run_artifacts::load_run_summary;
 use crate::run_lifecycle::{
-    RunId, RunItemId, RunItemRecord, RunItemSource, RunItemStatus, RunItemV1, RunObservationHandle,
-    SafeText, WorkflowContinuation,
+    CallKind, ModelUsage, RunCallId, RunId, RunItemId, RunItemRecord, RunItemSource,
+    RunItemStatus, RunItemV1, RunObservationHandle, RunProjection, SafeText,
+    WorkflowContinuation,
 };
 use anyhow::Result;
 use serde_json::Value;
@@ -12,6 +13,167 @@ use std::path::Path;
 mod artifacts;
 use artifacts::emit_artifact_references;
 pub use artifacts::{verified_result_artifact_reference, verified_run_artifact_reference};
+
+pub(crate) fn emit_recovered_interruption(
+    target: &Path,
+    run_id: &str,
+    reason: &str,
+    cost: crate::runtime::RuntimeCostReport,
+) -> Result<()> {
+    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    if projection.terminal.is_some() {
+        return Ok(());
+    }
+    let observation = RunObservationHandle::jsonl(target.to_path_buf(), run_id.to_string())?;
+    interrupt_open_calls(&observation, &projection)?;
+    interrupt_open_tasks(&observation, &projection, reason)?;
+    interrupt_open_plan(&observation, &projection)?;
+    observation.emit_and_flush(RunItemRecord::new(
+        RunItemId::new(),
+        RunItemSource::Persistence,
+        RunItemV1::TerminalOutcome {
+            status: RunItemStatus::Interrupted,
+            summary: SafeText::operator_visible(reason),
+            cost,
+            continuation: WorkflowContinuation::InspectRun {
+                run_id: RunId::parse(run_id)?,
+                reason: SafeText::operator_visible("inspect the interrupted run evidence"),
+            },
+        },
+    ))?;
+    observation.flush()
+}
+
+fn interrupt_open_calls(
+    observation: &RunObservationHandle,
+    projection: &RunProjection,
+) -> Result<()> {
+    for call_id in &projection.call_order {
+        let call = &projection.calls[call_id];
+        if call.status.is_terminal() {
+            continue;
+        }
+        observation.emit_and_flush(interrupted_call_record(*call_id, call)?)?;
+    }
+    Ok(())
+}
+
+fn interrupted_call_record(
+    call_id: RunCallId,
+    call: &crate::run_lifecycle::CallProjection,
+) -> Result<RunItemRecord> {
+    let item = match (call.kind, call.status) {
+        (CallKind::Tool, RunItemStatus::Pending) => RunItemV1::ToolCallRejected {
+            reason_class: SafeText::operator_visible("process_interrupted"),
+            detail: SafeText::operator_visible("execution stopped before the tool started"),
+        },
+        (CallKind::Tool, _) => interrupted_tool_finish(),
+        (CallKind::Model, _) => interrupted_model_finish(call),
+    };
+    Ok(scope_call_record(
+        RunItemRecord::new(call.item_id, RunItemSource::Persistence, item),
+        call_id,
+        call,
+    ))
+}
+
+fn interrupted_tool_finish() -> RunItemV1 {
+    RunItemV1::ToolCallFinished {
+        status: RunItemStatus::Interrupted,
+        cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
+        result_artifact: None,
+        preview: vec![SafeText::operator_visible("tool execution was interrupted")],
+        warning_count: 0,
+        error_count: 1,
+    }
+}
+
+fn interrupted_model_finish(call: &crate::run_lifecycle::CallProjection) -> RunItemV1 {
+    RunItemV1::ModelCallFinished {
+        provider: call
+            .provider
+            .clone()
+            .unwrap_or_else(|| SafeText::operator_visible("unknown")),
+        model: call.model.clone().unwrap_or_else(|| call.label.clone()),
+        status: RunItemStatus::Interrupted,
+        latency_ms: elapsed_call_ms(call),
+        usage: ModelUsage {
+            input_tokens: None,
+            output_tokens: None,
+        },
+        cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
+        error_class: Some(SafeText::operator_visible("process_interrupted")),
+    }
+}
+
+fn elapsed_call_ms(call: &crate::run_lifecycle::CallProjection) -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    now.saturating_sub(call.started_at_ms.unwrap_or(now))
+}
+
+fn scope_call_record(
+    mut record: RunItemRecord,
+    call_id: RunCallId,
+    call: &crate::run_lifecycle::CallProjection,
+) -> RunItemRecord {
+    record = record.with_call(call_id);
+    if let Some(task_id) = call.task_id {
+        record = record.with_task(task_id);
+    }
+    if let Some(parent_item_id) = call.parent_item_id {
+        record = record.with_parent(parent_item_id);
+    }
+    record
+}
+
+fn interrupt_open_tasks(
+    observation: &RunObservationHandle,
+    projection: &RunProjection,
+    reason: &str,
+) -> Result<()> {
+    for task_id in &projection.task_order {
+        let task = &projection.tasks[task_id];
+        if task.status.is_terminal() {
+            continue;
+        }
+        observation.emit_and_flush(
+            RunItemRecord::new(
+                task.item_id,
+                RunItemSource::Persistence,
+                RunItemV1::TaskUpdated {
+                    title: task.title.clone(),
+                    status: RunItemStatus::Interrupted,
+                    detail: Some(SafeText::operator_visible(reason)),
+                },
+            )
+            .with_task(*task_id),
+        )?;
+    }
+    Ok(())
+}
+
+fn interrupt_open_plan(
+    observation: &RunObservationHandle,
+    projection: &RunProjection,
+) -> Result<()> {
+    let Some(plan) = projection.plan.as_ref().filter(|plan| !plan.status.is_terminal()) else {
+        return Ok(());
+    };
+    observation.emit_and_flush(RunItemRecord::new(
+        plan.item_id,
+        RunItemSource::Persistence,
+        RunItemV1::PlanUpdated {
+            revision: plan.revision.saturating_add(1),
+            title: plan.title.clone(),
+            status: RunItemStatus::Interrupted,
+            task_ids: plan.task_ids.clone(),
+        },
+    ))?;
+    Ok(())
+}
 
 pub fn emit_persisted_terminal_outcome(
     observation: &RunObservationHandle,
@@ -37,21 +199,17 @@ pub fn emit_persisted_terminal_outcome_for_call(
         return Ok(());
     }
     let summary = load_run_summary(target, run_id)?;
+    let status = terminal_status_for_call(target, run_id, &summary.status, producing_call)?;
     let terminal_item_id = RunItemId::new();
     if let Some(identity) = producing_call {
         emit_artifact_references(observation, target, run_id, &summary.artifacts, identity)?;
     }
-    terminalize_semantic_task(observation, target, run_id, &summary.status, producing_call)?;
-    terminalize_semantic_plan(
-        observation,
-        target,
-        run_id,
-        lifecycle_status(&summary.status)?,
-    )?;
+    terminalize_semantic_task(observation, target, run_id, status, producing_call)?;
+    terminalize_semantic_plan(observation, target, run_id, status)?;
     observation.emit_and_flush(RunItemRecord::new(
         terminal_item_id,
         RunItemSource::Workflow,
-        terminal_item(target, run_id, output)?,
+        terminal_item(&summary, run_id, output, status)?,
     ))?;
     record_coverage_baseline(target, &summary);
     Ok(())
@@ -87,7 +245,7 @@ pub fn emit_result_persistence_failure(
     let task_detail = persistence_failure_task_detail(execution_may_have_occurred);
     if observation
         .task_handle()
-        .is_some_and(|task| task.task_id() == identity.task_id)
+        .is_some_and(|task| Some(task.task_id()) == identity.task_id)
     {
         observation
             .task_handle()
@@ -183,10 +341,13 @@ fn terminalize_task_by_identity(
     identity: ToolCallIdentity,
     status: RunItemStatus,
 ) -> Result<()> {
+    let Some(task_id) = identity.task_id else {
+        return Ok(());
+    };
     let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
     let task = projection
         .tasks
-        .get(&identity.task_id)
+        .get(&task_id)
         .ok_or_else(|| anyhow::anyhow!("producing call references an unknown semantic task"))?;
     if task.status.is_terminal() {
         return Ok(());
@@ -203,7 +364,7 @@ fn terminalize_task_by_identity(
                 )),
             },
         )
-        .with_task(identity.task_id),
+        .with_task(task_id),
     )?;
     Ok(())
 }
@@ -212,38 +373,41 @@ fn terminalize_semantic_task(
     observation: &RunObservationHandle,
     target: &Path,
     run_id: &str,
-    persisted_status: &str,
+    status: RunItemStatus,
     producing_call: Option<ToolCallIdentity>,
 ) -> Result<()> {
     let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
     if let Some(task) = observation.task_handle() {
-        return terminalize_scoped_task(&projection, &task, persisted_status);
+        return terminalize_scoped_task(&projection, &task, status);
     }
     let Some(identity) = producing_call else {
         return Ok(());
     };
+    let Some(task_id) = identity.task_id else {
+        return Ok(());
+    };
     let task = projection
         .tasks
-        .get(&identity.task_id)
+        .get(&task_id)
         .ok_or_else(|| anyhow::anyhow!("producing call references an unknown semantic task"))?;
     if task.status.is_terminal() {
         return Ok(());
     }
-    emit_task_terminal(observation, task, identity.task_id, persisted_status)?;
+    emit_task_terminal(observation, task, task_id, status)?;
     Ok(())
 }
 
 fn terminalize_scoped_task(
     projection: &crate::run_lifecycle::RunProjection,
     task: &crate::run_lifecycle::RunTaskHandle,
-    persisted_status: &str,
+    status: RunItemStatus,
 ) -> Result<()> {
     let already_terminal = projection
         .tasks
         .get(&task.task_id())
         .is_some_and(|projected| projected.status.is_terminal());
     if !already_terminal {
-        task.update_and_flush(lifecycle_status(persisted_status)?, None)?;
+        task.update_and_flush(status, None)?;
     }
     Ok(())
 }
@@ -252,7 +416,7 @@ fn emit_task_terminal(
     observation: &RunObservationHandle,
     task: &crate::run_lifecycle::TaskProjection,
     task_id: crate::run_lifecycle::RunTaskId,
-    persisted_status: &str,
+    status: RunItemStatus,
 ) -> Result<()> {
     observation.emit_and_flush(
         RunItemRecord::new(
@@ -260,7 +424,7 @@ fn emit_task_terminal(
             RunItemSource::Workflow,
             RunItemV1::TaskUpdated {
                 title: task.title.clone(),
-                status: lifecycle_status(persisted_status)?,
+                status,
                 detail: None,
             },
         )
@@ -269,9 +433,12 @@ fn emit_task_terminal(
     Ok(())
 }
 
-fn terminal_item(target: &Path, run_id: &str, output: &Value) -> Result<RunItemV1> {
-    let persisted = crate::run_artifacts::load_run_summary(target, run_id)?;
-    let status = lifecycle_status(&persisted.status)?;
+fn terminal_item(
+    persisted: &crate::run_artifacts::RunSummary,
+    run_id: &str,
+    output: &Value,
+    status: RunItemStatus,
+) -> Result<RunItemV1> {
     let cost = persisted.checked_cost_report()?;
     let summary = output
         .get("summary")
@@ -286,7 +453,10 @@ fn terminal_item(target: &Path, run_id: &str, output: &Value) -> Result<RunItemV
 }
 
 fn terminal_continuation(run_id: &str, status: RunItemStatus) -> Result<WorkflowContinuation> {
-    if matches!(status, RunItemStatus::Partial | RunItemStatus::Failed) {
+    if matches!(
+        status,
+        RunItemStatus::Partial | RunItemStatus::Blocked | RunItemStatus::Failed
+    ) {
         return Ok(WorkflowContinuation::InspectRun {
             run_id: RunId::parse(run_id)?,
             reason: SafeText::operator_visible("inspect the incomplete or failed run evidence"),
@@ -297,11 +467,30 @@ fn terminal_continuation(run_id: &str, status: RunItemStatus) -> Result<Workflow
     })
 }
 
+fn terminal_status_for_call(
+    target: &Path,
+    run_id: &str,
+    persisted_status: &str,
+    producing_call: Option<ToolCallIdentity>,
+) -> Result<RunItemStatus> {
+    let persisted = lifecycle_status(persisted_status)?;
+    let Some(identity) = producing_call else {
+        return Ok(persisted);
+    };
+    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    Ok(projection
+        .calls
+        .get(&identity.call_id)
+        .filter(|call| call.item_id == identity.item_id && call.status.is_terminal())
+        .map_or(persisted, |call| call.status))
+}
+
 fn lifecycle_status(status: &str) -> Result<RunItemStatus> {
     match status {
         "completed" => Ok(RunItemStatus::Completed),
         "partial" => Ok(RunItemStatus::Partial),
         "skipped" => Ok(RunItemStatus::Skipped),
+        "blocked" => Ok(RunItemStatus::Blocked),
         "failed" => Ok(RunItemStatus::Failed),
         "canceled" => Ok(RunItemStatus::Canceled),
         "interrupted" => Ok(RunItemStatus::Interrupted),

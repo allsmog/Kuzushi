@@ -70,10 +70,6 @@ const readContracts = [
   ["crates/kuzushi-core/src/run_artifacts/canonical_run_markers.rs", "read_marker_text"],
   ["crates/kuzushi-core/src/run_artifacts/run_events.rs", "next_event_number_from_path"],
   [
-    "crates/kuzushi-core/src/run_artifacts/write_run_artifact_json.rs",
-    "next_trace_step_number_from_path",
-  ],
-  [
     "crates/kuzushi-tui/src/app/workspace_context/context_snapshot_views.rs",
     "load_context_snapshot_view",
   ],

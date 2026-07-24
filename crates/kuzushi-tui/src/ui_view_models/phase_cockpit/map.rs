@@ -121,35 +121,14 @@ fn map_empty_hint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ActivitySession, RecordedTraceEvent};
-    use kuzushi_core::{RunTraceStep, V2Config};
+    use crate::ActivitySession;
+    use kuzushi_core::V2Config;
 
     #[test]
     fn retained_activity_never_changes_the_durable_map_projection() {
         let mut app = ShellApp::new(V2Config::default(), None);
         let baseline = map_phase_model(&app);
-        let mut activity = ActivitySession::new("unrelated-prove-run");
-        activity.events.push_back(RecordedTraceEvent {
-            step: RunTraceStep {
-                n: 9,
-                kind: "model".to_string(),
-                label: "unrelated proof output".to_string(),
-                latency_ms: None,
-                cost_usd: None,
-                observed_cost_usd: None,
-                provider_spend_unresolved: false,
-                call_attempted: None,
-                module_id: None,
-                verb: None,
-                parent_step: None,
-                severity: None,
-                started_at_ms: None,
-                model: None,
-                provider: None,
-                prompt_hash: None,
-            },
-            observed_at: std::time::Instant::now(),
-        });
+        let activity = ActivitySession::new("unrelated-prove-run");
         app.set_activity(Some(activity));
 
         assert_eq!(map_phase_model(&app), baseline);

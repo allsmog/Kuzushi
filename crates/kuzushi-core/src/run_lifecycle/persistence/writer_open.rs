@@ -10,16 +10,12 @@ pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterSta
     let directory = crate::run_artifacts::ensure_run_dir(target, run_id.as_str())?;
     record_stream_artifact(target, run_id.as_str())?;
     let lock = crate::file_lock::ExclusiveFileLock::acquire(&directory.join("items.lock"))?;
-    let path = crate::run_artifacts::checked_run_artifact_path(
-        target,
-        run_id.as_str(),
-        "items.jsonl",
-    )?;
+    let path =
+        crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
     let file = crate::bounded_file::open_append_regular_file_within(target, &path)
         .with_context(|| format!("open {}", path.display()))?;
     let recovery_file = file.try_clone().context("clone run-item stream handle")?;
-    let (next_seq, previous_hash, bytes_written) =
-        recover_tail(target, &path, recovery_file)?;
+    let (next_seq, previous_hash, bytes_written) = recover_tail(target, &path, recovery_file)?;
     let state = WriterState {
         run_id,
         file,
@@ -34,8 +30,8 @@ pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterSta
 }
 
 fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
-    let spec = crate::artifact_contract::optional_run_artifact_spec("items.jsonl")
-        .expect("run-item stream must be in the shared optional artifact contract");
+    let spec = crate::artifact_contract::canonical_run_artifact_spec("items.jsonl")
+        .expect("run-item stream must be in the shared artifact contract");
     let artifact =
         crate::run_artifacts::RunArtifact::from_declared(spec.label, spec.leaf, Some(spec.kind))
             .expect("run-item artifact spec is valid");
@@ -87,8 +83,8 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("items.jsonl");
         let displaced = temp.path().join("original.jsonl");
-        let mut writer = crate::bounded_file::open_append_regular_file_within(temp.path(), &path)
-            .unwrap();
+        let mut writer =
+            crate::bounded_file::open_append_regular_file_within(temp.path(), &path).unwrap();
         let recovery = writer.try_clone().unwrap();
         assert_eq!(
             recover_tail(temp.path(), &path, recovery).unwrap(),
@@ -115,12 +111,9 @@ mod tests {
         let outside = temp.path().join("outside");
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
-        let checked = crate::run_artifacts::checked_run_artifact_path(
-            temp.path(),
-            "run-1",
-            "items.jsonl",
-        )
-        .unwrap();
+        let checked =
+            crate::run_artifacts::checked_run_artifact_path(temp.path(), "run-1", "items.jsonl")
+                .unwrap();
 
         std::fs::rename(&run_dir, &displaced).unwrap();
         symlink(&outside, &run_dir).unwrap();

@@ -231,7 +231,6 @@ impl EffectRuntime {
             | ShellEffect::PersistPlanningOptionOverride(_)
             | ShellEffect::PersistOptions(_)
             | ShellEffect::RecordAgentRun(_)
-            | ShellEffect::RecordScanStageTrace(_)
             | ShellEffect::RecordToolRun(_)) => Self::execute_persistence_effect(app, effect),
             other => Self::execute_secondary_shell_effect(app, other),
         }
@@ -326,7 +325,6 @@ impl EffectRuntime {
         match effect {
             ShellEffect::PersistCommandHistory => app.persist_command_history(),
             ShellEffect::RecordAgentRun(record) => app.record_agent_run_effect(record),
-            ShellEffect::RecordScanStageTrace(record) => app.record_scan_stage_trace_effect(record),
             ShellEffect::RecordToolRun(record) => app.record_tool_run_effect(record),
             ShellEffect::PersistGlobalModelSelection(selection) => {
                 app.persist_global_model_selection_effect(selection)

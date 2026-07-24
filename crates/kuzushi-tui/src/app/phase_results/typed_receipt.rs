@@ -1,13 +1,13 @@
 use super::*;
-use kuzushi_core::run_lifecycle::{
-    PhaseReceiptProjection, RunItemStatus, RunProjectionSource, WorkflowContinuation,
-};
+use kuzushi_core::run_lifecycle::{PhaseReceiptProjection, RunItemStatus, WorkflowContinuation};
 
 #[derive(Debug, Clone)]
 pub(super) enum TypedReceiptResolution {
     Ready(PhaseReceiptProjection),
-    Invalid(String),
-    LegacyLossy,
+    Invalid {
+        reason: String,
+        fallback_outcome: PhaseAttemptOutcome,
+    },
 }
 
 impl TypedReceiptResolution {
@@ -18,45 +18,43 @@ impl TypedReceiptResolution {
             &completed.attempt_id,
         ) {
             Ok(Some(receipt)) => Self::Ready(receipt),
-            Err(error) => Self::Invalid(error.to_string()),
+            Err(error) => Self::invalid(completed, error.to_string()),
             Ok(None) => classify_missing_receipt(target, completed),
         }
     }
 
-    /// Return policy only when the workflow-v2 receipt path is authoritative.
-    ///
-    /// `Ready` has already passed hash-link, identity, and typed projection
-    /// validation in `load_phase_receipt_projection_v2`. `Invalid` is an
-    /// explicit integrity failure. Neither state may be reinterpreted from
-    /// mutable TUI caches; only `LegacyLossy` permits legacy reconstruction.
-    pub(super) fn authoritative_policy(&self) -> Option<PhaseResultPolicy> {
+    pub(super) fn authoritative_policy(&self) -> PhaseResultPolicy {
         match self {
-            Self::Ready(receipt) => Some(receipt_policy(receipt)),
-            Self::Invalid(reason) => Some(selection_blocked_result_policy(&format!(
+            Self::Ready(receipt) => receipt_policy(receipt),
+            Self::Invalid { reason, .. } => selection_blocked_result_policy(&format!(
                 "typed phase receipt is degraded: {reason}"
-            ))),
-            Self::LegacyLossy => None,
+            )),
         }
     }
 
-    pub(super) fn outcome_or(&self, fallback: PhaseAttemptOutcome) -> PhaseAttemptOutcome {
+    pub(super) fn outcome(&self) -> PhaseAttemptOutcome {
         match self {
             Self::Ready(receipt) => phase_outcome(receipt.status),
-            Self::Invalid(_) => PhaseAttemptOutcome::Partial,
-            Self::LegacyLossy => fallback,
+            Self::Invalid {
+                fallback_outcome, ..
+            } => *fallback_outcome,
         }
     }
 
     pub(super) fn detail_lines(&self) -> Option<Vec<String>> {
         match self {
             Self::Ready(receipt) => Some(receipt_detail_lines(receipt)),
-            Self::Invalid(reason) => Some(vec![format!("typed phase receipt degraded — {reason}")]),
-            Self::LegacyLossy => None,
+            Self::Invalid { reason, .. } => {
+                Some(vec![format!("typed phase receipt degraded — {reason}")])
+            }
         }
     }
 
-    pub(super) fn is_legacy_lossy(&self) -> bool {
-        matches!(self, Self::LegacyLossy)
+    fn invalid(completed: &PhaseAttemptCompleted, reason: String) -> Self {
+        Self::Invalid {
+            reason,
+            fallback_outcome: completed.outcome,
+        }
     }
 }
 
@@ -65,21 +63,26 @@ fn classify_missing_receipt(
     completed: &PhaseAttemptCompleted,
 ) -> TypedReceiptResolution {
     if kuzushi_core::run_lifecycle::RunAttemptId::parse(&completed.attempt_id).is_err() {
-        return TypedReceiptResolution::LegacyLossy;
+        return TypedReceiptResolution::invalid(
+            completed,
+            "attempt identity is not typed".to_string(),
+        );
     }
     let Some(final_run) = completed.run_refs.last() else {
-        return TypedReceiptResolution::LegacyLossy;
+        return TypedReceiptResolution::invalid(
+            completed,
+            "phase attempt has no run reference".to_string(),
+        );
     };
     match kuzushi_core::run_lifecycle::load_run_projection(target, final_run) {
-        Ok(read) if read.source == RunProjectionSource::Legacy => {
-            TypedReceiptResolution::LegacyLossy
-        }
-        Ok(_) => TypedReceiptResolution::Invalid(
+        Ok(_) => TypedReceiptResolution::invalid(
+            completed,
             "typed run has no hash-linked workflow-v2 receipt".to_string(),
         ),
-        Err(error) => TypedReceiptResolution::Invalid(format!(
-            "referenced run could not be inspected: {error}"
-        )),
+        Err(error) => TypedReceiptResolution::invalid(
+            completed,
+            format!("referenced run could not be inspected: {error}"),
+        ),
     }
 }
 
@@ -118,7 +121,9 @@ fn phase_outcome(status: RunItemStatus) -> PhaseAttemptOutcome {
         RunItemStatus::Completed | RunItemStatus::Skipped => PhaseAttemptOutcome::Completed,
         RunItemStatus::Partial => PhaseAttemptOutcome::Partial,
         RunItemStatus::Canceled => PhaseAttemptOutcome::Canceled,
-        RunItemStatus::Failed | RunItemStatus::Interrupted => PhaseAttemptOutcome::Failed,
+        RunItemStatus::Blocked | RunItemStatus::Failed | RunItemStatus::Interrupted => {
+            PhaseAttemptOutcome::Failed
+        }
         RunItemStatus::Pending | RunItemStatus::Running => PhaseAttemptOutcome::Partial,
     }
 }

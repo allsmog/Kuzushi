@@ -437,30 +437,24 @@ authorization: Default::default(),
         assert!(output.contains("previous model preserved"));
         assert!(output.contains("Cost:     >=$0.0000 (incomplete)"));
         assert!(!output.contains("threat-model:build complete"));
-        let trace = fs::read_to_string(crate::run_artifacts::run_dir(
-            workspace.root(),
-            run_id,
-        ).join("trace.jsonl"))
-        .unwrap();
-        assert!(trace.contains("partial — inadequate evidence"));
-        assert!(!trace.contains("threat-model:build complete"));
-        let terminal = trace
-            .lines()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .find(|step| {
-                step.get("label")
-                    .and_then(Value::as_str)
-                    .is_some_and(|label| label.contains("partial — inadequate evidence"))
-            })
-            .expect("partial terminal trace step");
-        assert_eq!(
-            terminal.get("kind").and_then(Value::as_str),
-            Some("tool-progress")
-        );
-        assert_eq!(
-            terminal.get("severity").and_then(Value::as_str),
-            Some("warn")
-        );
+        let lifecycle = crate::run_lifecycle::read_run_items(workspace.root(), run_id)
+            .unwrap()
+            .unwrap();
+        assert!(lifecycle.items.iter().any(|item| matches!(
+            &item.item,
+            crate::run_lifecycle::RunItemV1::ToolCallFinished {
+                status: crate::run_lifecycle::RunItemStatus::Partial,
+                preview,
+                ..
+            } if preview.iter().any(|line| line.as_str().contains("partial — inadequate evidence"))
+        )));
+        assert!(!lifecycle.items.iter().any(|item| matches!(
+            item.item,
+            crate::run_lifecycle::RunItemV1::ToolCallFinished {
+                status: crate::run_lifecycle::RunItemStatus::Completed,
+                ..
+            }
+        )));
         assert_eq!(
             result.pointer("/data/persisted").and_then(Value::as_bool),
             Some(false)

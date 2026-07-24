@@ -1,7 +1,7 @@
 import {
   failureHandoffFields,
   forbiddenFailureClaims,
-  reportJsonlAliasFields,
+  reportLifecycleFields,
 } from "./artifact-contract-fields.mjs";
 import { requiredRunArtifacts, toolInputArtifacts } from "./canonical-run-artifacts.mjs";
 
@@ -57,9 +57,9 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "report JSONL reader canonical trace fields",
+    label: "report JSONL reader canonical lifecycle fields",
     file: "crates/kuzushi-core/src/report/artifact_summary/jsonl.rs",
-    tokens: reportJsonlAliasFields,
+    tokens: reportLifecycleFields,
   },
   {
     label: "report result exploit-chain fields",
@@ -169,7 +169,7 @@ export const tokenChecks = [
       "write_json_if_missing(",
       'required_artifact_spec("artifacts.json").leaf',
       'write_text_if_missing(dir.join(required_artifact_spec("events.jsonl").leaf)',
-      'write_text_if_missing(dir.join(required_artifact_spec("trace.jsonl").leaf)',
+      'write_text_if_missing(dir.join(required_artifact_spec("items.jsonl").leaf)',
       "write_missing_report_marker(",
       'required_artifact_spec("report.md").leaf',
       "record_canonical_run_artifacts",
@@ -244,7 +244,7 @@ export const tokenChecks = [
       "All three write the canonical run bundle",
       "`run.json`",
       "`events.jsonl`",
-      "`trace.jsonl`",
+      "`items.jsonl`",
       "`failures.json`",
       "`report.md`",
       "`artifacts.json`",
@@ -257,9 +257,9 @@ export const tokenChecks = [
     tokens: ["pub tool: Option<String>", "pub artifact: Option<RunArtifact>"],
   },
   {
-    label: "report JSONL canonical trace architecture doc",
+    label: "report JSONL canonical lifecycle architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    tokens: ["Trace streams use canonical snake_case fields only", ...reportJsonlAliasFields],
+    tokens: ["schemas/run.items.schema.json", ...reportLifecycleFields],
   },
   {
     label: "CLI run entrypoint starts canonical artifact recording",

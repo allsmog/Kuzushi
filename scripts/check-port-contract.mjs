@@ -92,11 +92,11 @@ const rustArtifactSpecChecks = [
     needles: [
       'canonical_run_artifact_spec("run.json")',
       "run_metadata_artifact_leaf()",
-      'canonical_run_artifact_spec("trace.jsonl")',
-      "run_trace_artifact_leaf()",
+      'canonical_run_artifact_spec("items.jsonl")',
+      "run_items_artifact_leaf()",
       "RUN_TRIAGE_FILE",
       "RUN_VERIFY_FILE",
-      'run_artifact_detail(app, run_id, "trace", run_trace_artifact_leaf())',
+      'run_artifact_detail(app, run_id, "lifecycle", run_items_artifact_leaf())',
       'run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE)',
       'run_artifact_detail(app, run_id, "verify", RUN_VERIFY_FILE)',
     ],
@@ -106,12 +106,8 @@ const rustArtifactSpecChecks = [
     needles: ['canonical_run_artifact_spec("events.jsonl")', "run_events_spec().leaf"],
   },
   {
-    file: "crates/kuzushi-core/src/run_artifacts/write_run_artifact_json.rs",
-    needles: ['canonical_run_artifact_spec("trace.jsonl")', "run_trace_spec().leaf"],
-  },
-  {
     file: "crates/kuzushi-core/src/run_artifacts/llm_audit.rs",
-    needles: ['canonical_run_artifact_spec("trace.jsonl")', "run_trace_audit_spec().leaf"],
+    needles: ["read_run_items(", "load_run_lifecycle_audit"],
   },
   {
     file: "crates/kuzushi-core/src/run_artifacts/artifact_manifest.rs",

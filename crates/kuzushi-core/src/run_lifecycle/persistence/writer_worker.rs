@@ -162,7 +162,10 @@ pub(super) fn reserve_recovery_eligible_record(record: &RunItemRecord) -> bool {
         && matches!(
             record.item.status(),
             Some(crate::run_lifecycle::RunItemStatus::Partial)
+                | Some(crate::run_lifecycle::RunItemStatus::Blocked)
                 | Some(crate::run_lifecycle::RunItemStatus::Failed)
+                | Some(crate::run_lifecycle::RunItemStatus::Canceled)
+                | Some(crate::run_lifecycle::RunItemStatus::Interrupted)
         )
 }
 

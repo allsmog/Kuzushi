@@ -32,7 +32,7 @@ fn receipt() -> PhaseAttemptReceipt {
         elapsed_secs: 17,
         cost: "$0.1250".to_string(),
         changed_findings: 3,
-        changed_artifacts: vec!["result.json".to_string(), "trace.jsonl".to_string()],
+        changed_artifacts: vec!["result.json".to_string(), "items.jsonl".to_string()],
         interaction_count: 1,
         rerun_specification: Some("run semgrep:scan".to_string()),
         actions: vec![

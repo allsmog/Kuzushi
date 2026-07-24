@@ -56,7 +56,7 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
     session.run_id.starts_with("manual-")
         && app.running_tool_name().is_none()
         && !app.scan().is_some_and(|scan| scan.running)
-        && session.events.is_empty()
+        && session.event_count() == 0
         && session
             .tasks
             .values()
@@ -240,7 +240,7 @@ impl<'a> RunFocusModel<'a> {
     /// session so OUTPUT can own the frame.
     pub(crate) fn collapse_dag_pane(&self) -> bool {
         self.session.tasks.is_empty()
-            && self.session.events.is_empty()
+            && self.session.event_count() == 0
             && self.app.running_tool_name().is_none()
     }
 
@@ -667,40 +667,60 @@ mod tests {
     }
 
     #[test]
-    fn run_focus_output_shows_live_trace_instead_of_persisted_artifacts() {
+    fn run_focus_output_shows_live_lifecycle_instead_of_persisted_artifacts() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.domain_mut()
-            .set_taint_flows(vec![crate::TaintFlowSnapshot {
-                finding_fingerprint: None,
-                finding_identity_id: None,
-                cwe: "CWE-89".to_string(),
-                severity: "critical".to_string(),
-                stages: vec![crate::TaintStage {
-                    message: "order_id".to_string(),
-                    file: "orders.rs".to_string(),
-                    line: 1,
-                    snippet: None,
-                }],
-            }]);
-        let mut session = ActivitySession::new("r-x");
-        session.tasks.insert(
-            "context:build".to_string(),
-            DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
-        );
-        session.apply_step(
-            kuzushi_core::RunTraceStep::new(1, "tool-progress", "mapping live output")
-                .with_module_id("context")
-                .with_verb("build"),
-        );
-        app.set_activity(Some(session));
+        app.domain_mut().set_taint_flows(vec![test_taint_flow()]);
+        app.set_activity(Some(live_output_session()));
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
         };
         let rows = model.feed_pane_rows(120);
         assert!(rows
             .iter()
-            .any(|row| row.text.contains("mapping live output")));
+            .any(|row| row.text.contains("Mapping live output")));
         assert!(!rows.iter().any(|row| row.text.contains("ATTACK PATH")));
         assert!(!rows.iter().any(|row| row.text.contains("CWE-89")));
+    }
+
+    fn live_output_session() -> ActivitySession {
+        let mut session = ActivitySession::new("r-x");
+        session.tasks.insert(
+            "context:build".to_string(),
+            DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
+        );
+        session
+            .apply_run_item(
+                kuzushi_core::run_lifecycle::RunItemEnvelopeV1::new(
+                    1,
+                    kuzushi_core::run_lifecycle::RunId::parse("r-x").unwrap(),
+                    kuzushi_core::run_lifecycle::RunItemId::new(),
+                    kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+                    kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+                        level: kuzushi_core::run_lifecycle::DiagnosticLevel::Info,
+                        message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                            "Mapping live output",
+                        ),
+                    },
+                    None,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        session
+    }
+
+    fn test_taint_flow() -> crate::TaintFlowSnapshot {
+        crate::TaintFlowSnapshot {
+            finding_fingerprint: None,
+            finding_identity_id: None,
+            cwe: "CWE-89".to_string(),
+            severity: "critical".to_string(),
+            stages: vec![crate::TaintStage {
+                message: "order_id".to_string(),
+                file: "orders.rs".to_string(),
+                line: 1,
+                snippet: None,
+            }],
+        }
     }
 }

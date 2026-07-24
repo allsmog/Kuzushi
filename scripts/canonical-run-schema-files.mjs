@@ -4,7 +4,7 @@ const schemaByArtifact = {
   "run.json": "schemas/run.summary.schema.json",
   "artifacts.json": "schemas/run.artifacts.schema.json",
   "events.jsonl": "schemas/run.events.schema.json",
-  "trace.jsonl": "schemas/run.trace.schema.json",
+  "items.jsonl": "schemas/run.items.schema.json",
 };
 
 export const canonicalRunSchemaFiles = requiredArtifactSchemaFiles();

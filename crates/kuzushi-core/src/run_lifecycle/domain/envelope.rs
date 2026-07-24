@@ -18,7 +18,6 @@ pub enum RunItemSource {
     Workflow,
     Operator,
     Persistence,
-    LegacyReconstruction,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

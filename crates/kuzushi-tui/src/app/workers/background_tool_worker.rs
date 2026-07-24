@@ -48,19 +48,13 @@ pub(crate) enum AgentEvent {
 
 #[derive(Debug, Clone)]
 pub(crate) struct AgentCallAudit {
-    pub(crate) model: String,
-    pub(crate) provider: String,
-    pub(crate) prompt_hash: String,
     pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
     pub(crate) call_attempted: bool,
 }
 
 impl AgentCallAudit {
-    pub(crate) fn for_prompt(model: &str, system_prompt: &str, prompt: &str) -> Self {
+    pub(crate) fn for_prompt(_model: &str, _system_prompt: &str, _prompt: &str) -> Self {
         Self {
-            model: model.to_string(),
-            provider: kuzushi_core::model_provider(model).to_string(),
-            prompt_hash: kuzushi_core::prompt_pair_hash(system_prompt, prompt),
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: false,
         }
@@ -246,7 +240,7 @@ fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
         // Too Many Requests"), not just the topmost wrap
         // ("agent loop step 0 failed"). Without this, debugging
         // model-side failures from the shell requires digging into
-        // `.kuzushi/v3/runs/<id>/trace.jsonl` or rerunning under `kuzushi run`.
+        // `.kuzushi/v3/runs/<id>/items.jsonl` or rerunning under `kuzushi run`.
         error: format!("{error:#}"),
     }
 }

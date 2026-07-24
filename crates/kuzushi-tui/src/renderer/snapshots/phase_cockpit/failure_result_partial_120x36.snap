@@ -16,19 +16,19 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 
           ┌ SCAN · RESULT READY ─────────────────────────────────────────────────────────────────────────────┐
           │SCAN returned partial evidence. Review it and choose a recovery action.                           │
-          │1 canonical run reference(s) · legacy receipt metadata unavailable                                │
+          │receipt · partial · 1 run(s) · cost not recorded · findings +0 ~0 -0 · 0 artifact(s) · 0...       │
+          │Outcome · partial · scenario partial                                                              │
+          │3 run ledger cell(s) omitted from the result card · inspect replay                                │
+          │8 timeline cell(s) omitted from the result card · inspect replay                                  │
           │lineage: target rev unrecorded                                                                    │
-          │next: select this Scan, then open Review                                                          │
+          │next: inspect run-result_partial · inspect the incomplete phase evidence before retrying          │
           │›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.        │
-          │2 ○ Use scan & continue to Review                                                                 │
-          │3 ○ Open run evidence                                                                             │
-          │4 ○ Refine                                                                                        │
-          │5 ○ Run again                                                                                     │
-          │6 ○ Discard                                                                                       │
-          │1/6 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
+          │2 ○ Open run evidence                                                                             │
+          │3 ○ Use scan & continue to Review                                                                 │
+          │4 ○ Run again                                                                                     │
+          │1/4 · ↑/↓ move · Enter choose · Esc dismiss                                                       │
           │                                                                                                  │
           └──────────────────────────────────────────────────────────────────────────────────────────────────┘
-
 
 
 

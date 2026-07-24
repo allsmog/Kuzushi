@@ -101,7 +101,7 @@ fn harvest_cves_into_catalog(
         Option<&dyn AgentRuntime>,
     ) -> Result<Value>,
     gate: &HarvestGateConfig,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> HarvestedCatalog {
     let mut harvest = HarvestedCatalog {
         per_cve: Vec::with_capacity(cves.len()),
@@ -129,7 +129,7 @@ fn emit_threat_intel_harvest_start(
     ctx: &ToolExecutionContext<'_>,
     output_path: &Path,
     cve_count: usize,
-) -> Option<usize> {
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -146,7 +146,7 @@ fn emit_threat_intel_harvest_start(
 
 fn emit_threat_intel_harvest_progress(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
     label: impl Into<String>,
 ) {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
@@ -160,7 +160,7 @@ fn emit_threat_intel_harvest_progress(
 
 fn begin_threat_intel_harvest_scope(
     ctx: &ToolExecutionContext<'_>,
-    parent_step: Option<usize>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Option<crate::run_artifacts::ParentScope> {
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return None;

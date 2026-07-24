@@ -237,7 +237,7 @@ impl ShellApp {
             ),
         );
         self.set_live_activity(LiveActivity::new(
-            LiveActivityPhase::Thinking,
+            LiveActivityPhase::CallingModel,
             "agent",
             format!("asking {}", dispatch.model),
         ));
@@ -259,18 +259,6 @@ impl ShellApp {
             kuzushi_core::config_hash(&dispatch.config).ok(),
             self.registry().loaded_module_specifiers(),
         )?;
-        append_trace_step(
-            Some(dispatch.artifact_target.as_path()),
-            &dispatch.run_id,
-            "plan",
-            &format!(
-                "ask {} ({})",
-                short_label(&dispatch.operator_question, 80),
-                dispatch.model
-            ),
-            None,
-            None,
-        );
         Ok(())
     }
 

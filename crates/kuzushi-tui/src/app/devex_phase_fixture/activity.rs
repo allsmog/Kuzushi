@@ -62,40 +62,88 @@ fn task_row(
 }
 
 fn seed_trace(activity: &mut ActivitySession) {
-    let rows = [
-        ("tool-start", "indexing bounded source roots", 0.01),
-        ("tool-progress", "reading workspace manifests", 0.01),
-        ("tool-progress", "indexed 3 source files", 0.01),
-        ("reasoning", "identifying public entrypoints", 0.02),
-        ("tool-progress", "mapped external client", 0.01),
-        ("tool-progress", "mapped application API", 0.01),
-        ("tool-progress", "mapped orders data store", 0.01),
-        ("reasoning", "recording edge trust boundary", 0.02),
-        ("reasoning", "recording data trust boundary", 0.02),
-        ("done", "3 entrypoints · 2 trust zones", 0.01),
-    ];
-    for (index, (kind, label, cost)) in rows.into_iter().enumerate() {
-        activity.apply_step(trace_step(index + 1, kind, label, cost));
+    use kuzushi_core::run_lifecycle::{RunCallId, RunItemId};
+    let item_id = RunItemId::new();
+    let call_id = RunCallId::new();
+    for item in fixture_call_items() {
+        apply_trace_item(activity, item_id, Some(call_id), item);
+    }
+    for label in fixture_reasoning_summaries() {
+        apply_trace_item(activity, RunItemId::new(), None, reasoning_item(label));
     }
 }
 
-fn trace_step(n: usize, kind: &str, label: &str, cost: f64) -> RunTraceStep {
-    RunTraceStep {
-        n,
-        kind: kind.to_string(),
-        label: label.to_string(),
-        latency_ms: Some(18 + n as u64),
-        cost_usd: Some(cost),
-        observed_cost_usd: None,
-        provider_spend_unresolved: false,
-        call_attempted: Some(true),
-        module_id: Some("context".to_string()),
-        verb: Some("build".to_string()),
-        parent_step: None,
-        severity: None,
-        started_at_ms: Some(1_720_580_088_000 + n as u64),
-        model: Some("openai:gpt-5.4".to_string()),
-        provider: Some("openai".to_string()),
-        prompt_hash: Some(format!("fnv1a64:phase-{n}")),
+fn fixture_call_items() -> Vec<kuzushi_core::run_lifecycle::RunItemV1> {
+    use kuzushi_core::run_lifecycle::*;
+    vec![
+        RunItemV1::ToolCallRequested {
+            tool_name: SafeText::operator_visible("context:build"),
+            operation_fingerprint: OperationFingerprint::from_bytes(b"phase reference"),
+            safe_option_names: Vec::new(),
+        },
+        RunItemV1::ToolCallStarted {
+            tool_name: SafeText::operator_visible("context:build"),
+            runtime: Some(SafeText::operator_visible("native")),
+            model: None,
+        },
+        RunItemV1::ToolCallProgress {
+            message: SafeText::operator_visible("Indexing repository files"),
+            completed: Some(421),
+            total: Some(832),
+        },
+        RunItemV1::ToolCallFinished {
+            status: RunItemStatus::Completed,
+            cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                kuzushi_core::runtime::RuntimeCost::ZERO,
+            ),
+            result_artifact: None,
+            preview: vec![SafeText::operator_visible("3 entrypoints · 2 trust zones")],
+            warning_count: 0,
+            error_count: 0,
+        },
+    ]
+}
+
+fn fixture_reasoning_summaries() -> [&'static str; 6] {
+    [
+        "Identified public entrypoints",
+        "Mapped external client",
+        "Mapped application API",
+        "Mapped orders data store",
+        "Recorded edge trust boundary",
+        "Recorded data trust boundary",
+    ]
+}
+
+fn reasoning_item(label: &str) -> kuzushi_core::run_lifecycle::RunItemV1 {
+    kuzushi_core::run_lifecycle::RunItemV1::SafeReasoningSummary {
+        text: kuzushi_core::run_lifecycle::SafeText::operator_visible(label),
+        redaction_policy_version: 1,
     }
+}
+
+fn apply_trace_item(
+    activity: &mut ActivitySession,
+    item_id: kuzushi_core::run_lifecycle::RunItemId,
+    call_id: Option<kuzushi_core::run_lifecycle::RunCallId>,
+    item: kuzushi_core::run_lifecycle::RunItemV1,
+) {
+    use kuzushi_core::run_lifecycle::*;
+    let seq = activity.run_projection.last_committed_seq + 1;
+    let envelope = RunItemEnvelopeV1::new(
+        seq,
+        RunId::parse(&activity.run_id).expect("fixture run id"),
+        item_id,
+        RunItemSource::Workflow,
+        item,
+        activity.run_projection.last_event_hash.clone(),
+    )
+    .expect("fixture lifecycle item");
+    let envelope = match call_id {
+        Some(call_id) => envelope.with_call(call_id).expect("fixture call identity"),
+        None => envelope,
+    };
+    activity
+        .apply_run_item(envelope)
+        .expect("apply fixture lifecycle item");
 }

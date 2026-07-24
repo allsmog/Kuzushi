@@ -38,7 +38,7 @@ fn validate_terminal_calls(projection: &RunProjection) -> Result<()> {
         projection
             .calls
             .values()
-            .all(|call| call.status.is_terminal()),
+            .all(|call| call.status.is_terminal() && call.completed_at_ms.is_some()),
         "terminal outcome was emitted while calls were still open"
     );
     Ok(())

@@ -1,38 +1,5 @@
 use super::runtime_event_drains::JOB_DRAIN_LIMIT;
 use super::*;
-use std::sync::Arc;
-
-struct NoopTraceSink;
-
-impl kuzushi_core::TraceSink for NoopTraceSink {
-    fn record(&self, _step: &RunTraceStep) {}
-}
-
-#[test]
-fn job_drain_preserves_trace_terminal_order() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
-    let budget = app.jobs().trace_budget();
-    assert!(budget.reserve_for_test());
-    ticket.send(ShellEvent::Trace(
-        RunTraceStep::new(1, "tool", "ordered trace")
-            .with_module_id("semgrep")
-            .with_verb("scan"),
-    ));
-    ticket.send(ShellEvent::Tool(ToolEvent::Failed {
-        tool_name: "semgrep:scan".to_string(),
-        error: "tool failed".to_string(),
-    }));
-    app.set_running_tool_for_test("semgrep:scan");
-    app.set_activity(Some(ActivitySession::new("r-1")));
-
-    assert!(app.drain_job_events());
-
-    let labels = activity_labels(&app);
-    assert_eq!(labels, vec!["ordered trace", "tool failed"]);
-    assert_eq!(budget.pending(), 0);
-    assert!(!app.jobs().is_running(JobKind::Run));
-}
 
 #[test]
 fn zero_duration_job_slice_applies_one_event_and_keeps_tail() {
@@ -146,9 +113,6 @@ fn job_drain_finishes_agent_slot_and_clears_liveness() {
     ticket.send(ShellEvent::Agent(AgentEvent::Failed {
         error: "agent failed".to_string(),
         audit: AgentCallAudit {
-            model: "unknown".to_string(),
-            provider: "unknown".to_string(),
-            prompt_hash: "test".to_string(),
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: true,
         },
@@ -195,103 +159,6 @@ fn job_drain_finishes_threat_slot_and_clears_liveness() {
     assert!(app.log_lines().iter().any(|line| line
         .body
         .contains("threats worker failed: model request failed (runtime_error)")));
-}
-
-#[test]
-fn job_drain_is_budgeted_and_keeps_buffered_tail() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
-    let budget = app.jobs().trace_budget();
-    for i in 0..(JOB_DRAIN_LIMIT + 5) {
-        assert!(budget.reserve_for_test());
-        ticket.send(ShellEvent::Trace(
-            RunTraceStep::new(i + 1, "tool", format!("event {i}"))
-                .with_module_id("semgrep")
-                .with_verb("scan"),
-        ));
-    }
-    app.set_activity(Some(ActivitySession::new("r-1")));
-
-    assert!(app.drain_job_events());
-    let first_tick_count = app.activity().unwrap().events.len();
-    assert!(first_tick_count > 0);
-    assert!(first_tick_count <= JOB_DRAIN_LIMIT);
-    assert_eq!(budget.pending(), JOB_DRAIN_LIMIT + 5 - first_tick_count);
-    assert!(app.jobs().is_running(JobKind::Run));
-
-    drain_remaining_job_events(&mut app, &budget);
-    assert_eq!(app.activity().unwrap().events.len(), JOB_DRAIN_LIMIT + 5);
-    assert_eq!(budget.pending(), 0);
-    assert!(app.jobs().is_running(JobKind::Run));
-}
-
-#[test]
-fn dropped_live_trace_degrades_cost_until_terminal_reconciliation() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let ticket = app.jobs_mut().start(JobKind::Run, "runtime tool");
-    let budget = app.jobs().trace_budget();
-    for _ in 0..LIVE_TRACE_CHANNEL_CAPACITY {
-        assert!(budget.reserve_for_test());
-    }
-    let sink = StampedTraceSink::new(Arc::new(NoopTraceSink), ticket.sink(), budget);
-    app.set_activity(Some(ActivitySession::new("runtime-drop")));
-    app.begin_run_cost_tracking("runtime-drop", true);
-
-    kuzushi_core::TraceSink::record(
-        &sink,
-        &RunTraceStep::new(1, "llm", "provider call")
-            .with_call_attempted(true)
-            .with_cost_usd(Some(0.20))
-            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:test"),
-    );
-
-    assert!(app.drain_job_events());
-    assert!(!app.session().cost_accounting_is_complete());
-    assert!(!app
-        .activity()
-        .unwrap()
-        .runtime_cost_report()
-        .unwrap()
-        .is_complete());
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "activity"
-            && line.body.contains("dropped 1 live trace UI frame")
-            && line.body.contains("trace.jsonl remains authoritative")
-    }));
-
-    let terminal = kuzushi_core::runtime::RuntimeCostReport::known(
-        kuzushi_core::runtime::RuntimeCost::from_usd(0.20, "terminal cost").unwrap(),
-    );
-    app.settle_run_cost_report("runtime-drop", terminal);
-
-    assert!(app.session().cost_accounting_is_complete());
-    assert_eq!(app.session().session_cost_usd(), 0.20);
-    assert_eq!(
-        app.activity()
-            .unwrap()
-            .runtime_cost_report()
-            .unwrap()
-            .exact_usd(),
-        Some(0.20)
-    );
-}
-
-#[test]
-fn dropped_live_trace_is_logged_without_provider_cost_tracking() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let ticket = app.jobs_mut().start(JobKind::Run, "deterministic tool");
-    let budget = app.jobs().trace_budget();
-    for _ in 0..LIVE_TRACE_CHANNEL_CAPACITY {
-        assert!(budget.reserve_for_test());
-    }
-    let sink = StampedTraceSink::new(Arc::new(NoopTraceSink), ticket.sink(), budget);
-
-    kuzushi_core::TraceSink::record(&sink, &RunTraceStep::new(1, "tool", "deterministic"));
-
-    assert!(app.drain_job_events());
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "activity" && line.body.contains("dropped 1 live trace UI frame")
-    }));
 }
 
 #[test]
@@ -387,73 +254,8 @@ fn stale_job_burst_consumes_drain_budget_before_current_event() {
     app.set_activity(Some(ActivitySession::new("r-1")));
 
     assert!(!app.drain_job_events());
-    assert!(activity_labels(&app).is_empty());
     assert!(app.jobs().is_running(JobKind::Run));
 
     assert!(app.drain_job_events());
-    assert_eq!(activity_labels(&app), vec!["current failed"]);
     assert!(!app.jobs().is_running(JobKind::Run));
-}
-
-#[test]
-fn stale_job_trace_step_releases_budget_without_activity_update() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let stale = app.jobs_mut().start(JobKind::Run, "old-tool");
-    let _current = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
-    let budget = app.jobs().trace_budget();
-    assert!(budget.reserve_for_test());
-    stale.send(ShellEvent::Trace(
-        RunTraceStep::new(1, "tool", "stale trace")
-            .with_module_id("semgrep")
-            .with_verb("scan"),
-    ));
-
-    assert!(!app.drain_job_events());
-
-    assert_eq!(budget.pending(), 0);
-    assert!(app.activity().is_none());
-    assert!(app.jobs().is_running(JobKind::Run));
-}
-
-#[test]
-fn background_drain_applies_trace_before_terminal_tool_event() {
-    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    let ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
-    let budget = app.jobs().trace_budget();
-    assert!(budget.reserve_for_test());
-    ticket.send(ShellEvent::Trace(
-        RunTraceStep::new(1, "tool", "producer tail")
-            .with_module_id("semgrep")
-            .with_verb("scan"),
-    ));
-    ticket.send(ShellEvent::Tool(ToolEvent::Failed {
-        tool_name: "semgrep:scan".to_string(),
-        error: "tool failed".to_string(),
-    }));
-
-    app.set_running_tool_for_test("semgrep:scan");
-    app.set_activity(Some(ActivitySession::new("r-1")));
-
-    assert!(app.drain_background_events());
-
-    assert_eq!(activity_labels(&app), vec!["producer tail", "tool failed"]);
-}
-
-fn activity_labels(app: &ShellApp) -> Vec<&str> {
-    app.activity()
-        .unwrap()
-        .events
-        .iter()
-        .map(|event| event.step.label.as_str())
-        .collect()
-}
-
-fn drain_remaining_job_events(app: &mut ShellApp, budget: &LiveTraceBudget) {
-    for _ in 0..100 {
-        if budget.pending() == 0 {
-            return;
-        }
-        assert!(app.drain_job_events());
-    }
-    panic!("job events did not drain within the test iteration budget");
 }

@@ -96,7 +96,7 @@ Operator-visible run lifecycle text is redacted by construction rather than by
 convention: every such string is routed through the shared redaction policy,
 control-escaped, and length-bounded before it is written, and the same policy is
 re-applied when the stream is read back. Bridge failures surface as a fixed set
-of error classes instead of raw provider or subprocess output, and `trace.jsonl`
+of error classes instead of raw provider or subprocess output, and `items.jsonl`
 carries no prompts or model-response previews.
 
 ## Install
@@ -515,7 +515,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
 | `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked run lifecycle for new runs; live Run Focus, replay, plain output, and APIs reduce this stream |
 | `.kuzushi/v3/runs/<runId>/events.jsonl` | compatibility projection of typed lifecycle items during the migration window; authoritative only for legacy runs |
-| `.kuzushi/v3/runs/<runId>/trace.jsonl` | non-authoritative bounded diagnostics and model/tool audit during the migration window |
+| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed plan, task, call, interaction, diagnostic, and terminal lifecycle |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
@@ -541,7 +541,7 @@ Rust types rather than parsing the stream directly.
 
 Typed run lifecycle and phase attempts are in a compatibility window: new runs
 write authoritative `items.jsonl` while dual-writing the compatibility
-`events.jsonl` and diagnostic `trace.jsonl`, and new phase attempts write
+terminal storage `events.jsonl` and authoritative `items.jsonl`, and new phase attempts write
 `phase-attempts.v2.jsonl` alongside the unchanged workflow-v1 record. Readers
 prefer the typed and v2 data and disclose lossy fallback for legacy runs that
 predate it. Nothing is rewritten in place. See

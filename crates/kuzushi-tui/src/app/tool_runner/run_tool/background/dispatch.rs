@@ -159,11 +159,10 @@ pub(super) fn prepare_background_tool_dispatch(
     config: &V2Config,
     seed: BackgroundToolRunSeed,
     ticket: JobTicket,
-    trace_budget: LiveTraceBudget,
 ) -> Option<BackgroundToolDispatch> {
     let registry = registry.clone();
     let config = config.clone();
-    let run = match prepare_background_tool_run(seed, ticket.sink(), trace_budget.clone()) {
+    let run = match prepare_background_tool_run(seed, ticket.sink()) {
         Ok(run) => run,
         Err(error) => {
             ticket.fail(format!("could not start typed run observation: {error:#}"));
@@ -255,13 +254,11 @@ fn direct_tool_intent(registry: &ModuleRegistry, tool_name: &str) -> String {
 fn prepare_background_tool_run(
     seed: BackgroundToolRunSeed,
     sink: JobEventSink,
-    trace_budget: LiveTraceBudget,
 ) -> anyhow::Result<BackgroundToolRun> {
     let trace_handle = background_tool_trace_handle(
         &seed.target,
         &seed.run_id,
         sink,
-        trace_budget,
         seed.attempt_id,
         seed.phase,
         seed.task_id,
@@ -281,13 +278,12 @@ fn background_tool_trace_handle(
     target: &std::path::Path,
     run_id: &str,
     sink: JobEventSink,
-    trace_budget: LiveTraceBudget,
     attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
     phase: Option<crate::app::WorkflowPhase>,
     task_id: kuzushi_core::run_lifecycle::RunTaskId,
     task_title: &str,
 ) -> anyhow::Result<TraceHandle> {
-    let mut observation = background_tool_observation(target, run_id, sink, trace_budget)?;
+    let mut observation = background_tool_observation(target, run_id, sink)?;
     if let (Some(attempt_id), Some(phase)) = (attempt_id, phase) {
         observation = observation.for_attempt(attempt_id, phase);
     }
@@ -299,22 +295,12 @@ fn background_tool_observation(
     target: &std::path::Path,
     run_id: &str,
     sink: JobEventSink,
-    trace_budget: LiveTraceBudget,
 ) -> anyhow::Result<kuzushi_core::run_lifecycle::RunObservationHandle> {
-    let inner_sink: Arc<dyn TraceSink> = Arc::new(JsonlSink::new(target.to_path_buf(), run_id));
-    let broadcast_sink: Arc<dyn TraceSink> = Arc::new(StampedTraceSink::new(
-        inner_sink,
-        sink.clone(),
-        trace_budget,
-    ));
-    let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
     let (item_subscriber, range_subscriber, derivative_subscriber, fault_subscriber) =
         sink.run_lifecycle_subscribers(run_id);
-    kuzushi_core::run_lifecycle::RunObservationHandle::with_trace_sink_and_derivative_delivery_subscriber(
+    kuzushi_core::run_lifecycle::RunObservationHandle::jsonl_with_derivative_delivery_subscriber(
         target,
         run_id,
-        broadcast_sink,
-        initial_step_number,
         Some(item_subscriber),
         Some(range_subscriber),
         Some(derivative_subscriber),
@@ -335,7 +321,6 @@ mod tests {
             target.path(),
             "tool-plan-scope",
             ticket.sink(),
-            LiveTraceBudget::new(),
             None,
             None,
             kuzushi_core::run_lifecycle::RunTaskId::new(),

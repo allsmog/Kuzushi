@@ -126,14 +126,14 @@ mod tests {
     fn live_activity_model_projects_display_fields() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_live_activity_state(Some(LiveActivity::new(
-            LiveActivityPhase::Thinking,
+            LiveActivityPhase::CallingModel,
             "triage:run",
             "reviewing finding evidence",
         )));
 
         let model = live_activity_model(&app).expect("live activity");
 
-        assert_eq!(model.phase_label, "thinking");
+        assert_eq!(model.phase_label, "calling model");
         assert_eq!(model.subject, "triage:run");
         assert_eq!(model.detail, "reviewing finding evidence");
     }

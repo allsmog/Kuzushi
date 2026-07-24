@@ -55,12 +55,6 @@ pub struct ReconSnapshot {
     pub last_target: Option<String>,
 }
 
-impl ReconSnapshot {
-    pub(crate) fn has_evidence(&self) -> bool {
-        !self.hosts.is_empty() || !self.services.is_empty() || !self.notes.is_empty()
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct PwnView {
     pub target: Option<PathBuf>,
