@@ -30,24 +30,22 @@ pub fn run_wasm_plugin_invocation(invocation: WasmPluginInvocation) -> Result<Pl
     validate_wasm_policy(&invocation)?;
     let started = Instant::now();
     let engine = wasm_engine()?;
-    let module = Module::from_file(&engine, &invocation.module_path).with_context(|| {
-        format!(
-            "Could not compile Wasm plugin {}",
-            invocation.module_path.display()
-        )
-    })?;
+    let module = wasmtime_result(Module::from_file(&engine, &invocation.module_path))
+        .with_context(|| {
+            format!(
+                "Could not compile Wasm plugin {}",
+                invocation.module_path.display()
+            )
+        })?;
     let mut store = wasm_store(&engine, &invocation)?;
     let mut linker = Linker::new(&engine);
     register_host_imports(&mut linker)?;
-    let instance = linker
-        .instantiate(&mut store, &module)
+    let instance = wasmtime_result(linker.instantiate(&mut store, &module))
         .context("Could not instantiate Wasm plugin")?;
     require_memory_within_limit(&mut store, &instance, invocation.policy.memory_limit_bytes)?;
-    let analyze = instance
-        .get_typed_func::<(), i64>(&mut store, ANALYZE_EXPORT)
+    let analyze = wasmtime_result(instance.get_typed_func::<(), i64>(&mut store, ANALYZE_EXPORT))
         .context("Wasm plugin must export kuzushi_analyze() -> i64")?;
-    let packed_output = analyze
-        .call(&mut store, ())
+    let packed_output = wasmtime_result(analyze.call(&mut store, ()))
         .context("Wasm plugin analyze export trapped")?;
     let stdout = read_guest_output(
         &mut store,
@@ -76,8 +74,8 @@ fn wasm_engine() -> Result<Engine> {
     config.consume_fuel(true);
     config.epoch_interruption(true);
     config.signals_based_traps(false);
-    config.wasm_backtrace(false);
-    Engine::new(&config).context("Could not initialize Wasmtime engine")
+    config.wasm_backtrace_max_frames(None);
+    wasmtime_result(Engine::new(&config)).context("Could not initialize Wasmtime engine")
 }
 
 fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Store<WasmHostState>> {
@@ -100,8 +98,7 @@ fn wasm_store(engine: &Engine, invocation: &WasmPluginInvocation) -> Result<Stor
         },
     );
     store.limiter(|state| &mut state.limits);
-    store
-        .set_fuel(invocation.policy.fuel_limit)
+    wasmtime_result(store.set_fuel(invocation.policy.fuel_limit))
         .context("Could not set Wasm fuel limit")?;
     store.set_epoch_deadline(1);
     interrupt_engine_after_timeout(engine.clone(), invocation.policy.timeout_ms);
@@ -124,11 +121,15 @@ fn interrupt_engine_after_timeout(engine: Engine, timeout_ms: u64) {
 }
 
 fn register_host_imports(linker: &mut Linker<WasmHostState>) -> Result<()> {
-    linker.func_wrap(ABI_MODULE, "manifest_len", manifest_len)?;
-    linker.func_wrap(ABI_MODULE, "manifest_read", manifest_read)?;
-    linker.func_wrap(ABI_MODULE, "blob_len", blob_len)?;
-    linker.func_wrap(ABI_MODULE, "blob_read", blob_read)?;
+    wasmtime_result(linker.func_wrap(ABI_MODULE, "manifest_len", manifest_len))?;
+    wasmtime_result(linker.func_wrap(ABI_MODULE, "manifest_read", manifest_read))?;
+    wasmtime_result(linker.func_wrap(ABI_MODULE, "blob_len", blob_len))?;
+    wasmtime_result(linker.func_wrap(ABI_MODULE, "blob_read", blob_read))?;
     Ok(())
+}
+
+fn wasmtime_result<T>(result: std::result::Result<T, wasmtime::Error>) -> Result<T> {
+    result.map_err(|error| anyhow::Error::msg(format!("{error:#}")))
 }
 
 fn require_memory_within_limit(

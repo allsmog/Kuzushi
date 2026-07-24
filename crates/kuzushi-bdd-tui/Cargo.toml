@@ -15,7 +15,7 @@ harness = false
 
 [dependencies]
 anyhow = { workspace = true }
-cucumber = "0.21"
+cucumber = "0.23"
 futures = "0.3"
 tempfile = { workspace = true }
 uuid = { workspace = true }
