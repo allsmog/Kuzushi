@@ -226,6 +226,31 @@ fn fuzz_run_options() -> Vec<OptionSpec> {
         .default(json!(10))
         .advanced(),
         opt(
+            "kleeConfig",
+            OptionType::String,
+            "KLEE ci-pack JSON enabling the periodic KLEE lane: a name/path relative to \
+             <workspaceRoot>/klee/ or an absolute path. Requires the klee-ng docker image; \
+             the engine validates both and reports blockers.",
+        )
+        .aliases(&["klee_config"]),
+        opt(
+            "kleeEvery",
+            OptionType::Int,
+            "KLEE fires on every kleeEvery-th round (unset = engine policy default 4).",
+        )
+        .aliases(&["klee_every"])
+        .integer_range(1, 24)
+        .advanced(),
+        opt(
+            "kleeSeconds",
+            OptionType::Int,
+            "KLEE lane wall-clock per firing round (engine hard-caps at 3600).",
+        )
+        .aliases(&["klee_seconds"])
+        .integer_range(60, 3_600)
+        .default(json!(900))
+        .advanced(),
+        opt(
             "maxGeneratedTargets",
             OptionType::Int,
             "Cap on deterministically generated targets per run.",
@@ -703,6 +728,9 @@ struct FuzzRunOptions {
     fuzz_seconds: u64,
     rss_limit_mb: u64,
     min_free_gb: u64,
+    klee_config: Option<String>,
+    klee_every: Option<u64>,
+    klee_seconds: u64,
     max_generated_targets: u64,
     build_timeout: Duration,
     skip_import: bool,
@@ -717,6 +745,9 @@ impl FuzzRunOptions {
             fuzz_seconds: u64_input(input, &["fuzzSeconds", "fuzz_seconds"], 600),
             rss_limit_mb: u64_input(input, &["rssLimitMb", "rss_limit_mb"], 2048),
             min_free_gb: u64_input(input, &["minFreeGb", "min_free_gb"], 10),
+            klee_config: optional_string_input(input, &["kleeConfig", "klee_config"])?,
+            klee_every: optional_u64_input(input, &["kleeEvery", "klee_every"]),
+            klee_seconds: u64_input(input, &["kleeSeconds", "klee_seconds"], 900),
             max_generated_targets: u64_input(
                 input,
                 &["maxGeneratedTargets", "max_generated_targets"],
@@ -731,6 +762,14 @@ impl FuzzRunOptions {
             afe_target: optional_string_input(input, &["afeTarget", "afe_target", "shard"])?,
         })
     }
+
+    /// The KLEE lane plan for budgeting — present only when a config is set.
+    fn klee_lane(&self) -> Option<rounds::KleeLanePlan> {
+        self.klee_config.as_ref().map(|_| rounds::KleeLanePlan {
+            every: self.klee_every.unwrap_or(rounds::DEFAULT_KLEE_EVERY),
+            seconds: self.klee_seconds,
+        })
+    }
 }
 
 fn u64_input(input: &Value, keys: &[&str], default: u64) -> u64 {
@@ -738,6 +777,12 @@ fn u64_input(input: &Value, keys: &[&str], default: u64) -> u64 {
         .filter_map(|key| input.get(*key))
         .find_map(Value::as_u64)
         .unwrap_or(default)
+}
+
+fn optional_u64_input(input: &Value, keys: &[&str]) -> Option<u64> {
+    keys.iter()
+        .filter_map(|key| input.get(*key))
+        .find_map(Value::as_u64)
 }
 
 fn bool_input(input: &Value, keys: &[&str]) -> bool {
@@ -994,7 +1039,13 @@ fn execute_rounds(
         run.record_skip("campaign-rounds", "no built targets to fuzz");
         return Ok(Vec::new());
     }
-    rounds::round_budget(options.rounds, options.fuzz_seconds, selected.len() as u64, timeout)?;
+    rounds::round_budget(
+        options.rounds,
+        options.fuzz_seconds,
+        options.klee_lane(),
+        selected.len() as u64,
+        timeout,
+    )?;
     let mut summaries = Vec::new();
     for target in selected {
         if run.aborted {
@@ -1012,9 +1063,25 @@ fn execute_round_for(
     options: &FuzzRunOptions,
     target: &str,
 ) -> Option<Value> {
-    let ws = run.paths.workspace_root.display().to_string();
-    let args = vec![
-        "campaign-round-run".into(),
+    let args = campaign_round_args(run.paths, options, target);
+    let payload = run.engine_step(&format!("campaign-round-run {target}"), args, run.remaining())?;
+    let summary = rounds::parse_round_summary(&payload);
+    Some(json!({
+        "target": target,
+        "roundsCompleted": summary.rounds_completed,
+        "findingsRecorded": summary.findings_recorded,
+        "diskFreeGb": summary.disk_free_gb,
+        "blockers": summary.blockers,
+    }))
+}
+
+fn campaign_round_args(
+    paths: &FuzzPaths,
+    options: &FuzzRunOptions,
+    target: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        "campaign-round-run".to_string(),
         target.to_string(),
         "--rounds".into(),
         options.rounds.to_string(),
@@ -1025,17 +1092,29 @@ fn execute_round_for(
         "--min-free-gb".into(),
         options.min_free_gb.to_string(),
         "--workspace-root".into(),
-        ws,
+        paths.workspace_root.display().to_string(),
     ];
-    let payload = run.engine_step(&format!("campaign-round-run {target}"), args, run.remaining())?;
-    let summary = rounds::parse_round_summary(&payload);
-    Some(json!({
-        "target": target,
-        "roundsCompleted": summary.rounds_completed,
-        "findingsRecorded": summary.findings_recorded,
-        "diskFreeGb": summary.disk_free_gb,
-        "blockers": summary.blockers,
-    }))
+    if let (Some(config), Some(lane)) = (&options.klee_config, options.klee_lane()) {
+        // Cadence is passed explicitly so the engine agrees with what
+        // round_budget assumed; the engine still owns config/image validation.
+        args.extend([
+            "--klee-config".into(),
+            resolve_klee_config(&paths.workspace_root, config),
+            "--klee-every".into(),
+            lane.every.to_string(),
+            "--klee-seconds".into(),
+            lane.seconds.to_string(),
+        ]);
+    }
+    args
+}
+
+fn resolve_klee_config(workspace_root: &std::path::Path, spec: &str) -> String {
+    let path = std::path::Path::new(spec);
+    if path.is_absolute() {
+        return spec.to_string();
+    }
+    workspace_root.join("klee").join(spec).display().to_string()
 }
 
 fn execute_import(
@@ -2071,6 +2150,50 @@ mod tests {
     }
 
     #[test]
+    fn campaign_round_args_thread_klee_flags_only_when_config_is_set() {
+        fn fixture_paths() -> FuzzPaths {
+            FuzzPaths {
+                afe_repo: PathBuf::from("/afe"),
+                python_bin: PathBuf::from("/usr/bin/python3"),
+                workspace_root: PathBuf::from("/ws"),
+                data_root: PathBuf::from("/ws/data"),
+                source_dir: PathBuf::from("/repo"),
+            }
+        }
+
+        // Default (no kleeConfig): today's argv, byte-for-byte, no klee flags.
+        let plain = FuzzRunOptions::parse(&json!({})).unwrap();
+        assert!(plain.klee_lane().is_none());
+        let args = campaign_round_args(&fixture_paths(), &plain, "vhdx");
+        assert!(!args.iter().any(|a| a.starts_with("--klee")), "{args:?}");
+        assert_eq!(
+            args,
+            vec![
+                "campaign-round-run", "vhdx", "--rounds", "1", "--fuzz-seconds", "600",
+                "--rss-limit-mb", "2048", "--min-free-gb", "10", "--workspace-root", "/ws",
+            ]
+        );
+
+        // Relative config resolves under <ws>/klee/; cadence defaults pinned.
+        let relative = FuzzRunOptions::parse(&json!({"kleeConfig": "ci.json"})).unwrap();
+        let args = campaign_round_args(&fixture_paths(), &relative, "vhdx");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-config" && w[1] == "/ws/klee/ci.json"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-every" && w[1] == "4"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-seconds" && w[1] == "900"), "{args:?}");
+
+        // Absolute config passes through verbatim; snake aliases + explicit
+        // cadence are honored.
+        let explicit = FuzzRunOptions::parse(&json!({
+            "klee_config": "/abs/esc.ci.json", "klee_every": 2, "klee_seconds": 1800,
+        }))
+        .unwrap();
+        let args = campaign_round_args(&fixture_paths(), &explicit, "vhdx");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-config" && w[1] == "/abs/esc.ci.json"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-every" && w[1] == "2"), "{args:?}");
+        assert!(args.windows(2).any(|w| w[0] == "--klee-seconds" && w[1] == "1800"), "{args:?}");
+    }
+
+    #[test]
     fn unprovisionable_engine_is_an_explicit_skip_and_invalid_repo_is_an_error() {
         let temp = tempfile::tempdir().unwrap();
         // No afeRepo → auto-provision; a dead remote plus an uncached rev
@@ -2176,6 +2299,21 @@ mod tests {
             assert_eq!(prepared["afeTarget"], json!("vhdx"), "{tool}");
             assert_eq!(prepared["paths"], json!(["src/cpp/code/vhdx"]), "{tool}");
         }
+
+        // KLEE snake-case aliases canonicalize at the registry boundary and
+        // parse into the options the round args consume.
+        let prepared = registry
+            .prepare_tool_input(
+                "fuzz:run",
+                json!({"shard": "vhdx", "klee_config": "ci.json", "klee_every": 2}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(prepared["kleeConfig"], json!("ci.json"));
+        assert_eq!(prepared["kleeEvery"], json!(2));
+        let options = FuzzRunOptions::parse(&prepared).unwrap();
+        assert_eq!(options.klee_config.as_deref(), Some("ci.json"));
+        assert_eq!(options.klee_lane().map(|lane| (lane.every, lane.seconds)), Some((2, 900)));
     }
 
     /// The planner journey dispatches `{}` for the sweep and differential
