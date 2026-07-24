@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { hasActiveRustModule } from "./rust-source-markers.mjs";
 
 const root = process.cwd();
 function readSource(file) {
@@ -16,6 +17,10 @@ const required = [
   ],
   ["crates/kuzushi-tui/src/app/view_state/activity.rs", "run_projection"],
   ["crates/kuzushi-tui/src/renderer/views/runs/replay_lines.rs", "RunProjectionSource::TypedV1"],
+];
+
+const requiredRustModules = [
+  ["crates/kuzushi-tui/src/app/tests.rs", "run_lifecycle_semantic_equivalence_tests"],
 ];
 
 const forbidden = [
@@ -40,6 +45,11 @@ const failures = [];
 for (const [file, marker] of required) {
   if (!readSource(file).includes(marker)) {
     failures.push(`${file} must retain semantic lifecycle marker ${marker}`);
+  }
+}
+for (const [file, moduleName] of requiredRustModules) {
+  if (!hasActiveRustModule(readSource(file), moduleName)) {
+    failures.push(`${file} must actively register Rust module ${moduleName}`);
   }
 }
 for (const [file, marker, reason] of forbidden) {

@@ -1322,4 +1322,50 @@ mod tests {
             .expect("canceled run remains visible in Jobs");
         assert_eq!(row.status, JobRunStatus::Canceled);
     }
+
+    #[test]
+    fn refused_tool_is_blocked_live_in_replay_and_in_the_run_summary() {
+        use kuzushi_core::run_lifecycle::{present_run, RunItemStatus};
+
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "tool-refused-blocked";
+        let record = ToolRunRecord::new(target.path(), run_id, "tool", "sast:scan");
+        try_record_tool_run_started_with_reproducibility(
+            record,
+            &serde_json::json!({}),
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(target.path().to_path_buf()));
+        app.set_activity(Some(ActivitySession::new(run_id)));
+        app.set_active_tool_run_id_for_test(run_id);
+        app.set_running_tool_for_test("sast:scan");
+        let effects = app.apply_tool_event(ToolEvent::Refused {
+            tool_name: "sast:scan".to_string(),
+            error: "autonomy posture allows work through Review".to_string(),
+        });
+
+        assert_eq!(
+            app.activity().unwrap().tasks["sast:scan"].state,
+            DagTaskState::Blocked
+        );
+
+        crate::app::EffectRuntime::execute(&mut app, effects);
+
+        let summary = load_run_summary(target.path(), run_id).unwrap();
+        assert_eq!(summary.status, "blocked");
+        let read = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id).unwrap();
+        assert_eq!(
+            read.projection.terminal.as_ref().map(|item| item.status),
+            Some(RunItemStatus::Blocked)
+        );
+        assert_eq!(
+            present_run(&read).terminal_status,
+            Some(RunItemStatus::Blocked)
+        );
+    }
 }

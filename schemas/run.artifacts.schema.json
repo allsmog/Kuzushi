@@ -146,28 +146,6 @@
             ],
             "properties": {
               "path": {
-                "pattern": "(^|/)trace\\.jsonl$"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "label": {
-                "const": "runtime trace"
-              },
-              "kind": {
-                "const": "jsonl"
-              }
-            }
-          }
-        },
-        {
-          "if": {
-            "required": [
-              "path"
-            ],
-            "properties": {
-              "path": {
                 "pattern": "(^|/)items\\.jsonl$"
               }
             }

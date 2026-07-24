@@ -122,6 +122,7 @@ fn run_timeline_model_preserves_persisted_terminal_statuses() {
     write_status_run(temp.path(), "r-c-failed", "failed", 3);
     write_status_run(temp.path(), "r-d-skipped", "skipped", 4);
     write_status_run(temp.path(), "r-e-paused", "paused", 5);
+    write_status_run(temp.path(), "r-f-blocked", "blocked", 6);
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
@@ -152,6 +153,13 @@ fn run_timeline_model_preserves_persisted_terminal_statuses() {
         "4",
     );
     assert_status_row(&model, "r-e-paused", "paused", PastRunStatus::Paused, "5");
+    assert_status_row(
+        &model,
+        "r-f-blocked",
+        "blocked",
+        PastRunStatus::Blocked,
+        "6",
+    );
 }
 
 #[test]

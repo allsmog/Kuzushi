@@ -203,6 +203,10 @@ pub(super) fn phase_result_prompt(
             "{} returned partial evidence. Review it and choose a recovery action.",
             phase.label()
         ),
+        Blocked => format!(
+            "{} was blocked before it could run. Open the run, adjust the autonomy posture or input, then try again.",
+            phase.label()
+        ),
         Failed => format!("{} failed. Open the run or try again.", phase.label()),
         Canceled => format!("{} was canceled. Open the run or try again.", phase.label()),
     }

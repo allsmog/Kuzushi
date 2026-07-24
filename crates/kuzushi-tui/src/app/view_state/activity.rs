@@ -185,7 +185,7 @@ pub struct ActivitySession {
     tool_task_aliases: BTreeMap<String, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     last_run_item_at: Option<Instant>,
-    open_model_call_started_at: Option<Instant>,
+    open_model_call_starts: BTreeMap<kuzushi_core::run_lifecycle::RunCallId, Instant>,
     runtime_cost: RuntimeCostReport,
     cost_accounting_error: Option<String>,
     durable_run_item_seq: u64,
@@ -194,6 +194,27 @@ pub struct ActivitySession {
     run_item_derivative_tracking: bool,
     run_item_derivative_seq: u64,
     run_item_derivative_failure: Option<kuzushi_core::run_lifecycle::RunItemDeliveryFault>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ModelCallTimingEvent {
+    Started(kuzushi_core::run_lifecycle::RunCallId),
+    Finished(kuzushi_core::run_lifecycle::RunCallId),
+}
+
+fn model_call_timing_event(
+    item: &kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
+) -> Option<ModelCallTimingEvent> {
+    let call_id = item.call_id?;
+    match &item.item {
+        kuzushi_core::run_lifecycle::RunItemV1::ModelCallStarted { .. } => {
+            Some(ModelCallTimingEvent::Started(call_id))
+        }
+        kuzushi_core::run_lifecycle::RunItemV1::ModelCallFinished { .. } => {
+            Some(ModelCallTimingEvent::Finished(call_id))
+        }
+        _ => None,
+    }
 }
 
 fn derivative_range_fault(
@@ -352,7 +373,7 @@ impl ActivitySession {
             tool_task_aliases: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             last_run_item_at: None,
-            open_model_call_started_at: None,
+            open_model_call_starts: BTreeMap::new(),
             runtime_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
             cost_accounting_error: None,
             durable_run_item_seq: 0,
@@ -585,30 +606,39 @@ impl ActivitySession {
         &mut self,
         item: kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
     ) -> anyhow::Result<()> {
-        let observed_at = Instant::now();
-        let starts_model_call = matches!(
-            &item.item,
-            kuzushi_core::run_lifecycle::RunItemV1::ModelCallStarted { .. }
-        );
+        self.apply_run_item_observed_at(item, Instant::now())
+    }
+
+    fn apply_run_item_observed_at(
+        &mut self,
+        item: kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
+        observed_at: Instant,
+    ) -> anyhow::Result<()> {
+        let timing_event = model_call_timing_event(&item);
         self.durable_run_item_seq = self.durable_run_item_seq.max(item.seq);
         let delta = self.run_projection.apply_committed(item)?;
-        if starts_model_call {
-            self.open_model_call_started_at.get_or_insert(observed_at);
-        }
-        if !self.has_running_model_call() {
-            self.open_model_call_started_at = None;
-        }
+        self.apply_model_call_timing(timing_event, observed_at);
         self.last_run_item_at = Some(observed_at);
         self.apply_projection_delta(&delta);
         Ok(())
     }
 
-    fn has_running_model_call(&self) -> bool {
-        use kuzushi_core::run_lifecycle::{CallKind, RunItemStatus};
-        self.run_projection
-            .calls
-            .values()
-            .any(|call| call.kind == CallKind::Model && call.status == RunItemStatus::Running)
+    fn apply_model_call_timing(
+        &mut self,
+        event: Option<ModelCallTimingEvent>,
+        observed_at: Instant,
+    ) {
+        match event {
+            Some(ModelCallTimingEvent::Started(call_id)) => {
+                self.open_model_call_starts
+                    .entry(call_id)
+                    .or_insert(observed_at);
+            }
+            Some(ModelCallTimingEvent::Finished(call_id)) => {
+                self.open_model_call_starts.remove(&call_id);
+            }
+            None => {}
+        }
     }
 
     pub(crate) fn event_count(&self) -> usize {
@@ -620,8 +650,19 @@ impl ActivitySession {
     }
 
     pub(crate) fn open_model_call_age(&self, now: Instant) -> Option<std::time::Duration> {
-        self.open_model_call_started_at
-            .and_then(|started_at| now.checked_duration_since(started_at))
+        self.open_model_call_starts
+            .values()
+            .min()
+            .and_then(|started_at| now.checked_duration_since(*started_at))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn apply_run_item_at_for_test(
+        &mut self,
+        item: kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
+        observed_at: Instant,
+    ) -> anyhow::Result<()> {
+        self.apply_run_item_observed_at(item, observed_at)
     }
 
     #[cfg(test)]

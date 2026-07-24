@@ -176,11 +176,17 @@ const checks = [
   {
     label: "optional SARIF report artifact regression",
     file: "crates/kuzushi-core/src/run_artifacts/tests.rs",
-    artifacts: optionalRunArtifacts,
+    artifacts: ["report.sarif"],
     functions: [
       "tool_run_complete_keeps_domain_snapshots_inside_result_json",
       "tool_run_complete_rejects_snake_case_report_artifacts",
     ],
+  },
+  {
+    label: "optional tool stage receipt artifact regression",
+    file: "crates/kuzushi-core/src/run_artifacts/tool_stage.rs",
+    artifacts: ["stages.jsonl", "tool stage receipts", "jsonl"],
+    functions: ["stage_receipts_append_and_load_in_order"],
   },
   {
     label: "tool input artifact regression",

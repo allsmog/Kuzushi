@@ -94,6 +94,9 @@ fn plain_render_mode_selects_specialized_plain_views() {
     app.set_shell_view(ShellView::Help);
     assert_eq!(plain_render_mode(&app), PlainRenderMode::Help);
 
+    app.set_shell_view(ShellView::Activity);
+    assert_eq!(plain_render_mode(&app), PlainRenderMode::Activity);
+
     app.set_shell_view(ShellView::ProjectModel);
     assert_eq!(plain_render_mode(&app), PlainRenderMode::ProjectModel);
 

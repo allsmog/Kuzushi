@@ -115,11 +115,25 @@ fn planner_questions_continue_the_same_turn_instead_of_serializing_ask_changes()
     assert_eq!(request.tools[0].name, REQUEST_USER_INPUT_TOOL);
 }
 
+fn operator_question_observation(
+    target: &std::path::Path,
+    run_id: &str,
+) -> kuzushi_core::run_lifecycle::RunObservationHandle {
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, run_id)
+        .unwrap()
+        .start_root_task("Answer the operator request")
+        .unwrap();
+    mark_root_task_running(&observation).unwrap();
+    observation
+}
+
 #[test]
-fn persisted_freeform_resolution_records_presence_but_not_raw_text() {
+fn persisted_freeform_resolution_uses_typed_receipts_without_raw_text() {
     let target = tempfile::tempdir().unwrap();
     let run_id = "agent-private-answer";
     let request = question_request(run_id);
+    let observation = operator_question_observation(target.path(), run_id);
+    let observed = persist_operator_questions(&observation, &request).unwrap();
     let secret_answer = "scan the unreleased payment adapter";
     let resolution = OperatorQuestionResolution {
         request_id: request.request_id.clone(),
@@ -130,23 +144,30 @@ fn persisted_freeform_resolution_records_presence_but_not_raw_text() {
         }],
     };
 
-    persist_operator_resolution(target.path(), run_id, &request, &resolution).unwrap();
+    persist_operator_decisions(&observation, &observed, &resolution).unwrap();
 
-    let read = kuzushi_core::run_artifacts::load_run_events(target.path(), run_id).unwrap();
-    assert_eq!(read.malformed_lines, 0);
-    let interaction = read.events[0].interaction.as_ref().unwrap();
-    assert_eq!(interaction.request_id, "question-private");
-    assert_eq!(interaction.question_id, "scope");
-    assert_eq!(interaction.predefined_label, None);
-    assert_eq!(interaction.resolution, "submitted");
-    assert!(interaction.freeform_supplied);
-    assert!(!serde_json::to_string(&read.events)
+    let projection = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id)
         .unwrap()
-        .contains(secret_answer));
+        .projection;
+    assert!(projection.timeline.iter().any(|envelope| matches!(
+        envelope.item,
+        kuzushi_core::run_lifecycle::RunItemV1::OperatorQuestion { .. }
+    )));
+    assert!(projection.timeline.iter().any(|envelope| matches!(
+        envelope.item,
+        kuzushi_core::run_lifecycle::RunItemV1::OperatorDecision {
+            decision: kuzushi_core::run_lifecycle::OperatorDecisionValue::ProvidedFreeform,
+            ..
+        }
+    )));
+    let items =
+        std::fs::read_to_string(kuzushi_core::run_dir(target.path(), run_id).join("items.jsonl"))
+            .unwrap();
+    assert!(!items.contains(secret_answer));
 }
 
 #[test]
-fn credential_route_persists_only_the_route_and_never_an_answer() {
+fn credential_route_persists_a_typed_deferred_decision() {
     let target = tempfile::tempdir().unwrap();
     let run_id = "agent-credential-route";
     let mut request = question_request(run_id);
@@ -154,14 +175,21 @@ fn credential_route_persists_only_the_route_and_never_an_answer() {
     request.questions[0].header = "Auth".to_string();
     request.questions[0].prompt = "Paste the provider API key".to_string();
     let resolution = OperatorQuestionResolution::routed_to_setup(request.request_id.clone());
+    let observation = operator_question_observation(target.path(), run_id);
+    let observed = persist_operator_questions(&observation, &request).unwrap();
 
-    persist_operator_resolution(target.path(), run_id, &request, &resolution).unwrap();
+    persist_operator_decisions(&observation, &observed, &resolution).unwrap();
 
-    let read = kuzushi_core::run_artifacts::load_run_events(target.path(), run_id).unwrap();
-    let interaction = read.events[0].interaction.as_ref().unwrap();
-    assert_eq!(interaction.resolution, "routed_to_setup");
-    assert_eq!(interaction.predefined_label, None);
-    assert!(!interaction.freeform_supplied);
+    let projection = kuzushi_core::run_lifecycle::load_run_projection(target.path(), run_id)
+        .unwrap()
+        .projection;
+    assert!(projection.timeline.iter().any(|envelope| matches!(
+        envelope.item,
+        kuzushi_core::run_lifecycle::RunItemV1::OperatorDecision {
+            decision: kuzushi_core::run_lifecycle::OperatorDecisionValue::Deferred,
+            ..
+        }
+    )));
     assert!(resolution.answers.is_empty());
 }
 

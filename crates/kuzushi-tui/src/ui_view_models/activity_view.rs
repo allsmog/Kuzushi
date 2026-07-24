@@ -64,9 +64,9 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
         && session.subsystem_aggregate.hidden_task_states.is_empty()
 }
 
-/// The Activity run's terminal failure, if any. Sourced from the live
-/// activity card (set by both scan refusals and tool failures) and only once
-/// nothing is still running, so an in-flight session never reads as failed.
+/// The Activity run's terminal outcome, if any. Typed lifecycle state is
+/// authoritative; persisted summaries and legacy live cards only fill gaps.
+/// Without a typed terminal item, nothing is terminal while work is in flight.
 /// Remaining seconds for the active DAG task, ONLY when duration history for
 /// that tool exists (same estimator as the ambient footer chip). No history,
 /// no ETA — never a fabricated countdown.
@@ -84,12 +84,35 @@ fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<Act
     if session.operator_question.is_some() {
         return Some(ActivityRunOutcome::WaitingForOperator);
     }
+    if let Some(outcome) = typed_activity_run_outcome(session) {
+        return Some(outcome);
+    }
     if activity_session_still_running(app, session) {
         return None;
     }
     activity_run_summary(app, session)
         .and_then(activity_run_summary_outcome)
         .or_else(|| live_activity_run_outcome(app))
+}
+
+fn typed_activity_run_outcome(session: &ActivitySession) -> Option<ActivityRunOutcome> {
+    let presentation = kuzushi_core::run_lifecycle::present_projection_with_hydration_and_health(
+        &session.run_projection,
+        kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1,
+        &session.run_presentation_hydration,
+        session.effective_run_lifecycle_health(),
+    );
+    let status = presentation.terminal_status?;
+    let reason = session
+        .run_projection
+        .terminal
+        .as_ref()
+        .map(|terminal| terminal.summary.as_str().to_string());
+    Some(ActivityRunOutcome::Terminal {
+        status: status.label().to_string(),
+        findings: None,
+        reason,
+    })
 }
 
 fn live_activity_run_outcome(app: &ShellApp) -> Option<ActivityRunOutcome> {
@@ -603,6 +626,59 @@ mod tests {
             "{}",
             model.header().summary_title
         );
+    }
+
+    #[test]
+    fn typed_blocked_outcome_overrides_a_cached_completed_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let run_id = "run-authoritative-blocked";
+        kuzushi_core::write_run_summary(
+            workspace.root(),
+            &RunSummary::running(run_id, "tool", None, workspace.root().display().to_string())
+                .complete(),
+        )
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+        app.set_activity(Some(blocked_terminal_session(run_id)));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+        let header = model.header().summary_title;
+        let heartbeat = model.heartbeat(Instant::now()).text;
+        assert!(header.contains("▣ run blocked"), "{header}");
+        assert!(!header.contains("✓ run completed"), "{header}");
+        assert!(heartbeat.contains("▣ BLOCKED"), "{heartbeat}");
+        assert!(!heartbeat.contains("✓ COMPLETE"), "{heartbeat}");
+    }
+
+    fn blocked_terminal_session(run_id: &str) -> ActivitySession {
+        use kuzushi_core::run_lifecycle::{
+            RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemStatus, RunItemV1, SafeText,
+            WorkflowContinuation,
+        };
+
+        let mut session = ActivitySession::new(run_id);
+        let item = RunItemEnvelopeV1::new(
+            1,
+            RunId::parse(run_id).unwrap(),
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TerminalOutcome {
+                status: RunItemStatus::Blocked,
+                summary: SafeText::operator_visible("authorization required"),
+                cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("await authorization"),
+                },
+            },
+            None,
+        )
+        .unwrap();
+        session.apply_run_item(item).unwrap();
+        session
     }
 
     #[test]

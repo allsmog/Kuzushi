@@ -511,17 +511,17 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/v3/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
-| `.kuzushi/v3/latest` | latest completed, partial, failed, skipped, or running run id |
+| `.kuzushi/v3/latest` | latest run id, including blocked, canceled, or interrupted terminal runs |
 | `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
-| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked run lifecycle for new runs; live Run Focus, replay, plain output, and APIs reduce this stream |
-| `.kuzushi/v3/runs/<runId>/events.jsonl` | compatibility projection of typed lifecycle items during the migration window; authoritative only for legacy runs |
-| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed plan, task, call, interaction, diagnostic, and terminal lifecycle |
+| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked plan, task, call, interaction, diagnostic, and terminal lifecycle; live Run Focus, replay, plain output, and APIs reduce this stream |
+| `.kuzushi/v3/runs/<runId>/events.jsonl` | non-authoritative compatibility diagnostics such as run-start and recovered-interruption summaries; replay never reduces this stream |
 | `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
 | `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/result.json` | tool result envelope for direct tool runs |
 | `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif` and `data.reportSarif` output fields |
+| `.kuzushi/v3/runs/<runId>/stages.jsonl` | optional tool-generic stage receipts written by multi-stage tools; absent when a tool emits no stage receipts |
 | `.kuzushi/v3/runs/<runId>/<declared artifact>` | producer-declared sidecar artifacts such as context, attack-surface, findings, proof, or module-owned reports; only present when explicitly declared in `artifacts.json` |
 | `.kuzushi/v3/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
 | `.kuzushi/v3/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
@@ -531,20 +531,20 @@ not silently succeed and they do not substitute a different model.
 
 Machine-readable run schemas live under `schemas/run.*.schema.json` and ship
 through the npm subpath `kuzushi/schemas/*`. They document the canonical
-camelCase run metadata/event/failure fields such as `runId` and
-`startedAtUnix`, plus canonical snake_case trace fields. Obsolete compatibility
-aliases are rejected instead of normalized.
+camelCase run metadata, event, failure, artifact, and typed lifecycle fields
+such as `runId`, `startedAtUnix`, `schemaVersion`, and `item`. Obsolete
+compatibility aliases are rejected instead of normalized.
 
-`items.jsonl` does not yet have a published JSON Schema. Until it does, consume
-it through `kuzushi runs replay --json` or the `kuzushi_core::run_lifecycle`
-Rust types rather than parsing the stream directly.
+`items.jsonl` is published as `schemas/run.items.schema.json`. Prefer
+`kuzushi runs replay --json` or the `kuzushi_core::run_lifecycle` Rust types
+when consuming it so hash-chain health and reducer semantics are preserved.
 
-Typed run lifecycle and phase attempts are in a compatibility window: new runs
-write authoritative `items.jsonl` while dual-writing the compatibility
-terminal storage `events.jsonl` and authoritative `items.jsonl`, and new phase attempts write
-`phase-attempts.v2.jsonl` alongside the unchanged workflow-v1 record. Readers
-prefer the typed and v2 data and disclose lossy fallback for legacy runs that
-predate it. Nothing is rewritten in place. See
+Typed run lifecycle is authoritative for new runs. `events.jsonl` remains a
+non-authoritative compatibility diagnostic and is never used to reconstruct
+replay state. New phase attempts write `phase-attempts.v2.jsonl` alongside the
+same workflow-v1 record shape during that format's compatibility window; both
+ledgers preserve the additive `blocked` outcome for policy refusals.
+Pre-cutover artifacts are left unchanged rather than rewritten in place. See
 [RELEASING.md](./RELEASING.md) for the migration plan.
 
 Current implementation boundaries are documented in

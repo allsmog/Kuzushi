@@ -19,11 +19,17 @@ pub(crate) fn load_run_lifecycle_audit(target: &Path, run_id: &str) -> RunLifecy
         .into_iter()
         .filter_map(|envelope| audit_call(envelope, &fingerprints))
         .collect();
-    RunLifecycleAudit { llm_calls, malformed_lines }
+    RunLifecycleAudit {
+        llm_calls,
+        malformed_lines,
+    }
 }
 
 fn empty_audit() -> RunLifecycleAudit {
-    RunLifecycleAudit { llm_calls: Vec::new(), malformed_lines: 0 }
+    RunLifecycleAudit {
+        llm_calls: Vec::new(),
+        malformed_lines: 0,
+    }
 }
 
 fn model_fingerprints(
@@ -32,9 +38,13 @@ fn model_fingerprints(
     items
         .iter()
         .filter_map(|envelope| match (&envelope.call_id, &envelope.item) {
-            (Some(call_id), RunItemV1::ModelCallStarted { operation_fingerprint, .. }) => {
-                Some((*call_id, operation_fingerprint.as_str().to_string()))
-            }
+            (
+                Some(call_id),
+                RunItemV1::ModelCallStarted {
+                    operation_fingerprint,
+                    ..
+                },
+            ) => Some((*call_id, operation_fingerprint.as_str().to_string())),
             _ => None,
         })
         .collect()
@@ -47,16 +57,16 @@ fn audit_call(
     let RunItemV1::ModelCallFinished {
         provider,
         model,
-        status,
         latency_ms,
         cost,
         ..
-    } = envelope.item else {
+    } = envelope.item
+    else {
         return None;
     };
     Some(RunLlmCallAudit {
         n: envelope.seq as usize,
-        kind: status.label().to_string(),
+        kind: "llm".to_string(),
         verb: None,
         model: model.to_string(),
         provider: provider.to_string(),

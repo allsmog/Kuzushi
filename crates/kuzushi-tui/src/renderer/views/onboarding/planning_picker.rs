@@ -826,7 +826,7 @@ fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) 
 }
 
 /// Honest ledger note: a resumable failed attempt continues instead of
-/// restarting; an already-completed action is disclosed as done this pass.
+/// restarting; blocked and completed attempts remain distinct.
 fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
     use crate::app::LastAttempt;
     match row.last_attempt.as_ref()? {
@@ -839,6 +839,7 @@ fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
             resume_from: None,
         } => Some("continue from checkpoint".to_string()),
         LastAttempt::Failed { .. } => Some("failed last pass".to_string()),
+        LastAttempt::Blocked => Some("blocked last pass".to_string()),
         LastAttempt::Completed if matches!(row.artifact_state, PlanningArtifactState::Action) => {
             Some("done this pass".to_string())
         }
@@ -1508,6 +1509,19 @@ mod tests {
         );
         assert_eq!(model_readiness_message(true, true, true), None);
         assert_eq!(model_readiness_message(false, true, false), None);
+    }
+
+    #[test]
+    fn blocked_last_attempt_is_not_presented_as_completed() {
+        let target = tempfile::tempdir().unwrap();
+        let mut row =
+            PlanningTaskRow::for_task(crate::app::PlanningTaskId::ScanAgenticSast, target.path());
+        row.last_attempt = Some(crate::app::LastAttempt::Blocked);
+
+        assert_eq!(
+            last_attempt_note(&row).as_deref(),
+            Some("blocked last pass")
+        );
     }
 
     #[test]

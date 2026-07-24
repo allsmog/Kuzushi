@@ -3,7 +3,9 @@ use super::canonical_run_markers::{write_empty_failures_marker, write_missing_re
 use super::ensure_run_dir;
 use super::write_run_artifact_text;
 use super::RunArtifact;
-use crate::artifact_contract::{canonical_run_artifact_spec, optional_run_artifact_spec, CanonicalRunArtifactSpec};
+use crate::artifact_contract::{
+    canonical_run_artifact_spec, optional_run_artifact_spec, CanonicalRunArtifactSpec,
+};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;

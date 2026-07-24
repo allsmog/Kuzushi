@@ -6,6 +6,9 @@ fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
         .workbench()
         .focus_for(crate::ui_view_models::active_workbench_page(app))
 }
+#[path = "../ui_view_models/tests/run_lifecycle_semantic_equivalence.rs"]
+mod run_lifecycle_semantic_equivalence_tests;
+
 use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
 use super::artifacts::{
     append_run_status_event, record_agent_run_started, write_run_failure_handoff, write_run_summary,

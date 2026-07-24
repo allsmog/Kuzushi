@@ -87,8 +87,10 @@ pub(super) fn validate_disposition(
             *acknowledged_partial,
             "partial attempt must be explicitly acknowledged before selection"
         ),
-        PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled => {
-            anyhow::bail!("failed or canceled phase attempt cannot be selected")
+        PhaseAttemptOutcome::Blocked
+        | PhaseAttemptOutcome::Failed
+        | PhaseAttemptOutcome::Canceled => {
+            anyhow::bail!("blocked, failed, or canceled phase attempt cannot be selected")
         }
     }
     Ok(())

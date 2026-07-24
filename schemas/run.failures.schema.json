@@ -65,6 +65,7 @@
       "enum": [
         "running",
         "completed",
+        "blocked",
         "failed",
         "canceled",
         "interrupted",

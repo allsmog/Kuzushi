@@ -143,7 +143,7 @@ fn run_root_shell_tool_loop(
         &sink,
         &cancel,
     )?;
-    execute_root_shell_tool_loop(prepared, &run_id, &cwd, &sink, &cancel)
+    execute_root_shell_tool_loop(prepared, &run_id, &sink, &cancel)
 }
 
 struct PreparedRootShellToolLoop {
@@ -221,7 +221,6 @@ fn prepare_root_shell_tool_loop(
 fn execute_root_shell_tool_loop(
     prepared: PreparedRootShellToolLoop,
     run_id: &str,
-    cwd: &std::path::Path,
     sink: &JobEventSink,
     cancel: &ScanCancellation,
 ) -> CostedWorkerResult<String> {
@@ -236,7 +235,6 @@ fn execute_root_shell_tool_loop(
         handle_operator_question_call(
             call,
             run_id,
-            cwd,
             sink,
             cancel,
             &observation,
@@ -495,7 +493,6 @@ fn root_shell_agent_request(
 fn handle_operator_question_call(
     call: &kuzushi_core::runtime::ToolCall,
     run_id: &str,
-    target: &std::path::Path,
     sink: &JobEventSink,
     cancel: &ScanCancellation,
     observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
@@ -507,18 +504,10 @@ fn handle_operator_question_call(
     let request = OperatorQuestionRequest::from_tool_input(run_id, call.input.clone())?;
     let observed_questions = persist_operator_questions(observation, &request)?;
     if request.requires_credential_route() {
-        return route_credential_question(
-            call,
-            target,
-            sink,
-            observation,
-            &observed_questions,
-            &request,
-        );
+        return route_credential_question(call, sink, observation, &observed_questions, &request);
     }
     complete_operator_question(
         call,
-        target,
         run_id,
         sink,
         cancel,
@@ -544,7 +533,6 @@ fn question_call_preflight(
 
 fn complete_operator_question(
     call: &kuzushi_core::runtime::ToolCall,
-    target: &std::path::Path,
     run_id: &str,
     sink: &JobEventSink,
     cancel: &ScanCancellation,
@@ -563,12 +551,6 @@ fn complete_operator_question(
         }
     };
     persist_operator_decisions(observation, observed_questions, &resolution)?;
-    if let Err(error) = persist_operator_resolution(target, run_id, request, &resolution) {
-        sink.send(ShellEvent::OperatorQuestionCompleted(
-            OperatorQuestionCompleted::failed(request),
-        ));
-        return Err(error);
-    }
     anyhow::ensure!(
         sink.send(ShellEvent::OperatorQuestionCompleted(
             OperatorQuestionCompleted::from_resolution(run_id, &resolution)
@@ -584,7 +566,6 @@ fn complete_operator_question(
 
 fn route_credential_question(
     call: &kuzushi_core::runtime::ToolCall,
-    target: &std::path::Path,
     sink: &JobEventSink,
     observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
     observed_questions: &[ObservedOperatorQuestion],
@@ -592,7 +573,6 @@ fn route_credential_question(
 ) -> anyhow::Result<kuzushi_core::runtime::ToolResult> {
     let resolution = OperatorQuestionResolution::routed_to_setup(request.request_id.clone());
     persist_operator_decisions(observation, observed_questions, &resolution)?;
-    persist_operator_resolution(target, &request.run_id, request, &resolution)?;
     anyhow::ensure!(
         sink.send(ShellEvent::OperatorQuestionCompleted(
             OperatorQuestionCompleted::from_resolution(&request.run_id, &resolution),
@@ -890,63 +870,6 @@ fn question_control_matches(
     answer_generation: WorkerGeneration,
 ) -> bool {
     request.request_id == request_id && request.run_id == run_id && generation == answer_generation
-}
-
-fn persist_operator_resolution(
-    target: &std::path::Path,
-    run_id: &str,
-    request: &OperatorQuestionRequest,
-    resolution: &OperatorQuestionResolution,
-) -> anyhow::Result<()> {
-    let resolution_label = operator_resolution_label(resolution.kind);
-    for question in &request.questions {
-        let answer = resolution
-            .answers
-            .iter()
-            .find(|answer| answer.question_id() == question.id);
-        let audit = operator_interaction_audit(request, question, answer, resolution_label);
-        let event = kuzushi_core::run_artifacts::RunEvent::new(
-            0,
-            "interaction",
-            resolution_label,
-            "operator question resolved",
-        )
-        .with_tool(REQUEST_USER_INPUT_TOOL)
-        .with_interaction(audit);
-        kuzushi_core::run_artifacts::append_run_event(target, run_id, &event)?;
-    }
-    Ok(())
-}
-
-fn operator_resolution_label(kind: OperatorQuestionResolutionKind) -> &'static str {
-    match kind {
-        OperatorQuestionResolutionKind::Submitted => "submitted",
-        OperatorQuestionResolutionKind::Canceled => "canceled",
-        OperatorQuestionResolutionKind::AutoResolved => "auto_resolved",
-        OperatorQuestionResolutionKind::RoutedToSetup => "routed_to_setup",
-    }
-}
-
-fn operator_interaction_audit(
-    request: &OperatorQuestionRequest,
-    question: &OperatorQuestion,
-    answer: Option<&OperatorQuestionAnswer>,
-    resolution: &str,
-) -> kuzushi_core::run_artifacts::RunInteractionAudit {
-    kuzushi_core::run_artifacts::RunInteractionAudit {
-        request_id: request.request_id.clone(),
-        question_id: question.id.clone(),
-        predefined_label: answer
-            .and_then(OperatorQuestionAnswer::predefined_label)
-            .map(str::to_string),
-        resolution: resolution.to_string(),
-        freeform_supplied: answer.is_some_and(non_empty_freeform_answer),
-    }
-}
-
-fn non_empty_freeform_answer(answer: &OperatorQuestionAnswer) -> bool {
-    answer.is_freeform()
-        && matches!(answer, OperatorQuestionAnswer::Freeform { text, .. } if !text.trim().is_empty())
 }
 
 fn question_tool_error(

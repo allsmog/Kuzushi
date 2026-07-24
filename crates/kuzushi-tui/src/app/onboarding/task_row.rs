@@ -35,6 +35,7 @@ pub struct PlanningTaskRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LastAttempt {
     Completed,
+    Blocked,
     Failed {
         /// The tool declares continuation and left resumable state behind —
         /// re-running the same task resumes instead of restarting.
@@ -152,7 +153,7 @@ fn newest_terminal_runs(target: &Path) -> BTreeMap<String, (String, String)> {
 fn terminal_run_status(status: &str) -> bool {
     matches!(
         status,
-        "completed" | "failed" | "partial" | "interrupted" | "canceled"
+        "completed" | "blocked" | "failed" | "partial" | "interrupted" | "canceled"
     )
 }
 
@@ -164,6 +165,7 @@ fn last_attempt(
 ) -> Option<LastAttempt> {
     match status {
         "completed" => Some(LastAttempt::Completed),
+        "blocked" => Some(LastAttempt::Blocked),
         "failed" | "partial" | "interrupted" => Some(failed_attempt(target, row, run_id)),
         _ => None,
     }
@@ -336,5 +338,34 @@ mod tests {
         let row = PlanningTaskRow::for_task(PlanningTaskId::HuntUseAfterFree, tmp.path());
         assert!(!row.cli_available);
         assert!(row.cost_hint().contains("requires compile_commands.json"));
+    }
+
+    #[test]
+    fn newest_blocked_attempt_supersedes_an_older_completion() {
+        let target = tempfile::tempdir().unwrap();
+        let mut row = PlanningTaskRow::for_task(PlanningTaskId::ScanAgenticSast, target.path());
+        let tool_name = row.tool_name.to_string();
+        let mut completed = kuzushi_core::RunSummary::running(
+            "tool-100-completed",
+            "tool",
+            Some(tool_name.clone()),
+            target.path().to_string_lossy(),
+        )
+        .complete();
+        completed.started_at_unix = 100;
+        kuzushi_core::write_run_summary(target.path(), &completed).unwrap();
+        let mut blocked = kuzushi_core::RunSummary::running(
+            "tool-200-blocked",
+            "tool",
+            Some(tool_name),
+            target.path().to_string_lossy(),
+        )
+        .blocked("autonomy posture refused the tool");
+        blocked.started_at_unix = 200;
+        kuzushi_core::write_run_summary(target.path(), &blocked).unwrap();
+
+        overlay_last_attempts(std::slice::from_mut(&mut row), target.path());
+
+        assert_eq!(row.last_attempt, Some(LastAttempt::Blocked));
     }
 }

@@ -90,6 +90,13 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[0].stage, "research");
         assert_eq!(loaded[1].stage, "coverage");
+
+        let manifest = crate::run_artifacts::load_run_artifacts(temp.path(), "run-stages").unwrap();
+        assert!(manifest.iter().any(|artifact| {
+            artifact.path.ends_with("stages.jsonl")
+                && artifact.label == "tool stage receipts"
+                && artifact.kind == "jsonl"
+        }));
     }
 
     #[test]

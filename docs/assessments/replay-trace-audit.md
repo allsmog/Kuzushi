@@ -18,13 +18,14 @@ past runs from disk alone?**
 | ----------------- | --------------------------------------- | -------------------- | ---------- |
 | `run.json`        | Rust run artifact substrate             | scan/tool run start and completion | **yes** |
 | `items.jsonl`     | Rust run-lifecycle observation writer   | typed, hash-linked semantic lifecycle | new typed runs; authoritative for replay |
-| `events.jsonl`    | typed terminal storage derivative       | target-wide terminal run facts | **yes** |
+| `events.jsonl`    | Rust compatibility event writer         | non-authoritative run-start and recovery diagnostics | **yes** |
 | `input.json`      | Rust tool-run recorder                  | canonical prepared input | dispatched tools, including scan |
 | `result.json`     | Rust tool-run recorder                  | normalized result envelope | dispatched tools, including scan |
 | `scan-input.json`, `triage.jsonl`, `verify.jsonl`, `patch.jsonl` | Rust SAST umbrella | SAST pipeline lifecycle | `sast:scan` |
 | `failures.json`   | Rust failure handoff writer             | run start / failed tool output | **yes** |
 | `report.md`       | report producer or placeholder writer   | run start / report output | **yes** |
 | `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
+| `stages.jsonl`    | Rust tool-stage receipt writer          | each finished multi-stage tool stage | optional |
 | `artifacts.json`  | Rust artifact manifest writer           | artifact registration | **yes** |
 | producer-declared sidecars | individual tool producers | explicit artifact declaration | optional |
 

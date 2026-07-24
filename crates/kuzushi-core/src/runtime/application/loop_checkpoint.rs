@@ -157,7 +157,7 @@ mod tests {
 
     fn request(root: &Path, prompt: &str) -> AgentToolLoopRequest {
         AgentToolLoopRequest {
-            model: "anthropic:claude-test".to_string(),
+            model: "test:model".to_string(),
             cwd: root.to_path_buf(),
             system_prompt: "system".to_string(),
             prompt: prompt.to_string(),

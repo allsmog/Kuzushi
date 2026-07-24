@@ -26,7 +26,9 @@ fn completed_stages_survive_into_the_next_identical_run() {
 
     let first = open_handle(temp.path(), "run-1");
     assert!(first.resumed_from().is_none());
-    first.stage("research").complete(vec!["research.json".into()]);
+    first
+        .stage("research")
+        .complete(vec!["research.json".into()]);
     first.stage("coverage");
     drop(first);
 
@@ -48,7 +50,9 @@ fn completed_stages_survive_into_the_next_identical_run() {
 fn missing_stage_artifact_forces_the_stage_to_rerun() {
     let temp = workspace();
     let handle = open_handle(temp.path(), "run-1");
-    handle.stage("research").complete(vec!["research.json".into()]);
+    handle
+        .stage("research")
+        .complete(vec!["research.json".into()]);
 
     assert!(
         handle.completed_stage("research").is_none(),

@@ -37,7 +37,7 @@
     "build:rust": "cargo build --workspace",
     "build:native": "node scripts/build-native-runtime.mjs",
     "prepack": "pnpm build:native",
-    "test": "node --test scripts/setup-contract.test.mjs scripts/bump-release-version.test.mjs",
+    "test": "node --test scripts/setup-contract.test.mjs scripts/bump-release-version.test.mjs scripts/rust-source-markers.test.mjs",
     "test:rust": "cargo test --workspace",
     "test:e2e": "bash tests/e2e/run-smoke.sh",
     "quality:crap-risk": "node --test scripts/crap-risk-test-mapping.test.mjs scripts/crap-risk-gate.test.mjs && node scripts/crap-risk-gate.mjs",

@@ -44,14 +44,20 @@ Every run should converge on these files:
 | --- | --- |
 | `run.json` | Run metadata: canonical `runId`, kind, tool, target, status, `startedAtUnix`/completed time, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
 | `items.jsonl` | Authoritative versioned semantic run lifecycle with stable item/task/call/attempt identities, monotonic sequence, and a hash chain. |
-| `events.jsonl` | Target-storage derivative for terminal run facts. It is not an execution-progress source. |
-| `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/failed runs. |
+| `events.jsonl` | Non-authoritative compatibility diagnostics such as run-start and recovered-interruption summaries; never a replay source. |
+| `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/blocked/failed runs. |
 | `report.md` | Human-readable report for the run. |
 | `artifacts.json` | Manifest of written artifacts with label/path/kind and CAS object references when available. |
 
 Every dispatched tool run writes the canonical prepared input to `input.json`
 and its normalized result envelope to `result.json`. This includes the
 `sast:scan` umbrella and the APK scan path, not only `kuzushi run`.
+
+Multi-stage tools may additionally append tool-generic stage receipts to
+optional `stages.jsonl`. The writer registers that file in `artifacts.json`
+when the first receipt is emitted; tools that emit no receipts do not receive
+an empty placeholder. Scan-specific `phase-stages.jsonl` remains a separate
+SAST pipeline artifact.
 
 The SAST umbrella additionally owns four declared pipeline artifacts:
 
@@ -62,11 +68,13 @@ The SAST umbrella additionally owns four declared pipeline artifacts:
 | `verify.jsonl` | Verification-stage records only. |
 | `patch.jsonl` | Patch-stage records only; patch records are never multiplexed into `verify.jsonl`. |
 
-`report.sarif` is optional. A producer may return it in `reportSarif` or
-`data.reportSarif`; `kuzushi scan --sarif <path>` instead exports the findings
-observed by that scan's parent/child run-id union and excludes older workspace
-findings. Any other JSON file under the run directory is a producer-declared
-artifact, not part of the canonical bundle.
+`report.sarif` and `stages.jsonl` are optional. A producer may return SARIF in
+`reportSarif` or `data.reportSarif`; `kuzushi scan --sarif <path>` instead
+exports the findings observed by that scan's parent/child run-id union and
+excludes older workspace findings. `stages.jsonl` is written through the
+tool-stage receipt writer rather than returned in the result envelope. Any
+other JSON file under the run directory is a producer-declared artifact, not
+part of the canonical bundle.
 
 The target should also maintain:
 
@@ -99,6 +107,7 @@ scan, shell, run, Jobs, Timeline, replay, and reports:
 
 - `running` and `paused` are non-terminal;
 - `completed`, `partial`, and `skipped` are normal terminal projections;
+- `blocked` means policy or validation refused the operation before execution;
 - `failed` means execution genuinely failed;
 - `canceled` means an operator or budget policy requested cancellation and
   cleanup reached a terminal result;
@@ -156,11 +165,12 @@ artifact contract as the run manifest.
 available/missing artifacts, recovery options, fallback prompt, and forbidden
 claims.
 `schemas/run.events.schema.json` is the machine-readable contract for each
-JSON line in `events.jsonl`, including sequence number, kind, status, message,
-timestamp, optional tool, and optional artifact pointer.
+non-authoritative diagnostic JSON line in `events.jsonl`, including sequence
+number, kind, status, message, timestamp, optional tool, and optional artifact
+pointer.
 The currently published event kinds are `tool`, `scan`, `run`, and `shell`.
 Concurrent in-process writers are serialized per event file and the writer
-assigns the authoritative monotonic sequence number while holding that lock.
+assigns a monotonic file-local sequence number while holding that lock.
 Run events use canonical `atUnix`, `tool`, and `artifact` fields only; obsolete
 event aliases are rejected instead of normalized. Event artifacts use the
 canonical `artifact` object with `"label"`, `"path"`, and `"kind"` fields.
@@ -173,19 +183,19 @@ Context, attack-surface, threat-model, recommendations, strategy, findings, and
 proof payloads are no longer canonical per-run snapshot files. A tool may still
 emit any of those as explicit artifacts through `artifacts.json`, but the product
 does not synthesize or require fixed snapshot leaves for them. Their durable
-source is either the event log/CAS object it cites or the SQLite projection that
-can be rebuilt from those sources.
-The schema contract uses canonical run metadata, event, failure handoff, and
-trace fields only. Remaining alias coverage is limited to external producer
-payloads that have not been converted in the current slice. The architecture
-gate checks that those temporary alias fields are explicit and that canonical
-artifact fields stay required.
+source is the target-wide event log and any CAS object it cites; SQLite remains
+a projection that can be rebuilt from those sources.
+The schema contract uses canonical run metadata, event, failure handoff,
+artifact, and typed lifecycle fields only. Remaining alias coverage is limited
+to external producer payloads that have not been converted in the current
+slice. The architecture gate checks that those temporary alias fields are
+explicit and that canonical artifact fields stay required.
 The same gate also checks vocabulary fields that must stay aligned with Rust
-producers: artifact kind, run/failure status, run kind, event and trace
-kind/severity, LLM audit call kind, route path shape, attack-surface kind/risk
-tier, route method, recommendation priority, threat-model methodology, finding
-severity/confidence, proof kind, proof level, proof-state aliases, and proof
-verdicts.
+producers: artifact kind, run/failure status, run kind, event and typed
+lifecycle item kind/status, LLM audit call kind, route path shape,
+attack-surface kind/risk tier, route method, recommendation priority,
+threat-model methodology, finding severity/confidence, proof kind, proof
+level, proof-state aliases, and proof verdicts.
 
 When a producer declares an `attack-surface.json` export, entries include
 deterministic `risk` metadata: `rank`, `score`, `tier`, and explanatory
@@ -211,6 +221,8 @@ The current Rust substrate already writes:
   producer returns `reportMarkdown` or `data.reportMarkdown`
 - `.kuzushi/v3/runs/<runId>/report.sarif` when a producer returns
   `reportSarif` or `data.reportSarif`
+- `.kuzushi/v3/runs/<runId>/stages.jsonl` when a multi-stage tool emits
+  tool-generic stage receipts
 - `.kuzushi/v3/runs/<runId>/artifacts.json`
 
 `items.jsonl` is the durable per-run lifecycle contract. Context,
@@ -226,10 +238,9 @@ The recorder still records producer-declared artifacts from top-level
 so module-owned reports and sidecar outputs stay discoverable even when they
 are not one of the standard filenames.
 
-TUI synthetic scan and agent runs also append explicit `sast:scan` and
-`agent:ask` success/failure lifecycle events to `events.jsonl` when the panel
-resolves, including failed runs that exist only to carry bounded failure handoff
-context.
+`events.jsonl` is retained for non-authoritative compatibility diagnostics such
+as run-start and recovered-interruption summaries. TUI operator decisions and
+all replayable semantic state are recorded in `items.jsonl`.
 
 ## Typed stream content and safety
 
@@ -252,8 +263,10 @@ the explicit operator-visible redacted API.
 `workflow/phase-attempts.v2.jsonl` is a reference-only ledger containing the
 attempt/phase, run references, final typed receipt item reference, outcome,
 disposition, and target-content identity. It does not copy result or evidence
-bodies. Workflow v1 remains wire-compatible and is dual-written for this major
-release; readers prefer v2 and fall back conservatively. Dirty/non-Git targets
+bodies. Workflow v1 keeps its record shape and is dual-written for this major
+release; that shape additively admits the `blocked` outcome,
+which older closed-enum readers cannot consume. Readers prefer v2 and fall back
+conservatively. Dirty/non-Git targets
 with a bound indexed snapshot reuse evidence only while a fresh read-only tree
 hash still matches. Targets without that bound tree identity use
 `Unavailable(reason)` and cannot reuse an older attempt as current evidence.
@@ -307,17 +320,18 @@ Allowed status values:
 - `completed`
 - `partial`
 - `skipped`
+- `blocked`
 - `failed`
 - `canceled`
 - `interrupted`
 
-`fallback_context` is optional on the direct result. For partial/failed runs,
-the durable fallback handoff belongs in `failures.json`.
+`fallback_context` is optional on the direct result. For partial, blocked, or
+failed runs, the durable fallback handoff belongs in `failures.json`.
 
 ## Failure-To-LLM Contract
 
-When a run is `partial` or `failed`, `failures.json` must bound what the agent
-is allowed to infer:
+When a run is `partial`, `blocked`, or `failed`, `failures.json` must bound what
+the agent is allowed to infer:
 
 - failed stage/tool;
 - concrete cause;

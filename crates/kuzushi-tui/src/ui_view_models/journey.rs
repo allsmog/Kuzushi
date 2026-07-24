@@ -278,8 +278,8 @@ fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckp
 }
 
 /// Returns whether an accepted checkpoint was a partial result explicitly
-/// acknowledged by the operator. Failed/canceled attempts are never selected
-/// by the ledger validator and therefore cannot advance reality.
+/// acknowledged by the operator. Blocked/failed/canceled attempts are never
+/// selected by the ledger validator and therefore cannot advance reality.
 fn selected_attempt_counts(app: &ShellApp, phase: WorkflowPhase) -> Option<bool> {
     if app.engagement.phase_attempt_projection_is_degraded() {
         return None;
@@ -295,7 +295,9 @@ fn selected_attempt_counts(app: &ShellApp, phase: WorkflowPhase) -> Option<bool>
                 _ => None,
             }
         }
-        PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled => None,
+        PhaseAttemptOutcome::Blocked
+        | PhaseAttemptOutcome::Failed
+        | PhaseAttemptOutcome::Canceled => None,
     }
 }
 

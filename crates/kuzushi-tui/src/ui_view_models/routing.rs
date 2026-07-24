@@ -12,6 +12,7 @@ pub(crate) enum RoutingMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlainRenderMode<'a> {
+    Activity,
     Options(&'a OptionsView),
     SastTasks,
     Context,
@@ -82,6 +83,7 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
     }
 
     match &app.shell_view() {
+        ShellView::Activity => PlainRenderMode::Activity,
         ShellView::Options => PlainRenderMode::Options(app.router.options()),
         ShellView::SastTasks => PlainRenderMode::SastTasks,
         ShellView::Context => PlainRenderMode::Context,

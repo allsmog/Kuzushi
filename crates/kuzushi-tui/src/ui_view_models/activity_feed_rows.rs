@@ -188,7 +188,12 @@ fn append_typed_summary_rows(
     width: usize,
 ) {
     let mut active_section = None;
-    for row in presentation.summary_text_rows() {
+    let header_owned_cost_rows = run_focus_header_owned_cost_rows(presentation);
+    let visible_rows = presentation
+        .summary_text_rows()
+        .into_iter()
+        .filter(|row| !header_owned_cost_rows.contains(&(row.key.clone(), row.text.clone())));
+    for row in visible_rows {
         if row.section != active_section {
             if let Some(section) = row.section.as_ref() {
                 rows.push(feed_section_row(section.label(), width));
@@ -197,6 +202,30 @@ fn append_typed_summary_rows(
         }
         rows.extend(presentation_feed_rows(row, width));
     }
+}
+
+fn run_focus_header_owned_cost_rows(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+) -> BTreeSet<(kuzushi_core::run_lifecycle::RunCellKey, String)> {
+    presentation
+        .summary
+        .iter()
+        .flat_map(|section| section.cells.iter())
+        .filter_map(|cell| {
+            let kuzushi_core::run_lifecycle::RunPresentationPayloadV1::Terminal(terminal) =
+                &cell.payload
+            else {
+                return None;
+            };
+            Some((
+                cell.key.clone(),
+                format!(
+                    "Cost · {}",
+                    kuzushi_core::run_lifecycle::cost_label(terminal.cost)
+                ),
+            ))
+        })
+        .collect()
 }
 
 fn append_typed_timeline_rows(
@@ -277,12 +306,6 @@ fn presentation_feed_rows(
     row: kuzushi_core::run_lifecycle::RunPresentationTextRowV1,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    // The Run Focus header already owns the run's cost line; the typed
-    // Terminal cell restating it here put cost on screen three times
-    // (header + this row + the receipt notice). Header wins.
-    if row.text.trim_start().starts_with("Cost · ") {
-        return Vec::new();
-    }
     let tone = presentation_row_tone(&row);
     wrapped_feed_rows(Some(row.key), BTreeSet::new(), &row.text, width, tone)
 }
@@ -711,7 +734,9 @@ mod tests {
             execution_may_have_occurred: true,
         });
 
-        let rows = typed_rows(&session);
+        let mut route = ActivityRouteState::default();
+        route.verbose_subsystems = true;
+        let rows = activity_feed_pane_rows(&session, &route, 180, None, Instant::now());
         let presentation = present_projection_with_hydration_and_health(
             &session.run_projection,
             RunProjectionSource::TypedV1,

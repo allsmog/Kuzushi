@@ -352,7 +352,7 @@ mod tests {
         ));
     }
 
-     #[test]
+    #[test]
     fn run_event_numbering_counts_malformed_rows_and_uses_max_n() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-event-numbering";
@@ -392,7 +392,7 @@ mod tests {
         assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
     }
 
-     #[test]
+    #[test]
     fn concurrent_run_event_writers_assign_unique_monotonic_numbers() {
         const WRITERS: usize = 16;
         let tmp = tempfile::tempdir().unwrap();
@@ -500,7 +500,7 @@ mod tests {
         }
     }
 
-     #[test]
+    #[test]
     fn run_event_rejects_obsolete_tool_and_time_aliases() {
         let obsolete = serde_json::from_str::<RunEvent>(
             r#"{"n":1,"kind":"tool","status":"started","message":"ask","at_unix":1,"tool_name":"agent:ask"}"#,
@@ -513,6 +513,16 @@ mod tests {
 
         assert!(obsolete.to_string().contains("unknown field `at_unix`"));
         assert_eq!(canonical.tool.as_deref(), Some("sast:scan"));
+    }
+
+    #[test]
+    fn run_event_rejects_removed_operator_interaction_metadata() {
+        let error = serde_json::from_str::<RunEvent>(
+            r#"{"n":1,"kind":"tool","status":"completed","message":"ask","atUnix":1,"interaction":{"requestId":"request","questionId":"scope","resolution":"submitted","freeformSupplied":true}}"#,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `interaction`"));
     }
 
     #[test]
@@ -553,7 +563,7 @@ mod tests {
         assert!(event.artifact.is_none());
     }
 
-     #[test]
+    #[test]
     fn run_summary_records_available_reproducibility_metadata() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-repro-metadata";
@@ -790,6 +800,29 @@ mod tests {
     }
 
     #[test]
+    fn blocked_failure_bundle_matches_published_run_status_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-schema-blocked";
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "taint-iris-next:hunt",
+            "blocked",
+            "operator approval is required",
+            &[],
+        )
+        .unwrap();
+
+        let value = serde_json::to_value(load_run_failures(tmp.path(), run_id).unwrap()).unwrap();
+        let schema = run_failures_schema();
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_failure_entries_match_schema(&schema, &value);
+        assert_eq!(value["status"], serde_json::json!("blocked"));
+        assert_eq!(value["failures"][0]["status"], serde_json::json!("blocked"));
+    }
+
+    #[test]
     fn run_failures_schema_declares_canonical_available_artifact_fields() {
         let schema = run_failures_schema();
         let artifact_schema = &schema["definitions"]["artifact"];
@@ -823,7 +856,7 @@ mod tests {
         assert_canonical_artifact_schema(artifact_schema);
     }
 
-     #[test]
+    #[test]
     fn run_summary_records_house_rule_fingerprints() {
         let tmp = tempfile::tempdir().unwrap();
         write_house_rule(tmp.path(), "semgrep", "prefer reachable sinks");
@@ -1005,6 +1038,26 @@ mod tests {
             .threat_model_sha256
             .as_deref()
             .is_some_and(|hash| hash.starts_with("sha256:")));
+        assert_eq!(
+            loaded.threat_model_source.as_deref(),
+            Some(".kuzushi/threat-model.json")
+        );
+        assert_eq!(
+            loaded.threat_model_resolved_via.as_deref(),
+            Some("persistent-model")
+        );
+        let value = serde_json::to_value(&loaded).unwrap();
+        let schema = run_summary_schema();
+        assert_additional_properties_disabled(&schema);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_eq!(
+            schema["properties"]["threatModelSource"]["type"],
+            serde_json::json!("string")
+        );
+        assert_eq!(
+            schema["properties"]["threatModelResolvedVia"]["type"],
+            serde_json::json!("string")
+        );
         let metadata = fs::read_to_string(run_artifact_path(
             tmp.path(),
             "run-threat-digest",
@@ -1168,6 +1221,22 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["openai:triage", "anthropic:deep-auditor"]
         );
+    }
+
+    #[test]
+    fn typed_model_call_receipt_matches_published_llm_call_schema() {
+        let tmp = tempfile::tempdir().unwrap();
+        complete_run_with_observed_models(
+            tmp.path(),
+            "tool-typed-model-call-schema",
+            "openai:profile-default",
+            &["openai:gpt-test"],
+        );
+
+        let summary = load_run_summary(tmp.path(), "tool-typed-model-call-schema").unwrap();
+        let value = serde_json::to_value(summary).unwrap();
+        assert_run_summary_llm_entries_match_schema(&run_summary_schema(), &value);
+        assert_eq!(value["llmCalls"][0]["kind"], serde_json::json!("llm"));
     }
 
     struct ReceiptNoopRuntime;
@@ -2746,7 +2815,7 @@ mod tests {
         assert!(error.to_string().contains("events.jsonl"));
     }
 
-     #[test]
+    #[test]
     fn run_summary_with_artifact_normalizes_direct_artifact_values() {
         let summary = RunSummary::running("run-summary-artifact", "tool", None, "target")
             .with_artifact(RunArtifact {
@@ -3042,13 +3111,9 @@ mod tests {
             .count()
     }
 
-    fn terminal_item_status(
-        items: &[crate::run_lifecycle::RunItemEnvelopeV1],
-    ) -> Option<&str> {
+    fn terminal_item_status(items: &[crate::run_lifecycle::RunItemEnvelopeV1]) -> Option<&str> {
         items.iter().find_map(|item| match &item.item {
-            crate::run_lifecycle::RunItemV1::TerminalOutcome { status, .. } => {
-                Some(status.label())
-            }
+            crate::run_lifecycle::RunItemV1::TerminalOutcome { status, .. } => Some(status.label()),
             _ => None,
         })
     }
@@ -3111,24 +3176,21 @@ mod tests {
     }
 
     fn assert_manifest_has_sarif_report_artifact(artifacts: &[RunArtifact]) {
-        // Optional artifacts appear in the manifest only when the run
-        // produced them; this fixture emits a SARIF report and semantic
-        // items but no tool stage receipts.
-        for leaf in ["report.sarif", "items.jsonl"] {
-            let spec = crate::artifact_contract::optional_run_artifact_spec(leaf)
-                .expect("optional artifact must be in shared spec");
-            assert!(
-                artifacts.iter().any(|artifact| {
-                    artifact.path.ends_with(spec.leaf)
-                        && artifact.label == spec.label
-                        && artifact.kind == spec.kind
-                }),
-                "manifest missing optional artifact {} ({}, {})",
-                spec.leaf,
-                spec.label,
-                spec.kind
-            );
-        }
+        // Optional artifacts appear only when their producer wrote them.
+        // This fixture emits SARIF but no tool stage receipts.
+        let spec = crate::artifact_contract::optional_run_artifact_spec("report.sarif")
+            .expect("SARIF report must be in the shared optional inventory");
+        assert!(
+            artifacts.iter().any(|artifact| {
+                artifact.path.ends_with(spec.leaf)
+                    && artifact.label == spec.label
+                    && artifact.kind == spec.kind
+            }),
+            "manifest missing optional artifact {} ({}, {})",
+            spec.leaf,
+            spec.label,
+            spec.kind
+        );
     }
 
     fn assert_manifest_has_tool_result_artifact(artifacts: &[RunArtifact]) {
@@ -3791,7 +3853,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(terminal_item_count(&read.items), 1);
-        assert_eq!(terminal_item_status(&read.items), Some(summary.status.as_str()));
+        assert_eq!(
+            terminal_item_status(&read.items),
+            Some(summary.status.as_str())
+        );
     }
 
     #[test]
@@ -4635,7 +4700,12 @@ mod tests {
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert!((summary.cost_usd.unwrap() - 0.03).abs() < 1e-9);
-        assert_eq!(lifecycle_cost_report(tmp.path(), run_id).unwrap().exact_usd(), Some(0.03));
+        assert_eq!(
+            lifecycle_cost_report(tmp.path(), run_id)
+                .unwrap()
+                .exact_usd(),
+            Some(0.03)
+        );
     }
 
     #[test]
@@ -4654,8 +4724,16 @@ mod tests {
         let read = crate::run_lifecycle::read_run_items(tmp.path(), run_id)
             .unwrap()
             .unwrap();
-        assert_eq!(read.items.iter().filter(|item| matches!(item.item,
-            crate::run_lifecycle::RunItemV1::ModelCallFinished { .. })).count(), 1);
+        assert_eq!(
+            read.items
+                .iter()
+                .filter(|item| matches!(
+                    item.item,
+                    crate::run_lifecycle::RunItemV1::ModelCallFinished { .. }
+                ))
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -4747,16 +4825,18 @@ mod tests {
 
     fn append_model_preflight_trace(target: &Path, run_id: &str, n: usize) {
         let writer = crate::run_lifecycle::RunItemWriter::open(target, run_id, None).unwrap();
-        writer.emit_and_flush(crate::run_lifecycle::RunItemRecord::new(
-            crate::run_lifecycle::RunItemId::new(),
-            crate::run_lifecycle::RunItemSource::Runtime,
-            crate::run_lifecycle::RunItemV1::DiagnosticNotice {
-                level: crate::run_lifecycle::DiagnosticLevel::Info,
-                message: crate::run_lifecycle::SafeText::operator_visible(format!(
-                    "tool-loop preflight {n}"
-                )),
-            },
-        )).unwrap();
+        writer
+            .emit_and_flush(crate::run_lifecycle::RunItemRecord::new(
+                crate::run_lifecycle::RunItemId::new(),
+                crate::run_lifecycle::RunItemSource::Runtime,
+                crate::run_lifecycle::RunItemV1::DiagnosticNotice {
+                    level: crate::run_lifecycle::DiagnosticLevel::Info,
+                    message: crate::run_lifecycle::SafeText::operator_visible(format!(
+                        "tool-loop preflight {n}"
+                    )),
+                },
+            ))
+            .unwrap();
     }
 
     fn emit_test_model_call(
@@ -4768,45 +4848,55 @@ mod tests {
         let call_id = crate::run_lifecycle::RunCallId::new();
         let item_id = crate::run_lifecycle::RunItemId::new();
         writer
-            .emit(crate::run_lifecycle::RunItemRecord::new(
-                item_id,
-                crate::run_lifecycle::RunItemSource::Runtime,
-                crate::run_lifecycle::RunItemV1::ModelCallStarted {
-                    provider: crate::run_lifecycle::SafeText::operator_visible(
-                        crate::runtime::model_provider(model),
-                    ),
-                    model: crate::run_lifecycle::SafeText::operator_visible(model),
-                    operation_fingerprint: crate::run_lifecycle::OperationFingerprint::from_bytes(
-                        format!("model fixture {n}").as_bytes(),
-                    ),
-                },
+            .emit(
+                crate::run_lifecycle::RunItemRecord::new(
+                    item_id,
+                    crate::run_lifecycle::RunItemSource::Runtime,
+                    crate::run_lifecycle::RunItemV1::ModelCallStarted {
+                        provider: crate::run_lifecycle::SafeText::operator_visible(
+                            crate::runtime::model_provider(model),
+                        ),
+                        model: crate::run_lifecycle::SafeText::operator_visible(model),
+                        operation_fingerprint:
+                            crate::run_lifecycle::OperationFingerprint::from_bytes(
+                                format!("model fixture {n}").as_bytes(),
+                            ),
+                    },
+                )
+                .with_call(call_id),
             )
-            .with_call(call_id))
             .unwrap();
         let cost = cost_usd.map_or(
             crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
-            |value| crate::runtime::RuntimeCostReport::known(
-                crate::runtime::RuntimeCost::from_usd(value, "model fixture").unwrap(),
-            ),
-        );
-        writer.emit_and_flush(crate::run_lifecycle::RunItemRecord::new(
-            item_id,
-            crate::run_lifecycle::RunItemSource::Runtime,
-            crate::run_lifecycle::RunItemV1::ModelCallFinished {
-                provider: crate::run_lifecycle::SafeText::operator_visible(
-                    crate::runtime::model_provider(model),
-                ),
-                model: crate::run_lifecycle::SafeText::operator_visible(model),
-                status: crate::run_lifecycle::RunItemStatus::Completed,
-                latency_ms: n as u64,
-                usage: crate::run_lifecycle::ModelUsage {
-                    input_tokens: None,
-                    output_tokens: None,
-                },
-                cost,
-                error_class: None,
+            |value| {
+                crate::runtime::RuntimeCostReport::known(
+                    crate::runtime::RuntimeCost::from_usd(value, "model fixture").unwrap(),
+                )
             },
-        ).with_call(call_id)).unwrap();
+        );
+        writer
+            .emit_and_flush(
+                crate::run_lifecycle::RunItemRecord::new(
+                    item_id,
+                    crate::run_lifecycle::RunItemSource::Runtime,
+                    crate::run_lifecycle::RunItemV1::ModelCallFinished {
+                        provider: crate::run_lifecycle::SafeText::operator_visible(
+                            crate::runtime::model_provider(model),
+                        ),
+                        model: crate::run_lifecycle::SafeText::operator_visible(model),
+                        status: crate::run_lifecycle::RunItemStatus::Completed,
+                        latency_ms: n as u64,
+                        usage: crate::run_lifecycle::ModelUsage {
+                            input_tokens: None,
+                            output_tokens: None,
+                        },
+                        cost,
+                        error_class: None,
+                    },
+                )
+                .with_call(call_id),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -5914,16 +6004,6 @@ mod tests {
         }
     }
 
-    fn assert_schema_declares_fields(schema: &serde_json::Value, fields: &[&str]) {
-        let properties = schema["properties"].as_object().unwrap();
-        for field in fields {
-            assert!(
-                properties.contains_key(*field),
-                "schema missing field {field}"
-            );
-        }
-    }
-
     fn assert_schema_declares_no_fields(schema: &serde_json::Value, fields: &[&str]) {
         let properties = schema["properties"].as_object().unwrap();
         for field in fields {
@@ -6046,6 +6126,9 @@ mod tests {
         let llm_schema = schema["definitions"]["llmCall"]["properties"]
             .as_object()
             .unwrap();
+        let allowed_kinds = schema["definitions"]["llmCallKind"]["enum"]
+            .as_array()
+            .unwrap();
         let calls = value
             .get("llmCalls")
             .or_else(|| value.get("llm_calls"))
@@ -6059,6 +6142,11 @@ mod tests {
                     "llm call schema missing field {field}"
                 );
             }
+            assert!(
+                allowed_kinds.contains(&call["kind"]),
+                "llm call kind {:?} is not published",
+                call["kind"]
+            );
         }
     }
 
@@ -6075,6 +6163,14 @@ mod tests {
         let context_schema = schema["definitions"]["failureContext"]["properties"]
             .as_object()
             .unwrap();
+        let allowed_statuses = schema["definitions"]["runStatus"]["enum"]
+            .as_array()
+            .unwrap();
+        assert!(
+            allowed_statuses.contains(&value["status"]),
+            "failure bundle status {:?} is not published",
+            value["status"]
+        );
         for failure in value["failures"].as_array().unwrap() {
             for field in failure.as_object().unwrap().keys() {
                 assert!(
@@ -6082,6 +6178,11 @@ mod tests {
                     "failure schema missing field {field}"
                 );
             }
+            assert!(
+                allowed_statuses.contains(&failure["status"]),
+                "failure status {:?} is not published",
+                failure["status"]
+            );
             let context = failure.get("agentThreadContext").unwrap();
             for field in context.as_object().unwrap().keys() {
                 assert!(

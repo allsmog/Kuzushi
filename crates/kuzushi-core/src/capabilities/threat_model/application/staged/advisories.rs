@@ -245,7 +245,7 @@ mod tests {
             emit_findings: false,
             preserve_user_edits: true,
             prompt_override: None,
-            model: "openai:gpt-4.1".to_string(),
+            model: "test:model".to_string(),
             pipeline: "staged".to_string(),
             mode: "build".to_string(),
             seed_mode: "seeded".to_string(),

@@ -173,11 +173,14 @@ dependencies that would make a fresh npm install depend on GitHub availability.
 
 ## Run status vocabulary migration (unreleased)
 
-The public run-artifact vocabulary additively includes `"canceled"` in
-`run.json`, `events.jsonl`, `failures.json`, CLI status filters, and terminal
-projections. Consumers should treat it as a terminal status caused by an
-operator or budget cancellation request. `"interrupted"` remains readable and
-is reserved for watchdog escalation, process loss, and abnormal shutdown. No
+The public run-artifact vocabulary additively includes `"blocked"` and
+`"canceled"` in `run.json`, typed `items.jsonl`, `failures.json`, CLI status
+filters, and terminal projections. `"blocked"` means policy or validation
+refused the operation before execution; it must never be projected as failed,
+skipped, or completed. `"canceled"` means an operator or budget cancellation
+request reached cleanup. `"interrupted"` remains readable and is reserved for
+watchdog escalation, process loss, and abnormal shutdown. `events.jsonl` is a
+non-authoritative compatibility diagnostic, not a terminal-status ledger. No
 existing artifact is rewritten, and readers that already tolerate unknown
 additive status values require no data migration.
 
@@ -185,11 +188,20 @@ additive status values require no data migration.
 
 New runs write `runs/<runId>/items.jsonl` as the sole authoritative execution
 lifecycle. The former diagnostic trace stream and its compatibility reader were
-removed before release. `events.jsonl` remains only as a target-storage
-derivative for terminal run facts; it is not a progress source. Verify
-live/replay/plain/JSON projection equivalence and document the
-minimum reader version. Never add lifecycle fields to the current `run.json`
-or workflow-v1 wire shapes because older readers deny unknown fields.
+removed before release. `events.jsonl` remains only for non-authoritative
+run-start and recovered-interruption diagnostics; replay never reduces it.
+Verify live/replay/plain/JSON projection equivalence and document the minimum
+reader version. Never add lifecycle fields to the current `run.json` or
+workflow-v1 wire shapes because older readers deny unknown fields.
+
+Phase-attempt records keep their workflow-v1 shape while additively admitting
+the serialized outcome `"blocked"`; workflow-v2 persists the same truth as
+`RunItemStatus::Blocked`. This is emitted only for policy refusal, remains
+unselectable, and is dual-written without rewriting old attempts. Older Kuzushi
+binaries whose closed workflow-v1 enum predates `"blocked"` cannot read those
+new lines, so upgrade every reader before sharing a target written by this
+release. The minimum compatible reader version must be called out in the
+release notes.
 
 ## Native dynamic-module policy migration (unreleased)
 

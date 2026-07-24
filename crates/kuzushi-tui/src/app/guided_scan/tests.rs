@@ -818,6 +818,20 @@ fn partial_map_result_copy_never_claims_modules_finished() {
     assert!(!prompt.contains("continue to Scan"));
 }
 
+#[test]
+fn blocked_result_copy_names_the_policy_stop_without_claiming_failure() {
+    let prompt = presentation_copy::phase_result_prompt(
+        WorkflowPhase::Scan,
+        PhaseAttemptOutcome::Blocked,
+        false,
+    );
+
+    assert!(prompt.contains("blocked before it could run"));
+    assert!(prompt.contains("autonomy posture"));
+    assert!(!prompt.contains("failed"));
+    assert!(!prompt.contains("continue to Review"));
+}
+
 fn scan_picker_row(id: PlanningTaskId) -> PlanningTaskRow {
     PlanningTaskRow {
         id,

@@ -1,8 +1,8 @@
 //! Snapshot fixtures for the failure-path decision cards.
 //!
 //! The happy-path phase snapshots never show a RESULT READY card, so the
-//! copy operators see at their most stressed moments — a failed, canceled,
-//! or partial phase attempt, a blocked selection, a degraded ledger — had
+//! copy operators see at their most stressed moments — a blocked, failed,
+//! canceled, or partial phase attempt, a blocked selection, a degraded ledger — had
 //! zero fixture coverage. Each scenario here drives the real guided-scan
 //! result flow over a real persisted attempt and snapshots the full frame,
 //! which also feeds these screens through the rendered-surface lints and
@@ -43,6 +43,14 @@ struct FailureScenario {
 }
 
 const SCENARIOS: &[FailureScenario] = &[
+    FailureScenario {
+        slug: "result_blocked",
+        phase: WorkflowPhase::Scan,
+        outcome: PhaseAttemptOutcome::Blocked,
+        blocked_reason: None,
+        corrupt_ledger: false,
+        signature: "was blocked before it could run",
+    },
     FailureScenario {
         slug: "result_failed",
         phase: WorkflowPhase::Map,
@@ -209,6 +217,7 @@ fn scenario_status(outcome: PhaseAttemptOutcome) -> kuzushi_core::run_lifecycle:
     match outcome {
         PhaseAttemptOutcome::Completed => RunItemStatus::Completed,
         PhaseAttemptOutcome::Partial => RunItemStatus::Partial,
+        PhaseAttemptOutcome::Blocked => RunItemStatus::Blocked,
         PhaseAttemptOutcome::Failed => RunItemStatus::Failed,
         PhaseAttemptOutcome::Canceled => RunItemStatus::Canceled,
     }

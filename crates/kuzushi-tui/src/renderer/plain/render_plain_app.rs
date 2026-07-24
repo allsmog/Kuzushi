@@ -31,7 +31,10 @@ pub fn render_plain_command_result(
 
 pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let width = width.max(40);
-    let mut lines = match plain_render_mode(app) {
+    let mode = plain_render_mode(app);
+    let include_run_projection = !matches!(&mode, PlainRenderMode::Activity);
+    let mut lines = match mode {
+        PlainRenderMode::Activity => plain_line_based_view_lines(app, width, false),
         PlainRenderMode::Options(view) => plain_options_lines(app, width, view),
         PlainRenderMode::SastTasks => plain_sast_tasks_lines(app, width),
         PlainRenderMode::Context => plain_context_lines(app, width),
@@ -47,7 +50,7 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         } => plain_line_based_view_lines(app, width, include_context_strip),
     };
 
-    lines = prepend_plain_activity_lines(app, width, lines);
+    lines = prepend_plain_activity_lines(app, width, include_run_projection, lines);
 
     lines = finalize_width_safe_plain_lines(lines, width);
     trim_plain_lines(lines)
@@ -115,18 +118,27 @@ fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<Stri
     lines
 }
 
-fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
-    let prefix = plain_activity_prefix(app, width);
+fn prepend_plain_activity_lines(
+    app: &ShellApp,
+    width: usize,
+    include_run_projection: bool,
+    lines: Vec<String>,
+) -> Vec<String> {
+    let prefix = plain_activity_prefix(app, width, include_run_projection);
     if prefix.is_empty() {
         return lines;
     }
     prefix.into_iter().chain(lines).collect()
 }
 
-fn plain_activity_prefix(app: &ShellApp, width: usize) -> Vec<String> {
+fn plain_activity_prefix(
+    app: &ShellApp,
+    width: usize,
+    include_run_projection: bool,
+) -> Vec<String> {
     [
         optional_plain_retry_lines(app, width),
-        optional_plain_run_lines(app, width),
+        optional_plain_run_lines(app, width, include_run_projection),
         optional_plain_prereq_lines(app, width),
     ]
     .concat()
@@ -138,8 +150,12 @@ fn optional_plain_retry_lines(app: &ShellApp, width: usize) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn optional_plain_run_lines(app: &ShellApp, width: usize) -> Vec<String> {
-    if app.shell_view() == ShellView::Activity {
+fn optional_plain_run_lines(
+    app: &ShellApp,
+    width: usize,
+    include_run_projection: bool,
+) -> Vec<String> {
+    if !include_run_projection {
         return Vec::new();
     }
     if let Some(model) = plain_run_projection_model(app) {

@@ -250,6 +250,8 @@ export const runSummarySchemaFields = [
   "houseRules",
   "promptOverrides",
   "threatModelSha256",
+  "threatModelSource",
+  "threatModelResolvedVia",
   "envFingerprint",
   "targetGit",
   "llmCalls",

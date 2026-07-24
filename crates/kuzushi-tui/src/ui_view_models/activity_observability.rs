@@ -112,6 +112,7 @@ fn terminal_heartbeat(outcome: Option<&ActivityRunOutcome>) -> TerminalHeartbeat
         None => "completed",
     };
     match status {
+        "blocked" => terminal("▣ BLOCKED", ActivityHeartbeatTone::Warning),
         "failed" | "refused" | "interrupted" => terminal("✗ FAILED", ActivityHeartbeatTone::Failed),
         "partial" => terminal("⚠ PARTIAL", ActivityHeartbeatTone::Warning),
         "canceled" | "cancelled" => terminal("× CANCELED", ActivityHeartbeatTone::Warning),
@@ -175,7 +176,102 @@ fn age_label(age: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::run_lifecycle::{
+        ModelUsage, OperationFingerprint, RunCallId, RunId, RunItemEnvelopeV1, RunItemId,
+        RunItemSource, RunItemStatus, RunItemV1, SafeText,
+    };
     use kuzushi_core::WorkflowPhase;
+
+    fn model_call_started(
+        session: &ActivitySession,
+        seq: u64,
+        item_id: RunItemId,
+        call_id: RunCallId,
+    ) -> RunItemEnvelopeV1 {
+        RunItemEnvelopeV1::new(
+            seq,
+            RunId::parse(&session.run_id).unwrap(),
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallStarted {
+                provider: SafeText::operator_visible("anthropic"),
+                model: SafeText::operator_visible("claude"),
+                operation_fingerprint: OperationFingerprint::from_bytes(b"model call"),
+            },
+            session.run_projection.last_event_hash.clone(),
+        )
+        .unwrap()
+        .with_call(call_id)
+        .unwrap()
+    }
+
+    fn model_call_finished(
+        session: &ActivitySession,
+        seq: u64,
+        item_id: RunItemId,
+        call_id: RunCallId,
+        latency_ms: u64,
+    ) -> RunItemEnvelopeV1 {
+        RunItemEnvelopeV1::new(
+            seq,
+            RunId::parse(&session.run_id).unwrap(),
+            item_id,
+            RunItemSource::Runtime,
+            RunItemV1::ModelCallFinished {
+                provider: SafeText::operator_visible("anthropic"),
+                model: SafeText::operator_visible("claude"),
+                status: RunItemStatus::Completed,
+                latency_ms,
+                usage: ModelUsage {
+                    input_tokens: None,
+                    output_tokens: None,
+                },
+                cost: kuzushi_core::runtime::RuntimeCostReport::known(
+                    kuzushi_core::runtime::RuntimeCost::ZERO,
+                ),
+                error_class: None,
+            },
+            session.run_projection.last_event_hash.clone(),
+        )
+        .unwrap()
+        .with_call(call_id)
+        .unwrap()
+    }
+
+    fn assert_query_in_flight(session: &ActivitySession, probe: Instant, expected_age: Duration) {
+        assert_eq!(session.open_model_call_age(probe), Some(expected_age));
+        let heartbeat =
+            activity_heartbeat_model(session, Some("threat-model:build"), true, None, probe);
+        assert_eq!(
+            heartbeat.tone,
+            ActivityHeartbeatTone::Live,
+            "{}",
+            heartbeat.text
+        );
+        assert!(
+            heartbeat
+                .text
+                .contains(&format!("query in flight {}", age_label(expected_age))),
+            "{}",
+            heartbeat.text
+        );
+        assert!(
+            !heartbeat.text.contains("NO PROGRESS SIGNAL"),
+            "{}",
+            heartbeat.text
+        );
+    }
+
+    fn assert_watchdog_stalled(session: &ActivitySession, probe: Instant) {
+        let heartbeat =
+            activity_heartbeat_model(session, Some("threat-model:build"), true, None, probe);
+        assert_eq!(heartbeat.tone, ActivityHeartbeatTone::Stalled);
+        assert!(
+            heartbeat.text.contains("NO PROGRESS SIGNAL"),
+            "{}",
+            heartbeat.text
+        );
+    }
 
     #[test]
     fn stale_live_activity_names_the_current_tool_and_last_real_signal() {
@@ -226,56 +322,97 @@ mod tests {
     #[test]
     fn open_model_call_reports_query_in_flight_instead_of_a_false_stall() {
         let mut session = ActivitySession::for_phase("model-run", WorkflowPhase::Scan);
-        use kuzushi_core::run_lifecycle::{
-            OperationFingerprint, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
-            RunItemV1, SafeText,
-        };
-        let start = RunItemEnvelopeV1::new(
-            1,
-            RunId::parse("model-run").unwrap(),
-            RunItemId::new(),
-            RunItemSource::Runtime,
-            RunItemV1::ModelCallStarted {
-                provider: SafeText::operator_visible("anthropic"),
-                model: SafeText::operator_visible("claude"),
-                operation_fingerprint: OperationFingerprint::from_bytes(b"threat-model synthesis"),
-            },
-            None,
-        )
-        .unwrap()
-        .with_call(RunCallId::new())
-        .unwrap();
-        session.apply_run_item(start).unwrap();
+        let observed_at = Instant::now();
+        let start = model_call_started(&session, 1, RunItemId::new(), RunCallId::new());
+        session
+            .apply_run_item_at_for_test(start, observed_at)
+            .unwrap();
 
-        let stale_probe = Instant::now() + Duration::from_secs(45);
-        let model = activity_heartbeat_model(
+        assert_query_in_flight(
             &session,
-            Some("threat-model:build"),
-            true,
-            None,
-            stale_probe,
+            observed_at + Duration::from_secs(45),
+            Duration::from_secs(45),
         );
-        assert_eq!(model.tone, ActivityHeartbeatTone::Live, "{}", model.text);
-        assert!(
-            model.text.contains("◐ query in flight 45s"),
-            "{}",
-            model.text
-        );
-        assert!(!model.text.contains("NO PROGRESS SIGNAL"), "{}", model.text);
+        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(400));
+    }
 
-        let watchdog_probe = Instant::now() + Duration::from_secs(400);
-        let escalated = activity_heartbeat_model(
+    #[test]
+    fn overlapping_model_calls_use_the_remaining_calls_own_watchdog_age() {
+        let mut session = ActivitySession::for_phase("overlap-run", WorkflowPhase::Scan);
+        let observed_at = Instant::now();
+        let first_call = RunCallId::new();
+        let second_call = RunCallId::new();
+        let first_item = RunItemId::new();
+        let second_item = RunItemId::new();
+
+        let first_start = model_call_started(&session, 1, first_item, first_call);
+        session
+            .apply_run_item_at_for_test(first_start, observed_at)
+            .unwrap();
+        let second_start = model_call_started(&session, 2, second_item, second_call);
+        session
+            .apply_run_item_at_for_test(second_start, observed_at + Duration::from_secs(290))
+            .unwrap();
+        let first_finish = model_call_finished(&session, 3, first_item, first_call, 295_000);
+        session
+            .apply_run_item_at_for_test(first_finish, observed_at + Duration::from_secs(295))
+            .unwrap();
+
+        assert_query_in_flight(
             &session,
-            Some("threat-model:build"),
-            true,
-            None,
-            watchdog_probe,
+            observed_at + Duration::from_secs(326),
+            Duration::from_secs(36),
         );
-        assert_eq!(escalated.tone, ActivityHeartbeatTone::Stalled);
-        assert!(
-            escalated.text.contains("NO PROGRESS SIGNAL"),
-            "{}",
-            escalated.text
+        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(591));
+    }
+
+    #[test]
+    fn duplicate_model_start_preserves_the_original_watchdog_clock() {
+        let mut session = ActivitySession::for_phase("duplicate-start", WorkflowPhase::Scan);
+        let observed_at = Instant::now();
+        let start = model_call_started(&session, 1, RunItemId::new(), RunCallId::new());
+        session
+            .apply_run_item_at_for_test(start.clone(), observed_at)
+            .unwrap();
+        session
+            .apply_run_item_at_for_test(start, observed_at + Duration::from_secs(200))
+            .unwrap();
+
+        assert_query_in_flight(
+            &session,
+            observed_at + Duration::from_secs(250),
+            Duration::from_secs(250),
+        );
+        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(301));
+    }
+
+    #[test]
+    fn duplicate_model_finish_does_not_close_another_open_call() {
+        let mut session = ActivitySession::for_phase("duplicate-finish", WorkflowPhase::Scan);
+        let observed_at = Instant::now();
+        let first_call = RunCallId::new();
+        let second_call = RunCallId::new();
+        let first_item = RunItemId::new();
+        let first_start = model_call_started(&session, 1, first_item, first_call);
+        session
+            .apply_run_item_at_for_test(first_start, observed_at)
+            .unwrap();
+        let second_start = model_call_started(&session, 2, RunItemId::new(), second_call);
+        session
+            .apply_run_item_at_for_test(second_start, observed_at + Duration::from_secs(10))
+            .unwrap();
+        let first_finish = model_call_finished(&session, 3, first_item, first_call, 20_000);
+        session
+            .apply_run_item_at_for_test(first_finish.clone(), observed_at + Duration::from_secs(20))
+            .unwrap();
+        session
+            .apply_run_item_at_for_test(first_finish, observed_at + Duration::from_secs(30))
+            .unwrap();
+
+        assert_query_in_flight(
+            &session,
+            observed_at + Duration::from_secs(70),
+            Duration::from_secs(60),
         );
     }
 
@@ -287,6 +424,55 @@ mod tests {
             status: "failed".to_string(),
             findings: None,
             reason: Some("context snapshot was too large".to_string()),
+        };
+
+        let model = activity_heartbeat_model(&session, None, false, Some(&outcome), now);
+
+        assert_eq!(model.tone, ActivityHeartbeatTone::Failed);
+        assert!(model.text.contains("✗ FAILED"), "{}", model.text);
+        assert!(!model.text.contains("✓ COMPLETE"), "{}", model.text);
+    }
+
+    #[test]
+    fn blocked_terminal_activity_uses_a_warning_heartbeat() {
+        let now = Instant::now();
+        let session = ActivitySession::for_phase("blocked-run", WorkflowPhase::Map);
+        let outcome = ActivityRunOutcome::Terminal {
+            status: "blocked".to_string(),
+            findings: None,
+            reason: Some("tool was refused before execution".to_string()),
+        };
+
+        let model = activity_heartbeat_model(&session, None, false, Some(&outcome), now);
+
+        assert_eq!(model.tone, ActivityHeartbeatTone::Warning);
+        assert!(model.text.contains("▣ BLOCKED"), "{}", model.text);
+        assert!(!model.text.contains("✓ COMPLETE"), "{}", model.text);
+        assert!(!model.text.contains("✗ FAILED"), "{}", model.text);
+    }
+
+    #[test]
+    fn blocked_terminal_mapping_never_falls_through_to_complete() {
+        let outcome = ActivityRunOutcome::Terminal {
+            status: "blocked".to_string(),
+            findings: None,
+            reason: None,
+        };
+
+        let terminal = terminal_heartbeat(Some(&outcome));
+
+        assert_eq!(terminal.label, "▣ BLOCKED");
+        assert_eq!(terminal.tone, ActivityHeartbeatTone::Warning);
+    }
+
+    #[test]
+    fn refused_terminal_activity_never_uses_a_success_heartbeat() {
+        let now = Instant::now();
+        let session = ActivitySession::for_phase("refused-run", WorkflowPhase::Scan);
+        let outcome = ActivityRunOutcome::Terminal {
+            status: "refused".to_string(),
+            findings: None,
+            reason: Some("policy refused the operation".to_string()),
         };
 
         let model = activity_heartbeat_model(&session, None, false, Some(&outcome), now);

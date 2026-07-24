@@ -120,10 +120,9 @@ fn phase_outcome(status: RunItemStatus) -> PhaseAttemptOutcome {
     match status {
         RunItemStatus::Completed | RunItemStatus::Skipped => PhaseAttemptOutcome::Completed,
         RunItemStatus::Partial => PhaseAttemptOutcome::Partial,
+        RunItemStatus::Blocked => PhaseAttemptOutcome::Blocked,
         RunItemStatus::Canceled => PhaseAttemptOutcome::Canceled,
-        RunItemStatus::Blocked | RunItemStatus::Failed | RunItemStatus::Interrupted => {
-            PhaseAttemptOutcome::Failed
-        }
+        RunItemStatus::Failed | RunItemStatus::Interrupted => PhaseAttemptOutcome::Failed,
         RunItemStatus::Pending | RunItemStatus::Running => PhaseAttemptOutcome::Partial,
     }
 }

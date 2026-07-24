@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::run_lifecycle::{
-    DiagnosticLevel, RunAttemptId, RunCallId, RunItemId, RunItemRecord, RunItemSource,
-    RunItemV1, RunTaskId, SafeText,
+    DiagnosticLevel, RunAttemptId, RunCallId, RunItemId, RunItemRecord, RunItemSource, RunItemV1,
+    RunTaskId, SafeText,
 };
 
 thread_local! {

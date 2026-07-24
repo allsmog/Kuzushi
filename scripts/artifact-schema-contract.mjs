@@ -23,6 +23,9 @@ const reservedArtifactMetadataSpecs = [
   ...toolInputArtifactSpecs,
   ...toolResultArtifactSpecs,
 ];
+const retiredArtifactMetadataSpecsBySchema = {
+  "schemas/run.artifacts.schema.json": [{ path: "trace.jsonl", label: "runtime trace" }],
+};
 
 const producerFixturesBySchema = {
   "schemas/run.events.schema.json": [
@@ -48,29 +51,7 @@ const producerFixturesBySchema = {
       },
     },
   ],
-  "schemas/run.items.schema.json": [
-    {
-      name: "tool progress lifecycle item",
-      value: {
-        schemaVersion: 1,
-        seq: 3,
-        eventId: "event-1",
-        itemId: "item-1",
-        runId: "run-1",
-        callId: "call-1",
-        source: "runtime",
-        occurredAtMs: 120,
-        prevEventHash: "sha256:previous",
-        eventHash: "sha256:current",
-        item: {
-          type: "tool_call_progress",
-          message: "Scanning files",
-          completed: 12,
-          total: 40,
-        },
-      },
-    },
-  ],
+  "schemas/run.items.schema.json": runItemProducerFixtures(),
   "schemas/run.summary.schema.json": [
     {
       name: "agent llm audit summary",
@@ -94,6 +75,560 @@ const producerFixturesBySchema = {
       },
     },
   ],
+};
+
+function runItemProducerFixtures() {
+  const context = runItemFixtureContext();
+  const items = [
+    ...planAndTaskFixtures(context),
+    ...requestedAndRejectedToolFixtures(context),
+    ...runningToolFixtures(context),
+    ...finishedToolFixtures(context),
+    ...modelCallFixtures(context),
+    ...evidenceItemFixtures(context),
+    ...operatorItemFixtures(context),
+    ...terminalOutcomeFixtures(context),
+    ...phaseReceiptFixtures(context),
+  ];
+  return items.map(({ name, item, envelope }) => ({
+    name,
+    value: runItemEnvelope(item, envelope),
+  }));
+}
+
+function runItemFixtureContext() {
+  const cost = { observedUsd: 0, completeness: "exact" };
+  const fingerprint = `blake3:${"a".repeat(64)}`;
+  const itemId = "00000000-0000-4000-8000-000000000002";
+  const taskId = "00000000-0000-4000-8000-000000000003";
+  const callId = "00000000-0000-4000-8000-000000000004";
+  const questionId = "00000000-0000-4000-8000-000000000005";
+  const artifact = {
+    path: "result.json",
+    kind: "json",
+    label: "tool result",
+    digest: "sha256:result",
+    byteCount: 42,
+    lineCount: 1,
+    producingItemId: itemId,
+  };
+  const findingDelta = {
+    added: 1,
+    updated: 0,
+    removed: 0,
+    storeWatermark: "ledger:1",
+    findingIdSamples: ["finding-1"],
+  };
+  const noFurtherAction = { kind: "no_further_action", reason: "run terminal" };
+  return {
+    cost,
+    fingerprint,
+    itemId,
+    taskId,
+    callId,
+    questionId,
+    artifact,
+    findingDelta,
+    noFurtherAction,
+  };
+}
+
+function planAndTaskFixtures({ taskId }) {
+  return [
+    {
+      name: "plan updated",
+      item: {
+        type: "plan_updated",
+        revision: 1,
+        title: "Scan plan",
+        status: "running",
+        task_ids: [taskId],
+      },
+    },
+    {
+      name: "task updated",
+      envelope: { taskId },
+      item: {
+        type: "task_updated",
+        title: "Scan target",
+        status: "running",
+        detail: "Scanning",
+      },
+    },
+  ];
+}
+
+function requestedAndRejectedToolFixtures({ callId, fingerprint }) {
+  return [
+    {
+      name: "tool call requested",
+      envelope: { callId },
+      item: {
+        type: "tool_call_requested",
+        tool_name: "sast:scan",
+        operation_fingerprint: fingerprint,
+        safe_option_names: ["target"],
+      },
+    },
+    {
+      name: "tool call rejected",
+      envelope: { callId },
+      item: {
+        type: "tool_call_rejected",
+        reason_class: "autonomy_policy",
+        detail: "Operator posture blocks this tool",
+      },
+    },
+  ];
+}
+
+function runningToolFixtures({ callId }) {
+  return [
+    {
+      name: "tool call started",
+      envelope: { callId },
+      item: {
+        type: "tool_call_started",
+        tool_name: "sast:scan",
+        runtime: "codex",
+        model: "test:model",
+      },
+    },
+    {
+      name: "tool call progress",
+      envelope: { callId },
+      item: {
+        type: "tool_call_progress",
+        message: "Scanning files",
+        completed: 12,
+        total: 40,
+      },
+    },
+  ];
+}
+
+function finishedToolFixtures({ callId, cost, artifact }) {
+  return [
+    {
+      name: "tool call finished",
+      envelope: { callId },
+      item: {
+        type: "tool_call_finished",
+        status: "completed",
+        cost,
+        result_artifact: artifact,
+        preview: ["Scan completed"],
+        warning_count: 0,
+        error_count: 0,
+      },
+    },
+  ];
+}
+
+function modelCallFixtures({ callId, cost, fingerprint }) {
+  return [
+    {
+      name: "model call started",
+      envelope: { callId },
+      item: {
+        type: "model_call_started",
+        provider: "openai",
+        model: "test:model",
+        operation_fingerprint: fingerprint,
+      },
+    },
+    {
+      name: "model call finished",
+      envelope: { callId },
+      item: {
+        type: "model_call_finished",
+        provider: "openai",
+        model: "test:model",
+        status: "completed",
+        latency_ms: 120,
+        usage: { inputTokens: 10, outputTokens: 4 },
+        cost,
+      },
+    },
+  ];
+}
+
+function evidenceItemFixtures({ artifact, findingDelta, itemId }) {
+  return [
+    {
+      name: "safe reasoning summary",
+      item: {
+        type: "safe_reasoning_summary",
+        text: "Inspected the reachable call path",
+        redaction_policy_version: 1,
+      },
+    },
+    {
+      name: "artifact produced",
+      item: { type: "artifact_produced", artifact },
+    },
+    {
+      name: "finding delta",
+      item: { type: "finding_delta", delta: findingDelta },
+    },
+    {
+      name: "diagnostic notice",
+      item: {
+        type: "diagnostic_notice",
+        level: "warning",
+        message: "One optional engine was unavailable",
+      },
+    },
+    {
+      name: "progress truncated",
+      item: {
+        type: "progress_truncated",
+        progress_item_id: itemId,
+        omitted_count: 3,
+      },
+    },
+  ];
+}
+
+function operatorItemFixtures({ questionId }) {
+  return [
+    {
+      name: "operator question",
+      item: {
+        type: "operator_question",
+        question_id: questionId,
+        prompt: "Continue?",
+        choices: [{ id: "continue", label: "Continue" }],
+        authorization_scope: "sast:scan",
+      },
+    },
+    {
+      name: "operator decision",
+      item: {
+        type: "operator_decision",
+        question_id: questionId,
+        decision: { kind: "selected", choice_id: "continue" },
+        authorization_scope: "sast:scan",
+      },
+    },
+  ];
+}
+
+function terminalOutcomeFixtures({ noFurtherAction }) {
+  return [
+    {
+      name: "terminal outcome",
+      item: {
+        type: "terminal_outcome",
+        status: "blocked",
+        summary: "Run blocked by policy",
+        cost: { observedUsd: 0, completeness: "incomplete_observed" },
+        continuation: noFurtherAction,
+      },
+    },
+  ];
+}
+
+function phaseReceiptFixtures({ cost, findingDelta, itemId, questionId, noFurtherAction }) {
+  return [
+    {
+      name: "phase receipt",
+      item: {
+        type: "phase_receipt",
+        run_ids: ["run-previous"],
+        status: "partial",
+        cost,
+        finding_delta: findingDelta,
+        artifact_ids: [itemId],
+        interaction_count: 1,
+        offered_actions: [
+          { kind: "open_phase", phase: "review" },
+          { kind: "open_report", reason: "Review complete" },
+          { kind: "inspect_run", run_id: "run-previous", reason: "Inspect evidence" },
+          { kind: "retry", reason: "Retry failed work" },
+          { kind: "await_decision", question_id: questionId },
+          noFurtherAction,
+        ],
+        continuation: { kind: "retry", reason: "Retry failed work" },
+      },
+    },
+  ];
+}
+
+function runItemEnvelope(item, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    seq: 1,
+    eventId: "00000000-0000-4000-8000-000000000001",
+    itemId: "00000000-0000-4000-8000-000000000002",
+    runId: "run-1",
+    source: "workflow",
+    occurredAtMs: 120,
+    prevEventHash: `sha256:${"c".repeat(64)}`,
+    eventHash: `sha256:${"b".repeat(64)}`,
+    item,
+    ...overrides,
+  };
+}
+
+function runItemRejectedFixtures() {
+  return [
+    ...missingRunItemFieldFixtures(),
+    ...terminalContractRejections(),
+    ...interactionContractRejections(),
+    ...envelopeIdentityRejections(),
+    ...artifactAndQuestionIdentityRejections(),
+    ...progressAndReceiptIdentityRejections(),
+    ...unknownFieldRejections(),
+  ];
+}
+
+function missingRunItemFieldFixtures() {
+  return runItemProducerFixtures().flatMap(({ name, value }) =>
+    (requiredRunItemFields[value.item.type] ?? []).map((field) => {
+      const item = { ...value.item };
+      delete item[field];
+      return {
+        name: `${name} missing ${field}`,
+        value: { ...value, item },
+      };
+    }),
+  );
+}
+
+function terminalContractRejections() {
+  return [
+    {
+      name: "terminal outcome missing its payload",
+      value: runItemEnvelope({ type: "terminal_outcome" }),
+    },
+    {
+      name: "terminal outcome with a nonterminal status",
+      value: runItemEnvelope({
+        type: "terminal_outcome",
+        status: "running",
+        summary: "Still running",
+        cost: { observedUsd: 0, completeness: "exact" },
+        continuation: { kind: "no_further_action", reason: "not terminal" },
+      }),
+    },
+    {
+      name: "unavailable cost with an observed amount",
+      value: runItemEnvelope({
+        type: "terminal_outcome",
+        status: "failed",
+        summary: "Run failed",
+        cost: { observedUsd: 1, completeness: "unavailable" },
+        continuation: { kind: "retry", reason: "Retry" },
+      }),
+    },
+  ];
+}
+
+function interactionContractRejections() {
+  return [
+    {
+      name: "tool progress with only one counter",
+      value: runItemEnvelope({
+        type: "tool_call_progress",
+        message: "Scanning",
+        completed: 1,
+      }),
+    },
+    {
+      name: "selected operator decision without a choice",
+      value: runItemEnvelope({
+        type: "operator_decision",
+        question_id: "00000000-0000-4000-8000-000000000005",
+        decision: { kind: "selected" },
+        authorization_scope: "sast:scan",
+      }),
+    },
+  ];
+}
+
+function envelopeIdentityRejections() {
+  const notice = {
+    type: "diagnostic_notice",
+    level: "info",
+    message: "Invalid envelope identity",
+  };
+  return [
+    {
+      name: "non-UUID typed item identity",
+      value: { ...runItemEnvelope(notice), itemId: "item-1" },
+    },
+    {
+      name: "unsafe run identity",
+      value: { ...runItemEnvelope(notice), runId: "../outside" },
+    },
+    {
+      name: "short event hash",
+      value: { ...runItemEnvelope(notice), eventHash: "sha256:short" },
+    },
+  ];
+}
+
+function artifactAndQuestionIdentityRejections() {
+  return [
+    {
+      name: "artifact with a non-UUID producing item",
+      value: runItemEnvelope({
+        type: "artifact_produced",
+        artifact: {
+          path: "result.json",
+          kind: "json",
+          label: "tool result",
+          digest: "sha256:result",
+          byteCount: 42,
+          producingItemId: "item-1",
+        },
+      }),
+    },
+    {
+      name: "operator question with a non-UUID question identity",
+      value: runItemEnvelope({
+        type: "operator_question",
+        question_id: "question-1",
+        prompt: "Continue?",
+        authorization_scope: "sast:scan",
+      }),
+    },
+  ];
+}
+
+function progressAndReceiptIdentityRejections() {
+  return [
+    {
+      name: "progress truncation with a non-UUID item identity",
+      value: runItemEnvelope({
+        type: "progress_truncated",
+        progress_item_id: "progress-1",
+        omitted_count: 1,
+      }),
+    },
+    {
+      name: "phase receipt with an unsafe run identity",
+      value: runItemEnvelope({
+        type: "phase_receipt",
+        run_ids: ["../outside"],
+        status: "partial",
+        cost: { observedUsd: 0, completeness: "exact" },
+        finding_delta: {
+          added: 0,
+          updated: 0,
+          removed: 0,
+          storeWatermark: "ledger:1",
+        },
+        artifact_ids: [],
+        interaction_count: 0,
+        offered_actions: [],
+        continuation: { kind: "retry", reason: "Retry" },
+      }),
+    },
+  ];
+}
+
+function unknownFieldRejections() {
+  return [
+    {
+      name: "run item with an unknown field",
+      value: runItemEnvelope({
+        type: "diagnostic_notice",
+        level: "info",
+        message: "Unexpected field",
+        unexpected: true,
+      }),
+    },
+    {
+      name: "continuation with an unknown field",
+      value: runItemEnvelope({
+        type: "terminal_outcome",
+        status: "failed",
+        summary: "Run failed",
+        cost: { observedUsd: 0, completeness: "unavailable" },
+        continuation: { kind: "retry", reason: "Retry", unexpected: true },
+      }),
+    },
+    {
+      name: "operator decision with an unknown field",
+      value: runItemEnvelope({
+        type: "operator_decision",
+        question_id: "00000000-0000-4000-8000-000000000005",
+        decision: { kind: "approved", unexpected: true },
+        authorization_scope: "sast:scan",
+      }),
+    },
+  ];
+}
+
+function runItemStructuralOnlyFixtures() {
+  return [
+    {
+      name: "progress completed exceeds total",
+      value: runItemEnvelope({
+        type: "tool_call_progress",
+        message: "Scanning",
+        completed: 2,
+        total: 1,
+      }),
+    },
+    {
+      name: "unredacted SafeText secret",
+      value: runItemEnvelope({
+        type: "diagnostic_notice",
+        level: "warning",
+        message: "Authorization: Bearer raw-secret",
+      }),
+    },
+    {
+      name: "SafeText control character",
+      value: runItemEnvelope({
+        type: "diagnostic_notice",
+        level: "warning",
+        message: "unsafe\u0007control",
+      }),
+    },
+  ];
+}
+
+const requiredRunItemFields = {
+  plan_updated: ["type", "revision", "title", "status", "task_ids"],
+  task_updated: ["type", "title", "status"],
+  tool_call_requested: ["type", "tool_name", "operation_fingerprint"],
+  tool_call_rejected: ["type", "reason_class", "detail"],
+  tool_call_started: ["type", "tool_name"],
+  tool_call_progress: ["type", "message"],
+  tool_call_finished: ["type", "status", "cost", "warning_count", "error_count"],
+  model_call_started: ["type", "provider", "model", "operation_fingerprint"],
+  model_call_finished: ["type", "provider", "model", "status", "latency_ms", "usage", "cost"],
+  safe_reasoning_summary: ["type", "text", "redaction_policy_version"],
+  artifact_produced: ["type", "artifact"],
+  finding_delta: ["type", "delta"],
+  diagnostic_notice: ["type", "level", "message"],
+  operator_question: ["type", "question_id", "prompt", "authorization_scope"],
+  operator_decision: ["type", "question_id", "decision", "authorization_scope"],
+  terminal_outcome: ["type", "status", "summary", "cost", "continuation"],
+  phase_receipt: [
+    "type",
+    "run_ids",
+    "status",
+    "cost",
+    "finding_delta",
+    "artifact_ids",
+    "interaction_count",
+    "offered_actions",
+    "continuation",
+  ],
+  progress_truncated: ["type", "progress_item_id", "omitted_count"],
+};
+
+const rejectedFixturesBySchema = {
+  "schemas/run.items.schema.json": runItemRejectedFixtures(),
+};
+
+const structuralOnlyFixturesBySchema = {
+  "schemas/run.items.schema.json": runItemStructuralOnlyFixtures(),
 };
 
 const requiredAliasGroupsBySchema = {
@@ -303,6 +838,76 @@ const schemaEnumSpecs = {
       values: ["dispatch", "runtime", "workflow", "operator", "persistence"],
       refs: [["properties", "source"]],
     },
+    {
+      name: "runItemStatus",
+      path: ["definitions", "runItemStatus"],
+      values: [
+        "pending",
+        "running",
+        "completed",
+        "partial",
+        "skipped",
+        "blocked",
+        "failed",
+        "canceled",
+        "interrupted",
+      ],
+      refs: [
+        ["definitions", "planUpdatedItem", "properties", "status"],
+        ["definitions", "taskUpdatedItem", "properties", "status"],
+      ],
+    },
+    {
+      name: "terminalRunItemStatus",
+      path: ["definitions", "terminalRunItemStatus"],
+      values: ["completed", "partial", "skipped", "blocked", "failed", "canceled", "interrupted"],
+      refs: [
+        ["definitions", "toolCallFinishedItem", "properties", "status"],
+        ["definitions", "modelCallFinishedItem", "properties", "status"],
+        ["definitions", "terminalOutcomeItem", "properties", "status"],
+        ["definitions", "phaseReceiptItem", "properties", "status"],
+      ],
+    },
+    {
+      name: "workflowPhase",
+      path: ["definitions", "workflowPhase"],
+      values: ["map", "scan", "review", "prove", "fix"],
+      refs: [
+        ["properties", "phase"],
+        ["definitions", "openPhaseContinuation", "properties", "phase"],
+      ],
+    },
+    {
+      name: "workflowContinuationKind",
+      path: ["definitions", "workflowContinuationKind"],
+      values: [
+        "open_phase",
+        "open_report",
+        "inspect_run",
+        "retry",
+        "await_decision",
+        "no_further_action",
+      ],
+      refs: [["definitions", "workflowContinuation", "properties", "kind"]],
+    },
+    {
+      name: "operatorDecisionKind",
+      path: ["definitions", "operatorDecisionKind"],
+      values: ["selected", "provided_freeform", "approved", "denied", "deferred"],
+      refs: [["definitions", "operatorDecision", "properties", "kind"]],
+    },
+    {
+      name: "diagnosticLevel",
+      path: ["definitions", "diagnosticLevel"],
+      values: ["info", "warning", "error"],
+      refs: [["definitions", "diagnosticNoticeItem", "properties", "level"]],
+    },
+    {
+      name: "runtimeCostCompleteness",
+      path: ["definitions", "runtimeCostCompleteness"],
+      values: ["exact", "incomplete_observed", "unavailable"],
+      refs: [["definitions", "runtimeCost", "properties", "completeness"]],
+    },
   ],
   "schemas/run.summary.schema.json": [
     runSummaryStatusSpec,
@@ -384,8 +989,13 @@ function checkSchemaDocument(relativeFile, schema) {
     ...checkProofLevelNumericBranch(relativeFile, schema),
     ...checkFieldShapeSpecs(relativeFile, schema, schemaNode),
     ...checkRunArtifactManifestReservedMetadata(relativeFile, schema),
+    ...checkRetiredArtifactMetadata(relativeFile, schema),
     ...checkNamedEnums(relativeFile, schema),
+    ...checkRunItemVariantUnion(relativeFile, schema),
+    ...checkRunItemStructuralContract(relativeFile, schema),
     ...checkProducerFixtures(relativeFile, schema),
+    ...checkRejectedFixtures(relativeFile, schema),
+    ...checkStructuralOnlyFixtures(relativeFile, schema),
   ].filter(Boolean);
 }
 
@@ -399,6 +1009,139 @@ function checkProducerFixtures(relativeFile, schema) {
       ? []
       : [`${relativeFile}: producer fixture ${name} is invalid: ${JSON.stringify(result.errors)}`];
   });
+}
+
+function checkRejectedFixtures(relativeFile, schema) {
+  const fixtures = rejectedFixturesBySchema[relativeFile] ?? [];
+  if (fixtures.length === 0) return [];
+  const validator = new Validator(schema, "7", false);
+  return fixtures.flatMap(({ name, value }) => {
+    const result = validator.validate(value);
+    return result.valid ? [`${relativeFile}: malformed fixture ${name} was accepted`] : [];
+  });
+}
+
+function checkStructuralOnlyFixtures(relativeFile, schema) {
+  const fixtures = structuralOnlyFixturesBySchema[relativeFile] ?? [];
+  if (fixtures.length === 0) return [];
+  const validator = new Validator(schema, "7", false);
+  return fixtures.flatMap(({ name, value }) => {
+    const result = validator.validate(value);
+    return result.valid
+      ? []
+      : [
+          `${relativeFile}: structural-only fixture ${name} was rejected: ${JSON.stringify(result.errors)}`,
+        ];
+  });
+}
+
+function checkRunItemVariantUnion(relativeFile, schema) {
+  if (relativeFile !== "schemas/run.items.schema.json") return [];
+  return [
+    ...checkRunItemSchemaUnion(relativeFile, schema),
+    ...checkClosedTaggedUnionBranches(relativeFile, schema),
+  ];
+}
+
+function checkRunItemSchemaUnion(relativeFile, schema) {
+  const itemTypes = schemaNode(schema, ["definitions", "runItemType", "enum"]);
+  if (!Array.isArray(itemTypes)) {
+    return [`${relativeFile}: missing discriminated run-item variant union`];
+  }
+  return checkRunItemSchemaVariants(relativeFile, schema, itemTypes);
+}
+
+function checkRunItemSchemaVariants(relativeFile, schema, itemTypes) {
+  const variants = schemaNode(schema, ["definitions", "runItem", "oneOf"]);
+  if (!Array.isArray(variants)) {
+    return [`${relativeFile}: missing discriminated run-item variant union`];
+  }
+  const branches = variants.map((variant) => runItemBranch(schema, variant));
+  return runItemSchemaVariantErrors(relativeFile, itemTypes, branches);
+}
+
+function runItemBranch(schema, variant) {
+  const definitionName = variant?.$ref?.replace("#/definitions/", "");
+  const definition = definitionName && schemaNode(schema, ["definitions", definitionName]);
+  return { definition, itemType: definition?.properties?.type?.const };
+}
+
+function runItemSchemaVariantErrors(relativeFile, itemTypes, branches) {
+  const branchTypes = branches.map(({ itemType }) => itemType).filter(Boolean);
+  const duplicates = branchTypes.filter(
+    (itemType, index) => branchTypes.indexOf(itemType) !== index,
+  );
+  const producerTypes = runItemProducerFixtures().map(({ value }) => value.item.type);
+  const requiredFieldTypes = Object.keys(requiredRunItemFields);
+  return [
+    ...branches.flatMap((branch) => runItemBranchErrors(relativeFile, branch)),
+    ...missingEntries(itemTypes, branchTypes, `${relativeFile}: missing run-item branch`),
+    ...missingEntries(branchTypes, itemTypes, `${relativeFile}: unknown run-item branch`),
+    ...missingEntries(itemTypes, producerTypes, `${relativeFile}: missing producer fixture`),
+    ...missingEntries(itemTypes, requiredFieldTypes, `${relativeFile}: missing required-field map`),
+    ...[...new Set(duplicates)].map(
+      (itemType) => `${relativeFile}: duplicate run-item branch ${itemType}`,
+    ),
+  ];
+}
+
+function runItemBranchErrors(relativeFile, { definition, itemType }) {
+  if (typeof itemType !== "string") {
+    return [`${relativeFile}: run-item branch lacks a type const`];
+  }
+  const required = requiredFields(definition);
+  return (requiredRunItemFields[itemType] ?? [])
+    .filter((field) => !required.includes(field))
+    .map((field) => `${relativeFile}: ${itemType} must require ${field}`);
+}
+
+const closedTaggedUnionPaths = [
+  ["definitions", "runItem", "oneOf"],
+  ["definitions", "workflowContinuation", "oneOf"],
+  ["definitions", "operatorDecision", "oneOf"],
+];
+
+function checkClosedTaggedUnionBranches(relativeFile, schema) {
+  return closedTaggedUnionPaths.flatMap((unionPath) =>
+    closedTaggedUnionErrors(relativeFile, schema, unionPath),
+  );
+}
+
+function closedTaggedUnionErrors(relativeFile, schema, unionPath) {
+  const branches = schemaNode(schema, unionPath);
+  if (!Array.isArray(branches)) {
+    return [`${relativeFile}: missing tagged union ${unionPath.join(".")}`];
+  }
+  return branches.flatMap((branch) => closedTaggedBranchError(relativeFile, schema, branch));
+}
+
+function closedTaggedBranchError(relativeFile, schema, branch) {
+  const definitionName = branch?.$ref?.replace("#/definitions/", "");
+  const definition = definitionName && schemaNode(schema, ["definitions", definitionName]);
+  return definition?.additionalProperties === false
+    ? []
+    : [
+        `${relativeFile}: tagged branch ${definitionName ?? "<unknown>"} must reject unknown fields`,
+      ];
+}
+
+function checkRunItemStructuralContract(relativeFile, schema) {
+  if (relativeFile !== "schemas/run.items.schema.json") return [];
+  const contractText = [
+    schema.description,
+    schema.$comment,
+    schemaNode(schema, ["definitions", "safeText", "$comment"]),
+    schemaNode(schema, ["definitions", "toolCallProgressItem", "$comment"]),
+  ].join(" ");
+  const requiredMarkers = [
+    "structural",
+    "RunItemPersistencePolicy",
+    "SafeText",
+    "completed <= total",
+  ];
+  return requiredMarkers
+    .filter((marker) => !contractText.includes(marker))
+    .map((marker) => `${relativeFile}: structural contract must name ${marker}`);
 }
 
 function checkProofLevelNumericBranch(relativeFile, schema) {
@@ -537,6 +1280,24 @@ function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
     );
     if (!rule) return [`${relativeFile}: missing reserved metadata rule for ${spec.path}`];
     return missingArtifactMetadataConsts(relativeFile, rule, spec);
+  });
+}
+
+function checkRetiredArtifactMetadata(relativeFile, schema) {
+  const retired = retiredArtifactMetadataSpecsBySchema[relativeFile] ?? [];
+  if (retired.length === 0) return [];
+  const rules = schemaNode(schema, ["definitions", "canonicalArtifactMetadata", "allOf"]);
+  if (!Array.isArray(rules)) return [];
+  return retired.flatMap((spec) => {
+    const pathIsReserved = rules.some((rule) =>
+      ruleMatchesPath(rule, artifactPathPattern(spec.path)),
+    );
+    const labelIsReserved = rules.some(
+      (rule) => rule?.then?.properties?.label?.const === spec.label,
+    );
+    return pathIsReserved || labelIsReserved
+      ? [`${relativeFile}: reserves retired artifact metadata for ${spec.path}`]
+      : [];
   });
 }
 

@@ -18,10 +18,14 @@ fn terminal_status_matrix_keeps_typed_truth_across_surfaces() {
             fixture.read.projection.terminal.as_ref().unwrap().status,
             status
         );
+        let presentation = kuzushi_core::run_lifecycle::present_run(&fixture.read);
         assert_eq!(
-            kuzushi_core::run_lifecycle::present_run(&fixture.read).terminal_status,
-            Some(status)
+            presentation.terminal_status,
+            Some(status),
+            "{run_id}: canonical terminal status"
         );
+        assert_terminal_status_rendering(&presentation, status, &run_id);
+        assert_terminal_json_status(&presentation, status, &run_id);
         assert_surface_equivalence(target.path(), &run_id, fixture);
     }
 }
@@ -82,4 +86,65 @@ fn terminal_statuses() -> [RunItemStatus; 7] {
         RunItemStatus::Interrupted,
         RunItemStatus::Skipped,
     ]
+}
+
+fn assert_terminal_status_rendering(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    status: RunItemStatus,
+    run_id: &str,
+) {
+    let expected_outcome = format!(
+        "Outcome · {} · {} status fixture",
+        status.label(),
+        status.label()
+    );
+    assert!(
+        presentation
+            .summary_text_rows()
+            .iter()
+            .any(|row| row.key.role == RunCellRoleV1::TerminalOutcome
+                && row.text == expected_outcome),
+        "{run_id}: missing exact outcome text {expected_outcome:?}"
+    );
+    assert_terminal_timeline_rendering(presentation, status, run_id);
+}
+
+fn assert_terminal_timeline_rendering(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    status: RunItemStatus,
+    run_id: &str,
+) {
+    let (_, _, glyph) = terminal_expectation(status);
+    let expected = format!(
+        "  {glyph} Run {} · {} status fixture",
+        status.label(),
+        status.label()
+    );
+    let row = presentation
+        .timeline_text_rows()
+        .into_iter()
+        .find(|row| row.key.role == RunCellRoleV1::LifecycleEvent)
+        .expect("terminal fixture must include a lifecycle event");
+    assert!(
+        row.text.contains(&expected),
+        "{run_id}: expected {expected:?}, got {:?}",
+        row.text
+    );
+}
+
+fn assert_terminal_json_status(
+    presentation: &kuzushi_core::run_lifecycle::RunPresentationV1,
+    status: RunItemStatus,
+    run_id: &str,
+) {
+    let expected = serde_json::Value::String(status.label().to_string());
+    let cells = encoded_semantic_cells(presentation);
+    let terminal = cells
+        .iter()
+        .find(|cell| cell["payload"]["type"] == "terminal")
+        .expect("terminal fixture must encode a terminal payload");
+    assert_eq!(
+        terminal["payload"]["value"]["status"], expected,
+        "{run_id}: rich JSON terminal status"
+    );
 }

@@ -106,7 +106,7 @@ fn job_status_style(status: JobRunStatus) -> Style {
         JobRunStatus::WaitingInput => theme::warn(),
         JobRunStatus::Queued => theme::warn(),
         JobRunStatus::Completed => theme::success(),
-        JobRunStatus::Partial | JobRunStatus::Interrupted => theme::warn(),
+        JobRunStatus::Partial | JobRunStatus::Interrupted | JobRunStatus::Blocked => theme::warn(),
         JobRunStatus::Failed | JobRunStatus::Malformed => theme::danger(),
         JobRunStatus::Canceled => theme::warn(),
         // Stale (unverified disk `running`) reads muted, not confident green.
@@ -255,6 +255,11 @@ mod tests {
             assert_eq!(table_width(&widths), width as usize);
             assert!(line_width(&line) <= width as usize);
         }
+    }
+
+    #[test]
+    fn blocked_jobs_use_warning_tone() {
+        assert_eq!(job_status_style(JobRunStatus::Blocked), theme::warn());
     }
 
     #[test]

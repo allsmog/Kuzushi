@@ -57,21 +57,27 @@ fn typed_completed(target: &std::path::Path) -> PhaseAttemptCompleted {
 }
 
 fn typed_run(target: &std::path::Path) -> String {
+    typed_run_with_status(target, RunItemStatus::Completed)
+}
+
+fn typed_run_with_status(target: &std::path::Path, status: RunItemStatus) -> String {
     let run_id = crate::run_artifacts::new_run_id("phase-v2");
     let target_name = target
         .canonicalize()
         .unwrap_or_else(|_| target.to_path_buf())
         .display()
         .to_string();
+    let mut summary = RunSummary::running(
+        &run_id,
+        "tool",
+        Some("fixture:run".to_string()),
+        target_name,
+    );
+    summary.status = status.label().to_string();
+    summary.completed_at_unix = Some(summary.started_at_unix);
     crate::run_artifacts::write_run_summary(
         target,
-        &RunSummary::running(
-            &run_id,
-            "tool",
-            Some("fixture:run".to_string()),
-            target_name,
-        )
-        .complete(),
+        &summary,
     )
     .unwrap();
     let writer = RunItemWriter::open(target, &run_id, None).unwrap();
@@ -80,8 +86,11 @@ fn typed_run(target: &std::path::Path) -> String {
             RunItemId::new(),
             RunItemSource::Workflow,
             RunItemV1::TerminalOutcome {
-                status: RunItemStatus::Completed,
-                summary: SafeText::operator_visible("phase run complete"),
+                status,
+                summary: SafeText::operator_visible(format!(
+                    "phase run {}",
+                    status.label()
+                )),
                 cost: RuntimeCostReport::UNAVAILABLE,
                 continuation: WorkflowContinuation::NoFurtherAction {
                     reason: SafeText::operator_visible("await phase receipt"),
@@ -374,6 +383,48 @@ fn workflow_v2_dual_writes_reference_only_receipts_and_v1_projection() {
     let body = fs::read_to_string(phase_attempt_v2_ledger_path(target.path())).unwrap();
     assert!(!body.contains("phase run complete"));
     assert!(!body.contains("result.json"));
+}
+
+#[test]
+fn blocked_phase_attempt_stays_blocked_in_v1_v2_and_typed_receipt() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = typed_run_with_status(target.path(), RunItemStatus::Blocked);
+    let attempt = PhaseAttemptCompleted::new(
+        WorkflowPhase::Scan,
+        vec![run_id.clone()],
+        PhaseTargetSnapshot::capture(target.path()),
+        PhaseAttemptOutcome::Blocked,
+    )
+    .with_attempt_id(RunAttemptId::new().to_string())
+    .with_receipt(receipt());
+
+    append_phase_attempt_completed_with_v2(target.path(), attempt.clone()).unwrap();
+
+    let typed_id = RunAttemptId::parse(&attempt.attempt_id).unwrap();
+    let v2 = load_phase_attempt_ledger_v2(target.path()).unwrap();
+    assert_eq!(v2.attempts[&typed_id].outcome, RunItemStatus::Blocked);
+    let receipt = crate::workflow_attempts::load_phase_receipt_projection_v2(
+        target.path(),
+        &attempt.attempt_id,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(receipt.status, RunItemStatus::Blocked);
+    assert!(receipt
+        .offered_actions
+        .iter()
+        .all(|action| !matches!(
+            action,
+            WorkflowContinuation::OpenPhase { .. }
+                | WorkflowContinuation::OpenReport { .. }
+                | WorkflowContinuation::NoFurtherAction { .. }
+        )));
+    let events = load_phase_attempt_events(target.path()).unwrap();
+    let PhaseAttemptEvent::PhaseAttemptCompleted(v1) = &events[0] else {
+        panic!("expected workflow-v1 completion");
+    };
+    assert_eq!(v1.outcome, PhaseAttemptOutcome::Blocked);
+    assert_eq!(v1.run_refs, vec![run_id]);
 }
 
 #[test]
@@ -1412,6 +1463,31 @@ fn failed_attempt_can_be_discarded_but_not_selected() {
         },
     );
     assert!(append_phase_attempt_disposition(target.path(), selected).is_err());
+    append_phase_attempt_disposition(
+        target.path(),
+        PhaseAttemptDispositionRecorded::new(
+            attempt.attempt_id,
+            PhaseAttemptDisposition::Discarded,
+        ),
+    )
+    .unwrap();
+}
+
+#[test]
+fn blocked_attempt_can_be_discarded_but_not_selected() {
+    let target = tempfile::tempdir().unwrap();
+    let attempt = completed(PhaseAttemptOutcome::Blocked);
+    append_phase_attempt_completed(target.path(), attempt.clone()).unwrap();
+
+    let selected = PhaseAttemptDispositionRecorded::new(
+        &attempt.attempt_id,
+        PhaseAttemptDisposition::Selected {
+            acknowledged_partial: false,
+        },
+    );
+    let error = append_phase_attempt_disposition(target.path(), selected).unwrap_err();
+    assert!(error.to_string().contains("blocked"), "{error:#}");
+
     append_phase_attempt_disposition(
         target.path(),
         PhaseAttemptDispositionRecorded::new(

@@ -3,10 +3,7 @@ use crate::runtime::{RuntimeCost, RuntimeCostReport};
 use anyhow::Result;
 use std::path::Path;
 
-pub fn lifecycle_cost_report(
-    target: impl AsRef<Path>,
-    run_id: &str,
-) -> Result<RuntimeCostReport> {
+pub fn lifecycle_cost_report(target: impl AsRef<Path>, run_id: &str) -> Result<RuntimeCostReport> {
     let Some(read) = read_run_items(target, run_id)? else {
         return Ok(RuntimeCostReport::UNAVAILABLE);
     };
@@ -52,7 +49,10 @@ fn model_call_cost_report<'a>(
 ) -> Result<RuntimeCostReport> {
     let mut total = RuntimeCostReport::known(RuntimeCost::ZERO);
     let mut saw_model_call = false;
-    for cost in items.into_iter().filter_map(terminal_model_call_cost_report) {
+    for cost in items
+        .into_iter()
+        .filter_map(terminal_model_call_cost_report)
+    {
         saw_model_call = true;
         total = total.checked_add(cost, "lifecycle model-call cost sum")?;
     }

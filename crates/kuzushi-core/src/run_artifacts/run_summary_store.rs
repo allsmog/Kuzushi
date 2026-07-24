@@ -1177,7 +1177,9 @@ mod liveness_tests {
             )
             .with_call(call_id)
         };
-        writer.emit_and_flush(record(recovery_model_start(label))).unwrap();
+        writer
+            .emit_and_flush(record(recovery_model_start(label)))
+            .unwrap();
         writer
             .emit_and_flush(record(recovery_model_finish(sequence, cost_usd)))
             .unwrap();
@@ -1202,9 +1204,11 @@ mod liveness_tests {
         use crate::run_lifecycle::*;
         let cost = cost_usd.map_or(
             crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
-            |value| crate::runtime::RuntimeCostReport::known(
-                crate::runtime::RuntimeCost::from_usd(value, "recovery test").unwrap(),
-            ),
+            |value| {
+                crate::runtime::RuntimeCostReport::known(
+                    crate::runtime::RuntimeCost::from_usd(value, "recovery test").unwrap(),
+                )
+            },
         );
         RunItemV1::ModelCallFinished {
             provider: SafeText::operator_visible("openai"),
@@ -1316,7 +1320,13 @@ mod liveness_tests {
             projection
                 .timeline
                 .iter()
-                .filter(|item| matches!(item.item, crate::run_lifecycle::RunItemV1::TerminalOutcome { status: crate::run_lifecycle::RunItemStatus::Interrupted, .. }))
+                .filter(|item| matches!(
+                    item.item,
+                    crate::run_lifecycle::RunItemV1::TerminalOutcome {
+                        status: crate::run_lifecycle::RunItemStatus::Interrupted,
+                        ..
+                    }
+                ))
                 .count(),
             1
         );

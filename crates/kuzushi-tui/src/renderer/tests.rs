@@ -6285,7 +6285,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
         assert!(rendered.contains("TASKS"), "{width}x{height}: {rendered}");
         assert!(!rendered.contains("PHASE"), "{width}x{height}: {rendered}");
         assert!(
-            rendered.contains("Building repository inventory"),
+            rendered.contains("building repository inventory"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -6304,7 +6304,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
         "RUN FOCUS",
         "STEPS",
         "OUTPUT",
-        "Building repository inventory",
+        "building repository inventory",
     ] {
         assert!(
             plain.contains(marker),
@@ -6314,6 +6314,10 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
     assert!(!plain.contains("PHASE"), "{plain}");
     assert!(!plain.contains("MAP · RECON"), "{plain}");
     assert!(!plain.contains("TELEMETRY"), "{plain}");
+    assert!(
+        !plain.lines().any(|line| line.starts_with(" -- RUN -")),
+        "Run Focus already owns the typed run projection: {plain}"
+    );
 }
 
 #[test]

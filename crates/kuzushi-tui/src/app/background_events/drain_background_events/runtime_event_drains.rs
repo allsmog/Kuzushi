@@ -1025,25 +1025,59 @@ fn durable_phase_attempt_outcome(
     run_refs: &[String],
     fallback: &str,
 ) -> kuzushi_core::workflow_attempts::PhaseAttemptOutcome {
+    use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+
+    if final_typed_run_is_blocked(target, run_refs) {
+        return PhaseAttemptOutcome::Blocked;
+    }
     let fallback = phase_attempt_outcome_from_label(fallback);
-    if matches!(
-        fallback,
-        kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Failed
-            | kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Canceled
-    ) {
+    outcome_from_phase_evidence(target, phase, run_refs, fallback)
+}
+
+fn outcome_from_phase_evidence(
+    target: &std::path::Path,
+    phase: WorkflowPhase,
+    run_refs: &[String],
+    fallback: kuzushi_core::workflow_attempts::PhaseAttemptOutcome,
+) -> kuzushi_core::workflow_attempts::PhaseAttemptOutcome {
+    if recovery_only_outcome(fallback) {
         return fallback;
     }
-    if phase == WorkflowPhase::Map {
-        let facts = kuzushi_core::workflow_attempts::collect_map_evidence(target, run_refs);
-        return if kuzushi_core::workflow_attempts::assess_map_evidence(&facts).is_adequate() {
-            kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Completed
-        } else {
-            kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Partial
-        };
+    match phase {
+        WorkflowPhase::Map => map_phase_attempt_outcome(target, run_refs),
+        WorkflowPhase::Scan => scan_phase_attempt_outcome(target, run_refs, fallback),
+        WorkflowPhase::Review | WorkflowPhase::Prove | WorkflowPhase::Fix => fallback,
     }
-    if phase != WorkflowPhase::Scan {
-        return fallback;
+}
+
+fn recovery_only_outcome(outcome: kuzushi_core::workflow_attempts::PhaseAttemptOutcome) -> bool {
+    use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+
+    matches!(
+        outcome,
+        PhaseAttemptOutcome::Blocked | PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled
+    )
+}
+
+fn map_phase_attempt_outcome(
+    target: &std::path::Path,
+    run_refs: &[String],
+) -> kuzushi_core::workflow_attempts::PhaseAttemptOutcome {
+    use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+
+    let facts = kuzushi_core::workflow_attempts::collect_map_evidence(target, run_refs);
+    if kuzushi_core::workflow_attempts::assess_map_evidence(&facts).is_adequate() {
+        PhaseAttemptOutcome::Completed
+    } else {
+        PhaseAttemptOutcome::Partial
     }
+}
+
+fn scan_phase_attempt_outcome(
+    target: &std::path::Path,
+    run_refs: &[String],
+    fallback: kuzushi_core::workflow_attempts::PhaseAttemptOutcome,
+) -> kuzushi_core::workflow_attempts::PhaseAttemptOutcome {
     run_refs
         .iter()
         .filter_map(|run_id| {
@@ -1055,6 +1089,22 @@ fn durable_phase_attempt_outcome(
         .reduce(merge_phase_stage_outcome)
         .map(phase_stage_attempt_outcome)
         .unwrap_or(fallback)
+}
+
+fn final_typed_run_is_blocked(target: &std::path::Path, run_refs: &[String]) -> bool {
+    use kuzushi_core::run_lifecycle::{ProjectionHealth, RunItemStatus, RunProjectionSource};
+
+    run_refs
+        .last()
+        .and_then(|run_id| kuzushi_core::run_lifecycle::load_run_projection(target, run_id).ok())
+        .is_some_and(|read| {
+            read.source == RunProjectionSource::TypedV1
+                && read.projection.health == ProjectionHealth::Healthy
+                && read
+                    .projection
+                    .terminal
+                    .is_some_and(|terminal| terminal.status == RunItemStatus::Blocked)
+        })
 }
 
 fn map_evidence_blocker(
@@ -1095,6 +1145,7 @@ fn phase_attempt_outcome_label(
     match outcome {
         PhaseAttemptOutcome::Completed => "completed",
         PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Blocked => "blocked",
         PhaseAttemptOutcome::Failed => "failed",
         PhaseAttemptOutcome::Canceled => "canceled",
     }
@@ -1569,6 +1620,27 @@ mod run_focus_completion_tests {
     }
 
     #[test]
+    fn typed_blocked_terminal_overrides_success_fallback_and_phase_evidence() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "blocked-phase-run";
+        write_terminal_run(
+            target.path(),
+            run_id,
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked,
+        );
+
+        assert_eq!(
+            durable_phase_attempt_outcome(
+                target.path(),
+                WorkflowPhase::Map,
+                &[run_id.to_string()],
+                "completed",
+            ),
+            PhaseAttemptOutcome::Blocked
+        );
+    }
+
+    #[test]
     fn durable_scan_stage_aggregation_uses_the_most_severe_outcome() {
         let target = tempfile::tempdir().unwrap();
         write_scan_stage(target.path(), "complete-scan", PhaseStageOutcome::Completed);
@@ -1691,6 +1763,34 @@ mod run_focus_completion_tests {
         });
         session.apply_run_item(item).unwrap();
         session
+    }
+
+    fn write_terminal_run(
+        target: &std::path::Path,
+        run_id: &str,
+        status: kuzushi_core::run_lifecycle::RunItemStatus,
+    ) {
+        use kuzushi_core::run_lifecycle::{
+            RunItemId, RunItemRecord, RunItemSource, RunItemV1, RunItemWriter, SafeText,
+            WorkflowContinuation,
+        };
+
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        writer
+            .emit_and_flush(RunItemRecord::new(
+                RunItemId::new(),
+                RunItemSource::Workflow,
+                RunItemV1::TerminalOutcome {
+                    status,
+                    summary: SafeText::operator_visible(status.label()),
+                    cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                    continuation: WorkflowContinuation::NoFurtherAction {
+                        reason: SafeText::operator_visible("phase stopped"),
+                    },
+                },
+            ))
+            .unwrap();
+        writer.shutdown().unwrap();
     }
 
     fn completed_terminal_item(run_id: &str) -> kuzushi_core::run_lifecycle::RunItemEnvelopeV1 {

@@ -56,6 +56,7 @@ pub(crate) fn target_identities_match(left: &str, right: &str) -> bool {
 pub enum PhaseAttemptOutcome {
     Completed,
     Partial,
+    Blocked,
     Failed,
     Canceled,
 }

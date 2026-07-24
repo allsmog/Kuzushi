@@ -243,6 +243,60 @@ fn completed_receipt_rejects_non_complete_referenced_run() {
 }
 
 #[test]
+fn blocked_receipt_requires_a_blocked_final_run_and_offers_no_selection() {
+    let run_id = run_id();
+    let projection = projection(run_id.clone(), RunItemStatus::Blocked);
+
+    let item = PhaseReceiptBuilder::new(
+        WorkflowPhase::Scan,
+        RunItemStatus::Blocked,
+        std::slice::from_ref(&run_id),
+        std::slice::from_ref(&projection),
+    )
+    .build()
+    .unwrap();
+
+    let RunItemV1::PhaseReceipt {
+        status,
+        offered_actions,
+        continuation,
+        ..
+    } = item
+    else {
+        panic!("expected phase receipt");
+    };
+    assert_eq!(status, RunItemStatus::Blocked);
+    assert!(matches!(
+        continuation,
+        WorkflowContinuation::InspectRun { ref reason, .. }
+            if reason.as_str().contains("autonomy posture")
+    ));
+    assert!(offered_actions.iter().all(|action| !matches!(
+        action,
+        WorkflowContinuation::OpenPhase { .. }
+            | WorkflowContinuation::OpenReport { .. }
+            | WorkflowContinuation::NoFurtherAction { .. }
+    )));
+}
+
+#[test]
+fn blocked_receipt_rejects_a_non_blocked_final_run() {
+    let run_id = run_id();
+    let projection = projection(run_id.clone(), RunItemStatus::Failed);
+
+    let error = PhaseReceiptBuilder::new(
+        WorkflowPhase::Scan,
+        RunItemStatus::Blocked,
+        std::slice::from_ref(&run_id),
+        std::slice::from_ref(&projection),
+    )
+    .build()
+    .unwrap_err();
+
+    assert!(error.to_string().contains("non-blocked final run"));
+}
+
+#[test]
 fn outstanding_question_is_the_primary_continuation() {
     let run_id = run_id();
     let question_id = RunQuestionId::new();

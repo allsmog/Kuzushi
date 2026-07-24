@@ -10,6 +10,7 @@ mod canonical_run_files;
 mod canonical_run_markers;
 mod jsonl_append;
 mod jsonl_numbering;
+mod lifecycle_cost;
 mod llm_audit;
 mod output_declared_artifacts;
 mod process_identity;
@@ -30,10 +31,9 @@ mod stage_checkpoint;
 mod tests;
 mod tool_output_cost;
 mod tool_run_failure_result;
-mod tool_stage;
 mod tool_run_record;
 mod tool_run_record_events;
-mod lifecycle_cost;
+mod tool_stage;
 mod trace_handle;
 mod write_run_artifact_json;
 mod write_run_artifact_text;
@@ -41,6 +41,9 @@ mod write_run_artifact_text;
 pub(crate) use artifact_manifest::record_run_artifact;
 pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub(crate) use jsonl_append::append_run_artifact_jsonl_value;
+pub use lifecycle_cost::{
+    lifecycle_cost_report, reconcile_terminal_cost_reports, terminal_model_call_cost_report,
+};
 pub use run_artifact::RunArtifact;
 pub use run_artifact_reader::{
     read_run_artifact_bytes, read_run_artifact_text, resolve_run_artifact_path,
@@ -48,7 +51,6 @@ pub use run_artifact_reader::{
 };
 pub use run_events::{
     append_run_event, load_run_events, next_run_event_number, RunEvent, RunEventRead,
-    RunInteractionAudit,
 };
 pub(crate) use run_failures::run_failure_artifact_path;
 pub use run_failures::{
@@ -80,20 +82,17 @@ pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
     RunSummary, RunTargetGitMetadata,
 };
-pub use stage_checkpoint::{
-    active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
-    PendingStageCheckpoint, StageCheckpointCoordinates, StageCheckpointHandle,
-    StageCheckpointScope, StageCheckpointStore, StageGuard,
-};
 pub use scan_stage::{
     load_scan_stage_data, PhaseStageOutcome, PhaseStageReceipt, ScanArtifactDelta,
     ScanEngineStageOutcome, ScanFindingDelta, ScanSeverityCount, ScanStageCost, ScanStageData,
     ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
-pub use tool_output_cost::tool_run_output_cost_report;
-pub use tool_stage::{
-    append_tool_stage_receipt, load_tool_stage_receipts, ToolStageReceipt, TOOL_STAGES_JSONL_FILE,
+pub use stage_checkpoint::{
+    active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
+    PendingStageCheckpoint, StageCheckpointCoordinates, StageCheckpointHandle,
+    StageCheckpointScope, StageCheckpointStore, StageGuard,
 };
+pub use tool_output_cost::tool_run_output_cost_report;
 pub(crate) use tool_run_record::terminal_result_digest;
 pub use tool_run_record::{
     record_tool_run_canceled, record_tool_run_complete, record_tool_run_failed,
@@ -110,8 +109,8 @@ pub use tool_run_record::{
     try_record_tool_run_refused_observed, try_record_tool_run_refused_settled,
     try_record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
-pub use lifecycle_cost::{
-    lifecycle_cost_report, reconcile_terminal_cost_reports, terminal_model_call_cost_report,
+pub use tool_stage::{
+    append_tool_stage_receipt, load_tool_stage_receipts, ToolStageReceipt, TOOL_STAGES_JSONL_FILE,
 };
 pub use trace_handle::{
     current_parent_step, with_parent_step, ParentScope, RunActivityBuilder, TraceHandle,

@@ -2,7 +2,8 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kuzushi.dev/schemas/run.items.schema.json",
   "title": "Kuzushi Run Lifecycle Item V1",
-  "description": "Canonical schema for each JSON line in .kuzushi/v3/runs/<runId>/items.jsonl.",
+  "description": "Canonical structural schema for each JSON line in .kuzushi/v3/runs/<runId>/items.jsonl. Rust deserialization and RunItemPersistencePolicy remain authoritative for semantic invariants.",
+  "$comment": "Draft-07 validates the wire shape only. Cross-field invariants such as completed <= total and SafeText redaction/control policy are enforced by Rust deserialization and RunItemPersistencePolicy.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,25 +20,306 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "seq": { "type": "integer", "minimum": 1 },
-    "eventId": { "$ref": "#/definitions/identity" },
-    "itemId": { "$ref": "#/definitions/identity" },
-    "runId": { "$ref": "#/definitions/identity" },
-    "taskId": { "$ref": "#/definitions/identity" },
-    "callId": { "$ref": "#/definitions/identity" },
-    "parentItemId": { "$ref": "#/definitions/identity" },
-    "attemptId": { "$ref": "#/definitions/identity" },
-    "phase": { "type": "string", "minLength": 1 },
+    "eventId": { "$ref": "#/definitions/typedUuid" },
+    "itemId": { "$ref": "#/definitions/typedUuid" },
+    "runId": { "$ref": "#/definitions/runId" },
+    "taskId": { "$ref": "#/definitions/typedUuid" },
+    "callId": { "$ref": "#/definitions/typedUuid" },
+    "parentItemId": { "$ref": "#/definitions/typedUuid" },
+    "attemptId": { "$ref": "#/definitions/typedUuid" },
+    "phase": { "$ref": "#/definitions/workflowPhase" },
     "source": { "$ref": "#/definitions/runItemSource" },
     "occurredAtMs": { "type": "integer", "minimum": 0 },
-    "prevEventHash": { "type": "string", "minLength": 1 },
-    "eventHash": { "type": "string", "minLength": 1 },
+    "prevEventHash": { "$ref": "#/definitions/sha256Digest" },
+    "eventHash": { "$ref": "#/definitions/sha256Digest" },
     "item": { "$ref": "#/definitions/runItem" }
   },
   "definitions": {
-    "identity": { "type": "string", "minLength": 1 },
+    "typedUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"
+    },
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "safeText": {
+      "$comment": "Structural bound only. Rust SafeText deserialization authoritatively enforces shared secret redaction, control-character escaping, and the operator-visible text policy.",
+      "type": "string",
+      "maxLength": 6000
+    },
+    "unsignedInteger": { "type": "integer", "minimum": 0 },
     "runItemSource": {
       "type": "string",
       "enum": ["dispatch", "runtime", "workflow", "operator", "persistence"]
+    },
+    "runItemStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "completed",
+        "partial",
+        "skipped",
+        "blocked",
+        "failed",
+        "canceled",
+        "interrupted"
+      ]
+    },
+    "terminalRunItemStatus": {
+      "type": "string",
+      "enum": [
+        "completed",
+        "partial",
+        "skipped",
+        "blocked",
+        "failed",
+        "canceled",
+        "interrupted"
+      ]
+    },
+    "workflowPhase": {
+      "type": "string",
+      "enum": ["map", "scan", "review", "prove", "fix"]
+    },
+    "operationFingerprint": {
+      "type": "string",
+      "pattern": "^blake3:[0-9a-fA-F]{64}$"
+    },
+    "runtimeCostCompleteness": {
+      "type": "string",
+      "enum": ["exact", "incomplete_observed", "unavailable"]
+    },
+    "runtimeCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observedUsd", "completeness"],
+      "properties": {
+        "observedUsd": { "type": "number", "minimum": 0 },
+        "completeness": { "$ref": "#/definitions/runtimeCostCompleteness" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "completeness": { "const": "unavailable" } },
+            "required": ["completeness"]
+          },
+          "then": {
+            "properties": { "observedUsd": { "const": 0 } }
+          }
+        }
+      ]
+    },
+    "artifactReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "kind",
+        "label",
+        "digest",
+        "byteCount",
+        "producingItemId"
+      ],
+      "properties": {
+        "path": { "$ref": "#/definitions/safeText" },
+        "kind": { "$ref": "#/definitions/safeText" },
+        "label": { "$ref": "#/definitions/safeText" },
+        "digest": { "$ref": "#/definitions/safeText" },
+        "byteCount": { "$ref": "#/definitions/unsignedInteger" },
+        "lineCount": { "$ref": "#/definitions/unsignedInteger" },
+        "producingItemId": { "$ref": "#/definitions/typedUuid" }
+      }
+    },
+    "findingDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["added", "updated", "removed", "storeWatermark"],
+      "properties": {
+        "added": { "$ref": "#/definitions/unsignedInteger" },
+        "updated": { "$ref": "#/definitions/unsignedInteger" },
+        "removed": { "$ref": "#/definitions/unsignedInteger" },
+        "storeWatermark": { "$ref": "#/definitions/safeText" },
+        "findingIdSamples": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/definitions/safeText" }
+        }
+      }
+    },
+    "modelUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputTokens": { "$ref": "#/definitions/unsignedInteger" },
+        "outputTokens": { "$ref": "#/definitions/unsignedInteger" }
+      }
+    },
+    "workflowContinuationKind": {
+      "type": "string",
+      "enum": [
+        "open_phase",
+        "open_report",
+        "inspect_run",
+        "retry",
+        "await_decision",
+        "no_further_action"
+      ]
+    },
+    "workflowContinuation": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "$ref": "#/definitions/workflowContinuationKind" }
+      },
+      "oneOf": [
+        { "$ref": "#/definitions/openPhaseContinuation" },
+        { "$ref": "#/definitions/openReportContinuation" },
+        { "$ref": "#/definitions/inspectRunContinuation" },
+        { "$ref": "#/definitions/retryContinuation" },
+        { "$ref": "#/definitions/awaitDecisionContinuation" },
+        { "$ref": "#/definitions/noFurtherActionContinuation" }
+      ]
+    },
+    "openPhaseContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "phase"],
+      "properties": {
+        "kind": { "const": "open_phase" },
+        "phase": { "$ref": "#/definitions/workflowPhase" }
+      }
+    },
+    "openReportContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason"],
+      "properties": {
+        "kind": { "const": "open_report" },
+        "reason": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "inspectRunContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "run_id", "reason"],
+      "properties": {
+        "kind": { "const": "inspect_run" },
+        "run_id": { "$ref": "#/definitions/runId" },
+        "reason": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "retryContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason"],
+      "properties": {
+        "kind": { "const": "retry" },
+        "reason": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "awaitDecisionContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "question_id"],
+      "properties": {
+        "kind": { "const": "await_decision" },
+        "question_id": { "$ref": "#/definitions/typedUuid" }
+      }
+    },
+    "noFurtherActionContinuation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reason"],
+      "properties": {
+        "kind": { "const": "no_further_action" },
+        "reason": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "operatorChoice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {
+        "id": { "$ref": "#/definitions/safeText" },
+        "label": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "operatorDecisionKind": {
+      "type": "string",
+      "enum": [
+        "selected",
+        "provided_freeform",
+        "approved",
+        "denied",
+        "deferred"
+      ]
+    },
+    "operatorDecision": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "$ref": "#/definitions/operatorDecisionKind" }
+      },
+      "oneOf": [
+        { "$ref": "#/definitions/selectedOperatorDecision" },
+        { "$ref": "#/definitions/providedFreeformOperatorDecision" },
+        { "$ref": "#/definitions/approvedOperatorDecision" },
+        { "$ref": "#/definitions/deniedOperatorDecision" },
+        { "$ref": "#/definitions/deferredOperatorDecision" }
+      ]
+    },
+    "selectedOperatorDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "choice_id"],
+      "properties": {
+        "kind": { "const": "selected" },
+        "choice_id": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "providedFreeformOperatorDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "provided_freeform" }
+      }
+    },
+    "approvedOperatorDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "approved" }
+      }
+    },
+    "deniedOperatorDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "denied" }
+      }
+    },
+    "deferredOperatorDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "deferred" }
+      }
+    },
+    "diagnosticLevel": {
+      "type": "string",
+      "enum": ["info", "warning", "error"]
     },
     "runItemType": {
       "type": "string",
@@ -66,21 +348,307 @@
       "type": "object",
       "required": ["type"],
       "properties": {
-        "type": { "$ref": "#/definitions/runItemType" },
-        "status": { "type": "string" },
-        "title": { "type": "string" },
-        "detail": { "type": "string" },
-        "tool_name": { "type": "string" },
-        "message": { "type": "string" },
-        "completed": { "type": "integer", "minimum": 0 },
-        "total": { "type": "integer", "minimum": 0 },
-        "provider": { "type": "string" },
-        "model": { "type": "string" },
-        "latency_ms": { "type": "integer", "minimum": 0 },
-        "summary": { "type": "string" },
-        "text": { "type": "string" }
+        "type": { "$ref": "#/definitions/runItemType" }
       },
-      "additionalProperties": true
+      "oneOf": [
+        { "$ref": "#/definitions/planUpdatedItem" },
+        { "$ref": "#/definitions/taskUpdatedItem" },
+        { "$ref": "#/definitions/toolCallRequestedItem" },
+        { "$ref": "#/definitions/toolCallRejectedItem" },
+        { "$ref": "#/definitions/toolCallStartedItem" },
+        { "$ref": "#/definitions/toolCallProgressItem" },
+        { "$ref": "#/definitions/toolCallFinishedItem" },
+        { "$ref": "#/definitions/modelCallStartedItem" },
+        { "$ref": "#/definitions/modelCallFinishedItem" },
+        { "$ref": "#/definitions/safeReasoningSummaryItem" },
+        { "$ref": "#/definitions/artifactProducedItem" },
+        { "$ref": "#/definitions/findingDeltaItem" },
+        { "$ref": "#/definitions/diagnosticNoticeItem" },
+        { "$ref": "#/definitions/operatorQuestionItem" },
+        { "$ref": "#/definitions/operatorDecisionItem" },
+        { "$ref": "#/definitions/terminalOutcomeItem" },
+        { "$ref": "#/definitions/phaseReceiptItem" },
+        { "$ref": "#/definitions/progressTruncatedItem" }
+      ]
+    },
+    "planUpdatedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "revision", "title", "status", "task_ids"],
+      "properties": {
+        "type": { "const": "plan_updated" },
+        "revision": { "$ref": "#/definitions/unsignedInteger" },
+        "title": { "$ref": "#/definitions/safeText" },
+        "status": { "$ref": "#/definitions/runItemStatus" },
+        "task_ids": {
+          "type": "array",
+          "maxItems": 2048,
+          "items": { "$ref": "#/definitions/typedUuid" }
+        }
+      }
+    },
+    "taskUpdatedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "title", "status"],
+      "properties": {
+        "type": { "const": "task_updated" },
+        "title": { "$ref": "#/definitions/safeText" },
+        "status": { "$ref": "#/definitions/runItemStatus" },
+        "detail": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "toolCallRequestedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_name", "operation_fingerprint"],
+      "properties": {
+        "type": { "const": "tool_call_requested" },
+        "tool_name": { "$ref": "#/definitions/safeText" },
+        "operation_fingerprint": { "$ref": "#/definitions/operationFingerprint" },
+        "safe_option_names": {
+          "type": "array",
+          "maxItems": 128,
+          "items": { "$ref": "#/definitions/safeText" }
+        }
+      }
+    },
+    "toolCallRejectedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "reason_class", "detail"],
+      "properties": {
+        "type": { "const": "tool_call_rejected" },
+        "reason_class": { "$ref": "#/definitions/safeText" },
+        "detail": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "toolCallStartedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "tool_name"],
+      "properties": {
+        "type": { "const": "tool_call_started" },
+        "tool_name": { "$ref": "#/definitions/safeText" },
+        "runtime": { "$ref": "#/definitions/safeText" },
+        "model": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "toolCallProgressItem": {
+      "type": "object",
+      "$comment": "Draft-07 cannot portably compare sibling properties. RunItemPersistencePolicy enforces completed <= total after structural validation.",
+      "additionalProperties": false,
+      "required": ["type", "message"],
+      "properties": {
+        "type": { "const": "tool_call_progress" },
+        "message": { "$ref": "#/definitions/safeText" },
+        "completed": { "$ref": "#/definitions/unsignedInteger" },
+        "total": { "type": "integer", "minimum": 1 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              { "required": ["completed"] },
+              { "required": ["total"] }
+            ]
+          },
+          "then": { "required": ["completed", "total"] }
+        }
+      ]
+    },
+    "toolCallFinishedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "status",
+        "cost",
+        "warning_count",
+        "error_count"
+      ],
+      "properties": {
+        "type": { "const": "tool_call_finished" },
+        "status": { "$ref": "#/definitions/terminalRunItemStatus" },
+        "cost": { "$ref": "#/definitions/runtimeCost" },
+        "result_artifact": { "$ref": "#/definitions/artifactReference" },
+        "preview": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "maxLength": 500 }
+        },
+        "warning_count": { "$ref": "#/definitions/unsignedInteger" },
+        "error_count": { "$ref": "#/definitions/unsignedInteger" }
+      }
+    },
+    "modelCallStartedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "provider", "model", "operation_fingerprint"],
+      "properties": {
+        "type": { "const": "model_call_started" },
+        "provider": { "$ref": "#/definitions/safeText" },
+        "model": { "$ref": "#/definitions/safeText" },
+        "operation_fingerprint": { "$ref": "#/definitions/operationFingerprint" }
+      }
+    },
+    "modelCallFinishedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "provider",
+        "model",
+        "status",
+        "latency_ms",
+        "usage",
+        "cost"
+      ],
+      "properties": {
+        "type": { "const": "model_call_finished" },
+        "provider": { "$ref": "#/definitions/safeText" },
+        "model": { "$ref": "#/definitions/safeText" },
+        "status": { "$ref": "#/definitions/terminalRunItemStatus" },
+        "latency_ms": { "$ref": "#/definitions/unsignedInteger" },
+        "usage": { "$ref": "#/definitions/modelUsage" },
+        "cost": { "$ref": "#/definitions/runtimeCost" },
+        "error_class": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "safeReasoningSummaryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "text", "redaction_policy_version"],
+      "properties": {
+        "type": { "const": "safe_reasoning_summary" },
+        "text": { "$ref": "#/definitions/safeText" },
+        "redaction_policy_version": { "const": 1 }
+      }
+    },
+    "artifactProducedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "artifact"],
+      "properties": {
+        "type": { "const": "artifact_produced" },
+        "artifact": { "$ref": "#/definitions/artifactReference" }
+      }
+    },
+    "findingDeltaItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "delta"],
+      "properties": {
+        "type": { "const": "finding_delta" },
+        "delta": { "$ref": "#/definitions/findingDelta" }
+      }
+    },
+    "diagnosticNoticeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "level", "message"],
+      "properties": {
+        "type": { "const": "diagnostic_notice" },
+        "level": { "$ref": "#/definitions/diagnosticLevel" },
+        "message": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "operatorQuestionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "question_id",
+        "prompt",
+        "authorization_scope"
+      ],
+      "properties": {
+        "type": { "const": "operator_question" },
+        "question_id": { "$ref": "#/definitions/typedUuid" },
+        "prompt": { "$ref": "#/definitions/safeText" },
+        "choices": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/operatorChoice" }
+        },
+        "authorization_scope": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "operatorDecisionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "question_id",
+        "decision",
+        "authorization_scope"
+      ],
+      "properties": {
+        "type": { "const": "operator_decision" },
+        "question_id": { "$ref": "#/definitions/typedUuid" },
+        "decision": { "$ref": "#/definitions/operatorDecision" },
+        "authorization_scope": { "$ref": "#/definitions/safeText" }
+      }
+    },
+    "terminalOutcomeItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "status", "summary", "cost", "continuation"],
+      "properties": {
+        "type": { "const": "terminal_outcome" },
+        "status": { "$ref": "#/definitions/terminalRunItemStatus" },
+        "summary": { "$ref": "#/definitions/safeText" },
+        "cost": { "$ref": "#/definitions/runtimeCost" },
+        "continuation": { "$ref": "#/definitions/workflowContinuation" }
+      }
+    },
+    "phaseReceiptItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run_ids",
+        "status",
+        "cost",
+        "finding_delta",
+        "artifact_ids",
+        "interaction_count",
+        "offered_actions",
+        "continuation"
+      ],
+      "properties": {
+        "type": { "const": "phase_receipt" },
+        "run_ids": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/definitions/runId" }
+        },
+        "status": { "$ref": "#/definitions/terminalRunItemStatus" },
+        "cost": { "$ref": "#/definitions/runtimeCost" },
+        "finding_delta": { "$ref": "#/definitions/findingDelta" },
+        "artifact_ids": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/typedUuid" }
+        },
+        "interaction_count": { "$ref": "#/definitions/unsignedInteger" },
+        "offered_actions": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/definitions/workflowContinuation" }
+        },
+        "continuation": { "$ref": "#/definitions/workflowContinuation" }
+      }
+    },
+    "progressTruncatedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "progress_item_id", "omitted_count"],
+      "properties": {
+        "type": { "const": "progress_truncated" },
+        "progress_item_id": { "$ref": "#/definitions/typedUuid" },
+        "omitted_count": { "type": "integer", "minimum": 1 }
+      }
     }
   }
 }

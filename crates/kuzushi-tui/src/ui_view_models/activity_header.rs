@@ -141,6 +141,7 @@ fn terminal_status_segment(status: &str) -> String {
     match status {
         "completed" => "✓ run completed".to_string(),
         "partial" => "⚠ run partial".to_string(),
+        "blocked" => "▣ run blocked".to_string(),
         "failed" => "✗ run failed".to_string(),
         "interrupted" => "× run interrupted".to_string(),
         "canceled" | "cancelled" => "× run canceled".to_string(),

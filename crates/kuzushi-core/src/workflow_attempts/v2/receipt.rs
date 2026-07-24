@@ -83,6 +83,7 @@ pub(super) fn outcome_status(outcome: PhaseAttemptOutcome) -> RunItemStatus {
     match outcome {
         PhaseAttemptOutcome::Completed => RunItemStatus::Completed,
         PhaseAttemptOutcome::Partial => RunItemStatus::Partial,
+        PhaseAttemptOutcome::Blocked => RunItemStatus::Blocked,
         PhaseAttemptOutcome::Failed => RunItemStatus::Failed,
         PhaseAttemptOutcome::Canceled => RunItemStatus::Canceled,
     }

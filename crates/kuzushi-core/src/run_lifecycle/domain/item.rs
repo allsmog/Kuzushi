@@ -124,7 +124,7 @@ pub struct ModelUsage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowContinuation {
     OpenPhase { phase: WorkflowPhase },
     OpenReport { reason: SafeText },
@@ -154,7 +154,7 @@ pub struct OperatorChoice {
     pub label: SafeText,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OperatorDecisionValue {
     Selected { choice_id: SafeText },
@@ -162,6 +162,40 @@ pub enum OperatorDecisionValue {
     Approved,
     Denied,
     Deferred,
+}
+
+impl<'de> Deserialize<'de> for OperatorDecisionValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        StrictOperatorDecisionValue::deserialize(deserializer).map(Into::into)
+    }
+}
+
+// Serde accepts extra map keys on internally tagged unit variants. Empty
+// struct variants keep the public enum API unchanged while closing that wire
+// boundary before a persisted decision can be hashed into different semantics.
+#[derive(Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum StrictOperatorDecisionValue {
+    Selected { choice_id: SafeText },
+    ProvidedFreeform {},
+    Approved {},
+    Denied {},
+    Deferred {},
+}
+
+impl From<StrictOperatorDecisionValue> for OperatorDecisionValue {
+    fn from(value: StrictOperatorDecisionValue) -> Self {
+        match value {
+            StrictOperatorDecisionValue::Selected { choice_id } => Self::Selected { choice_id },
+            StrictOperatorDecisionValue::ProvidedFreeform {} => Self::ProvidedFreeform,
+            StrictOperatorDecisionValue::Approved {} => Self::Approved,
+            StrictOperatorDecisionValue::Denied {} => Self::Denied,
+            StrictOperatorDecisionValue::Deferred {} => Self::Deferred,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -178,7 +212,7 @@ pub(crate) const RUN_PROGRESS_SATURATION_MARKER: &str =
     "progress fidelity saturated; unique progress updates were omitted";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunItemV1 {
     PlanUpdated {
         revision: u64,

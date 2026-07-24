@@ -490,8 +490,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
         fs::write(tmp.path().join("research.json"), "{}").unwrap();
-        let store =
-            super::super::StageCheckpointStore::discover(tmp.path(), &[3u8; 32]).unwrap();
+        let store = super::super::StageCheckpointStore::discover(tmp.path(), &[3u8; 32]).unwrap();
         let handle = super::super::StageCheckpointHandle::open(
             store,
             tmp.path(),
@@ -543,7 +542,10 @@ mod tests {
         );
 
         let report = load_run_failures(tmp.path(), "run-checkpointed").unwrap();
-        assert_eq!(report.failures[0].error_class.as_deref(), Some("rate_limited"));
+        assert_eq!(
+            report.failures[0].error_class.as_deref(),
+            Some("rate_limited")
+        );
     }
 
     #[test]
@@ -593,7 +595,10 @@ mod tests {
 
         let parsed: RunFailures = serde_json::from_value(legacy).unwrap();
         assert!(parsed.failures[0].error_class.is_none());
-        assert!(parsed.failures[0].agent_thread_context.resume_from.is_none());
+        assert!(parsed.failures[0]
+            .agent_thread_context
+            .resume_from
+            .is_none());
     }
 
     #[test]

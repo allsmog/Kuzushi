@@ -83,9 +83,10 @@ fn run_timeline_status_style(status: PastRunStatus) -> Style {
     match status {
         PastRunStatus::Complete => theme::success(),
         PastRunStatus::Running => theme::warn(),
-        PastRunStatus::Partial | PastRunStatus::Paused | PastRunStatus::Interrupted => {
-            theme::warn()
-        }
+        PastRunStatus::Partial
+        | PastRunStatus::Paused
+        | PastRunStatus::Interrupted
+        | PastRunStatus::Blocked => theme::warn(),
         PastRunStatus::Skipped => theme::muted(),
         PastRunStatus::Canceled => theme::warn(),
         PastRunStatus::Failed | PastRunStatus::Malformed => theme::danger(),
@@ -119,5 +120,13 @@ mod tests {
             assert_eq!(table_width(&widths), width);
             assert!(rendered_width <= width);
         }
+    }
+
+    #[test]
+    fn blocked_runs_use_warning_tone() {
+        assert_eq!(
+            run_timeline_status_style(PastRunStatus::Blocked),
+            theme::warn()
+        );
     }
 }

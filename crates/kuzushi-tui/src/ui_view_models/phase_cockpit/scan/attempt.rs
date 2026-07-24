@@ -170,6 +170,7 @@ fn attempt_outcome_label(outcome: PhaseAttemptOutcome) -> &'static str {
     match outcome {
         PhaseAttemptOutcome::Completed => "completed",
         PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Blocked => "blocked",
         PhaseAttemptOutcome::Failed => "failed",
         PhaseAttemptOutcome::Canceled => "canceled",
     }
@@ -188,6 +189,7 @@ pub(super) fn engine_outcome_from_attempt(outcome: PhaseAttemptOutcome) -> &'sta
     match outcome {
         PhaseAttemptOutcome::Completed => "complete",
         PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Blocked => "blocked",
         PhaseAttemptOutcome::Failed => "failed",
         PhaseAttemptOutcome::Canceled => "canceled",
     }
@@ -287,6 +289,7 @@ fn normalized_engine_outcome(status: &str) -> &'static str {
         "complete" | "completed" | "success" | "succeeded" => "complete",
         "partial" => "partial",
         "skipped" => "skipped",
+        "blocked" | "refused" => "blocked",
         "canceled" | "cancelled" => "canceled",
         "interrupted" => "interrupted",
         _ => "failed",
@@ -298,7 +301,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn canceled_and_interrupted_runs_keep_their_terminal_identity() {
+    fn blocked_canceled_and_interrupted_runs_keep_their_terminal_identity() {
         let mut canceled = RunSummary::running(
             "run-canceled",
             "tool",
@@ -308,12 +311,19 @@ mod tests {
         canceled.status = "canceled".to_string();
         let mut interrupted = canceled.clone();
         interrupted.status = "interrupted".to_string();
+        let mut blocked = canceled.clone();
+        blocked.status = "blocked".to_string();
 
+        assert_eq!(engine_outcome(&blocked).outcome, "blocked");
         assert_eq!(engine_outcome(&canceled).outcome, "canceled");
         assert_eq!(engine_outcome(&interrupted).outcome, "interrupted");
         assert_eq!(
             engine_outcome_from_attempt(PhaseAttemptOutcome::Canceled),
             "canceled"
+        );
+        assert_eq!(
+            engine_outcome_from_attempt(PhaseAttemptOutcome::Blocked),
+            "blocked"
         );
     }
 }

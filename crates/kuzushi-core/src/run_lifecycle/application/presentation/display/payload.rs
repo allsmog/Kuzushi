@@ -253,7 +253,11 @@ fn lifecycle_event_action(value: &LifecycleEventPresentationV1) -> String {
             terminal_verb(value.status)
         ),
         ModelStarted => format!("Calling {}", value.subject),
-        ModelFinished => format!("Model call {} · {}", terminal_verb(value.status), value.subject),
+        ModelFinished => format!(
+            "Model call {} · {}",
+            terminal_verb(value.status),
+            value.subject
+        ),
         ArtifactProduced => format!("Produced {}", value.subject),
         FindingsChanged => format!("Findings changed · {}", value.subject),
         OperatorQuestion if value.status == Some(RunItemStatus::Completed) => {

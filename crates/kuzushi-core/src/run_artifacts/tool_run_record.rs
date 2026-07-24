@@ -462,7 +462,7 @@ pub fn try_record_tool_run_refused_observed(
     reason: &str,
     observation: Option<&crate::run_lifecycle::RunObservationHandle>,
 ) -> Result<()> {
-    try_record_reason_terminal(record, "skipped", reason, observation, None, false)
+    try_record_reason_terminal(record, "blocked", reason, observation, None, false)
 }
 
 pub fn try_record_tool_run_refused_settled(
@@ -473,7 +473,7 @@ pub fn try_record_tool_run_refused_settled(
 ) -> Result<()> {
     try_record_reason_terminal(
         record,
-        "skipped",
+        "blocked",
         reason,
         Some(observation),
         Some(completion),
@@ -541,10 +541,11 @@ fn reason_terminal_summary(
     if status == "skipped" {
         return Ok(seed.skipped(reason));
     }
-    let summary = if status == "canceled" {
-        seed.canceled(reason)
-    } else {
-        seed.interrupted(reason)
+    let summary = match status {
+        "blocked" => seed.blocked(reason),
+        "canceled" => seed.canceled(reason),
+        "interrupted" => seed.interrupted(reason),
+        other => anyhow::bail!("unsupported reason terminal status {other:?}"),
     };
     Ok(
         summary.with_cost_report(super::lifecycle_cost::lifecycle_cost_report(
@@ -782,7 +783,8 @@ fn completed_summary(
 ) -> Result<RunSummary> {
     let seed = summary_seed(record)?;
     let output_cost = tool_run_output_cost_report(output)?;
-    let lifecycle_cost = super::lifecycle_cost::lifecycle_cost_report(record.target, record.run_id)?;
+    let lifecycle_cost =
+        super::lifecycle_cost::lifecycle_cost_report(record.target, record.run_id)?;
     let terminal_cost = super::lifecycle_cost::reconcile_terminal_cost_reports(
         output_cost,
         lifecycle_cost,
@@ -874,10 +876,10 @@ fn unsuccessful_summary(
     } else {
         summary.failed(error.to_string())
     };
-    Ok(artifacts.iter().cloned().fold(
-        summary.with_cost_report(cost),
-        RunSummary::with_artifact,
-    ))
+    Ok(artifacts
+        .iter()
+        .cloned()
+        .fold(summary.with_cost_report(cost), RunSummary::with_artifact))
 }
 
 fn tool_result_status_label(status: ToolResultStatus) -> &'static str {
@@ -952,13 +954,7 @@ fn ensure_same_terminal_content(
 fn is_terminal_run_status(status: &str) -> bool {
     matches!(
         status,
-        "completed"
-            | "partial"
-            | "skipped"
-            | "blocked"
-            | "failed"
-            | "canceled"
-            | "interrupted"
+        "completed" | "partial" | "skipped" | "blocked" | "failed" | "canceled" | "interrupted"
     )
 }
 

@@ -25,6 +25,7 @@ pub(crate) enum JobRunStatus {
     Interrupted,
     Partial,
     Skipped,
+    Blocked,
     Malformed,
     Unknown,
 }
@@ -43,6 +44,7 @@ impl JobRunStatus {
             JobRunStatus::Interrupted => "interrupted",
             JobRunStatus::Partial => "partial",
             JobRunStatus::Skipped => "skipped",
+            JobRunStatus::Blocked => "blocked",
             JobRunStatus::Malformed => "malformed",
             JobRunStatus::Unknown => "—",
         }
@@ -61,6 +63,7 @@ impl JobRunStatus {
             "interrupted" => JobRunStatus::Interrupted,
             "partial" => JobRunStatus::Partial,
             "skipped" => JobRunStatus::Skipped,
+            "blocked" => JobRunStatus::Blocked,
             _ => JobRunStatus::Unknown,
         }
     }

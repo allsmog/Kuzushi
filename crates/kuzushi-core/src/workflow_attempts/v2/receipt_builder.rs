@@ -72,6 +72,7 @@ impl<'a> PhaseReceiptBuilder<'a> {
         for (run_id, projection) in self.run_ids.iter().zip(self.projections) {
             validate_projection(run_id, projection, self.status)?;
         }
+        validate_blocked_final_run(self.status, self.projections)?;
         Ok(())
     }
 
@@ -109,6 +110,12 @@ impl<'a> PhaseReceiptBuilder<'a> {
     /// the card's run-again action); other failed phases inspect with the
     /// recognized remediation drafted in. Unknown classes stay generic.
     fn failure_continuation(&self) -> Result<WorkflowContinuation> {
+        if self.status == RunItemStatus::Blocked {
+            return Ok(inspect_continuation(
+                self.final_run()?,
+                "inspect the policy refusal, adjust the autonomy posture or input, then retry",
+            ));
+        }
         let remediation = self.terminal_remediation();
         if self.phase == WorkflowPhase::Map {
             return Ok(WorkflowContinuation::Retry {
@@ -138,7 +145,8 @@ impl<'a> PhaseReceiptBuilder<'a> {
         self.selection_blocked_reason.is_none()
             && !matches!(
                 self.status,
-                RunItemStatus::Failed
+                RunItemStatus::Blocked
+                    | RunItemStatus::Failed
                     | RunItemStatus::Canceled
                     | RunItemStatus::Interrupted
                     | RunItemStatus::Pending
@@ -183,6 +191,24 @@ fn validate_projection(
             "completed phase receipt references a non-complete run"
         );
     }
+    Ok(())
+}
+
+fn validate_blocked_final_run(
+    receipt_status: RunItemStatus,
+    projections: &[RunProjection],
+) -> Result<()> {
+    if receipt_status != RunItemStatus::Blocked {
+        return Ok(());
+    }
+    let terminal = projections
+        .last()
+        .and_then(|projection| projection.terminal.as_ref())
+        .context("blocked phase receipt has no final terminal outcome")?;
+    anyhow::ensure!(
+        terminal.status == RunItemStatus::Blocked,
+        "blocked phase receipt references a non-blocked final run"
+    );
     Ok(())
 }
 

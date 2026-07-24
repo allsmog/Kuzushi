@@ -175,12 +175,73 @@ fn envelope_hash_chain_and_cost_states_round_trip() {
 }
 
 #[test]
-fn safe_text_redacts_secrets_and_rejects_unsafe_persisted_text() {
+fn rust_safe_text_policy_redacts_secrets_and_rejects_unsafe_persisted_text() {
     let safe = SafeText::operator_visible("Authorization: Bearer sk-run-item-sentinel");
 
     assert!(!safe.as_str().contains("sk-run-item-sentinel"));
     assert!(safe.as_str().contains("[REDACTED]"));
     assert!(serde_json::from_str::<SafeText>("\"Authorization: Bearer raw-secret\"").is_err());
+    assert!(serde_json::from_value::<SafeText>(serde_json::json!("unsafe\u{7}control")).is_err());
+}
+
+#[test]
+fn tagged_run_item_variants_reject_unknown_fields() {
+    let error = serde_json::from_value::<RunItemV1>(serde_json::json!({
+        "type": "diagnostic_notice",
+        "level": "info",
+        "message": "ready",
+        "unexpected": true
+    }))
+    .unwrap_err();
+
+    assert!(error.to_string().contains("unknown field"), "{error}");
+}
+
+#[test]
+fn nested_tagged_variants_reject_unknown_fields() {
+    let continuation_error = serde_json::from_value::<WorkflowContinuation>(serde_json::json!({
+        "kind": "retry",
+        "reason": "Retry",
+        "unexpected": true
+    }))
+    .unwrap_err();
+    let selected_error = serde_json::from_value::<OperatorDecisionValue>(serde_json::json!({
+        "kind": "selected",
+        "choice_id": "continue",
+        "unexpected": true
+    }))
+    .unwrap_err();
+
+    assert!(
+        continuation_error.to_string().contains("unknown field"),
+        "{continuation_error}"
+    );
+    assert!(
+        selected_error.to_string().contains("unknown field"),
+        "{selected_error}"
+    );
+    for kind in ["provided_freeform", "approved", "denied", "deferred"] {
+        let error = serde_json::from_value::<OperatorDecisionValue>(serde_json::json!({
+            "kind": kind,
+            "unexpected": true
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
+}
+
+#[test]
+fn tagged_unit_decision_without_unknown_fields_still_round_trips() {
+    let decision = serde_json::from_value::<OperatorDecisionValue>(serde_json::json!({
+        "kind": "approved"
+    }))
+    .unwrap();
+
+    assert_eq!(decision, OperatorDecisionValue::Approved);
+    assert_eq!(
+        serde_json::to_value(decision).unwrap(),
+        serde_json::json!({"kind": "approved"})
+    );
 }
 
 #[test]
@@ -1334,6 +1395,7 @@ fn exact_progress_requires_a_truthful_completed_total_pair() {
     assert!(RunItemPersistencePolicy::validate(&progress(None, None)).is_ok());
     assert!(RunItemPersistencePolicy::validate(&progress(Some(421), Some(832))).is_ok());
     assert!(RunItemPersistencePolicy::validate(&progress(Some(421), None)).is_err());
+    assert!(RunItemPersistencePolicy::validate(&progress(Some(0), Some(0))).is_err());
     assert!(RunItemPersistencePolicy::validate(&progress(Some(833), Some(832))).is_err());
 }
 
@@ -1378,6 +1440,50 @@ fn reader_stops_at_the_last_valid_prefix_for_corruption_and_truncation() {
         projection.health,
         ProjectionHealth::Degraded { .. }
     ));
+}
+
+#[test]
+fn reader_rejects_unknown_nested_fields_before_hash_verification() {
+    let target = tempfile::tempdir().unwrap();
+    let item = envelope(
+        1,
+        RunItemId::new(),
+        RunItemV1::TerminalOutcome {
+            status: RunItemStatus::Failed,
+            summary: SafeText::operator_visible("failed"),
+            cost: RuntimeCostReport::UNAVAILABLE,
+            continuation: WorkflowContinuation::Retry {
+                reason: SafeText::operator_visible("Retry"),
+            },
+        },
+        None,
+    );
+    let mut persisted = serde_json::to_value(&item).unwrap();
+    persisted["item"]["continuation"]["unexpected"] = serde_json::json!(true);
+    let path =
+        crate::run_artifacts::run_dir(target.path(), item.run_id.as_str()).join("items.jsonl");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(
+        path,
+        format!("{}\n", serde_json::to_string(&persisted).unwrap()),
+    )
+    .unwrap();
+
+    let read = read_run_items(target.path(), item.run_id.as_str())
+        .unwrap()
+        .unwrap();
+
+    assert!(read.items.is_empty());
+    let ProjectionHealth::Degraded {
+        valid_through_seq,
+        reason,
+    } = read.health
+    else {
+        panic!("unknown nested field must degrade the reader");
+    };
+    assert_eq!(valid_through_seq, 0);
+    assert!(reason.contains("unknown field"), "{reason}");
+    assert!(!reason.contains("event hash"), "{reason}");
 }
 
 #[cfg(unix)]

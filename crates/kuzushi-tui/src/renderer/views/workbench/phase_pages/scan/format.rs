@@ -212,6 +212,7 @@ pub(super) fn outcome_symbol(outcome: &str) -> &'static str {
     match outcome {
         "complete" | "completed" => "✓",
         "partial" => "⚠",
+        "blocked" | "refused" => "▣",
         "failed" => "✗",
         "canceled" | "cancelled" | "interrupted" => "×",
         "skipped" => "⊘",
@@ -222,7 +223,7 @@ pub(super) fn outcome_symbol(outcome: &str) -> &'static str {
 pub(super) fn outcome_style(outcome: &str) -> ratatui::style::Style {
     match outcome {
         "complete" | "completed" => theme::success(),
-        "partial" | "skipped" => theme::warn(),
+        "partial" | "blocked" | "refused" | "skipped" => theme::warn(),
         "failed" => theme::danger(),
         "canceled" | "cancelled" | "interrupted" => theme::muted(),
         _ => theme::primary(),

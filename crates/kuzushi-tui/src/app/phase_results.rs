@@ -148,10 +148,10 @@ pub(crate) fn phase_result_policy(
     outcome: PhaseAttemptOutcome,
     routes_to_report: bool,
 ) -> PhaseResultPolicy {
-    use PhaseAttemptOutcome::{Canceled, Failed};
+    use PhaseAttemptOutcome::{Blocked, Canceled, Failed};
     use PhaseResultAction::{Discard, Open, RunAgain};
 
-    if matches!(outcome, Failed | Canceled) {
+    if matches!(outcome, Blocked | Failed | Canceled) {
         return PhaseResultPolicy {
             actions: vec![Open, RunAgain, Discard],
             recommended_next: Some(failed_result_recommendation(outcome).to_string()),
@@ -173,6 +173,7 @@ pub(crate) fn phase_attempt_outcome_from_label(value: &str) -> PhaseAttemptOutco
     match value.trim().to_ascii_lowercase().as_str() {
         "completed" | "complete" | "success" => PhaseAttemptOutcome::Completed,
         "partial" => PhaseAttemptOutcome::Partial,
+        "blocked" | "refused" => PhaseAttemptOutcome::Blocked,
         "canceled" | "cancelled" => PhaseAttemptOutcome::Canceled,
         _ => PhaseAttemptOutcome::Failed,
     }
@@ -397,12 +398,14 @@ impl ShellApp {
         &self,
         completed: &PhaseAttemptCompleted,
     ) -> Option<String> {
-        // Failed/canceled attempts are already terminal and unselectable;
+        // Blocked/failed/canceled attempts are already terminal and unselectable;
         // demoting them to "partial evidence" would misstate the outcome
         // exactly when the operator needs the honest one.
         if matches!(
             completed.outcome,
-            PhaseAttemptOutcome::Failed | PhaseAttemptOutcome::Canceled
+            PhaseAttemptOutcome::Blocked
+                | PhaseAttemptOutcome::Failed
+                | PhaseAttemptOutcome::Canceled
         ) {
             return None;
         }
@@ -641,7 +644,8 @@ fn typed_run_result_details(
     let rows = phase_card_run_rows(&presentation, false);
     let is_problem = matches!(
         terminal.status,
-        RunItemStatus::Failed
+        RunItemStatus::Blocked
+            | RunItemStatus::Failed
             | RunItemStatus::Partial
             | RunItemStatus::Canceled
             | RunItemStatus::Interrupted
@@ -795,10 +799,10 @@ fn preferred_phase_result_action(
     outcome: PhaseAttemptOutcome,
     actions: &[PhaseResultAction],
 ) -> Option<PhaseResultAction> {
-    use PhaseAttemptOutcome::{Canceled, Failed, Partial};
+    use PhaseAttemptOutcome::{Blocked, Canceled, Failed, Partial};
     use PhaseResultAction::{Open, Select, SelectAndContinue, SelectAndReport};
 
-    if matches!(outcome, Failed | Canceled) {
+    if matches!(outcome, Blocked | Failed | Canceled) {
         return [PhaseResultAction::ContinueRun, Open]
             .into_iter()
             .find(|action| actions.contains(action));
@@ -844,6 +848,9 @@ fn continuation_action(routes_to_report: bool) -> PhaseResultAction {
 
 fn failed_result_recommendation(outcome: PhaseAttemptOutcome) -> &'static str {
     match outcome {
+        PhaseAttemptOutcome::Blocked => {
+            "open the blocked run, adjust the autonomy posture or input, then run it again"
+        }
         PhaseAttemptOutcome::Canceled => "open the canceled run or run it again",
         _ => "open the failed run, adjust its input, or run it again",
     }
@@ -1081,6 +1088,38 @@ mod tests {
         assert_eq!(selected.rows[0].text, "failed run");
     }
 
+    #[test]
+    fn typed_phase_result_prioritizes_blocked_over_later_completed_run() {
+        let target = tempfile::tempdir().unwrap();
+        let blocked_run = "typed-phase-blocked";
+        let completed_run = "typed-phase-completed";
+        write_typed_terminal_run_with_status(
+            target.path(),
+            blocked_run,
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked,
+        );
+        write_typed_terminal_run_with_status(
+            target.path(),
+            completed_run,
+            kuzushi_core::run_lifecycle::RunItemStatus::Completed,
+        );
+        let runs = vec![
+            typed_run_result_details(target.path(), blocked_run).unwrap(),
+            typed_run_result_details(target.path(), completed_run).unwrap(),
+        ];
+
+        let selected = select_typed_run_result(runs).expect("selected typed result");
+        let detail = selected
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(detail.contains("blocked"), "{detail}");
+        assert!(!detail.contains("scan completed"), "{detail}");
+    }
+
     fn typed_result_fixture(
         is_problem: bool,
         text: &str,
@@ -1181,8 +1220,12 @@ mod tests {
     }
 
     #[test]
-    fn failed_and_canceled_attempts_offer_only_recovery_actions() {
-        for outcome in [PhaseAttemptOutcome::Failed, PhaseAttemptOutcome::Canceled] {
+    fn blocked_failed_and_canceled_attempts_offer_only_recovery_actions() {
+        for outcome in [
+            PhaseAttemptOutcome::Blocked,
+            PhaseAttemptOutcome::Failed,
+            PhaseAttemptOutcome::Canceled,
+        ] {
             let policy = phase_result_policy(Some(WorkflowPhase::Prove), outcome, false);
             assert_eq!(
                 policy.actions,
@@ -1191,6 +1234,16 @@ mod tests {
                     PhaseResultAction::RunAgain,
                     PhaseResultAction::Discard,
                 ]
+            );
+        }
+    }
+
+    #[test]
+    fn blocked_and_refused_labels_preserve_the_policy_outcome() {
+        for label in ["blocked", "refused"] {
+            assert_eq!(
+                phase_attempt_outcome_from_label(label),
+                PhaseAttemptOutcome::Blocked
             );
         }
     }
@@ -1479,6 +1532,12 @@ mod tests {
             "{} card did not disclose bounded timeline",
             status.label()
         );
+        if status == kuzushi_core::run_lifecycle::RunItemStatus::Blocked {
+            assert_eq!(card.outcome, "blocked");
+            assert!(!card.actions.contains(&PhaseResultAction::Select));
+            assert!(!card.actions.contains(&PhaseResultAction::SelectAndContinue));
+            assert!(card.recommended.contains("autonomy posture"));
+        }
     }
 
     fn terminal_status_card_fixture(
@@ -1615,10 +1674,9 @@ mod tests {
         match status {
             RunItemStatus::Completed | RunItemStatus::Skipped => PhaseAttemptOutcome::Completed,
             RunItemStatus::Partial => PhaseAttemptOutcome::Partial,
+            RunItemStatus::Blocked => PhaseAttemptOutcome::Blocked,
             RunItemStatus::Canceled => PhaseAttemptOutcome::Canceled,
-            RunItemStatus::Blocked | RunItemStatus::Failed | RunItemStatus::Interrupted => {
-                PhaseAttemptOutcome::Failed
-            }
+            RunItemStatus::Failed | RunItemStatus::Interrupted => PhaseAttemptOutcome::Failed,
             RunItemStatus::Pending | RunItemStatus::Running => {
                 unreachable!("terminal-status fixture received a nonterminal status")
             }
@@ -1704,14 +1762,18 @@ mod tests {
     }
 
     #[test]
-    fn failed_and_canceled_attempts_are_never_demoted_to_partial_by_evidence_blockers() {
+    fn blocked_failed_and_canceled_attempts_are_never_demoted_by_evidence_blockers() {
         // An empty target trips the legacy map-evidence blocker; the
-        // blocker must not rewrite a terminal Failed/Canceled outcome into
+        // blocker must not rewrite a terminal Blocked/Failed/Canceled outcome into
         // "partial evidence", which would misstate what happened.
         let target = tempfile::tempdir().unwrap();
         let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(target.path());
         let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        for outcome in [PhaseAttemptOutcome::Failed, PhaseAttemptOutcome::Canceled] {
+        for outcome in [
+            PhaseAttemptOutcome::Blocked,
+            PhaseAttemptOutcome::Failed,
+            PhaseAttemptOutcome::Canceled,
+        ] {
             let completed = PhaseAttemptCompleted::new(
                 WorkflowPhase::Map,
                 vec!["map-run".to_string()],

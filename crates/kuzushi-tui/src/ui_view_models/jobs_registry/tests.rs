@@ -54,6 +54,28 @@ fn jobs_registry_model_projects_recent_disk_runs_newest_first() {
 }
 
 #[test]
+fn jobs_registry_model_preserves_blocked_disk_status_and_label() {
+    let (_temp, mut app) = app_with_target();
+    persist(
+        &app,
+        RunSummary::running(
+            "tool-300-blocked",
+            "tool",
+            Some("sast:scan".into()),
+            "/repo",
+        )
+        .blocked("autonomy posture refused the tool"),
+    );
+    hydrate_run_history(&mut app);
+
+    let model = jobs_registry_model(&app, 20);
+
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].status, JobRunStatus::Blocked);
+    assert_eq!(model.rows[0].status.label(), "blocked");
+}
+
+#[test]
 fn jobs_registry_model_empty_state_reports_runs_root_hint() {
     let (_temp, mut app) = app_with_target();
     hydrate_run_history(&mut app);

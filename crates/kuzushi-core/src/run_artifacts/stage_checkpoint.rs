@@ -96,7 +96,10 @@ fn write_checkpoint_atomically(path: &Path, contents: &str) -> std::io::Result<(
 }
 
 fn hex_fingerprint(fingerprint: &[u8; 32]) -> String {
-    fingerprint.iter().map(|byte| format!("{byte:02x}")).collect()
+    fingerprint
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 struct StageCheckpointState {

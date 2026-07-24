@@ -110,6 +110,12 @@
     "threatModelSha256": {
       "type": "string"
     },
+    "threatModelSource": {
+      "type": "string"
+    },
+    "threatModelResolvedVia": {
+      "type": "string"
+    },
     "envFingerprint": {
       "type": "array",
       "items": {

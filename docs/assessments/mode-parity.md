@@ -45,7 +45,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Verification provenance | ✓ | ✓ | ✓ | Persisted proof carries both the verification run id and the discovery scan it verified. A later observation may reuse proof by durable identity, but is marked for revalidation; shell replay opens the verification run only. |
 | Workspace target consent | ✓ | ✓ | ✓ | Workspace-backed commands require an explicit target such as `--target <path>` or `--target .`; modes must not silently substitute cwd. A live shell run keeps the target captured at launch even if ambient app state later changes. |
 | Cancellation | ◐ | ✓ | ◐ | Shell/TUI work has live cancellation controls. Core scan engines accept cancellation tokens, but headless CLI scan/run do not currently install a dedicated SIGINT handler. |
-| Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, partial, failed, canceled, or interrupted outcomes. |
+| Plain/scripted output | ✓ | ✓ | ✓ | Plain output reuses the same projections as TTY output. Bare `--plain` emits a self-contained summary; scripted scan requires an explicit target, waits for terminal completion, writes its run bundle, and exits nonzero for invalid, partial, blocked, failed, canceled, or interrupted outcomes. |
 | Interactive views | N/A | ✓ | N/A | Target, aggregate Setup, Map/Scan/Review/Prove/Fix, Run Focus, Report, and contextual utilities are shell-only. Prompt review returns to the unchanged Setup row without launching work. |
 | Machine output | ✓ | N/A | ✓ | Scan has CI/scripted output; headless `run` always prints the tool result as pretty JSON on stdout. |
 | Campaign planning (`campaign:plan` / `campaign:status`) | N/A | ✓ | ✓ | Deterministic workspace-file tools (no runtime): plan writes `.kuzushi/v3/campaigns/<id>/plan.json` + per-job prompt files; status folds the dispatcher `queue.json` and run `done.json` sentinels. Not a scan engine, so scan mode does not apply. |
@@ -181,8 +181,9 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
 - **Lifecycle semantics are mode-shared.** Scan, shell, and run all reach the
   typed stream through the shared preparation/dispatch boundary. Shell alone
   subscribes to committed items for Run Focus and operator questions.
-  `events.jsonl` is a terminal storage derivative, not an alternative semantic
-  execution source.
+  `events.jsonl` contains only non-authoritative compatibility diagnostics such
+  as run-start and recovered-interruption summaries; it is never a replay
+  source.
 - **Contextual surfaces are shell-only.** Help, Controls, and Capabilities are
   modal; Jobs, Replay, Trace, and visualizations are scrollable full-frame
   decks. Replacing one utility retains the original workflow origin; Esc

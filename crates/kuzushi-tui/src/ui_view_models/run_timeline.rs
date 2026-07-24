@@ -16,6 +16,7 @@ pub(crate) enum PastRunStatus {
     Paused,
     Interrupted,
     Skipped,
+    Blocked,
     Failed,
     Canceled,
     Malformed,
@@ -51,6 +52,7 @@ impl PastRun {
             PastRunStatus::Paused => "paused",
             PastRunStatus::Interrupted => "interrupted",
             PastRunStatus::Skipped => "skipped",
+            PastRunStatus::Blocked => "blocked",
             PastRunStatus::Failed => "failed",
             PastRunStatus::Canceled => "canceled",
             PastRunStatus::Malformed => "malformed",
@@ -259,6 +261,7 @@ fn parse_past_run_status(status: &str) -> PastRunStatus {
         "canceled" | "cancelled" => PastRunStatus::Canceled,
         "interrupted" => PastRunStatus::Interrupted,
         "skipped" => PastRunStatus::Skipped,
+        "blocked" => PastRunStatus::Blocked,
         _ => PastRunStatus::Unknown,
     }
 }
