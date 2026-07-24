@@ -159,7 +159,7 @@ for (const file of docRoots.flatMap((root) => walk(root, textExtensions))) {
   const fileIsHistorical = isHistorical(lines.slice(0, 12).join("\n"));
   lines.forEach((line, index) => {
     for (const retiredPath of [...retiredDirs, deletedReferenceRoot]) {
-      if (!line.includes(retiredPath)) continue;
+      if (!referencesRetiredRoot(line, retiredPath)) continue;
       const context = lines.slice(Math.max(0, index - 4), index + 5).join("\n");
       if (fileIsHistorical || isHistorical(context)) continue;
       failures.push(
@@ -350,4 +350,19 @@ function isHistorical(text) {
   return /\b(retired|historical|legacy|deleted|not current|unsupported|former TypeScript)\b/i.test(
     text,
   );
+}
+
+function referencesRetiredRoot(line, retiredPath) {
+  let start = line.indexOf(retiredPath);
+  while (start >= 0) {
+    const prefix = line.slice(0, start);
+    const pathPrefix = prefix.match(/[^\s"'`()=\[\]<>]*$/)?.[0] ?? "";
+    const following = line[start + retiredPath.length];
+    const startsAtRepositoryRoot = /^(?:(?:\.|\.\.)\/)*$/.test(pathPrefix);
+    const endsSegment =
+      following === undefined || !/[A-Za-z0-9_.-]/.test(following);
+    if (startsAtRepositoryRoot && endsSegment) return true;
+    start = line.indexOf(retiredPath, start + 1);
+  }
+  return false;
 }

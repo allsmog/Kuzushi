@@ -338,8 +338,9 @@ stored OAuth), `vertex-anthropic:*` (Claude on Google Vertex AI — the secret
 is GCP Application Default Credentials, so `runtime.api_key_env` is
 `ANTHROPIC_VERTEX_PROJECT_ID` and carries the GCP project id, which the
 bridge can also resolve from ADC; `CLOUD_ML_REGION` selects the endpoint and
-defaults to `global`), `openai:*` (OPENAI_API_KEY), and `openai-codex:*`
-(stored OAuth). Vertex model ids use the Vertex naming scheme (for example
+defaults to `global`), `openai:*` (OPENAI_API_KEY), and OpenAI
+subscription-backed model selectors (stored OAuth). Vertex model ids use the
+Vertex naming scheme (for example
 `vertex-anthropic:claude-sonnet-4-5@20250929`).
 
 Role-routed tools then resolve their role model with this precedence:

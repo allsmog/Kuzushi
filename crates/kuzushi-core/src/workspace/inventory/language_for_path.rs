@@ -23,7 +23,6 @@ fn language_kind_table() -> &'static [(&'static [&'static str], &'static str)] {
         (&["php"], "PHP"),
         (&["c", "h"], "C"),
         (&["cc", "cpp", "cxx", "hh", "hpp", "hxx"], "C++"),
-        (&["scala", "sc"], "Scala"),
         (&["thrift"], "Thrift"),
     ]
 }
