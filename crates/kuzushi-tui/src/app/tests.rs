@@ -1484,10 +1484,10 @@ fn logs_command_routes_to_full_screen_transcript() {
 
 #[test]
 fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
-    // M1 §1.1: while in the Logs view, j/k and PgDn/PgUp must drive the
-    // dedicated logs route scroll rather than the fallback route scroll
-    // — otherwise the transcript would visually stay pinned while the
-    // generic offset advances.
+    // M1 §1.1: while in the Logs view, line and page keys must drive the
+    // dedicated logs route scroll rather than the fallback route scroll —
+    // otherwise the transcript would visually stay pinned while the generic
+    // offset advances.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Logs);
     app.set_input_mode(crate::InputMode::Navigate);
@@ -1505,6 +1505,13 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
+    assert_eq!(app.router.logs().scroll(), 11);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.logs().scroll(), 12);
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
     assert_eq!(app.router.logs().scroll(), 11);
 
     press_key(
@@ -4942,6 +4949,61 @@ fn strategy_fire_runs_next_approved_runnable_proposal() {
     );
     assert_eq!(app.running_tool_name(), Some("workspace:status"));
     assert_eq!(app.shell_view(), ShellView::Activity);
+    assert!(app.log_lines().iter().any(|line| line.prefix == "strategy"
+        && line
+            .body
+            .contains("firing review-workspace-status via workspace:status")));
+}
+
+#[test]
+fn strategy_fire_skips_resource_blocked_approved_proposal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut blocked = kuzushi_core::StrategyProposal::new(
+        kuzushi_core::StrategyPhase::Review,
+        "run blocked analysis",
+        "resource policy refuses this proposal",
+    )
+    .with_tool("blocked:scan", Some(serde_json::json!({})))
+    .with_preflight(kuzushi_core::StrategyPreflight::ready())
+    .with_estimates(
+        Some(0.0),
+        Some("instant".to_string()),
+        kuzushi_core::StrategyResourceRisk::Blocked,
+    );
+    blocked.id = "review-blocked-scan".to_string();
+    blocked.status = kuzushi_core::StrategyProposalStatus::Approved;
+    kuzushi_core::append_strategy_proposal(&workspace, &blocked).unwrap();
+
+    let mut runnable = kuzushi_core::StrategyProposal::new(
+        kuzushi_core::StrategyPhase::Review,
+        "show workspace status",
+        "safe readiness check",
+    )
+    .with_tool("workspace:status", Some(serde_json::json!({})))
+    .with_preflight(kuzushi_core::StrategyPreflight::ready())
+    .with_estimates(
+        Some(0.0),
+        Some("instant".to_string()),
+        kuzushi_core::StrategyResourceRisk::Low,
+    );
+    runnable.id = "review-workspace-status".to_string();
+    runnable.status = kuzushi_core::StrategyProposalStatus::Approved;
+    kuzushi_core::append_strategy_proposal(&workspace, &runnable).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    run_command(&mut app, parse_command("strategy fire"));
+
+    let queue = kuzushi_core::load_strategy_queue(&workspace).unwrap();
+    assert_eq!(
+        queue[0].status,
+        kuzushi_core::StrategyProposalStatus::Approved
+    );
+    assert_eq!(
+        queue[1].status,
+        kuzushi_core::StrategyProposalStatus::Running
+    );
+    assert_eq!(app.running_tool_name(), Some("workspace:status"));
     assert!(app.log_lines().iter().any(|line| line.prefix == "strategy"
         && line
             .body
@@ -13323,8 +13385,15 @@ fn vi_keys_scroll_help_view() {
     assert_eq!(app.router.help().scroll(), 2);
     press_key(
         &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.help().scroll(), 3);
+    press_key(
+        &mut app,
         KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
     );
+    assert_eq!(app.router.help().scroll(), 2);
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
     assert_eq!(app.router.help().scroll(), 1);
     press_key(
         &mut app,
@@ -14621,8 +14690,12 @@ fn scrollable_views_advertise_scroll_and_back_hints() {
         app.set_shell_view(view);
         let advertised = app.view_keybindings();
         assert!(
-            advertised.iter().any(|binding| binding.hint == "j/k/g/G"),
+            advertised.iter().any(|binding| binding.hint == "j/k/↑/↓"),
             "{view:?} should advertise scroll keys"
+        );
+        assert!(
+            advertised.iter().any(|binding| binding.hint == "g/G"),
+            "{view:?} should advertise edge keys"
         );
         assert!(
             advertised

@@ -272,7 +272,8 @@ fn theme_picker_keybindings() -> Vec<FooterKeybinding> {
 
 fn keymap_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("j/k/g/G", "scroll"),
+        bind("j/k/↑/↓", "scroll"),
+        bind("g/G", "ends"),
         bind("PgUp/PgDn", "scroll"),
         bind("Esc/q", "close"),
     ]
@@ -300,7 +301,8 @@ fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
         // not a scroll offset — advertising scroll here would be false.
         bindings.push(bind("j/k", "select node/flow"));
     } else if !page.is_3d() {
-        bindings.push(bind("j/k/g/G", "scroll"));
+        bindings.push(bind("j/k/↑/↓", "scroll"));
+        bindings.push(bind("g/G", "ends"));
     }
     bindings.extend([
         bind("Tab", "next page"),

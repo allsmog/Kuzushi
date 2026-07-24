@@ -1,17 +1,26 @@
 use super::*;
 
 /// Canonical scroll set shared by every generically-scrollable view so the
-/// footer always advertises the same `j/k/g/G` + paging keys. Views with a
+/// footer always advertises the same line, edge, and paging keys. Views with a
 /// bespoke cursor (Catalog, Findings) opt out and keep their own set.
 pub(super) fn scroll_keybindings() -> Vec<ViewKeybinding> {
-    // All four share the `scroll` label so the footer dedupes them into a
-    // single `j/k/g/G scroll` hint (mirrors the Findings `move` grouping),
-    // while the distinct actions still drive line/top/bottom behavior.
     vec![
-        bind_char('j', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollDown),
-        bind_char('k', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollUp),
-        bind_char('g', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollTop),
-        bind_char('G', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollBottom),
+        bind_char('j', "j/k/↑/↓", "scroll", ViewHotkeyAction::ViewScrollDown),
+        bind_char('k', "j/k/↑/↓", "scroll", ViewHotkeyAction::ViewScrollUp),
+        bind(
+            HotkeyTrigger::Down,
+            "j/k/↑/↓",
+            "scroll",
+            ViewHotkeyAction::ViewScrollDown,
+        ),
+        bind(
+            HotkeyTrigger::Up,
+            "j/k/↑/↓",
+            "scroll",
+            ViewHotkeyAction::ViewScrollUp,
+        ),
+        bind_char('g', "g/G", "ends", ViewHotkeyAction::ViewScrollTop),
+        bind_char('G', "g/G", "ends", ViewHotkeyAction::ViewScrollBottom),
         bind(
             HotkeyTrigger::PageDown,
             "PgUp/PgDn",

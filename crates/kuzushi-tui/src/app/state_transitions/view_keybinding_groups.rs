@@ -69,7 +69,7 @@ pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
 }
 
 pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
-    // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
+    // Line/edge scrolling comes from the shared `scroll_keybindings()` base.
     let mut bindings = vec![
         bind(
             HotkeyTrigger::Tab,
@@ -541,7 +541,7 @@ pub(super) fn actor_detail_keybindings() -> Vec<ViewKeybinding> {
             "reset filter",
             ViewHotkeyAction::ActorDetailFilterReset,
         ),
-        // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
+        // Line/edge scrolling comes from the shared `scroll_keybindings()` base.
     ]
 }
 

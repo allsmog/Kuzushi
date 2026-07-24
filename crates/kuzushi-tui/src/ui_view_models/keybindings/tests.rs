@@ -437,8 +437,12 @@ fn navigate_mode_views_show_scroll_and_truthful_prompt_escape() {
         app.set_input_mode(crate::InputMode::Navigate);
         let bindings = footer_keybindings(&app);
         assert!(
-            bindings.contains(&bind("j/k/g/G", "scroll")),
+            bindings.contains(&bind("j/k/↑/↓", "scroll")),
             "{view:?} footer should show scroll keys"
+        );
+        assert!(
+            bindings.contains(&bind("g/G", "ends")),
+            "{view:?} footer should show edge keys"
         );
         assert!(
             bindings.contains(&bind("Esc", "prompt")),
@@ -462,7 +466,8 @@ fn prompt_mode_help_keeps_non_editing_page_keys_discoverable() {
         let bindings = footer_keybindings(&app);
 
         assert!(bindings.contains(&bind("PgUp/PgDn", "scroll")), "{view:?}");
-        assert!(!bindings.contains(&bind("j/k/g/G", "scroll")), "{view:?}");
+        assert!(!bindings.contains(&bind("j/k/↑/↓", "scroll")), "{view:?}");
+        assert!(!bindings.contains(&bind("g/G", "ends")), "{view:?}");
     }
 }
 
@@ -475,11 +480,13 @@ fn permission_policy_footer_separates_commands_from_scroll_keys() {
     assert!(prompt.contains(&bind("doctor", "preflight")));
     assert!(prompt.contains(&bind("config", "model/runtime")));
     assert!(prompt.contains(&bind("runs", "execution evidence")));
-    assert!(!prompt.contains(&bind("j/k/g/G", "scroll")));
+    assert!(!prompt.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(!prompt.contains(&bind("g/G", "ends")));
 
     app.set_input_mode(crate::InputMode::Navigate);
     let navigate = footer_keybindings(&app);
-    assert!(navigate.contains(&bind("j/k/g/G", "scroll")));
+    assert!(navigate.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(navigate.contains(&bind("g/G", "ends")));
     assert!(navigate.contains(&bind("Esc", "prompt")));
     assert!(!navigate.contains(&bind("doctor", "preflight")));
 }
@@ -530,7 +537,8 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     // The DFD is a frame-rendered graph: j/k drive the inspector cursor.
     // Advertising a scroll offset here would be false.
     assert!(dfd_bindings.contains(&bind("j/k", "select node/flow")));
-    assert!(!dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
+    assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(!dfd_bindings.contains(&bind("g/G", "ends")));
     assert!(dfd_bindings.contains(&bind("Tab", "next page")));
     assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
     assert!(dfd_bindings.contains(&bind("q", "leave")));
@@ -542,10 +550,16 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.router.scene_mut().set_page(VizPage::AttackSurface);
     app.set_shell_view(ShellView::Scene);
     let terrain_bindings = footer_keybindings(&app);
-    assert!(!terrain_bindings.contains(&bind("j/k/g/G", "scroll")));
+    assert!(!terrain_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(!terrain_bindings.contains(&bind("g/G", "ends")));
     assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(terrain_bindings.contains(&bind("space/p", "pause")));
     assert!(terrain_bindings.contains(&bind("r", "reset")));
+
+    app.router.scene_mut().set_page(VizPage::AttackPath);
+    let path_bindings = footer_keybindings(&app);
+    assert!(path_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+    assert!(path_bindings.contains(&bind("g/G", "ends")));
 }
 
 fn scan_state(running: bool, abort_requested: bool) -> ScanPanelState {

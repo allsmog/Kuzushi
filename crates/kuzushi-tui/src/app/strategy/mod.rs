@@ -391,4 +391,5 @@ fn approved_runnable_strategy(proposal: &kuzushi_core::StrategyProposal) -> bool
             .as_deref()
             .is_some_and(|tool| !tool.trim().is_empty())
         && proposal.preflight.status != kuzushi_core::StrategyPreflightStatus::Blocked
+        && proposal.resource_risk != kuzushi_core::StrategyResourceRisk::Blocked
 }

@@ -995,8 +995,8 @@ impl ShellApp {
         }
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
-            KeyCode::Char('j') => self.scroll_current_view_down(1),
-            KeyCode::Char('k') => self.scroll_current_view_up(1),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll_current_view_down(1),
+            KeyCode::Up | KeyCode::Char('k') => self.scroll_current_view_up(1),
             KeyCode::Char('g') => self.scroll_current_view_to_top(),
             KeyCode::Char('G') => self.scroll_current_view_to_bottom(),
             KeyCode::PageDown => self.page_down_current_view(),

@@ -65,7 +65,7 @@ impl ShellApp {
         bindings
     }
 
-    /// Generic `j/k/g/G` scrolling applies to scrollable views except those
+    /// Generic line/edge scrolling applies to scrollable views except those
     /// that drive a bespoke cursor (Catalog and the Workbench's pane-aware
     /// focus own their keys).
     fn view_uses_scroll_base(&self, view: ShellView) -> bool {
