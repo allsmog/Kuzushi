@@ -66,12 +66,12 @@ toml.workspace = true
 # the syntactic-narrowing pass to that language; absence of a grammar
 # means the language gets the previous "raw match" behavior.
 tree-sitter = "0.26"
-tree-sitter-c = "0.23"
+tree-sitter-c = "0.24"
 tree-sitter-go = "0.23"
 tree-sitter-java = "0.23"
 tree-sitter-javascript = "0.23"
 tree-sitter-php = "0.23"
-tree-sitter-python = "0.23"
+tree-sitter-python = "0.25"
 tree-sitter-ruby = "0.23"
 tree-sitter-typescript = "0.23"
 uuid.workspace = true
