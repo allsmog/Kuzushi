@@ -6,8 +6,8 @@ import {
   runArtifactManifestSchemaFields,
   runEventsSchemaFields,
   runFailuresSchemaFields,
-  runSummarySchemaFields,
   runItemsSchemaFields,
+  runSummarySchemaFields,
   schemaAliasContractFields,
 } from "./artifact-contract-fields.mjs";
 import {

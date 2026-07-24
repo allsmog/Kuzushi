@@ -356,11 +356,10 @@ function referencesRetiredRoot(line, retiredPath) {
   let start = line.indexOf(retiredPath);
   while (start >= 0) {
     const prefix = line.slice(0, start);
-    const pathPrefix = prefix.match(/[^\s"'`()=\[\]<>]*$/)?.[0] ?? "";
+    const pathPrefix = prefix.match(/[^\s"'`()=[\]<>]*$/)?.[0] ?? "";
     const following = line[start + retiredPath.length];
     const startsAtRepositoryRoot = /^(?:(?:\.|\.\.)\/)*$/.test(pathPrefix);
-    const endsSegment =
-      following === undefined || !/[A-Za-z0-9_.-]/.test(following);
+    const endsSegment = following === undefined || !/[A-Za-z0-9_.-]/.test(following);
     if (startsAtRepositoryRoot && endsSegment) return true;
     start = line.indexOf(retiredPath, start + 1);
   }
