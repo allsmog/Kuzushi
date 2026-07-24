@@ -131,10 +131,7 @@ fn story_from_threat(threat: &serde_json::Value) -> Option<ThreatStoryRow> {
 /// Cross-referencing threat-model.json must work in both directions: when
 /// the listed id differs from the artifact's model-emitted `id`/`stableId`,
 /// disclose them as detail rows instead of leaving the operator to guess.
-fn artifact_id_details(
-    threat: &serde_json::Value,
-    listing_id: &str,
-) -> Vec<ThreatStoryDetail> {
+fn artifact_id_details(threat: &serde_json::Value, listing_id: &str) -> Vec<ThreatStoryDetail> {
     let mut details = Vec::new();
     if let Some(id) = string_field(threat, "id").filter(|id| id != listing_id) {
         details.push(ThreatStoryDetail {

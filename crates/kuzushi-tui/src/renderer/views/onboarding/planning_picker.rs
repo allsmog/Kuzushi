@@ -839,9 +839,7 @@ fn last_attempt_note(row: &PlanningTaskRow) -> Option<String> {
             resume_from: None,
         } => Some("continue from checkpoint".to_string()),
         LastAttempt::Failed { .. } => Some("failed last pass".to_string()),
-        LastAttempt::Completed
-            if matches!(row.artifact_state, PlanningArtifactState::Action) =>
-        {
+        LastAttempt::Completed if matches!(row.artifact_state, PlanningArtifactState::Action) => {
             Some("done this pass".to_string())
         }
         LastAttempt::Completed => None,

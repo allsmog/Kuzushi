@@ -1,6 +1,7 @@
 mod delivery_fault;
 mod presentation_hydration;
 mod reader;
+mod stream_reader;
 mod writer;
 mod writer_fault;
 

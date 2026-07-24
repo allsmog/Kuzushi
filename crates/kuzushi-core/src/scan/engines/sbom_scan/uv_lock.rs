@@ -11,7 +11,7 @@ pub(super) fn is_uv_lock(path: &Path) -> bool {
 
 pub(super) fn uv_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse uv.lock")?;
     Ok(value
         .get("package")
@@ -24,7 +24,7 @@ pub(super) fn uv_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomC
 
 pub(super) fn uv_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse uv.lock")?;
     let source = relative_display(target, path);
     Ok(value

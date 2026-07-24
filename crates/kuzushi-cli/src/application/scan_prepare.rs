@@ -168,7 +168,9 @@ impl ScanCommandSetup {
             kuzushi_core::progress::HeartbeatGate::new(std::time::Duration::from_secs(5));
         let mut on_files_hashed = |files: usize| {
             if heartbeat.ready() {
-                eprintln!("scan prepare: registering workspace tree identity · {files} files hashed");
+                eprintln!(
+                    "scan prepare: registering workspace tree identity · {files} files hashed"
+                );
             }
         };
         let preparation = kuzushi_core::scan::prepare_scan_workspace_state_with_observer(

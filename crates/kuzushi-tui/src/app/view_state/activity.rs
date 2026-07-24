@@ -2292,8 +2292,11 @@ mod tests {
 
         let mut inherited = ActivitySession::new("run-3");
         inherited.seed_task_sequence(["secrets:scan[deep]".to_string()]);
-        inherited.tasks.get_mut("secrets:scan[deep]").unwrap().prior_run_ref =
-            Some("run-2".to_string());
+        inherited
+            .tasks
+            .get_mut("secrets:scan[deep]")
+            .unwrap()
+            .prior_run_ref = Some("run-2".to_string());
         inherited.alias_tool_to_unique_planned_row("secrets:scan");
         inherited.mark_task_partial("secrets:scan", "x");
         // The only match belongs to a prior run → no alias (item 5c keying).

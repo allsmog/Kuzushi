@@ -67,7 +67,9 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         // Keep first value fast and predictable. These remain visible as
         // deliberate Deep map work instead of silently starting database or
         // model-backed construction from the default plan.
-        BuildThreatModel | BuildStrideThreatModel | BuildCodePropertyGraph
+        BuildThreatModel
+        | BuildStrideThreatModel
+        | BuildCodePropertyGraph
         | BuildCodeQlDatabase => false,
         // Reverse-engineering artifacts only matter for binary/APK targets.
         BuildXRay => target.kind.is_reverse_engineering_target() && missing_artifact(row),
@@ -111,9 +113,7 @@ fn ledger_preselect(row: &PlanningTaskRow) -> Option<bool> {
         Some(LastAttempt::Failed {
             resumable: true, ..
         }) => Some(true),
-        Some(LastAttempt::Completed)
-            if matches!(row.artifact_state, ArtifactState::Action) =>
-        {
+        Some(LastAttempt::Completed) if matches!(row.artifact_state, ArtifactState::Action) => {
             Some(false)
         }
         _ => None,
@@ -295,7 +295,8 @@ mod tests {
         assert!(!picked.contains(&PlanningTaskId::VerifyFindings));
         // Dedupe and chain-hunt are offered in the Review picker but never
         // preselected — both are deliberate model-spend opt-ins.
-        let offered = applicable_tasks_for_phase(WorkflowPhase::Review, profile(TargetKind::Source));
+        let offered =
+            applicable_tasks_for_phase(WorkflowPhase::Review, profile(TargetKind::Source));
         assert!(offered.contains(&PlanningTaskId::DedupeFindings));
         assert!(offered.contains(&PlanningTaskId::HuntChains));
         assert!(!picked.contains(&PlanningTaskId::DedupeFindings));

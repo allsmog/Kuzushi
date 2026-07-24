@@ -263,7 +263,14 @@ impl DfdDiagram {
         };
         match dfd_selected_item(&self.model, selected) {
             Some(DfdSelected::Node(node)) => {
-                text(buf, area, 2, y, &format!("▸ {}", node.name), selection_color());
+                text(
+                    buf,
+                    area,
+                    2,
+                    y,
+                    &format!("▸ {}", node.name),
+                    selection_color(),
+                );
                 text(buf, area, 2, y + 1, &node_detail(node), diagram_muted());
             }
             Some(DfdSelected::Flow(flow)) => {
@@ -319,11 +326,7 @@ fn draw_page_notes(buf: &mut Buffer, area: Rect, notes: &[PageNote]) {
 
 /// Anchors keyed by node name (flows reference display names) for the
 /// visible placements only — flows to a paged-out node are simply skipped.
-fn anchor_map(
-    model: &DfdModel,
-    placements: &[NodePlacement],
-    nbw: u16,
-) -> HashMap<String, Anchor> {
+fn anchor_map(model: &DfdModel, placements: &[NodePlacement], nbw: u16) -> HashMap<String, Anchor> {
     placements
         .iter()
         .map(|placement| {
@@ -400,7 +403,12 @@ fn node_detail(node: &DfdNodeModel) -> String {
 
 fn flow_detail(flow: &DfdFlowModel) -> String {
     let boundaries = if flow.boundary_ids.is_empty() {
-        if flow.crosses { "crosses boundary" } else { "in-zone" }.to_string()
+        if flow.crosses {
+            "crosses boundary"
+        } else {
+            "in-zone"
+        }
+        .to_string()
     } else {
         format!("boundaries: {}", flow.boundary_ids.join(", "))
     };
@@ -584,7 +592,10 @@ mod tests {
             24,
         );
         assert!(node_selected.contains("▸ web"), "{node_selected}");
-        assert!(node_selected.contains("process · zone a"), "{node_selected}");
+        assert!(
+            node_selected.contains("process · zone a"),
+            "{node_selected}"
+        );
 
         let flow_selected = render_to_text(
             DfdDiagram {

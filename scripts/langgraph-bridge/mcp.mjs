@@ -3,12 +3,61 @@ import { sep } from "node:path";
 import process from "node:process";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
 
+const MCP_TOOL_TIMEOUT_CODE = "KUZUSHI_MCP_TOOL_TIMEOUT";
+const MCP_CLOSE_GRACE_MS = 1_000;
+
+export class McpToolTimeoutError extends Error {
+  constructor(cause) {
+    super("MCP tool request timed out", { cause });
+    this.name = "McpToolTimeoutError";
+    this.code = MCP_TOOL_TIMEOUT_CODE;
+  }
+}
+
+export function normalizeMcpToolError(error) {
+  if (error instanceof McpToolTimeoutError) return error;
+  return isMcpToolTimeoutError(error) ? new McpToolTimeoutError(error) : error;
+}
+
+export function isMcpToolTimeoutError(error) {
+  return errorChain(error).some(timeoutErrorSignal);
+}
+
+export async function withMcpClientCleanup(
+  operation,
+  close,
+  cleanupTimeoutMs = MCP_CLOSE_GRACE_MS,
+) {
+  try {
+    return await operation();
+  } finally {
+    await ignoreMcpCloseFailure(close, cleanupTimeoutMs);
+  }
+}
+
+async function ignoreMcpCloseFailure(close, timeoutMs) {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(close),
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch {
+    // The primary result owns the spend receipt; cleanup cannot replace it.
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function mcpToolsForRequest(request) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
   const mcpServers = mcpServerConfig(request);
   if (Object.keys(mcpServers).length === 0) return { tools: [], close: async () => {} };
   const client = new MultiServerMCPClient({
     mcpServers,
+    defaultToolTimeout: mcpToolTimeoutForRequest(request),
     onConnectionError: (server, error) => {
       throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
     },
@@ -31,6 +80,42 @@ function providerSafeToolNames(tools) {
     tool.name = name;
   }
   return tools;
+}
+
+function errorChain(error) {
+  const chain = [];
+  let current = error;
+  while (current && chain.length < 4) {
+    chain.push(current);
+    current = current?.cause;
+  }
+  return chain;
+}
+
+function timeoutErrorSignal(error) {
+  const name = normalizedErrorField(error?.name);
+  const code = normalizedErrorField(error?.code);
+  const message = normalizedErrorField(error?.message);
+  return (
+    name === "mcptooltimeouterror" ||
+    code === MCP_TOOL_TIMEOUT_CODE.toLowerCase() ||
+    code.includes("timeout") ||
+    message.includes("timed out")
+  );
+}
+
+function normalizedErrorField(value) {
+  return typeof value === "string" ? value.slice(0, 512).toLowerCase() : "";
+}
+
+export function mcpToolTimeoutForRequest(request) {
+  const options = request?.runtimeOptions ?? request?.runtime_options ?? {};
+  const raw = options.mcpToolTimeoutMs ?? options.mcp_tool_timeout_ms ?? 60_000;
+  const timeout = Number(raw);
+  if (!Number.isSafeInteger(timeout) || timeout < 1) {
+    throw new Error("MCP tool timeout must be a positive safe integer in milliseconds");
+  }
+  return timeout;
 }
 
 export function mcpConnectionFailureMessage(server, error, serverConfig = {}) {
@@ -135,12 +220,19 @@ function plannedServer(attachment, cwd, request, readRoots) {
 }
 
 // Artifact-backed servers read their input path from
-// `KUZUSHI_MCP_<NAME>_ARTIFACT`.
+// `KUZUSHI_MCP_<NAME>_ARTIFACT`. When the attachment carries an authenticated
+// identity, the server receives it through the matching `_ARTIFACT_IDENTITY`
+// variable.
 function artifactEnv(attachment, token, readRoots) {
   const path = attachment.artifactPath ?? attachment.artifact_path;
   if (typeof path !== "string" || path.length === 0) return {};
   const authorizedPath = authorizedArtifactPath(path, readRoots);
-  return { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
+  const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: authorizedPath };
+  const identity = attachment.artifactIdentity ?? attachment.artifact_identity;
+  if (typeof identity === "string" && identity.length > 0) {
+    env[`KUZUSHI_MCP_${token}_ARTIFACT_IDENTITY`] = identity;
+  }
+  return env;
 }
 
 function authorizedArtifactPath(path, readRoots) {

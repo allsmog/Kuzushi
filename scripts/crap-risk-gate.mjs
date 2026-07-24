@@ -6,6 +6,7 @@ import { testCoversProductionFile } from "./crap-risk-test-mapping.mjs";
 
 const root = execGit(["rev-parse", "--show-toplevel"], process.cwd()).trim() || process.cwd();
 const threshold = Number(process.env.KUZUSHI_CRAP_RISK_THRESHOLD ?? "7");
+const base = diffBase();
 const allChanged = changedFiles();
 const changedTests = changedTestFiles(allChanged);
 const changed = changedCodeFiles(allChanged);
@@ -88,13 +89,26 @@ function changedFilesFromGit() {
     ...gitLines(["ls-files", "--others", "--exclude-standard"]),
   ];
   if (files.length > 0) return files;
-  const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
-  requireResolvableBase(base);
-  return gitLines(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]);
+  return gitLinesRequired(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]);
 }
 
-function requireResolvableBase(base) {
-  if (gitRefResolves(base)) return;
+function diffBase() {
+  const requested = process.env.KUZUSHI_CRAP_RISK_BASE_REF;
+  if (/^0+$/.test(requested ?? "")) return emptyTreeBase();
+  const selected = requested ?? "HEAD^";
+  requireCommitBase(selected);
+  return selected;
+}
+
+function emptyTreeBase() {
+  const emptyTree = execGitRequired(["hash-object", "-t", "tree", "--stdin"], root, "").trim();
+  if (emptyTree) return emptyTree;
+  console.error("CRAP-risk gate cannot resolve Git's empty tree for a zero-SHA event base.");
+  process.exit(1);
+}
+
+function requireCommitBase(base) {
+  if (gitCommitResolves(base)) return;
   console.error(
     `CRAP-risk gate cannot resolve diff base "${base}" — the gate would silently check 0 files. ` +
       "Fetch more history (checkout with fetch-depth: 2 or 0) or set KUZUSHI_CRAP_RISK_BASE_REF.",
@@ -102,7 +116,7 @@ function requireResolvableBase(base) {
   process.exit(1);
 }
 
-function gitRefResolves(ref) {
+function gitCommitResolves(ref) {
   return git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim().length > 0;
 }
 
@@ -277,7 +291,20 @@ function isUntrackedFile(file) {
 }
 
 function isAddedFile(file) {
-  return gitLines(["diff", "--name-only", "--diff-filter=A", "HEAD", "--", file]).includes(file);
+  const workingTreeAdd = gitLines([
+    "diff",
+    "--name-only",
+    "--diff-filter=A",
+    "HEAD",
+    "--",
+    file,
+  ]).includes(file);
+  return (
+    workingTreeAdd ||
+    gitLinesRequired(["diff", "--name-only", "--diff-filter=A", base, "HEAD", "--", file]).includes(
+      file,
+    )
+  );
 }
 
 function overlapsRanges(block, ranges) {
@@ -288,10 +315,7 @@ function overlapsRanges(block, ranges) {
 function changedLineRanges(file) {
   let diff = git(["diff", "--unified=0", "HEAD", "--", file]);
   if (!diff.trim() && !explicitFileListUsed() && !isUntrackedFile(file)) {
-    const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
-    if (gitRefResolves(base)) {
-      diff = git(["diff", "--unified=0", base, "HEAD", "--", file]);
-    }
+    diff = gitRequired(["diff", "--unified=0", base, "HEAD", "--", file]);
   }
   return diff.split(/\r?\n/).map(parseAddedRange).filter(Boolean);
 }
@@ -312,14 +336,40 @@ function gitLines(args) {
     .filter(Boolean);
 }
 
+function gitLinesRequired(args) {
+  return gitRequired(args)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function git(args) {
   return execGit(args, root);
 }
 
-function execGit(args, cwd) {
+function gitRequired(args) {
+  return execGitRequired(args, root);
+}
+
+function execGit(args, cwd, input) {
   try {
-    return execFileSync("git", args, { cwd, encoding: "utf8" });
+    return execFileSync("git", args, { cwd, encoding: "utf8", input });
   } catch {
     return "";
+  }
+}
+
+function execGitRequired(args, cwd, input) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      encoding: "utf8",
+      input,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    const detail = error.stderr?.toString().trim() || error.message;
+    console.error(`CRAP-risk gate Git command failed: git ${args.join(" ")}\n${detail}`);
+    process.exit(1);
   }
 }

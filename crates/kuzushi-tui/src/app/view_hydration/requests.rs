@@ -118,11 +118,12 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    for relative in [".kuzushi/cpg.bin", ".kuzushi/codeql-db"] {
-        keys.push(ViewHydrationKey::PathState {
-            path: target.join(relative),
-        });
-    }
+    keys.push(ViewHydrationKey::PathState {
+        path: target.join(".kuzushi/cpg.bin"),
+    });
+    keys.push(ViewHydrationKey::PathState {
+        path: kuzushi_core::workspace_codeql_db_path(target),
+    });
 }
 
 /// The recommender fold runs git diffs and a repo walk, so it hydrates only
@@ -280,6 +281,7 @@ fn append_health_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     };
     let paths = vec![
         kuzushi_core::workspace_codeql_db_path(target),
+        kuzushi_core::legacy_workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
         kuzushi_core::cpg_artifact_dir(target),
     ];

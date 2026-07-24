@@ -28,13 +28,20 @@ Feature: Conditional MCP attachment plan
     When I type command "logs"
     Then the log contains "MCP plan: treesitter, context"
 
-  Scenario: Pre-seeded CPG graphs and CodeQL DB attach the cpg + codeql MCPs
+  Scenario: Pre-seeded current CPG graphs attach the cpg MCP
     # The cpg server only attaches for current-shape-version graphs
     # (<lang>.v<GRAPH_SHAPE_VERSION>.cpg) under .kuzushi/cpg-rs/.
     Given the artifact ".kuzushi/cpg-rs/rust.v11.cpg" is seeded with "CPGSTUB"
-    And the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
     When I launch the shell
     Then the status segment shows "workbench"
     When I type command "logs"
     Then the log contains "cpg"
-    And the log contains "codeql"
+    And I do not see "codeql,"
+
+  Scenario: Legacy marker-only CodeQL DB fails closed
+    Given the artifact ".kuzushi/codeql-db/codeql-database.yml" is seeded with "primaryLanguage: rust"
+    When I launch the shell
+    Then the status segment shows "workbench"
+    When I type command "logs"
+    Then the log contains "MCP plan error: legacy CodeQL database"
+    And I do not see "codeql,"

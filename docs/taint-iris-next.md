@@ -26,8 +26,8 @@ exact-invocation compatibility entry for older workflows.
 
 - `mode=plan` runs deterministic planning, candidate extraction, typed spec seeding, and optional backend path detection. It returns the ranked catalog, structural query seeds, candidates, labeled specs, evidence rows, backend choice, and the bounded prompt that hunt mode would send to the agent.
 - `mode=hunt` runs the same deterministic prepass, then sends one bounded agent session the context summary, threat-model summary, CWE Candidate Catalog, candidate/spec counts, evidence bundles, and internal evidence tools.
-- `backend=auto` uses structural extraction first. If `ast-grep`/tree-sitter support is available, V1 uses it for bounded parser-aware call candidates and falls back to `rg` for broad/token signals. If an existing CodeQL DB is present under `.kuzushi/codeql-db` or `.codeql/db`, V1 also runs read-only CodeQL analysis as corroboration and converts matching SARIF findings into catalog-scoped evidence rows.
-- `backend=codeql` is opt-in and uses an existing DB only. If no DB exists, V1 falls back to structural evidence and reports a warning. It never creates a CodeQL database.
+- `backend=auto` uses structural extraction first. If `ast-grep`/tree-sitter support is available, V1 uses it for bounded parser-aware call candidates and falls back to `rg` for broad/token signals. If a managed CodeQL DB is present under `.kuzushi/v3/codeql-db`, V1 verifies its operator-owned promotion receipt, source commit, target scope, language, and content identity before using read-only CodeQL analysis as corroboration.
+- `backend=codeql` is opt-in and uses an existing managed DB only. If no DB exists, V1 falls back to structural evidence and reports a warning. A stale, malformed, target-forged, or legacy DB is an explicit rebuild error rather than an absent-database fallback. The hunt never creates a CodeQL database; rebuild with `codeql:create-db`.
 - If a DB exists but the CodeQL CLI is not installed, V1 keeps the structural evidence and reports the CLI problem explicitly.
 - `backend=cpg-rs` (alias `cpg`) is the default deep-evidence backend: the in-process cpg-rs engine builds per-language graphs implicitly under `.kuzushi/cpg-rs/` — no install, no JVM. `backend=joern` is a retired alias that redirects to `cpg-rs` with a warning.
 - `backend=semgrep|language` is reserved behind the same evidence interface; V1 falls back to structural evidence until those adapters land.
@@ -37,6 +37,17 @@ Caps keep the run bounded: `maxCatalogEntries`, `maxCandidatesPerCwe`, `maxEvide
 `minEvidenceLevel=linked` is the default. Raw structural hits are candidate evidence only; findings require either backend path evidence or a clearly linked source-to-sink/control story. Operators can tighten to `path` or loosen to `candidate`.
 
 The module requires usable context or a file inventory. An empty threat model is a warning, not a blocker; `/threats regen dfd` improves ranking and triage but should not prevent structural-first hunts from producing candidates.
+
+## CodeQL MCP latency and authentication
+
+The CodeQL MCP result memo reduces CodeQL execution; it does not weaken database authentication.
+
+- An eligible dependency-free local query can reuse an in-process result. A memo hit skips CodeQL execution, but the server first performs full content authentication of the database tree. Memo-hit authentication time therefore remains proportional to database size.
+- CWE pack selectors bypass the result memo. Local queries with imports are rejected because the server cannot authenticate their complete dependency graph without CodeQL's resolver. CodeQL's on-disk pack cache and optional prewarm can still avoid repeated compilation work for pack selectors.
+- When CodeQL executes, Kuzushi authenticates the complete database before the process starts and again before accepting or memoizing its output. A change during analysis fails closed.
+- On the first execution for a CodeQL bundle or database revision, Kuzushi copies the complete authenticated tree into an operator-owned, receipt-bound server-session snapshot. A one-entry cache per tree type bounds retained disk; replacing either revision cancels work using the stale snapshot.
+- Analysis and prewarm run inside the shared read-only MCP sandbox. The launcher bundle, database, and dependency-free local query snapshot are read-only to the child; only its per-run scratch/output and explicit common-cache roots are writable. `CODEQL_DIST` is pinned to the launcher snapshot and `CODEQL_JAVA_HOME` is not inherited. If the OS sandbox is unavailable, execution fails closed.
+- Session roots are explicitly owned by the MCP runtime and removed at normal shutdown. A cross-process owner lock lets the next server safely reclaim abandoned roots after a crash. Full source authentication still runs on every request, including memo lookups, before a cached snapshot can be reused.
 
 ## CWE Reference
 

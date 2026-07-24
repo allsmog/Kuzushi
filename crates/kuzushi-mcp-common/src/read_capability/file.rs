@@ -128,18 +128,29 @@ impl BoundedReadFile {
     }
 
     pub fn copy_to_with_sha256_hex(mut self, writer: &mut impl Write) -> Result<String> {
+        let digest = self.stream_chunks(|bytes| writer.write_all(bytes).map_err(Into::into))?;
+        Ok(hex_digest(&digest))
+    }
+
+    /// Stream this authorized file through a bounded callback while retaining
+    /// the same before/after identity checks as the ordinary read helpers.
+    pub fn for_each_chunk(mut self, consume: impl FnMut(&[u8]) -> Result<()>) -> Result<()> {
+        self.stream_chunks(consume).map(|_| ())
+    }
+
+    fn stream_chunks(&mut self, mut consume: impl FnMut(&[u8]) -> Result<()>) -> Result<[u8; 32]> {
         let mut hasher = Sha256::new();
         let mut copied = 0_usize;
         let mut buffer = [0_u8; 64 * 1024];
         while let read @ 1.. = self.file.read(&mut buffer)? {
             copied = copied.checked_add(read).context("MCP copy size overflow")?;
             ensure_size(&self.path, copied, self.max_bytes)?;
-            writer.write_all(&buffer[..read])?;
+            consume(&buffer[..read])?;
             hasher.update(&buffer[..read]);
         }
         let digest: [u8; 32] = hasher.finalize().into();
         self.verify_after_copy(digest)?;
-        Ok(hex_digest(&digest))
+        Ok(digest)
     }
 
     fn verify_after_copy(&self, digest: [u8; 32]) -> Result<()> {

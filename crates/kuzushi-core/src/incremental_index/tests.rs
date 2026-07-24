@@ -84,7 +84,9 @@ fn plans_source_and_policy_changes_differently() {
         ReindexPlan::MarkStaleOnly
     );
     assert!(should_ignore_path(Path::new(".kuzushi/v3/index.sqlite3")));
-    assert!(should_ignore_path(Path::new(".kuzushi/codeql-db/db-cpp/default/cache")));
+    assert!(should_ignore_path(Path::new(
+        ".kuzushi/v3/codeql-db/db-cpp/default/cache"
+    )));
     assert!(should_ignore_path(Path::new(".git/HEAD")));
 }
 
@@ -107,7 +109,9 @@ fn full_snapshot_excludes_git_and_kuzushi_owned_state() {
     fs::create_dir_all(temp.path().join("src")).unwrap();
     fs::write(temp.path().join("src/lib.rs"), "pub fn live() {}\n").unwrap();
     git(temp.path(), &["init", "-q"]);
-    let codeql = temp.path().join(".kuzushi/codeql-db/db-cpp/default/cache");
+    let codeql = temp
+        .path()
+        .join(".kuzushi/v3/codeql-db/db-cpp/default/cache");
     fs::create_dir_all(codeql.parent().unwrap()).unwrap();
     fs::File::create(&codeql)
         .unwrap()
@@ -239,7 +243,7 @@ fn watcher_ignores_owned_state_but_keeps_policy_signals() {
     let changes = classify_watcher_events(
         root,
         [
-            WatchEvent::Modified("/repo/.kuzushi/codeql-db/db-cpp/cache".into()),
+            WatchEvent::Modified("/repo/.kuzushi/v3/codeql-db/db-cpp/cache".into()),
             WatchEvent::Modified("/repo/.kuzushi/prompts/sast/triage.md".into()),
             WatchEvent::Modified("/repo/.git/logs/HEAD".into()),
             WatchEvent::Modified("/repo/.git/index".into()),
@@ -286,8 +290,8 @@ fn state_aware_watcher_reports_map_artifacts_without_codeql_churn() {
         notify::event::DataChange::Any,
     )))
     .add_path("/repo/.kuzushi/context-snapshot.json".into())
-    .add_path("/repo/.kuzushi/codeql-db".into())
-    .add_path("/repo/.kuzushi/codeql-db/db-cpp/cache/chunk".into());
+    .add_path("/repo/.kuzushi/v3/codeql-db".into())
+    .add_path("/repo/.kuzushi/v3/codeql-db/db-cpp/cache/chunk".into());
 
     let (changes, state_paths) = classify_notify_event_with_state(Path::new("/repo"), event);
 
@@ -295,8 +299,8 @@ fn state_aware_watcher_reports_map_artifacts_without_codeql_churn() {
     assert_eq!(
         state_paths,
         vec![
-            PathBuf::from(".kuzushi/codeql-db"),
             PathBuf::from(".kuzushi/context-snapshot.json"),
+            PathBuf::from(".kuzushi/v3/codeql-db"),
         ]
     );
 }

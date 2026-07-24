@@ -218,7 +218,7 @@ fn query_variant_hunt_json(
             VARIANT_HUNT_SYSTEM_PROMPT.to_string(),
             prompt,
         )
-        .with_tool_policy(whitebox_static_policy_for_target(&run.target))
+        .with_tool_policy(try_whitebox_static_policy_for_target(&run.target)?)
         .with_thinking_level(run.thinking_level.clone()),
         StructuredJsonContract::new("variant:hunt", "VariantFindings", findings_schema()),
         require_json_object,

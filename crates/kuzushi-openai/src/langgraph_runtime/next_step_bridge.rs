@@ -48,9 +48,10 @@ pub(crate) fn next_step_observed_blocking(
         let Some(failure) = failure.filter(|f| attempt < transport_retry::max_attempts(f)) else {
             return Err(error);
         };
-        transport_retry::sleep_before_retry(transport_retry::backoff_delay(attempt, &failure), || {
-            ensure_not_cancelled(runtime)
-        })?;
+        transport_retry::sleep_before_retry(
+            transport_retry::backoff_delay(attempt, &failure),
+            || ensure_not_cancelled(runtime),
+        )?;
     }
 }
 
@@ -130,6 +131,8 @@ fn next_step_bridge_request(
         max_tokens: 4096,
         api_key_env: credential.env,
         api_key: credential.value,
+        oauth_credentials_path: runtime.oauth_credentials_path.display().to_string(),
+        oauth_allow_env_token: runtime.oauth_allow_env_token,
         base_url: runtime.base_url.clone(),
         runtime_options: request.runtime_options.clone(),
         temperature: request.temperature,

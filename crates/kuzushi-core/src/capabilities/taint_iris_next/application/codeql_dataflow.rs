@@ -141,16 +141,9 @@ fn first_standard_codeql_launcher() -> Option<PathBuf> {
 }
 
 /// Standard locations kuzushi expects for an existing CodeQL DB.
-pub(crate) fn codeql_db_path(repo_root: &Path) -> Option<PathBuf> {
-    for candidate in [
-        crate::workspace::workspace_codeql_db_path(repo_root),
-        crate::workspace::legacy_codeql_db_path(repo_root),
-    ] {
-        if candidate.exists() && candidate.is_dir() {
-            return Some(candidate);
-        }
-    }
-    None
+pub(crate) fn codeql_db_path(repo_root: &Path) -> Result<Option<PathBuf>> {
+    crate::codeql_repository_execution::resolve_managed_codeql_database(repo_root)
+        .map(|database| database.map(|database| database.path().to_path_buf()))
 }
 
 /// One source-to-sink path discovered by a CodeQL query, distilled from
@@ -178,7 +171,7 @@ pub(crate) struct CodeqlStep {
 }
 
 /// Run a CodeQL security-and-quality query suite against the DB at
-/// `<target>/.kuzushi/codeql-db` and return the resulting source-to-sink
+/// `<target>/.kuzushi/v3/codeql-db` and return the resulting source-to-sink
 /// flows. Returns `Ok(None)` when CodeQL is unavailable, the DB is
 /// missing, or the query suite isn't installed — callers fall back to
 /// cpg-rs or the heuristic linker without surfacing an error.
@@ -186,25 +179,29 @@ pub(crate) fn run_codeql_flows(plan: &TaintIrisNextPlan) -> Result<Option<Vec<Co
     if !codeql_available() {
         return Ok(None);
     }
-    let Some(db_path) = codeql_db_path(&plan.scan_root) else {
+    let Some(database) =
+        crate::codeql_repository_execution::resolve_managed_codeql_database(&plan.scan_root)?
+    else {
         return Ok(None);
     };
     let Some(launcher) = codeql_launcher_path() else {
         return Ok(None);
     };
     let queries = selected_codeql_queries(plan);
-    let sarif_file =
-        tempfile::NamedTempFile::new().context("could not create codeql sarif tempfile")?;
+    let analysis_dir = tempfile::tempdir().context("could not create codeql analysis directory")?;
+    let sarif_path = analysis_dir.path().join("results.sarif");
     let timeout_secs = (plan.caps.codeql_analyze_timeout_ms as u64).div_ceil(1_000);
-    let output = run_codeql_analysis(
-        &launcher,
-        &db_path,
-        sarif_file.path(),
-        &queries,
-        timeout_secs,
-    )?;
+    let output = database.run_verified(|database_path| {
+        run_codeql_analysis(
+            &launcher,
+            database_path,
+            &sarif_path,
+            &queries,
+            timeout_secs,
+        )
+    })?;
     ensure_codeql_analysis_succeeded(&output)?;
-    let sarif = crate::bounded_file::read_utf8_text(sarif_file.path(), 64 * 1024 * 1024)
+    let sarif = crate::bounded_file::read_utf8_text(&sarif_path, 64 * 1024 * 1024)
         .context("could not read codeql SARIF output")?;
     Ok(Some(parse_sarif_flows(&sarif)))
 }
@@ -228,11 +225,17 @@ fn run_codeql_analysis(
     queries: &[String],
     timeout_secs: u64,
 ) -> Result<std::process::Output> {
+    let log_dir = sarif_path
+        .parent()
+        .context("CodeQL SARIF output has no parent directory")?;
     let mut command = Command::new(launcher);
     command
         .args(["database", "analyze", "--format=sarif-latest", "--output"])
         .arg(sarif_path)
         .args(["--ram=4096", "--threads=4"])
+        .args(
+            crate::codeql_repository_execution::managed_codeql_analysis_safety_args(log_dir),
+        )
         .arg(db_path)
         .args(queries)
         .stdin(std::process::Stdio::null())
@@ -803,10 +806,16 @@ mod tests {
     fn run_codeql_flows_invokes_cli_and_parses_sarif() {
         let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
+        let fake_codeql = write_fake_codeql_flow_script(temp.path());
+        initialize_codeql_dataflow_repository(temp.path());
         let db = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(db.join("db-cpp")).unwrap();
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
-        let fake_codeql = write_fake_codeql_flow_script(temp.path());
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            temp.path(),
+            "cpp",
+        );
 
         let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_CODEQL_BIN", &fake_codeql);
         let plan = codeql_dataflow_test_plan(temp.path().to_path_buf());
@@ -818,6 +827,26 @@ mod tests {
         assert_eq!(flows[0].taint_class, "sql-injection");
         assert_eq!(flows[0].source_line, 3);
         assert_eq!(flows[0].sink_line, 9);
+    }
+
+    #[cfg(unix)]
+    fn initialize_codeql_dataflow_repository(root: &Path) {
+        run_codeql_dataflow_git(root, &["init", "-q"]);
+        std::fs::write(root.join("tracked.cpp"), "int main() { return 0; }\n").unwrap();
+        run_codeql_dataflow_git(root, &["add", "tracked.cpp", "codeql"]);
+        run_codeql_dataflow_git(root, &["commit", "-qm", "initial"]);
+    }
+
+    #[cfg(unix)]
+    fn run_codeql_dataflow_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     #[cfg(unix)]

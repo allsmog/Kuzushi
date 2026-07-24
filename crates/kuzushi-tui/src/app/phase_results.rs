@@ -394,7 +394,9 @@ impl ShellApp {
             .or_else(|| {
                 let pending =
                     !kuzushi_core::runtime::pending_agent_loop_checkpoints(target).is_empty();
-                pending.then(|| completed.run_refs.last().cloned()).flatten()
+                pending
+                    .then(|| completed.run_refs.last().cloned())
+                    .flatten()
             })
     }
 
@@ -875,8 +877,7 @@ fn semantic_result_lines<'a>(
     // Failed runs carry the same error text as both output and error; the
     // card must not print it twice (once as `│ …` preview, once as `⚠ …`).
     // Old ledger records also doubled the message inside one string.
-    let message =
-        operator_message.map(kuzushi_core::run_lifecycle::collapse_repeated_message);
+    let message = operator_message.map(kuzushi_core::run_lifecycle::collapse_repeated_message);
     if let Some(message) = message
         .as_deref()
         .filter(|message| *message != summary)
@@ -1123,9 +1124,8 @@ mod tests {
     fn write_stage_checkpoint(target: &std::path::Path, run_id: &str) {
         std::fs::create_dir_all(target.join(".kuzushi")).unwrap();
         std::fs::write(target.join("research.json"), "{}").unwrap();
-        let store =
-            kuzushi_core::run_artifacts::StageCheckpointStore::discover(target, &[5u8; 32])
-                .unwrap();
+        let store = kuzushi_core::run_artifacts::StageCheckpointStore::discover(target, &[5u8; 32])
+            .unwrap();
         let handle = kuzushi_core::run_artifacts::StageCheckpointHandle::open(
             store,
             target,
@@ -1189,15 +1189,15 @@ mod tests {
         let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.set_target(Some(temp.path().to_path_buf()));
 
-        let failed = app
-            .phase_result_presentation_for(&attempt_with_outcome(
-                temp.path(),
-                PhaseAttemptOutcome::Failed,
-            ));
+        let failed = app.phase_result_presentation_for(&attempt_with_outcome(
+            temp.path(),
+            PhaseAttemptOutcome::Failed,
+        ));
         assert!(
-            failed.detail_lines.iter().any(|line| {
-                line.contains("resume checkpoint saved (1 completed agent turn)")
-            }),
+            failed
+                .detail_lines
+                .iter()
+                .any(|line| { line.contains("resume checkpoint saved (1 completed agent turn)") }),
             "failed result must disclose the checkpoint: {:?}",
             failed.detail_lines
         );

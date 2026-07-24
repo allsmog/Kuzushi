@@ -196,7 +196,7 @@ fn fake_codeql_binary(dir: &std::path::Path) {
         &binary,
         r#"#!/bin/sh
 if [ "$1" = "database" ] && [ "$2" = "create" ]; then
-  mkdir -p "$3"
+  mkdir -p "$3/db-javascript" "$3/diagnostic" "$3/results"
   printf 'name: test\n' > "$3/codeql-database.yml"
   exit 0
 fi
@@ -1596,7 +1596,6 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
-    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("package.json"),
@@ -1608,6 +1607,7 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo, &home);
     let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -1643,7 +1643,6 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
-    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("package.json"),
@@ -1655,6 +1654,7 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo, &home);
     let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -1712,7 +1712,6 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
-    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("package.json"),
@@ -1724,9 +1723,7 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
-    // The bridge is faked; stub the optional CodeQL DB artifact.
-    std::fs::create_dir_all(repo.join(".kuzushi/codeql-db")).unwrap();
-    std::fs::write(repo.join(".kuzushi/codeql-db/placeholder"), "stub").unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo, &home);
     let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -3198,18 +3195,35 @@ fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str)
     );
 }
 
-fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
-    // The taint-iris-next MCP probe attaches the codeql server only when a
-    // CodeQL DB (`.kuzushi/codeql-db/`) artifact exists. The fake bridge does
-    // not read it, so a non-empty placeholder satisfies the probe. cpg-rs
-    // needs no artifact: graphs build implicitly in-process.
-    let kuzushi = repo.join(".kuzushi");
-    std::fs::create_dir_all(kuzushi.join("codeql-db")).unwrap();
-    std::fs::write(
-        kuzushi.join("codeql-db").join("codeql-database.yml"),
-        "primaryLanguage: javascript\n",
-    )
-    .unwrap();
+fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path, home: &std::path::Path) {
+    // Build through the real promotion boundary so the optional CodeQL MCP
+    // attachment carries current source provenance and an operator receipt.
+    // The in-process cpg-rs backend builds graphs implicitly and needs no
+    // pre-seeded artifact.
+    let fake_bin = repo.join("tools");
+    std::fs::create_dir_all(&fake_bin).unwrap();
+    fake_codeql_binary(&fake_bin);
+    init_git_repo(repo);
+    let codeql = fake_bin.join("codeql");
+    let input = serde_json::json!({
+        "language": "javascript",
+        "buildMode": "none",
+        "codeqlBin": codeql,
+    });
+    let output = kuzushi_command(home)
+        .arg("--target")
+        .arg(repo)
+        .arg("run")
+        .arg("codeql:create-db")
+        .arg("--input")
+        .arg(input.to_string())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "failed to seed trusted CodeQL DB: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[cfg(unix)]

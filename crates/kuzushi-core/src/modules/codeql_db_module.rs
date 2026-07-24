@@ -2,16 +2,12 @@ use super::*;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const DEFAULT_CODEQL_CREATE_TIMEOUT_MS: u64 = 30 * 60 * 1000;
-const MAX_CODEQL_CREATE_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
-
-struct CodeqlDbOutputPath {
-    path: PathBuf,
-    explicit: bool,
-}
+const DEFAULT_CODEQL_CREATE_TIMEOUT_MS: u64 =
+    crate::codeql_repository_execution::DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS;
+const MAX_CODEQL_CREATE_TIMEOUT_MS: u64 =
+    crate::codeql_repository_execution::MAX_CODEQL_REPOSITORY_TIMEOUT_MS;
 
 struct CodeqlCreateOutcome {
     build_mode: String,
@@ -19,26 +15,15 @@ struct CodeqlCreateOutcome {
     first_error: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-struct CodeqlCreateCommand<'a> {
-    bin: &'a Path,
-    target: &'a Path,
-    output_path: &'a Path,
-    language: &'a str,
-    allow_non_db_removal: bool,
-    cancellation: Option<&'a crate::scan::ScanCancellation>,
-    timeout: Duration,
-}
-
 pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
     builtin_module(
         "codeql-db",
         "CodeQL Database",
         ModuleKind::Intel,
-        "Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and \
+        "Create a CodeQL database (.kuzushi/v3/codeql-db/) for downstream taint and \
          security queries. Deterministic; wraps `codeql database create`.",
         tools_with_policy(
-            workspace_policy(
+            repository_execute_policy(
                 ToolPhase::Map,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Optional,
@@ -46,7 +31,7 @@ pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
             vec![tool_with_options(
                 "codeql:create-db",
                 "Create a CodeQL database for the active target. Returns an explicit skipped result \
-                 when the codeql CLI is missing; otherwise writes .kuzushi/codeql-db/.",
+                 when the codeql CLI is missing; otherwise writes .kuzushi/v3/codeql-db/.",
                 codeql_create_db_options(),
             )],
         ),
@@ -60,10 +45,9 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
         opt(
             "importPath",
             OptionType::Path,
-            "Reuse a prebuilt CodeQL database directory instead of running `codeql database \
-             create`: the directory is validated (codeql-database.yml) and copied to the \
-             canonical <target>/.kuzushi/codeql-db. The codeql CLI need not be installed. \
-             Use for large targets where the database is built out-of-band or shared.",
+            "Compatibility input for a prebuilt CodeQL database. Kuzushi refuses raw imports \
+             until they can be authenticated against the current source and an operator-owned \
+             promotion receipt; run codeql:create-db against the target instead.",
         )
         .external_read()
         .aliases(&["import_path", "existingDb", "existing_db"]),
@@ -72,21 +56,8 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
             OptionType::String,
             "CodeQL language pack (e.g. javascript, python, cpp, java, rust). Defaults to auto-detection.",
         ),
-        opt(
-            "outputPath",
-            OptionType::Path,
-            "Destination DB directory below <target>/.kuzushi. Defaults to <target>/.kuzushi/codeql-db; paths outside Kuzushi state are rejected.",
-        )
-        .state_write()
-        .advanced(),
-        opt(
-            "codeqlBin",
-            OptionType::Path,
-            "Explicit CodeQL CLI binary path. When omitted, Kuzushi searches PATH.",
-        )
-        .aliases(&["codeql_bin"])
-        .executable()
-        .advanced(),
+        codeql_output_path_option(),
+        codeql_binary_path_option(),
         opt(
             "buildMode",
             OptionType::String,
@@ -102,7 +73,30 @@ fn codeql_create_db_options() -> Vec<OptionSpec> {
         .aliases(&["timeout_ms"])
         .default(json!(DEFAULT_CODEQL_CREATE_TIMEOUT_MS))
         .advanced(),
+        repository_source_commit_binding_option(),
+        repository_target_scope_binding_option(),
     ]
+}
+
+fn codeql_output_path_option() -> OptionSpec {
+    opt(
+        "outputPath",
+        OptionType::Path,
+        "Destination DB directory below <target>/.kuzushi. Defaults to <target>/.kuzushi/v3/codeql-db; paths outside Kuzushi state are rejected.",
+    )
+    .state_write()
+    .advanced()
+}
+
+fn codeql_binary_path_option() -> OptionSpec {
+    opt(
+        "codeqlBin",
+        OptionType::Path,
+        "Explicit CodeQL CLI binary path. When omitted, Kuzushi searches PATH.",
+    )
+    .aliases(&["codeql_bin"])
+    .executable()
+    .advanced()
 }
 
 pub(in crate::modules) fn run_codeql_create_db(
@@ -112,13 +106,16 @@ pub(in crate::modules) fn run_codeql_create_db(
     ctx.ensure_active()?;
     let target = resolve_tool_target(input, ctx)?;
     if let Some(import_path) = resolve_db_import_path(input) {
-        return run_codeql_db_import(ctx, &target, &import_path, input);
+        return reject_unauthenticated_db_import(&import_path);
     }
-    let bin = match locate_codeql_bin(input)? {
-        Some(path) => path,
-        None => return Ok(skipped_response(&target)),
+    let launcher = crate::codeql_repository_execution::prepared_codeql_launcher(input)?;
+    if matches!(
+        launcher,
+        crate::codeql_repository_execution::PreparedCodeqlLauncher::Unavailable
+    ) {
+        return Ok(skipped_response(&target));
     };
-    execute_codeql_create(input, ctx, target, bin)
+    execute_codeql_create(input, ctx, target, launcher)
 }
 
 fn resolve_db_import_path(input: &Value) -> Option<PathBuf> {
@@ -132,115 +129,12 @@ fn resolve_db_import_path(input: &Value) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-/// Import a prebuilt CodeQL database: validate the source directory, then copy
-/// it to the canonical output path so downstream queries find it where they
-/// already look. No `codeql database create` involvement.
-fn run_codeql_db_import(
-    ctx: &ToolExecutionContext<'_>,
-    target: &Path,
-    import_path: &Path,
-    input: &Value,
-) -> Result<Value> {
-    validate_db_import_source(import_path)?;
-    let output_path = resolve_db_output_path(input, target);
-    emit_step(
-        ctx,
-        "tool",
-        "create-db",
-        format!("codeql:create-db import from {}", import_path.display()),
-    );
-    let started = Instant::now();
-    prepare_db_directory(target, &output_path.path, can_remove_non_db_path(&output_path))?;
-    copy_directory_recursive(import_path, &output_path.path).with_context(|| {
-        format!(
-            "Could not copy prebuilt CodeQL DB {} to {}",
-            import_path.display(),
-            output_path.path.display()
-        )
-    })?;
-    anyhow::ensure!(
-        looks_like_codeql_database(&output_path.path),
-        "imported CodeQL DB copy at {} is missing codeql-database.yml",
-        output_path.path.display()
-    );
-    let elapsed_ms = started.elapsed().as_millis() as u64;
-    emit_done_step(ctx, &output_path.path, elapsed_ms);
-    Ok(codeql_db_import_response(
-        target,
-        &output_path.path,
-        import_path,
-        elapsed_ms,
-        now_ms()?,
-    ))
-}
-
-/// A usable import source is a directory carrying the codeql-database.yml
-/// marker that `codeql database create` writes.
-fn validate_db_import_source(import_path: &Path) -> Result<()> {
-    anyhow::ensure!(
-        import_path.is_dir(),
-        "prebuilt CodeQL DB not found at {} — check importPath",
+fn reject_unauthenticated_db_import(import_path: &Path) -> Result<Value> {
+    anyhow::bail!(
+        "codeql:create-db refuses prebuilt database import from {} because a raw copy cannot be \
+         authenticated against the current repository source or an operator promotion receipt; \
+         run codeql:create-db without importPath",
         import_path.display()
-    );
-    anyhow::ensure!(
-        looks_like_codeql_database(import_path),
-        "{} is not a CodeQL database (no codeql-database.yml)",
-        import_path.display()
-    );
-    Ok(())
-}
-
-/// Copy a directory tree of regular files. Symlinks are skipped rather than
-/// followed so a hostile prebuilt artifact cannot pull outside content into
-/// Kuzushi state; CodeQL databases contain none.
-fn copy_directory_recursive(source: &Path, destination: &Path) -> Result<()> {
-    fs::create_dir_all(destination)
-        .with_context(|| format!("creating {}", destination.display()))?;
-    for entry in fs::read_dir(source).with_context(|| format!("reading {}", source.display()))? {
-        let entry = entry.with_context(|| format!("reading entry below {}", source.display()))?;
-        copy_directory_entry(&entry, destination)?;
-    }
-    Ok(())
-}
-
-fn copy_directory_entry(entry: &fs::DirEntry, destination: &Path) -> Result<()> {
-    let file_type = entry
-        .file_type()
-        .with_context(|| format!("inspecting {}", entry.path().display()))?;
-    let target = destination.join(entry.file_name());
-    if file_type.is_dir() {
-        return copy_directory_recursive(&entry.path(), &target);
-    }
-    if file_type.is_file() {
-        fs::copy(entry.path(), &target)
-            .with_context(|| format!("copying {}", entry.path().display()))?;
-    }
-    Ok(())
-}
-
-fn codeql_db_import_response(
-    target: &Path,
-    output_path: &Path,
-    import_path: &Path,
-    elapsed_ms: u64,
-    timestamp: u64,
-) -> Value {
-    let output = format!(
-        "codeql:create-db imported prebuilt database from {} to {} in {} ms",
-        import_path.display(),
-        output_path.display(),
-        elapsed_ms
-    );
-    crate::module_result::completed_output_result(
-        output.clone(),
-        output,
-        json!({
-            "target": target.display().to_string(),
-            "dbPath": output_path.display().to_string(),
-            "importedFrom": import_path.display().to_string(),
-            "elapsedMs": elapsed_ms,
-            "timestamp": timestamp,
-        }),
     )
 }
 
@@ -248,32 +142,33 @@ fn execute_codeql_create(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     target: PathBuf,
-    bin: PathBuf,
+    launcher: crate::codeql_repository_execution::PreparedCodeqlLauncher,
 ) -> Result<Value> {
-    let language = resolve_language(input, &target)?;
+    let bin = launcher
+        .display_path()
+        .context("prepared CodeQL launcher has no executable path")?
+        .to_path_buf();
     let output_path = resolve_db_output_path(input, &target);
-    let build_modes = resolve_build_modes(input, &language)?;
+    let binding = crate::remediation::patch::repository_source_binding(input)?;
     let timeout = codeql_create_timeout(input)?;
-    let start_label = format!(
-        "codeql:create-db start · language={language} target={}",
-        target.display()
-    );
-    emit_step(ctx, "tool", "create-db", start_label);
-    let (outcome, elapsed_ms) = timed_codeql_create(
-        &bin,
-        &target,
-        &output_path.path,
-        &language,
-        &build_modes,
-        can_remove_non_db_path(&output_path),
-        ctx.cancellation,
-        timeout,
+    let execution = crate::codeql_repository_execution::CodeqlRepositoryExecution::prepare(
+        crate::codeql_repository_execution::CodeqlRepositoryRequest {
+            source_root: &target,
+            binding,
+            destination: &output_path,
+            launcher,
+            cancellation: ctx.cancellation,
+            timeout,
+        },
     )?;
-    emit_done_step(ctx, &output_path.path, elapsed_ms);
+    let started = Instant::now();
+    let (language, outcome) = execute_bound_codeql_create(&execution, input, ctx, &target)?;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    emit_done_step(ctx, &output_path, elapsed_ms);
     let timestamp = now_ms()?;
     Ok(codeql_db_response(
         &target,
-        &output_path.path,
+        &output_path,
         &bin,
         &language,
         &outcome,
@@ -282,28 +177,33 @@ fn execute_codeql_create(
     ))
 }
 
-fn timed_codeql_create(
-    bin: &Path,
+fn execute_bound_codeql_create(
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
     target: &Path,
-    output_path: &Path,
-    language: &str,
-    build_modes: &[String],
-    allow_non_db_removal: bool,
-    cancellation: Option<&crate::scan::ScanCancellation>,
-    timeout: Duration,
-) -> Result<(CodeqlCreateOutcome, u64)> {
-    let started = Instant::now();
-    let command = CodeqlCreateCommand {
-        bin,
-        target,
-        output_path,
-        language,
-        allow_non_db_removal,
-        cancellation,
-        timeout,
-    };
-    let outcome = invoke_codeql_create_with_fallbacks(command, build_modes)?;
-    Ok((outcome, started.elapsed().as_millis() as u64))
+) -> Result<(String, CodeqlCreateOutcome)> {
+    execution.with_bound_target(|bound_target| {
+        let language = resolve_language(input, bound_target)?;
+        let build_modes = resolve_build_modes(input, &language)?;
+        emit_step(
+            ctx,
+            "tool",
+            "create-db",
+            format!(
+                "codeql:create-db start · language={language} target={}",
+                target.display()
+            ),
+        );
+        let outcome = invoke_codeql_create_with_fallbacks(
+            &execution,
+            bound_target,
+            &language,
+            &build_modes,
+            ctx.cancellation,
+        )?;
+        Ok((language, outcome))
+    })
 }
 
 fn codeql_create_timeout(input: &Value) -> Result<Duration> {
@@ -322,31 +222,6 @@ fn emit_done_step(ctx: &ToolExecutionContext<'_>, output_path: &Path, elapsed_ms
         output_path.display()
     );
     emit_step(ctx, "done", "create-db", done_label);
-}
-
-fn locate_codeql_bin(input: &Value) -> Result<Option<PathBuf>> {
-    if let Some(value) = optional_string_input(input, &["codeqlBin", "codeql_bin"])? {
-        let path = PathBuf::from(value);
-        if path.is_file() {
-            return Ok(Some(path));
-        }
-        anyhow::bail!(
-            "codeqlBin points to a missing CodeQL binary: {}",
-            path.display()
-        );
-    }
-    Ok(which_on_path("codeql"))
-}
-
-fn which_on_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
 }
 
 fn resolve_language(input: &Value, target: &Path) -> Result<String> {
@@ -480,22 +355,16 @@ fn ambiguous_language_error(target: &Path, languages: &BTreeSet<&'static str>) -
     )
 }
 
-fn resolve_db_output_path(input: &Value, target: &Path) -> CodeqlDbOutputPath {
+fn resolve_db_output_path(input: &Value, target: &Path) -> PathBuf {
     if let Some(path) = input
         .get("outputPath")
         .or_else(|| input.get("output_path"))
         .and_then(Value::as_str)
         .map(PathBuf::from)
     {
-        return CodeqlDbOutputPath {
-            path,
-            explicit: true,
-        };
+        return path;
     }
-    CodeqlDbOutputPath {
-        path: target.join(".kuzushi/codeql-db"),
-        explicit: false,
-    }
+    crate::workspace::workspace_codeql_db_path(target)
 }
 
 fn resolve_build_modes(input: &Value, language: &str) -> Result<Vec<String>> {
@@ -508,62 +377,24 @@ fn resolve_build_modes(input: &Value, language: &str) -> Result<Vec<String>> {
     crate::codeql_build_mode::codeql_build_mode_plan(language, explicit)
 }
 
-fn can_remove_non_db_path(output_path: &CodeqlDbOutputPath) -> bool {
-    !output_path.explicit || !output_path.path.exists()
-}
-
-fn prepare_db_directory(target: &Path, path: &Path, allow_non_db_removal: bool) -> Result<()> {
-    let path = prepare_codeql_db_output_path(target, path)?;
-    if path.exists() {
-        if !allow_non_db_removal && !looks_like_codeql_database(&path) {
-            anyhow::bail!(
-                "refusing to clear explicit outputPath because it is not a CodeQL database: {}",
-                path.display()
-            );
-        }
-        fs::remove_dir_all(&path)
-            .with_context(|| format!("clearing existing CodeQL DB at {}", path.display()))?;
-    }
-    Ok(())
-}
-
-fn prepare_codeql_db_output_path(target: &Path, path: &Path) -> Result<PathBuf> {
-    let relative = path.strip_prefix(target).with_context(|| {
-        format!(
-            "CodeQL database output {} must stay inside target {}",
-            path.display(),
-            target.display()
-        )
-    })?;
-    anyhow::ensure!(
-        relative.starts_with(crate::workspace::KUZUSHI_STATE_DIR),
-        "CodeQL database output {} must stay below .kuzushi",
-        path.display()
-    );
-    crate::workspace::prepare_workspace_output_path(target, relative)
-}
-
-fn looks_like_codeql_database(path: &Path) -> bool {
-    std::fs::symlink_metadata(path.join("codeql-database.yml"))
-        .is_ok_and(|metadata| metadata.file_type().is_file() && !metadata.file_type().is_symlink())
-}
-
 fn invoke_codeql_create_with_fallbacks(
-    command: CodeqlCreateCommand<'_>,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
+    language: &str,
     build_modes: &[String],
+    cancellation: Option<&crate::scan::ScanCancellation>,
 ) -> Result<CodeqlCreateOutcome> {
     let mut last_output: Option<std::process::Output> = None;
     let mut first_error = None;
     for (index, build_mode) in build_modes.iter().enumerate() {
-        let output = run_codeql_create_attempt(command, build_mode)?;
+        let output =
+            run_codeql_create_attempt(execution, bound_target, language, build_mode, cancellation)?;
         if output.status.success() {
-            return completed_codeql_create_attempt(
-                command.target,
-                command.output_path,
+            return Ok(completed_codeql_create_attempt(
                 build_mode,
                 index,
                 first_error,
-            );
+            ));
         }
         if first_error.is_none() {
             first_error = Some(codeql_failure_summary(&output));
@@ -571,136 +402,44 @@ fn invoke_codeql_create_with_fallbacks(
         last_output = Some(output);
     }
     let output = last_output.context("no CodeQL build modes were attempted")?;
-    Err(cleanup_codeql_output_after_error(
-        command.target,
-        command.output_path,
-        codeql_failure_error(&output),
-    ))
+    Err(codeql_failure_error(&output))
 }
 
 fn completed_codeql_create_attempt(
-    target: &Path,
-    output_path: &Path,
     build_mode: &str,
     attempt_index: usize,
     first_error: Option<String>,
-) -> Result<CodeqlCreateOutcome> {
-    validate_codeql_create_output(target, output_path)?;
-    Ok(CodeqlCreateOutcome {
+) -> CodeqlCreateOutcome {
+    CodeqlCreateOutcome {
         build_mode: build_mode.to_string(),
         fallback: attempt_index > 0,
         first_error,
-    })
+    }
 }
 
 fn run_codeql_create_attempt(
-    command: CodeqlCreateCommand<'_>,
-    build_mode: &str,
-) -> Result<std::process::Output> {
-    if command
-        .cancellation
-        .is_some_and(crate::scan::ScanCancellation::is_cancelled)
-    {
-        let error = anyhow::anyhow!("codeql:create-db was cancelled before starting an attempt");
-        return Err(cleanup_codeql_output_after_error(
-            command.target,
-            command.output_path,
-            error,
-        ));
-    }
-    prepare_db_directory(
-        command.target,
-        command.output_path,
-        command.allow_non_db_removal,
-    )?;
-    invoke_codeql_create(
-        command.bin,
-        command.target,
-        command.output_path,
-        command.language,
-        build_mode,
-        command.cancellation,
-        command.timeout,
-    )
-    .map_err(|error| cleanup_codeql_output_after_error(command.target, command.output_path, error))
-}
-
-fn validate_codeql_create_output(target: &Path, output_path: &Path) -> Result<()> {
-    prepare_codeql_db_output_path(target, output_path)?;
-    if looks_like_codeql_database(output_path) {
-        return Ok(());
-    }
-    let error = anyhow::anyhow!(
-        "codeql reported success without a valid database at {}",
-        output_path.display()
-    );
-    Err(cleanup_codeql_output_after_error(
-        target,
-        output_path,
-        error,
-    ))
-}
-
-fn cleanup_codeql_output_after_error(
-    target: &Path,
-    output_path: &Path,
-    error: anyhow::Error,
-) -> anyhow::Error {
-    match clear_codeql_output(target, output_path) {
-        Ok(()) => error,
-        Err(cleanup) => cleanup.context(error),
-    }
-}
-
-fn clear_codeql_output(target: &Path, output_path: &Path) -> Result<()> {
-    let path = prepare_codeql_db_output_path(target, output_path)?;
-    match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            fs::remove_dir_all(&path)
-                .with_context(|| format!("clearing CodeQL DB at {}", path.display()))
-        }
-        Ok(metadata) if metadata.file_type().is_file() || metadata.file_type().is_symlink() => {
-            fs::remove_file(&path)
-                .with_context(|| format!("clearing CodeQL output at {}", path.display()))
-        }
-        Ok(_) => anyhow::bail!("CodeQL output is not removable: {}", path.display()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("inspecting {}", path.display())),
-    }
-}
-
-fn invoke_codeql_create(
-    bin: &Path,
-    target: &Path,
-    output_path: &Path,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
     language: &str,
     build_mode: &str,
     cancellation: Option<&crate::scan::ScanCancellation>,
-    timeout: Duration,
 ) -> Result<std::process::Output> {
-    // Capture stdout/stderr rather than inheriting the terminal — otherwise
-    // codeql's progress output corrupts the Ratatui shell. Stderr is surfaced
-    // on failure.
-    let mut command = Command::new(bin);
-    command
-        .arg("database")
-        .arg("create")
-        .arg(output_path)
-        .arg("--language")
-        .arg(language)
-        .arg("--source-root")
-        .arg(target)
-        .arg("--overwrite");
-    if build_mode != "default" {
-        command.arg(format!("--build-mode={build_mode}"));
-    }
-    command.stdin(Stdio::null());
-    crate::bounded_subprocess::output_with_control(
-        &mut command,
-        "codeql database create",
-        cancellation,
-        timeout,
+    ensure_codeql_attempt_active(cancellation)?;
+    execution.build(
+        bound_target,
+        language,
+        crate::codeql_repository_execution::CodeqlBuildStrategy::BuildMode(build_mode),
     )
+}
+
+fn ensure_codeql_attempt_active(
+    cancellation: Option<&crate::scan::ScanCancellation>,
+) -> Result<()> {
+    anyhow::ensure!(
+        !cancellation.is_some_and(crate::scan::ScanCancellation::is_cancelled),
+        "codeql:create-db was cancelled before starting an attempt"
+    );
+    Ok(())
 }
 
 fn codeql_failure_error(output: &std::process::Output) -> anyhow::Error {
@@ -799,43 +538,13 @@ mod tests {
     }
 
     #[test]
-    fn db_import_source_requires_codeql_database_marker() {
-        let temp = tempdir().unwrap();
-        let missing = temp.path().join("absent");
-        assert!(validate_db_import_source(&missing).is_err());
+    fn prebuilt_database_import_fails_closed() {
+        let error = reject_unauthenticated_db_import(Path::new("/shared/prebuilt-db"))
+            .unwrap_err()
+            .to_string();
 
-        let plain = temp.path().join("plain");
-        fs::create_dir_all(&plain).unwrap();
-        let error = validate_db_import_source(&plain).unwrap_err().to_string();
-        assert!(error.contains("codeql-database.yml"), "{error}");
-
-        fs::write(plain.join("codeql-database.yml"), "db").unwrap();
-        validate_db_import_source(&plain).unwrap();
-    }
-
-    #[test]
-    fn directory_copy_preserves_tree_and_skips_symlinks() {
-        let source = tempdir().unwrap();
-        fs::write(source.path().join("codeql-database.yml"), "db").unwrap();
-        fs::create_dir_all(source.path().join("db-cpp/sub")).unwrap();
-        fs::write(source.path().join("db-cpp/sub/data.bin"), "payload").unwrap();
-        #[cfg(unix)]
-        {
-            let outside = source.path().join("codeql-database.yml");
-            std::os::unix::fs::symlink(&outside, source.path().join("link.yml")).unwrap();
-        }
-        let destination = tempdir().unwrap();
-        let copy_root = destination.path().join("copy");
-
-        copy_directory_recursive(source.path(), &copy_root).unwrap();
-
-        assert!(copy_root.join("codeql-database.yml").is_file());
-        assert_eq!(
-            fs::read_to_string(copy_root.join("db-cpp/sub/data.bin")).unwrap(),
-            "payload"
-        );
-        #[cfg(unix)]
-        assert!(!copy_root.join("link.yml").exists());
+        assert!(error.contains("cannot be authenticated"), "{error}");
+        assert!(error.contains("without importPath"), "{error}");
     }
 
     #[test]
@@ -858,44 +567,6 @@ mod tests {
             "timeoutMs": MAX_CODEQL_CREATE_TIMEOUT_MS + 1
         }))
         .is_err());
-    }
-
-    #[test]
-    fn explicit_existing_non_db_output_path_is_not_removed() {
-        let temp = tempdir().unwrap();
-        let output = temp.path().join(".kuzushi/not-codeql");
-        fs::create_dir_all(&output).unwrap();
-        fs::write(output.join("important.txt"), "keep").unwrap();
-
-        let error = prepare_db_directory(temp.path(), &output, false)
-            .unwrap_err()
-            .to_string();
-
-        assert!(error.contains("refusing to clear explicit outputPath"));
-        assert!(output.join("important.txt").exists());
-    }
-
-    #[test]
-    fn retry_may_remove_directory_created_by_this_run() {
-        let temp = tempdir().unwrap();
-        let output = temp.path().join(".kuzushi/codeql-db");
-        fs::create_dir_all(&output).unwrap();
-        fs::write(output.join("partial"), "stale").unwrap();
-
-        prepare_db_directory(temp.path(), &output, true).unwrap();
-
-        assert!(!output.exists());
-        assert!(output.parent().unwrap().exists());
-    }
-
-    #[test]
-    fn invalid_codeql_bin_option_is_not_silent_fallback() {
-        let temp = tempdir().unwrap();
-        let input = json!({"codeqlBin": temp.path().join("missing-codeql")});
-
-        let error = locate_codeql_bin(&input).unwrap_err().to_string();
-
-        assert!(error.contains("codeqlBin points to a missing CodeQL binary"));
     }
 
     #[test]
@@ -961,68 +632,19 @@ mod tests {
         assert_eq!(language, "python");
     }
 
-    #[cfg(unix)]
     #[test]
-    fn database_output_rejects_workspace_symlink() {
-        use std::os::unix::fs::symlink;
-
+    fn cancellation_before_retry_preserves_existing_output() {
         let workspace = tempdir().unwrap();
-        let outside = tempdir().unwrap();
-        fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
-        symlink(outside.path(), workspace.path().join(".kuzushi/codeql-db")).unwrap();
-        let output = workspace.path().join(".kuzushi/codeql-db");
-
-        assert!(prepare_db_directory(workspace.path(), &output, true).is_err());
-        assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn cleanup_failure_preserves_primary_codeql_error() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let workspace = tempdir().unwrap();
-        let output = workspace.path().join(".kuzushi/codeql-db");
-        fs::create_dir_all(&output).unwrap();
-        fs::write(output.join("partial"), "stale").unwrap();
-        fs::set_permissions(&output, fs::Permissions::from_mode(0o500)).unwrap();
-
-        let error = cleanup_codeql_output_after_error(
-            workspace.path(),
-            &output,
-            anyhow::anyhow!("primary codeql failure"),
-        );
-        fs::set_permissions(&output, fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(error.to_string().contains("primary codeql failure"));
-        let message = format!("{error:#}");
-
-        assert!(message.contains("primary codeql failure"), "{message}");
-        assert!(message.contains("clearing CodeQL DB"), "{message}");
-    }
-
-    #[test]
-    fn cancellation_before_retry_cleans_partial_database() {
-        let workspace = tempdir().unwrap();
-        let output = workspace.path().join(".kuzushi/codeql-db");
+        let output = crate::workspace::workspace_codeql_db_path(workspace.path());
         fs::create_dir_all(&output).unwrap();
         fs::write(output.join("partial"), "stale").unwrap();
         let cancellation = crate::scan::ScanCancellation::default();
         cancellation.cancel();
-        let command = CodeqlCreateCommand {
-            bin: Path::new("unused-codeql"),
-            target: workspace.path(),
-            output_path: &output,
-            language: "javascript",
-            allow_non_db_removal: true,
-            cancellation: Some(&cancellation),
-            timeout: Duration::from_secs(1),
-        };
-
-        let error = run_codeql_create_attempt(command, "none")
+        let error = ensure_codeql_attempt_active(Some(&cancellation))
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("cancelled"), "{error}");
-        assert!(!output.exists());
+        assert!(output.join("partial").exists());
     }
 }

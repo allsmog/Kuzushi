@@ -139,7 +139,7 @@ fn taint_iris_legacy_options() -> Vec<OptionSpec> {
         opt(
             "maxBudgetUsd",
             OptionType::Float,
-            "Maximum runtime budget for this hunt.",
+            "Observed-spend stop for model follow-up turns; the crossing turn can exceed it and incomplete cost receipts stop retries.",
         )
         .aliases(&["max_budget_usd"])
         .advanced(),
@@ -173,44 +173,60 @@ pub(crate) fn taint_iris_next_module() -> BuiltinModule {
 
 fn taint_iris_next_tools() -> Vec<ToolDescriptor> {
     vec![
-        taint_iris_next_hunt_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
+        with_taint_workspace_policy(
+            taint_iris_next_hunt_tool(),
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
-        )),
-        taint_iris_next_dataflow_plan_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
+        ),
+        with_taint_workspace_policy(
+            taint_iris_next_dataflow_plan_tool(),
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
-        )),
-        taint_iris_next_source_sink_trace_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
+        ),
+        with_taint_workspace_policy(
+            taint_iris_next_source_sink_trace_tool(),
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
-        )),
-        taint_iris_next_finding_review_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
+        ),
+        with_taint_workspace_policy(
+            taint_iris_next_finding_review_tool(),
             RuntimeRequirement::Always,
             FindingStoreRequirement::Required,
-        )),
-        taint_iris_next_import_sinks_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
+        ),
+        with_taint_workspace_policy(
+            taint_iris_next_import_sinks_tool(),
             RuntimeRequirement::Never,
             FindingStoreRequirement::Optional,
-        )),
-        taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
-            ToolPhase::Scan,
-            RuntimeRequirement::Always,
-            ToolEffect::Read,
-            WorkspaceRequirement::Required,
-            FindingStoreRequirement::Optional,
-        )),
-        taint_iris_next_codeql_db_tool().with_policy(workspace_policy(
-            ToolPhase::Scan,
-            RuntimeRequirement::Always,
-            FindingStoreRequirement::Optional,
-        )),
+        ),
+        taint_catalog_tool_with_policy(),
+        taint_codeql_db_tool_with_policy(),
     ]
+}
+
+fn with_taint_workspace_policy(
+    tool: ToolDescriptor,
+    runtime: RuntimeRequirement,
+    findings: FindingStoreRequirement,
+) -> ToolDescriptor {
+    tool.with_policy(workspace_policy(ToolPhase::Scan, runtime, findings))
+}
+
+fn taint_catalog_tool_with_policy() -> ToolDescriptor {
+    taint_iris_next_catalog_tool().with_policy(ToolPolicy::new(
+        ToolPhase::Scan,
+        RuntimeRequirement::Always,
+        ToolEffect::Read,
+        WorkspaceRequirement::Required,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn taint_codeql_db_tool_with_policy() -> ToolDescriptor {
+    taint_iris_next_codeql_db_tool().with_policy(repository_execute_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Optional,
+    ))
 }
 
 fn taint_iris_next_hunt_tool() -> ToolDescriptor {
@@ -301,10 +317,7 @@ fn taint_iris_next_catalog_tool() -> ToolDescriptor {
         vec![
             target_option(),
             model_option(),
-            prompt_option(
-                "TAINT_IRIS_NEXT_CATALOG_PROMPT",
-                "catalog generation",
-            ),
+            prompt_option("TAINT_IRIS_NEXT_CATALOG_PROMPT", "catalog generation"),
         ],
     )
     .with_prompt(editable_prompt(
@@ -327,6 +340,18 @@ fn taint_iris_next_codeql_db_tool() -> ToolDescriptor {
                 "TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT",
                 "CodeQL build planning",
             ),
+            opt(
+                "timeoutMs",
+                OptionType::Int,
+                "Isolated CodeQL database-build deadline in milliseconds.",
+            )
+            .aliases(&["timeout_ms"])
+            .default(json!(
+                crate::codeql_repository_execution::DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS
+            ))
+            .advanced(),
+            repository_source_commit_binding_option(),
+            repository_target_scope_binding_option(),
         ],
     )
     .with_prompt(editable_prompt(
@@ -448,7 +473,7 @@ fn max_budget_usd_option() -> OptionSpec {
     opt(
         "maxBudgetUsd",
         OptionType::Float,
-        "Maximum runtime budget for this hunt.",
+        "Observed-spend stop for model follow-up turns; the crossing turn can exceed it and incomplete cost receipts stop retries.",
     )
     .aliases(&["max_budget_usd"])
     .advanced()

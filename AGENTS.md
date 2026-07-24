@@ -80,10 +80,19 @@ attaches as agent tools when a module asks for it:
   examples for `source`/`sink` so the agent doesn't have to guess.
 - `crates/kuzushi-mcp-codeql` — `codeql:flows_for_cwe`, `codeql:query`,
   `codeql:db_info`. Wraps `codeql database analyze` with an in-process
-  result memo (same `(db, selector, limit)` returns instantly on
-  repeat). Set `KUZUSHI_CODEQL_PREWARM=1` to pre-compile common CWE
-  packs at MCP-server startup; set `KUZUSHI_CODEQL_CACHE_DIR=<path>` to
-  share the on-disk pack cache across kuzushi runs.
+  result memo for dependency-free local query selectors. A memo hit skips
+  `codeql database analyze`, but every request still performs full content
+  authentication of the database tree, so memo-hit latency remains
+  proportional to database size. Pack selectors bypass the result memo; local
+  queries with imports are rejected because their dependency closure cannot be
+  authenticated. On the first execution for a CodeQL bundle or database
+  revision, the server copies the complete authenticated tree into an
+  operator-owned session snapshot. Analysis and prewarm execute only
+  OS-sandboxed snapshot paths; stale revisions cancel active work, normal
+  shutdown drops the session, and startup reclaims abandoned sessions. Set
+  `KUZUSHI_CODEQL_PREWARM=1` to pre-compile common CWE packs at MCP-server
+  startup; set `KUZUSHI_CODEQL_CACHE_DIR=<path>` to share the on-disk pack cache
+  across kuzushi runs.
 
 The bridge wires these in when the request carries
 `toolPolicy.mcps === true` (set by `taint-iris-next:hunt` automatically

@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+blake3.workspace = true
 dirs.workspace = true
 libc.workspace = true
 serde.workspace = true
@@ -25,6 +26,7 @@ windows-sys = { version = "0.61", features = [
   "Win32_Security",
   "Win32_Storage_FileSystem",
   "Win32_System_JobObjects",
+  "Win32_System_SystemServices",
 ] }
 
 [lints]

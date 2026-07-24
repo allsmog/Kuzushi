@@ -11,7 +11,7 @@ part of every release commit.
 - Push access to `github.com/allsmog/Kuzushi`
 - `NPM_TOKEN` secret set in GitHub repo settings (for automated CI releases)
 
-## Manual Release (from your machine)
+## Prepare a release (from your machine)
 
 ```sh
 # 1. Make sure release gates pass locally
@@ -25,21 +25,24 @@ cargo test --workspace
 pnpm build:native
 pnpm verify:pack
 
-# 2. Bump the same version in package.json and workspace Cargo.toml.
-#    Then let Cargo refresh local workspace entries in Cargo.lock.
-npm version prerelease --preid alpha --no-git-tag-version
-# Edit [workspace.package].version in Cargo.toml to that exact value.
-cargo metadata --no-deps --format-version 1 >/dev/null
+# 2. Consistently bump package.json, Cargo.toml, Cargo.lock workspace entries,
+#    and the dynamic-module host protocol version.
+node scripts/bump-release-version.mjs 0.24.0-alpha.9
 pnpm check:release
 
-# 3. Commit and tag
-git add package.json CHANGELOG.md
+# 3. Commit every source updated by the bump, plus the changelog, and tag
+git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
 git tag "v$(node -p 'require("./package.json").version')"
 
 # 4. Push commit + tag (triggers GitHub Release workflow and npm publish)
 git push origin main --tags
 ```
+
+Do not publish from the local package build. `pnpm publish:npm:go` fails
+closed by design because `pnpm build:native` stages only the current host.
+The tag-triggered workflow is the sole publishing path and requires both
+`linux-x64` and `darwin-arm64` payloads before `npm publish` can run.
 
 ## Automated Release (via CI)
 
@@ -241,6 +244,13 @@ the active target's `.kuzushi/` state tree. Before upgrading, move any custom
 destination into `<target>/.kuzushi/`; destinations elsewhere are rejected
 instead of allowing scanner subprocesses to overwrite operator or project
 files.
+
+Managed CodeQL databases now require a content-bound promotion receipt in the
+operator-owned global state store. Existing target-only databases, including
+legacy `.kuzushi/codeql-db` and `.codeql/db` layouts, are intentionally not
+trusted after upgrade. Rebuild them with `codeql:create-db`; Kuzushi will then
+bind the database contents, source commit, nested target scope, and language to
+the operator receipt before any consumer can use the database.
 
 The empirical Rust API `verify_finding` now requires an explicit
 `workspace_root` argument. Custom callers must pass the same trusted target

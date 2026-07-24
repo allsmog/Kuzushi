@@ -4,6 +4,13 @@ use std::time::Duration;
 pub(crate) const DEFAULT_PATCH_VALIDATION_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 pub(crate) const MAX_PATCH_VALIDATION_TIMEOUT_MS: u64 = 24 * 60 * 60 * 1000;
 pub(crate) const PATCH_SOURCE_COMMIT_INPUT_KEY: &str = "__kuzushiPatchSourceCommit";
+pub(crate) const REPOSITORY_TARGET_SCOPE_INPUT_KEY: &str = "__kuzushiRepositoryTargetScope";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RepositorySourceBinding {
+    pub(crate) commit: String,
+    pub(crate) target_scope: String,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PatchFindingInput {
@@ -31,19 +38,49 @@ impl PatchFindingInput {
 }
 
 pub(crate) fn patch_source_commit(input: &Value) -> Result<String> {
+    repository_source_commit(input).context("patch:finding source binding is invalid")
+}
+
+pub(crate) fn repository_source_commit(input: &Value) -> Result<String> {
     let value = input
         .get(PATCH_SOURCE_COMMIT_INPUT_KEY)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .context(
-            "patch:finding is missing its bound source commit; prepare the operation through the module registry",
-        )?;
+        .context("repository execution is missing its bound source commit; prepare the operation through the module registry")?;
     anyhow::ensure!(
         matches!(value.len(), 40 | 64) && value.chars().all(|ch| ch.is_ascii_hexdigit()),
-        "patch:finding bound source commit must be a full Git object ID"
+        "repository execution bound source commit must be a full Git object ID"
     );
     Ok(value.to_ascii_lowercase())
+}
+
+pub(crate) fn repository_source_binding(input: &Value) -> Result<RepositorySourceBinding> {
+    let commit = repository_source_commit(input)?;
+    let target_scope = input
+        .get(REPOSITORY_TARGET_SCOPE_INPUT_KEY)
+        .and_then(Value::as_str)
+        .context("repository execution is missing its bound target scope; prepare the operation through the module registry")?;
+    validate_repository_target_scope(target_scope)?;
+    Ok(RepositorySourceBinding {
+        commit,
+        target_scope: target_scope.to_string(),
+    })
+}
+
+pub(crate) fn validate_repository_target_scope(scope: &str) -> Result<()> {
+    anyhow::ensure!(!scope.is_empty(), "repository target scope may not be empty");
+    if scope == "." {
+        return Ok(());
+    }
+    let path = std::path::Path::new(scope);
+    anyhow::ensure!(
+        !path.is_absolute()
+            && path.components().all(|component| matches!(component, std::path::Component::Normal(_)))
+            && !scope.contains('\\'),
+        "repository target scope must be a normalized relative path"
+    );
+    Ok(())
 }
 
 fn patch_validation_timeout(input: &Value) -> Result<Duration> {

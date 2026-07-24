@@ -59,6 +59,7 @@ pub(in crate::modules) fn sast_patch_input(sast_input: &Value, fingerprint: &str
         "buildCmd",
         "testCmd",
         crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY,
+        crate::remediation::patch::REPOSITORY_TARGET_SCOPE_INPUT_KEY,
     ] {
         if let Some(value) = sast_input.get(key) {
             patch_input.insert(key.to_string(), value.clone());
@@ -72,11 +73,12 @@ mod sast_patch_tests {
     use super::*;
 
     #[test]
-    fn nested_patch_input_propagates_the_bound_source_commit() {
+    fn nested_patch_input_propagates_the_bound_repository_source() {
         let source_commit = "0123456789012345678901234567890123456789";
         let input = json!({
             "autoPatch": true,
             (crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY): source_commit,
+            (crate::remediation::patch::REPOSITORY_TARGET_SCOPE_INPUT_KEY): "packages/service",
         });
 
         let patch_input = sast_patch_input(&input, "finding-1");
@@ -84,6 +86,10 @@ mod sast_patch_tests {
         assert_eq!(
             patch_input[crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY],
             source_commit
+        );
+        assert_eq!(
+            patch_input[crate::remediation::patch::REPOSITORY_TARGET_SCOPE_INPUT_KEY],
+            "packages/service"
         );
     }
 }

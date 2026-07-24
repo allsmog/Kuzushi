@@ -1,7 +1,7 @@
 use super::bounded_fs as fs;
 use super::edge_readers::dependency_edges_for_path;
-use super::target::ignored_dir;
 use super::*;
+use anyhow::Context;
 use serde_json::Value;
 
 const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
@@ -13,35 +13,15 @@ const NPM_LOCK_DEPENDENCY_FIELDS: &[&str] = &[
 
 pub(super) fn collect_dependency_edges(
     target: &Path,
-    cancellation: &ScanCancellation,
+    files: &[PathBuf],
 ) -> Result<Vec<SbomDependencyEdge>> {
     let mut edges = Vec::new();
-    collect_package_lock_edges(target, target, &mut edges, cancellation)?;
+    for path in files {
+        edges.extend(dependency_edges_for_path(target, path)?);
+    }
     edges.sort_by_key(edge_sort_key);
     edges.dedup();
     Ok(edges)
-}
-
-fn collect_package_lock_edges(
-    target: &Path,
-    dir: &Path,
-    edges: &mut Vec<SbomDependencyEdge>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("sbom-scan scan cancelled");
-    }
-    for entry in fs::read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !ignored_dir(&path) {
-            collect_package_lock_edges(target, &path, edges, cancellation)?;
-        } else if file_type.is_file() {
-            edges.extend(dependency_edges_for_path(target, &path)?);
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn is_package_lock(path: &Path) -> bool {
@@ -70,7 +50,7 @@ pub(super) fn is_pnpm_lock(path: &Path) -> bool {
 
 pub(super) fn package_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse package lock")?;
     let source = relative_display(target, path);
     let mut edges = package_lock_v2_edges(&value, &source);
@@ -98,7 +78,7 @@ fn package_lock_v1_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge>
 
 pub(super) fn cargo_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.lock")?;
     let source = relative_display(target, path);
     Ok(value
@@ -139,7 +119,7 @@ fn cargo_dependency_name(raw: &str) -> Option<String> {
 
 pub(super) fn go_sum_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(text
         .lines()

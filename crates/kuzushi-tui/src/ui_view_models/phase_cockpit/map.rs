@@ -51,9 +51,8 @@ fn decompose_first_hint(app: &ShellApp) -> Option<String> {
         tree,
         ViewDataState::Ready(crate::app::ProjectScopeTreeState::RootOnly)
     );
-    undecomposed.then(|| {
-        format!("{files} files indexed — break the target into logical modules first")
-    })
+    undecomposed
+        .then(|| format!("{files} files indexed — break the target into logical modules first"))
 }
 
 const NEXT_SCAN_ROW_LIMIT: usize = 4;

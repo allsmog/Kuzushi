@@ -69,7 +69,10 @@ pub(super) fn sleep_before_retry(
     let deadline = Instant::now() + delay;
     loop {
         ensure_not_cancelled()?;
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) else {
+        let Some(remaining) = deadline
+            .checked_duration_since(Instant::now())
+            .filter(|d| !d.is_zero())
+        else {
             return Ok(());
         };
         std::thread::sleep(remaining.min(Duration::from_millis(200)));
@@ -185,7 +188,9 @@ mod tests {
         assert!(limited.rate_limited);
         assert_eq!(limited.retry_after, Some(Duration::from_secs(30)));
 
-        assert!(response_transient_failure(Some(401), Some("authentication"), None, None).is_none());
+        assert!(
+            response_transient_failure(Some(401), Some("authentication"), None, None).is_none()
+        );
 
         let flaky = message_transient_failure("socket hang up").expect("transport is transient");
         assert!(!flaky.rate_limited);

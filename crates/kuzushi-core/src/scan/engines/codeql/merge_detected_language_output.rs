@@ -82,35 +82,6 @@ pub(crate) fn codeql_repo_name(target: &Path) -> String {
         .to_string()
 }
 
-pub(crate) fn remove_stale_codeql_database(db_path: &Path) -> Result<()> {
-    match fs::symlink_metadata(db_path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => anyhow::bail!(
-            "codeql: refusing symlinked database output {}",
-            db_path.display()
-        ),
-        Ok(metadata) if metadata.file_type().is_dir() => fs::remove_dir_all(db_path)
-            .with_context(|| format!("codeql: could not remove stale {}", db_path.display())),
-        Ok(metadata) if metadata.file_type().is_file() => fs::remove_file(db_path)
-            .with_context(|| format!("codeql: could not remove stale {}", db_path.display())),
-        Ok(_) => anyhow::bail!(
-            "codeql: database output is not a regular file or directory: {}",
-            db_path.display()
-        ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("codeql: could not inspect {}", db_path.display()))
-        }
-    }
-}
-
-pub(crate) fn create_codeql_database_parent(db_path: &Path) -> Result<()> {
-    let Some(parent) = db_path.parent() else {
-        return Ok(());
-    };
-    fs::create_dir_all(parent)
-        .with_context(|| format!("codeql: could not create {}", parent.display()))
-}
-
 pub(crate) fn codeql_multi_language_output(
     output: ScanEngineOutput,
     errors: Vec<String>,
@@ -124,8 +95,23 @@ pub(crate) fn codeql_multi_language_output(
     Ok(output)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct CodeqlDatabase {
     pub(crate) db_path: PathBuf,
     pub(crate) language: String,
+    pub(crate) managed: Option<
+        crate::codeql_repository_execution::ValidatedManagedCodeqlDatabase,
+    >,
+}
+
+impl CodeqlDatabase {
+    pub(crate) fn run_verified<T>(
+        &self,
+        operation: impl FnOnce(&Path) -> Result<T>,
+    ) -> Result<T> {
+        match &self.managed {
+            Some(database) => database.run_verified(operation),
+            None => operation(&self.db_path),
+        }
+    }
 }

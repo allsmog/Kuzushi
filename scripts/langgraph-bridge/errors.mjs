@@ -5,6 +5,7 @@ const PUBLIC_FAILURES = Object.freeze({
   authentication: "Provider authentication failed.",
   bridge_internal: "Bridge operation failed; raw error details were suppressed.",
   cancelled: "Bridge operation was cancelled.",
+  mcp_timeout: "MCP tool request timed out.",
   provider_rejected: "Provider rejected the request.",
   provider_response_invalid: "Provider returned an invalid response.",
   provider_unavailable: "Provider is temporarily unavailable.",
@@ -83,9 +84,18 @@ function retryAfterSecondsFromError(error) {
 function classifyBridgeError(error) {
   const status = statusFromError(error);
   const trustedClass = error instanceof BridgePublicError ? error.errorClass : undefined;
+  if (trustedClass === "mcp_timeout" || explicitMcpTimeoutClass(error)) {
+    return { errorClass: "mcp_timeout" };
+  }
   if (trustedClass) return { errorClass: trustedClass, status };
   if (status !== undefined) return { errorClass: errorClassForStatus(status), status };
   return { errorClass: errorClassFromShape(error) };
+}
+
+function explicitMcpTimeoutClass(error) {
+  const name = boundedLower(error?.name);
+  const code = boundedLower(error?.code ?? error?.cause?.code);
+  return mcpTimeoutClass(name, code);
 }
 
 function statusFromError(error) {
@@ -100,6 +110,7 @@ function errorClassFromShape(error) {
   const message = boundedLower(error?.message);
   return (
     cancellationClass(name, message) ??
+    mcpTimeoutClass(name, code) ??
     rateLimitClass(name, message) ??
     timeoutClass(code, message) ??
     transportClass(name, code, message) ??
@@ -129,6 +140,11 @@ function rateLimitClass(name, message) {
   const rateLimitedMessage =
     message.includes("resource_exhausted") || message.startsWith("429 ") || message.includes(" 429 ");
   return rateLimitedName || rateLimitedMessage ? "rate_limited" : undefined;
+}
+
+function mcpTimeoutClass(name, code) {
+  const marked = name === "mcptooltimeouterror" || code === "kuzushi_mcp_tool_timeout";
+  return marked ? "mcp_timeout" : undefined;
 }
 
 function cancellationClass(name, message) {

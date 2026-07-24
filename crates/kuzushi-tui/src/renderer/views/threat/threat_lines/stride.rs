@@ -1,7 +1,5 @@
 use super::*;
-use crate::ui_view_models::{
-    SeverityTone, ThreatStrideMember, ThreatStrideRow, ThreatStrideTone,
-};
+use crate::ui_view_models::{SeverityTone, ThreatStrideMember, ThreatStrideRow, ThreatStrideTone};
 
 pub(super) fn append_stride_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let rollup = crate::ui_view_models::threat_stride_rollup(app);
@@ -21,7 +19,10 @@ fn stride_member_row(member: &ThreatStrideMember, width: u16) -> Line<'static> {
     Line::from(vec![
         Span::raw("        "),
         Span::styled(pad(&member.id, 6), theme::primary()),
-        Span::styled(pad(&member.severity, 10), threat_stride_tone_style(member.tone)),
+        Span::styled(
+            pad(&member.severity, 10),
+            threat_stride_tone_style(member.tone),
+        ),
         Span::styled(fit(&member.title, title_w), theme::muted()),
     ])
 }

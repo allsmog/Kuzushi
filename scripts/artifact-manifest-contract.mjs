@@ -418,6 +418,9 @@ function workspaceStatePathFunctionFailures(source) {
     source.includes("pub fn workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
       ? null
       : "workspace state helper must expose workspace_codeql_db_path",
+    source.includes("pub fn legacy_workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
+      ? null
+      : "workspace state helper must expose legacy_workspace_codeql_db_path",
     source.includes("pub fn legacy_codeql_db_path(root: impl AsRef<Path>) -> PathBuf")
       ? null
       : "workspace state helper must expose legacy_codeql_db_path",
@@ -426,9 +429,12 @@ function workspaceStatePathFunctionFailures(source) {
 
 function workspaceStatePathDerivationFailures(source) {
   return [
+    source.includes("workspace_state_dir(root).join(WORKSPACE_CODEQL_DB_DIR)")
+      ? null
+      : "workspace codeql helper must derive from workspace_state_dir",
     source.includes("workspace_state_root(root).join(WORKSPACE_CODEQL_DB_DIR)")
       ? null
-      : "workspace codeql helper must derive from workspace_state_root",
+      : "legacy workspace codeql helper must derive from workspace_state_root",
     source.includes("workspace_state_dir(root).join(WORKSPACE_STATIC_EVIDENCE_DB_FILE)")
       ? null
       : "workspace static evidence helper must derive from workspace_state_dir",
@@ -521,9 +527,17 @@ const workspaceStateRequiredHelpersByFile = {
       needle: "workspace_codeql_db_path(",
       message: "taint-iris-next CodeQL build must use workspace_codeql_db_path",
     },
+    {
+      needle: "CodeqlRepositoryExecution::prepare(",
+      message: "taint-iris-next CodeQL build must use trusted repository execution",
+    },
+    {
+      needle: "repository_source_binding(input)",
+      message: "taint-iris-next CodeQL build must require repository source binding",
+    },
   ],
   "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_dataflow.rs":
-    codeqlDbResolverHelperRequirements("taint-iris-next CodeQL dataflow"),
+    managedCodeqlDbResolverRequirements("taint-iris-next CodeQL dataflow"),
   "crates/kuzushi-core/src/evidence/static_evidence/evidence_store.rs": [
     {
       needle: "workspace_static_evidence_db_path(",
@@ -556,15 +570,11 @@ const workspaceStateRequiredHelpersByFile = {
   ],
 };
 
-function codeqlDbResolverHelperRequirements(label) {
+function managedCodeqlDbResolverRequirements(label) {
   return [
     {
-      needle: "workspace_codeql_db_path(",
-      message: `${label} must use workspace_codeql_db_path`,
-    },
-    {
-      needle: "legacy_codeql_db_path(",
-      message: `${label} must use legacy_codeql_db_path`,
+      needle: "resolve_managed_codeql_database(",
+      message: `${label} must resolve a provenance-authenticated managed database`,
     },
   ];
 }
@@ -578,6 +588,7 @@ function workspaceStatePathConsumerHardcodesPath(source) {
     'join(".kuzushi").join("models.toml")',
     'join(".kuzushi").join("codeql-db")',
     'join(".kuzushi/codeql-db")',
+    'join(".kuzushi/v3/codeql-db")',
     'join(".kuzushi").join("bin")',
     'join(".kuzushi/bin")',
     'join(".kuzushi").join("v2").join("static-evidence.sqlite3")',
@@ -1033,7 +1044,6 @@ export function checkTaintIrisNextArtifactPathHelpers(root) {
   const constants = rustStringConstants(helper, [
     "TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE",
     "TAINT_IRIS_NEXT_TARGET_CATALOG_FILE",
-    "TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE",
   ]);
   return [
     ...taintIrisNextArtifactPathConstantFailures(constants),
@@ -1076,9 +1086,6 @@ function taintIrisNextArtifactPathConstantFailures(constants) {
     constants.TAINT_IRIS_NEXT_TARGET_CATALOG_FILE === "taint-iris-next-catalog.json"
       ? null
       : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_TARGET_CATALOG_FILE as taint-iris-next-catalog.json",
-    constants.TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE === "codeql-build.sh"
-      ? null
-      : "taint-iris-next artifact path must name TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE as codeql-build.sh",
   ];
 }
 
@@ -1090,18 +1097,12 @@ function taintIrisNextArtifactPathFunctionFailures(helper) {
     helper.includes("taint_iris_next_target_catalog_artifact_path(target: &Path) -> PathBuf")
       ? null
       : "taint-iris-next artifact path helper must expose target catalog path",
-    helper.includes("taint_iris_next_codeql_build_script_path(target: &Path) -> PathBuf")
-      ? null
-      : "taint-iris-next artifact path helper must expose CodeQL build script path",
     helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_DISCOVERED_SIGNALS_FILE)")
       ? null
       : "taint-iris-next discovered signals path must derive from workspace_state_root",
     helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_TARGET_CATALOG_FILE)")
       ? null
       : "taint-iris-next target catalog path must derive from workspace_state_root",
-    helper.includes("workspace_state_root(target).join(TAINT_IRIS_NEXT_CODEQL_BUILD_SCRIPT_FILE)")
-      ? null
-      : "taint-iris-next CodeQL build script path must derive from workspace_state_root",
   ];
 }
 
@@ -1109,7 +1110,6 @@ function taintIrisNextArtifactPathConsumerFailures(root) {
   const consumers = [
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/source_sink_discovery.rs",
     "crates/kuzushi-core/src/capabilities/taint_iris_next/application/dynamic_catalog.rs",
-    "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_build.rs",
   ];
   return consumers.flatMap((file) => taintIrisNextArtifactPathConsumerFailure(root, file));
 }
@@ -1133,7 +1133,6 @@ function taintIrisNextArtifactPathConsumerUsesHelper(source) {
   return [
     "taint_iris_next_discovered_signals_path(",
     "taint_iris_next_target_catalog_artifact_path(",
-    "taint_iris_next_codeql_build_script_path(",
   ].some((needle) => source.includes(needle));
 }
 
@@ -1145,8 +1144,6 @@ function taintIrisNextArtifactPathConsumerHardcodesPath(source) {
     'join(".kuzushi/discovered-signals.json")',
     'join(".kuzushi").join("taint-iris-next-catalog.json")',
     'join(".kuzushi/taint-iris-next-catalog.json")',
-    'join(".kuzushi").join("codeql-build.sh")',
-    'join(".kuzushi/codeql-build.sh")',
   ].some((needle) => source.includes(needle));
 }
 

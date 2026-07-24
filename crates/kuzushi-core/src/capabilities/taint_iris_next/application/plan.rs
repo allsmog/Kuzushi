@@ -302,11 +302,8 @@ fn discover_taint_iris_next_plan_signals(
     source_paths: &[TaintIrisNextSourcePath],
 ) -> Result<DiscoveredSignals> {
     let catalog_markers = catalog_regex_markers_for_discovery(catalog);
-    let discovered_signals = run_taint_iris_next_discovery_for_plan(
-        source_paths,
-        options,
-        &catalog_markers,
-    );
+    let discovered_signals =
+        run_taint_iris_next_discovery_for_plan(source_paths, options, &catalog_markers);
     persist_taint_iris_next_discovered_signals(repo_root, &discovered_signals)?;
     Ok(discovered_signals)
 }
@@ -332,7 +329,7 @@ fn configure_taint_iris_next_backend(
     options: &TaintIrisNextInput,
     languages: &[String],
 ) -> Result<TaintIrisNextBackendChoice> {
-    let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root, languages);
+    let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root, languages)?;
     validate_explicit_taint_iris_next_backend(&backend)?;
     if options.target_subdir.is_none() {
         let c_file_count = count_c_files_under(repo_root);

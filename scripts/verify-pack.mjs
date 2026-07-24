@@ -24,6 +24,8 @@ const packageDevDependencies = recordOrEmpty(manifest.devDependencies);
 const packageOptionalDependencies = recordOrEmpty(manifest.optionalDependencies);
 const packageExports = recordOrEmpty(manifest.exports);
 const omitNative = process.env.KUZUSHI_VERIFY_PACK_OMIT_NATIVE === "1";
+const verifyReleaseAssembly = process.env.KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY === "1";
+const requiredReleaseNativeDirs = ["native/linux-x64", "native/darwin-arm64"];
 const includes = entries.filter((entry) => !entry.startsWith("!")).filter(isIncludedEntry);
 const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
 const requiredPackageFiles = [
@@ -548,13 +550,26 @@ function nativeBinaryFailures(files) {
   if (omitNative) return [];
   const dirs = nativePlatformDirs(files);
   if (dirs.length === 0) {
-    return ["missing shipped native directory native/<platform>-<arch>"];
+    return [
+      "missing shipped native directory native/<platform>-<arch>",
+      ...missingReleaseNativeDirs(dirs),
+    ];
   }
-  return dirs.flatMap((dir) => [
-    ...missingNativeBinaries(files, dir),
-    ...extraNativePayloadFailures(files, dir),
-    ...nativeExecutableFailures(dir),
-  ]);
+  return [
+    ...missingReleaseNativeDirs(dirs),
+    ...dirs.flatMap((dir) => [
+      ...missingNativeBinaries(files, dir),
+      ...extraNativePayloadFailures(files, dir),
+      ...nativeExecutableFailures(dir),
+    ]),
+  ];
+}
+
+function missingReleaseNativeDirs(dirs) {
+  if (!verifyReleaseAssembly) return [];
+  return requiredReleaseNativeDirs
+    .filter((dir) => !dirs.includes(dir))
+    .map((dir) => `release assembly is missing required native directory ${dir}`);
 }
 
 function nativePlatformDirs(files) {
@@ -670,9 +685,24 @@ function releaseScriptFailuresFor(scripts) {
 function publishWrapperContentFailures() {
   const content = readPackageContractText("scripts/publish-npm.sh");
   const required = [
+    "Build and inspect a platform-local npm package without publishing it",
+    "Local publishing is disabled",
+    "Release assembly is authoritative",
+    "git diff --quiet",
+    "git diff --cached --quiet",
+    "git rev-parse --abbrev-ref HEAD",
+    'git rev-parse -q --verify "refs/tags/${TAG}"',
+    'git rev-list -n 1 "$TAG"',
+    "git rev-parse HEAD",
+    'git ls-remote --tags origin "refs/tags/${TAG}"',
+    "SKIP_TESTS:-0",
+    "pnpm run test",
+    "pnpm run test:rust",
+    "pnpm run build:native",
     "pnpm run verify:pack",
     "npm pack --dry-run --ignore-scripts",
-    "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
+    "no registry mutation was attempted",
+    "multi-platform GitHub workflow",
   ];
   return [
     ...content.failures,

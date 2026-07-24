@@ -59,6 +59,22 @@ mod tests {
         records
     }
 
+    #[test]
+    fn codeql_database_build_tools_require_repository_execution_approval() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        for name in ["codeql:create-db", "taint-iris-next:codeql-db"] {
+            let descriptor = registry.resolve_tool(name).unwrap();
+            assert_eq!(descriptor.effect, ToolEffect::RepositoryExecute, "{name}");
+            assert_eq!(descriptor.approval, ApprovalPolicy::Explicit, "{name}");
+            assert_eq!(
+                descriptor.workspace_requirement,
+                WorkspaceRequirement::Required,
+                "{name}"
+            );
+        }
+    }
+
     struct MockRuntime {
         requests: Mutex<Vec<TriageRequest>>,
         queries: Mutex<Vec<AgentQueryRequest>>,
@@ -643,11 +659,6 @@ JSON
             &binary,
             r#"#!/bin/sh
 PATH=/usr/bin:/bin
-if [ "$1" = "database" ] && [ "$2" = "create" ]; then
-  mkdir -p "$3"
-  printf 'name: test\n' > "$3/codeql-database.yml"
-  exit 0
-fi
 if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
   out=""
   for arg in "$@"; do
@@ -725,7 +736,40 @@ exit 2
         let mut permissions = fs::metadata(&binary).unwrap().permissions();
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
+        initialize_codeql_scan_fixture(dir);
         binary
+    }
+
+    #[cfg(unix)]
+    fn initialize_codeql_scan_fixture(root: &Path) {
+        run_codeql_fixture_git(root, &["init", "-q"]);
+        run_codeql_fixture_git(root, &["add", "."]);
+        run_codeql_fixture_git(root, &["commit", "-qm", "CodeQL fixture"]);
+        crate::workspace::initialize_workspace_state(root).unwrap();
+        let database = crate::workspace::workspace_codeql_db_path(root);
+        fs::create_dir_all(database.join("db-javascript")).unwrap();
+        fs::write(
+            database.join("codeql-database.yml"),
+            "primaryLanguage: javascript\n",
+        )
+        .unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &database,
+            root,
+            "javascript",
+        );
+    }
+
+    #[cfg(unix)]
+    fn run_codeql_fixture_git(root: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     #[cfg(unix)]

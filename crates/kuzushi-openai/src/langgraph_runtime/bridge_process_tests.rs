@@ -4,8 +4,8 @@ use super::bridge_payloads::{
 use super::bridge_process::{
     bridge_near_executable, configure_bridge_process_group, default_langgraph_bridge_command,
     mcp_binary_env_defaults, public_bridge_error, public_bridge_failure_with_detail,
-    read_bounded_pipe,
-    run_next_step_bridge, wait_with_output_deadline_limits,
+    read_bounded_pipe, run_next_step_bridge, wait_with_output_deadline_limits,
+    write_bridge_diagnostics,
 };
 use kuzushi_core::AgentToolPolicy;
 use serde_json::json;
@@ -24,6 +24,26 @@ fn bridge_pipe_reader_rejects_output_above_limit() {
         .to_string();
 
     assert!(error.contains("capture limit"), "{error}");
+}
+
+#[test]
+fn bridge_verbose_forwards_only_bounded_metadata() {
+    let sentinel = "raw-prompt-provider-secret-sentinel";
+    let valid = r#"[kuzushi-bridge] {"ts":7,"kind":"query","modelProvider":"openai","thinkingLevel":"high","toolCount":2,"promptLen":19,"messageCount":0,"systemPromptLen":11,"responseLen":5,"stopClass":"complete","responseToolCount":0}"#;
+    let invalid = format!(
+        "[kuzushi-bridge] {{\"ts\":8,\"kind\":\"{sentinel}\",\"modelProvider\":\"openai\",\"toolCount\":0,\"promptLen\":0,\"messageCount\":0,\"systemPromptLen\":0,\"responseLen\":0,\"responseToolCount\":0}}"
+    );
+    let oversized = format!("[kuzushi-bridge] {}", "x".repeat(5000));
+    let captured = format!("untrusted {sentinel}\n{valid}\n{invalid}\n{oversized}\n");
+    let mut forwarded = Vec::new();
+
+    write_bridge_diagnostics(captured.as_bytes(), &mut forwarded);
+
+    let forwarded = String::from_utf8(forwarded).unwrap();
+    assert!(forwarded.starts_with("[kuzushi-bridge] {\"ts\":7"));
+    assert!(forwarded.contains("\"modelProvider\":\"openai\""));
+    assert!(!forwarded.contains(sentinel));
+    assert_eq!(forwarded.lines().count(), 1);
 }
 
 #[test]
@@ -253,6 +273,16 @@ fn structured_bridge_failure_ignores_arbitrary_fallback_content() {
 }
 
 #[test]
+fn mcp_timeout_failure_is_safe_and_not_mislabeled_as_provider_timeout() {
+    let sentinel = "raw-mcp-timeout-sentinel";
+
+    let public = public_bridge_failure_with_detail(Some("mcp_timeout"), None, Some(sentinel), None);
+
+    assert_eq!(public, "MCP tool request timed out.");
+    assert!(!public.contains(sentinel));
+}
+
+#[test]
 fn bridge_requests_serialize_protocol_version() {
     let request = BridgeRequest {
         protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
@@ -263,6 +293,8 @@ fn bridge_requests_serialize_protocol_version() {
         structured_output: None,
         api_key_env: "OPENAI_API_KEY".to_string(),
         api_key: None,
+        oauth_credentials_path: "/operator/oauth.json".to_string(),
+        oauth_allow_env_token: false,
         base_url: None,
         thinking_level: None,
         max_output_tokens: None,
@@ -301,6 +333,8 @@ fn test_next_step_request() -> NextStepBridgeRequest {
         max_tokens: 128,
         api_key_env: "OPENAI_API_KEY".to_string(),
         api_key: None,
+        oauth_credentials_path: "/operator/oauth.json".to_string(),
+        oauth_allow_env_token: false,
         base_url: None,
         runtime_options: None,
         temperature: None,

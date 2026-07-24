@@ -26,7 +26,7 @@ pub(super) fn maven_pom_components(
 
 pub(super) fn maven_pom_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let document = roxmltree::Document::parse(&text).context("sbom-scan: parse Maven pom.xml")?;
     let source = relative_display(target, path);
     let edges = child_elements(document.root_element(), "dependencies")

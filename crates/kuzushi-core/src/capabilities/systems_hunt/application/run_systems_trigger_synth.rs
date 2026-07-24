@@ -24,7 +24,7 @@ pub(crate) fn run_systems_trigger_synth_with_cost(
         input,
         runtime: required_systems_runtime(runtime, "systems-hunt:systems-trigger-synth")?,
         model: resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?,
-        agent_tool_policy: whitebox_static_policy_for_target(&target),
+        agent_tool_policy: try_whitebox_static_policy_for_target(&target)?,
         thinking_level: agentic_hunter_thinking_level(input),
         target,
         context,

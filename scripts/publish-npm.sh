@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Publish the current package.json version to npm.
+# Build and inspect a platform-local npm package without publishing it.
 #
 # Preflight:
 #   - Working tree must be clean
@@ -8,20 +8,15 @@
 #   - The tag v<version> must exist and point at HEAD
 #   - tests + native build + package verification must pass
 #
-# Dry-run by default. Pass --publish to actually publish.
+# Public publishing is intentionally GitHub-Actions-only because a local build
+# contains only the host platform's native payload.
 #
 # Env:
-#   NPM_PROVENANCE=true   enable `npm publish --provenance` (requires
-#                         public repo, npm ≥9.5, and an OIDC token —
-#                         only useful inside GitHub Actions; ignored
-#                         locally unless NODE_AUTH_TOKEN is set)
-#   OTP=<code>            pass through as `--otp=<code>` for 2FA
 #   SKIP_TESTS=1          skip the test suite (NOT recommended)
 #
 # Usage:
 #   scripts/publish-npm.sh                # dry-run
-#   scripts/publish-npm.sh --publish      # actually publish
-#   OTP=123456 scripts/publish-npm.sh --publish
+#   scripts/publish-npm.sh --publish      # fails closed with CI instructions
 #
 
 set -euo pipefail
@@ -42,10 +37,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." &>/dev/null && pwd)
 cd "$REPO_ROOT"
 
-PUBLISH=0
 for arg in "$@"; do
   case "$arg" in
-    --publish) PUBLISH=1 ;;
+    --publish)
+      fail "Local publishing is disabled: push a v<version> tag so the GitHub release workflow assembles and verifies every required native platform."
+      ;;
     --help|-h)
       awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
       exit 0
@@ -91,24 +87,9 @@ if ! git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "$TAG"; then
   warn "run: git push origin $TAG"
 fi
 
-log "Checking npm whoami"
-if command -v npm >/dev/null 2>&1; then
-  if npm whoami >/dev/null 2>&1; then
-    ok "npm user: $(npm whoami)"
-  else
-    warn "not logged in to npm — run \`npm login\` before --publish"
-  fi
-else
+if ! command -v npm >/dev/null 2>&1; then
   fail "npm not found on PATH"
 fi
-
-log "Checking this version isn't already published"
-PUB_NAME=$(node -e "console.log(require('./package.json').name)")
-PUB_VIEW=$(npm view "${PUB_NAME}@${VERSION}" version 2>/dev/null || true)
-if [ -n "$PUB_VIEW" ]; then
-  fail "$PUB_NAME@$VERSION is already on npm — bump the version"
-fi
-ok "version is unpublished"
 
 # ── Build + verify ───────────────────────────────────────────────────────────
 
@@ -124,7 +105,7 @@ fi
 
 log "Building native Rust package binaries"
 pnpm run build:native
-ok "native binaries staged"
+ok "platform-local native binaries staged"
 
 log "Verifying package artifact"
 pnpm run verify:pack
@@ -134,33 +115,5 @@ log "Dry-running npm pack to see what ships"
 # `npm pack --dry-run` prints file list + total size.
 npm pack --dry-run --ignore-scripts 2>&1 | tail -n 60
 
-# ── Publish ──────────────────────────────────────────────────────────────────
-
-PUBLISH_ARGS=(publish --access public --ignore-scripts)
-if [ "${NPM_PROVENANCE:-}" = "true" ]; then
-  PUBLISH_ARGS+=(--provenance)
-fi
-if [ -n "${OTP:-}" ]; then
-  PUBLISH_ARGS+=(--otp="$OTP")
-fi
-
-if [ "$PUBLISH" -eq 1 ]; then
-  log "Publishing $PUB_NAME@$VERSION"
-  printf '%sWARNING:%s this will publish to the public npm registry.\n' "$YELLOW" "$RESET"
-  printf 'Proceed? [y/N] '
-  read -r reply
-  case "$reply" in
-    y|Y|yes|YES)
-      npm "${PUBLISH_ARGS[@]}"
-      ok "published $PUB_NAME@$VERSION 🎉"
-      log "Next: create a GitHub release — gh release create $TAG --generate-notes"
-      ;;
-    *)
-      warn "aborted — nothing published"
-      exit 0
-      ;;
-  esac
-else
-  log "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})"
-  log "Pass --publish to actually publish"
-fi
+log "Platform-local dry-run complete; no registry mutation was attempted"
+log "Release assembly is authoritative: push $TAG to run the multi-platform GitHub workflow"

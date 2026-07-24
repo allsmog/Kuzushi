@@ -2,7 +2,7 @@ use crate::findings::{Finding, Severity, StaticProofState};
 use crate::modules::ToolExecutionContext;
 use crate::proof::whitebox_policy::{
     agentic_hunter_thinking_level, mark_whitebox_static_findings,
-    whitebox_static_policy_for_target, whitebox_static_profile_requested,
+    try_whitebox_static_policy_for_target, whitebox_static_profile_requested,
 };
 use crate::runtime::{
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, RuntimeCost, RuntimeCostReport,

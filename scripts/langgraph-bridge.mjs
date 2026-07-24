@@ -5,19 +5,29 @@ import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph
 import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
 import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
 import { fileToolsForRequest } from "./langgraph-bridge/file-tools.mjs";
-import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
+import {
+  isMcpToolTimeoutError,
+  mcpToolsForRequest,
+  normalizeMcpToolError,
+  withMcpClientCleanup,
+} from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
+  bridgeUsageFields,
+  interruptedQueryResult,
   isAiMessage,
   maybeParseJson,
   messageText,
+  modelContinuationDecision,
   modelForRequest,
   parseModelSpec,
   systemMessageForRequest,
   toolMessageForOutput,
   usageFromMessage,
+  usageFromMessages,
 } from "./langgraph-bridge/model.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
+import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
 
 async function readStdin() {
@@ -35,17 +45,24 @@ const QUERY_GRAPH_RECURSION_LIMIT = 64;
 
 async function runQueryGraph(request) {
   const mcp = await mcpToolsForRequest(request);
-  try {
+  return withMcpClientCleanup(async () => {
     const system = querySystemPromptForRequest(request);
     const tools = [...fileToolsForRequest(request), ...mcp.tools];
+    const mcpToolNames = new Set(mcp.tools.map((tool) => tool.name));
     const progress = { messages: [] };
-    const graph = queryGraphForRequest(request, tools, system, progress);
-    const message = await runQueryGraphToConclusion(graph, request, system, progress);
-    debugDumpBridgeCall("query", request, tools, system, message);
-    return queryResultFromMessage(message);
-  } finally {
-    await mcp.close();
-  }
+    const graph = queryGraphForRequest(request, tools, mcpToolNames, system, progress);
+    try {
+      const messages = await runQueryGraphToConclusion(graph, request, system, progress);
+      const message = messages.at(-1);
+      debugDumpBridgeCall("query", request, tools, system, message);
+      return queryResultFromMessages(messages, request);
+    } catch (error) {
+      if (!isMcpToolTimeoutError(error)) throw error;
+      const message = progress.messages.at(-1);
+      debugDumpBridgeCall("query", request, tools, system, message);
+      return interruptedQueryResult(progress.messages, "mcp_tool_timeout");
+    }
+  }, mcp.close);
 }
 
 // When an evidence-gathering loop exhausts its tool budget, a verdict from
@@ -64,10 +81,11 @@ async function runQueryGraphToConclusion(graph, request, system, progress) {
     const result = await graph.invoke(state, {
       recursionLimit: QUERY_GRAPH_RECURSION_LIMIT,
     });
-    return result.messages.at(-1);
+    return result.messages;
   } catch (error) {
     if (error?.name !== "GraphRecursionError") throw error;
-    return forcedConclusion(request, system, progress);
+    const conclusion = await forcedConclusion(request, system, progress);
+    return [...progress.messages, conclusion];
   }
 }
 
@@ -91,14 +109,14 @@ function concludedEvidenceMessages(progress) {
   return evidence;
 }
 
-function queryGraphForRequest(request, tools, system, progress) {
+function queryGraphForRequest(request, tools, mcpToolNames, system, progress) {
   const model = modelForRequest(request);
   const boundModel = tools.length ? model.bindTools(tools) : model;
   return new StateGraph(MessagesAnnotation)
     .addNode("model", callModelNode(boundModel, request, system, progress))
-    .addNode("tools", runToolsNode(tools, progress))
+    .addNode("tools", runToolsNode(tools, mcpToolNames, progress))
     .addEdge(START, "model")
-    .addConditionalEdges("model", shouldContinue)
+    .addConditionalEdges("model", shouldContinueForRequest(request))
     .addEdge("tools", "model")
     .compile();
 }
@@ -157,25 +175,25 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function runToolsNode(tools, progress) {
+function runToolsNode(tools, mcpToolNames, progress) {
   const byName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
   return async (state) => {
-    const results = await runRequestedTools(state.messages.at(-1), byName);
+    const results = await runRequestedTools(state.messages.at(-1), byName, mcpToolNames);
     progress.messages = [...state.messages, ...results];
     return { messages: results };
   };
 }
 
-async function runRequestedTools(message, toolsByName) {
+async function runRequestedTools(message, toolsByName, mcpToolNames) {
   if (!isAiMessage(message) || !message.tool_calls?.length) return [];
   const results = [];
   for (const call of message.tool_calls) {
-    results.push(await runOneTool(call, toolsByName[call.name]));
+    results.push(await runOneTool(call, toolsByName[call.name], mcpToolNames.has(call.name)));
   }
   return results;
 }
 
-async function runOneTool(call, tool) {
+async function runOneTool(call, tool, isMcpTool) {
   if (!tool) {
     return new ToolMessage({ tool_call_id: call.id ?? call.name, content: `Unknown tool ${call.name}` });
   }
@@ -183,6 +201,9 @@ async function runOneTool(call, tool) {
     const output = await tool.invoke(call.args ?? {});
     return toolMessageForOutput(call, output);
   } catch (error) {
+    if (isMcpTool && isMcpToolTimeoutError(error)) {
+      throw normalizeMcpToolError(error);
+    }
     // A failed tool call is agent feedback, not a bridge crash: return the
     // failure as an error tool result so the model can adjust its approach.
     return new ToolMessage({
@@ -193,29 +214,48 @@ async function runOneTool(call, tool) {
   }
 }
 
-function shouldContinue(state) {
-  const last = state.messages.at(-1);
-  return isAiMessage(last) && last.tool_calls?.length ? "tools" : END;
+function shouldContinueForRequest(request) {
+  return (state) => {
+    const last = state.messages.at(-1);
+    if (!isAiMessage(last) || !last.tool_calls?.length) return END;
+    return queryStopReason(state.messages, request) ? END : "tools";
+  };
 }
 
-function queryResultFromMessage(message) {
+function queryResultFromMessages(messages, request) {
+  const message = messages.at(-1);
   const text = messageText(message);
-  const usage = usageFromMessage(message);
-  const stopReason = message?.response_metadata?.finish_reason;
+  const usage = usageFromMessages(messages);
+  const stopReason = queryStopReason(messages, request) ?? message?.response_metadata?.finish_reason;
   return {
     ok: true,
     text,
     structured: maybeParseJson(text),
-    cost_usd: usage.costUsd,
-    input_tokens: usage.inputTokens,
-    output_tokens: usage.outputTokens,
+    ...bridgeUsageFields(usage),
     truncated: isTruncatedStopReason(stopReason),
     stopReason,
   };
 }
 
+function queryStopReason(messages, request) {
+  const last = messages.at(-1);
+  if (!isAiMessage(last) || !last.tool_calls?.length) return undefined;
+  const options = request.runtimeOptions ?? request.runtime_options ?? {};
+  const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
+  const decision = modelContinuationDecision(messages, stop);
+  return decision === "continue" ? undefined : decision;
+}
+
 function isTruncatedStopReason(reason) {
-  return ["length", "max_tokens", "max_tokens_reached"].includes(String(reason ?? ""));
+  return [
+    "length",
+    "max_tokens",
+    "max_tokens_reached",
+    "model_turn_limit",
+    "mcp_tool_timeout",
+    "observed_spend_incomplete",
+    "observed_spend_exhausted",
+  ].includes(String(reason ?? ""));
 }
 
 function messagesForNextStep(request) {
@@ -310,16 +350,19 @@ async function main() {
     return;
   }
   const request = validateBridgeRequest(JSON.parse(await readStdin()));
-  process.stdout.write(JSON.stringify(await dispatch(request)));
+  await writeBridgeResponseAndExit(await dispatch(request), 0);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   const response = bridgeErrorResponse(error);
   // Mirror the bounded raw detail on stderr so `KUZUSHI_BRIDGE_VERBOSE` /
   // `KUZUSHI_BRIDGE_LOG` capture it even when stdout parsing fails.
   if (response.detail) {
     process.stderr.write(`[bridge-error] ${response.errorClass}: ${response.detail}\n`);
   }
-  process.stdout.write(JSON.stringify(response));
-  process.exitCode = 1;
+  try {
+    await writeBridgeResponseAndExit(response, 1);
+  } catch {
+    process.exit(1);
+  }
 });

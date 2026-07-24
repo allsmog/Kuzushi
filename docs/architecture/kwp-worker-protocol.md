@@ -41,14 +41,14 @@ flowchart TD
   Supervisor --> Sandbox[Sandboxed worker process]
   Sandbox --> Worker[Node / WASM / container worker]
   Worker <--> KWP[KWP JSON-RPC over stdio]
-  KWP <--> Broker[CapabilityBroker]
-  Broker --> FS[Scoped filesystem]
-  Broker --> Net[HTTP fetch proxy]
-  Broker --> Runtime[LLM runtime broker]
-  Broker --> Bus[Event bus]
-  Broker --> Findings[Findings writer]
-  Broker --> Artifacts[Run artifacts]
-  Broker --> Audit[Hash-linked audit]
+  KWP <--> LiveBroker[WorkerHostSession]
+  LiveBroker --> FS[Scoped filesystem]
+  LiveBroker --> Net[HTTP fetch proxy]
+  LiveBroker --> Runtime[LLM runtime broker]
+  LiveBroker --> Bus[Event bus]
+  LiveBroker --> Findings[Findings writer]
+  LiveBroker --> Artifacts[Run artifacts]
+  LiveBroker --> Audit[Hash-linked audit]
   Supervisor --> Registry[ModuleRegistry catalog]
 ```
 
@@ -56,7 +56,9 @@ Responsibilities:
 
 - `TrustVerifier`: resolves a specifier, hashes the bundle, verifies signatures and lockfile approval, then returns a `VerifiedModule`.
 - `Supervisor`: owns spawn, handshake, worker reuse, dispatch, deadlines, cancellation, epochs, recycle, and kill.
-- `CapabilityBroker`: the only place grants are enforced, effects are metered, and audit records are emitted.
+- `worker_protocol::policy`: the shared grant, path, quota, and audit-decision core used by both broker facades.
+- `WorkerHostSession`: the live Node-worker dispatcher. It checks invocation authority, applies the shared policy, performs and meters host effects, and emits the run audit chain.
+- `CapabilityBroker`: the asynchronous host/reference facade used by broker backends and tests. It applies the same policy decisions, but it is not the live Node-worker dispatcher.
 - `ModuleRegistry`: stores host-checked module and tool descriptors. It does not own trust, process lifecycle, or capability policy.
 
 ## 3. Transport
@@ -683,9 +685,12 @@ kuzushi kwp audit --target /abs/workspace --run-id run_... --json
    author-facing APIs. Implemented for approved local `file://` modules;
    descriptor probes and serve workers use stripped environments plus Node
    file-read permissions.
-4. Add `CapabilityBroker` for filesystem and runtime. Implemented for the live
-   Node worker path with invocation-id plus epoch checks, host-computed runtime
-   cost, and hash-linked broker audit records for workspace-backed runs.
+4. Add brokered filesystem and runtime capabilities. The live Node path is
+   implemented by `WorkerHostSession`; the asynchronous `CapabilityBroker`
+   remains a separate host/reference facade. Both consume the shared
+   `worker_protocol::policy` decision core. The live path adds invocation-id
+   and epoch checks, host-computed runtime cost, and hash-linked broker audit
+   records for workspace-backed runs.
 5. Add network broker with SSRF hardening and named credentials. Initial HTTPS
    backend is implemented with redirects disabled and grant-gated response
    artifact spilling.

@@ -10,6 +10,14 @@ use std::path::Path;
 #[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
+fn authorized(path: &Path) -> crate::AuthorizedDirectory {
+    crate::ReadRootCapability::new([path.to_path_buf()])
+        .unwrap()
+        .authorize_directory(path)
+        .unwrap()
+}
+
 #[test]
 fn executable_resolution_rejects_directories() {
     let directory = tempfile::tempdir().unwrap();
@@ -43,12 +51,10 @@ async fn long_lived_sandbox_process_uses_a_dedicated_killable_group() {
         unsafe { libc::getpgid(pid as libc::pid_t) },
         pid as libc::pid_t
     );
-    // SAFETY: the launcher and its descendant were placed in this dedicated group.
-    unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
-    tokio::time::timeout(Duration::from_secs(2), child.wait())
+    tokio::time::timeout(Duration::from_secs(2), terminate_child_group(&mut child))
         .await
-        .expect("sandbox group did not terminate")
-        .unwrap();
+        .expect("sandbox group did not terminate");
+    assert!(child.try_wait().unwrap().is_some());
 }
 
 #[cfg(target_os = "linux")]
@@ -92,4 +98,78 @@ fn seatbelt_paths_are_parameters_not_profile_source() {
 
     assert!(args.contains(&target));
     assert!(!MACOS_PROFILE.contains(root.to_string_lossy().as_ref()));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn child_cannot_rewrite_a_helper_in_its_authorized_tool_bundle() {
+    use std::os::unix::fs::PermissionsExt;
+
+    if !sandbox_available().await {
+        return;
+    }
+    let tool = tempfile::tempdir().unwrap();
+    let input = tempfile::tempdir().unwrap();
+    let writable = tempfile::tempdir().unwrap();
+    let launcher = tool.path().join("runner");
+    let helper = tool.path().join("helper");
+    let receipt = writable.path().join("receipt");
+    std::fs::write(&helper, "trusted").unwrap();
+    std::fs::write(
+        &launcher,
+        "#!/bin/sh\nif printf malicious > \"$1\"; then printf rewritable > \"$2\"; else printf blocked > \"$2\"; fi\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let access = RestrictedSandboxAccess {
+        working_directory: authorized(input.path()),
+        tool_root: authorized(tool.path()),
+        read_only: Vec::new(),
+        read_write: vec![authorized(writable.path())],
+        environment: Vec::new(),
+    };
+    let sandboxed = restricted_command(&launcher, [&helper, &receipt], access)
+        .await
+        .unwrap();
+    let (mut child, _scratch) = sandboxed.spawn("rewrite fixture").unwrap();
+
+    assert!(child.wait().await.unwrap().success());
+    assert_eq!(std::fs::read_to_string(&helper).unwrap(), "trusted");
+    assert_eq!(std::fs::read_to_string(&receipt).unwrap(), "blocked");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn restricted_seatbelt_command_pins_only_approved_codeql_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tool = tempfile::tempdir().unwrap();
+    let input = tempfile::tempdir().unwrap();
+    let launcher = tool.path().join("codeql");
+    std::fs::write(&launcher, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let tool_root = authorized(tool.path());
+    let canonical_tool = tool_root.path().to_path_buf();
+    let access = RestrictedSandboxAccess {
+        working_directory: authorized(input.path()),
+        tool_root,
+        read_only: Vec::new(),
+        read_write: Vec::new(),
+        environment: vec![("CODEQL_DIST".into(), canonical_tool.as_os_str().to_owned())],
+    };
+    let sandboxed = super::backend::build_restricted_command(
+        ReadOnlySandboxBackend::MacosSeatbelt,
+        &launcher,
+        std::iter::empty::<&OsStr>(),
+        access,
+    )
+    .unwrap();
+    let environment = sandboxed.command.as_std().get_envs().collect::<Vec<_>>();
+
+    assert!(environment.iter().any(|(name, value)| {
+        *name == OsStr::new("CODEQL_DIST") && value == &Some(canonical_tool.as_os_str())
+    }));
+    assert!(!environment
+        .iter()
+        .any(|(name, _)| *name == OsStr::new("CODEQL_JAVA_HOME")));
 }

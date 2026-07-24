@@ -210,10 +210,19 @@ mod tests {
         session.apply_step(start);
 
         let stale_probe = Instant::now() + Duration::from_secs(45);
-        let model =
-            activity_heartbeat_model(&session, Some("threat-model:build"), true, None, stale_probe);
+        let model = activity_heartbeat_model(
+            &session,
+            Some("threat-model:build"),
+            true,
+            None,
+            stale_probe,
+        );
         assert_eq!(model.tone, ActivityHeartbeatTone::Live, "{}", model.text);
-        assert!(model.text.contains("◐ query in flight 45s"), "{}", model.text);
+        assert!(
+            model.text.contains("◐ query in flight 45s"),
+            "{}",
+            model.text
+        );
         assert!(!model.text.contains("NO PROGRESS SIGNAL"), "{}", model.text);
 
         let watchdog_probe = Instant::now() + Duration::from_secs(400);

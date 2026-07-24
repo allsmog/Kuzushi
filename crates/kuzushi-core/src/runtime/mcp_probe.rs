@@ -11,6 +11,7 @@
 
 use crate::runtime::domain::McpAttachment;
 use crate::workspace::artifact_state_within;
+use anyhow::Result;
 use std::path::Path;
 
 /// One row of [`MCP_ARTIFACT_TABLE`]. Static for simplicity — the set of
@@ -57,7 +58,7 @@ pub const MCP_ARTIFACT_TABLE: &[McpArtifactSpec] = &[
     },
     McpArtifactSpec {
         name: "codeql",
-        artifact_relative_path: ".kuzushi/codeql-db",
+        artifact_relative_path: ".kuzushi/v3/codeql-db",
     },
 ];
 
@@ -68,48 +69,67 @@ pub const MCP_CONSTANT_NAMES: &[&str] = &["treesitter"];
 /// Build the MCP attachment plan for `target`. Entries are returned in
 /// the canonical order from [`MCP_ARTIFACT_TABLE`] (constants first),
 /// so callers can diff successive plans without flapping.
-pub fn mcp_attachment_plan_for_target(target: &Path) -> Vec<McpAttachment> {
-    let mut plan = Vec::new();
-    for name in MCP_CONSTANT_NAMES {
-        plan.push(McpAttachment::constant(*name));
-    }
+pub fn try_mcp_attachment_plan_for_target(target: &Path) -> Result<Vec<McpAttachment>> {
+    let mut plan = constant_mcp_attachments();
     for spec in MCP_ARTIFACT_TABLE {
-        let path = target.join(spec.artifact_relative_path);
-        if mcp_artifact_is_ready(target, spec, &path) {
-            plan.push(McpAttachment::new(spec.name, path.display().to_string()));
+        if let Some(attachment) = mcp_artifact_attachment(target, spec)? {
+            plan.push(attachment);
         }
     }
-    plan
+    Ok(plan)
 }
 
-fn mcp_artifact_is_ready(target: &Path, spec: &McpArtifactSpec, path: &Path) -> bool {
+/// Compatibility wrapper for callers that cannot surface probe errors yet.
+/// It fails closed to constant, source-only MCPs and never attaches CodeQL
+/// from a marker-only or otherwise invalid database.
+pub fn mcp_attachment_plan_for_target(target: &Path) -> Vec<McpAttachment> {
+    try_mcp_attachment_plan_for_target(target).unwrap_or_else(|_| constant_mcp_attachments())
+}
+
+fn constant_mcp_attachments() -> Vec<McpAttachment> {
+    MCP_CONSTANT_NAMES
+        .iter()
+        .map(|name| McpAttachment::constant(*name))
+        .collect()
+}
+
+fn mcp_artifact_attachment(
+    target: &Path,
+    spec: &McpArtifactSpec,
+) -> Result<Option<McpAttachment>> {
     match spec.name {
-        "codeql" => codeql_database_is_ready(target, path),
+        "codeql" => managed_codeql_attachment(target),
         // Ready when at least one current-shape-version graph exists —
         // stale-version leftovers alone must not attach the server.
         "cpg" => {
-            artifact_state_within(target, path).is_cached() && kuzushi_cpg::has_artifacts(target)
+            let path = target.join(spec.artifact_relative_path);
+            Ok((artifact_state_within(target, &path).is_cached()
+                && kuzushi_cpg::has_artifacts(target))
+            .then(|| McpAttachment::new(spec.name, path.display().to_string())))
         }
-        _ => artifact_state_within(target, path).is_cached(),
+        _ => {
+            let path = target.join(spec.artifact_relative_path);
+            Ok(artifact_state_within(target, &path)
+                .is_cached()
+                .then(|| McpAttachment::new(spec.name, path.display().to_string())))
+        }
     }
 }
 
-fn codeql_database_is_ready(target: &Path, path: &Path) -> bool {
-    if !artifact_state_within(target, path).is_cached() {
-        return false;
-    }
-    if artifact_state_within(target, &path.join("codeql-database.yml")).is_cached() {
-        return true;
-    }
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return false;
+fn managed_codeql_attachment(target: &Path) -> Result<Option<McpAttachment>> {
+    let expected = crate::workspace::workspace_codeql_db_path(target);
+    let database = crate::codeql_repository_execution::resolve_managed_codeql_database(target)?;
+    let Some(database) = database else {
+        return Ok(None);
     };
-    entries.filter_map(Result::ok).any(|entry| {
-        entry
-            .file_type()
-            .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
-            && artifact_state_within(target, &entry.path().join("codeql-database.yml")).is_cached()
-    })
+    anyhow::ensure!(
+        database.path() == expected,
+        "managed CodeQL database resolved outside its workspace path"
+    );
+    Ok(Some(
+        McpAttachment::new("codeql", database.path().display().to_string())
+            .with_artifact_identity(database.database_identity()),
+    ))
 }
 
 /// True if `plan` contains an entry with the given server `name`.
@@ -159,19 +179,25 @@ mod tests {
     }
 
     #[test]
-    fn codeql_db_directory_attaches_codeql_server() {
+    fn marker_only_codeql_database_fails_closed() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = tmp.path().join(".kuzushi/codeql-db");
-        std::fs::create_dir_all(&db).unwrap();
+        let db = crate::workspace::workspace_codeql_db_path(tmp.path());
+        std::fs::create_dir_all(db.join("db-rust")).unwrap();
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: rust\n").unwrap();
+
+        let error = try_mcp_attachment_plan_for_target(tmp.path())
+            .unwrap_err()
+            .to_string();
         let plan = mcp_attachment_plan_for_target(tmp.path());
-        assert!(plan_contains(&plan, "codeql"));
+
+        assert!(error.contains("trusted provenance"), "{error}");
+        assert!(!plan_contains(&plan, "codeql"));
     }
 
     #[test]
     fn non_database_directory_does_not_attach_codeql_server() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = tmp.path().join(".kuzushi/codeql-db");
+        let db = crate::workspace::workspace_codeql_db_path(tmp.path());
         std::fs::create_dir_all(&db).unwrap();
         std::fs::write(db.join("placeholder"), "x").unwrap();
 

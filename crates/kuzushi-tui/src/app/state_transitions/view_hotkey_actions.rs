@@ -90,9 +90,7 @@ impl ShellApp {
                 self.toggle_workbench_investigation_boundary()
             }
             ViewHotkeyAction::WorkbenchDeferProof => self.draft_workbench_proof_deferral(),
-            ViewHotkeyAction::WorkbenchReverifyPatch => {
-                self.draft_workbench_patch_reverification()
-            }
+            ViewHotkeyAction::WorkbenchReverifyPatch => self.draft_workbench_patch_reverification(),
             ViewHotkeyAction::WorkbenchSuppress => self.draft_workbench_suppression(),
             ViewHotkeyAction::WorkbenchInvariantHunt => self.draft_workbench_invariant_hunt(),
             ViewHotkeyAction::WorkbenchOrderChain => self.draft_workbench_chain(),
@@ -310,7 +308,10 @@ impl ShellApp {
                 "refine draft loaded — Enter to update the stale threat model",
             )
         } else {
-            ("next", "journey planner loaded — Enter to continue the derived phase")
+            (
+                "next",
+                "journey planner loaded — Enter to continue the derived phase",
+            )
         };
         self.set_input(command.to_string());
         self.set_input_mode(InputMode::Prompt);
@@ -608,7 +609,10 @@ impl ShellApp {
 
     /// Item 13: `/` opens the palette-style search capture over the queue.
     fn open_review_search(&mut self) {
-        self.router.workbench_mut().review_mut().open_search_capture();
+        self.router
+            .workbench_mut()
+            .review_mut()
+            .open_search_capture();
         self.log(
             "review",
             "search: type to filter · sev:/tool:/status:/actor: facets · Enter keep · Esc clear",

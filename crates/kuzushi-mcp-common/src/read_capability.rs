@@ -3,10 +3,15 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 mod directory;
+mod directory_entries;
+mod directory_revisions;
 mod file;
 mod open;
 
-pub use directory::AuthorizedDirectory;
+pub use directory::{
+    AuthorizedChild, AuthorizedDirectory, AuthorizedDirectoryEntry, AuthorizedFile,
+};
+pub use directory_revisions::AuthorizedDirectoryRevisions;
 use file::bounded_regular_file;
 pub use file::{BoundedReadFile, ReadFileIdentity};
 

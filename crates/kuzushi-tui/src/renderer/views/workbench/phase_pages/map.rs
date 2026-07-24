@@ -227,7 +227,10 @@ fn stale_threat_model_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'st
 /// noise until the target is broken into scoped modules.
 fn decompose_first_lines(hint: &str, width: usize) -> Vec<Line<'static>> {
     vec![
-        Line::styled(fit("⚠ Large monorepo — decompose before modeling", width), theme::warn()),
+        Line::styled(
+            fit("⚠ Large monorepo — decompose before modeling", width),
+            theme::warn(),
+        ),
         Line::styled(fit(hint, width), theme::muted()),
         Line::styled(
             fit(
@@ -619,7 +622,10 @@ mod next_scan_tests {
 
         assert_eq!(title, "NEXT ACTION");
         let rendered = text(&lines);
-        assert!(rendered.contains("suggest module decomposition"), "{rendered}");
+        assert!(
+            rendered.contains("suggest module decomposition"),
+            "{rendered}"
+        );
         assert!(rendered.contains("81259 files indexed"), "{rendered}");
         assert!(!rendered.contains("generate threat model"), "{rendered}");
     }

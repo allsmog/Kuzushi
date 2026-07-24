@@ -1,8 +1,7 @@
 use super::super::application::{apply_envelope, ProjectionHealth, RunProjection};
-use super::super::{RunId, RunItemEnvelopeV1, RUN_ITEM_SCHEMA_VERSION};
+use super::super::{RunId, RunItemEnvelopeV1};
+use super::stream_reader::{parse_record, RunItemStreamReader};
 use anyhow::{Context, Result};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -28,32 +27,37 @@ pub struct RunProjectionRead {
 }
 
 pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<RunItemRead>> {
-    let path = crate::run_artifacts::run_dir(target, run_id).join("items.jsonl");
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).with_context(|| format!("open {}", path.display())),
+    let target = target.as_ref();
+    let run_id = RunId::parse(run_id)?;
+    let path = crate::run_artifacts::checked_run_artifact_path(
+        target,
+        run_id.as_str(),
+        "items.jsonl",
+    )?;
+    let Some(reader) = open_stream(target, &path)? else {
+        return Ok(None);
     };
-    Ok(Some(read_lines(BufReader::new(file))))
+    Ok(Some(read_lines(reader)))
 }
 
 pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<RunProjectionRead> {
     let target = target.as_ref();
-    let path = crate::run_artifacts::run_dir(target, run_id).join("items.jsonl");
-    let file = match File::open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return legacy_projection(run_id)
-        }
-        Err(error) => return Err(error).with_context(|| format!("open {}", path.display())),
+    let run_id = RunId::parse(run_id)?;
+    let path =
+        crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
+    let Some(reader) = open_stream(target, &path)? else {
+        return legacy_projection(run_id.as_str());
     };
     let mut projection = RunProjection {
-        run_id: Some(RunId::parse(run_id)?),
+        run_id: Some(run_id.clone()),
         ..RunProjection::default()
     };
-    reduce_lines(BufReader::new(file), &mut projection);
-    let presentation_hydration =
-        super::presentation_hydration::load_presentation_hydration(target, run_id, &projection);
+    reduce_lines(reader, &mut projection);
+    let presentation_hydration = super::presentation_hydration::load_presentation_hydration(
+        target,
+        run_id.as_str(),
+        &projection,
+    );
     Ok(RunProjectionRead {
         projection,
         source: RunProjectionSource::TypedV1,
@@ -61,10 +65,16 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
     })
 }
 
-fn reduce_lines(reader: impl BufRead, projection: &mut RunProjection) {
-    for (index, line) in reader.lines().enumerate() {
-        let item = match parse_line(line, index + 1) {
-            Ok(item) => item,
+fn open_stream(root: &Path, path: &Path) -> Result<Option<RunItemStreamReader>> {
+    RunItemStreamReader::open_within(root, path)
+        .with_context(|| format!("open {}", path.display()))
+}
+
+fn reduce_lines(mut reader: RunItemStreamReader, projection: &mut RunProjection) {
+    loop {
+        let item = match next_item(&mut reader) {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
             Err(reason) => {
                 super::super::record_degraded_replay();
                 projection.degrade(reason);
@@ -79,12 +89,13 @@ fn reduce_lines(reader: impl BufRead, projection: &mut RunProjection) {
     }
 }
 
-fn read_lines(reader: impl BufRead) -> RunItemRead {
+fn read_lines(mut reader: RunItemStreamReader) -> RunItemRead {
     let mut items = Vec::new();
     let mut projection = RunProjection::default();
-    for (index, line) in reader.lines().enumerate() {
-        let item = match parse_line(line, index + 1) {
-            Ok(item) => item,
+    loop {
+        let item = match next_item(&mut reader) {
+            Ok(Some(item)) => item,
+            Ok(None) => break,
             Err(reason) => {
                 projection.degrade(reason);
                 break;
@@ -105,22 +116,9 @@ fn read_lines(reader: impl BufRead) -> RunItemRead {
     }
 }
 
-fn parse_line(
-    line: std::io::Result<String>,
-    line_number: usize,
-) -> Result<RunItemEnvelopeV1, String> {
-    let line = line.map_err(|error| format!("line {line_number}: {error}"))?;
-    let value = serde_json::from_str::<serde_json::Value>(&line)
-        .map_err(|error| format!("line {line_number}: {error}"))?;
-    let version = value
-        .get("schemaVersion")
-        .and_then(serde_json::Value::as_u64);
-    if version != Some(u64::from(RUN_ITEM_SCHEMA_VERSION)) {
-        return Err(format!(
-            "line {line_number}: unknown schema version {version:?}"
-        ));
-    }
-    serde_json::from_value(value).map_err(|error| format!("line {line_number}: {error}"))
+fn next_item(reader: &mut RunItemStreamReader) -> Result<Option<RunItemEnvelopeV1>, String> {
+    let record = reader.next_record().map_err(|error| error.to_string())?;
+    record.map(parse_record).transpose()
 }
 
 fn legacy_projection(run_id: &str) -> Result<RunProjectionRead> {

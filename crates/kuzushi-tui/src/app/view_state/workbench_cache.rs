@@ -27,6 +27,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use view_model_fragments::ViewModelFragmentCache;
 
+const MAX_PATH_CACHE_ENTRIES: usize = 128;
+const MAX_RUN_CACHE_ENTRIES: usize = 32;
+const MAX_LARGE_RUN_CACHE_ENTRIES: usize = 8;
+const MAX_LARGE_RUN_CACHE_BYTES: usize = kuzushi_core::MAX_RUN_ARTIFACT_READ_BYTES as usize;
+const MAX_FINDING_TRUTH_CACHE_ENTRIES: usize = 256;
+const MAX_STATUS_CACHE_ENTRIES: usize = 32;
+
 mod cache_entries;
 mod completion_values;
 mod finding_alias_cache;
@@ -406,6 +413,7 @@ impl WorkbenchCache {
         self.file_completion_values = None;
         self.bump_completion_generation();
         self.run_traces.clear();
+        self.run_projections.clear();
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
@@ -415,6 +423,48 @@ impl WorkbenchCache {
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
         self.clear_view_hydration_loading();
+    }
+
+    fn trim_large_run_caches(&mut self, keep: &LargeRunCacheKey) {
+        self.trim_large_run_caches_to(keep, MAX_LARGE_RUN_CACHE_BYTES);
+    }
+
+    fn trim_large_run_caches_to(&mut self, keep: &LargeRunCacheKey, max_bytes: usize) {
+        while self.large_run_cache_bytes() > max_bytes {
+            if !self.evict_large_run_cache_entry_except(keep) {
+                self.remove_large_run_cache_entry(keep);
+                break;
+            }
+        }
+    }
+
+    fn large_run_cache_bytes(&self) -> usize {
+        self.run_artifact_texts
+            .values()
+            .map(|entry| entry.bytes)
+            .chain(self.run_traces.values().map(|entry| entry.bytes))
+            .chain(self.run_projections.values().map(|entry| entry.bytes))
+            .fold(0, usize::saturating_add)
+    }
+
+    fn evict_large_run_cache_entry_except(&mut self, keep: &LargeRunCacheKey) -> bool {
+        evict_artifact_text_except(&mut self.run_artifact_texts, keep)
+            || evict_run_trace_except(&mut self.run_traces, keep)
+            || evict_run_projection_except(&mut self.run_projections, keep)
+    }
+
+    fn remove_large_run_cache_entry(&mut self, key: &LargeRunCacheKey) {
+        match key {
+            LargeRunCacheKey::Artifact(key) => {
+                self.run_artifact_texts.remove(key);
+            }
+            LargeRunCacheKey::Trace(key) => {
+                self.run_traces.remove(key);
+            }
+            LargeRunCacheKey::Projection(key) => {
+                self.run_projections.remove(key);
+            }
+        }
     }
 
     pub(crate) fn invalidate_json_file(&mut self, path: &Path) {
@@ -500,27 +550,63 @@ impl WorkbenchCache {
     }
 
     fn invalidate_run_caches(&mut self, roots: &StateArtifactRoots<'_>, path: &Path, broad: bool) {
-        invalidate_cached_trace(
-            &mut self.run_traces,
-            roots.target,
-            &roots.runs,
-            &path,
-            broad,
-        );
+        if broad || path == roots.runs {
+            self.invalidate_target_run_caches(roots.target);
+            return;
+        }
+        if let Some(run_id) = run_directory_identity(&roots.runs, path) {
+            self.invalidate_one_run_cache(roots.target, run_id);
+            return;
+        }
+        invalidate_cached_trace(&mut self.run_traces, roots.target, &roots.runs, &path);
         invalidate_cached_run_artifact_text(
             &mut self.run_artifact_texts,
             roots.target,
             &roots.runs,
             &path,
-            broad,
+        );
+        invalidate_cached_run_projection(
+            &mut self.run_projections,
+            roots.target,
+            &roots.runs,
+            path,
         );
         invalidate_cached_scan_stage_receipt(
             &mut self.scan_stage_receipts,
             roots.target,
             &roots.runs,
             &path,
-            broad,
         );
+    }
+
+    fn invalidate_target_run_caches(&mut self, target: &Path) {
+        self.run_traces
+            .retain(|(cached_target, _), _| cached_target != target);
+        self.run_projections
+            .retain(|(cached_target, _), _| cached_target != target);
+        self.run_artifact_texts
+            .retain(|(cached_target, _, _), _| cached_target != target);
+        self.scan_stage_receipts
+            .retain(|(cached_target, _), state| {
+                cached_target != target || scan_stage_receipt_is_settled(state)
+            });
+    }
+
+    fn invalidate_one_run_cache(&mut self, target: &Path, run_id: &str) {
+        let key = (target.to_path_buf(), run_id.to_string());
+        self.run_traces.remove(&key);
+        self.run_projections.remove(&key);
+        self.run_artifact_texts
+            .retain(|(cached_target, cached_run, _), _| {
+                cached_target != target || cached_run != run_id
+            });
+        if self
+            .scan_stage_receipts
+            .get(&key)
+            .is_some_and(|state| !scan_stage_receipt_is_settled(state))
+        {
+            self.scan_stage_receipts.remove(&key);
+        }
     }
 
     fn invalidate_state_root(&mut self, state_root: &Path) {
@@ -606,11 +692,13 @@ impl WorkbenchCache {
             return cache.state.clone();
         }
         let state = read_json_file(path);
-        self.json_files.insert(
+        insert_bounded(
+            &mut self.json_files,
             path.to_path_buf(),
             JsonFileCache {
                 state: state.clone(),
             },
+            MAX_PATH_CACHE_ENTRIES,
         );
         state
     }
@@ -627,12 +715,16 @@ impl WorkbenchCache {
             return cache.state.clone();
         }
         let state = kuzushi_core::read_run_artifact_text(target, run_id, leaf);
-        self.run_artifact_texts.insert(
-            key,
+        insert_bounded(
+            &mut self.run_artifact_texts,
+            key.clone(),
             RunArtifactTextCache {
+                bytes: run_artifact_text_bytes(&state),
                 state: state.clone(),
             },
+            MAX_LARGE_RUN_CACHE_ENTRIES,
         );
+        self.trim_large_run_caches(&LargeRunCacheKey::Artifact(key));
         state
     }
 
@@ -740,7 +832,7 @@ fn is_project_scope_tree_path(path: &Path) -> bool {
 }
 
 fn is_map_artifact_path(path: &Path) -> bool {
-    path.starts_with(".kuzushi/codeql-db")
+    path.starts_with(".kuzushi/v3/codeql-db")
         || matches!(
             path.to_str(),
             Some(
@@ -768,12 +860,7 @@ fn invalidate_cached_trace(
     target: &Path,
     runs_root: &Path,
     path: &Path,
-    broad: bool,
 ) {
-    if broad {
-        traces.retain(|(cached_target, _), _| cached_target != target);
-        return;
-    }
     let Some(run_id) = path
         .strip_prefix(runs_root)
         .ok()
@@ -790,21 +877,122 @@ fn invalidate_cached_trace(
     traces.remove(&(target.to_path_buf(), run_id.to_string()));
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LargeRunCacheKey {
+    Artifact((PathBuf, String, String)),
+    Trace((PathBuf, String)),
+    Projection((PathBuf, String)),
+}
+
+fn evict_artifact_text_except(
+    entries: &mut BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
+    keep: &LargeRunCacheKey,
+) -> bool {
+    let protected = match keep {
+        LargeRunCacheKey::Artifact(key) => Some(key),
+        _ => None,
+    };
+    let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
+    candidate.is_some_and(|key| entries.remove(&key).is_some())
+}
+
+fn evict_run_trace_except(
+    entries: &mut BTreeMap<(PathBuf, String), RunTraceCache>,
+    keep: &LargeRunCacheKey,
+) -> bool {
+    let protected = match keep {
+        LargeRunCacheKey::Trace(key) => Some(key),
+        _ => None,
+    };
+    let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
+    candidate.is_some_and(|key| entries.remove(&key).is_some())
+}
+
+fn evict_run_projection_except(
+    entries: &mut BTreeMap<(PathBuf, String), RunProjectionCache>,
+    keep: &LargeRunCacheKey,
+) -> bool {
+    let protected = match keep {
+        LargeRunCacheKey::Projection(key) => Some(key),
+        _ => None,
+    };
+    let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
+    candidate.is_some_and(|key| entries.remove(&key).is_some())
+}
+
+fn run_artifact_text_bytes(state: &kuzushi_core::RunArtifactTextRead) -> usize {
+    match state {
+        kuzushi_core::RunArtifactRead::Ready { value, .. } => value.len(),
+        kuzushi_core::RunArtifactRead::Unsafe { error }
+        | kuzushi_core::RunArtifactRead::Unreadable { error, .. } => error.len(),
+        _ => 1,
+    }
+}
+
+fn run_trace_bytes(state: &RunTraceCacheState) -> usize {
+    let RunTraceCacheState::Ready(read) = state else {
+        return 1;
+    };
+    read.steps
+        .iter()
+        .map(serialized_bytes)
+        .fold(0, usize::saturating_add)
+}
+
+fn run_projection_bytes(
+    state: &Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>,
+) -> usize {
+    match state {
+        Ok(read) => serialized_bytes(read),
+        Err(error) => error.len(),
+    }
+}
+
+fn serialized_bytes(value: &impl serde::Serialize) -> usize {
+    let mut counter = ByteCounter::default();
+    serde_json::to_writer(&mut counter, value).map_or(usize::MAX, |_| counter.bytes)
+}
+
+#[derive(Default)]
+struct ByteCounter {
+    bytes: usize,
+}
+
+impl std::io::Write for ByteCounter {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.bytes = self.bytes.saturating_add(buffer.len());
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn invalidate_cached_run_artifact_text(
     artifacts: &mut BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     target: &Path,
     runs_root: &Path,
     path: &Path,
-    broad: bool,
 ) {
-    if broad {
-        artifacts.retain(|(cached_target, _, _), _| cached_target != target);
-        return;
-    }
     let Some((run_id, leaf)) = run_artifact_identity(runs_root, path) else {
         return;
     };
     artifacts.remove(&(target.to_path_buf(), run_id.to_string(), leaf.to_string()));
+}
+
+fn invalidate_cached_run_projection(
+    projections: &mut BTreeMap<(PathBuf, String), RunProjectionCache>,
+    target: &Path,
+    runs_root: &Path,
+    path: &Path,
+) {
+    let Some((run_id, leaf)) = run_artifact_identity(runs_root, path) else {
+        return;
+    };
+    if leaf == "items.jsonl" {
+        projections.remove(&(target.to_path_buf(), run_id.to_string()));
+    }
 }
 
 fn invalidate_cached_scan_stage_receipt(
@@ -812,14 +1000,7 @@ fn invalidate_cached_scan_stage_receipt(
     target: &Path,
     runs_root: &Path,
     path: &Path,
-    broad: bool,
 ) {
-    if broad {
-        receipts.retain(|(cached_target, _), state| {
-            cached_target != target || scan_stage_receipt_is_settled(state)
-        });
-        return;
-    }
     let Some(run_id) = path
         .strip_prefix(runs_root)
         .ok()
@@ -857,6 +1038,22 @@ fn run_artifact_identity<'a>(runs_root: &Path, path: &'a Path) -> Option<(&'a st
     let run_id = components.next()?.as_os_str().to_str()?;
     let leaf = components.next()?.as_os_str().to_str()?;
     (components.next().is_none()).then_some((run_id, leaf))
+}
+
+fn run_directory_identity<'a>(runs_root: &Path, path: &'a Path) -> Option<&'a str> {
+    let mut components = path.strip_prefix(runs_root).ok()?.components();
+    let run_id = components.next()?.as_os_str().to_str()?;
+    components.next().is_none().then_some(run_id)
+}
+
+fn insert_bounded<K: Ord, V>(entries: &mut BTreeMap<K, V>, key: K, value: V, max_entries: usize) {
+    debug_assert!(max_entries > 0);
+    if !entries.contains_key(&key) {
+        while entries.len() >= max_entries {
+            entries.pop_first();
+        }
+    }
+    entries.insert(key, value);
 }
 
 #[derive(Debug)]

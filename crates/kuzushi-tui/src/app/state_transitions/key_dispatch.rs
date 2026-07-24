@@ -259,7 +259,11 @@ impl ShellApp {
     /// advertised.
     pub(crate) fn phase_result_target_phase(&self) -> Option<WorkflowPhase> {
         let page_phase = crate::ui_view_models::active_workbench_page(self).phase();
-        if self.engagement.unresolved_phase_attempt(page_phase).is_some() {
+        if self
+            .engagement
+            .unresolved_phase_attempt(page_phase)
+            .is_some()
+        {
             return Some(page_phase);
         }
         WorkflowPhase::ORDER

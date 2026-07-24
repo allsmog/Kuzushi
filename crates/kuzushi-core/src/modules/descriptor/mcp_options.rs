@@ -47,7 +47,7 @@ pub(in crate::modules) fn bridge_verbose_option() -> OptionSpec {
     opt(
         "bridgeVerbose",
         OptionType::Bool,
-        "Forward bridge and MCP child logs to stderr in real time.",
+        "Emit request-scoped, metadata-only bridge diagnostics to bridge stderr.",
     )
     .aliases(&["bridge_verbose"])
     .default(json!(false))
@@ -58,7 +58,7 @@ pub(in crate::modules) fn bridge_log_path_option() -> OptionSpec {
     opt(
         "bridgeLogPath",
         OptionType::Path,
-        "Append bridge and MCP child logs to this path.",
+        "Append request-scoped, metadata-only bridge diagnostics to this path.",
     )
     .aliases(&["bridge_log_path"])
     .external_write()

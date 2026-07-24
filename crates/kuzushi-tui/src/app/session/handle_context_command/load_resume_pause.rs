@@ -113,12 +113,18 @@ impl ShellApp {
     /// A run can be resumed when it ended without completing (failed,
     /// interrupted, or canceled) and recorded the tool + input it was
     /// dispatched with. Anything else is inspect-only.
-    fn resumable_run_invocation(&mut self, run_id: &str) -> anyhow::Result<Option<(String, String)>> {
+    fn resumable_run_invocation(
+        &mut self,
+        run_id: &str,
+    ) -> anyhow::Result<Option<(String, String)>> {
         let Some(target) = self.target_owned() else {
             anyhow::bail!("resume requires an active target. Next: target <path>");
         };
         let summary = kuzushi_core::run_artifacts::load_run_summary(&target, run_id)?;
-        let resumable = matches!(summary.status.as_str(), "failed" | "interrupted" | "canceled");
+        let resumable = matches!(
+            summary.status.as_str(),
+            "failed" | "interrupted" | "canceled"
+        );
         let Some(tool) = summary.tool.filter(|_| resumable) else {
             return Ok(None);
         };

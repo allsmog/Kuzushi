@@ -12,7 +12,7 @@ pub(super) fn is_nuget_lock(path: &Path) -> bool {
 
 pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     let source = relative_display(target, path);
@@ -27,7 +27,7 @@ pub(super) fn nuget_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDep
 
 pub(super) fn nuget_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&text).context("sbom-scan: parse packages.lock.json")?;
     Ok(value

@@ -167,8 +167,9 @@ mod tests {
         // through `source()` again made anyhow's alternate formatting print
         // the whole message twice, concatenated — the result-card "429 error
         // shown twice" bug.
-        let source =
-            anyhow::anyhow!("LangGraph bridge failed: Provider rate limited the request (HTTP 429).");
+        let source = anyhow::anyhow!(
+            "LangGraph bridge failed: Provider rate limited the request (HTTP 429)."
+        );
         let error = anyhow::Error::from(StructuredOutputError::from_source_and_cost(
             source,
             crate::runtime::RuntimeCostReport::UNAVAILABLE,

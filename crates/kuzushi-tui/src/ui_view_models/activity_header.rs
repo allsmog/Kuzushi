@@ -420,8 +420,16 @@ mod tests {
             0,
             Some(190),
         );
-        assert!(model.summary_title.contains("stage 2/4"), "{}", model.summary_title);
-        assert!(model.summary_title.contains("~3m10s left"), "{}", model.summary_title);
+        assert!(
+            model.summary_title.contains("stage 2/4"),
+            "{}",
+            model.summary_title
+        );
+        assert!(
+            model.summary_title.contains("~3m10s left"),
+            "{}",
+            model.summary_title
+        );
 
         let no_history = activity_header_model_with_queue(
             &session,
@@ -769,7 +777,10 @@ mod tests {
 
         assert_eq!(counts.total, 1);
         assert_eq!(counts.done, 1);
-        assert_eq!(counts.failing, 0, "prior run's failure leaked into the header");
+        assert_eq!(
+            counts.failing, 0,
+            "prior run's failure leaked into the header"
+        );
     }
 
     fn model_cost_step(n: usize, module: &str, verb: &str, cost: f64) -> RunTraceStep {

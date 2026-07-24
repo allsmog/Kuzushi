@@ -14824,7 +14824,10 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
 
     let mut live = load_persistent_threat_model(&target).unwrap();
     assert!(
-        live.as_object_mut().unwrap().remove("verification").is_some(),
+        live.as_object_mut()
+            .unwrap()
+            .remove("verification")
+            .is_some(),
         "threats use <n> re-verifies the restored document"
     );
     assert_eq!(live, original);
@@ -21042,7 +21045,11 @@ fn threat_tab_digits_yield_to_an_in_progress_composer_draft() {
         &mut app,
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
     );
-    assert_eq!(app.input(), "model 1", "draft typing must win over tab keys");
+    assert_eq!(
+        app.input(),
+        "model 1",
+        "draft typing must win over tab keys"
+    );
     assert_eq!(app.router.threat().view(), ThreatView::Stride);
 }
 

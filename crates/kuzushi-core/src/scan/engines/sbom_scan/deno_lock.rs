@@ -13,7 +13,7 @@ pub(super) fn is_deno_lock(path: &Path) -> bool {
 
 pub(super) fn deno_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse deno.lock")?;
     let source = relative_display(target, path);
     Ok(dependency_edges(&value)
@@ -28,7 +28,7 @@ pub(super) fn deno_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepe
 
 pub(super) fn deno_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse deno.lock")?;
     let source = relative_display(target, path);
     let mut components = package_components(target, path, "jsr", &source, value.get("jsr"));

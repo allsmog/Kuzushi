@@ -101,17 +101,27 @@ fn patch_finding_options() -> Vec<OptionSpec> {
             crate::remediation::patch::DEFAULT_PATCH_VALIDATION_TIMEOUT_MS
         ))
         .advanced(),
-        source_commit_binding_option(),
+        repository_source_commit_binding_option(),
+        repository_target_scope_binding_option(),
         model_option(),
         patch_prompt_option(),
     ]
 }
 
-fn source_commit_binding_option() -> OptionSpec {
+pub(in crate::modules) fn repository_source_commit_binding_option() -> OptionSpec {
     opt(
         crate::remediation::patch::PATCH_SOURCE_COMMIT_INPUT_KEY,
         OptionType::String,
         "Internal clean-source commit binding populated and verified by the registry.",
+    )
+    .advanced()
+}
+
+pub(in crate::modules) fn repository_target_scope_binding_option() -> OptionSpec {
+    opt(
+        crate::remediation::patch::REPOSITORY_TARGET_SCOPE_INPUT_KEY,
+        OptionType::String,
+        "Internal Git target-scope binding populated and verified by the registry.",
     )
     .advanced()
 }

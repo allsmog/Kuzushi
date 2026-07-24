@@ -1,18 +1,25 @@
+use super::super::stream_reader::{parse_record, RunItemStreamReader};
 use super::WriterState;
 use crate::run_lifecycle::{RunId, RunItemEnvelopeV1};
 use anyhow::{Context, Result};
-use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader};
+use std::fs::File;
 use std::path::Path;
 
 pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterState> {
     let run_id = RunId::parse(run_id)?;
     let directory = crate::run_artifacts::ensure_run_dir(target, run_id.as_str())?;
     record_stream_artifact(target, run_id.as_str())?;
-    let path = directory.join("items.jsonl");
     let lock = crate::file_lock::ExclusiveFileLock::acquire(&directory.join("items.lock"))?;
-    let (next_seq, previous_hash, bytes_written) = recover_tail(&path)?;
-    let file = open_append_file(&path)?;
+    let path = crate::run_artifacts::checked_run_artifact_path(
+        target,
+        run_id.as_str(),
+        "items.jsonl",
+    )?;
+    let file = crate::bounded_file::open_append_regular_file_within(target, &path)
+        .with_context(|| format!("open {}", path.display()))?;
+    let recovery_file = file.try_clone().context("clone run-item stream handle")?;
+    let (next_seq, previous_hash, bytes_written) =
+        recover_tail(target, &path, recovery_file)?;
     let state = WriterState {
         run_id,
         file,
@@ -36,28 +43,20 @@ fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn recover_tail(path: &Path) -> Result<(u64, Option<String>, u64)> {
-    let Some(file) = open_existing(path)? else {
-        return Ok((1, None, 0));
-    };
-    let bytes = file.metadata()?.len();
+fn recover_tail(root: &Path, path: &Path, file: File) -> Result<(u64, Option<String>, u64)> {
+    let mut reader = RunItemStreamReader::from_open_file_within(root, path, file)
+        .with_context(|| format!("open {}", path.display()))?;
     let mut next_seq = 1;
     let mut previous_hash = None;
-    for line in BufReader::new(file).lines() {
-        let envelope: RunItemEnvelopeV1 = serde_json::from_str(&line?)?;
+    while let Some(record) = reader.next_record()? {
+        let envelope = parse_record(record).map_err(anyhow::Error::msg)?;
         validate_recovered_envelope(&envelope, next_seq, &previous_hash)?;
         next_seq += 1;
         previous_hash = Some(envelope.event_hash);
     }
+    reader.verify_path_unchanged()?;
+    let bytes = reader.bytes_read();
     Ok((next_seq, previous_hash, bytes))
-}
-
-fn open_existing(path: &Path) -> Result<Option<File>> {
-    match File::open(path) {
-        Ok(file) => Ok(Some(file)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).with_context(|| format!("open {}", path.display())),
-    }
 }
 
 fn validate_recovered_envelope(
@@ -77,25 +76,58 @@ fn validate_recovered_envelope(
     Ok(())
 }
 
-#[cfg(unix)]
-fn open_append_file(path: &Path) -> Result<File> {
-    use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .mode(0o600)
-        .custom_flags(libc::O_CLOEXEC | libc::O_NOFOLLOW)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
 
-#[cfg(not(unix))]
-fn open_append_file(path: &Path) -> Result<File> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .read(true)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))
+    #[cfg(unix)]
+    #[test]
+    fn recovered_writer_handle_cannot_be_redirected_to_a_replacement_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("items.jsonl");
+        let displaced = temp.path().join("original.jsonl");
+        let mut writer = crate::bounded_file::open_append_regular_file_within(temp.path(), &path)
+            .unwrap();
+        let recovery = writer.try_clone().unwrap();
+        assert_eq!(
+            recover_tail(temp.path(), &path, recovery).unwrap(),
+            (1, None, 0)
+        );
+
+        std::fs::rename(&path, &displaced).unwrap();
+        std::fs::write(&path, b"replacement\n").unwrap();
+        writer.write_all(b"retained handle\n").unwrap();
+        writer.sync_data().unwrap();
+
+        assert_eq!(std::fs::read(&path).unwrap(), b"replacement\n");
+        assert_eq!(std::fs::read(&displaced).unwrap(), b"retained handle\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rooted_append_rejects_parent_replaced_after_path_validation() {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".kuzushi/v3/runs/run-1");
+        let displaced = temp.path().join("displaced-run");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let checked = crate::run_artifacts::checked_run_artifact_path(
+            temp.path(),
+            "run-1",
+            "items.jsonl",
+        )
+        .unwrap();
+
+        std::fs::rename(&run_dir, &displaced).unwrap();
+        symlink(&outside, &run_dir).unwrap();
+
+        let error = crate::bounded_file::open_append_regular_file_within(temp.path(), &checked)
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(!outside.join("items.jsonl").exists());
+    }
 }

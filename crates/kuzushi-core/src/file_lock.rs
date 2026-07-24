@@ -13,6 +13,12 @@ pub(crate) struct ExclusiveFileLock {
     _file: File,
 }
 
+impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
+
 impl ExclusiveFileLock {
     pub(crate) fn acquire(path: &Path) -> Result<Self> {
         let file = prepared_lock_file(path)?;
@@ -144,7 +150,7 @@ pub(crate) fn windows_file_identity(file: &File) -> std::io::Result<WindowsFileI
 }
 
 #[cfg(windows)]
-fn windows_final_path(file: &File) -> std::io::Result<std::path::PathBuf> {
+pub(crate) fn windows_final_path(file: &File) -> std::io::Result<std::path::PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::OsStringExt;
     use std::os::windows::io::AsRawHandle;

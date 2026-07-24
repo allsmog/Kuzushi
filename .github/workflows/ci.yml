@@ -57,17 +57,18 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # The CRAP-risk gate diffs HEAD^..HEAD on clean checkouts; a depth-1
-          # clone has no HEAD^ and the gate now fails loudly instead of
-          # silently checking 0 files.
-          fetch-depth: 2
+          # The risk gate covers the complete PR/push range, not only HEAD^.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm quality:crap-risk
+      - name: Check CRAP risk across the complete change
+        env:
+          KUZUSHI_CRAP_RISK_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm quality:crap-risk
       - run: pnpm quality:identity
       - run: pnpm quality:architecture
       - run: pnpm quality:model-safety

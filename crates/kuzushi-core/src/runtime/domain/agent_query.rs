@@ -86,7 +86,7 @@ impl AgentQueryRequest {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRuntimeOptions {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -97,6 +97,10 @@ pub struct AgentRuntimeOptions {
     pub bridge_verbose: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge_log_path: Option<String>,
+    /// Retrospective stop checked after each model receipt. This cannot
+    /// prevent the turn that crosses the threshold from spending money.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observed_spend_stop_usd: Option<f64>,
 }
 
 impl AgentRuntimeOptions {
@@ -105,6 +109,7 @@ impl AgentRuntimeOptions {
             && self.mcp_tool_timeout_ms.is_none()
             && self.bridge_verbose.is_none()
             && self.bridge_log_path.is_none()
+            && self.observed_spend_stop_usd.is_none()
     }
 }
 
@@ -190,6 +195,11 @@ pub struct McpAttachment {
     /// source tree directly.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub artifact_path: String,
+    /// Authenticated identity of the artifact at attachment-planning time.
+    /// Artifact-backed MCP servers may use this value to reject work when
+    /// the artifact changes between planning and execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_identity: Option<String>,
 }
 
 impl McpAttachment {
@@ -197,13 +207,20 @@ impl McpAttachment {
         Self {
             name: name.into(),
             artifact_path: artifact_path.into(),
+            artifact_identity: None,
         }
+    }
+
+    pub fn with_artifact_identity(mut self, identity: impl Into<String>) -> Self {
+        self.artifact_identity = Some(identity.into());
+        self
     }
 
     pub fn constant(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             artifact_path: String::new(),
+            artifact_identity: None,
         }
     }
 }

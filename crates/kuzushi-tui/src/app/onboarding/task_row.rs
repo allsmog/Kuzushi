@@ -171,8 +171,7 @@ fn last_attempt(
 
 fn failed_attempt(target: &Path, row: &PlanningTaskRow, run_id: &str) -> LastAttempt {
     let continuation = kuzushi_core::modules::tool_continuation(row.tool_name);
-    let coordinates =
-        kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id);
+    let coordinates = kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id);
     let resumable = continuation.is_continuable()
         && (coordinates.is_some()
             || matches!(
@@ -187,11 +186,7 @@ fn failed_attempt(target: &Path, row: &PlanningTaskRow, run_id: &str) -> LastAtt
 
 /// The live threat model's real methodology + ledger version, so the picker
 /// says "cached · stride v4" instead of guessing from the row that built it.
-fn cached_row_detail(
-    task: PlanningTaskId,
-    target: &Path,
-    state: ArtifactState,
-) -> Option<String> {
+fn cached_row_detail(task: PlanningTaskId, target: &Path, state: ArtifactState) -> Option<String> {
     if task != PlanningTaskId::BuildThreatModel || state != ArtifactState::Cached {
         return None;
     }

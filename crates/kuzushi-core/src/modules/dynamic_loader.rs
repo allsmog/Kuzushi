@@ -881,6 +881,11 @@ fn ensure_node_network_permission_boundary() -> Result<()> {
         .map_err(anyhow::Error::msg)
 }
 
+#[cfg(test)]
+pub(crate) fn kwp_node_execution_available() -> bool {
+    ensure_node_network_permission_boundary().is_ok()
+}
+
 fn check_node_network_permission_boundary() -> std::result::Result<(), String> {
     let help_output = Command::new("node")
         .arg("--help")
@@ -1580,6 +1585,42 @@ mod dynamic_loader_tests {
         assert!(retired_builtin_module_id("smoke"));
         assert!(retired_builtin_module_id("pwn"));
         assert!(!retired_builtin_module_id("third-party-module"));
+    }
+
+    #[test]
+    fn approved_worker_snapshot_path_remains_bound_after_source_changes() {
+        let source = tempfile::tempdir().unwrap();
+        let entry = source.path().join("worker.mjs");
+        fs::write(&entry, "export const version = 1;\n").unwrap();
+        let specifier = entry.display().to_string();
+        let resolved = resolve_file_worker_bundle(&specifier).unwrap();
+        let approval = LockfileEntry {
+            module_id: crate::worker_protocol::ModuleId("snapshot-test".to_string()),
+            digest: resolved.digest.clone(),
+            version: "1.0.0".to_string(),
+            descriptor_hash: "sha256:test-descriptor".to_string(),
+            grant: Grant::default(),
+            signature_chain: Vec::new(),
+            revoked: false,
+        };
+        let (_snapshot, staged) = snapshot_worker_bundle(&resolved).unwrap();
+        let verified = verified_module_from_snapshot(&resolved, staged, &approval);
+
+        fs::write(&entry, "export const version = 2;\n").unwrap();
+
+        let changed = ensure_verified_bundle_is_current(&specifier, &verified)
+            .unwrap_err()
+            .to_string();
+        assert!(changed.contains("changed after approval"), "{changed}");
+        ensure_verified_snapshot_is_current(&verified).unwrap();
+        assert_eq!(
+            PathBuf::from(worker_import_path(&specifier, &verified)),
+            verified.module_root.join(&verified.entry)
+        );
+        assert_ne!(
+            PathBuf::from(worker_import_path(&specifier, &verified)),
+            entry
+        );
     }
 
     #[test]

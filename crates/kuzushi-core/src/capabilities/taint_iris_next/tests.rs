@@ -105,9 +105,64 @@ mod tests {
             "joern",
             Path::new("/nonexistent"),
             &["typescript".to_string()],
-        );
+        )
+        .unwrap();
         assert_eq!(choice.selected, "cpg-rs");
         assert!(choice.warnings.iter().any(|w| w.contains("retired")));
+    }
+
+    #[test]
+    fn explicit_codeql_backend_rejects_malformed_managed_provenance() {
+        let temp = tempdir().unwrap();
+        let database = crate::workspace::workspace_codeql_db_path(temp.path());
+        fs::create_dir_all(database.join("db-cpp")).unwrap();
+        fs::write(
+            database.join("codeql-database.yml"),
+            "primaryLanguage: cpp\n",
+        )
+        .unwrap();
+        fs::write(database.join(".kuzushi-provenance.json"), "{not-json\n").unwrap();
+        let options = TaintIrisNextInput::from_tool_input(&json!({
+            "mode": "plan",
+            "backend": "codeql"
+        }))
+        .unwrap();
+
+        let error = build_taint_iris_next_plan(temp.path(), options).unwrap_err();
+        let error = format!("{error:#}");
+
+        assert!(error.contains("invalid CodeQL provenance"), "{error}");
+        assert!(error.contains("run `codeql:create-db` again"), "{error}");
+        assert!(
+            !error.contains("no existing CodeQL DB was found"),
+            "{error}"
+        );
+        assert!(!error.contains("Using structural evidence"), "{error}");
+    }
+
+    #[test]
+    fn automatic_backend_rejects_stale_managed_codeql_provenance() {
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            "const sql = req.query.sql;\ndb.query(sql);\n",
+        )
+        .unwrap();
+        run_taint_iris_next_test_git(temp.path(), &["add", "src/routes.ts"]);
+        run_taint_iris_next_test_git(temp.path(), &["commit", "-qm", "change source"]);
+        let options = TaintIrisNextInput::from_tool_input(&json!({
+            "mode": "plan",
+            "backend": "auto"
+        }))
+        .unwrap();
+
+        let error = build_taint_iris_next_plan(temp.path(), options)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("built for commit"), "{error}");
+        assert!(error.contains("run `codeql:create-db` again"), "{error}");
     }
 
     /// Cost the test runtime reports for every query — exercises the cost
@@ -188,6 +243,7 @@ mod tests {
             "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
         )
         .unwrap();
+        initialize_taint_iris_next_test_repository(root);
         stub_taint_iris_next_mcp_artifacts(root);
     }
 
@@ -201,13 +257,35 @@ mod tests {
     fn stub_taint_iris_next_mcp_artifacts(root: &Path) {
         let kuzushi = root.join(".kuzushi");
         fs::create_dir_all(&kuzushi).unwrap();
-        let db = kuzushi.join("codeql-db");
-        fs::create_dir_all(&db).unwrap();
+        let db = crate::workspace::workspace_codeql_db_path(root);
+        fs::create_dir_all(db.join("db-javascript")).unwrap();
         fs::write(
             db.join("codeql-database.yml"),
             "primaryLanguage: javascript\n",
         )
         .unwrap();
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &db,
+            root,
+            "javascript",
+        );
+    }
+
+    fn initialize_taint_iris_next_test_repository(root: &Path) {
+        run_taint_iris_next_test_git(root, &["init", "-q"]);
+        run_taint_iris_next_test_git(root, &["add", "package.json", "src"]);
+        run_taint_iris_next_test_git(root, &["commit", "-qm", "taint fixture"]);
+    }
+
+    fn run_taint_iris_next_test_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.email=test@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(args)
+            .current_dir(root)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
     }
 
     fn evidence_row(cwe: &str, evidence_level: &str) -> TaintIrisNextEvidence {
@@ -441,8 +519,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -493,16 +571,12 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: Some(&trace),
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
-        run_taint_iris_next_report(
-            &json!({"mode": "plan", "maxCatalogEntries": 1}),
-            &ctx,
-            None,
-        )
-        .unwrap();
+        run_taint_iris_next_report(&json!({"mode": "plan", "maxCatalogEntries": 1}), &ctx, None)
+            .unwrap();
 
         let steps = sink.steps.lock().unwrap();
         let labels = steps
@@ -539,8 +613,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = ModuleRegistry::with_v2_builtins()
@@ -577,8 +651,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -666,8 +740,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let err = run_taint_iris_next_report(
@@ -925,8 +999,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = run_taint_iris_next_report(
@@ -1197,8 +1271,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: Some(&store),
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
         let result = run_taint_iris_next_report(
             &json!({

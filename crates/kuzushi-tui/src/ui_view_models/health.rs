@@ -334,6 +334,7 @@ fn cpg_graph_row(app: &ShellApp) -> HealthRow {
 fn existing_codeql_db(app: &ShellApp, target: &Path) -> Option<PathBuf> {
     [
         kuzushi_core::workspace_codeql_db_path(target),
+        kuzushi_core::legacy_workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
     ]
     .into_iter()

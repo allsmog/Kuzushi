@@ -62,7 +62,11 @@ fn traced_taint_iris_next_evidence(
     parent_step: Option<usize>,
     plan: &TaintIrisNextPlan,
 ) -> Result<TaintIrisNextEvidenceResult> {
-    emit_taint_iris_next_progress(ctx, parent_step, "evidence · collect source/sink candidates");
+    emit_taint_iris_next_progress(
+        ctx,
+        parent_step,
+        "evidence · collect source/sink candidates",
+    );
     let evidence = extract_taint_iris_next_evidence(plan)?;
     emit_taint_iris_next_progress(
         ctx,
@@ -225,7 +229,11 @@ fn begin_taint_iris_next_agent_scope(
     };
     let phase = trace
         .child(parent)
-        .step("reasoning", "hunt", "source-discovery · sink-discovery · taint-trace")
+        .step(
+            "reasoning",
+            "hunt",
+            "source-discovery · sink-discovery · taint-trace",
+        )
         .emit();
     Some(trace.parent_scope(phase))
 }
@@ -332,7 +340,7 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_polic
     if !mcps_enabled {
         return Ok(policy);
     }
-    let policy = policy.with_mcps_for_target(target);
+    let policy = policy.try_with_mcps_for_target(target)?;
     ensure_required_mcps(&policy, target, required_mcps_for_backend(selected_backend))?;
     Ok(policy)
 }
@@ -347,11 +355,7 @@ fn required_mcps_for_backend(selected_backend: &str) -> &'static [&'static str] 
     }
 }
 
-fn ensure_required_mcps(
-    policy: &AgentToolPolicy,
-    target: &Path,
-    required: &[&str],
-) -> Result<()> {
+fn ensure_required_mcps(policy: &AgentToolPolicy, target: &Path, required: &[&str]) -> Result<()> {
     let mut missing = Vec::new();
     for name in required {
         if !crate::runtime::plan_contains(&policy.mcps_attached, name) {
@@ -376,7 +380,7 @@ fn ensure_required_mcps(
 fn missing_mcp_hint(name: &str, target: &Path) -> String {
     match name {
         "codeql" => format!(
-            "- codeql (.kuzushi/codeql-db/)          missing -> run `codeql:create-db` on {}",
+            "- codeql (.kuzushi/v3/codeql-db/)       missing -> run `codeql:create-db` on {}",
             target.display()
         ),
         other => format!("- {other:>17} missing"),

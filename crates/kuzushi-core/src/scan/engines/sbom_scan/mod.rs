@@ -1,8 +1,10 @@
 use crate::scan::ScanCancellation;
-use anyhow::{Context, Result};
+use super::bounded_regular_files::{
+    collect_regular_files, FileLimitBehavior, RegularFileWalkOptions,
+};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::read_dir;
 use std::path::{Path, PathBuf};
 
 #[cfg(test)]
@@ -79,16 +81,25 @@ mod bounded_fs {
     use std::io;
     use std::path::Path;
 
-    pub(super) use std::fs::read_dir;
-
     const MAX_SBOM_INPUT_BYTES: usize = 64 * 1024 * 1024;
 
-    pub(super) fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-        crate::bounded_file::read_utf8_text(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    pub(super) fn read_to_string(
+        target: &Path,
+        path: impl AsRef<Path>,
+    ) -> io::Result<String> {
+        crate::bounded_file::read_utf8_text_within(
+            target,
+            path.as_ref(),
+            MAX_SBOM_INPUT_BYTES,
+        )
     }
 
-    pub(super) fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-        crate::bounded_file::read_regular_bytes(path.as_ref(), MAX_SBOM_INPUT_BYTES)
+    pub(super) fn read(target: &Path, path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+        crate::bounded_file::read_regular_bytes_within(
+            target,
+            path.as_ref(),
+            MAX_SBOM_INPUT_BYTES,
+        )
     }
 }
 
@@ -131,10 +142,14 @@ pub struct SbomLockfile {
 
 pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomScanReport> {
     target::ensure_directory(target)?;
-    let mut manifests = Vec::new();
-    collect_manifests(target, &mut manifests, cancellation)?;
-    let lockfiles = collect_lockfiles(target, cancellation)?;
-    let dependencies = collect_dependency_edges(target, cancellation)?;
+    let files = collect_regular_files(target, cancellation, sbom_walk_options())?.files;
+    ensure_scan_active(cancellation)?;
+    let manifests = collect_manifests(&files);
+    ensure_scan_active(cancellation)?;
+    let lockfiles = collect_lockfiles(target, &files)?;
+    ensure_scan_active(cancellation)?;
+    let dependencies = collect_dependency_edges(target, &files)?;
+    ensure_scan_active(cancellation)?;
     let mut components = manifests
         .iter()
         .map(|path| manifest::manifest_components(target, path))
@@ -142,7 +157,8 @@ pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomS
         .into_iter()
         .flatten()
         .collect::<Vec<_>>();
-    components.extend(collect_lockfile_components(target, cancellation)?);
+    ensure_scan_active(cancellation)?;
+    components.extend(collect_lockfile_components(target, &files)?);
     components.sort_by_key(report::component_sort_key);
     components.dedup();
     Ok(SbomScanReport {
@@ -155,26 +171,29 @@ pub fn scan_sbom(target: &Path, cancellation: &ScanCancellation) -> Result<SbomS
     })
 }
 
-fn collect_manifests(
-    dir: &Path,
-    manifests: &mut Vec<PathBuf>,
-    cancellation: &ScanCancellation,
-) -> Result<()> {
-    if cancellation.is_cancelled() {
-        anyhow::bail!("sbom-scan scan cancelled");
-    }
-    for entry in read_dir(dir).with_context(|| format!("sbom-scan: read {}", dir.display()))? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let path = entry.path();
-        if file_type.is_dir() && !target::ignored_dir(&path) {
-            collect_manifests(&path, manifests, cancellation)?;
-        } else if file_type.is_file() && manifest::is_dependency_manifest(&path) {
-            manifests.push(path);
-        }
-    }
-    manifests.sort();
+fn ensure_scan_active(cancellation: &ScanCancellation) -> Result<()> {
+    cancellation.wait_if_paused();
+    anyhow::ensure!(!cancellation.is_cancelled(), "sbom-scan scan cancelled");
     Ok(())
+}
+
+fn sbom_walk_options() -> RegularFileWalkOptions {
+    RegularFileWalkOptions {
+        operation: "sbom-scan",
+        max_entries: 100_000,
+        max_files: 50_000,
+        max_depth: 64,
+        file_limit: FileLimitBehavior::Error,
+        ignored_dir: target::ignored_dir,
+    }
+}
+
+fn collect_manifests(files: &[PathBuf]) -> Vec<PathBuf> {
+    files
+        .iter()
+        .filter(|path| manifest::is_dependency_manifest(path))
+        .cloned()
+        .collect()
 }
 
 pub(super) fn component(

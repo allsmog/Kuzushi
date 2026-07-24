@@ -11,14 +11,14 @@ pub(super) fn is_gemfile_lock(path: &Path) -> bool {
 
 pub(super) fn gemfile_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let source = relative_display(target, path);
     Ok(GemfileLockParser::new(&source).parse(&text))
 }
 
 pub(super) fn gemfile_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(text
         .lines()
         .filter_map(|line| spec_component(target, path, line))

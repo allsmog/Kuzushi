@@ -6,6 +6,8 @@ use std::fs::{File, Metadata};
 use std::path::{Path, PathBuf};
 #[cfg(any(unix, windows))]
 use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::OnceLock;
 use std::time::UNIX_EPOCH;
 
 #[cfg(windows)]
@@ -21,6 +23,8 @@ pub(super) struct ReadRoot {
     directory: Arc<File>,
     #[cfg(windows)]
     directory_identity: windows::WindowsFileIdentity,
+    #[cfg(windows)]
+    open_by_file_id_support: Arc<OnceLock<Result<(), String>>>,
 }
 
 impl Clone for ReadRoot {
@@ -34,6 +38,8 @@ impl Clone for ReadRoot {
             directory: Arc::clone(&self.directory),
             #[cfg(windows)]
             directory_identity: self.directory_identity,
+            #[cfg(windows)]
+            open_by_file_id_support: Arc::clone(&self.open_by_file_id_support),
         }
     }
 }
@@ -67,6 +73,8 @@ impl ReadRoot {
             directory,
             #[cfg(windows)]
             directory_identity,
+            #[cfg(windows)]
+            open_by_file_id_support: Arc::new(OnceLock::new()),
         })
     }
 
@@ -75,6 +83,18 @@ impl ReadRoot {
         self.directory
             .try_clone()
             .context("could not clone retained MCP read-root handle")
+    }
+
+    #[cfg(windows)]
+    pub(super) fn ensure_open_by_file_id_supported(&self) -> Result<()> {
+        let support = self.open_by_file_id_support.get_or_init(|| {
+            windows::ensure_open_by_file_id_supported(&self.directory)
+                .map_err(|error| format!("{error:#}"))
+        });
+        match support {
+            Ok(()) => Ok(()),
+            Err(message) => anyhow::bail!(message.clone()),
+        }
     }
 }
 

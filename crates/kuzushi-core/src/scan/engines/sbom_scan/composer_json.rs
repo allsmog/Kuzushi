@@ -26,7 +26,7 @@ pub(super) fn is_composer_json(path: &Path) -> bool {
 
 pub(super) fn composer_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value = serde_json::from_str(&text).context("sbom-scan: parse composer.json")?;
     let source = relative_display(target, path);
     Ok(COMPOSER_DEPENDENCY_SCOPES

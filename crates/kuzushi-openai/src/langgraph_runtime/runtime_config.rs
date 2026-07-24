@@ -1,6 +1,7 @@
 use anyhow::Result;
 use kuzushi_core::{RuntimeConfig, ScanCancellation, V2Config};
 use std::path::Path;
+use std::path::PathBuf;
 
 use super::bridge_process::default_langgraph_bridge_command;
 
@@ -11,6 +12,8 @@ pub struct LangGraphRuntime {
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: Option<String>,
     pub(crate) thinking_level: Option<String>,
+    pub(crate) oauth_credentials_path: PathBuf,
+    pub(crate) oauth_allow_env_token: bool,
     pub(crate) cancellation: Option<ScanCancellation>,
     pub(crate) retry: BridgeRetryPolicy,
 }
@@ -84,6 +87,8 @@ impl LangGraphRuntime {
         let api_key = std::env::var(&runtime.api_key_env)
             .ok()
             .filter(|value| !value.trim().is_empty());
+        let oauth = runtime.anthropic_oauth.clone().unwrap_or_default();
+        let oauth_credentials_path = crate::oauth::resolve_credentials_path(&oauth)?;
 
         Ok(Self {
             command,
@@ -95,6 +100,8 @@ impl LangGraphRuntime {
                 .clone()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            oauth_credentials_path,
+            oauth_allow_env_token: oauth.allow_env_token,
             cancellation: None,
             retry: BridgeRetryPolicy::from_runtime_config(runtime),
         })

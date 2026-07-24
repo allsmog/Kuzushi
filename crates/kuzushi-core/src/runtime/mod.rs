@@ -28,8 +28,8 @@ pub use domain::{
     DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE, REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use mcp_probe::{
-    mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,
-    MCP_CONSTANT_NAMES,
+    mcp_attachment_plan_for_target, plan_contains, try_mcp_attachment_plan_for_target,
+    McpArtifactSpec, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,
 };
 pub use policy::{
     bridge_api_key_env_for_model, canonical_model_spec, require_configured_model,

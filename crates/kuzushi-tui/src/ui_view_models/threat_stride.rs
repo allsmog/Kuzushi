@@ -145,7 +145,10 @@ fn row_for_category(category: StrideCategory, threats: &[serde_json::Value]) -> 
         matching.len(),
         String::new(),
     );
-    row.members = matching.iter().map(|threat| stride_member(threat)).collect();
+    row.members = matching
+        .iter()
+        .map(|threat| stride_member(threat))
+        .collect();
     row
 }
 

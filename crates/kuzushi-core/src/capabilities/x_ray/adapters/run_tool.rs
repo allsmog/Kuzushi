@@ -19,12 +19,7 @@ pub(crate) fn run_x_ray(
     let content = crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
         runtime,
-        AgentQueryRequest::new(
-            input.model.clone(),
-            input.target.clone(),
-            input.system_prompt.clone(),
-            prompt,
-        ),
+        x_ray_agent_request(&input, prompt),
         StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),
         XRayArtifactContent::from_value_owned,
     )?
@@ -32,6 +27,22 @@ pub(crate) fn run_x_ray(
     drop(_agent_scope);
     let cost = content.cost_report()?;
     finish_x_ray_run(&input, ctx, parent_step, content.value, cost)
+}
+
+fn x_ray_agent_request(input: &XRayRunInput, prompt: String) -> AgentQueryRequest {
+    let request = AgentQueryRequest::new(
+        input.model.clone(),
+        input.target.clone(),
+        input.system_prompt.clone(),
+        prompt,
+    );
+    let Some(stop_usd) = input.max_budget_usd else {
+        return request;
+    };
+    request.with_runtime_options(crate::runtime::AgentRuntimeOptions {
+        observed_spend_stop_usd: Some(stop_usd),
+        ..Default::default()
+    })
 }
 
 pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {

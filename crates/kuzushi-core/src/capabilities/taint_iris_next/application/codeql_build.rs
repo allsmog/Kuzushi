@@ -1,5 +1,5 @@
 use super::*;
-use std::process::Command;
+use std::time::Duration;
 
 /// Result of running the `taint-iris-next:codeql-db` tool. A success carries
 /// the path of the newly-built DB so the hunt can pick it up.
@@ -90,7 +90,7 @@ struct CodeqlBuildPlan {
 }
 
 /// Drive an LLM-picked build, wrap it in `codeql database create`, and
-/// produce a CodeQL DB at `<target>/.kuzushi/codeql-db` that the
+/// produce a CodeQL DB at `<target>/.kuzushi/v3/codeql-db` that the
 /// `codeql` backend can immediately consume. This removes the manual
 /// `./configure && make` step from the operator's path: the agent reads
 /// the codebase and decides what command extracts C/C++ facts (or
@@ -103,36 +103,86 @@ pub(crate) fn run_codeql_build_report(
     let target = resolve_codeql_build_target(input, ctx)?;
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
-    let system_prompt = optional_taint_next_string(
-        input,
-        &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"],
-    )?
-    .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string());
-    let launcher = require_codeql_launcher()?;
+    let system_prompt = codeql_build_system_prompt(input)?;
+    let launcher = crate::codeql_repository_execution::prepared_codeql_launcher(input)?;
+    anyhow::ensure!(
+        !matches!(
+            launcher,
+            crate::codeql_repository_execution::PreparedCodeqlLauncher::Unavailable
+        ),
+        "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
+    );
+    let db_path = prepare_codeql_db_path(&target)?;
+    let binding = crate::remediation::patch::repository_source_binding(input)?;
+    let timeout = codeql_build_timeout(input)?;
+    let execution = crate::codeql_repository_execution::CodeqlRepositoryExecution::prepare(
+        crate::codeql_repository_execution::CodeqlRepositoryRequest {
+            source_root: &target,
+            binding,
+            destination: &db_path,
+            launcher,
+            cancellation: ctx.cancellation,
+            timeout,
+        },
+    )?;
+    let built = execution.with_bound_target(|bound_target| {
+        plan_and_execute_codeql_build(&execution, bound_target, runtime, model, system_prompt)
+    })?;
+    Ok(completed_codeql_build_report(&target, &db_path, built))
+}
+
+fn completed_codeql_build_report(
+    target: &Path,
+    db_path: &Path,
+    built: BoundCodeqlBuild,
+) -> CodeqlBuildReport {
+    let ok = built.output.status.success() && db_built(&db_path);
+    let details = codeql_build_details(
+        built.language,
+        built.build_command,
+        built.build_mode,
+        &built.output,
+    );
+    codeql_build_report(target, db_path, details, built.cost, ok)
+}
+
+fn codeql_build_system_prompt(input: &Value) -> Result<String> {
+    Ok(
+        optional_taint_next_string(input, &["TAINT_IRIS_NEXT_CODEQL_BUILD_PROMPT"])?
+            .unwrap_or_else(|| TAINT_IRIS_NEXT_CODEQL_BUILD_SYSTEM_PROMPT.to_string()),
+    )
+}
+
+struct BoundCodeqlBuild {
+    language: String,
+    build_command: String,
+    build_mode: String,
+    output: std::process::Output,
+    cost: RuntimeCostReport,
+}
+
+fn plan_and_execute_codeql_build(
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
+    runtime: &dyn AgentRuntime,
+    model: String,
+    system_prompt: String,
+) -> Result<BoundCodeqlBuild> {
     let (detected_languages, response) =
-        request_codeql_build_plan(runtime, model, &target, system_prompt)?;
+        request_codeql_build_plan(runtime, model, bound_target, system_prompt)?;
     let cost = response.checked_cost_report()?;
     let plan = decode_codeql_build_plan(&response)?;
     let language = resolved_codeql_language(&plan, &detected_languages);
     let build_mode = resolved_codeql_build_mode(&plan, &language);
-    let db_path = prepare_codeql_db_path(&target)?;
     let (build_command, output) =
-        execute_codeql_build(&launcher, &target, &db_path, &language, &build_mode, &plan)?;
-    let stderr_excerpt = codeql_stderr_excerpt(&output.stderr);
-    let ok = output.status.success() && db_built(&db_path);
-    if !ok {
-        clear_codeql_db_path(&target, &db_path)?;
-    }
-    let details = CodeqlBuildDetails {
+        execute_codeql_build(execution, bound_target, &language, &build_mode, &plan)?;
+    Ok(BoundCodeqlBuild {
         language,
         build_command,
         build_mode,
-        stderr_excerpt,
-        status: output.status,
-    };
-    Ok(codeql_build_report(
-        &target, &db_path, details, cost, ok,
-    ))
+        output,
+        cost,
+    })
 }
 
 struct CodeqlBuildDetails {
@@ -141,6 +191,21 @@ struct CodeqlBuildDetails {
     build_mode: String,
     stderr_excerpt: String,
     status: std::process::ExitStatus,
+}
+
+fn codeql_build_details(
+    language: String,
+    build_command: String,
+    build_mode: String,
+    output: &std::process::Output,
+) -> CodeqlBuildDetails {
+    CodeqlBuildDetails {
+        language,
+        build_command,
+        build_mode,
+        stderr_excerpt: codeql_stderr_excerpt(&output.stderr),
+        status: output.status,
+    }
 }
 
 fn codeql_build_report(
@@ -184,23 +249,44 @@ fn request_codeql_build_plan(
 }
 
 fn execute_codeql_build(
-    launcher: &Path,
-    target: &Path,
-    db_path: &Path,
+    execution: &crate::codeql_repository_execution::CodeqlRepositoryExecution<'_>,
+    bound_target: &Path,
     language: &str,
     build_mode: &str,
     plan: &CodeqlBuildPlan,
 ) -> Result<(String, std::process::Output)> {
-    let mut command = codeql_database_create_command(launcher, db_path, target, language);
-    let build_command = attach_codeql_build_strategy(&mut command, target, plan, build_mode)?;
-    let output =
-        run_codeql_create_command(command, launcher).map_err(
-            |error| match clear_codeql_db_path(target, db_path) {
-                Ok(()) => error,
-                Err(cleanup) => cleanup.context(error),
-            },
-        )?;
+    let (build_command, strategy) = isolated_codeql_strategy(plan, build_mode);
+    let output = execution.build(bound_target, language, strategy)?;
     Ok((build_command, output))
+}
+
+fn isolated_codeql_strategy<'a>(
+    plan: &'a CodeqlBuildPlan,
+    build_mode: &'a str,
+) -> (
+    String,
+    crate::codeql_repository_execution::CodeqlBuildStrategy<'a>,
+) {
+    if build_mode == "none" {
+        return (
+            String::new(),
+            crate::codeql_repository_execution::CodeqlBuildStrategy::BuildMode("none"),
+        );
+    }
+    let command = codeql_build_command(plan);
+    let strategy =
+        crate::codeql_repository_execution::CodeqlBuildStrategy::Manual(plan.build_command.trim());
+    (command, strategy)
+}
+
+fn codeql_build_timeout(input: &Value) -> Result<Duration> {
+    crate::bounded_subprocess::timeout_from_input(
+        input,
+        &["timeoutMs", "timeout_ms"],
+        crate::codeql_repository_execution::DEFAULT_CODEQL_REPOSITORY_TIMEOUT_MS,
+        crate::codeql_repository_execution::MAX_CODEQL_REPOSITORY_TIMEOUT_MS,
+        "taint-iris-next:codeql-db timeoutMs",
+    )
 }
 
 fn resolve_codeql_build_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
@@ -216,14 +302,6 @@ fn resolve_codeql_build_target(input: &Value, ctx: &ToolExecutionContext<'_>) ->
     Ok(target)
 }
 
-fn require_codeql_launcher() -> Result<PathBuf> {
-    codeql_launcher_path().ok_or_else(|| {
-        anyhow::anyhow!(
-            "taint-iris-next:codeql-db requires the codeql CLI on PATH (or set KUZUSHI_CODEQL_BIN)"
-        )
-    })
-}
-
 fn query_codeql_build_plan(
     runtime: &dyn AgentRuntime,
     model: String,
@@ -231,12 +309,10 @@ fn query_codeql_build_plan(
     system_prompt: String,
     prompt: String,
 ) -> Result<AgentQueryResponse> {
-    crate::runtime::query_blocking_checked(runtime, AgentQueryRequest::new(
-        model,
-        target.to_path_buf(),
-        system_prompt,
-        prompt,
-    ))
+    crate::runtime::query_blocking_checked(
+        runtime,
+        AgentQueryRequest::new(model, target.to_path_buf(), system_prompt, prompt),
+    )
 }
 
 fn decode_codeql_build_plan(response: &AgentQueryResponse) -> Result<CodeqlBuildPlan> {
@@ -298,105 +374,13 @@ fn resolved_codeql_build_mode(plan: &CodeqlBuildPlan, language: &str) -> String 
 }
 
 fn prepare_codeql_db_path(target: &Path) -> Result<PathBuf> {
-    let relative = Path::new(".kuzushi/codeql-db");
-    let db_path = crate::workspace::prepare_workspace_output_path(target, relative)?;
-    clear_codeql_db_path(target, &db_path)?;
-    Ok(db_path)
-}
-
-fn clear_codeql_db_path(target: &Path, db_path: &Path) -> Result<()> {
-    let relative = db_path.strip_prefix(target).with_context(|| {
-        format!(
-            "CodeQL database output {} must stay inside target {}",
-            db_path.display(),
-            target.display()
-        )
-    })?;
-    let db_path = crate::workspace::prepare_workspace_output_path(target, relative)?;
-    match std::fs::symlink_metadata(&db_path) {
-        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
-            std::fs::remove_dir_all(&db_path)
-                .with_context(|| format!("could not clear {}", db_path.display()))?;
-        }
-        Ok(_) => anyhow::bail!(
-            "CodeQL database output is not a real directory: {}",
-            db_path.display()
-        ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(error).with_context(|| format!("could not inspect {}", db_path.display()))
-        }
-    }
-    Ok(())
-}
-
-fn codeql_database_create_command(
-    launcher: &Path,
-    db_path: &Path,
-    target: &Path,
-    language: &str,
-) -> Command {
-    let mut cmd = Command::new(launcher);
-    cmd.arg("database").arg("create").arg(db_path);
-    cmd.arg(format!("--language={language}"));
-    cmd.arg(format!("--source-root={}", target.display()));
-    cmd.arg("--overwrite");
-    cmd
-}
-
-fn attach_codeql_build_strategy(
-    cmd: &mut Command,
-    target: &Path,
-    plan: &CodeqlBuildPlan,
-    build_mode: &str,
-) -> Result<String> {
-    if build_mode == "none" {
-        cmd.arg("--build-mode=none");
-        return Ok(String::new());
-    }
-    let raw = codeql_build_command(plan);
-    let script_path = write_codeql_build_script(target, &raw)?;
-    cmd.arg(format!("--command=bash {}", script_path.display()));
-    Ok(raw)
+    let path = crate::workspace::workspace_codeql_db_path(target);
+    let relative = path.strip_prefix(target)?;
+    crate::workspace::prepare_workspace_output_path(target, relative)
 }
 
 fn codeql_build_command(plan: &CodeqlBuildPlan) -> String {
     plan.build_command.trim().to_string()
-}
-
-fn write_codeql_build_script(target: &Path, raw: &str) -> Result<PathBuf> {
-    // CodeQL's `--command` flag execs a single command directly. A wrapper
-    // script lets bash interpret shell operators while CodeQL traces the build.
-    let script_body =
-        format!("#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")/..\"\n{raw}\n");
-    let intended_path = taint_iris_next_codeql_build_script_path(target);
-    let relative = intended_path
-        .strip_prefix(target)
-        .context("could not resolve CodeQL build script below target")?;
-    let script_path =
-        crate::workspace::write_workspace_state_file(target, relative, script_body.as_bytes())
-            .with_context(|| format!("could not write {}", intended_path.display()))?;
-    make_codeql_build_script_executable(&script_path);
-    Ok(script_path)
-}
-
-#[cfg(unix)]
-fn make_codeql_build_script_executable(script_path: &Path) {
-    use std::os::unix::fs::PermissionsExt;
-    let Ok(metadata) = std::fs::metadata(script_path) else {
-        return;
-    };
-    let mut perms = metadata.permissions();
-    perms.set_mode(0o755);
-    let _ = std::fs::set_permissions(script_path, perms);
-}
-
-#[cfg(not(unix))]
-fn make_codeql_build_script_executable(_script_path: &Path) {}
-
-fn run_codeql_create_command(mut cmd: Command, launcher: &Path) -> Result<std::process::Output> {
-    crate::bounded_subprocess::output(&mut cmd, &launcher.display().to_string())
-        .with_context(|| format!("could not invoke codeql at {}", launcher.display()))
 }
 
 fn codeql_stderr_excerpt(stderr: &[u8]) -> String {
@@ -552,19 +536,7 @@ fn default_build_mode(language: &str) -> String {
 }
 
 fn db_built(path: &Path) -> bool {
-    let yaml_present = std::fs::symlink_metadata(path.join("codeql-database.yml"))
-        .is_ok_and(|metadata| metadata.file_type().is_file() && !metadata.file_type().is_symlink());
-    let any_db_dir = std::fs::read_dir(path)
-        .map(|entries| {
-            entries.filter_map(|entry| entry.ok()).any(|entry| {
-                entry.file_name().to_string_lossy().starts_with("db-")
-                    && entry
-                        .file_type()
-                        .is_ok_and(|file_type| file_type.is_dir() && !file_type.is_symlink())
-            })
-        })
-        .unwrap_or(false);
-    yaml_present && any_db_dir
+    crate::codeql_repository_execution::codeql_database_is_valid(path)
 }
 
 /// Has a complete CodeQL DB been built at the standard kuzushi path?
@@ -581,6 +553,8 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::TriageOutcome;
     use crate::runtime::TriageRequest;
+    use crate::workspace::WorkspaceTarget;
+    use std::process::Command;
     use std::sync::Mutex;
     use tempfile::tempdir;
 
@@ -591,8 +565,8 @@ mod tests {
             Ok(AgentQueryResponse {
                 structured: Some(json!({
                     "language": "cpp",
-                    "buildMode": "none",
-                    "buildCommand": "",
+                    "buildMode": "manual",
+                    "buildCommand": "printf isolated > source-side-effect.txt",
                     "rationale": "unit test"
                 })),
                 cost_usd: 0.02,
@@ -696,14 +670,22 @@ mod tests {
     }
 
     #[test]
-    fn db_built_only_when_yaml_and_db_subdir_present() {
+    fn db_built_requires_shape_and_trusted_provenance() {
         let temp = tempdir().unwrap();
-        let path = temp.path().join("codeql-db");
+        std::fs::write(temp.path().join("source.cpp"), "int main() {}\n").unwrap();
+        initialize_codeql_test_repository(temp.path());
+        let path = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
         assert!(!db_built(&path));
         std::fs::write(path.join("codeql-database.yml"), "...").unwrap();
         assert!(!db_built(&path));
         std::fs::create_dir_all(path.join("db-cpp")).unwrap();
+        assert!(!db_built(&path));
+        crate::codeql_repository_execution::write_test_codeql_database_provenance(
+            &path,
+            temp.path(),
+            "cpp",
+        );
         assert!(db_built(&path));
     }
 
@@ -753,52 +735,40 @@ mod tests {
         assert!(excerpt.is_empty());
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn codeql_build_script_writer_rejects_symlinked_leaf() {
-        use std::os::unix::fs::symlink;
-
-        let workspace = tempdir().unwrap();
-        let outside = tempdir().unwrap();
-        std::fs::create_dir_all(workspace.path().join(".kuzushi")).unwrap();
-        let outside_script = outside.path().join("build.sh");
-        std::fs::write(&outside_script, "outside-sentinel").unwrap();
-        symlink(
-            &outside_script,
-            taint_iris_next_codeql_build_script_path(workspace.path()),
-        )
-        .unwrap();
-
-        let error = write_codeql_build_script(workspace.path(), "make").unwrap_err();
-
-        assert!(format!("{error:#}").contains("symlink"));
-        assert_eq!(
-            std::fs::read_to_string(outside_script).unwrap(),
-            "outside-sentinel"
-        );
-    }
-
     #[test]
     #[cfg(unix)]
     fn run_codeql_build_report_drives_agent_plan_and_codeql_cli() {
+        if !crate::remediation::patch_process_adapter::validation_network_sandbox_available() {
+            return;
+        }
         let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
         std::fs::write(temp.path().join("main.c"), "int main(void) { return 0; }\n").unwrap();
-        let _bin = crate::test_env::ScopedEnv::set(
-            "KUZUSHI_CODEQL_BIN",
-            write_fake_codeql_build_script(temp.path()),
-        );
+        let launcher = write_fake_codeql_build_script(temp.path());
+        initialize_codeql_test_repository(temp.path());
+        let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_CODEQL_BIN", launcher);
         let config = codeql_build_test_config();
-        let ctx = codeql_build_test_context(&config);
-
-        let report = run_codeql_build_report(
-            &json!({"target": temp.path().display().to_string()}),
-            &ctx,
-            Some(&BuildPlanRuntime),
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let ctx = codeql_build_test_context(&config, &workspace);
+        let mut input = json!({"target": temp.path().display().to_string()});
+        crate::remediation::patch::bind_repository_source_snapshot(temp.path(), &mut input)
+            .unwrap();
+        crate::codeql_repository_execution::bind_codeql_launcher(
+            "taint-iris-next:codeql-db",
+            temp.path(),
+            &mut input,
         )
         .unwrap();
 
+        let report = run_codeql_build_report(&input, &ctx, Some(&BuildPlanRuntime)).unwrap();
+
         assert_codeql_build_report(report);
+        assert!(!temp.path().join("source-side-effect.txt").exists());
+        assert!(
+            crate::codeql_repository_execution::codeql_database_is_valid(
+                &crate::workspace::workspace_codeql_db_path(temp.path())
+            )
+        );
     }
 
     #[cfg(unix)]
@@ -809,6 +779,11 @@ mod tests {
             r#"#!/usr/bin/env bash
 set -euo pipefail
 db="$3"
+for arg in "$@"; do
+  if [[ "$arg" == --command=* ]]; then
+    bash -c "${arg#--command=}"
+  fi
+done
 mkdir -p "$db/db-cpp"
 printf 'primaryLanguage: cpp\n' > "$db/codeql-database.yml"
 printf 'fake warning\n' >&2
@@ -830,10 +805,13 @@ printf 'fake warning\n' >&2
         config
     }
 
-    fn codeql_build_test_context(config: &V2Config) -> ToolExecutionContext<'_> {
+    fn codeql_build_test_context<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+    ) -> ToolExecutionContext<'a> {
         ToolExecutionContext {
             config,
-            workspace: None,
+            workspace: Some(workspace),
             findings_store: None,
             trace: None,
             cancellation: None,
@@ -841,11 +819,41 @@ printf 'fake warning\n' >&2
         }
     }
 
+    fn initialize_codeql_test_repository(root: &Path) {
+        run_git(root, &["init"]);
+        run_git(root, &["add", "."]);
+        run_git(
+            root,
+            &[
+                "-c",
+                "user.name=Kuzushi Test",
+                "-c",
+                "user.email=kuzushi@example.invalid",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+        );
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git {args:?} failed");
+    }
+
     fn assert_codeql_build_report(report: CodeqlBuildReport) {
-        assert!(report.ok);
+        assert!(report.ok, "{report:#?}");
         assert_eq!(report.status, "built");
         assert_eq!(report.language, "cpp");
-        assert_eq!(report.build_mode, "none");
+        assert_eq!(report.build_mode, "manual");
+        assert_eq!(
+            report.build_command,
+            "printf isolated > source-side-effect.txt"
+        );
         assert_eq!(report.cost_usd, 0.02);
         assert!(report
             .stderr_excerpt

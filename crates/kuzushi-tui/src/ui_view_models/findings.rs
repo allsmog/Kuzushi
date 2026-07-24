@@ -797,9 +797,9 @@ fn search_filtered_finding_alias_indices(
     visible
         .into_iter()
         .filter(|(_, index)| {
-            app.findings().get(*index).is_some_and(|finding| {
-                finding_matches_search(finding, &terms, &review_index)
-            })
+            app.findings()
+                .get(*index)
+                .is_some_and(|finding| finding_matches_search(finding, &terms, &review_index))
         })
         .collect()
 }
@@ -868,9 +868,10 @@ fn search_facets_match(
             .as_deref()
             .is_some_and(|actor| actor.to_lowercase().contains(wanted))
     });
-    let status_ok = terms.status.as_deref().is_none_or(|wanted| {
-        search_status_label(finding, review_index).contains(wanted)
-    });
+    let status_ok = terms
+        .status
+        .as_deref()
+        .is_none_or(|wanted| search_status_label(finding, review_index).contains(wanted));
     severity_ok && tool_ok && actor_ok && status_ok
 }
 

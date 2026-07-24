@@ -73,9 +73,15 @@ pub fn workspace_suppressions_path(root: impl AsRef<Path>) -> PathBuf {
 }
 
 pub fn workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_CODEQL_DB_DIR)
+}
+
+/// Pre-v3 managed CodeQL database path retained only for migration checks.
+pub fn legacy_workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
     workspace_state_root(root).join(WORKSPACE_CODEQL_DB_DIR)
 }
 
+/// Legacy CodeQL CLI database path retained only for migration checks.
 pub fn legacy_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
     root.as_ref()
         .join(LEGACY_CODEQL_STATE_DIR)

@@ -49,6 +49,30 @@ impl ModelTokenUsage {
         }
     }
 
+    pub fn from_aggregate(
+        input_tokens: Option<u64>,
+        output_tokens: Option<u64>,
+        input_reported_calls: u64,
+        output_reported_calls: u64,
+        total_calls: u64,
+    ) -> Result<Self> {
+        anyhow::ensure!(total_calls > 0, "model usage aggregate must include a model call");
+        validate_reported_direction(input_tokens, input_reported_calls, total_calls, "input")?;
+        validate_reported_direction(
+            output_tokens,
+            output_reported_calls,
+            total_calls,
+            "output",
+        )?;
+        Ok(Self {
+            input_tokens: input_tokens.unwrap_or(0),
+            output_tokens: output_tokens.unwrap_or(0),
+            input_reported_calls,
+            output_reported_calls,
+            total_calls,
+        })
+    }
+
     pub fn checked_add(self, other: Self, context: &str) -> Result<Self> {
         Ok(Self {
             input_tokens: checked_add(self.input_tokens, other.input_tokens, context, "input")?,
@@ -102,6 +126,23 @@ impl ModelTokenUsage {
             self.output_reported_calls
         }
     }
+}
+
+fn validate_reported_direction(
+    tokens: Option<u64>,
+    reported_calls: u64,
+    total_calls: u64,
+    direction: &str,
+) -> Result<()> {
+    anyhow::ensure!(
+        reported_calls <= total_calls,
+        "{direction} reported-call count exceeds total model calls"
+    );
+    anyhow::ensure!(
+        tokens.is_some() == (reported_calls > 0),
+        "{direction} token total and reported-call provenance disagree"
+    );
+    Ok(())
 }
 
 fn checked_add(left: u64, right: u64, context: &str, field: &str) -> Result<u64> {
@@ -188,5 +229,20 @@ mod tests {
         assert!(left
             .checked_add(ModelTokenUsage::reported(1, 0), "test aggregate")
             .is_err());
+    }
+
+    #[test]
+    fn aggregate_constructor_preserves_partial_provenance() {
+        let usage = ModelTokenUsage::from_aggregate(Some(12), Some(3), 1, 1, 2).unwrap();
+
+        assert_eq!(usage.observed_counts(), (Some(12), Some(3)));
+        assert_eq!(usage.total_calls, 2);
+        assert!(!usage.is_complete());
+    }
+
+    #[test]
+    fn aggregate_constructor_rejects_dishonest_provenance() {
+        assert!(ModelTokenUsage::from_aggregate(Some(12), None, 0, 0, 1).is_err());
+        assert!(ModelTokenUsage::from_aggregate(None, None, 2, 0, 1).is_err());
     }
 }

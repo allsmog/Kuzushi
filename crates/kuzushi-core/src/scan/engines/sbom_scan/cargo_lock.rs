@@ -7,7 +7,7 @@ pub(super) use super::dependency_graph::is_cargo_lock;
 
 pub(super) fn cargo_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Cargo.lock")?;
     let source = relative_display(target, path);
     Ok(value

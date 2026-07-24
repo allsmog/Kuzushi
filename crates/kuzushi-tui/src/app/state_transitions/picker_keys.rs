@@ -1218,9 +1218,9 @@ impl ShellApp {
         // detour) go straight back; workbench origins restore their page,
         // since the findings refresh inside `open_workbench` may have
         // re-derived a different one.
-        if let Some(view) = origin_view.filter(|view| {
-            !matches!(view, ShellView::Workbench | ShellView::PlanningPicker)
-        }) {
+        if let Some(view) = origin_view
+            .filter(|view| !matches!(view, ShellView::Workbench | ShellView::PlanningPicker))
+        {
             self.set_shell_view(view);
             return;
         }

@@ -31,7 +31,10 @@ for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.y
 }
 checkNativeRuntimeContract();
 checkDynamicHostVersion();
+checkWorkspaceLockVersions();
 checkNativeReleaseSmoke();
+checkReleaseAssemblyGate();
+checkReleaseInstructions();
 
 if (process.env.GITHUB_REF_TYPE === "tag") {
   const expectedTag = `v${manifest.version}`;
@@ -66,7 +69,23 @@ function checkWorkflowUsesToolchainFile(relativePath) {
 }
 
 function checkNativeRuntimeContract() {
-  failures.push(...nativePackageFailures(), ...mcpExposureFailures());
+  failures.push(
+    ...nativePackageFailures(),
+    ...mcpExposureFailures(),
+    ...nativeHealthEntrypointFailures(),
+  );
+}
+
+function nativeHealthEntrypointFailures() {
+  return nativeRuntimePackages
+    .filter(({ binaryName }) => binaryName.startsWith("kuzushi-mcp-"))
+    .flatMap(({ packageName, binaryName }) => {
+      const source = readText(`crates/${packageName}/src/main.rs`);
+      const handlesHealth =
+        source.includes('== "--health"') ||
+        source.includes("exit_after_standalone_health_if_requested");
+      return handlesHealth ? [] : [`${binaryName} must handle --health before stdio startup`];
+    });
 }
 
 function checkDynamicHostVersion() {
@@ -79,6 +98,32 @@ function checkDynamicHostVersion() {
   }
 }
 
+function checkWorkspaceLockVersions() {
+  const lock = readText("Cargo.lock");
+  const members = [...cargo.matchAll(/^\s*"crates\/([^"]+)",?$/gm)].map((match) => match[1]);
+  const lockedVersions = new Map(
+    [...lock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"/g)].map((match) => [
+      match[1],
+      match[2],
+    ]),
+  );
+  const mismatches = members.filter((member) => lockedVersions.get(member) !== manifest.version);
+  failures.push(
+    ...mismatches.map((member) =>
+      "Cargo.lock workspace package ".concat(member, " must have version ", manifest.version),
+    ),
+  );
+}
+
+function checkReleaseInstructions() {
+  const instructions = readText("RELEASING.md");
+  const staged =
+    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md";
+  if (!instructions.includes(staged)) {
+    failures.push("RELEASING.md must stage every release-version source and CHANGELOG.md");
+  }
+}
+
 function checkNativeReleaseSmoke() {
   const workflow = readText(".github/workflows/release.yml");
   for (const token of [
@@ -88,6 +133,24 @@ function checkNativeReleaseSmoke() {
     "cargo test -p kuzushi-cli mcp::tests",
   ]) {
     if (!workflow.includes(token)) failures.push(`release workflow must run ${token}`);
+  }
+}
+
+function checkReleaseAssemblyGate() {
+  const workflow = readText(".github/workflows/release.yml");
+  const packVerifier = readText("scripts/verify-pack.mjs");
+  for (const token of [
+    "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
+    "native/linux-x64",
+    "native/darwin-arm64",
+  ]) {
+    if (!workflow.includes(token) && !packVerifier.includes(token)) {
+      failures.push(`release assembly gate must mention ${token}`);
+    }
+  }
+  const gatedVerifySteps = workflow.match(/KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY/g)?.length ?? 0;
+  if (gatedVerifySteps < 2) {
+    failures.push("npm and GitHub release assembly must both enable the pack release gate");
   }
 }
 

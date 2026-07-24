@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
     runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
@@ -7,9 +7,7 @@ use kuzushi_core::{
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{
-    public_bridge_error, public_bridge_failure_with_detail, run_bridge,
-};
+use super::bridge_process::{public_bridge_error, public_bridge_failure_with_detail, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -45,7 +43,7 @@ impl AgentRuntime for LangGraphRuntime {
             bridge_request,
             self.cancellation.as_ref(),
         )?;
-        observed_agent_response_from_bridge(response).try_map(AgentQueryResponse::validate_cost)
+        observed_agent_response_from_bridge(response)?.try_map(AgentQueryResponse::validate_cost)
     }
 
     fn query_blocking_controlled(
@@ -144,6 +142,8 @@ fn bridge_request_from(
         structured_output: request.structured_output,
         api_key_env: credential.env,
         api_key: credential.value,
+        oauth_credentials_path: runtime.oauth_credentials_path.display().to_string(),
+        oauth_allow_env_token: runtime.oauth_allow_env_token,
         base_url: runtime.base_url.clone(),
         thinking_level,
         max_output_tokens: request.max_output_tokens,
@@ -153,15 +153,16 @@ fn bridge_request_from(
     }
 }
 
-fn observed_agent_response_from_bridge(response: BridgeResponse) -> Observed<AgentQueryResponse> {
-    let usage =
-        ModelTokenUsage::from_reported_options(response.input_tokens, response.output_tokens);
-    let cost_usd_reported = response.cost_usd.is_some();
-    Observed::new(
+fn observed_agent_response_from_bridge(
+    response: BridgeResponse,
+) -> Result<Observed<AgentQueryResponse>> {
+    let usage = bridge_model_usage(&response)?;
+    let (cost_usd, cost_usd_reported) = bridge_cost(&response)?;
+    Ok(Observed::new(
         AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
-            cost_usd: response.cost_usd.unwrap_or(0.0),
+            cost_usd,
             cost_usd_reported,
             estimated_cost_usd: None,
             input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
@@ -170,7 +171,55 @@ fn observed_agent_response_from_bridge(response: BridgeResponse) -> Observed<Age
             stop_reason: response.stop_reason,
         },
         usage,
+    ))
+}
+
+fn bridge_model_usage(response: &BridgeResponse) -> Result<ModelTokenUsage> {
+    let Some(total_calls) = response.model_calls else {
+        return Ok(ModelTokenUsage::from_reported_options(
+            response.input_tokens,
+            response.output_tokens,
+        ));
+    };
+    ModelTokenUsage::from_aggregate(
+        response.input_tokens,
+        response.output_tokens,
+        response
+            .input_reported_calls
+            .context("bridge omitted input reported-call count")?,
+        response
+            .output_reported_calls
+            .context("bridge omitted output reported-call count")?,
+        total_calls,
     )
+}
+
+fn bridge_cost(response: &BridgeResponse) -> Result<(f64, bool)> {
+    let Some(total_calls) = response.model_calls else {
+        return Ok((
+            response.cost_usd.unwrap_or(0.0),
+            response.cost_usd.is_some(),
+        ));
+    };
+    let reported_calls = response
+        .cost_reported_calls
+        .context("bridge omitted cost reported-call count")?;
+    anyhow::ensure!(
+        reported_calls <= total_calls,
+        "bridge cost provenance exceeds model calls"
+    );
+    anyhow::ensure!(
+        response.cost_usd.is_some() == (reported_calls > 0),
+        "bridge cost total and reported-call provenance disagree"
+    );
+    let exact = response
+        .cost_usd_exact
+        .context("bridge omitted cost exactness")?;
+    anyhow::ensure!(
+        exact == (reported_calls == total_calls),
+        "bridge cost exactness disagrees with provenance"
+    );
+    Ok((response.cost_usd.unwrap_or(0.0), exact))
 }
 
 fn spawn_query_control_watchdog(
@@ -231,9 +280,10 @@ fn run_bridge_with_transport_retries(
         if attempt >= transport_retry::max_attempts(&failure) {
             return Err(error);
         }
-        transport_retry::sleep_before_retry(transport_retry::backoff_delay(attempt, &failure), || {
-            ensure_not_cancelled(cancellation)
-        })?;
+        transport_retry::sleep_before_retry(
+            transport_retry::backoff_delay(attempt, &failure),
+            || ensure_not_cancelled(cancellation),
+        )?;
     }
 }
 
@@ -261,12 +311,16 @@ fn bridge_attempt_outcome(result: Result<BridgeResponse>) -> Result<BridgeAttemp
 }
 
 fn bridge_response_error(response: BridgeResponse) -> Result<BridgeAttempt> {
-    let failure = transport_retry::response_transient_failure(
-        response.status,
-        response.error_class.as_deref(),
-        response.error.as_deref(),
-        response.retry_after_seconds,
-    );
+    let failure = if response.error_class.as_deref() == Some("mcp_timeout") {
+        None
+    } else {
+        transport_retry::response_transient_failure(
+            response.status,
+            response.error_class.as_deref(),
+            response.error.as_deref(),
+            response.retry_after_seconds,
+        )
+    };
     let message = public_bridge_failure_with_detail(
         response.error_class.as_deref(),
         response.status,

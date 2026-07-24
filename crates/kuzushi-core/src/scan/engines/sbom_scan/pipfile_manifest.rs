@@ -26,7 +26,7 @@ pub(super) fn pipfile_components(
 
 pub(super) fn pipfile_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: toml::Value = toml::from_str(&text).context("sbom-scan: parse Pipfile")?;
     let source = relative_display(target, path);
     Ok(PIPFILE_SCOPES

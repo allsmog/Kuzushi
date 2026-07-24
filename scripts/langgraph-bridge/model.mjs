@@ -6,7 +6,10 @@ import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
+import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
+
+export const DEFAULT_MAX_MODEL_TURNS = 12;
 
 export function parseModelSpec(spec) {
   const value = String(spec ?? "");
@@ -92,56 +95,74 @@ function vertexProjectId(request) {
 }
 
 function oauthModelForProvider(request, provider, modelName) {
-  const token = oauthAccessToken(provider);
-  if (!token) return undefined;
-  if (provider === "openai-codex") return oauthModelForRequest(provider, modelName, token, request);
-  if (provider === "anthropic" && !apiKeyCredential(request, "ANTHROPIC_API_KEY")) {
-    return oauthModelForRequest(provider, modelName, token, request);
-  }
-  return undefined;
+  if (provider === "openai-codex") return requiredOauthModel(request, provider, modelName);
+  if (provider !== "anthropic") return undefined;
+  if (apiKeyCredential(request, "ANTHROPIC_API_KEY")) return undefined;
+  return optionalOauthModel(request, provider, modelName);
+}
+
+function requiredOauthModel(request, provider, modelName) {
+  const model = optionalOauthModel(request, provider, modelName);
+  if (!model) throw new BridgePublicError("authentication");
+  return model;
+}
+
+function optionalOauthModel(request, provider, modelName) {
+  const token = oauthAccessToken(request, provider);
+  return token ? oauthModelForRequest(provider, modelName, token, request) : undefined;
 }
 
 export function credentialForRequest(request, provider, defaultEnv) {
-  return (
-    apiKeyCredential(request, defaultEnv) ??
-    oauthAccessToken(provider)
-  );
+  return apiKeyCredential(request, defaultEnv);
 }
 
 function apiKeyCredential(request, defaultEnv) {
   return nonEmpty(request.apiKey) ?? nonEmpty(process.env[request.apiKeyEnv ?? defaultEnv]);
 }
 
-export function oauthAccessToken(provider) {
-  const entry = freshOauthCredentialBag()[oauthCredentialProvider(provider)];
-  return nonEmpty(entry?.access);
+export function oauthAccessToken(request, provider) {
+  const entry = freshOauthCredentialBag(request, provider)[oauthCredentialProvider(provider)];
+  return nonEmpty(entry?.access) ?? allowedOauthEnvToken(request, provider);
 }
 
 function oauthCredentialProvider(provider) {
   return provider === "openai" ? "openai-codex" : provider;
 }
 
-export function oauthCredentialBag() {
+export function oauthCredentialBag(credentialsPath = oauthCredentialsPath()) {
   try {
-    return JSON.parse(readFileSync(oauthCredentialsPath(), "utf8"));
+    return JSON.parse(readFileSync(credentialsPath, "utf8"));
   } catch {
     return {};
   }
 }
 
-function freshOauthCredentialBag() {
-  const bag = oauthCredentialBag();
-  return refreshExpiredAnthropicCredential(bag);
+function freshOauthCredentialBag(request, provider) {
+  const credentialsPath = requestOauthCredentialsPath(request);
+  const bag = credentialsPath ? oauthCredentialBag(credentialsPath) : {};
+  return provider === "anthropic"
+    ? refreshExpiredAnthropicCredential(bag, credentialsPath)
+    : bag;
 }
 
-function refreshExpiredAnthropicCredential(bag) {
+function refreshExpiredAnthropicCredential(bag, credentialsPath) {
   const credential = bag.anthropic;
   if (!expiredOAuthCredential(credential)) return bag;
   const refreshed = refreshAnthropicCredentialSync(credential.refresh);
   if (!refreshed) return bag;
   const nextBag = { ...bag, anthropic: refreshed };
-  writeOauthCredentialBag(nextBag);
+  if (credentialsPath) writeOauthCredentialBag(nextBag, credentialsPath);
   return nextBag;
+}
+
+function requestOauthCredentialsPath(request) {
+  return nonEmpty(request?.oauthCredentialsPath ?? request?.oauth_credentials_path);
+}
+
+function allowedOauthEnvToken(request, provider) {
+  const allowed = request?.oauthAllowEnvToken ?? request?.oauth_allow_env_token;
+  if (allowed !== true || provider !== "anthropic") return undefined;
+  return nonEmpty(process.env.ANTHROPIC_OAUTH_TOKEN) ?? nonEmpty(process.env.ANTHROPIC_AUTH_TOKEN);
 }
 
 function expiredOAuthCredential(credential) {
@@ -188,8 +209,7 @@ function anthropicCredentialFromRefreshResponse(raw, priorRefresh) {
   }
 }
 
-export function writeOauthCredentialBag(bag) {
-  const credentialsPath = oauthCredentialsPath();
+export function writeOauthCredentialBag(bag, credentialsPath = oauthCredentialsPath()) {
   mkdirSync(path.dirname(credentialsPath), { recursive: true, mode: 0o700 });
   const tmp = `${credentialsPath}.tmp.${process.pid}`;
   writeFileSync(tmp, `${JSON.stringify(bag, null, 2)}\n`, { mode: 0o600 });
@@ -347,6 +367,106 @@ export function usageFromMessage(message) {
     throw new Error("provider usage cost must be a finite non-negative number");
   }
   return { ...result, costUsd };
+}
+
+export function usageFromMessages(messages) {
+  return (messages ?? []).filter(isAiMessage).reduce(addMessageUsage, emptyUsage());
+}
+
+export function bridgeUsageFields(usage) {
+  const hasInput = usage.inputReportedCalls > 0;
+  const hasOutput = usage.outputReportedCalls > 0;
+  const hasCost = usage.costReportedCalls > 0;
+  return {
+    input_tokens: hasInput ? usage.inputTokens : undefined,
+    output_tokens: hasOutput ? usage.outputTokens : undefined,
+    cost_usd: hasCost ? usage.costUsd : undefined,
+    input_reported_calls: usage.inputReportedCalls,
+    output_reported_calls: usage.outputReportedCalls,
+    cost_reported_calls: usage.costReportedCalls,
+    model_calls: usage.modelCalls,
+    cost_usd_exact: usage.modelCalls > 0 && usage.costReportedCalls === usage.modelCalls,
+  };
+}
+
+export function interruptedQueryResult(messages, stopReason) {
+  return {
+    ok: true,
+    text: "",
+    ...bridgeUsageFields(usageFromMessages(messages)),
+    truncated: true,
+    stopReason,
+  };
+}
+
+export function modelContinuationDecision(
+  messages,
+  observedSpendStopUsd,
+  maxModelTurns = DEFAULT_MAX_MODEL_TURNS,
+) {
+  const usage = usageFromMessages(messages);
+  validateMaxModelTurns(maxModelTurns);
+  if (usage.modelCalls >= maxModelTurns) return "model_turn_limit";
+  const stop = observedSpendStop(observedSpendStopUsd);
+  if (stop === undefined) return "continue";
+  return observedSpendDecision(usage, stop);
+}
+
+function validateMaxModelTurns(maxModelTurns) {
+  if (!Number.isSafeInteger(maxModelTurns) || maxModelTurns < 1) {
+    throw new Error("max model turns must be a positive safe integer");
+  }
+}
+
+function observedSpendStop(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  const stop = Number(raw);
+  if (!Number.isFinite(stop) || stop <= 0) {
+    throw new Error("observed spend stop must be a finite positive number");
+  }
+  return stop;
+}
+
+function observedSpendDecision(usage, stop) {
+  if (usage.costReportedCalls !== usage.modelCalls) return "observed_spend_incomplete";
+  return usage.costUsd >= stop ? "observed_spend_exhausted" : "continue";
+}
+
+function addMessageUsage(total, message) {
+  const usage = usageFromMessage(message);
+  return {
+    inputTokens: checkedTokenSum(total.inputTokens, usage.inputTokens),
+    outputTokens: checkedTokenSum(total.outputTokens, usage.outputTokens),
+    inputReportedCalls: total.inputReportedCalls + Number(usage.inputTokens !== undefined),
+    outputReportedCalls: total.outputReportedCalls + Number(usage.outputTokens !== undefined),
+    costUsd: checkedCostSum(total.costUsd, usage.costUsd),
+    costReportedCalls: total.costReportedCalls + Number(usage.costUsd !== undefined),
+    modelCalls: total.modelCalls + 1,
+  };
+}
+
+function emptyUsage() {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    inputReportedCalls: 0,
+    outputReportedCalls: 0,
+    costUsd: 0,
+    costReportedCalls: 0,
+    modelCalls: 0,
+  };
+}
+
+function checkedTokenSum(total, value) {
+  const next = total + (value ?? 0);
+  if (!Number.isSafeInteger(next)) throw new Error("provider token usage aggregate overflowed");
+  return next;
+}
+
+function checkedCostSum(total, value) {
+  const next = total + (value ?? 0);
+  if (!Number.isFinite(next) || next < 0) throw new Error("provider usage cost aggregate overflowed");
+  return next;
 }
 
 function optionalTokenCount(raw) {

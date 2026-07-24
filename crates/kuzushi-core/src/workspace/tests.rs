@@ -85,6 +85,10 @@ mod tests {
 
         assert_eq!(
             workspace_codeql_db_path(tmp.path()),
+            tmp.path().join(".kuzushi/v3/codeql-db")
+        );
+        assert_eq!(
+            legacy_workspace_codeql_db_path(tmp.path()),
             tmp.path().join(".kuzushi/codeql-db")
         );
         assert_eq!(

@@ -19,7 +19,7 @@ pub(super) fn is_bun_lock(path: &Path) -> bool {
 
 pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&strip_jsonc(&text)).context("sbom-scan: parse bun.lock")?;
     let source = relative_display(target, path);
@@ -30,7 +30,7 @@ pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepen
 
 pub(super) fn bun_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&strip_jsonc(&text)).context("sbom-scan: parse bun.lock")?;
     let source = relative_display(target, path);

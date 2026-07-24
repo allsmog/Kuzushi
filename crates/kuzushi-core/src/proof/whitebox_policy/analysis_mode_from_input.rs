@@ -39,6 +39,12 @@ pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
 /// server only when its backing artifact exists, so calling this on a
 /// fresh workspace is a no-op (just the constant treesitter MCP is
 /// attached) and there's no penalty for the unconditional migration.
+pub fn try_whitebox_static_policy_for_target(
+    target: &std::path::Path,
+) -> Result<AgentToolPolicy> {
+    default_whitebox_static_agent_tool_policy().try_with_mcps_for_target(target)
+}
+
 pub fn whitebox_static_policy_for_target(target: &std::path::Path) -> AgentToolPolicy {
     default_whitebox_static_agent_tool_policy().with_mcps_for_target(target)
 }
@@ -51,7 +57,7 @@ pub fn agent_tool_policy_for_input_and_target(
     input: &Value,
     target: &std::path::Path,
 ) -> Result<AgentToolPolicy> {
-    Ok(agent_tool_policy_for_input(input)?.with_mcps_for_target(target))
+    agent_tool_policy_for_input(input)?.try_with_mcps_for_target(target)
 }
 
 pub fn agentic_hunter_thinking_level(input: &Value) -> String {

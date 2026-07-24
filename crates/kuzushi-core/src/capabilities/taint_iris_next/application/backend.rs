@@ -4,8 +4,8 @@ pub(crate) fn choose_taint_iris_next_backend(
     requested: &str,
     repo_root: &Path,
     languages: &[String],
-) -> TaintIrisNextBackendChoice {
-    let codeql_db = super::codeql_db_path(repo_root);
+) -> Result<TaintIrisNextBackendChoice> {
+    let codeql_db = super::codeql_db_path(repo_root)?;
     let availability = TaintIrisNextBackendAvailability {
         codeql_db_present: codeql_db.is_some(),
         codeql_runnable: codeql_db.is_some() && super::codeql_available(),
@@ -15,14 +15,14 @@ pub(crate) fn choose_taint_iris_next_backend(
     };
     let mut warnings = Vec::new();
     let selected = select_taint_iris_next_backend(requested, &availability, &mut warnings);
-    TaintIrisNextBackendChoice {
+    Ok(TaintIrisNextBackendChoice {
         requested: requested.to_string(),
         selected: selected.to_string(),
         codeql_db_path: codeql_db.as_ref().map(|path| path.display().to_string()),
         corroborate_with_codeql: codeql_db.as_ref().map(|_| true),
         structural_tool: detect_structural_tool().to_string(),
         warnings,
-    }
+    })
 }
 
 struct TaintIrisNextBackendAvailability {
@@ -122,7 +122,7 @@ fn select_codeql_backend(
 
 fn codeql_unavailable_warning(availability: &TaintIrisNextBackendAvailability) -> &'static str {
     if !availability.codeql_db_present {
-        return "backend=codeql requested, but no existing CodeQL DB was found; build with `codeql database create --language=<lang> --source-root=<repo> <repo>/.kuzushi/codeql-db` then rerun. Using structural evidence.";
+        return "backend=codeql requested, but no existing CodeQL DB was found; run `codeql:create-db` to build <repo>/.kuzushi/v3/codeql-db, then rerun. Using structural evidence.";
     }
     "backend=codeql requested, but the codeql launcher was not found on PATH (set KUZUSHI_CODEQL_BIN or install the CodeQL CLI bundle). Using structural evidence."
 }

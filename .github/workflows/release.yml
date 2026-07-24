@@ -74,7 +74,10 @@ jobs:
             rm -f "${archive}"
           done
           ls -la native/*/
-      - run: pnpm verify:pack
+      - name: Verify required multi-platform package assembly
+        env:
+          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+        run: pnpm verify:pack
       # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
       # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
       - name: Publish to npm
@@ -208,7 +211,10 @@ jobs:
           done
           ls -la native/*/
 
-      - run: pnpm verify:pack
+      - name: Verify required multi-platform release assembly
+        env:
+          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+        run: pnpm verify:pack
 
       # Pack the tarball for users who want to install from the release.
       # CI already built dist/; native/ was staged above; skip prepack.

@@ -11,9 +11,16 @@ git clone <your-fork>
 cd Kuzushi
 pnpm setup          # verifies pinned Rust + Node 22, then runs pnpm install
 pnpm doctor         # re-check the environment at any time (read-only)
-pnpm test           # retained TypeScript SDK/tooling tests
-cargo test --workspace  # native product and MCP server tests
+pnpm verify:quick    # types, tests, formatting, architecture, docs, and policy gates
 ```
+
+Before a release or when reproducing CI end to end, run `pnpm verify:ci`.
+It adds coverage, codegen drift, Clippy, cargo-deny, the full Rust workspace,
+native/package assembly, and e2e smoke, and reserves stdout for one
+machine-readable receipt. CI keeps those gates parallel for latency. The
+dedicated Node 22 compatibility lane, Linux bubblewrap/AppArmor setup, and
+artifact transfer are matrix/infrastructure checks and remain CI-only; the
+receipt lists those exceptions explicitly.
 
 Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+. The repo has
 `rust-toolchain.toml`, `.nvmrc`, and `.tool-versions` so `rustup`, `nvm use`,
@@ -53,9 +60,9 @@ pnpm setup:benchmarks all
 
 1. Create a branch from `main`
 2. Make your changes
-3. Run `cargo fmt --all -- --check`, `cargo test --workspace`,
-   `cargo deny check advisories licenses bans sources`, `pnpm typecheck:all`,
-   `pnpm test`, and the relevant quality gates
+3. Run `pnpm verify:quick`, the focused tests for your change, and
+   `cargo deny check advisories licenses bans sources`. Use `pnpm verify:ci`
+   before release-bound changes.
 4. Open a pull request against `main`
 
 Keep PRs focused — one feature or fix per PR.

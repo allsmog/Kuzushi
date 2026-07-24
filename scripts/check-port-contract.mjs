@@ -132,6 +132,8 @@ const ciRequirements = [
   "node scripts/build-native-runtime.mjs",
   "moonrepo/setup-rust@v1",
   "native-linux-x64",
+  "KUZUSHI_CRAP_RISK_BASE_REF",
+  "fetch-depth: 0",
 ];
 
 const releaseRequirements = [
@@ -142,6 +144,7 @@ const releaseRequirements = [
   "merge-multiple: true",
   "Stage native binaries for every built platform",
   "pnpm verify:pack",
+  "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
   "npm publish --access public --provenance --ignore-scripts",
   "npm publish --access public --ignore-scripts",
   "npm pack --ignore-scripts",

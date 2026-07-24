@@ -29,7 +29,7 @@ pub(super) fn deno_components(
 
 pub(super) fn deno_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
     let text =
-        fs::read_to_string(path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value = parse_import_map(&text)?;
     let mut edges = dependency_edges(target, path, &value);
     for import_map in referenced_import_maps(target, path, &value)? {
@@ -62,7 +62,7 @@ fn referenced_import_maps(
         return Ok(Vec::new());
     }
     let text =
-        fs::read_to_string(&path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+        fs::read_to_string(target, &path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
     Ok(vec![ReferencedImportMap {
         value: parse_import_map(&text)?,
         path,

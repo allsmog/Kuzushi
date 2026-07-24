@@ -152,7 +152,7 @@ authorization: Default::default(),
 
         let output = execute_x_ray_tool(
             "x-ray:run",
-            json!({"X_RAY_PROMPT": "custom x-ray system"}),
+            json!({"X_RAY_PROMPT": "custom x-ray system", "maxBudgetUsd": 0.25}),
             &context(&config, &workspace),
             Some(&runtime),
         )
@@ -172,6 +172,16 @@ authorization: Default::default(),
         assert!(runtime.queries()[0]
             .prompt
             .contains("missing local artifact KB"));
+        assert!(runtime.queries()[0]
+            .prompt
+            .contains("Observed-spend stop requested by operator"));
+        assert_eq!(
+            runtime.queries()[0]
+                .runtime_options
+                .as_ref()
+                .and_then(|options| options.observed_spend_stop_usd),
+            Some(0.25)
+        );
     }
 
     #[test]
@@ -244,6 +254,31 @@ authorization: Default::default(),
         .unwrap_err();
 
         assert!(err.to_string().contains("explicit model"));
+        assert!(runtime.queries().is_empty());
+    }
+
+    #[test]
+    fn run_rejects_non_positive_budget_before_querying() {
+        let tmp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let config = V2Config {
+            model: Some("openai:gpt-4.1".to_string()),
+            ..V2Config::default()
+        };
+        let runtime = MockRuntime::new(AgentQueryResponse::default());
+
+        for value in [0.0, -0.25] {
+            let error = execute_x_ray_tool(
+                "x-ray:run",
+                json!({"maxBudgetUsd": value}),
+                &context(&config, &workspace),
+                Some(&runtime),
+            )
+            .unwrap_err()
+            .to_string();
+
+            assert!(error.contains("finite positive number"), "{error}");
+        }
         assert!(runtime.queries().is_empty());
     }
 
