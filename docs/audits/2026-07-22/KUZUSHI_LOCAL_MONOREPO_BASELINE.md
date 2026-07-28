@@ -14,7 +14,7 @@ recorded with reasoning in
 `/home/ci/kz-local-monorepo/phaseA-20260722-161613/provenance-baseline.json`:
 
 - **Target: `/home/ci/monorepo`** (alias `monorepo`). Real git worktree,
-  remote `git@github.com:acme/monorepo.git` — monorepo *is* the monorepo
+  remote `git@github.com:acme/monorepo.git` — monorepo *is* the canonical
   codebase. 442,579 tracked files, 18 GiB, 58 root directories,
   `bazel-bin`/`bazel-out` symlinked outside the repo, one uninitialized
   submodule (`src/go/src/acme/vendor`, left uninitialized).

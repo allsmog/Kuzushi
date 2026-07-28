@@ -223,7 +223,7 @@ mod tests {
         let index = review_index(std::slice::from_ref(&finding));
 
         assert!(FindingSearch::parse(
-            "sev:critical,high source:codeql|carlini path:gateway actor:gateway conf:unknown status:open"
+            "sev:critical,high source:codeql|carlini path:gateway actor:router conf:unknown status:open"
         )
         .matches(&finding, &index));
         assert!(FindingSearch::parse("severity:low severity:high").matches(&finding, &index));

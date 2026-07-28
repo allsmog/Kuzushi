@@ -440,7 +440,7 @@ mod tests {
 
     fn write_carlini_alias_fixture_files(target: &Path) {
         fs::create_dir_all(target.join("bluejay_auth")).unwrap();
-        fs::create_dir_all(target.join("gateway/rpc")).unwrap();
+        fs::create_dir_all(target.join("router/rpc")).unwrap();
         fs::write(
             target.join("bluejay_auth/account_cache.go"),
             "package auth\n",

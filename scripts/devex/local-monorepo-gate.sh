@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # local-monorepo-gate.sh — acceptance gate for Kuzushi against an EXISTING
-# local monorepo checkout (monorepo / monorepo aliases for the same codebase).
+# local monorepo checkout (monorepo aliases for the same codebase).
 #
 #   --baseline          record target state, build once, capture current
 #                       behavior (J25–J27), write the baseline report inputs.
