@@ -210,6 +210,7 @@ fn model_call_cell(
             usage: details.usage,
             cost: call.cost,
             error_class: details.error_class,
+            failure: details.failure,
             timing: details.timing,
         }),
     )

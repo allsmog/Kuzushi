@@ -12,6 +12,7 @@ pub use persistence::{
     RunItemDeliveryFault, RunItemDeliveryFaultSubscriber, RunItemRead, RunItemWriter,
     RunItemWriterFault, RunProjectionRead, RunProjectionSource,
 };
+pub(crate) use persistence::load_run_projection_unhydrated;
 
 #[cfg(test)]
 mod tests;

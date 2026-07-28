@@ -7,6 +7,7 @@ mod runtime_impl;
 mod tests;
 
 pub use options::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
+pub(crate) use response::estimate_cost_usd;
 
 #[cfg(test)]
 pub(crate) use client::{

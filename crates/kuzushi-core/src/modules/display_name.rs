@@ -13,7 +13,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("agentic-sast:scan", "Agentic SAST hunt"),
     ("android-apk:check-env", "Check Android tooling environment"),
     ("android-apk:code-scan", "Scan APK decompiled code"),
-    ("android-apk:fileprovider-scan", "Scan APK FileProvider configs"),
+    (
+        "android-apk:fileprovider-scan",
+        "Scan APK FileProvider configs",
+    ),
     ("android-apk:hybrid-detect", "Detect APK hybrid frameworks"),
     ("android-apk:manifest-scan", "Scan Android manifest"),
     ("android-apk:native-libs", "Inspect APK native libraries"),
@@ -35,7 +38,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("catalog:tools", "List tools"),
     ("chrome-rce:review-trigger", "Review Chrome RCE trigger"),
     ("chrome-rce:scan", "Scan for Chrome RCE patterns"),
-    ("classifier-gate:score", "Score finding with classifier gate"),
+    (
+        "classifier-gate:score",
+        "Score finding with classifier gate",
+    ),
     ("codeql:create-db", "Create CodeQL database"),
     ("codeql:scan", "Run CodeQL scan"),
     ("config:show", "Show configuration"),
@@ -59,7 +65,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("exploit-chain:scan", "Scan for exploit chains"),
     ("findings:chains", "Show finding chains"),
     ("findings:ground", "Re-ground finding citations"),
-    ("fleet:diff-findings", "Diff fleet findings across revisions"),
+    (
+        "fleet:diff-findings",
+        "Diff fleet findings across revisions",
+    ),
     ("fleet:findings", "Query fleet findings"),
     ("fleet:ingest", "Rebuild fleet corpus"),
     ("fleet:register", "Register fleet target"),
@@ -71,7 +80,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("iac-scan:scan", "Scan infrastructure-as-code"),
     ("license-scan:scan", "Scan dependency licenses"),
     ("module-recommender:recommend", "Recommend modules"),
-    ("ndiff:extract-fix-pattern", "Extract fix pattern from CVE diff"),
+    (
+        "ndiff:extract-fix-pattern",
+        "Extract fix pattern from CVE diff",
+    ),
     ("ndiff:fetch-cve", "Fetch CVE advisory"),
     ("ndiff:hunt-variants", "Hunt CVE variants"),
     ("offense-review:threat-hunt", "Review offensive threat hunt"),
@@ -127,13 +139,19 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
         "Select CWEs for deep semantic hunt",
     ),
     ("systems-hunt:deep-semantic-hunt", "Deep semantic hunt"),
-    ("systems-hunt:systems-context-gatherer", "Gather systems context"),
+    (
+        "systems-hunt:systems-context-gatherer",
+        "Gather systems context",
+    ),
     ("systems-hunt:systems-hunt", "Hunt systems-level bugs"),
     (
         "systems-hunt:systems-invariant-extract",
         "Extract system invariants",
     ),
-    ("systems-hunt:systems-trigger-synth", "Synthesize trigger inputs"),
+    (
+        "systems-hunt:systems-trigger-synth",
+        "Synthesize trigger inputs",
+    ),
     ("taint-iris-next:catalog", "Catalog taint sources and sinks"),
     (
         "taint-iris-next:codeql-db",
@@ -143,17 +161,24 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("taint-iris-next:finding-review", "Review taint findings"),
     ("taint-iris-next:hunt", "Hunt taint flows (IRIS next)"),
     ("taint-iris-next:import-sinks", "Import sink definitions"),
-    ("taint-iris-next:source-sink-trace", "Trace source-to-sink flow"),
+    (
+        "taint-iris-next:source-sink-trace",
+        "Trace source-to-sink flow",
+    ),
     ("taint-iris:hunt", "Hunt taint flows (IRIS)"),
     ("threat-intel:apply", "Apply threat intel invariants"),
     ("threat-intel:discover", "Discover threat intel"),
     ("threat-intel:harvest", "Harvest threat intel"),
     ("threat-intel:list", "List threat intel"),
+    ("threat-intel:research", "Research dependency threat intel"),
     ("threat-leads:build", "Build threat leads"),
     ("threat-leads:read", "Read threat leads"),
     ("threat-model:build", "Build threat model"),
     ("threat-model:import", "Import threat model"),
-    ("threat-model:methodologies", "List threat-model methodologies"),
+    (
+        "threat-model:methodologies",
+        "List threat-model methodologies",
+    ),
     ("threat-model:read", "Read threat model"),
     ("threat-model:verify", "Verify threat model"),
     ("tob:audit", "Run Trail of Bits audit checklist"),
@@ -167,7 +192,10 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("variant:lift-pattern", "Lift pattern from seed finding"),
     ("vendor-assessment:assess", "Assess vendor"),
     ("vendor-assessment:attach", "Attach vendor evidence"),
-    ("vendor-assessment:prompts", "Show vendor assessment prompts"),
+    (
+        "vendor-assessment:prompts",
+        "Show vendor assessment prompts",
+    ),
     ("vendor-assessment:scope", "Scope vendor assessment"),
     ("verify:exploit", "Verify exploit"),
     ("verify:finding", "Verify finding"),
@@ -215,10 +243,7 @@ mod tests {
     #[test]
     fn humanizer_turns_keys_into_words() {
         assert_eq!(humanize_tool_key("campaign:plan"), "Campaign plan");
-        assert_eq!(
-            humanize_tool_key("agentic-sast:scan"),
-            "Agentic sast scan"
-        );
+        assert_eq!(humanize_tool_key("agentic-sast:scan"), "Agentic sast scan");
     }
 
     /// Every registered tool must have a curated operator label. The
@@ -226,10 +251,8 @@ mod tests {
     /// deliberate names so receipts read as sentences.
     #[test]
     fn every_registered_tool_has_a_curated_display_name() {
-        let curated: std::collections::BTreeSet<&str> = CURATED_TOOL_LABELS
-            .iter()
-            .map(|(key, _)| *key)
-            .collect();
+        let curated: std::collections::BTreeSet<&str> =
+            CURATED_TOOL_LABELS.iter().map(|(key, _)| *key).collect();
         let mut missing = Vec::new();
         let mut seen = std::collections::BTreeSet::new();
         for module in crate::modules::ModuleRegistry::with_v2_builtins().all_modules() {
@@ -270,10 +293,7 @@ mod tests {
                 label.chars().next().is_some_and(char::is_uppercase),
                 "{key}: label {label:?} is not sentence case"
             );
-            assert_ne!(
-                label, key,
-                "{key}: label must differ from the registry key"
-            );
+            assert_ne!(label, key, "{key}: label must differ from the registry key");
         }
     }
 }

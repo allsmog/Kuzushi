@@ -288,7 +288,11 @@ fn execution_trace_bridges_safe_progress_into_the_owning_call() {
         .with_progress(421, 832)
         .emit();
     execution
-        .step("reasoning", "scan", "Comparing candidate source-to-sink paths")
+        .step(
+            "reasoning",
+            "scan",
+            "Comparing candidate source-to-sink paths",
+        )
         .emit();
     let identity = finish_success(lifecycle, "7 findings");
 
@@ -302,10 +306,9 @@ fn execution_trace_bridges_safe_progress_into_the_owning_call() {
             ..
         }
     )));
-    assert!(calls.iter().any(|envelope| matches!(
-        envelope.item,
-        RunItemV1::SafeReasoningSummary { .. }
-    )));
+    assert!(calls
+        .iter()
+        .any(|envelope| matches!(envelope.item, RunItemV1::SafeReasoningSummary { .. })));
     assert_eq!(
         calls
             .iter()
@@ -313,7 +316,9 @@ fn execution_trace_bridges_safe_progress_into_the_owning_call() {
             .count(),
         1
     );
-    assert!(calls.iter().all(|envelope| envelope.task_id == Some(task_id)));
+    assert!(calls
+        .iter()
+        .all(|envelope| envelope.task_id == Some(task_id)));
     assert!(calls.iter().all(|envelope| match envelope.item {
         RunItemV1::ToolCallProgress { .. } | RunItemV1::SafeReasoningSummary { .. } => {
             envelope.parent_item_id == Some(identity.item_id)
@@ -353,7 +358,11 @@ fn deferred_dispatch_rejection_settles_once_with_exact_result_linkage() {
 
     let read = read_run_items(target.path(), run_id).unwrap().unwrap();
     let calls = call_items(&read.items, identity);
-    assert_eq!(calls.len(), 3, "request, rejection, and finish must be durable");
+    assert_eq!(
+        calls.len(),
+        3,
+        "request, rejection, and finish must be durable"
+    );
     assert!(matches!(calls[1].item, RunItemV1::ToolCallRejected { .. }));
     assert!(matches!(
         calls[2].item,
@@ -399,7 +408,11 @@ fn application_rejection_settles_once_with_exact_durable_result() {
 
     let read = read_run_items(target.path(), run_id).unwrap().unwrap();
     let calls = call_items(&read.items, identity);
-    assert_eq!(calls.len(), 3, "request, rejection, and finish must be durable");
+    assert_eq!(
+        calls.len(),
+        3,
+        "request, rejection, and finish must be durable"
+    );
     assert!(matches!(calls[0].item, RunItemV1::ToolCallRequested { .. }));
     assert!(matches!(calls[1].item, RunItemV1::ToolCallRejected { .. }));
     assert!(matches!(
@@ -411,10 +424,9 @@ fn application_rejection_settles_once_with_exact_durable_result() {
         }
     ));
     assert_eq!(calls[2].task_id, Some(task_id));
-    assert!(!calls.iter().any(|item| matches!(
-        item.item,
-        RunItemV1::ToolCallStarted { .. }
-    )));
+    assert!(!calls
+        .iter()
+        .any(|item| matches!(item.item, RunItemV1::ToolCallStarted { .. })));
 
     let projection = crate::run_lifecycle::load_run_projection(target.path(), run_id)
         .unwrap()

@@ -21,6 +21,7 @@ impl PhaseReferenceFixture {
         )
         .expect("phase reference fixture");
         hydrate_fix_truth(&mut app, target.path(), page);
+        hydrate_selected_source(&mut app, target.path());
         app.set_running_tool_for_test("context:build");
         let target_root = target.path().to_path_buf();
         let canonical_target_root = target_root
@@ -45,6 +46,23 @@ impl PhaseReferenceFixture {
             .replace(&self.target_root.display().to_string(), "/tmp/phase-target")
             .replace(&self.target_name, "phase-target")
     }
+}
+
+fn hydrate_selected_source(app: &mut ShellApp, target: &std::path::Path) {
+    let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
+        return;
+    };
+    let hydration_target = app.target_owned().unwrap_or_else(|| target.to_path_buf());
+    let source = std::path::PathBuf::from(finding.file_path);
+    let path = if source.is_absolute() {
+        source
+    } else {
+        hydration_target.join(source)
+    };
+    app.hydrate_view_keys_blocking(
+        &hydration_target,
+        vec![crate::ViewHydrationKey::SourceFile { path }],
+    );
 }
 
 fn hydrate_fix_truth(app: &mut ShellApp, target: &std::path::Path, page: WorkbenchPage) {

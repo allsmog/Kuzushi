@@ -37,6 +37,9 @@ fn setup_readiness_lines(
             width,
             compact,
         ));
+        if !compact && row.id == crate::app::SetupRowId::Target {
+            lines.extend(setup_target_fact_lines(app, width));
+        }
         if !compact && index == app.router.setup().cursor() {
             lines.extend(
                 wrap_text(&format!("    {}", row.detail), width)
@@ -46,6 +49,19 @@ fn setup_readiness_lines(
         }
     }
     lines
+}
+
+fn setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    if app.active_target_facts_loading() {
+        return vec![muted("    Inspecting active target...")];
+    }
+    let Some(facts) = app.active_target_facts() else {
+        return Vec::new();
+    };
+    crate::ui_view_models::target_fact_detail_lines(facts)
+        .into_iter()
+        .map(|line| muted(&fit(&format!("    {line}"), width)))
+        .collect()
 }
 
 fn setup_editor_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
@@ -64,11 +80,16 @@ fn setup_summary_line(
     width: usize,
 ) -> Line<'static> {
     if model.can_start {
+        let execution = if model.selected_model_tasks == 0 {
+            "deterministic/runtime-free · no model or credentials".to_string()
+        } else {
+            format!("{} model-backed task(s)", model.selected_model_tasks)
+        };
         styled(
             &fit(
                 &format!(
-                    " READY · {} Map task(s) · s Start Map · Enter edits the selected row",
-                    model.selected_tasks
+                    " READY · {} Map task(s) · {execution} · s Start Map · Enter edits the selected row",
+                    model.selected_tasks,
                 ),
                 width,
             ),
@@ -146,6 +167,12 @@ mod tests {
             assert!(text.contains("Map plan"));
             assert!(text.contains("Start Map"));
             assert!(!text.contains("組 map"));
+            if area.width >= 120 {
+                assert!(
+                    text.contains("deterministic/runtime-free · no model or credentials"),
+                    "{text}"
+                );
+            }
         }
     }
 
@@ -181,5 +208,41 @@ mod tests {
             .join("\n");
 
         assert_eq!(text.matches('▸').count(), 1, "{text}");
+    }
+
+    #[test]
+    fn setup_renders_generation_checked_active_target_facts() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join("src")).unwrap();
+        std::fs::write(
+            target.path().join("Cargo.toml"),
+            "[package]\nname='fixture'\nversion='0.1.0'\n",
+        )
+        .unwrap();
+        std::fs::write(target.path().join("src/lib.rs"), "pub fn ready() {}\n").unwrap();
+        std::fs::write(
+            target.path().join("MODULE.bazel"),
+            "module(name='fixture')\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.set_shell_view(crate::ShellView::Config);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.active_target_facts().is_none() && std::time::Instant::now() < deadline {
+            app.apply_target_candidate_discovery_results();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        app.open_setup();
+
+        let text = setup_lines(&app, Rect::new(0, 0, 120, 36))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("languages: Rust"), "{text}");
+        assert!(text.contains("build: Bazel, Cargo"), "{text}");
+        assert!(text.contains("prior Kuzushi:"), "{text}");
     }
 }

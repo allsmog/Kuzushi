@@ -313,9 +313,8 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-            assert!(error.starts_with(
-                "verification output fingerprint must be a non-empty string, got "
-            ));
+            assert!(error
+                .starts_with("verification output fingerprint must be a non-empty string, got "));
             assert!(!error.contains("42"));
         }
     }

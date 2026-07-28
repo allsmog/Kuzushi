@@ -20,9 +20,9 @@ Commands the reviewer can copy-paste to verify. Include manual repro steps
 for anything that isn't exercised by automated tests.
 -->
 
-- [ ] `pnpm typecheck` passes
+- [ ] `pnpm verify:quick` passes
 - [ ] `pnpm test` passes
-- [ ] `pnpm build` succeeds (only if touching build/packaging)
+- [ ] `pnpm build:native` succeeds (only if touching build/packaging)
 - [ ] Manual verification:
 
 ## Risks / rollback plan

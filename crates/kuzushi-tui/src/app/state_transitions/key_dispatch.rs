@@ -21,11 +21,7 @@ impl ShellApp {
     }
 
     fn reduce_key_without_recording(&mut self, key: KeyEvent) -> InputUpdate {
-        let budget_update = self.handle_budget_key(key);
-        if budget_update.handled {
-            return budget_update;
-        }
-        if let Some(update) = self.reduce_modal_key(key) {
+        if let Some(update) = self.reduce_owned_key(key) {
             return update;
         }
 
@@ -35,6 +31,17 @@ impl ShellApp {
         }
 
         self.reduce_non_modal_key(key)
+    }
+
+    fn reduce_owned_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let budget_update = self.handle_budget_key(key);
+        if budget_update.handled {
+            return Some(budget_update);
+        }
+        if let Some(update) = self.reduce_modal_key(key) {
+            return Some(update);
+        }
+        None
     }
 
     fn reduce_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
@@ -81,54 +88,17 @@ impl ShellApp {
     }
 
     fn reduce_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if let Some(update) = self.handle_configured_phase_result_key(key) {
-            return Some(update);
+        if self.input_mode() != InputMode::Navigate {
+            return None;
         }
-        self.handle_configured_phase_result_prompt_mode(key)
+        self.handle_configured_phase_result_key(key)
     }
 
     fn reduce_default_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if let Some(update) = self.handle_phase_result_escape(key) {
-            return Some(update);
+        if self.input_mode() != InputMode::Navigate {
+            return None;
         }
-        // Keys the RESULT strip does not bind fall through to the shell:
-        // an unresolved attempt is a checkpoint, not a modal — page keys,
-        // pane cycling, and mode controls must keep working under it.
         self.handle_phase_result_key(key)
-    }
-
-    fn handle_configured_phase_result_prompt_mode(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if !self.phase_result_is_open() {
-            return None;
-        }
-        match self
-            .ui_mut()
-            .handle_configured_context_key("composer", key, Instant::now())
-        {
-            ConfiguredKeyResult::Action(ViewHotkeyAction::EnterPromptMode) => {
-                self.enter_prompt_mode();
-                Some(InputUpdate::handled())
-            }
-            ConfiguredKeyResult::Action(_) | ConfiguredKeyResult::Pending => {
-                Some(InputUpdate::handled())
-            }
-            ConfiguredKeyResult::NoMatch => None,
-        }
-    }
-
-    fn handle_phase_result_escape(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        // Esc keeps its composer meaning in Prompt mode; only Navigate mode
-        // with a card open uses it to return to the prompt.
-        if self.input_mode() != InputMode::Navigate
-            || !self.phase_result_is_open()
-            || !key.modifiers.is_empty()
-            || key.code != KeyCode::Esc
-            || !self.default_composer_action_enabled("prompt_mode")
-        {
-            return None;
-        }
-        self.enter_prompt_mode();
-        Some(InputUpdate::handled())
     }
 
     fn reduce_configured_shell_or_mode_cycle(&mut self, key: KeyEvent) -> Option<InputUpdate> {
@@ -191,12 +161,9 @@ impl ShellApp {
     }
 
     fn handle_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        // Card keys fire in BOTH input modes: Prompt mode captures them only
-        // while the composer is empty, so an in-progress draft always wins
-        // and single keys stop landing as stray prompt text ("q uickstart").
-        if self.shell_view() != ShellView::Workbench
+        if self.input_mode() != InputMode::Navigate
+            || !self.phase_result_is_open()
             || !key.modifiers.is_empty()
-            || (self.input_mode() == InputMode::Prompt && !self.input().is_empty())
         {
             return None;
         }
@@ -207,12 +174,15 @@ impl ShellApp {
         {
             return Some(InputUpdate::handled());
         }
-        self.phase_result_command_is_available(command)
-            .then(|| self.apply_phase_result_command(command))
+        Some(if self.phase_result_command_is_available(command) {
+            self.apply_phase_result_command(command)
+        } else {
+            InputUpdate::handled()
+        })
     }
 
     fn handle_configured_phase_result_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
-        if !self.phase_result_is_open() {
+        if self.input_mode() != InputMode::Navigate || !self.phase_result_is_open() {
             return None;
         }
         let result =
@@ -242,9 +212,6 @@ impl ShellApp {
     }
 
     fn phase_result_is_open(&self) -> bool {
-        // The card is modal for its advertised keys in both input modes
-        // (prereq-card precedent); a non-empty Prompt draft still wins in
-        // `handle_phase_result_key`.
         if self.shell_view() != ShellView::Workbench {
             return false;
         }
@@ -614,32 +581,27 @@ impl ShellApp {
             );
             return None;
         };
+        let descriptor = self.registry().resolve_tool(&tool)?;
         Some(PhaseRerunDraft {
-            phase: record.completed.phase,
-            parent_attempt_id: record.completed.attempt_id,
-            tool,
-            input,
+            review: PhaseRerunReview {
+                phase: record.completed.phase,
+                parent_attempt_id: record.completed.attempt_id,
+                tool: tool.clone(),
+                tool_description: descriptor.description.clone(),
+                changed_options: rerun_option_review(descriptor, &input),
+                prepared_input: input,
+                derivation,
+            },
             derivation,
         })
     }
 
     fn apply_phase_rerun_draft(&mut self, draft: PhaseRerunDraft) {
-        match draft.derivation {
-            Some(derivation) => {
-                self.engagement.arm_attempt_lineage(
-                    draft.phase,
-                    draft.parent_attempt_id,
-                    derivation,
-                );
-            }
-            None => self.engagement.clear_attempt_lineage(draft.phase),
-        }
-        self.set_input(format!("run {} {}", draft.tool, draft.input));
-        self.set_input_mode(InputMode::Prompt);
+        self.engagement.set_pending_phase_rerun(draft.review);
         self.log(
             "workflow",
             format!(
-                "{} loaded from canonical input.json — edit canonical input or press Enter",
+                "{} review opened from canonical input.json — Enter dispatches the exact saved input; e opens Options",
                 phase_rerun_action(draft.derivation)
             ),
         );
@@ -697,6 +659,9 @@ impl ShellApp {
     }
 
     fn handle_primary_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.engagement.pending_phase_rerun().is_some() {
+            return Some(self.handle_phase_rerun_review_key(key));
+        }
         if self.advisory().pending_confirm.is_some() {
             return Some(self.handle_confirm_key(key));
         }
@@ -704,6 +669,98 @@ impl ShellApp {
             return Some(InputUpdate::handled());
         }
         self.handle_modal_editor_key(key)
+    }
+
+    fn handle_phase_rerun_review_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if is_quit_chord(key) {
+            return InputUpdate::ignored();
+        }
+        if !key.modifiers.is_empty() {
+            return InputUpdate::handled();
+        }
+        match key.code {
+            KeyCode::Enter => self.dispatch_phase_rerun_review(),
+            KeyCode::Char('e') => self.edit_phase_rerun_review(),
+            KeyCode::Esc => self.cancel_phase_rerun_review(),
+            _ => InputUpdate::handled(),
+        }
+    }
+
+    fn edit_phase_rerun_review(&mut self) -> InputUpdate {
+        if let Some(review) = self.engagement.take_pending_phase_rerun() {
+            self.show_options(Some(review.tool), OptionsFilter::Standard);
+        }
+        InputUpdate::handled()
+    }
+
+    fn cancel_phase_rerun_review(&mut self) -> InputUpdate {
+        self.engagement.clear_pending_phase_rerun();
+        self.log(
+            "workflow",
+            "rerun review canceled — saved input was not changed",
+        );
+        InputUpdate::handled()
+    }
+
+    fn dispatch_phase_rerun_review(&mut self) -> InputUpdate {
+        let Some(review) = self.engagement.take_pending_phase_rerun() else {
+            return InputUpdate::handled();
+        };
+        let Some(launch) = self.phase_rerun_launch(review) else {
+            return InputUpdate::handled();
+        };
+        InputUpdate::handled_with_effects(vec![ShellEffect::DispatchRunTool(launch)])
+    }
+
+    fn phase_rerun_launch(&mut self, review: PhaseRerunReview) -> Option<RunToolLaunch> {
+        let workspace = self.phase_rerun_workspace()?;
+        let prepared = match self.prepare_background_tool_input(
+            &review.tool,
+            review.prepared_input.clone(),
+            &workspace,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.log(
+                    "workflow",
+                    format!("exact rerun is no longer valid: {error}"),
+                );
+                return None;
+            }
+        };
+        self.apply_phase_rerun_lineage(&review);
+        let thinking_level = thinking_level_from_input(prepared.value())
+            .or_else(|| self.session_thinking_level_owned());
+        Some(RunToolLaunch {
+            tool_name: review.tool,
+            input: prepared,
+            workspace,
+            thinking_level,
+            authorization: ExecutionAuthorization::interactive_request(),
+        })
+    }
+
+    fn phase_rerun_workspace(&mut self) -> Option<WorkspaceTarget> {
+        let Some(target) = self.target_owned() else {
+            self.log("workflow", "rerun requires an active target");
+            return None;
+        };
+        let Ok(workspace) = WorkspaceTarget::new(&target) else {
+            self.log("workflow", "rerun target is unavailable");
+            return None;
+        };
+        Some(workspace)
+    }
+
+    fn apply_phase_rerun_lineage(&mut self, review: &PhaseRerunReview) {
+        match review.derivation {
+            Some(derivation) => self.engagement.arm_attempt_lineage(
+                review.phase,
+                review.parent_attempt_id.clone(),
+                derivation,
+            ),
+            None => self.engagement.clear_attempt_lineage(review.phase),
+        }
     }
 
     fn handle_modal_editor_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
@@ -749,18 +806,50 @@ impl ShellApp {
         if !self.router.workbench().review().search_capture {
             return false;
         }
+        let cursor_anchor = crate::ui_view_models::visible_finding_at_cursor(self)
+            .map(|(_, finding)| review_search_anchor(&finding));
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let review = self.router.workbench_mut().review_mut();
-        match key.code {
-            KeyCode::Esc => review.close_search_capture(false),
-            KeyCode::Enter => review.close_search_capture(true),
-            KeyCode::Backspace => review.pop_search_char(),
+        let projection_changed = match key.code {
+            KeyCode::Esc => {
+                review.close_search_capture(false);
+                true
+            }
+            KeyCode::Enter => {
+                review.close_search_capture(true);
+                false
+            }
+            KeyCode::Backspace => {
+                review.pop_search_char();
+                true
+            }
             KeyCode::Char('c') if ctrl => return false,
-            KeyCode::Char(ch) if !ctrl && !alt => review.push_search_char(ch),
+            KeyCode::Char(ch) if !ctrl && !alt => {
+                review.push_search_char(ch);
+                true
+            }
             _ => return false,
+        };
+        if projection_changed {
+            self.reanchor_review_search_cursor(cursor_anchor);
         }
         true
+    }
+
+    fn reanchor_review_search_cursor(&mut self, anchor: Option<String>) {
+        let len = crate::ui_view_models::visible_findings_len(self);
+        let position = anchor.and_then(|anchor| {
+            (0..len).find(|index| {
+                crate::ui_view_models::visible_finding_at_index(self, *index)
+                    .is_some_and(|(_, finding)| review_search_anchor(&finding) == anchor)
+            })
+        });
+        if let Some(position) = position {
+            self.router.findings_mut().set_cursor(position);
+        } else {
+            self.router.findings_mut().clamp(len);
+        }
     }
 
     fn handle_contextual_surface_key(&mut self, key: KeyEvent) -> bool {
@@ -1041,7 +1130,10 @@ impl ShellApp {
     /// Esc dismisses a visible notice banner. Returns false when no notice is
     /// present so Esc falls through to view-back / draft-restore as usual.
     fn handle_notice_dismiss_key(&mut self, key: KeyEvent) -> bool {
-        if self.advisory().notice.is_none() || key.code != KeyCode::Esc || !key.modifiers.is_empty()
+        if self.phase_result_is_open()
+            || self.advisory().notice.is_none()
+            || key.code != KeyCode::Esc
+            || !key.modifiers.is_empty()
         {
             return false;
         }
@@ -1296,6 +1388,15 @@ impl ShellApp {
     }
 }
 
+fn review_search_anchor(finding: &kuzushi_core::Finding) -> String {
+    finding
+        .identity_id
+        .as_ref()
+        .or(finding.dedup_key.as_ref())
+        .unwrap_or(&finding.fingerprint)
+        .clone()
+}
+
 /// Terminals speaking an enhanced keyboard protocol (kitty CSI-u,
 /// modifyOtherKeys, tmux extended-keys) report Shift+Tab as `Tab` with the
 /// SHIFT modifier instead of the legacy `ESC [ Z` BackTab that every binding
@@ -1331,10 +1432,7 @@ fn inactive_composer_mode_action(mode: InputMode) -> ViewHotkeyAction {
 }
 
 struct PhaseRerunDraft {
-    phase: WorkflowPhase,
-    parent_attempt_id: String,
-    tool: String,
-    input: String,
+    review: PhaseRerunReview,
     derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
 }
 
@@ -1342,7 +1440,7 @@ fn rerun_specification(
     registry: &kuzushi_core::ModuleRegistry,
     target: &std::path::Path,
     run_id: &str,
-) -> Option<(String, String)> {
+) -> Option<(String, serde_json::Value)> {
     let summary = kuzushi_core::load_run_summary(target, run_id).ok()?;
     let tool = summary.tool?;
     let kuzushi_core::RunArtifactRead::Ready { value, .. } =
@@ -1351,33 +1449,52 @@ fn rerun_specification(
         return None;
     };
     let input: serde_json::Value = serde_json::from_str(&value).ok()?;
-    let minimal = minimal_rerun_input(registry, &tool, input);
-    Some((tool, minimal.to_string()))
+    registry.resolve_tool(&tool)?;
+    Some((tool, input))
 }
 
-/// Canonical `input.json` carries every merged default; the draft the
-/// operator edits keeps only the values that differ, so the composer line
-/// stays readable instead of a several-hundred-character JSON blob.
-fn minimal_rerun_input(
-    registry: &kuzushi_core::ModuleRegistry,
-    tool: &str,
-    input: serde_json::Value,
-) -> serde_json::Value {
-    let Some(descriptor) = registry.resolve_tool(tool) else {
-        return input;
+fn rerun_option_review(
+    descriptor: &kuzushi_core::modules::ToolDescriptor,
+    input: &serde_json::Value,
+) -> Vec<PhaseRerunOptionReview> {
+    let Some(input) = input.as_object() else {
+        return Vec::new();
     };
-    let serde_json::Value::Object(mut object) = input else {
-        return input;
-    };
-    object.retain(|name, value| {
-        descriptor
-            .options
-            .iter()
-            .find(|option| option.matches_name_or_alias(name))
-            .and_then(|option| option.default.as_ref())
-            .is_none_or(|default| default != value)
-    });
-    serde_json::Value::Object(object)
+    descriptor
+        .options
+        .iter()
+        .filter_map(|option| {
+            let value = input.get(&option.name)?;
+            if option.default.as_ref() == Some(value) {
+                return None;
+            }
+            Some(PhaseRerunOptionReview {
+                label: option.name.clone(),
+                value: review_option_value(&option.name, value),
+                description: option.description.clone(),
+            })
+        })
+        .collect()
+}
+
+fn review_option_value(name: &str, value: &serde_json::Value) -> String {
+    if sensitive_option_name(name) {
+        return "<redacted>".to_string();
+    }
+    match value {
+        serde_json::Value::Object(_) => "custom JSON value".to_string(),
+        serde_json::Value::String(text) if text.chars().count() > 80 => {
+            format!("custom text ({} characters)", text.chars().count())
+        }
+        _ => crate::app::format_option_value(value),
+    }
+}
+
+fn sensitive_option_name(name: &str) -> bool {
+    let name = name.replace(['_', '-'], "").to_ascii_lowercase();
+    ["apikey", "token", "secret", "password", "credential"]
+        .iter()
+        .any(|needle| name.contains(needle))
 }
 
 fn phase_rerun_action(
@@ -1460,9 +1577,16 @@ mod tests {
     }
 
     fn app_with_unresolved_map_result(config: V2Config) -> (tempfile::TempDir, ShellApp, String) {
+        app_with_unresolved_map_result_input(config, serde_json::json!({}))
+    }
+
+    fn app_with_unresolved_map_result_input(
+        config: V2Config,
+        input: serde_json::Value,
+    ) -> (tempfile::TempDir, ShellApp, String) {
         use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
         let target = tempfile::tempdir().unwrap();
-        seed_indexed_map_run(target.path(), "map-run");
+        seed_indexed_map_run(target.path(), "map-run", input);
         let completed = crate::test_support::append_typed_attempt(
             target.path(),
             WorkflowPhase::Map,
@@ -1481,11 +1605,12 @@ mod tests {
         (target, app, attempt_id)
     }
 
-    fn seed_indexed_map_run(target: &std::path::Path, run_id: &str) {
-        crate::test_support::record_indexed_run(
+    fn seed_indexed_map_run(target: &std::path::Path, run_id: &str, input: serde_json::Value) {
+        crate::test_support::record_indexed_run_with_input(
             target,
             run_id,
             "context:build",
+            input,
             serde_json::json!({
                 "ok": true,
                 "data": {"snapshot": {"filesIndexed": 1}}
@@ -1558,28 +1683,29 @@ mod tests {
     ) {
         use kuzushi_core::{PatchLifecycleRecord, PatchLifecycleState};
 
-        store
-            .insert_patch_lifecycle_record(&PatchLifecycleRecord {
-                application_id: "application-fix-result".to_string(),
-                stable_fp: store
-                    .patch_lifecycle_stable_fp(&finding.fingerprint)
-                    .unwrap(),
-                fingerprint: finding.fingerprint.clone(),
-                finding_scan_id: finding.scan_id.clone(),
-                patch_run_id: "patch-candidate-run".to_string(),
-                target: workspace.root().display().to_string(),
-                diff_hash: "diff-sha256".to_string(),
-                base_commit: None,
-                touched_files: Vec::new(),
-                state: PatchLifecycleState::Verified,
-                reverify_run_id: Some(lifecycle_run_id.to_string()),
-                detail: Some("re-verification passed".to_string()),
-                actor: "operator".to_string(),
-                application_started_at: "1".to_string(),
-                applied_at: Some("2".to_string()),
-                updated_at: "3".to_string(),
-            })
-            .unwrap();
+        let mut record = PatchLifecycleRecord {
+            application_id: "application-fix-result".to_string(),
+            stable_fp: store
+                .patch_lifecycle_stable_fp(&finding.fingerprint)
+                .unwrap(),
+            fingerprint: finding.fingerprint.clone(),
+            finding_scan_id: finding.scan_id.clone(),
+            patch_run_id: "patch-candidate-run".to_string(),
+            target: workspace.root().display().to_string(),
+            diff_hash: "diff-sha256".to_string(),
+            base_commit: Some("source-commit".to_string()),
+            touched_files: Vec::new(),
+            state: PatchLifecycleState::Verified,
+            reverify_run_id: Some(lifecycle_run_id.to_string()),
+            reverify_evidence: None,
+            detail: Some("re-verification passed".to_string()),
+            actor: "operator".to_string(),
+            application_started_at: "1".to_string(),
+            applied_at: Some("2".to_string()),
+            updated_at: "3".to_string(),
+        };
+        crate::test_support::attach_verified_patch_receipt(workspace, &mut record);
+        store.insert_patch_lifecycle_record(&record).unwrap();
     }
 
     fn write_completed_fix_run_summary(
@@ -2183,6 +2309,115 @@ mod tests {
     }
 
     #[test]
+    fn phase_result_shortcuts_never_steal_prompt_text() {
+        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+        app.set_input_mode(InputMode::Prompt);
+
+        for key in ['n', 'u', 'o', 'r', 'c', 'x'] {
+            assert!(app.reduce_key(plain_key(KeyCode::Char(key))).handled);
+        }
+        assert_eq!(app.input(), "nuorcx");
+        assert!(app
+            .engagement
+            .unresolved_phase_attempt(WorkflowPhase::Map)
+            .is_some());
+    }
+
+    #[test]
+    fn unresolved_result_keeps_prompt_editing_and_escape_semantics() {
+        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+        app.set_input("preserved draft".to_string());
+        app.set_input_mode(InputMode::Prompt);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('x'))).handled);
+        assert_eq!(app.input(), "preserved draftx");
+        assert!(app.reduce_key(plain_key(KeyCode::Backspace)).handled);
+        assert_eq!(app.input(), "preserved draft");
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        let card = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Map)
+            .header
+            .result_card
+            .unwrap();
+        assert_eq!(
+            card.control_hint,
+            "Esc Navigate after finishing or clearing prompt draft"
+        );
+
+        assert!(app.reduce_key(plain_key(KeyCode::Esc)).handled);
+        assert!(app.input().is_empty());
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        assert!(app.reduce_key(plain_key(KeyCode::Esc)).handled);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+    }
+
+    #[test]
+    fn rerun_review_is_human_readable_and_enter_dispatches_exact_saved_input() {
+        let input = rerun_review_input();
+        let (_target, mut app, _) =
+            app_with_unresolved_map_result_input(V2Config::default(), input.clone());
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
+        assert_human_readable_rerun_review(&app);
+        assert!(app.input().is_empty());
+        assert_exact_saved_input_dispatch(&mut app, &input);
+        assert!(app.input().is_empty());
+    }
+
+    fn rerun_review_input() -> serde_json::Value {
+        serde_json::json!({
+            "sampleLimit": 12,
+            "discovery": "auto",
+            "enrichment": false,
+            "scope": "all"
+        })
+    }
+
+    fn assert_human_readable_rerun_review(app: &ShellApp) {
+        let review = app
+            .engagement
+            .pending_phase_rerun()
+            .expect("human rerun review");
+        assert_eq!(review.tool, "context:build");
+        assert_eq!(review.changed_options.len(), 1);
+        assert_eq!(review.changed_options[0].label, "sampleLimit");
+        assert!(review.changed_options[0]
+            .description
+            .contains("Maximum source files"));
+        let card = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Map)
+            .header
+            .result_card
+            .unwrap();
+        assert!(card.detail.contains("sampleLimit = 12"), "{}", card.detail);
+        assert!(
+            !card.detail.contains("{"),
+            "raw JSON leaked: {}",
+            card.detail
+        );
+    }
+
+    fn assert_exact_saved_input_dispatch(app: &mut ShellApp, input: &serde_json::Value) {
+        let update = app.reduce_key(plain_key(KeyCode::Enter));
+        let [ShellEffect::DispatchRunTool(launch)] = update.effects.as_slice() else {
+            panic!("expected exact rerun dispatch");
+        };
+        assert_eq!(launch.tool_name, "context:build");
+        assert_eq!(launch.input.value(), input);
+    }
+
+    #[test]
+    fn rerun_review_edit_action_opens_existing_options_without_touching_composer() {
+        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+        assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('e'))).handled);
+
+        assert_eq!(app.shell_view(), ShellView::Options);
+        assert_eq!(app.router.options().tool_name, "context:build");
+        assert!(app.input().is_empty());
+        assert!(app.engagement.pending_phase_rerun().is_none());
+    }
+
+    #[test]
     fn phase_result_escape_returns_to_prompt_without_resolving_the_result() {
         let (_target, mut app, attempt_id) = app_with_unresolved_map_result(V2Config::default());
 
@@ -2194,6 +2429,42 @@ mod tests {
                 .map(|record| record.completed.attempt_id.as_str()),
             Some(attempt_id.as_str())
         );
+    }
+
+    #[test]
+    fn phase_result_escape_enters_navigate_without_resolving_the_result() {
+        let (_target, mut app, attempt_id) = app_with_unresolved_map_result(V2Config::default());
+        app.set_input_mode(InputMode::Prompt);
+
+        assert!(app.phase_result_is_open());
+        assert!(app.default_composer_action_enabled("navigate_mode"));
+        assert!(app.reduce_key(plain_key(KeyCode::Esc)).handled);
+        assert_eq!(app.input_mode(), InputMode::Navigate);
+        assert!(app.input().is_empty());
+        assert_eq!(
+            app.engagement
+                .unresolved_phase_attempt(WorkflowPhase::Map)
+                .map(|record| record.completed.attempt_id.as_str()),
+            Some(attempt_id.as_str())
+        );
+    }
+
+    #[test]
+    fn remapped_navigate_mode_key_works_while_a_phase_result_is_open() {
+        let mut config = V2Config::default();
+        config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
+            context: "composer".to_string(),
+            action: "navigate_mode".to_string(),
+            bindings: vec!["ctrl+x".to_string()],
+        }];
+        let (_target, mut app, _) = app_with_unresolved_map_result(config);
+        app.set_input_mode(InputMode::Prompt);
+
+        assert!(
+            app.reduce_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL))
+                .handled
+        );
+        assert_eq!(app.input_mode(), InputMode::Navigate);
     }
 
     #[test]
@@ -2259,7 +2530,7 @@ mod tests {
     }
 
     #[test]
-    fn selecting_proof_materializes_reality_and_restart_reconstructs_fix() {
+    fn selecting_model_proof_materializes_non_runtime_reality_without_opening_fix() {
         let mut fixture = proof_selection_fixture("tool-proof-selection-restart");
         assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Prove));
 
@@ -2269,16 +2540,26 @@ mod tests {
                 .reduce_key(plain_key(KeyCode::Char('u')))
                 .handled
         );
-        assert!(fixture
-            .app
-            .engagement
-            .unresolved_phase_attempt(WorkflowPhase::Prove)
-            .is_none());
-        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Fix));
+        assert!(
+            fixture
+                .app
+                .engagement
+                .unresolved_phase_attempt(WorkflowPhase::Prove)
+                .is_none(),
+            "{}",
+            fixture
+                .app
+                .log_lines()
+                .iter()
+                .map(|line| format!("{}: {}", line.prefix, line.body))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert_eq!(journey_phase(&fixture.app), Some(WorkflowPhase::Prove));
 
         let mut restarted = ShellApp::new(V2Config::default(), Some(&fixture.workspace));
         restarted.refresh_findings(false);
-        assert_eq!(journey_phase(&restarted), Some(WorkflowPhase::Fix));
+        assert_eq!(journey_phase(&restarted), Some(WorkflowPhase::Prove));
         assert_selected_proof_persisted(&fixture);
     }
 
@@ -2417,6 +2698,11 @@ mod tests {
             .unwrap()
             .unwrap();
         let proof = restored.verification.unwrap();
+        assert_eq!(
+            proof.proof_verdict,
+            kuzushi_core::PersistedProofVerdict::NotAttempted
+        );
+        assert_eq!(proof.backend, kuzushi_core::PersistedSandboxBackend::Model);
         assert_eq!(proof.verification_run_id.as_deref(), Some(fixture.run_id));
         assert_eq!(proof.verified_scan_id.as_deref(), Some("scan-current"));
     }
@@ -2444,10 +2730,16 @@ mod tests {
         run_id: &str,
         finding: &kuzushi_core::Finding,
     ) {
+        let indexed = kuzushi_core::incremental_index::index_workspace_snapshot(workspace).unwrap();
         let candidate = serde_json::json!({
             "fingerprint": finding.fingerprint.clone(),
             "verifiedScanId": "scan-current",
             "identityId": finding.identity_id.clone(),
+            "sourceIdentity": {
+                "kind": "indexed_snapshot",
+                "snapshot_hash": indexed.snapshot_hash,
+                "tree_hash": indexed.tree_hash
+            },
             "exploitable": true,
             "confidence": 0.99,
             "proofLevel": 3,

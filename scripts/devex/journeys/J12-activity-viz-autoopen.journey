@@ -8,12 +8,12 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
+submit: demo
 wait: 2
 snap: activity-auto-open
-expect: ACTIVITY
-ask: Did Activity auto-open when work started (auto_open_activity default true)?
-wait-for: 90 run completed
+expect: RUN FOCUS
+ask: Did Run Focus auto-open when work started (auto_open_activity default true)?
+wait-for: 120 run receipt · completed
 wait: 2
 snap: post-run-deck
 ask: Post-run — did the output deck/viz switch honor the content gate (scan→Heatmap only when findings > 0), with no empty page auto-opened?

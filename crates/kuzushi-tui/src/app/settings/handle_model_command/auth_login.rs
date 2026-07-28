@@ -129,9 +129,8 @@ impl ShellApp {
             self.open_credential_entry(provider.to_string());
             return Vec::new();
         }
-        let effects = self.select_oauth_model_for_provider(provider);
         self.transition_after_auth_ready();
-        effects
+        Vec::new()
     }
 
     fn report_incomplete_picker_oauth(&mut self, provider: &str) {

@@ -490,6 +490,13 @@ fn phase_result_card_model(
     phase: WorkflowPhase,
     presentation: crate::app::PhaseResultPresentation,
 ) -> PhaseResultCardModel {
+    if let Some(review) = app
+        .engagement
+        .pending_phase_rerun()
+        .filter(|review| review.phase == phase)
+    {
+        return phase_rerun_review_card(review);
+    }
     let verified_remediation = app.verified_remediation_result_is_open(phase);
     // The strip renders `recommended` as its own trailing `next:` row, so
     // the identical row inside the presentation details would print twice.
@@ -514,6 +521,68 @@ fn phase_result_card_model(
         ),
         actions: presentation.actions,
         recommended: presentation.recommended_next,
+    }
+}
+
+fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResultCardModel {
+    let detail_rows = phase_rerun_review_rows(review);
+    let detail = detail_rows
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    PhaseResultCardModel {
+        attempt_id: review.parent_attempt_id.clone(),
+        outcome: format!("{} review", phase_rerun_action_label(review.derivation)),
+        detail,
+        detail_rows,
+        semantic_keys: std::collections::BTreeSet::new(),
+        actions: Vec::new(),
+        control_hint: "Enter dispatch exact saved input · e edit in Options · Esc cancel"
+            .to_string(),
+        recommended:
+            "review changed options; raw run JSON is available only from the expert command surface"
+                .to_string(),
+    }
+}
+
+fn phase_rerun_review_rows(
+    review: &crate::app::PhaseRerunReview,
+) -> Vec<crate::app::PhaseResultDetailRow> {
+    let mut rows = vec![phase_rerun_detail_row(format!(
+        "{} · {}",
+        review.tool, review.tool_description
+    ))];
+    if review.changed_options.is_empty() {
+        rows.push(phase_rerun_detail_row(
+            "Options · descriptor defaults".to_string(),
+        ));
+    } else {
+        rows.extend(review.changed_options.iter().map(|option| {
+            phase_rerun_detail_row(format!(
+                "{} = {} · {}",
+                option.label, option.value, option.description
+            ))
+        }));
+    }
+    rows
+}
+
+fn phase_rerun_detail_row(text: String) -> crate::app::PhaseResultDetailRow {
+    crate::app::PhaseResultDetailRow {
+        key: None,
+        disclosed_keys: std::collections::BTreeSet::new(),
+        text,
+    }
+}
+
+fn phase_rerun_action_label(
+    derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+) -> &'static str {
+    match derivation {
+        Some(kuzushi_core::workflow_attempts::PhaseAttemptDerivation::Refine) => "refine",
+        Some(kuzushi_core::workflow_attempts::PhaseAttemptDerivation::Regenerate) => "regenerate",
+        _ => "run again",
     }
 }
 

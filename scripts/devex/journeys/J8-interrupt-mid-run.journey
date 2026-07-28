@@ -11,24 +11,25 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
-wait-for: 5 ACTIVITY
-snap: mid-run-before-interrupt
+submit: demo
+wait-for: 10 RUN FOCUS
 keys: C-c
 wait-for: 2 cancel
 snap: cancel-requested
 expect: cancel
 ask: Cancel request — does live work show CANCELING while cleanup is active, or CANCELED only when cleanup has already completed?
-wait: 3
+wait-for: 30 canceled
 snap: canceled-terminal
 expect: canceled
 ask: Terminal state — is operator-stopped work marked CANCELED, while watchdog/process-loss remains INTERRUPTED?
 submit: jobs
 wait: 3
 snap: jobs-after-interrupt
+expect: canceled
 expect-not: ✓ done
 ask: Jobs view — does the operator-stopped run say canceled with a copyable 8-character ref, and are stale disk rows labeled as unverifiable rather than "running"?
 submit: activity
 wait: 2
 snap: activity-after-interrupt
+expect: canceled
 ask: Activity view — do the task rows for the interrupted run show an honest terminal state (no fabricated completion glyphs)?

@@ -206,6 +206,15 @@ fn settle_interactive_scan(
 ) -> Result<serde_json::Value> {
     let record =
         kuzushi_core::run_artifacts::ToolRunRecord::new(target, run_id, "scan", "sast:scan");
+    if let Some(disposition) = cancellation.disposition() {
+        return settle_interactive_scan_error(
+            record,
+            observation,
+            cancellation,
+            outcome.completion,
+            scan_cancellation_error(disposition),
+        );
+    }
     match outcome.execution {
         Ok(output) => {
             kuzushi_core::run_artifacts::try_record_tool_run_complete_settled(
@@ -223,6 +232,17 @@ fn settle_interactive_scan(
             outcome.completion,
             error,
         ),
+    }
+}
+
+fn scan_cancellation_error(
+    disposition: kuzushi_core::scan::CancellationDisposition,
+) -> anyhow::Error {
+    match disposition {
+        kuzushi_core::scan::CancellationDisposition::Canceled => anyhow::anyhow!("scan cancelled"),
+        kuzushi_core::scan::CancellationDisposition::Interrupted => {
+            anyhow::anyhow!("scan interrupted")
+        }
     }
 }
 
@@ -336,4 +356,123 @@ fn ensure_scan_not_cancelled(cancel: &ScanCancellation) -> Result<()> {
 fn send_registry_scan_finished(sink: &JobEventSink, result: serde_json::Value) -> Result<()> {
     sink.send(ShellEvent::Scan(ScanEvent::Finished { result }));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::run_lifecycle::{RunItemStatus, RunItemV1};
+
+    const RUN_ID: &str = "scan-cancel-race";
+
+    struct CompletedScanFixture {
+        target: tempfile::TempDir,
+        observation: kuzushi_core::run_lifecycle::RunObservationHandle,
+        cancellation: ScanCancellation,
+        outcome: kuzushi_core::ObservedDispatchOutcome,
+    }
+
+    impl CompletedScanFixture {
+        fn new() -> Self {
+            let target = tempfile::tempdir().unwrap();
+            let record = kuzushi_core::run_artifacts::ToolRunRecord::new(
+                target.path(),
+                RUN_ID,
+                "scan",
+                "sast:scan",
+            );
+            kuzushi_core::run_artifacts::try_record_tool_run_started_with_reproducibility(
+                record,
+                &serde_json::json!({}),
+                None,
+                None,
+                Vec::new(),
+            )
+            .unwrap();
+            let observation = test_scan_observation(target.path());
+            let output = serde_json::json!({"ok": true, "status": "completed", "data": {}});
+            let call = kuzushi_core::ApplicationToolCall::start(
+                observation.clone(),
+                "sast:scan",
+                &serde_json::json!({}),
+                None,
+                None,
+            )
+            .unwrap();
+            let completion = call.completion_from_result(&Ok(output.clone()));
+            let cancellation = ScanCancellation::default();
+            cancellation.cancel();
+            Self {
+                target,
+                observation,
+                cancellation,
+                outcome: kuzushi_core::ObservedDispatchOutcome {
+                    execution: Ok(output),
+                    completion,
+                },
+            }
+        }
+    }
+
+    #[test]
+    fn completed_scan_result_is_canceled_before_terminal_persistence() {
+        let fixture = CompletedScanFixture::new();
+        let error = settle_interactive_scan(
+            fixture.target.path(),
+            RUN_ID,
+            &fixture.observation,
+            &fixture.cancellation,
+            fixture.outcome,
+        )
+        .unwrap_err();
+
+        assert_canceled_run(fixture.target.path(), error);
+    }
+
+    fn test_scan_observation(
+        target: &std::path::Path,
+    ) -> kuzushi_core::run_lifecycle::RunObservationHandle {
+        let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target, RUN_ID)
+            .unwrap()
+            .start_root_task("Run the accepted Scan plan")
+            .unwrap();
+        observation
+            .task_handle()
+            .unwrap()
+            .update_and_flush(RunItemStatus::Running, None)
+            .unwrap();
+        observation
+    }
+
+    fn assert_canceled_run(target: &std::path::Path, error: anyhow::Error) {
+        assert_eq!(error.to_string(), "scan cancelled");
+        assert_eq!(
+            kuzushi_core::load_run_summary(target, RUN_ID)
+                .unwrap()
+                .status,
+            "canceled"
+        );
+        let items = kuzushi_core::run_lifecycle::read_run_items(target, RUN_ID)
+            .unwrap()
+            .unwrap()
+            .items;
+        assert!(items.iter().any(|item| matches!(
+            item.item,
+            RunItemV1::ToolCallFinished {
+                status: RunItemStatus::Canceled,
+                ..
+            }
+        )));
+        let projection = kuzushi_core::run_lifecycle::load_run_projection(target, RUN_ID)
+            .unwrap()
+            .projection;
+        assert_eq!(
+            projection.health,
+            kuzushi_core::run_lifecycle::ProjectionHealth::Healthy
+        );
+        assert!(projection
+            .calls
+            .values()
+            .any(|call| call.status == RunItemStatus::Canceled));
+    }
 }

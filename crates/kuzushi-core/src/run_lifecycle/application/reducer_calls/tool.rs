@@ -120,7 +120,11 @@ fn update_existing_tool_call(
     };
     let pre_start_terminal = matches!(
         status,
-        RunItemStatus::Skipped | RunItemStatus::Blocked | RunItemStatus::Failed
+        RunItemStatus::Skipped
+            | RunItemStatus::Blocked
+            | RunItemStatus::Failed
+            | RunItemStatus::Canceled
+            | RunItemStatus::Interrupted
     );
     let valid = call.status == RunItemStatus::Running
         || (pre_start_terminal

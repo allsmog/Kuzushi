@@ -3,6 +3,9 @@ use super::*;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ProofVerdict {
+    /// Runtime verification was deliberately not started because a safety or
+    /// harness-fidelity prerequisite was not met.
+    NotAttempted,
     /// An observed exploit triggered inside the sandbox.
     Exploited,
     /// Harness compiled and ran but the suspect path didn't crash.
@@ -23,6 +26,7 @@ pub enum ProofVerdict {
 impl ProofVerdict {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::NotAttempted => "not_attempted",
             Self::Exploited => "exploited",
             Self::NotReproduced => "not_reproduced",
             Self::HarnessFailedToBuild => "harness_failed_to_build",
@@ -50,4 +54,6 @@ pub struct VerificationOutcome {
     pub duration_ms: u64,
     pub cost_usd: f64,
     pub notes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<crate::findings::VerificationProvenance>,
 }

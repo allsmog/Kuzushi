@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(in crate::verification) const PY_HARNESS_TEMPLATE: &str = r#"# kuzushi-verify Python trigger harness
 import sys
 
@@ -20,57 +21,17 @@ if __name__ == "__main__":
 "#;
 
 pub(in crate::verification) async fn verify_python(
-    finding: &Finding,
+    _finding: &Finding,
     backend: SandboxBackend,
-    opts: &VerifyOptions,
+    _opts: &VerifyOptions,
 ) -> Result<VerificationOutcome> {
-    if kuzushi_sandbox::which("python3").is_none() && kuzushi_sandbox::which("python").is_none() {
-        return Ok(infrastructure_error(
-            backend,
-            None,
-            "no python interpreter on PATH (looked for python3, python)".to_string(),
-        ));
-    }
-    let interpreter = kuzushi_sandbox::which("python3")
-        .map(|_| "python3")
-        .unwrap_or("python");
-
-    let project = match scaffold_python_project(finding).await {
-        Ok(p) => p,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                None,
-                format!("python scaffold: {err}"),
-            ));
-        }
-    };
-
-    let mut run_cmd = SandboxExecOptions::new(vec![
-        interpreter.to_string(),
-        project.path.join("trigger.py").display().to_string(),
-    ]);
-    run_cmd.timeout_ms = opts.timeout_ms;
-    run_cmd.workdir = Some(project.path.clone());
-    run_cmd.read_write_mounts = vec![MountSpec {
-        host_path: project.path.clone(),
-        guest_path: project.path.clone(),
-    }];
-
-    let run = match sandbox_exec(backend, run_cmd).await {
-        Ok(r) => r,
-        Err(err) => {
-            return Ok(infrastructure_error(
-                backend,
-                Some(project.path.clone()),
-                format!("python run spawn: {err}"),
-            ));
-        }
-    };
-
-    Ok(classify_run_result(&run, backend, &project.path, opts))
+    Ok(VerificationOutcome::not_attempted(
+        backend,
+        "Python harness is a placeholder and does not invoke the finding sink",
+    ))
 }
 
+#[cfg(test)]
 pub(in crate::verification) async fn scaffold_python_project(
     finding: &Finding,
 ) -> Result<ScaffoldedProject> {
@@ -86,6 +47,9 @@ pub(in crate::verification) async fn scaffold_python_project(
     tokio::fs::write(root.join("trigger.py"), body).await?;
     Ok(ScaffoldedProject {
         path: root,
+        fidelity: HarnessFidelity::Placeholder,
+        payload,
+        provenance: None,
         _tempdir: tempdir,
     })
 }

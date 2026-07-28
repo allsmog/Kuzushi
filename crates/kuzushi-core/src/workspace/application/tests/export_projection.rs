@@ -1,7 +1,7 @@
 use super::*;
 use crate::findings::{
-    FindingEvidence, ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor, TriageOutcome,
-    TriageVerdict,
+    FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification,
+    ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor, TriageOutcome, TriageVerdict,
 };
 use std::collections::HashMap;
 
@@ -56,6 +56,35 @@ fn export_record_lifecycle_does_not_duplicate_static_proof_state() {
 
     assert_eq!(records[0].static_proof_state, "statically_confirmed");
     assert_eq!(records[0].lifecycle_status, "verified_static");
+}
+
+#[test]
+fn export_record_discloses_model_assessment_without_runtime_authority() {
+    let mut finding = basic_finding(Severity::High);
+    finding.verification = Some(PersistedVerification {
+        proof_level: 3,
+        proof_verdict: PersistedProofVerdict::Exploited,
+        backend: PersistedSandboxBackend::Model,
+        language: None,
+        harness_path: None,
+        crash_evidence: None,
+        duration_ms: 10,
+        cost_usd: 0.01,
+        notes: vec!["legacy model verdict".to_string()],
+        verification_run_id: Some("model-run".to_string()),
+        verified_scan_id: Some("scan-1".to_string()),
+        provenance: None,
+        created_at: "now".to_string(),
+    });
+
+    let records = workspace_finding_export_records_with_reviews(&[finding], &[]);
+    let record = &records[0];
+
+    assert_eq!(record.proof_confidence, "unverified");
+    assert_eq!(record.lifecycle_status, "model_assessed");
+    assert!(record.verification.label.contains("model_assessed"));
+    assert_eq!(record.verification.verdict.as_deref(), Some("exploited"));
+    assert_eq!(record.verification.backend.as_deref(), Some("model"));
 }
 
 #[test]

@@ -33,7 +33,7 @@ impl UnsupportedAdvisory {
 /// not thread-safe; only one tool call may be in flight at a time
 /// (matching how the tool-loop driver invokes it sequentially).
 pub(crate) struct ClangMcpClient {
-    child: Child,
+    child: crate::scan::RegisteredChild,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
     next_id: u64,
@@ -43,28 +43,24 @@ impl ClangMcpClient {
     /// Spawn `kuzushi-mcp-clang` with an explicit, canonical read capability.
     pub(crate) fn spawn(repo_root: &Path, _compile_commands_path: &Path) -> Result<Self> {
         let binary = locate_mcp_clang_binary()?;
-        let mut child = mcp_clang_command(&binary, repo_root)?
+        let mut command = mcp_clang_command(&binary, repo_root)?;
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "uaf-hunt: could not spawn mcp-clang at {} \
+            .stderr(Stdio::piped());
+        let process_group = crate::scan::PreparedProcessGroup::configure(&mut command)
+            .context("uaf-hunt: could not guard mcp-clang process tree")?;
+        let mut child = command.spawn().with_context(|| {
+            format!(
+                "uaf-hunt: could not spawn mcp-clang at {} \
                      (is `kuzushi-mcp-clang` in the same directory as `kuzushi` or on PATH?)",
-                    binary.display()
-                )
-            })?;
-        let stdin = child
-            .stdin
-            .take()
-            .context("uaf-hunt: mcp-clang spawned without a writable stdin pipe")?;
-        let stdout = BufReader::new(
-            child
-                .stdout
-                .take()
-                .context("uaf-hunt: mcp-clang spawned without a readable stdout pipe")?,
-        );
+                binary.display()
+            )
+        })?;
+        let (stdin, stdout) = take_mcp_pipes(&mut child)?;
+        let child = crate::scan::ScanCancellation::default()
+            .register_prepared_child(child, process_group)
+            .context("uaf-hunt: could not supervise mcp-clang process tree")?;
         let mut client = Self {
             child,
             stdin,
@@ -177,6 +173,18 @@ impl ClangMcpClient {
     }
 }
 
+fn take_mcp_pipes(child: &mut Child) -> Result<(ChildStdin, BufReader<ChildStdout>)> {
+    let stdin = child
+        .stdin
+        .take()
+        .context("uaf-hunt: mcp-clang spawned without a writable stdin pipe")?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("uaf-hunt: mcp-clang spawned without a readable stdout pipe")?;
+    Ok((stdin, BufReader::new(stdout)))
+}
+
 fn mcp_clang_command(binary: &Path, repo_root: &Path) -> Result<Command> {
     let canonical_root = std::fs::canonicalize(repo_root).with_context(|| {
         format!(
@@ -218,8 +226,14 @@ impl Drop for ClangMcpClient {
         // Give the server a half-second to exit on its own before
         // we send SIGKILL.
         std::thread::sleep(Duration::from_millis(500));
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let deadline = std::time::Instant::now() + Duration::from_millis(500);
+        while std::time::Instant::now() < deadline {
+            if self.child.try_wait().ok().flatten().is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let _ = self.child.kill_and_wait();
     }
 }
 

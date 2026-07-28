@@ -313,10 +313,20 @@ fn execute_carlini_threat_hunt_run(
         run.debug_artifacts.as_ref(),
     )?;
     drop(_actor_scope);
+    finish_carlini_threat_hunt_run(input, ctx, run, total_runs, outcome)
+}
+
+fn finish_carlini_threat_hunt_run(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    run: CarliniThreatHuntRun<'_>,
+    total_runs: usize,
+    outcome: CarliniActorHuntsOutcome,
+) -> Result<CarliniThreatHuntReport> {
     let mut findings = outcome.findings;
     finalize_carlini_findings(input, &mut findings, run.options.max_findings)?;
-    emit_carlini_rejections(ctx, &outcome.rejected);
-    emit_carlini_completion(ctx, findings.len(), outcome.rejected.len());
+    emit_carlini_rejections(ctx, &outcome.rejection_reasons, outcome.rejected_count);
+    emit_carlini_completion(ctx, findings.len(), outcome.rejected_count);
     carlini_threat_hunt_report(
         run.target,
         ctx,
@@ -326,7 +336,8 @@ fn execute_carlini_threat_hunt_run(
         run.inventory.len(),
         threat_focused_inventory_count(&run.inventory, &run.capped),
         findings,
-        outcome.rejected.len(),
+        outcome.rejected_count,
+        outcome.rejection_reasons,
         outcome.cost_usd,
         outcome.cost_usd_exact,
     )
@@ -488,30 +499,32 @@ fn begin_carlini_actor_scope(
     Some(trace.parent_scope(phase))
 }
 
-const MAX_TRACED_REJECTIONS: usize = 10;
-
-fn emit_carlini_rejections(ctx: &ToolExecutionContext<'_>, rejected: &[String]) {
+fn emit_carlini_rejections(
+    ctx: &ToolExecutionContext<'_>,
+    rejection_reasons: &[String],
+    rejected_count: usize,
+) {
     let Some(trace) = ctx.trace else {
         return;
     };
-    for reason in rejected.iter().take(MAX_TRACED_REJECTIONS) {
+    for reason in rejection_reasons {
         let _ = trace
             .step(
-                "tool-progress",
+                "finding-rejected",
                 "run",
                 format!("finding rejected by normalizer · {reason}"),
             )
             .with_severity("warn")
             .emit();
     }
-    if rejected.len() > MAX_TRACED_REJECTIONS {
+    if rejected_count > rejection_reasons.len() {
         let _ = trace
             .step(
-                "tool-progress",
+                "finding-rejected",
                 "run",
                 format!(
                     "… {} more findings rejected by normalizer",
-                    rejected.len() - MAX_TRACED_REJECTIONS
+                    rejected_count - rejection_reasons.len()
                 ),
             )
             .with_severity("warn")
@@ -525,17 +538,12 @@ fn emit_carlini_completion(
     rejected_count: usize,
 ) {
     if let Some(trace) = ctx.trace {
-        let rejected_suffix = if rejected_count > 0 {
-            format!(" · {rejected_count} rejected by schema")
-        } else {
-            String::new()
-        };
         let _ = trace
             .step(
                 "done",
                 "run",
                 format!(
-                    "carlini-threat-hunt:run complete · {finding_count} findings{rejected_suffix}"
+                    "carlini-threat-hunt:run complete · {finding_count} findings · {rejected_count} rejected by schema"
                 ),
             )
             .emit();

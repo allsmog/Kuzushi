@@ -10,13 +10,17 @@ pub(crate) fn read_threat_model(
     };
     let target = resolve_target(&input, ctx)?;
     let repo_name = repo_name(&target);
-    let methodology = read_methodology(&input, "pasta");
+    let fallback = requested_or_default_methodology(&input, flavor);
     let artifacts = read_randori_artifacts(&target, &output_dir);
-    let Some(document) = read_threat_model_document(&target, &output_dir, &methodology, &artifacts)?
+    let Some(document) = read_threat_model_document(&target, &output_dir, &fallback, &artifacts)?
     else {
-        return Ok(missing_threat_model_artifacts_response(&target, &output_dir));
+        return Ok(missing_threat_model_artifacts_response(
+            &target,
+            &output_dir,
+        ));
     };
-    let document = apply_methodology(document, &methodology)?;
+    let methodology = resolve_document_methodology(&input, &document, flavor);
+    let document = apply_methodology(normalize_document(document, &methodology)?, &methodology)?;
     Ok(read_threat_model_response(ReadThreatModelResponse {
         flavor,
         target,
@@ -52,7 +56,7 @@ fn read_persistent_fallback(
     let Some(document) = try_load_persistent_threat_model(&target)? else {
         return Ok(missing_output_dir_response(flavor));
     };
-    let methodology = read_methodology(input, "pasta");
+    let methodology = resolve_document_methodology(input, &document, flavor);
     let document = apply_methodology(normalize_document(document, &methodology)?, &methodology)?;
     let repo_name = repo_name(&target);
     let mut result = read_threat_model_response(ReadThreatModelResponse {
@@ -88,7 +92,7 @@ fn read_threat_model_document(
     let normalized_path =
         resolve_output_dir(target, output_dir).join("normalized-threat-model.json");
     if normalized_path.exists() {
-        return read_normalized_threat_model(target, &normalized_path, methodology).map(Some);
+        return read_normalized_threat_model(target, &normalized_path).map(Some);
     }
     if artifacts.has_any_artifact() {
         return convert_randori_artifacts_to_document(artifacts, methodology);
@@ -96,20 +100,44 @@ fn read_threat_model_document(
     Ok(None)
 }
 
-fn read_normalized_threat_model(target: &Path, path: &Path, methodology: &str) -> Result<Value> {
+fn read_normalized_threat_model(target: &Path, path: &Path) -> Result<Value> {
     let raw = crate::bounded_file::read_utf8_text_within(target, path, 8 * 1024 * 1024)
         .with_context(|| format!("Could not read {}", path.display()))?;
-    let parsed = serde_json::from_str::<Value>(&raw)
-        .with_context(|| format!("Could not parse {}", path.display()))?;
-    normalize_document(parsed, methodology)
+    serde_json::from_str::<Value>(&raw)
+        .with_context(|| format!("Could not parse {}", path.display()))
+}
+
+fn requested_or_default_methodology(input: &Value, flavor: ReadFlavor) -> String {
+    requested_methodology(input).unwrap_or_else(|| flavor.default_methodology().to_string())
+}
+
+fn resolve_document_methodology(input: &Value, document: &Value, flavor: ReadFlavor) -> String {
+    requested_methodology(input)
+        .or_else(|| persisted_methodology(document))
+        .unwrap_or_else(|| flavor.default_methodology().to_string())
+}
+
+fn requested_methodology(input: &Value) -> Option<String> {
+    read_string(input, &["methodology", "type"])
+        .map(|value| value.to_lowercase())
+        .filter(|value| VALID_METHODOLOGIES.contains(&value.as_str()))
+}
+
+fn persisted_methodology(document: &Value) -> Option<String> {
+    document
+        .get("methodology")
+        .or_else(|| document.pointer("/document/methodology"))
+        .and_then(Value::as_str)
+        .map(|value| value.to_lowercase())
+        .filter(|value| VALID_METHODOLOGIES.contains(&value.as_str()))
 }
 
 fn missing_threat_model_artifacts_response(target: &Path, output_dir: &str) -> Value {
     let output = format!(
-            "No threat-model artifacts found under {} (resolved against {}).",
-            output_dir,
-            target.display()
-        );
+        "No threat-model artifacts found under {} (resolved against {}).",
+        output_dir,
+        target.display()
+    );
     crate::module_result::failed_output_result(
         "threat-model artifacts not found",
         output,
@@ -220,7 +248,8 @@ downstream scan findings are: name the attacker-controlled entry, the asset or s
 trust boundary crossed, and the concrete files that implement the path. Do not emit generic \
 checklist threats that no file in this repository realizes.";
 
-const THREAT_MODEL_SCORING_GUIDE: &str = "Scoring guide (closed vocabularies; you choose the value, \
+const THREAT_MODEL_SCORING_GUIDE: &str =
+    "Scoring guide (closed vocabularies; you choose the value, \
 normalization only fixes spelling):
 - actor: remote_unauth (no credentials, reachable entry) | remote_auth (any authenticated \
   principal) | adjacent_network (same segment / on-path) | local_user (unprivileged local) | \

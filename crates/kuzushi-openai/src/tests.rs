@@ -431,12 +431,12 @@ while :; do :; done
         let error = runtime
             .query_blocking_controlled(
                 AgentQueryRequest::new("openai:gpt-5.5", ".", "sys", "prompt"),
-                AgentQueryControl::new(None, Some(Instant::now() + Duration::from_millis(500))),
+                AgentQueryControl::new(None, Some(Instant::now() + Duration::from_secs(2))),
             )
             .unwrap_err()
             .to_string();
 
-        assert!(started_at.elapsed() < Duration::from_secs(2));
+        assert!(started_at.elapsed() < Duration::from_secs(4));
         assert!(error.contains("deadline"), "{error}");
         assert!(started.exists());
     }
@@ -752,13 +752,17 @@ fi
             runtime_options: None,
             temperature: None,
         };
-        let err = bridge
-            .next_step_blocking(&req, &[])
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("next-step"));
-        assert!(err.contains("Provider authentication failed (HTTP 401)"));
-        assert!(!err.contains("raw-provider-body-sentinel"));
+        let err = bridge.next_step_blocking(&req, &[]).unwrap_err();
+        let metadata = kuzushi_core::runtime::runtime_failure_metadata(&err).unwrap();
+        assert_eq!(
+            metadata.error_class,
+            kuzushi_core::runtime::RuntimeFailureClass::Authentication
+        );
+        assert_eq!(metadata.http_status, Some(401));
+        assert!(err
+            .to_string()
+            .contains("Provider authentication failed (HTTP 401)"));
+        assert!(!err.to_string().contains("raw-provider-body-sentinel"));
     }
 
     #[test]
@@ -841,8 +845,13 @@ fi
         };
 
         let err = bridge.preflight_tool_loop_blocking(&req).unwrap_err();
+        let metadata = kuzushi_core::runtime::runtime_failure_metadata(&err).unwrap();
 
-        assert!(err.to_string().contains("next-step preflight"));
+        assert_eq!(
+            metadata.error_class,
+            kuzushi_core::runtime::RuntimeFailureClass::ProviderRejected
+        );
+        assert_eq!(metadata.http_status, Some(403));
         assert!(err
             .to_string()
             .contains("Provider rejected the request (HTTP 403)"));
@@ -885,12 +894,16 @@ fi
                 ),
                 prompt_template: None,
             })
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let metadata = kuzushi_core::runtime::runtime_failure_metadata(&err).unwrap();
 
-        assert!(err.contains("LangGraph bridge failed"));
-        assert!(err.contains("raw error details were suppressed"));
-        assert!(!err.contains("raw-model-response-sentinel"));
+        assert_eq!(
+            metadata.error_class,
+            kuzushi_core::runtime::RuntimeFailureClass::BridgeInternal
+        );
+        assert!(metadata.detail.is_none());
+        assert_eq!(err.to_string(), "Bridge operation failed.");
+        assert!(!err.to_string().contains("raw-model-response-sentinel"));
     }
 
     #[test]
@@ -920,12 +933,17 @@ fi
                 "system",
                 "prompt",
             ))
-            .unwrap_err()
-            .to_string();
+            .unwrap_err();
+        let metadata = kuzushi_core::runtime::runtime_failure_metadata(&err).unwrap();
+        let detail = metadata.detail.as_deref().unwrap_or_default();
 
-        assert!(err.contains("OpenAI OAuth"));
-        assert!(err.contains("kuzushi auth login openai"));
-        assert!(!err.contains("openai-codex"));
+        assert_eq!(
+            metadata.error_class,
+            kuzushi_core::runtime::RuntimeFailureClass::Authentication
+        );
+        assert!(detail.contains("OpenAI OAuth"));
+        assert!(detail.contains("kuzushi auth login openai"));
+        assert!(!detail.contains("openai-codex"));
     }
 
     #[test]

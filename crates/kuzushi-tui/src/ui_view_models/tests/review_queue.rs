@@ -162,6 +162,131 @@ fn review_queue_rows_are_reused_across_cursor_only_navigation() {
 }
 
 #[test]
+fn review_search_edits_refresh_cached_rows_and_keep_prefilter_facets() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut gateway = finding("gateway-ownership", Severity::High, 1);
+    gateway.dedup_key = Some("gateway".to_string());
+    let mut cookie = finding("cookie-bypass", Severity::Low, 2);
+    cookie.dedup_key = Some("cookie".to_string());
+    *app.findings_mut() = vec![gateway, cookie];
+    app.router.workbench_mut().review_mut().search_query = "gateway".to_string();
+
+    let gateway = review_queue_model(&app, ReviewQueueMode::All);
+    let cached = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(gateway.visible_count, 1);
+    assert_eq!(gateway.total_count, 2);
+    assert!(std::sync::Arc::ptr_eq(&gateway.rows, &cached.rows));
+    assert_eq!(gateway.active_filter_chips, ["text:\"gateway\""]);
+    let severity = gateway
+        .facet_groups
+        .iter()
+        .find(|group| group.label == "severity")
+        .expect("severity facets");
+    assert!(severity
+        .values
+        .iter()
+        .any(|value| value.value == "high" && value.count == 1));
+    assert!(severity
+        .values
+        .iter()
+        .any(|value| value.value == "low" && value.count == 1));
+
+    app.router.workbench_mut().review_mut().search_query = "cookie".to_string();
+    let cookie = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(cookie.rows[0].rule, "cookie-bypass");
+    assert!(!std::sync::Arc::ptr_eq(&gateway.rows, &cookie.rows));
+}
+
+#[test]
+fn incremental_search_preserves_cursor_identity_and_pinned_finding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut pinned = finding("pinned-cookie", Severity::Critical, 1);
+    pinned.dedup_key = Some("pinned".to_string());
+    let mut target = finding("needle-target", Severity::Low, 2);
+    target.dedup_key = Some("needle".to_string());
+    let mut other = finding("other-result", Severity::Medium, 3);
+    other.dedup_key = Some("other".to_string());
+    *app.findings_mut() = vec![pinned.clone(), target.clone(), other];
+    *app.selected_finding_mut() = Some(pinned.clone());
+    app.set_shell_view(crate::ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    app.set_input_mode(InputMode::Navigate);
+    let target_position = crate::ui_view_models::visible_finding_position_for(&app, &target)
+        .expect("target starts visible");
+    app.router.findings_mut().set_cursor(target_position);
+
+    press_workbench_key(&mut app, KeyCode::Char('/'));
+    for character in "needle".chars() {
+        press_workbench_key(&mut app, KeyCode::Char(character));
+    }
+
+    let visible = crate::ui_view_models::visible_finding_at_cursor(&app)
+        .expect("matching target stays cursored");
+    assert_eq!(visible.1.fingerprint, target.fingerprint);
+    assert_eq!(app.selected_finding().as_ref(), Some(&pinned));
+
+    press_workbench_key(&mut app, KeyCode::Backspace);
+    assert_eq!(app.router.workbench().review().search_query, "needl");
+    assert_eq!(
+        crate::ui_view_models::visible_finding_at_cursor(&app)
+            .expect("backspace refresh keeps matching identity")
+            .1
+            .fingerprint,
+        target.fingerprint
+    );
+    press_workbench_key(&mut app, KeyCode::Enter);
+    assert!(!app.router.workbench().review().search_capture);
+    assert_eq!(app.router.workbench().review().search_query, "needl");
+
+    press_workbench_key(&mut app, KeyCode::Char('/'));
+    press_workbench_key(&mut app, KeyCode::Esc);
+    let restored = crate::ui_view_models::visible_finding_at_cursor(&app)
+        .expect("target is re-anchored after clearing search");
+    assert_eq!(restored.1.fingerprint, target.fingerprint);
+    assert!(app.router.workbench().review().search_query.is_empty());
+    assert_eq!(app.selected_finding().as_ref(), Some(&pinned));
+}
+
+#[test]
+fn zero_result_search_clamps_cursor_without_retargeting_pin() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut pinned = finding("pinned", Severity::High, 1);
+    pinned.dedup_key = Some("pinned".to_string());
+    let mut other = finding("other", Severity::Low, 2);
+    other.dedup_key = Some("other".to_string());
+    *app.findings_mut() = vec![pinned.clone(), other];
+    *app.selected_finding_mut() = Some(pinned.clone());
+    app.router.findings_mut().set_cursor(1);
+    app.router.workbench_mut().review_mut().search_query = "no-such-result".to_string();
+    app.clamp_findings_cursor();
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+    assert_eq!(app.router.findings().cursor(), 0);
+    assert_eq!(model.visible_count, 0);
+    assert_eq!(model.total_count, 2);
+    assert_eq!(
+        model.empty_reason.as_deref(),
+        Some("no findings match the active search and filters")
+    );
+    assert_eq!(app.selected_finding().as_ref(), Some(&pinned));
+    let PhaseCockpitBody::Review(review) =
+        phase_cockpit_model_for_phase(&app, WorkflowPhase::Review).body
+    else {
+        panic!("expected Review cockpit");
+    };
+    let disclosure = review
+        .selection_disclosure
+        .expect("pinned finding disclosure");
+    assert_eq!(disclosure.filter, "search:no-such-result");
+    assert!(disclosure.message.contains("outside"));
+}
+
+#[test]
 fn review_queue_cursor_identity_wins_over_a_stale_pinned_finding() {
     let mut app = ShellApp::new(V2Config::default(), None);
     *app.findings_mut() = vec![
@@ -201,20 +326,7 @@ fn repeated_j_crosses_workflow_group_boundary_without_identity_drift() {
         cost_usd: 0.0,
         cost_usd_exact: true,
     });
-    confirmed.verification = Some(PersistedVerification {
-        proof_level: 3,
-        proof_verdict: PersistedProofVerdict::Exploited,
-        backend: PersistedSandboxBackend::Plain,
-        language: None,
-        harness_path: None,
-        crash_evidence: None,
-        duration_ms: 1,
-        cost_usd: 0.0,
-        notes: Vec::new(),
-        verification_run_id: None,
-        verified_scan_id: None,
-        created_at: "2026-07-09T00:00:00Z".to_string(),
-    });
+    confirmed.verification = Some(crate::test_support::test_empirical_verification(3));
     let needs_high = finding("needs-high", Severity::High, 1);
     let needs_low = finding("needs-low", Severity::Low, 2);
     let needs_low_fingerprint = needs_low.fingerprint.clone();

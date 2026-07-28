@@ -86,6 +86,7 @@ pub(super) fn scan_attempt_from_record(
         .first()
         .cloned()
         .unwrap_or_else(|| "run reference missing".to_string());
+    let (cost_usd, cost_complete) = summed_recorded_cost(summaries);
     ScanAttemptModel {
         attempt_id: Some(record.completed.attempt_id.clone()),
         run_id,
@@ -103,8 +104,8 @@ pub(super) fn scan_attempt_from_record(
             .sum(),
         artifact_paths: Vec::new(),
         duration_secs: sum_recorded_durations(summaries),
-        cost_usd: sum_recorded_cost(summaries),
-        cost_complete: None,
+        cost_usd,
+        cost_complete,
         error: summaries.iter().find_map(|summary| summary.error.clone()),
     }
 }
@@ -158,12 +159,19 @@ fn sum_recorded_durations(summaries: &[&RunSummary]) -> Option<u64> {
     (!values.is_empty()).then(|| values.into_iter().sum())
 }
 
-fn sum_recorded_cost(summaries: &[&RunSummary]) -> Option<f64> {
+fn summed_recorded_cost(summaries: &[&RunSummary]) -> (Option<f64>, Option<bool>) {
     let values = summaries
         .iter()
         .filter_map(|summary| summary.cost_usd.or(summary.observed_cost_usd))
         .collect::<Vec<_>>();
-    (!values.is_empty()).then(|| values.into_iter().sum())
+    if values.is_empty() {
+        return (None, None);
+    }
+    let total = values.into_iter().sum::<f64>() + 0.0;
+    let complete = !summaries
+        .iter()
+        .any(|summary| summary.provider_spend_unresolved);
+    (Some(total), Some(complete))
 }
 
 fn attempt_outcome_label(outcome: PhaseAttemptOutcome) -> &'static str {
@@ -324,6 +332,20 @@ mod tests {
         assert_eq!(
             engine_outcome_from_attempt(PhaseAttemptOutcome::Blocked),
             "blocked"
+        );
+    }
+
+    #[test]
+    fn mixed_scan_cost_is_an_incomplete_lower_bound() {
+        let mut exact = RunSummary::running("run-exact", "scan", None, ".");
+        exact.cost_usd = Some(0.5);
+        let mut unresolved = RunSummary::running("run-unresolved", "scan", None, ".");
+        unresolved.observed_cost_usd = Some(0.25);
+        unresolved.provider_spend_unresolved = true;
+
+        assert_eq!(
+            summed_recorded_cost(&[&exact, &unresolved]),
+            (Some(0.75), Some(false))
         );
     }
 }

@@ -168,6 +168,9 @@ pub struct PriorState {
     /// Map artifacts exist on disk even when no cacheable rows appear in this
     /// phase — so a later phase never reads as a fresh start after 組 map ran.
     pub map_artifacts_built: bool,
+    /// A durable phase attempt exists even if it was discarded or produced no
+    /// reusable artifact. Its run evidence still makes this a returning target.
+    pub prior_attempt: bool,
     /// Human phrase for when the newest cached artifact was written, e.g.
     /// "~2 h ago". `None` when no timestamp is available.
     pub last_activity: Option<String>,
@@ -176,17 +179,30 @@ pub struct PriorState {
 impl PriorState {
     /// The banner's one-line summary of what already exists on disk.
     pub fn headline(&self) -> String {
-        let mut parts = Vec::new();
+        let mut parts = self.artifact_headline().into_iter().collect::<Vec<_>>();
+        self.push_findings_headline(&mut parts);
+        if parts.is_empty() && self.prior_attempt {
+            parts.push("prior run evidence retained".to_string());
+        }
+        if let Some(age) = &self.last_activity {
+            parts.push(format!("last activity {age}"));
+        }
+        parts.join(" · ")
+    }
+
+    fn artifact_headline(&self) -> Option<String> {
         if self.cached_artifacts > 0 {
-            parts.push(format!(
+            return Some(format!(
                 "{} cached artifact{}",
                 self.cached_artifacts,
                 plural(self.cached_artifacts)
             ));
-        } else if self.map_artifacts_built {
-            // Later phases carry no cacheable rows, but the map is still done.
-            parts.push("map artifacts ready".to_string());
         }
+        self.map_artifacts_built
+            .then(|| "map artifacts ready".to_string())
+    }
+
+    fn push_findings_headline(&self, parts: &mut Vec<String>) {
         if self.findings > 0 {
             parts.push(format!(
                 "{} finding{}",
@@ -194,10 +210,6 @@ impl PriorState {
                 plural(self.findings)
             ));
         }
-        if let Some(age) = &self.last_activity {
-            parts.push(format!("last activity {age}"));
-        }
-        parts.join(" · ")
     }
 }
 
@@ -208,16 +220,18 @@ pub fn workspace_history(
     rows: &[PlanningTaskRow],
     findings: usize,
     map_artifacts_built: bool,
+    prior_attempt: bool,
     last_activity: Option<String>,
 ) -> WorkspaceHistory {
     let cached_artifacts = rows.iter().filter(|row| is_cached(row)).count();
-    if cached_artifacts == 0 && findings == 0 && !map_artifacts_built {
+    if cached_artifacts == 0 && findings == 0 && !map_artifacts_built && !prior_attempt {
         return WorkspaceHistory::Fresh;
     }
     WorkspaceHistory::Prior(PriorState {
         cached_artifacts,
         findings,
         map_artifacts_built,
+        prior_attempt,
         last_activity,
     })
 }
@@ -357,7 +371,7 @@ mod tests {
     fn fresh_workspace_has_no_prior_state() {
         let rows = vec![row(GatherRepoContext, PlanningArtifactState::Missing)];
         assert_eq!(
-            workspace_history(&rows, 0, false, None),
+            workspace_history(&rows, 0, false, false, None),
             WorkspaceHistory::Fresh
         );
     }
@@ -369,7 +383,7 @@ mod tests {
             row(BuildXRay, PlanningArtifactState::Cached),
             row(MapEntryPoints, PlanningArtifactState::Missing),
         ];
-        let history = workspace_history(&rows, 5, true, Some("~2 h ago".to_string()));
+        let history = workspace_history(&rows, 5, true, false, Some("~2 h ago".to_string()));
         let WorkspaceHistory::Prior(state) = history else {
             panic!("expected prior state");
         };
@@ -387,7 +401,7 @@ mod tests {
         // Later phases (hunt/confirm) list action rows with nothing cached, but
         // an imported-findings workspace still has prior state to announce.
         let rows = vec![row(TriageFindings, PlanningArtifactState::Action)];
-        let history = workspace_history(&rows, 3, false, None);
+        let history = workspace_history(&rows, 3, false, false, None);
         let WorkspaceHistory::Prior(state) = history else {
             panic!("expected prior state");
         };
@@ -401,11 +415,34 @@ mod tests {
         // rows are actions with nothing cached — but the map is done, so the
         // banner must not claim a fresh start.
         let rows = vec![row(HuntTaint, PlanningArtifactState::Action)];
-        let history = workspace_history(&rows, 0, true, None);
+        let history = workspace_history(&rows, 0, true, false, None);
         let WorkspaceHistory::Prior(state) = history else {
             panic!("expected prior state once map artifacts exist");
         };
         assert_eq!(state.headline(), "map artifacts ready");
+    }
+
+    #[test]
+    fn prior_attempt_does_not_claim_the_target_is_fresh() {
+        let rows = vec![row(GatherRepoContext, PlanningArtifactState::Missing)];
+        let history = workspace_history(&rows, 0, false, true, None);
+        let WorkspaceHistory::Prior(state) = history else {
+            panic!("expected retained run evidence to count as prior state");
+        };
+        assert_eq!(state.headline(), "prior run evidence retained");
+    }
+
+    #[test]
+    fn prior_attempt_fallback_does_not_duplicate_real_history() {
+        let state = PriorState {
+            cached_artifacts: 1,
+            findings: 0,
+            map_artifacts_built: false,
+            prior_attempt: true,
+            last_activity: None,
+        };
+
+        assert_eq!(state.headline(), "1 cached artifact");
     }
 
     #[test]

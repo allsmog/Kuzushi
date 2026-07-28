@@ -56,12 +56,19 @@ impl PreparedToolInput {
         &self.value
     }
 
+    /// Stable identity of this prepared operation for correlation with the
+    /// durable lifecycle request written to `items.jsonl`.
+    pub fn operation_fingerprint(&self) -> crate::run_lifecycle::OperationFingerprint {
+        crate::run_lifecycle::OperationFingerprint::from_digest(self.binding.operation_fingerprint)
+    }
+
     /// Bind the explicit `kuzushi run <tool>` authorization to this prepared
     /// operation only.
     pub fn authorize_explicit_headless(self) -> Self {
+        let delegated_tools = implicit_delegated_tools(&self.tool_name);
         self.authorize(
             crate::modules::execution_context::AuthorizationKind::ExplicitHeadless,
-            &[],
+            delegated_tools,
         )
     }
 
@@ -80,7 +87,15 @@ impl PreparedToolInput {
     /// Bind an interactive confirmation request to this prepared operation.
     pub fn authorize_requested(self, request: ExecutionAuthorization) -> Result<Self> {
         let mut prepared = self;
-        prepared.authorization = request.bind_request(prepared.binding.operation_fingerprint)?;
+        let delegated_tools = implicit_delegated_tools(&prepared.tool_name);
+        prepared.authorization = if delegated_tools.is_empty() {
+            request.bind_request(prepared.binding.operation_fingerprint)?
+        } else {
+            request.bind_request_with_delegated_tools(
+                prepared.binding.operation_fingerprint,
+                delegated_tools.iter().map(|tool| (*tool).to_string()),
+            )?
+        };
         Ok(prepared)
     }
 
@@ -129,6 +144,91 @@ impl PreparedToolInput {
             delegated_tools.iter().map(|tool| (*tool).to_string()),
         );
         self
+    }
+}
+
+fn implicit_delegated_tools(tool_name: &str) -> &'static [&'static str] {
+    match tool_name {
+        "threat-intel:harvest" | "threat-intel:research" => {
+            &["ndiff:fetch-cve", "ndiff:extract-fix-pattern"]
+        }
+        _ => &[],
+    }
+}
+
+#[cfg(test)]
+mod implicit_delegation_tests {
+    use super::implicit_delegated_tools;
+
+    #[test]
+    fn threat_intel_delegates_only_to_its_fixed_harvest_steps() {
+        let expected = &["ndiff:fetch-cve", "ndiff:extract-fix-pattern"];
+        assert_eq!(implicit_delegated_tools("threat-intel:research"), expected);
+        assert_eq!(implicit_delegated_tools("threat-intel:harvest"), expected);
+        assert!(implicit_delegated_tools("threat-intel:apply").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod staged_operation_fingerprint_tests {
+    use super::*;
+    use crate::{V2Config, WorkspaceTarget};
+
+    #[test]
+    fn changed_agentic_input_or_model_has_a_different_checkpoint_fingerprint() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+        let first = fingerprint(&registry, &ctx, json!({"focus":"auth", "model":"test:a"}));
+        let changed_input = fingerprint(&registry, &ctx, json!({"focus":"sql", "model":"test:a"}));
+        let changed_model = fingerprint(&registry, &ctx, json!({"focus":"auth", "model":"test:b"}));
+
+        assert_ne!(first, changed_input);
+        assert_ne!(first, changed_model);
+    }
+
+    #[test]
+    fn equivalent_registries_have_the_same_cross_process_checkpoint_fingerprint() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let first = ModuleRegistry::with_v2_builtins();
+        let second = ModuleRegistry::with_v2_builtins();
+
+        assert_ne!(first.identity, second.identity);
+        assert_eq!(
+            fingerprint(&first, &ctx, json!({"focus":"auth"})),
+            fingerprint(&second, &ctx, json!({"focus":"auth"}))
+        );
+    }
+
+    fn fingerprint(
+        registry: &ModuleRegistry,
+        ctx: &ToolExecutionContext<'_>,
+        input: Value,
+    ) -> [u8; 32] {
+        registry
+            .prepare_dispatch_input("agentic-sast:scan", input, ctx, None)
+            .unwrap()
+            .binding
+            .operation_fingerprint
     }
 }
 
@@ -370,7 +470,8 @@ impl ModuleRegistry {
             return None;
         }
         let (target, run_id) = ctx.run_artifact_location()?;
-        let store = crate::run_artifacts::StageCheckpointStore::discover(&target, operation_binding)?;
+        let store =
+            crate::run_artifacts::StageCheckpointStore::discover(&target, operation_binding)?;
         Some(std::sync::Arc::new(
             crate::run_artifacts::StageCheckpointHandle::open(store, &target, &run_id, name),
         ))
@@ -389,7 +490,6 @@ impl ModuleRegistry {
             .workspace
             .map(|workspace| workspace.root().to_string_lossy().into_owned());
         let operation_fingerprint = fingerprint_serializable(&(
-            self.identity,
             registry_fingerprint,
             descriptor_fingerprint,
             name,
@@ -1391,9 +1491,7 @@ fn workspace_prompt_source_label(workspace: &std::path::Path, path: &std::path::
 /// Completion is the only terminal state that consumes the checkpoint;
 /// failed, partial, canceled, and interrupted runs keep it so an identical
 /// re-dispatch resumes the paid stages.
-fn clear_completed_stage_checkpoint(
-    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
-) {
+fn clear_completed_stage_checkpoint(handle: Option<&crate::run_artifacts::StageCheckpointHandle>) {
     if let Some(handle) = handle {
         handle.clear_checkpoint();
     }

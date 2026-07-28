@@ -50,20 +50,57 @@ fn pending_confirm_owns_normal_and_multiline_paste_before_composer() {
 #[test]
 fn activity_clicks_map_to_visible_panes() {
     let frame = crate::ui_view_models::activity_frame_layout(3, 2);
+    let split = crate::ui_view_models::ActivityPaneLayout::SideBySide { task_width: 43 };
     assert_eq!(
-        activity_pane_for_click(4, 4, 120, 40, false, 4, crate::app::PaneFocus::Left, frame,),
+        activity_pane_for_click(
+            4,
+            4,
+            120,
+            40,
+            false,
+            crate::app::PaneFocus::Left,
+            frame,
+            split
+        ),
         Some(crate::app::PaneFocus::Left)
     );
     assert_eq!(
-        activity_pane_for_click(80, 4, 120, 40, false, 4, crate::app::PaneFocus::Left, frame,),
+        activity_pane_for_click(
+            80,
+            4,
+            120,
+            40,
+            false,
+            crate::app::PaneFocus::Left,
+            frame,
+            split
+        ),
         Some(crate::app::PaneFocus::Right)
     );
     assert_eq!(
-        activity_pane_for_click(4, 4, 120, 40, true, 0, crate::app::PaneFocus::Left, frame,),
+        activity_pane_for_click(
+            4,
+            4,
+            120,
+            40,
+            true,
+            crate::app::PaneFocus::Left,
+            frame,
+            split
+        ),
         Some(crate::app::PaneFocus::Right)
     );
     assert_eq!(
-        activity_pane_for_click(4, 1, 120, 40, false, 4, crate::app::PaneFocus::Left, frame,),
+        activity_pane_for_click(
+            4,
+            1,
+            120,
+            40,
+            false,
+            crate::app::PaneFocus::Left,
+            frame,
+            split
+        ),
         None
     );
 }
@@ -71,20 +108,57 @@ fn activity_clicks_map_to_visible_panes() {
 #[test]
 fn activity_clicks_follow_stacked_and_focused_layouts() {
     let frame = crate::ui_view_models::activity_frame_layout(3, 2);
+    let stacked = crate::ui_view_models::ActivityPaneLayout::Stacked { task_height: 6 };
     assert_eq!(
-        activity_pane_for_click(4, 4, 60, 20, false, 4, crate::app::PaneFocus::Right, frame,),
+        activity_pane_for_click(
+            4,
+            4,
+            60,
+            20,
+            false,
+            crate::app::PaneFocus::Right,
+            frame,
+            stacked
+        ),
         Some(crate::app::PaneFocus::Left)
     );
     assert_eq!(
-        activity_pane_for_click(4, 12, 60, 20, false, 4, crate::app::PaneFocus::Left, frame,),
+        activity_pane_for_click(
+            4,
+            12,
+            60,
+            20,
+            false,
+            crate::app::PaneFocus::Left,
+            frame,
+            stacked
+        ),
         Some(crate::app::PaneFocus::Right)
     );
     assert_eq!(
-        activity_pane_for_click(4, 4, 40, 12, false, 4, crate::app::PaneFocus::Right, frame,),
+        activity_pane_for_click(
+            4,
+            4,
+            40,
+            12,
+            false,
+            crate::app::PaneFocus::Right,
+            frame,
+            crate::ui_view_models::ActivityPaneLayout::Focused,
+        ),
         Some(crate::app::PaneFocus::Right)
     );
     assert_eq!(
-        activity_pane_for_click(4, 4, 7, 12, false, 4, crate::app::PaneFocus::Right, frame,),
+        activity_pane_for_click(
+            4,
+            4,
+            7,
+            12,
+            false,
+            crate::app::PaneFocus::Right,
+            frame,
+            crate::ui_view_models::ActivityPaneLayout::Focused,
+        ),
         None
     );
 }

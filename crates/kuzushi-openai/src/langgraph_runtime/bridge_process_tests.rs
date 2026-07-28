@@ -1,12 +1,14 @@
 use super::bridge_payloads::{
-    BridgeRequest, NextStepBridgeRequest, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+    BridgeRequest, BridgeResponse, NextStepBridgeRequest, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    bridge_near_executable, configure_bridge_process_group, default_langgraph_bridge_command,
-    mcp_binary_env_defaults, public_bridge_error, public_bridge_failure_with_detail,
-    read_bounded_pipe, run_next_step_bridge, wait_with_output_deadline_limits,
-    write_bridge_diagnostics,
+    bridge_failure_metadata, bridge_near_executable, bridge_runtime_failure,
+    bridge_timeout_from_env_value, configure_bridge_process_group,
+    default_langgraph_bridge_command, mcp_binary_env_defaults, public_bridge_error,
+    public_bridge_failure_with_detail, read_bounded_pipe, run_next_step_bridge,
+    wait_with_output_deadline_limits, write_bridge_diagnostics,
 };
+use super::runtime_impl::estimated_bridge_cost;
 use kuzushi_core::AgentToolPolicy;
 use serde_json::json;
 use std::fs;
@@ -52,17 +54,18 @@ fn bridge_output_overflow_kills_the_registered_process_tree() {
     command
         .args([
             "-e",
-            "for (;;) require('node:fs').writeSync(1, '1234567890')",
+            "const fs=require('node:fs'); for (;;) { try { fs.writeSync(1, '1234567890') } catch { setInterval(()=>{}, 1000); break } }",
         ])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_bridge_process_group(&mut command);
+    let process_group = configure_bridge_process_group(&mut command).unwrap();
     let child = command.spawn().unwrap();
     let started = Instant::now();
 
     let error = wait_with_output_deadline_limits(
         child,
+        process_group,
         "bridge fixture",
         Some(Duration::from_secs(5)),
         None,
@@ -84,11 +87,19 @@ fn bridge_without_configured_ceiling_waits_for_natural_exit() {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_bridge_process_group(&mut command);
+    let process_group = configure_bridge_process_group(&mut command).unwrap();
     let child = command.spawn().unwrap();
 
-    let output =
-        wait_with_output_deadline_limits(child, "bridge fixture", None, None, 1024, 1024).unwrap();
+    let output = wait_with_output_deadline_limits(
+        child,
+        process_group,
+        "bridge fixture",
+        None,
+        None,
+        1024,
+        1024,
+    )
+    .unwrap();
 
     assert!(output.status.success());
     assert_eq!(output.stdout, b"done");
@@ -102,12 +113,13 @@ fn bridge_configured_ceiling_kills_overrunning_process() {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_bridge_process_group(&mut command);
+    let process_group = configure_bridge_process_group(&mut command).unwrap();
     let child = command.spawn().unwrap();
     let started = Instant::now();
 
     let error = wait_with_output_deadline_limits(
         child,
+        process_group,
         "bridge fixture",
         Some(Duration::from_millis(200)),
         None,
@@ -119,6 +131,33 @@ fn bridge_configured_ceiling_kills_overrunning_process() {
 
     assert!(started.elapsed() < Duration::from_secs(5));
     assert!(error.contains("KUZUSHI_BRIDGE_TIMEOUT_MS"), "{error}");
+}
+
+#[test]
+fn bridge_timeout_defaults_and_invalid_overrides_fail_closed() {
+    assert_eq!(
+        bridge_timeout_from_env_value(None).unwrap(),
+        Duration::from_secs(600)
+    );
+    assert_eq!(
+        bridge_timeout_from_env_value(Some("250")).unwrap(),
+        Duration::from_millis(250)
+    );
+    assert!(bridge_timeout_from_env_value(Some("0")).is_err());
+    assert!(bridge_timeout_from_env_value(Some("invalid")).is_err());
+}
+
+#[test]
+fn known_claude_usage_gets_an_observed_cost_when_provider_omits_cost() {
+    let response: BridgeResponse = serde_json::from_value(json!({
+        "ok": true,
+        "input_tokens": 1_000,
+        "output_tokens": 500,
+    }))
+    .unwrap();
+
+    let estimate = estimated_bridge_cost(&response, "vertex:claude-sonnet-4-6").unwrap();
+    assert!((estimate - 0.0105).abs() < 1e-12, "{estimate}");
 }
 
 #[test]
@@ -220,7 +259,7 @@ fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        format!("printf '%s' '{sentinel}' >&2; exit 1"),
+        format!("cat >/dev/null; printf '%s' '{sentinel}' >&2; exit 1"),
     ];
 
     let error = run_next_step_bridge(&command, &request, None)
@@ -237,7 +276,7 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
     let command = vec![
         "sh".to_string(),
         "-c".to_string(),
-        "printf '%s' 'malformed openai-codex response'".to_string(),
+        "cat >/dev/null; printf '%s' 'malformed openai-codex response'".to_string(),
     ];
 
     let error = run_next_step_bridge(&command, &request, None)
@@ -254,10 +293,7 @@ fn public_bridge_error_suppresses_arbitrary_provider_content() {
 
     let public = public_bridge_error(sentinel);
 
-    assert_eq!(
-        public,
-        "Bridge operation failed; raw error details were suppressed."
-    );
+    assert_eq!(public, "Bridge operation failed.");
     assert!(!public.contains(sentinel));
 }
 
@@ -280,6 +316,47 @@ fn mcp_timeout_failure_is_safe_and_not_mislabeled_as_provider_timeout() {
 
     assert_eq!(public, "MCP tool request timed out.");
     assert!(!public.contains(sentinel));
+}
+
+#[test]
+fn structured_bridge_failure_preserves_redacted_typed_metadata() {
+    let metadata = bridge_failure_metadata(
+        Some("sdk_client_validation"),
+        None,
+        None,
+        Some("temperature incompatible with adaptive thinking; Authorization: Bearer sk-live-secret-sentinel"),
+    );
+
+    assert_eq!(
+        metadata.error_class,
+        kuzushi_core::runtime::RuntimeFailureClass::SdkClientValidation
+    );
+    assert_eq!(
+        metadata.detail.as_deref(),
+        Some("temperature is incompatible with adaptive thinking; omit the pinned temperature")
+    );
+}
+
+#[test]
+fn bridge_runtime_error_transports_typed_metadata_through_anyhow() {
+    let error = bridge_runtime_failure(
+        Some("rate_limited"),
+        Some(429),
+        None,
+        Some("quota window exhausted"),
+    );
+    let metadata = kuzushi_core::runtime::runtime_failure_metadata(&error).unwrap();
+
+    assert_eq!(
+        metadata.error_class,
+        kuzushi_core::runtime::RuntimeFailureClass::RateLimited
+    );
+    assert_eq!(metadata.http_status, Some(429));
+    assert_eq!(metadata.detail, None);
+    assert_eq!(
+        error.to_string(),
+        "Provider rate limited the request (HTTP 429)."
+    );
 }
 
 #[test]

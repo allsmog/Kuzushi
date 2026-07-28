@@ -28,29 +28,56 @@ pub(crate) fn failure_handoff_model(app: &ShellApp) -> Option<FailureHandoffMode
 pub(super) fn failure_handoff_model_from_context(
     context: &FailureToLlmContext,
 ) -> FailureHandoffModel {
-    FailureHandoffModel {
-        rows: vec![
-            failure_row("stage", failure_text(&context.failed_stage, "unknown")),
-            failure_row("cause", failure_text(&context.cause, "unknown")),
-            failure_row("proof", context.allowed_proof_level.clone()),
-            failure_row(
-                "available",
-                format!(
-                    "{} {}",
-                    context.artifacts_available.len(),
-                    artifact_noun(context.artifacts_available.len()),
-                ),
-            ),
-            failure_row("missing", failure_list(&context.missing_artifacts)),
-            failure_row(
-                "next",
-                failure_list(&context.next_files_or_artifacts_to_inspect),
-            ),
-            failure_row("recovery", failure_list(&context.recovery_options)),
-            failure_row("forbidden", failure_list(&context.claims_forbidden)),
-            failure_row("prompt", bounded_failure_text(&context.fallback_prompt)),
-        ],
+    let mut rows = vec![
+        failure_row("stage", failure_text(&context.failed_stage, "unknown")),
+        failure_row("cause", failure_text(&context.cause, "unknown")),
+    ];
+    rows.extend(runtime_failure_rows(context));
+    rows.extend(failure_context_rows(context));
+    FailureHandoffModel { rows }
+}
+
+fn runtime_failure_rows(context: &FailureToLlmContext) -> Vec<FailureHandoffRow> {
+    let Some(failure) = context.runtime_failure.as_ref() else {
+        return Vec::new();
+    };
+    let mut rows = vec![failure_row("class", failure.error_class.to_string())];
+    push_optional_row(&mut rows, "model", context.model.as_deref());
+    push_optional_row(&mut rows, "model stage", failure.stage.as_deref());
+    push_optional_row(&mut rows, "call", failure.model_call_id.as_deref());
+    if let Some(status) = failure.http_status {
+        rows.push(failure_row("http", status.to_string()));
     }
+    push_optional_row(&mut rows, "detail", failure.detail.as_deref());
+    rows
+}
+
+fn push_optional_row(rows: &mut Vec<FailureHandoffRow>, label: &'static str, value: Option<&str>) {
+    if let Some(value) = value {
+        rows.push(failure_row(label, value.to_string()));
+    }
+}
+
+fn failure_context_rows(context: &FailureToLlmContext) -> Vec<FailureHandoffRow> {
+    vec![
+        failure_row("proof", context.allowed_proof_level.clone()),
+        failure_row(
+            "available",
+            format!(
+                "{} {}",
+                context.artifacts_available.len(),
+                artifact_noun(context.artifacts_available.len()),
+            ),
+        ),
+        failure_row("missing", failure_list(&context.missing_artifacts)),
+        failure_row(
+            "next",
+            failure_list(&context.next_files_or_artifacts_to_inspect),
+        ),
+        failure_row("recovery", failure_list(&context.recovery_options)),
+        failure_row("forbidden", failure_list(&context.claims_forbidden)),
+        failure_row("prompt", bounded_failure_text(&context.fallback_prompt)),
+    ]
 }
 
 fn failure_row(label: &'static str, value: String) -> FailureHandoffRow {
@@ -313,6 +340,8 @@ mod tests {
             completed_stages: Vec::new(),
             checkpoint_artifacts: Vec::new(),
             checkpoint_fingerprint: None,
+            runtime_failure: None,
+            model: None,
         });
 
         assert_eq!(
@@ -348,6 +377,8 @@ mod tests {
             completed_stages: Vec::new(),
             checkpoint_artifacts: Vec::new(),
             checkpoint_fingerprint: None,
+            runtime_failure: None,
+            model: None,
         });
 
         let missing = row_value(&model, "missing");
@@ -377,7 +408,7 @@ mod tests {
         assert_eq!(row_value(&model, "stage"), "agentic-sast:scan");
         assert_eq!(row_value(&model, "cause"), "bridge failed");
         assert!(row_value(&model, "proof").contains("artifact-review-only"));
-        assert_eq!(row_value(&model, "available"), "1 artifact");
+        assert_eq!(row_value(&model, "available"), "7 artifacts");
         assert_eq!(row_value(&model, "missing"), "none");
         assert!(row_value(&model, "next").contains("failures.json"));
         assert!(row_value(&model, "recovery").contains("Rerun agentic-sast:scan"));

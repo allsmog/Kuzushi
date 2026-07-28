@@ -642,7 +642,7 @@ async fn run_revng_container(
         .and_then(OsStr::to_str)
         .context("binary file name is not valid UTF-8")?;
     let volume = format!("{}:/input:ro", binary_dir.display());
-    let mut cleanup = ContainerCleanup::new(runtime);
+    let mut cleanup = ContainerCleanup::new(runtime)?;
     let mut command =
         revng_container_command(runtime, image, &volume, binary_name, cleanup.name(), action);
     let run = run_bounded_process(&mut command, "rev.ng container", revng_limits()).await;
@@ -728,16 +728,21 @@ struct ContainerCleanup {
     runtime: String,
     name: String,
     armed: bool,
+    #[cfg(unix)]
+    parent_death_guard: ContainerParentDeathGuard,
 }
 
 impl ContainerCleanup {
-    fn new(runtime: &str) -> Self {
+    fn new(runtime: &str) -> Result<Self> {
         let sequence = CONTAINER_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        Self {
+        let name = format!("kuzushi-revng-{}-{sequence}", std::process::id());
+        Ok(Self {
             runtime: runtime.to_string(),
-            name: format!("kuzushi-revng-{}-{sequence}", std::process::id()),
+            #[cfg(unix)]
+            parent_death_guard: ContainerParentDeathGuard::spawn(runtime, &name)?,
+            name,
             armed: true,
-        }
+        })
     }
 
     fn name(&self) -> &str {
@@ -758,6 +763,8 @@ impl ContainerCleanup {
             output.stderr
         );
         self.armed = false;
+        #[cfg(unix)]
+        self.parent_death_guard.disarm();
         Ok(())
     }
 }
@@ -779,9 +786,64 @@ impl Drop for ContainerCleanup {
         if !self.armed {
             return;
         }
-        let runtime = self.runtime.clone();
-        let name = self.name.clone();
-        std::thread::spawn(move || bounded_force_remove(&runtime, &name));
+        #[cfg(unix)]
+        return;
+        #[cfg(not(unix))]
+        {
+            let runtime = self.runtime.clone();
+            let name = self.name.clone();
+            std::thread::spawn(move || bounded_force_remove(&runtime, &name));
+        }
+    }
+}
+
+#[cfg(unix)]
+struct ContainerParentDeathGuard {
+    process: Option<std::process::Child>,
+    keepalive: Option<std::process::ChildStdin>,
+}
+
+#[cfg(unix)]
+impl ContainerParentDeathGuard {
+    fn spawn(runtime: &str, name: &str) -> Result<Self> {
+        let script = "trap '' HUP INT TERM\nif IFS= read -r command; then\n  [ \"$command\" = disarm ] && exit 0\nfi\nexec \"$1\" rm -f \"$2\"\n";
+        let mut command = std::process::Command::new("/bin/sh");
+        command
+            .args(["-c", script, "kuzushi-revng-container-guard", runtime, name])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        configure_cleanup_group(&mut command);
+        let mut process = command
+            .spawn()
+            .context("spawn rev.ng container parent-death cleanup guard")?;
+        let keepalive = process
+            .stdin
+            .take()
+            .context("rev.ng container cleanup guard has no stdin")?;
+        Ok(Self {
+            process: Some(process),
+            keepalive: Some(keepalive),
+        })
+    }
+
+    fn disarm(&mut self) {
+        if let Some(mut keepalive) = self.keepalive.take() {
+            let _ = keepalive.write_all(b"disarm\n");
+        }
+        if let Some(mut process) = self.process.take() {
+            wait_for_cleanup(&mut process, Duration::from_secs(5));
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ContainerParentDeathGuard {
+    fn drop(&mut self) {
+        self.keepalive.take();
+        if let Some(mut process) = self.process.take() {
+            std::thread::spawn(move || wait_for_cleanup(&mut process, Duration::from_secs(5)));
+        }
     }
 }
 
@@ -797,6 +859,7 @@ fn force_remove_command(runtime: &str, name: &str) -> Command {
     command
 }
 
+#[cfg(not(unix))]
 fn bounded_force_remove(runtime: &str, name: &str) {
     let mut command = std::process::Command::new(runtime);
     command
@@ -1114,6 +1177,13 @@ fn cleanup_limits() -> ProcessLimits {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    const REVNG_GUARD_RUNTIME_ENV: &str = "KUZUSHI_REVNG_GUARD_TEST_RUNTIME";
+    #[cfg(unix)]
+    const REVNG_GUARD_READY_ENV: &str = "KUZUSHI_REVNG_GUARD_TEST_READY";
+    #[cfg(unix)]
+    const REVNG_GUARD_CLEANED_ENV: &str = "KUZUSHI_REVNG_GUARD_TEST_CLEANED";
+
     #[test]
     fn registry_exposes_revng_tools() {
         let root = tempfile::tempdir().unwrap();
@@ -1406,7 +1476,7 @@ mod tests {
         )
         .unwrap();
         fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
-        let mut cleanup = ContainerCleanup::new(runtime.to_str().unwrap());
+        let mut cleanup = ContainerCleanup::new(runtime.to_str().unwrap()).unwrap();
 
         assert!(cleanup.remove().await.is_err());
         assert!(cleanup.armed);
@@ -1430,7 +1500,7 @@ mod tests {
         .unwrap();
         fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
         fs::write(root.path().join("sleep-once"), b"").unwrap();
-        let mut cleanup = ContainerCleanup::new(runtime.to_str().unwrap());
+        let mut cleanup = ContainerCleanup::new(runtime.to_str().unwrap()).unwrap();
         let limits = ProcessLimits {
             timeout: Duration::from_secs(2),
             stdout_bytes: 1024,
@@ -1442,6 +1512,52 @@ mod tests {
         drop(cleanup);
 
         wait_for_call_count(&calls, 2).await;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn abrupt_owner_death_force_removes_the_revng_container() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let runtime = root.path().join("fake-runtime");
+        let ready = root.path().join("ready");
+        let cleaned = root.path().join("cleaned");
+        fs::write(
+            &runtime,
+            "#!/bin/sh\nprintf '%s' \"$3\" > \"$KUZUSHI_REVNG_GUARD_TEST_CLEANED\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&runtime, fs::Permissions::from_mode(0o700)).unwrap();
+        let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("revng_container_cleanup_owner_helper")
+            .arg("--nocapture")
+            .env(REVNG_GUARD_RUNTIME_ENV, &runtime)
+            .env(REVNG_GUARD_READY_ENV, &ready)
+            .env(REVNG_GUARD_CLEANED_ENV, &cleaned)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let expected_name = wait_for_file(&ready, Some(&mut owner));
+
+        owner.kill().unwrap();
+        owner.wait().unwrap();
+
+        assert_eq!(wait_for_file(&cleaned, None), expected_name);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn revng_container_cleanup_owner_helper() {
+        let Some(runtime) = std::env::var_os(REVNG_GUARD_RUNTIME_ENV) else {
+            return;
+        };
+        let ready = PathBuf::from(std::env::var_os(REVNG_GUARD_READY_ENV).unwrap());
+        let cleanup = ContainerCleanup::new(runtime.to_str().unwrap()).unwrap();
+        fs::write(ready, cleanup.name()).unwrap();
+        tokio::time::sleep(Duration::from_secs(60)).await;
     }
 
     #[cfg(unix)]
@@ -1477,5 +1593,27 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
         panic!("cleanup retry was not observed");
+    }
+
+    #[cfg(unix)]
+    fn wait_for_file(path: &Path, mut owner: Option<&mut std::process::Child>) -> String {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if let Ok(value) = fs::read_to_string(path) {
+                return value;
+            }
+            if let Some(owner) = owner.as_mut() {
+                assert!(
+                    owner.try_wait().unwrap().is_none(),
+                    "rev.ng parent-death fixture exited before writing {}",
+                    path.display()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!(
+            "rev.ng parent-death fixture did not write {}",
+            path.display()
+        );
     }
 }

@@ -28,9 +28,9 @@ use crate::ui_view_models::{jobs_registry_model, ui_run_artifact_relative_path};
 use kuzushi_core::run_artifacts::load_run_failures;
 use kuzushi_core::{
     load_persistent_threat_model, load_run_summary, run_dir, save_persistent_threat_model,
-    AttachmentRecord, FindingStore, OptionScope, OptionTarget, PatchProvenance, PatchResult,
-    PatchStatus, RuntimeConfig, RuntimeKind, Severity, ToolExecutionContext, ToolOptionStore,
-    TriageOutcome, TriageVerdict,
+    AttachmentRecord, FindingListFilter, FindingStore, OptionScope, OptionTarget, PatchProvenance,
+    PatchResult, PatchStatus, RuntimeConfig, RuntimeKind, Severity, ToolExecutionContext,
+    ToolOptionStore, TriageOutcome, TriageVerdict,
 };
 use std::ffi::OsString;
 use std::fs;
@@ -599,6 +599,7 @@ fn budget_halt_blocks_runtime_background_tool_before_run_artifacts() {
         limit_usd: 0.20,
         spent_usd: 0.30,
     });
+    let runs_before = kuzushi_core::list_run_summaries(tmp.path()).unwrap_or_default();
 
     app.start_background_tool(
         "threat-model:build".to_string(),
@@ -609,7 +610,11 @@ fn budget_halt_blocks_runtime_background_tool_before_run_artifacts() {
     );
 
     assert!(!app.jobs().is_running(JobKind::Run));
-    assert!(!kuzushi_core::runs_root(tmp.path()).exists());
+    assert_eq!(
+        kuzushi_core::list_run_summaries(tmp.path()).unwrap_or_default(),
+        runs_before,
+        "budget rejection must not create a run artifact"
+    );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "budget" && line.body.contains("threat-model:build blocked")
     }));
@@ -2000,6 +2005,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
         | ShellEffect::CancelJob(_)
+        | ShellEffect::FinalizeJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2164,6 +2170,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
         | ShellEffect::CancelJob(_)
+        | ShellEffect::FinalizeJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2270,6 +2277,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
         | ShellEffect::CancelJob(_)
+        | ShellEffect::FinalizeJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2359,6 +2367,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::AbortForBudget
         | ShellEffect::CancelActiveJobs
         | ShellEffect::CancelJob(_)
+        | ShellEffect::FinalizeJob(_)
         | ShellEffect::ClearConversation
         | ShellEffect::ContinuePastBudget
         | ShellEffect::ShowKnowledgeBase(_)
@@ -2963,12 +2972,22 @@ fn replay_latest_reducer_defers_latest_pointer_read_to_effect_runtime() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let latest = kuzushi_core::latest_run_path(workspace.root());
+    if latest.exists() {
+        fs::remove_file(latest).unwrap();
+    }
 
     let effects = app
         .reduce_command_effects(&ShellCommand::Replay("latest".to_string()))
         .expect("replay command should be effect-routed");
 
-    assert_ne!(app.shell_view(), ShellView::Replay);
+    assert_ne!(
+        app.shell_view(),
+        ShellView::Replay,
+        "missing latest pointer opened replay run {:?}; logs={:?}",
+        app.router.replay().run_id(),
+        app.log_lines()
+    );
     assert!(app.log_lines().iter().all(|line| line.prefix != "error"));
     let open = run_artifact_open(&effects).expect("open run artifact effect");
     assert_eq!(open.selector, "latest");
@@ -2977,7 +2996,13 @@ fn replay_latest_reducer_defers_latest_pointer_read_to_effect_runtime() {
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_ne!(app.shell_view(), ShellView::Replay);
+    assert_ne!(
+        app.shell_view(),
+        ShellView::Replay,
+        "missing latest pointer opened replay run {:?}; logs={:?}",
+        app.router.replay().run_id(),
+        app.log_lines()
+    );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("latest run pointer is missing")
     }));
@@ -3508,6 +3533,9 @@ fn patch_apply_effect_applies_reviewed_diff_and_updates_view_state() {
             detector_tool: Some("semgrep:scan".to_string()),
             detector_run_id: Some("finding-run".to_string()),
             detector_input_digest: Some(detector_input_digest),
+            reproducer: None,
+            verification_source_identity: None,
+            verification_run_id: None,
         }),
         created_at: Some("1".to_string()),
         updated_at: Some("1".to_string()),
@@ -3771,6 +3799,7 @@ enum EffectKind {
     RecordReviewDecision,
     RecordProofDeferral,
     RecordSuppression,
+    FinalizeJob,
     ResumeSession,
     OpenFinding,
     RunArtifact,
@@ -3817,6 +3846,7 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::AbortForBudget => EffectKind::AbortForBudget,
         ShellEffect::CancelActiveJobs => EffectKind::Cancel,
         ShellEffect::CancelJob(_) => EffectKind::Cancel,
+        ShellEffect::FinalizeJob(_) => EffectKind::FinalizeJob,
         ShellEffect::ClearConversation => EffectKind::ClearConversation,
         ShellEffect::BuildContext(_) => EffectKind::BuildContext,
         ShellEffect::ContinuePastBudget => EffectKind::ContinuePastBudget,
@@ -4503,7 +4533,7 @@ fn findings_command_loads_store_rows() {
     run_command(&mut app, ShellCommand::Findings);
 
     assert_eq!(app.findings().len(), 1);
-    // `findings` now lands on the Workbench command center (FINDINGS pane).
+    // `findings` now lands on the Workbench Review workflow.
     assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(wb_focus(&app), PhaseSurfaceId::ReviewQueue);
 }
@@ -7688,6 +7718,66 @@ fn stored_oauth_gets_visible_secret_safe_acknowledgement() {
 }
 
 #[test]
+fn stored_openai_oauth_never_replaces_an_explicit_api_key_model() {
+    let _env_lock = env_test_lock();
+    let home = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let credentials_dir = home.path().join(".kuzushi");
+    fs::create_dir_all(&credentials_dir).unwrap();
+    fs::write(
+        credentials_dir.join("oauth-credentials.json"),
+        r#"{"openai-codex":{"access":"secret","refresh":"refresh"}}"#,
+    )
+    .unwrap();
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, None);
+    app.set_session_thinking_level(Some("high".to_string()));
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.session_thinking_level(), Some("high"));
+    assert!(!update
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, ShellEffect::PersistGlobalModelSelection(_))));
+}
+
+#[test]
+fn setup_explains_when_openai_oauth_is_incompatible_with_selected_model() {
+    let _env_lock = env_test_lock();
+    let home = tempfile::tempdir().unwrap();
+    let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    fs::create_dir_all(home.path().join(".kuzushi")).unwrap();
+    fs::write(
+        home.path().join(".kuzushi/oauth-credentials.json"),
+        r#"{"openai-codex":{"access":"secret","refresh":"refresh"}}"#,
+    )
+    .unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.engagement
+        .planning_picker_mut()
+        .selected_mut()
+        .insert(PlanningTaskId::BuildThreatModel);
+
+    let setup = crate::ui_view_models::setup_readiness_model(&app);
+    let credentials = &setup.rows[3];
+
+    assert_eq!(credentials.status, "MISSING");
+    assert!(credentials.detail.contains("requires OPENAI_API_KEY"));
+    assert!(credentials.detail.contains("openai-codex models only"));
+}
+
+#[test]
 fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
     let _env_lock = env_test_lock();
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
@@ -7706,7 +7796,7 @@ fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
         Ok("sk-test-secret")
     );
     assert!(app.router.auth_picker().key_draft().is_empty());
-    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.config().model, None);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "onboarding"
             && line
@@ -7744,9 +7834,10 @@ fn auth_picker_enter_returns_session_env_effect_without_setting_secret() {
     );
 
     assert!(result.changed);
-    let persist = global_model_persist_effect(&result.effects).expect("model persist effect");
-    assert_eq!(persist.model, "openai:gpt-5.5");
-    assert_eq!(persist.thinking_level.as_deref(), Some("xhigh"));
+    assert!(!result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, ShellEffect::PersistGlobalModelSelection(_))));
     let env = result
         .effects
         .iter()
@@ -7758,10 +7849,10 @@ fn auth_picker_enter_returns_session_env_effect_without_setting_secret() {
     assert_eq!(env.key, "OPENAI_API_KEY");
     assert_eq!(env.value, "sk-test-secret");
     assert!(std::env::var_os("OPENAI_API_KEY").is_none());
-    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.config().model, None);
     assert!(app.router.auth_picker().key_draft().is_empty());
     assert!(app.provider_auth_ready_for("openai"));
-    assert!(app.configured_model_auth_ready());
+    assert!(!app.configured_model_auth_ready());
 
     EffectRuntime::execute(&mut app, result.effects);
 
@@ -7772,7 +7863,7 @@ fn auth_picker_enter_returns_session_env_effect_without_setting_secret() {
 }
 
 #[test]
-fn pasted_session_key_makes_fresh_quick_planner_ready_before_env_effect() {
+fn pasted_session_key_preserves_the_keyless_quick_planner_before_env_effect() {
     let _env_lock = env_test_lock();
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
     let target_dir = tempfile::tempdir().expect("temp target");
@@ -7794,7 +7885,8 @@ fn pasted_session_key_makes_fresh_quick_planner_ready_before_env_effect() {
         .iter()
         .any(|effect| matches!(effect, ShellEffect::SetSessionEnv(_))));
     assert!(std::env::var_os("OPENAI_API_KEY").is_none());
-    assert!(app.configured_model_auth_ready());
+    assert_eq!(app.config().model, None);
+    assert!(!app.configured_model_auth_ready());
     assert_eq!(app.shell_view(), ShellView::Setup);
     let picker = app.engagement.planning_picker();
     assert!(picker
@@ -8480,7 +8572,7 @@ fn run_command_dispatches_semgrep_through_registry_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn run_command_dispatches_codeql_through_registry_and_persists() {
+fn run_command_dispatches_codeql_and_refuses_to_autobuild_a_database() {
     let tmp = tempfile::tempdir().unwrap();
     fs::write(tmp.path().join("package.json"), "{}\n").unwrap();
     fs::write(tmp.path().join("server.js"), "db.query(req.query.q)\n").unwrap();
@@ -8501,13 +8593,18 @@ fn run_command_dispatches_codeql_through_registry_and_persists() {
     drain_tool(&mut app);
 
     assert_eq!(app.shell_view(), ShellView::Activity);
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.prefix == "result" && line.body.contains("codeql: 1 finding")));
+    assert!(
+        app.log_lines().iter().any(|line| {
+            line.prefix == "result"
+                && line.body.contains("no valid managed database")
+                && line.body.contains("codeql:create-db")
+        }),
+        "logs={:?}",
+        app.log_lines()
+    );
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[test]
@@ -8865,18 +8962,6 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
-    // taint-iris-next:hunt attaches the codeql MCP only when a CodeQL DB
-    // artifact exists. Stub it so the policy probe returns the expected
-    // attachment and the hunt routes. cpg-rs needs no artifact stub.
-    let kuzushi = tmp.path().join(".kuzushi");
-    fs::create_dir_all(&kuzushi).unwrap();
-    let codeql_db = kuzushi.join("codeql-db");
-    fs::create_dir_all(&codeql_db).unwrap();
-    fs::write(
-        codeql_db.join("codeql-database.yml"),
-        "primaryLanguage: javascript\n",
-    )
-    .unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let bridge = fake_taint_iris_next_bridge(&tmp.path().to_path_buf());
     let mut config = V2Config::default();
@@ -9202,6 +9287,51 @@ fn filtered_complete_subset_does_not_advance_workspace_journey() {
     assert_eq!(journey.progress.finding_total, 2);
     assert_eq!(journey.progress.reviewed_findings, 1);
     assert_eq!(journey.current, WorkflowPhase::Review);
+}
+
+#[test]
+fn journey_counts_every_finding_beyond_the_display_limit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    seed_confirmed_journey_findings(&store, workspace.root(), 501);
+
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.refresh_findings(false);
+
+    assert_eq!(app.findings().len(), FindingListFilter::MAX_LIMIT);
+    let progress = crate::ui_view_models::journey_model(&app)
+        .expect("journey")
+        .progress;
+    assert_eq!(progress.finding_total, 501);
+    assert_eq!(progress.reviewed_findings, 501);
+    assert_eq!(progress.confirmed_findings, 501);
+}
+
+fn seed_confirmed_journey_findings(store: &FindingStore, root: &Path, count: usize) {
+    store
+        .record_run_started("scan-large", root, "completed")
+        .unwrap();
+    let findings = (0..count)
+        .map(|index| {
+            let mut finding = Finding::new_semgrep(
+                format!("demo.large-{index}"),
+                format!("src/file-{index}.ts"),
+                1,
+                Some(1),
+                Severity::High,
+                "confirmed finding",
+            );
+            finding.triage = Some(TriageOutcome {
+                verdict: TriageVerdict::TruePositive,
+                confidence: 0.9,
+                rationale: "confirmed".to_string(),
+                ..Default::default()
+            });
+            finding
+        })
+        .collect::<Vec<_>>();
+    store.insert_findings("scan-large", &findings).unwrap();
 }
 
 #[test]
@@ -9577,19 +9707,23 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     drain_chain_with_auto_reuse(&mut app);
 
     // The final event remains in foreground Run Focus until the next shell
-    // maintenance pass restores its origin and opens the DFD contextually.
+    // maintenance pass restores its origin. Threat-model completion only
+    // advertises the DFD; it never takes over the operator's screen.
     assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(
         app.activity()
             .and_then(|session| session.run_focus_pending_viz),
-        Some(crate::scene3d::VizPage::Dfd)
+        None
     );
     assert!(app.run_background_maintenance());
-    assert_eq!(app.shell_view(), ShellView::Scene);
-    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
-    assert_eq!(app.router.overlay_origin(), Some(ShellView::Tools));
+    assert_eq!(app.shell_view(), ShellView::Tools);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
+    }));
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "scene"
+            && line.body.contains("threat model ready")
+            && line.body.contains("DFD")
     }));
     assert!(kuzushi_core::capabilities::persistent_threat_model_path(tmp.path()).exists());
     assert!(tmp
@@ -11051,6 +11185,10 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
         app.active_scope().map(|scope| scope.id.as_str()),
         Some("submodule-libs-parser")
     );
+    assert_eq!(
+        app.active_target_facts_path(),
+        Some(canonical_submodule.as_path())
+    );
     assert_ne!(app.shell_view(), ShellView::TargetPicker);
 }
 
@@ -11431,8 +11569,8 @@ fn zero_finding_scan_does_not_rewind_review_prove_or_fix_phase() {
 
 #[test]
 fn scene_view_is_never_a_trap() {
-    // Prompt mode owns printable text. Navigate mode owns the gallery keys;
-    // Esc restores the exact workflow origin.
+    // An empty prompt exposes gallery keys; once typing starts, the composer
+    // owns printable text. Esc restores the exact workflow origin.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
     run_command(&mut app, ShellCommand::Scene);
@@ -11893,6 +12031,7 @@ fn target_command_switches_target_directory() {
     run_command(&mut app, ShellCommand::Target(Some(path_str.clone())));
     let canonical = std::fs::canonicalize(temp.path()).unwrap();
     assert_eq!(app.target(), Some(canonical.as_path()));
+    assert_eq!(app.active_target_facts_path(), Some(canonical.as_path()));
     assert_eq!(
         app.active_scope().map(|scope| scope.id.as_str()),
         Some(kuzushi_core::workspace::ROOT_SCOPE_ID),
@@ -12142,7 +12281,7 @@ fn target_activation_reloads_workspace_options_and_preserves_session_values() {
 }
 
 #[test]
-fn target_activation_reloads_safe_target_phase_config() {
+fn target_activation_rejects_operator_only_target_phase_config() {
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -12157,32 +12296,18 @@ fn target_activation_reloads_safe_target_phase_config() {
     )
     .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&first_workspace));
-    let startup =
-        kuzushi_core::load_config_for_target_with_diagnostics(Some(second.path())).unwrap();
-    app.log_config_diagnostics(&startup.diagnostics);
 
     app.activate_target(second_workspace);
 
+    assert_eq!(app.target(), Some(first_workspace.root()));
     assert_eq!(
         app.config().phases.stop_after,
-        Some(kuzushi_core::GuidedPhase::Scan)
+        None,
+        "an invalid target config must not replace active operator policy"
     );
     assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "config"
-            && line
-                .body
-                .contains("target config uses deprecated stop_after = \"hunt\"; use \"scan\"")
+        line.prefix == "target" && line.body.contains("sets operator-only fields (phases)")
     }));
-
-    app.reload_external_target_settings(second.path(), true, false);
-    assert_eq!(
-        app.log_lines()
-            .iter()
-            .filter(|line| line.prefix == "config")
-            .count(),
-        1,
-        "the same target diagnostic is transcribed once per shell session"
-    );
 }
 
 #[test]
@@ -12254,8 +12379,16 @@ fn external_target_settings_reload_without_losing_session_options() {
     );
     assert_eq!(
         app.config().phases.stop_after,
-        Some(kuzushi_core::GuidedPhase::Scan)
+        None,
+        "a rejected target config must not replace active operator policy"
     );
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "config"
+            && line
+                .body
+                .contains("external project config change rejected")
+            && line.body.contains("sets operator-only fields (phases)")
+    }));
 }
 
 #[test]
@@ -14210,20 +14343,13 @@ fn prove_z_refuses_to_invent_a_replay() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let mut finding = make_finding(Severity::High, "proof-without-trace", "verified finding");
     finding.scan_id = Some("scan-proof".to_string());
-    finding.verification = Some(kuzushi_core::PersistedVerification {
-        proof_level: 2,
-        proof_verdict: kuzushi_core::PersistedProofVerdict::Exploited,
-        backend: kuzushi_core::PersistedSandboxBackend::Plain,
-        language: Some("rust".to_string()),
-        harness_path: None,
-        crash_evidence: Some("verification recorded".to_string()),
-        duration_ms: 12,
-        cost_usd: 0.0,
-        notes: Vec::new(),
-        verification_run_id: Some("verify-without-trace".to_string()),
-        verified_scan_id: Some("scan-proof".to_string()),
-        created_at: "2026-07-14T00:00:00Z".to_string(),
-    });
+    let mut verification = crate::test_support::test_empirical_verification(2);
+    verification.crash_evidence = Some("verification recorded".to_string());
+    verification.duration_ms = 12;
+    verification.verification_run_id = Some("verify-without-trace".to_string());
+    verification.verified_scan_id = Some("scan-proof".to_string());
+    verification.created_at = "2026-07-14T00:00:00Z".to_string();
+    finding.verification = Some(verification);
     *app.findings_mut() = vec![finding.clone()];
     app.set_selected_finding(Some(finding));
     app.set_input_mode(crate::InputMode::Navigate);
@@ -14250,20 +14376,13 @@ fn prove_z_opens_its_persisted_replay() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let mut finding = make_finding(Severity::High, "proof-fp", "runtime confirmed");
     finding.scan_id = Some("scan-proof".to_string());
-    finding.verification = Some(kuzushi_core::PersistedVerification {
-        proof_level: 3,
-        proof_verdict: kuzushi_core::PersistedProofVerdict::Exploited,
-        backend: kuzushi_core::PersistedSandboxBackend::Plain,
-        language: Some("rust".to_string()),
-        harness_path: None,
-        crash_evidence: Some("reproduced".to_string()),
-        duration_ms: 42,
-        cost_usd: 0.01,
-        notes: Vec::new(),
-        verification_run_id: Some("verify-replay".to_string()),
-        verified_scan_id: Some("scan-proof".to_string()),
-        created_at: "2026-07-10T00:00:00Z".to_string(),
-    });
+    let mut verification = crate::test_support::test_empirical_verification(3);
+    verification.duration_ms = 42;
+    verification.cost_usd = 0.01;
+    verification.verification_run_id = Some("verify-replay".to_string());
+    verification.verified_scan_id = Some("scan-proof".to_string());
+    verification.created_at = "2026-07-10T00:00:00Z".to_string();
+    finding.verification = Some(verification);
     *app.findings_mut() = vec![finding.clone()];
     *app.selected_finding_mut() = Some(finding);
     let run_dir = kuzushi_core::run_dir(target.path(), "verify-replay");
@@ -16088,14 +16207,14 @@ fn terminal_tool_record_uses_target_captured_at_launch() {
     let mut app = ShellApp::new(V2Config::default(), Some(&launch_workspace));
     app.set_running_tool_for_test("context:build");
     app.set_active_tool_run_id_for_test("tool-immutable-target");
-    assert!(app
+    assert!(!app
         .workbench_cache()
         .borrow_mut()
         .run_summary_index(
             Some(launch_workspace.root()),
             vec!["tool-immutable-target".to_string()],
         )
-        .is_empty());
+        .contains_key("tool-immutable-target"));
     seed_run_artifact_start(
         launch_workspace.root(),
         "tool-immutable-target",
@@ -17894,62 +18013,6 @@ fn auto_open_viz_page_switches_view_when_enabled() {
 }
 
 #[test]
-fn threat_model_auto_open_selects_the_contextual_dfd_deck() {
-    let temp = tempfile::tempdir().unwrap();
-    let doc = serde_json::json!({
-        "dfd": {
-            "nodes": [
-                {"id": "user", "name": "Browser", "trustZone": "internet"},
-                {"id": "api", "name": "API", "trustZone": "app"}
-            ],
-            "flows": [
-                {"id": "request", "sourceId": "user", "targetId": "api", "description": "https"}
-            ]
-        }
-    });
-    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, serde_json::to_vec(&doc).unwrap()).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_target(Some(temp.path().to_path_buf()));
-    app.ui_mut().set_auto_open_viz(true);
-
-    app.auto_open_workbench_dfd();
-
-    assert_eq!(app.shell_view(), ShellView::Scene);
-    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
-}
-
-#[test]
-fn generated_scope_placeholder_does_not_auto_open_the_dfd() {
-    let temp = tempfile::tempdir().unwrap();
-    let doc = serde_json::json!({
-        "dfd": {
-            "nodes": [{
-                "id": "n1",
-                "name": "empty repository scope",
-                "trustZone": "analysis-scope",
-                "type": "process"
-            }],
-            "flows": []
-        },
-        "threats": []
-    });
-    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, serde_json::to_vec(&doc).unwrap()).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_target(Some(temp.path().to_path_buf()));
-    app.ui_mut().set_auto_open_viz(true);
-    let before = app.shell_view();
-
-    app.auto_open_workbench_dfd();
-
-    assert_eq!(app.shell_view(), before);
-    assert!(!app.viz_page_has_content(crate::scene3d::VizPage::Dfd));
-}
-
-#[test]
 fn auto_open_viz_page_is_inert_when_disabled() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -18016,11 +18079,9 @@ fn deferred_visualization_without_artifact_restores_origin_instead_of_empty_deck
         .any(|line| { line.prefix == "scene" && line.body.contains("artifact still hydrating") }));
 }
 
-/// A committed phase run (Setup origin) lands on the phase RESULT checkpoint
-/// on the workbench, never back on the setup card that committed it — that
-/// card still promises "Start Map" for a run that already happened.
+/// A foreground run restores the exact workflow origin captured at launch.
 #[test]
-fn setup_committed_run_lands_on_the_phase_result_not_the_setup_card() {
+fn setup_committed_run_restores_the_setup_origin() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Setup);
     let session = app.capture_run_focus_origin(ActivitySession::for_phase(
@@ -18035,11 +18096,7 @@ fn setup_committed_run_lands_on_the_phase_result_not_the_setup_card() {
         .mark_run_focus_terminal_pending("completed");
     assert!(app.run_background_maintenance());
 
-    assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert_eq!(
-        crate::ui_view_models::active_workbench_page(&app),
-        WorkbenchPage::Map
-    );
+    assert_eq!(app.shell_view(), ShellView::Setup);
 }
 
 /// Opening the target picker over a bound target anchors it on that target
@@ -18863,6 +18920,7 @@ fn job_tool_completion_returns_planning_dispatch_effect_without_inline_launch() 
         result.effects.as_slice(),
         [
             ShellEffect::RecordToolRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run),
             ShellEffect::RefreshContextView,
             ShellEffect::DispatchNextPlanningTask(_)
         ]
@@ -18885,6 +18943,7 @@ fn observed_tool_completion_settles_before_planning_continuation() {
         result.effects.as_slice(),
         [
             ShellEffect::RecordToolRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run),
             ShellEffect::RefreshContextView,
             ShellEffect::DispatchNextPlanningTask(_)
         ]
@@ -19039,6 +19098,7 @@ fn recommender_completion_resumes_queued_plan_with_dispatch_effect() {
         result.effects.as_slice(),
         [
             ShellEffect::RecordToolRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run),
             ShellEffect::DispatchNextPlanningTask(_)
         ]
     ));
@@ -19098,6 +19158,7 @@ fn job_finding_state_tool_returns_refresh_effect_without_inline_reload() {
         result.effects.as_slice(),
         [
             ShellEffect::RecordToolRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run),
             ShellEffect::RefreshFindings(FindingsRefresh {
                 announce: false,
                 filter: None
@@ -19162,6 +19223,7 @@ fn job_tool_completion_returns_record_tool_effect_without_inline_artifacts() {
         result.effects.as_slice(),
         [
             ShellEffect::RecordToolRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run),
             ShellEffect::RefreshFindings(FindingsRefresh {
                 announce: false,
                 filter: None
@@ -19212,7 +19274,10 @@ fn job_scan_completion_returns_record_scan_effect_without_inline_artifacts() {
     assert!(app.scan().is_some_and(|scan| !scan.running));
     assert!(matches!(
         result.effects.as_slice(),
-        [ShellEffect::RecordScanRun(_)]
+        [
+            ShellEffect::RecordScanRun(_),
+            ShellEffect::FinalizeJob(JobKind::Run)
+        ]
     ));
     let items_path = kuzushi_core::run_dir(workspace.root(), "scan-job").join("items.jsonl");
     let items_before = std::fs::read_to_string(&items_path).unwrap_or_default();
@@ -20090,7 +20155,7 @@ fn queued_steer_item_dispatches_when_a_scan_finishes() {
 
     // The scan's terminal event flows through the central drain in
     // `apply_job_event`.
-    let _effects = app.apply_job_event(ShellEvent::Scan(ScanEvent::Finished {
+    let effects = app.apply_job_event(ShellEvent::Scan(ScanEvent::Finished {
         result: serde_json::json!({
             "ok": true,
             "status": "completed",
@@ -20099,6 +20164,8 @@ fn queued_steer_item_dispatches_when_a_scan_finishes() {
     }));
 
     assert!(!app.scan().is_some_and(|scan| scan.running));
+    assert_eq!(app.steer_queue().len(), 1);
+    EffectRuntime::execute(&mut app, effects);
     assert!(
         app.steer_queue().is_empty(),
         "queued steer item must dispatch when the scan finishes"
@@ -20201,12 +20268,15 @@ fn clear_conversation_retains_agent_slot_until_terminal_event_then_drains_steer(
         audit: test_agent_audit(),
     }));
 
-    assert!(!app.jobs().is_running(JobKind::Agent));
-    assert!(app.steer_queue().is_empty());
+    assert!(app.jobs().is_running(JobKind::Agent));
+    assert!(!app.steer_queue().is_empty());
     assert!(
         !effects.is_empty(),
-        "terminal event must release queued steer work"
+        "terminal event must schedule two-phase settlement"
     );
+    EffectRuntime::execute(&mut app, effects);
+    assert!(!app.jobs().is_running(JobKind::Agent));
+    assert!(app.steer_queue().is_empty());
 }
 
 #[test]
@@ -20372,6 +20442,27 @@ fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
         .and_then(|session| session.tasks.get("triage:run"))
         .expect("triage row seeded");
     assert_ne!(row.state, DagTaskState::Canceled);
+}
+
+#[test]
+fn scoped_cancel_discloses_armed_steer_items() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _plan_ticket = app.jobs_mut().start(JobKind::Plan, "plan");
+    app.set_planner_running(true);
+    app.steer_queue_mut().enqueue(QueuedCommand {
+        raw: "run triage:run".to_string(),
+        summary: "run triage:run".to_string(),
+    });
+
+    app.cancel_job_effect(JobKind::Plan);
+
+    assert_eq!(app.steer_queue().len(), 1);
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "jobs"
+            && line.body.contains("remain armed")
+            && line.body.contains("queued-1 run triage:run")
+            && line.body.contains("jobs -k queued-N")
+    }));
 }
 
 #[test]
@@ -21096,25 +21187,35 @@ fn catalog_expert_toggle_fires_from_prompt_mode_with_empty_composer() {
 }
 
 #[test]
-fn dfd_page_j_k_cycle_the_inspector_selection_with_wrap() {
+fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
     let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let nodes = (0..13)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("n{index}"),
+                "name": format!("node {index}"),
+                "trustZone": if index < 10 { "gateway" } else { "data" },
+                "type": "process"
+            })
+        })
+        .collect::<Vec<_>>();
+    let flows = (0..11)
+        .map(|index| {
+            serde_json::json!({
+                "id": format!("f{index}"),
+                "sourceId": if index == 7 { "n1".to_string() } else { "n0".to_string() },
+                "targetId": if index == 7 { "n9".to_string() } else { format!("n{}", index + 1) },
+                "description": format!("flow {index}"),
+                "trustBoundaryIds": (index < 8).then(|| vec![format!("tb-{index}")]).unwrap_or_default()
+            })
+        })
+        .collect::<Vec<_>>();
     fs::write(
         path,
-        serde_json::json!({
-            "dfd": {
-                "nodes": [
-                    {"id": "web", "name": "web", "trustZone": "app", "type": "process"},
-                    {"id": "db", "name": "db", "trustZone": "data", "type": "data-store"}
-                ],
-                "flows": [
-                    {"id": "f1", "sourceId": "web", "targetId": "db", "description": "sql"}
-                ]
-            }
-        })
-        .to_string(),
+        serde_json::json!({"dfd": {"nodes": nodes, "flows": flows}}).to_string(),
     )
     .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -21123,20 +21224,42 @@ fn dfd_page_j_k_cycle_the_inspector_selection_with_wrap() {
         .scene_mut()
         .set_page(crate::scene3d::VizPage::Dfd);
     app.set_shell_view(ShellView::Scene);
-    app.set_input_mode(crate::InputMode::Navigate);
+    app.set_input_mode(crate::InputMode::Prompt);
 
-    // 2 nodes + 1 flow = 3 selectable items; j advances, wraps at the end.
-    for expected in [1, 2, 0] {
+    let total = 24;
+    let mut visited = vec![false; total];
+    visited[0] = true;
+    for expected in 1..total {
         press_key(
             &mut app,
             KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
         );
         assert_eq!(app.router.scene().dfd_selection(), expected);
+        visited[expected] = true;
     }
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
-    assert_eq!(app.router.scene().dfd_selection(), 2, "k wraps backwards");
+    assert_eq!(app.router.scene().dfd_selection(), 0, "j wraps forward");
+    assert!(visited.into_iter().all(|item| item));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert_eq!(
+        app.router.scene().dfd_selection(),
+        total - 1,
+        "up wraps backwards"
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
+    );
+    assert!(app.router.scene().dfd_detail_scroll() > 0);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().dfd_selection(), 0);
+    assert_eq!(app.router.scene().dfd_detail_scroll(), 0);
     assert_eq!(app.input(), "", "selection keys never land in the composer");
 }

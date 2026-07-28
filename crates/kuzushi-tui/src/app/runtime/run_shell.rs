@@ -252,7 +252,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     ) {
         return;
     }
-    // The Workbench command center is the default landing surface (both the
+    // The phase Workbench is the default landing surface (both the
     // interactive shell and the plain front door route through here). The
     // onboarding/target/model pickers above still take precedence — nothing
     // here clobbers a first-run gate.

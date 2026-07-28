@@ -132,6 +132,7 @@ fn exploited_verification(
         notes: vec![format!("live attack chain {:?} completed", outcome.chain)],
         verification_run_id: verification_run_id.map(str::to_string),
         verified_scan_id: Some(verified_scan_id.to_string()),
+        provenance: None,
         created_at: String::new(),
     }
 }

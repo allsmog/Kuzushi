@@ -59,7 +59,7 @@ absolutes, symlinked-subdir escape, and the no-create guarantee.
 - `sinksPath` / `modelsDir` / `importPath` (cpg:build, codeql:create-db) are
   `.external_read()`: canonicalize-only reads of out-of-band artifacts, by
   design; the write side copies into fixed canonical `.kuzushi` destinations,
-  and import sources are validated (file magic / codeql-database.yml).
+  and import sources are format-checked (file magic / codeql-database.yml).
 - `normalize_external_write_path` writes anywhere only behind
   `enforce_path_write_authorization` (explicit operator authorization with
   operation binding).

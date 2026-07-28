@@ -8,9 +8,10 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum JobOutcome {
     Completed,
-    PrepareFailed,
+    Blocked,
     ToolFailed,
     Partial,
+    Canceled,
     OperationalError,
     TimedOut,
     Interrupted,
@@ -23,19 +24,33 @@ impl JobOutcome {
     pub(super) fn from_exit_code(code: Option<i32>) -> Self {
         match code {
             Some(0) => Self::Completed,
-            Some(2) => Self::PrepareFailed,
+            Some(2) => Self::Blocked,
             Some(3) => Self::ToolFailed,
             Some(4) => Self::Partial,
+            Some(130) => Self::Canceled,
             _ => Self::OperationalError,
+        }
+    }
+
+    pub(super) fn from_persisted_status(status: &str) -> Option<Self> {
+        match status {
+            "completed" | "skipped" => Some(Self::Completed),
+            "blocked" => Some(Self::Blocked),
+            "failed" => Some(Self::ToolFailed),
+            "partial" => Some(Self::Partial),
+            "canceled" => Some(Self::Canceled),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
         }
     }
 
     pub(super) fn label(self) -> &'static str {
         match self {
             Self::Completed => "completed",
-            Self::PrepareFailed => "prepare-failed",
+            Self::Blocked => "blocked",
             Self::ToolFailed => "tool-failed",
             Self::Partial => "partial",
+            Self::Canceled => "canceled",
             Self::OperationalError => "operational-error",
             Self::TimedOut => "timed-out",
             Self::Interrupted => "interrupted",
@@ -71,7 +86,8 @@ pub(super) fn transition_for(
 ) -> Transition {
     match outcome {
         JobOutcome::Completed => Transition::Complete,
-        JobOutcome::PrepareFailed => park(outcome),
+        JobOutcome::Blocked => park(outcome),
+        JobOutcome::Canceled => park(outcome),
         JobOutcome::Interrupted => park(outcome),
         // Retrying an over-budget job would just spend the same money
         // again; it parks with its partial run state kept for resume.
@@ -166,12 +182,10 @@ mod tests {
     #[test]
     fn exit_codes_map_to_the_batch_contract() {
         assert_eq!(JobOutcome::from_exit_code(Some(0)), JobOutcome::Completed);
-        assert_eq!(
-            JobOutcome::from_exit_code(Some(2)),
-            JobOutcome::PrepareFailed
-        );
+        assert_eq!(JobOutcome::from_exit_code(Some(2)), JobOutcome::Blocked);
         assert_eq!(JobOutcome::from_exit_code(Some(3)), JobOutcome::ToolFailed);
         assert_eq!(JobOutcome::from_exit_code(Some(4)), JobOutcome::Partial);
+        assert_eq!(JobOutcome::from_exit_code(Some(130)), JobOutcome::Canceled);
         assert_eq!(
             JobOutcome::from_exit_code(None),
             JobOutcome::OperationalError
@@ -183,12 +197,30 @@ mod tests {
     }
 
     #[test]
+    fn persisted_host_statuses_preserve_cancellation_identity() {
+        assert_eq!(
+            JobOutcome::from_persisted_status("canceled"),
+            Some(JobOutcome::Canceled)
+        );
+        assert_eq!(
+            JobOutcome::from_persisted_status("interrupted"),
+            Some(JobOutcome::Interrupted)
+        );
+        assert_eq!(
+            transition_for(JobOutcome::Canceled, false, 1, 3, 5),
+            Transition::Park {
+                reason: "canceled".to_string()
+            }
+        );
+    }
+
+    #[test]
     fn prepare_failures_park_and_never_retry() {
-        let transition = transition_for(JobOutcome::PrepareFailed, false, 1, 3, 5);
+        let transition = transition_for(JobOutcome::Blocked, false, 1, 3, 5);
         assert_eq!(
             transition,
             Transition::Park {
-                reason: "prepare-failed".to_string()
+                reason: "blocked".to_string()
             }
         );
     }

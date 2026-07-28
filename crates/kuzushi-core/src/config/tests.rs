@@ -145,7 +145,7 @@ concurrency = 2
     }
 
     #[test]
-    fn target_deprecation_diagnostic_uses_stable_source_label() {
+    fn target_phase_alias_is_rejected_as_operator_owned() {
         let tmp = tempfile::tempdir().unwrap();
         let target = tmp.path().join("target");
         fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
@@ -155,18 +155,17 @@ concurrency = 2
         )
         .unwrap();
 
-        let loaded = load_config_with_diagnostics(ConfigPaths {
+        let error = load_config_with_diagnostics(ConfigPaths {
             home_dir: tmp.path().join("home"),
             target_dir: Some(target),
         })
-        .unwrap();
-        let message = loaded.diagnostics[0].to_string();
+        .unwrap_err();
+        let message = format!("{error:#}");
 
-        assert_eq!(
-            message,
-            "warning: target config uses deprecated [phases.confirm]; use [phases.prove]"
+        assert!(
+            message.contains("operator-only fields (phases)"),
+            "{message}"
         );
-        assert!(!message.contains(tmp.path().to_string_lossy().as_ref()));
     }
 
     #[test]
@@ -194,7 +193,7 @@ stop_after = "2"
     }
 
     #[test]
-    fn project_config_can_set_guided_phase_template() {
+    fn project_config_cannot_set_guided_phase_policy() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("target");
@@ -211,14 +210,17 @@ strategy_cap = 1
         )
         .unwrap();
 
-        let config = load_config(ConfigPaths {
+        let error = load_config(ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
         })
-        .unwrap();
+        .unwrap_err();
+        let message = format!("{error:#}");
 
-        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Map));
-        assert_eq!(config.phases.map.strategy_cap, Some(1));
+        assert!(
+            message.contains("operator-only fields (phases)"),
+            "{message}"
+        );
     }
 
     #[test]
@@ -349,10 +351,7 @@ prompt_variant = "   "
     }
 
     #[test]
-    fn project_config_overrides_only_safe_fields() {
-        // A target repo's `.kuzushi/v3/config.toml` may set workflow
-        // presentation knobs, but model/runtime/operator settings stay
-        // operator-owned.
+    fn empty_project_config_preserves_operator_owned_settings() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("repo");
@@ -368,14 +367,7 @@ api_key_env = "OPENAI_API_KEY"
 "#,
         )
         .unwrap();
-        fs::write(
-            target.join(".kuzushi/v3/config.toml"),
-            r#"
-[phases]
-stop_after = "hunt"
-"#,
-        )
-        .unwrap();
+        fs::write(target.join(".kuzushi/v3/config.toml"), "").unwrap();
 
         let config = load_config(ConfigPaths {
             home_dir: home,
@@ -384,8 +376,7 @@ stop_after = "hunt"
         .unwrap();
 
         assert_eq!(config.model.as_deref(), Some("openai:gpt-4o-mini"));
-        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Scan));
-        // The operator's api_key_env is preserved; project file cannot touch it.
+        assert_eq!(config.phases.stop_after, None);
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
 

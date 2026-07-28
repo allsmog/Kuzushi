@@ -74,6 +74,35 @@
         "paused"
       ]
     },
+    "runtimeFailureClass": {
+      "type": "string",
+      "enum": [
+        "authentication",
+        "bridge_internal",
+        "cancelled",
+        "mcp_timeout",
+        "provider_rejected",
+        "provider_response_invalid",
+        "provider_unavailable",
+        "rate_limited",
+        "sdk_client_validation",
+        "timeout",
+        "transport",
+        "runtime_error"
+      ]
+    },
+    "runtimeFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["errorClass"],
+      "properties": {
+        "errorClass": { "$ref": "#/definitions/runtimeFailureClass" },
+        "httpStatus": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "detail": { "type": "string", "maxLength": 300 },
+        "modelCallId": { "type": "string", "maxLength": 64 },
+        "stage": { "type": "string", "maxLength": 160 }
+      }
+    },
     "failure": {
       "type": "object",
       "additionalProperties": false,
@@ -94,6 +123,13 @@
           "type": "string"
         },
         "errorClass": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimeFailure": {
+          "$ref": "#/definitions/runtimeFailure"
+        },
+        "model": {
           "type": "string",
           "minLength": 1
         },
@@ -198,6 +234,13 @@
           }
         },
         "checkpointFingerprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runtimeFailure": {
+          "$ref": "#/definitions/runtimeFailure"
+        },
+        "model": {
           "type": "string",
           "minLength": 1
         }

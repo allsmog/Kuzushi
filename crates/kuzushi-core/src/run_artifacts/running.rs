@@ -173,7 +173,7 @@ impl RunSummary {
     pub fn failed(mut self, error: impl Into<String>) -> Self {
         self.status = "failed".to_string();
         self.completed_at_unix = Some(now_unix());
-        self.error = Some(error.into());
+        self.error = Some(safe_run_error(error));
         self.process_id = None;
         self
     }
@@ -181,7 +181,7 @@ impl RunSummary {
     pub fn blocked(mut self, reason: impl Into<String>) -> Self {
         self.status = "blocked".to_string();
         self.completed_at_unix = Some(now_unix());
-        self.error = Some(reason.into());
+        self.error = Some(safe_run_error(reason));
         self.process_id = None;
         self
     }
@@ -189,7 +189,7 @@ impl RunSummary {
     pub fn interrupted(mut self, error: impl Into<String>) -> Self {
         self.status = "interrupted".to_string();
         self.completed_at_unix = Some(now_unix());
-        self.error = Some(error.into());
+        self.error = Some(safe_run_error(error));
         self.process_id = None;
         self
     }
@@ -197,7 +197,7 @@ impl RunSummary {
     pub fn canceled(mut self, reason: impl Into<String>) -> Self {
         self.status = "canceled".to_string();
         self.completed_at_unix = Some(now_unix());
-        self.error = Some(reason.into());
+        self.error = Some(safe_run_error(reason));
         self.process_id = None;
         self
     }
@@ -205,7 +205,7 @@ impl RunSummary {
     pub fn skipped(mut self, reason: impl Into<String>) -> Self {
         self.status = "skipped".to_string();
         self.completed_at_unix = Some(now_unix());
-        self.error = Some(reason.into());
+        self.error = Some(safe_run_error(reason));
         self.process_id = None;
         self
     }
@@ -394,6 +394,10 @@ impl RunSummary {
         self.terminal_result_sha256 = non_empty_metadata(terminal_result_sha256);
         self
     }
+}
+
+fn safe_run_error(value: impl Into<String>) -> String {
+    crate::session_transcript::redaction::redact_text(&value.into())
 }
 
 fn sole_observed_model(calls: &[RunLlmCallAudit]) -> Option<String> {

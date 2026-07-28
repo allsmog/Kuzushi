@@ -178,6 +178,7 @@ fn model_event(envelope: &RunItemEnvelopeV1) -> Option<LifecycleEventPresentatio
             latency_ms,
             cost,
             error_class,
+            failure,
             ..
         } => Some(
             event(
@@ -185,12 +186,29 @@ fn model_event(envelope: &RunItemEnvelopeV1) -> Option<LifecycleEventPresentatio
                 envelope,
                 &SafeText::operator_visible(format!("{provider}/{model}")),
                 Some(*status),
-                safe_detail(error_class),
+                model_failure_detail(error_class, failure.as_ref()),
             )
             .with_call_metrics(*latency_ms, *cost),
         ),
         _ => None,
     }
+}
+
+fn model_failure_detail(
+    error_class: &Option<SafeText>,
+    failure: Option<&crate::runtime::RuntimeFailureMetadata>,
+) -> Option<String> {
+    let Some(failure) = failure else {
+        return safe_detail(error_class);
+    };
+    let mut parts = vec![format!("class={}", failure.error_class)];
+    if let Some(stage) = failure.stage.as_deref() {
+        parts.push(format!("stage={stage}"));
+    }
+    if let Some(status) = failure.http_status {
+        parts.push(format!("http={status}"));
+    }
+    Some(parts.join(" · "))
 }
 
 fn evidence_event(envelope: &RunItemEnvelopeV1) -> Option<LifecycleEventPresentationV1> {

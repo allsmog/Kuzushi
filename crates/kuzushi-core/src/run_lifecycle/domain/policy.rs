@@ -45,26 +45,24 @@ impl RunItemPersistencePolicy {
             RunItemV1::ToolCallFinished {
                 status, preview, ..
             } => validate_tool_call_finish(*status, preview)?,
-            RunItemV1::ModelCallFinished { status, .. } => {
-                ensure_terminal(*status, "model call")?;
-            }
+            RunItemV1::ModelCallFinished {
+                status,
+                error_class,
+                failure,
+                ..
+            } => validate_model_call_finish(*status, error_class, failure.as_ref())?,
             RunItemV1::SafeReasoningSummary {
                 redaction_policy_version,
                 ..
-            } => anyhow::ensure!(
-                *redaction_policy_version == RUN_ITEM_REDACTION_POLICY_VERSION,
-                "unsupported reasoning-summary redaction policy"
-            ),
+            } => validate_redaction_policy(*redaction_policy_version)?,
             RunItemV1::ToolCallProgress {
                 completed, total, ..
             } => validate_progress(*completed, *total)?,
             RunItemV1::FindingDelta { delta } => validate_finding_delta(delta)?,
-            RunItemV1::TerminalOutcome { status, .. } => {
-                ensure_terminal(*status, "run outcome")?;
-            }
+            RunItemV1::TerminalOutcome { status, .. } => ensure_terminal(*status, "run outcome")?,
             RunItemV1::PhaseReceipt { .. } => validate_phase_receipt(item)?,
             RunItemV1::ProgressTruncated { omitted_count, .. } => {
-                anyhow::ensure!(*omitted_count > 0, "truncation count must be positive");
+                validate_truncation(*omitted_count)?
             }
             RunItemV1::TaskUpdated { .. }
             | RunItemV1::ToolCallRejected { .. }
@@ -76,6 +74,39 @@ impl RunItemPersistencePolicy {
         }
         Ok(())
     }
+}
+
+fn validate_redaction_policy(version: u16) -> Result<()> {
+    anyhow::ensure!(
+        version == RUN_ITEM_REDACTION_POLICY_VERSION,
+        "unsupported reasoning-summary redaction policy"
+    );
+    Ok(())
+}
+
+fn validate_truncation(omitted_count: u64) -> Result<()> {
+    anyhow::ensure!(omitted_count > 0, "truncation count must be positive");
+    Ok(())
+}
+
+fn validate_model_call_finish(
+    status: RunItemStatus,
+    error_class: &Option<super::SafeText>,
+    failure: Option<&crate::runtime::RuntimeFailureMetadata>,
+) -> Result<()> {
+    ensure_terminal(status, "model call")?;
+    let Some(failure) = failure else {
+        return Ok(());
+    };
+    anyhow::ensure!(
+        status == RunItemStatus::Failed,
+        "typed model failure is not failed"
+    );
+    anyhow::ensure!(
+        error_class.as_ref().map(super::SafeText::as_str) == Some(failure.error_class.as_str()),
+        "typed model failure class disagrees with error_class"
+    );
+    Ok(())
 }
 
 fn validate_progress(completed: Option<u64>, total: Option<u64>) -> Result<()> {

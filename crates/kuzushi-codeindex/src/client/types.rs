@@ -24,6 +24,7 @@ pub struct McpClient {
     pub(crate) next_id: AtomicI64,
     pub(crate) initialized: Mutex<bool>,
     pub(crate) binary: String,
+    pub(crate) process_group: kuzushi_mcp_common::process::ParentDeathProcessGroup,
 }
 
 impl std::fmt::Debug for McpClient {

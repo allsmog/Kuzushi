@@ -20,7 +20,7 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           │Outcome · blocked · scenario blocked                                                              │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │
-          │lineage: target rev unrecorded                                                                    │
+          │target revision was not recorded for this attempt                                                 │
           │next: inspect run-result_blocked · inspect the policy refusal, adjust the autonomy posture or...  │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
           │2 ○ Run again                                                                                     │

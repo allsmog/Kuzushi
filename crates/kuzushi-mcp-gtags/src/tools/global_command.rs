@@ -17,10 +17,9 @@ pub(crate) fn ensure_binary_available() -> Result<()> {
 }
 
 pub(crate) async fn run_global_x(repo: &Path, args: &[&str]) -> Result<Vec<Symbol>> {
-    let output = Command::new("global")
-        .args(args)
-        .current_dir(repo)
-        .output()
+    let mut command = Command::new("global");
+    command.args(args).current_dir(repo);
+    let output = kuzushi_mcp_common::process::run_guarded_output(&mut command, "global query")
         .await
         .with_context(|| format!("failed to spawn `global {}`", args.join(" ")))?;
     let stdout = global_stdout_or_empty(output)?;
@@ -45,10 +44,9 @@ pub(crate) fn global_status_means_no_matches(output: &Output, stderr: &str) -> b
 }
 
 pub(crate) async fn run_gtags(repo: &Path) -> Result<()> {
-    let output = Command::new("gtags")
-        .arg("--quiet")
-        .current_dir(repo)
-        .output()
+    let mut command = Command::new("gtags");
+    command.arg("--quiet").current_dir(repo);
+    let output = kuzushi_mcp_common::process::run_guarded_output(&mut command, "gtags index")
         .await
         .context("failed to spawn `gtags`")?;
     if !output.status.success() {
@@ -66,10 +64,9 @@ pub(crate) async fn run_global_lines(
     args: &[&str],
     spawn_context: &str,
 ) -> Result<Vec<String>> {
-    let output = Command::new("global")
-        .args(args)
-        .current_dir(repo)
-        .output()
+    let mut command = Command::new("global");
+    command.args(args).current_dir(repo);
+    let output = kuzushi_mcp_common::process::run_guarded_output(&mut command, "global query")
         .await
         .context(spawn_context.to_string())?;
     let stdout = global_stdout_or_empty(output)?;

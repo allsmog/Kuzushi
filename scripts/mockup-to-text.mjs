@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { transform } from "esbuild";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PARITY_TARGET = path.join(REPO_ROOT, "design", "PARITY_TARGET.md");
@@ -27,10 +27,6 @@ function parseArg(parsed, argv, index) {
 }
 
 const ARG_HANDLERS = {
-  "--runner": (parsed, _argv, index) => {
-    parsed.runner = true;
-    return index;
-  },
   "--mockup": (parsed, argv, index) => {
     parsed.mockups.push(requireValue(argv, index + 1, argv[index]));
     return index + 1;
@@ -62,12 +58,7 @@ const ARG_HANDLERS = {
 };
 
 const args = parseArgs(process.argv.slice(2));
-
-if (args.runner) {
-  await runExtractor(args);
-} else {
-  forwardToTsx(process.argv.slice(2));
-}
+await runExtractor(args);
 
 function requireValue(argv, index, flag) {
   const value = argv[index];
@@ -75,15 +66,6 @@ function requireValue(argv, index, flag) {
     throw new Error(`${flag} requires a value`);
   }
   return value;
-}
-
-function forwardToTsx(argv) {
-  const script = fileURLToPath(import.meta.url);
-  const child = spawnSync("pnpm", ["exec", "tsx", script, "--runner", ...argv], {
-    cwd: REPO_ROOT,
-    stdio: "inherit",
-  });
-  process.exit(child.status ?? 1);
 }
 
 async function runExtractor(options) {
@@ -180,8 +162,15 @@ async function viewExportName(sourcePath) {
 
 async function importWithPragma(sourcePath, temp, name) {
   const source = await readFile(sourcePath, "utf8");
-  const targetPath = path.join(temp, name);
-  await writeFile(targetPath, `/** @jsx h */\n${source}`);
+  const targetPath = path.join(temp, name.replace(/\.jsx$/, ".mjs"));
+  const compiled = await transform(source, {
+    format: "esm",
+    jsxFactory: "h",
+    loader: "jsx",
+    sourcefile: sourcePath,
+    target: "es2022",
+  });
+  await writeFile(targetPath, compiled.code);
   await import(pathToFileURL(targetPath).href);
 }
 

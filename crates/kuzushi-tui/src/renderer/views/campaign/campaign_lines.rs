@@ -166,6 +166,14 @@ fn append_campaign_operational_detail(lines: &mut Vec<Line<'static>>, campaign: 
         pause_countdown_label(campaign.paused_until_ms, unix_now_ms()),
         theme::warn(),
     );
+    append_optional_campaign_detail(
+        lines,
+        campaign.provider_spend_unresolved.then(|| {
+            "provider spend is incomplete; shown cost is a lower bound and dispatch is halted"
+                .to_string()
+        }),
+        theme::warn(),
+    );
 }
 
 fn append_optional_campaign_detail(
@@ -185,11 +193,11 @@ fn detail_summary_line(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -
         .unwrap_or_else(|| "no deck-launched dispatcher".to_string());
     Line::styled(
         format!(
-            "  {} job(s) · {} · workers {} · ${:.2} spent · {}",
+            "  {} job(s) · {} · workers {} · {} · {}",
             campaign.jobs.len(),
             states_label(campaign),
             deck.workers,
-            campaign.total_cost_usd,
+            campaign_spend_label(campaign),
             dispatcher,
         ),
         theme::subtle(),
@@ -268,8 +276,22 @@ fn job_findings_label(job: &CampaignJobSnapshot) -> String {
 
 fn job_cost_label(job: &CampaignJobSnapshot) -> String {
     job.cost_usd
-        .map(|cost| format!("${cost:.2}"))
+        .map(|cost| {
+            if job.provider_spend_unresolved {
+                format!("≥${cost:.2}")
+            } else {
+                format!("${cost:.2}")
+            }
+        })
         .unwrap_or_else(|| "—".to_string())
+}
+
+fn campaign_spend_label(campaign: &CampaignSnapshot) -> String {
+    if campaign.provider_spend_unresolved {
+        format!("≥${:.2} spent", campaign.total_cost_usd)
+    } else {
+        format!("${:.2} spent", campaign.total_cost_usd)
+    }
 }
 
 fn job_scope_label(job: &CampaignJobSnapshot) -> String {
@@ -416,6 +438,7 @@ mod tests {
             fill_gaps: false,
             skipped_covered_cells: None,
             total_cost_usd: 0.0,
+            provider_spend_unresolved: false,
             jobs: vec![job.clone()],
         };
         for width in [40, 60, 80] {
@@ -475,6 +498,7 @@ mod tests {
             attempts: 0,
             exit_code: None,
             cost_usd: None,
+            provider_spend_unresolved: false,
             run_id: None,
             reason: None,
             findings: None,

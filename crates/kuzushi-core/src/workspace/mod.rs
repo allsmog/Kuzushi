@@ -7,6 +7,7 @@ pub mod diff_scope;
 mod domain;
 mod git_history_mining;
 mod git_metadata;
+mod infrastructure;
 pub mod inventory;
 pub mod source_span;
 pub mod tool_shelf;
@@ -67,6 +68,7 @@ pub use git_history_mining::{
 pub use git_metadata::{
     resolve_target_git_commit, switch_target_revision, target_git_metadata, TargetRevisionSwitch,
 };
+pub(crate) use infrastructure::git_tracked_relative_paths;
 pub use inventory::*;
 pub use source_span::*;
 pub use tool_shelf::{

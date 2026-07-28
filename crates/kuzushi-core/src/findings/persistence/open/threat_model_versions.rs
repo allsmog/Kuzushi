@@ -149,9 +149,7 @@ fn is_missing_ledger_table(error: &rusqlite::Error) -> bool {
         .contains("no such table: threat_model_versions")
 }
 
-fn threat_model_version_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<ThreatModelVersionRecord> {
+fn threat_model_version_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ThreatModelVersionRecord> {
     Ok(ThreatModelVersionRecord {
         id: row.get(0)?,
         created_at: row.get(1)?,
@@ -248,7 +246,10 @@ mod tests {
             .record_threat_model_version(&original, "restore", None)
             .unwrap();
 
-        assert!(restored.is_some(), "restore of a non-latest doc is a new row");
+        assert!(
+            restored.is_some(),
+            "restore of a non-latest doc is a new row"
+        );
         assert_eq!(store.list_threat_model_versions(10).unwrap().len(), 3);
     }
 }

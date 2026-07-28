@@ -5,18 +5,6 @@ use crate::run_lifecycle::{
 use crate::runtime::RuntimeCostReport;
 
 #[test]
-fn completion_fallback_preserves_pre_and_post_dispatch_truth() {
-    assert_eq!(
-        completion_failure_context(&None, false),
-        (RunItemStatus::Failed, false)
-    );
-    assert_eq!(
-        completion_failure_context(&None, true),
-        (RunItemStatus::Failed, true)
-    );
-}
-
-#[test]
 fn writer_fault_annotation_forbids_only_post_dispatch_retry() {
     let fault = || RunItemWriterFault {
         stage: PersistenceFailureStage::Sync,
@@ -94,8 +82,8 @@ fn result_artifact_event(
 }
 
 #[test]
-fn canceled_summary_is_durable_before_the_single_call_finish() {
-    let mut fixture = ObservedTerminalFixture::new("canceled-order", RunItemStatus::Canceled);
+fn canceled_call_finish_precedes_the_typed_terminal() {
+    let mut fixture = ObservedTerminalFixture::new("canceled-order", RunItemStatus::Completed);
     let completion = fixture.take_completion();
     try_record_tool_run_canceled_settled(
         fixture.record(),
@@ -116,6 +104,11 @@ fn canceled_summary_is_durable_before_the_single_call_finish() {
     let terminal = item_sequence(&read.items, |item| {
         matches!(item, RunItemV1::TerminalOutcome { .. })
     });
+    let call_status = read.items.iter().find_map(|item| match item.item {
+        RunItemV1::ToolCallFinished { status, .. } => Some(status),
+        _ => None,
+    });
+    assert_eq!(call_status, Some(RunItemStatus::Canceled));
     assert!(call_finish < terminal);
 }
 

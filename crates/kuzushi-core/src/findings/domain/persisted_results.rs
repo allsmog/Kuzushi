@@ -1,4 +1,7 @@
 use super::*;
+use crate::content_store::{ObjectKind, ObjectRef, MAX_CONTENT_OBJECT_BYTES};
+use crate::identity::Blake3Hash;
+use crate::workflow_attempts::TargetContentIdentity;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +30,12 @@ pub struct PatchProvenance {
     pub detector_run_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detector_input_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reproducer: Option<ObjectRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_source_identity: Option<TargetContentIdentity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verification_run_id: Option<String>,
 }
 
 impl PatchProvenance {
@@ -278,11 +287,107 @@ pub struct PersistedVerification {
     /// UI can then label it as requiring revalidation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verified_scan_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_verification_provenance"
+    )]
+    pub provenance: Option<VerificationProvenance>,
     #[serde(default)]
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VerificationProvenance {
+    pub source_identity: TargetContentIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reproducer: Option<ObjectRef>,
+}
+
+impl VerificationProvenance {
+    pub fn validate(&self) -> Result<()> {
+        match &self.source_identity {
+            TargetContentIdentity::IndexedSnapshot {
+                snapshot_hash,
+                tree_hash,
+            } => {
+                Blake3Hash::new(snapshot_hash.as_str().to_string())?;
+                if let Some(tree_hash) = tree_hash {
+                    Blake3Hash::new(tree_hash.as_str().to_string())?;
+                }
+            }
+            TargetContentIdentity::CleanGitCommit { commit } => {
+                anyhow::ensure!(!commit.as_str().trim().is_empty(), "source commit is empty");
+            }
+            TargetContentIdentity::Unavailable { reason } => {
+                anyhow::ensure!(
+                    !reason.as_str().trim().is_empty(),
+                    "source identity unavailable reason is empty"
+                );
+            }
+        }
+        if let Some(reproducer) = &self.reproducer {
+            anyhow::ensure!(
+                reproducer.kind == ObjectKind::ProofSnapshot,
+                "verification reproducer is not a proof snapshot"
+            );
+            Blake3Hash::new(reproducer.hash.as_str().to_string())?;
+            anyhow::ensure!(
+                reproducer.size_bytes <= MAX_CONTENT_OBJECT_BYTES,
+                "verification reproducer exceeds the CAS object limit"
+            );
+        }
+        Ok(())
+    }
+}
+
+fn deserialize_verification_provenance<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<VerificationProvenance>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let provenance = Option::<VerificationProvenance>::deserialize(deserializer)?;
+    if let Some(provenance) = &provenance {
+        provenance.validate().map_err(serde::de::Error::custom)?;
+    }
+    Ok(provenance)
+}
+
 impl PersistedVerification {
+    pub fn is_model_assessment(&self) -> bool {
+        self.backend == PersistedSandboxBackend::Model
+    }
+
+    pub fn is_empirically_verified(&self) -> bool {
+        self.backend == PersistedSandboxBackend::Bwrap
+            && self.proof_verdict == PersistedProofVerdict::Exploited
+            && self.provenance.as_ref().is_some_and(|provenance| {
+                provenance.source_identity.permits_cross_attempt_reuse()
+                    && provenance.reproducer.is_some()
+                    && provenance.validate().is_ok()
+            })
+    }
+
+    pub fn has_terminal_runtime_verification(&self) -> bool {
+        !self.is_model_assessment() && self.proof_verdict != PersistedProofVerdict::NotAttempted
+    }
+
+    pub fn validate_for_persistence(&self) -> Result<()> {
+        if self.is_model_assessment() {
+            anyhow::ensure!(
+                self.proof_verdict == PersistedProofVerdict::NotAttempted,
+                "model assessments cannot persist a runtime proof verdict"
+            );
+            anyhow::ensure!(
+                self.proof_level <= 3,
+                "model assessment proof level exceeds the static review ceiling"
+            );
+        }
+        Ok(())
+    }
+
     /// A proof outcome belongs to the current discovery generation only when
     /// both canonical run references are present and the verified scan id
     /// exactly matches the finding's current scan id. Legacy or stale proof is
@@ -319,6 +424,7 @@ mod verification_generation_tests {
             notes: Vec::new(),
             verification_run_id: run_id.map(str::to_string),
             verified_scan_id: scan_id.map(str::to_string),
+            provenance: None,
             created_at: "1".to_string(),
         }
     }
@@ -330,11 +436,43 @@ mod verification_generation_tests {
         assert!(!verification(None, Some("scan-2")).is_current_for_scan(Some("scan-2")));
         assert!(!verification(Some("verify-2"), None).is_current_for_scan(Some("scan-2")));
     }
+
+    #[test]
+    fn model_assessments_never_have_runtime_authority() {
+        let mut record = verification(Some("verify-2"), Some("scan-2"));
+        record.backend = PersistedSandboxBackend::Model;
+
+        assert!(record.is_model_assessment());
+        assert!(!record.is_empirically_verified());
+        assert!(!record.has_terminal_runtime_verification());
+        assert!(record.validate_for_persistence().is_err());
+
+        record.proof_verdict = PersistedProofVerdict::NotAttempted;
+        assert!(record.validate_for_persistence().is_ok());
+    }
+
+    #[test]
+    fn legacy_verification_without_provenance_deserializes() {
+        let value = serde_json::json!({
+            "proofLevel": 1,
+            "proofVerdict": "not_attempted",
+            "backend": "plain",
+            "durationMs": 0,
+            "costUsd": 0.0,
+            "notes": [],
+            "createdAt": "legacy"
+        });
+
+        let verification: PersistedVerification = serde_json::from_value(value).unwrap();
+
+        assert!(verification.provenance.is_none());
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PersistedProofVerdict {
+    NotAttempted,
     Exploited,
     NotReproduced,
     HarnessFailedToBuild,
@@ -346,6 +484,7 @@ pub enum PersistedProofVerdict {
 impl PersistedProofVerdict {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::NotAttempted => "not_attempted",
             Self::Exploited => "exploited",
             Self::NotReproduced => "not_reproduced",
             Self::HarnessFailedToBuild => "harness_failed_to_build",
@@ -358,6 +497,7 @@ impl PersistedProofVerdict {
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Option<Self> {
         Some(match value {
+            "not_attempted" => Self::NotAttempted,
             "exploited" => Self::Exploited,
             "not_reproduced" => Self::NotReproduced,
             "harness_failed_to_build" => Self::HarnessFailedToBuild,

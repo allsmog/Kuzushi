@@ -45,6 +45,7 @@ fn opening_legacy_projection_adds_verification_provenance_columns() {
     let conn = Connection::open(&db_path).unwrap();
     assert!(table_has_column(&conn, "verification_events", "verification_run_id").unwrap());
     assert!(table_has_column(&conn, "verification_events", "verified_scan_id").unwrap());
+    assert!(table_has_column(&conn, "verification_events", "provenance_json").unwrap());
 }
 
 #[test]
@@ -120,6 +121,7 @@ fn opening_legacy_projection_adds_patch_lifecycle_generation_columns() {
     let conn = Connection::open(&db_path).unwrap();
     for table in ["patch_lifecycle_events", "patch_lifecycle_current"] {
         assert!(table_has_column(&conn, table, "finding_scan_id").unwrap());
+        assert!(table_has_column(&conn, table, "reverify_evidence_json").unwrap());
     }
 }
 

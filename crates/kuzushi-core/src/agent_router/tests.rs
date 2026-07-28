@@ -629,7 +629,7 @@ primary = "gpt-5.5"
 
         assert_eq!(
             persisted_model_error_class(target.path(), &run_id).as_deref(),
-            Some("invalid_response")
+            Some("provider_response_invalid")
         );
 
         assert_artifact_excludes(

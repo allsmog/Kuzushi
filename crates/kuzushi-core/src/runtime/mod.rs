@@ -24,7 +24,8 @@ pub use domain::{
     AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
     McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeCost, RuntimeCostReport,
-    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall,
+    ToolCallHandler, ToolResult, TriageRequest,
     DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE, REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use mcp_probe::{
@@ -39,6 +40,7 @@ pub use traced_runtime::{
     model_error_class_from_message, model_provider, prompt_pair_hash, safe_model_failure_message,
     TracedRuntime,
 };
+pub use domain::runtime_failure_metadata;
 
 pub fn missing_agent_runtime_message(tool_name: &str) -> String {
     format!(

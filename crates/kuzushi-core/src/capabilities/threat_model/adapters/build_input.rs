@@ -54,7 +54,7 @@ fn apply_target_build_input(
     build.sources = read_source_artifacts(input, flavor, &context_mode)?;
     build.seeds = read_string_list(input, &["seed"]);
     build.design_doc = read_string(input, &["designDoc", "design_doc", "design"]);
-    build.stages = read_stages(input, flavor.tool_name())?;
+    build.stages = read_stages(input, flavor.tool_name(), &build.methodology)?;
     build.prompt_override = Some(
         prompt_override(input, &target)?
             .unwrap_or_else(|| DEFAULT_THREAT_MODEL_GUIDANCE.to_string()),
@@ -113,8 +113,8 @@ fn parse_vulns_text(text: &str) -> Result<Vec<OperatorVulnRow>> {
 }
 
 fn parse_vulns_json(text: &str) -> Result<Vec<OperatorVulnRow>> {
-    let rows: Vec<Value> = serde_json::from_str(text)
-        .context("threat-model:build vulnsFile JSON must be an array")?;
+    let rows: Vec<Value> =
+        serde_json::from_str(text).context("threat-model:build vulnsFile JSON must be an array")?;
     rows.iter()
         .map(|row| match row {
             Value::String(id) => Ok(OperatorVulnRow {
@@ -154,7 +154,7 @@ fn json_vuln_row(fields: &Map<String, Value>) -> Result<OperatorVulnRow> {
 fn parse_vulns_csv(lines: &[&str]) -> Vec<OperatorVulnRow> {
     lines
         .iter()
-        .filter(|line| line.splitn(2, ',').next().map(str::trim) != Some("id"))
+        .filter(|line| line.split(',').next().map(str::trim) != Some("id"))
         .map(|line| {
             let mut fields = line.splitn(4, ',').map(str::trim);
             OperatorVulnRow {
@@ -169,8 +169,13 @@ fn parse_vulns_csv(lines: &[&str]) -> Vec<OperatorVulnRow> {
 }
 
 fn read_max_output_tokens(input: &Value) -> u32 {
-    read_usize(input, &["maxOutputTokens", "max_output_tokens"], 32_000, 1_024)
-        .min(u32::MAX as usize) as u32
+    read_usize(
+        input,
+        &["maxOutputTokens", "max_output_tokens"],
+        32_000,
+        1_024,
+    )
+    .min(u32::MAX as usize) as u32
 }
 
 fn read_pipeline(input: &Value) -> Result<String> {

@@ -95,6 +95,7 @@ fn new_call(
             output_tokens: None,
         },
         error_class: None,
+        failure: None,
         cost: RuntimeCostReport::UNAVAILABLE,
         preview: Vec::new(),
         warning_count: 0,

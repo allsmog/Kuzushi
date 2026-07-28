@@ -433,8 +433,7 @@ fn stalled_progress_row(
     if elapsed.as_secs() < STALLED_PROGRESS_AFTER_SECS {
         return None;
     }
-    // An open model call is quiet by nature — name it instead of implying
-    // a stall, until it outlives the model-call watchdog.
+    // Typed call state, not elapsed presentation time, owns model-call closure.
     if let Some(query_age) = super::activity_observability::open_query_in_flight(session, now) {
         return Some(query_in_flight_row(query_age, width));
     }

@@ -39,7 +39,7 @@ Feature: Five phase modes are real interactive Workbench states
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\",\"filesIndexed\":1}"
     When I launch the shell
     Then an alternate-screen capture shows "Viewing Scan"
-    When I press "F2"
+    When I press "Esc"
     And I press "1"
     Then one alternate-screen row shows "Viewing Map" and "pipeline live in Scan"
     And an alternate-screen capture shows "◇ MAP › NAVIGATE"

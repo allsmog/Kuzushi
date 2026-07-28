@@ -87,7 +87,10 @@ fn patch_resources<'a>(ctx: &'a ToolExecutionContext<'a>) -> Result<PatchResourc
     Ok(PatchResources { workspace, store })
 }
 
-fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_patch_start(
+    ctx: &ToolExecutionContext<'_>,
+    input: &PatchFindingInput,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -553,6 +556,7 @@ fn patch_provenance(
     let detector_binding = direct_detector_binding(target, finding).context(
         "patch:finding requires a canonical detector run and input; re-scan the finding before generating a patch",
     )?;
+    let empirical = current_empirical_patch_binding(finding);
     let provenance = PatchProvenance {
         source_commit: source_commit.to_string(),
         target: target.display().to_string(),
@@ -563,9 +567,44 @@ fn patch_provenance(
         detector_tool: Some(detector_binding.tool),
         detector_run_id: Some(detector_binding.run_id),
         detector_input_digest: Some(detector_binding.input_digest),
+        reproducer: empirical.as_ref().map(|binding| binding.reproducer.clone()),
+        verification_source_identity: empirical
+            .as_ref()
+            .map(|binding| binding.source_identity.clone()),
+        verification_run_id: empirical.map(|binding| binding.verification_run_id),
     };
     provenance.ensure_complete_for_apply()?;
     Ok(provenance)
+}
+
+struct EmpiricalPatchBinding {
+    reproducer: crate::content_store::ObjectRef,
+    source_identity: crate::workflow_attempts::TargetContentIdentity,
+    verification_run_id: String,
+}
+
+fn current_empirical_patch_binding(finding: &Finding) -> Option<EmpiricalPatchBinding> {
+    let verification = finding.verification.as_ref()?;
+    if !verification.is_empirically_verified()
+        || verification.backend != crate::findings::PersistedSandboxBackend::Bwrap
+        || !verification.is_current_for_scan(finding.scan_id.as_deref())
+    {
+        return None;
+    }
+    let provenance = verification.provenance.as_ref()?;
+    provenance.validate().ok()?;
+    if !provenance.source_identity.permits_cross_attempt_reuse() {
+        return None;
+    }
+    Some(EmpiricalPatchBinding {
+        reproducer: provenance.reproducer.clone()?,
+        source_identity: provenance.source_identity.clone(),
+        verification_run_id: verification
+            .verification_run_id
+            .as_deref()
+            .filter(|run_id| !run_id.trim().is_empty())?
+            .to_string(),
+    })
 }
 
 struct DirectDetectorBinding {
@@ -632,14 +671,9 @@ mod detector_provenance_tests {
         );
         let config = crate::V2Config::default();
 
-        let error = patch_provenance(
-            &context(&config),
-            target.path(),
-            &finding,
-            "source-commit",
-        )
-        .unwrap_err()
-        .to_string();
+        let error = patch_provenance(&context(&config), target.path(), &finding, "source-commit")
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("canonical detector run"), "{error}");
         assert!(error.contains("re-scan"), "{error}");
@@ -691,15 +725,58 @@ mod detector_provenance_tests {
         finding.scan_id = Some(run_id.to_string());
         let config = crate::V2Config::default();
 
-        let error = patch_provenance(
-            &context(&config),
-            target.path(),
-            &finding,
-            "source-commit",
-        )
-        .unwrap_err()
-        .to_string();
+        let error = patch_provenance(&context(&config), target.path(), &finding, "source-commit")
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("canonical patch run id"), "{error}");
+    }
+
+    #[test]
+    fn patch_binding_copies_only_current_isolating_empirical_provenance() {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "demo.rule",
+            "src/lib.rs",
+            1,
+            None,
+            Severity::High,
+            "candidate",
+        );
+        finding.scan_id = Some("scan-1".to_string());
+        finding.verification = Some(crate::findings::PersistedVerification {
+            proof_level: 4,
+            proof_verdict: crate::findings::PersistedProofVerdict::Exploited,
+            backend: crate::findings::PersistedSandboxBackend::Bwrap,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 1,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            verification_run_id: Some("verify-1".to_string()),
+            verified_scan_id: Some("scan-1".to_string()),
+            provenance: Some(crate::findings::VerificationProvenance {
+                source_identity: crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                    snapshot_hash: crate::run_lifecycle::SafeText::operator_visible("a".repeat(64)),
+                    tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
+                        "b".repeat(64),
+                    )),
+                },
+                reproducer: Some(crate::content_store::ObjectRef {
+                    kind: crate::content_store::ObjectKind::ProofSnapshot,
+                    hash: crate::identity::Blake3Hash::new("c".repeat(64)).unwrap(),
+                    size_bytes: 1,
+                }),
+            }),
+            created_at: "1".to_string(),
+        });
+
+        let binding = current_empirical_patch_binding(&finding).unwrap();
+        assert_eq!(binding.verification_run_id, "verify-1");
+
+        finding.verification.as_mut().unwrap().backend =
+            crate::findings::PersistedSandboxBackend::Plain;
+        assert!(current_empirical_patch_binding(&finding).is_none());
     }
 }

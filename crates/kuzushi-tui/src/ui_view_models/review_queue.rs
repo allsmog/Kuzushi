@@ -1,6 +1,7 @@
 use super::findings::{
     finding_identity_label, finding_proof_meter, finding_unique_source_count,
-    projected_visible_findings, relativize_location, target_base, visible_findings_cache_key,
+    projected_findings_before_search, projected_visible_findings, relativize_location, target_base,
+    visible_findings_cache_key,
 };
 use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
@@ -8,7 +9,7 @@ use super::review_state::{
     effective_review_decision_complete, effective_review_decision_label, evidence_state_label,
     lifecycle_status_label, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
-use super::SeverityTone;
+use super::{finding_facet_values, FindingSearch, SeverityTone};
 use crate::{ReviewQueueCacheKey, ShellApp};
 use kuzushi_core::{
     finding_next_action, project_finding, Finding, FindingNextAction, ProofConfidence,
@@ -57,12 +58,28 @@ pub(crate) struct ReviewQueueModel {
     pub(crate) visible_count: usize,
     pub(crate) open_count: usize,
     pub(crate) complete_count: usize,
+    pub(crate) search_active: bool,
+    pub(crate) search_capture: bool,
+    pub(crate) active_filter_chips: Vec<String>,
+    pub(crate) facet_groups: Arc<[ReviewFacetGroup]>,
     pub(crate) filter_label: String,
     pub(crate) completeness_mode: &'static str,
     pub(crate) header: String,
     pub(crate) empty_reason: Option<String>,
     pub(crate) rows: Arc<[ReviewQueueRow]>,
     pub(crate) selected_row: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewFacetGroup {
+    pub(crate) label: &'static str,
+    pub(crate) values: Vec<ReviewFacetCount>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ReviewFacetCount {
+    pub(crate) value: String,
+    pub(crate) count: usize,
 }
 
 impl ReviewQueueModel {
@@ -109,14 +126,16 @@ pub(crate) struct ReviewQueueRow {
 }
 
 pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> ReviewQueueModel {
-    let (rows, open_count, complete_count) = cached_review_queue_rows(app, mode);
+    let (rows, open_count, complete_count, facet_groups) = cached_review_queue_rows(app, mode);
     let total_count = open_count + complete_count;
     let visible_count = rows.len();
     let cursor = app.router.findings().cursor();
     let selected_row = rows.iter().position(|row| row.projection_index == cursor);
+    let review = app.router.workbench().review();
+    let search_active = review_search_active(review);
     let backlog = super::review_backlog_active(app);
     let header = if backlog {
-        backlog_header(visible_count, app.router.workbench().review())
+        backlog_header(visible_count, review)
     } else {
         review_queue_header(visible_count, total_count, open_count, complete_count)
     };
@@ -126,13 +145,27 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         visible_count,
         open_count,
         complete_count,
+        search_active,
+        search_capture: review.search_capture,
+        active_filter_chips: review_filter_chips(app, mode),
+        facet_groups,
         filter_label: review_queue_filter_label(app, mode),
         completeness_mode: if backlog { "backlog" } else { mode.label() },
         header,
-        empty_reason: review_queue_empty_reason(total_count, visible_count, mode),
+        empty_reason: review_queue_empty_reason(
+            total_count,
+            visible_count,
+            app.findings().len(),
+            search_active,
+            mode,
+        ),
         rows,
         selected_row,
     }
+}
+
+fn review_search_active(review: &crate::app::WorkbenchReviewState) -> bool {
+    !review.search_query.trim().is_empty()
 }
 
 /// The backlog projection already dropped decided findings, so the header
@@ -161,7 +194,7 @@ fn backlog_header(visible_count: usize, review: &crate::app::WorkbenchReviewStat
 fn cached_review_queue_rows(
     app: &ShellApp,
     mode: ReviewQueueMode,
-) -> (Arc<[ReviewQueueRow]>, usize, usize) {
+) -> (Arc<[ReviewQueueRow]>, usize, usize, Arc<[ReviewFacetGroup]>) {
     let key = ReviewQueueCacheKey::new(visible_findings_cache_key(app), mode.cache_key());
     if let Some(cached) = app.workbench_cache().borrow().review_queue(&key) {
         return cached;
@@ -171,26 +204,104 @@ fn cached_review_queue_rows(
         app.findings(),
         app.review_decisions(),
     );
+    let candidates = projected_findings_before_search(app);
+    let facet_groups = Arc::from(review_facet_groups(&candidates, &review_index));
+    let (open_count, complete_count) = candidate_review_counts(&candidates, &review_index);
     let all_rows = projected_review_queue_rows(app, &review_index, base.as_deref());
-    let open_count = all_rows.iter().filter(|row| !row.review_complete()).count();
-    let complete_count = all_rows.len().saturating_sub(open_count);
     let rows = Arc::from(filter_review_rows(all_rows, mode));
     app.workbench_cache().borrow_mut().cache_review_queue(
         key,
         Arc::clone(&rows),
         open_count,
         complete_count,
+        Arc::clone(&facet_groups),
     );
-    (rows, open_count, complete_count)
+    (rows, open_count, complete_count, facet_groups)
+}
+
+fn candidate_review_counts(
+    candidates: &[crate::VisibleFindingProjection],
+    review_index: &EffectiveReviewStateIndex,
+) -> (usize, usize) {
+    let complete = candidates
+        .iter()
+        .filter(|candidate| {
+            let decision = review_index.effective_decision_for(&candidate.finding);
+            effective_review_decision_complete(&candidate.finding, decision.as_ref())
+        })
+        .count();
+    (candidates.len().saturating_sub(complete), complete)
 }
 
 fn review_queue_filter_label(app: &ShellApp, mode: ReviewQueueMode) -> String {
-    app.active_findings_filter()
+    review_filter_chips(app, mode).join(" ")
+}
+
+fn review_filter_chips(app: &ShellApp, mode: ReviewQueueMode) -> Vec<String> {
+    let mut chips = app
+        .active_findings_filter()
         .as_deref()
         .map(str::trim)
         .filter(|filter| !filter.is_empty())
         .map(str::to_string)
-        .unwrap_or_else(|| format!("completeness:{}", mode.label()))
+        .into_iter()
+        .collect::<Vec<_>>();
+    let review = app.router.workbench().review();
+    if let Some(severity) = review.backlog_severity {
+        chips.push(format!("severity:{severity}"));
+    }
+    if let Some(tool) = review.backlog_tool.as_deref() {
+        chips.push(format!("source:{tool}"));
+    }
+    chips.extend(FindingSearch::parse(&review.search_query).chips(review.search_capture));
+    if chips.is_empty() {
+        chips.push(format!("completeness:{}", mode.label()));
+    }
+    chips
+}
+
+fn review_facet_groups(
+    candidates: &[crate::VisibleFindingProjection],
+    review_index: &EffectiveReviewStateIndex,
+) -> Vec<ReviewFacetGroup> {
+    let mut counts = std::collections::BTreeMap::<(&'static str, String), usize>::new();
+    for candidate in candidates {
+        for facet in finding_facet_values(&candidate.finding, review_index) {
+            *counts.entry((facet.facet, facet.value)).or_default() += 1;
+        }
+    }
+    [
+        "severity",
+        "source",
+        "file",
+        "actor",
+        "confidence",
+        "status",
+    ]
+    .into_iter()
+    .map(|label| facet_group(label, &counts))
+    .collect()
+}
+
+fn facet_group(
+    label: &'static str,
+    counts: &std::collections::BTreeMap<(&'static str, String), usize>,
+) -> ReviewFacetGroup {
+    let mut values = counts
+        .iter()
+        .filter(|((facet, _), _)| *facet == label)
+        .map(|((_, value), count)| ReviewFacetCount {
+            value: value.clone(),
+            count: *count,
+        })
+        .collect::<Vec<_>>();
+    values.sort_by(|left, right| {
+        right
+            .count
+            .cmp(&left.count)
+            .then(left.value.cmp(&right.value))
+    });
+    ReviewFacetGroup { label, values }
 }
 
 fn projected_review_queue_rows(
@@ -238,14 +349,27 @@ fn review_queue_header(
 fn review_queue_empty_reason(
     total_count: usize,
     visible_count: usize,
+    loaded_count: usize,
+    search_active: bool,
     mode: ReviewQueueMode,
 ) -> Option<String> {
     if visible_count > 0 {
         return None;
     }
     if total_count == 0 {
-        return Some("no findings loaded for review".to_string());
+        return Some(if loaded_count == 0 {
+            "no findings loaded for review".to_string()
+        } else {
+            "no findings match the active loaded-list filters".to_string()
+        });
     }
+    if search_active {
+        return Some("no findings match the active search and filters".to_string());
+    }
+    review_queue_mode_empty_reason(mode)
+}
+
+fn review_queue_mode_empty_reason(mode: ReviewQueueMode) -> Option<String> {
     match mode {
         ReviewQueueMode::Open => Some("all visible findings have terminal decisions".to_string()),
         ReviewQueueMode::Complete => {

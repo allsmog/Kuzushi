@@ -119,12 +119,13 @@ pub async fn probe(binary: &str, version_args: &[&str]) -> BinaryProbe {
     let mut version = None;
 
     if let Some(path) = path.as_ref() {
-        if let Ok(output) = Command::new(path)
+        let mut command = Command::new(path);
+        command
             .args(version_args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
+            .stderr(Stdio::piped());
+        if let Ok(output) =
+            crate::process::run_guarded_output(&mut command, "MCP dependency probe").await
         {
             let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
             let stderr = String::from_utf8_lossy(&output.stderr).into_owned();

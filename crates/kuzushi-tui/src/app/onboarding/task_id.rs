@@ -1,4 +1,5 @@
 use kuzushi_core::WorkflowPhase;
+use std::path::{Path, PathBuf};
 
 /// Every task an operator can select across the five engagement phases. Each
 /// variant maps to a concrete tool (or a tool + option) and, for the Map-phase
@@ -264,13 +265,20 @@ impl PlanningTaskId {
             BuildThreatModel | BuildStrideThreatModel | BuildPastaThreatModel => {
                 ".kuzushi/threat-model.json"
             }
-            DecomposeModules => ".kuzushi/project-model/scopes.json",
+            DecomposeModules => ".kuzushi/v3/project-model/scopes.json",
             BuildCodePropertyGraph => ".kuzushi/cpg.bin",
             BuildCodeQlDatabase => ".kuzushi/v3/codeql-db",
             ThreatIntelCves => ".kuzushi/threat-intel/candidates.json",
             _ => return None,
         };
         Some(path)
+    }
+
+    pub fn artifact_path(self, target: &Path) -> Option<PathBuf> {
+        if self == Self::DecomposeModules {
+            return Some(kuzushi_core::workspace::project_model_scopes_path(target));
+        }
+        self.artifact_relative_path().map(|path| target.join(path))
     }
 
     /// External CLI prerequisite for this task. `Some(name)` means the
@@ -324,6 +332,15 @@ mod tests {
         assert!(PlanningTaskId::ReverseEngineerBinary
             .artifact_relative_path()
             .is_none());
+    }
+
+    #[test]
+    fn decomposition_uses_the_canonical_v3_scope_tree_path() {
+        let target = Path::new("/target");
+        assert_eq!(
+            PlanningTaskId::DecomposeModules.artifact_path(target),
+            Some(kuzushi_core::workspace::project_model_scopes_path(target))
+        );
     }
 
     #[test]

@@ -602,7 +602,7 @@ impl DomainCache {
         run_refs.iter().find_map(|run_id| {
             self.patch_lifecycles_by_reverify_run
                 .get(run_id)
-                .is_some_and(|record| record.state == PatchLifecycleState::Verified)
+                .is_some_and(PatchLifecycleRecord::is_empirically_verified)
                 .then_some(run_id.as_str())
         })
     }

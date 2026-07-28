@@ -7,11 +7,13 @@ pub use crate::findings::{
     severity_icon, sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
     static_proof_summary, ConfidenceBand, Finding, FindingDetailReport, FindingEvidence,
     FindingListFilter, FindingListReport, FindingNextAction, FindingProjection, FindingStore,
-    FindingVerdictFilter, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
-    PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
+    FindingVerdictFilter, PatchAttempt, PatchAttemptSummary, PatchDetectorReplayOutcome,
+    PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState,
+    PatchProvenance, PatchResult, PatchReverificationCaseKind, PatchReverificationFileHash,
+    PatchReverificationReceipt, PatchReverificationStep, PatchReverificationTarget, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
     ProofLadderState, RefuteReason, RuntimeValidationSummary, Severity, StaticProofState,
-    StaticProofSummary, TriageOutcome, TriageVerdict, VulnSource,
+    StaticProofSummary, TriageOutcome, TriageVerdict, VerificationProvenance, VulnSource,
 };
 pub use crate::pr_comment::{
     build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,

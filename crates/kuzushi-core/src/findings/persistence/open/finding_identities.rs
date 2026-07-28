@@ -81,8 +81,7 @@ fn reusable_prior_identity(
     if prior.identity_id.is_none() || prior.suppressed {
         return false;
     }
-    if normalized_identity_file(&prior.file_path) != normalized_identity_file(&incoming.file_path)
-    {
+    if normalized_identity_file(&prior.file_path) != normalized_identity_file(&incoming.file_path) {
         return false;
     }
     let stable_key = prior

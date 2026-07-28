@@ -41,28 +41,26 @@ pub(crate) fn build_agent_prompt(
 ) -> Result<String> {
     let files = inventory_files(&input.target, input.max_elements.saturating_mul(4).max(40))?;
     let manifest_summary = read_manifest_summary(&input.target)?;
-    Ok(
-        [
-            prompt_header(input),
-            repository_inventory_section(&files),
-            manifest_section(&manifest_summary),
-            attack_surface_section(&grounding.surfaces),
-            confirmed_findings_section(&grounding.confirmed_findings),
-            operator_vulns_section(&input.vulns),
-            previous_model_section(previous_model),
-            source_bundle_section(source_bundle),
-            source_rules_section().to_string(),
-            methodology_section(input),
-            bootstrap_stages_section().to_string(),
-            threat_quality_section().to_string(),
-            output_contract_section().to_string(),
-            prompt_override_section(input),
-        ]
-        .into_iter()
-        .filter(|section| !section.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n"),
-    )
+    Ok([
+        prompt_header(input),
+        repository_inventory_section(&files),
+        manifest_section(&manifest_summary),
+        attack_surface_section(&grounding.surfaces),
+        confirmed_findings_section(&grounding.confirmed_findings),
+        operator_vulns_section(&input.vulns),
+        previous_model_section(previous_model),
+        source_bundle_section(source_bundle),
+        source_rules_section().to_string(),
+        methodology_section(input),
+        bootstrap_stages_section().to_string(),
+        threat_quality_section().to_string(),
+        output_contract_section().to_string(),
+        prompt_override_section(input),
+    ]
+    .into_iter()
+    .filter(|section| !section.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join("\n\n"))
 }
 
 fn prompt_header(input: &BuildInput) -> String {
@@ -73,16 +71,26 @@ Target: {target}
 Repository name: {repo_name}
 Methodology: {methodology}
 Slice: {slice}
-Stages: {stages}
+{methodology_scope}
 Max DFD elements: {max_elements}
 Max threats: {max_threats}"#,
         target = input.target.display(),
         repo_name = input.repo_name,
         methodology = input.methodology,
         slice = input.slice,
-        stages = input.stages.join(", "),
+        methodology_scope = methodology_scope(input),
         max_elements = input.max_elements,
         max_threats = input.max_threats,
+    )
+}
+
+fn methodology_scope(input: &BuildInput) -> String {
+    if input.methodology == "pasta" {
+        return format!("PASTA stages: {}", input.stages.join(", "));
+    }
+    format!(
+        "Methodology scope: full {} analysis",
+        methodology_label(&input.methodology)
     )
 }
 
@@ -127,10 +135,7 @@ fn source_rules_section() -> &'static str {
 }
 
 fn methodology_section(input: &BuildInput) -> String {
-    format!(
-        "Methodology contract:\n{}",
-        methodology_guidance(input)
-    )
+    format!("Methodology contract:\n{}", methodology_guidance(input))
 }
 
 fn bootstrap_stages_section() -> &'static str {

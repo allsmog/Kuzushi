@@ -260,22 +260,22 @@ fn append_linux_access(
     scratch: &Path,
 ) -> Result<(Vec<File>, PathBuf)> {
     let mut retained_handles = Vec::new();
-    append_linux_authorized_root(&mut command, &access.tool_root, true, &mut retained_handles)?;
+    append_linux_authorized_root(command, &access.tool_root, true, &mut retained_handles)?;
     append_linux_authorized_root(
-        &mut command,
+        command,
         &access.working_directory,
         true,
         &mut retained_handles,
     )?;
     for root in &access.read_only {
-        append_linux_authorized_root(&mut command, root, true, &mut retained_handles)?;
+        append_linux_authorized_root(command, root, true, &mut retained_handles)?;
     }
     for root in &access.read_write {
-        append_linux_authorized_root(&mut command, root, false, &mut retained_handles)?;
+        append_linux_authorized_root(command, root, false, &mut retained_handles)?;
     }
     let scratch_capability = crate::ReadRootCapability::new([scratch.to_path_buf()])?;
     let scratch = scratch_capability.authorize_directory(scratch)?;
-    append_linux_authorized_root(&mut command, &scratch, false, &mut retained_handles)?;
+    append_linux_authorized_root(command, &scratch, false, &mut retained_handles)?;
     Ok((retained_handles, scratch.path().to_path_buf()))
 }
 
@@ -288,10 +288,10 @@ fn append_linux_environment(
     command
         .arg("--setenv")
         .arg("HOME")
-        .arg(scratch.path())
+        .arg(scratch)
         .arg("--setenv")
         .arg("TMPDIR")
-        .arg(scratch.path());
+        .arg(scratch);
     for (name, value) in &access.environment {
         command.arg("--setenv").arg(name).arg(value);
     }

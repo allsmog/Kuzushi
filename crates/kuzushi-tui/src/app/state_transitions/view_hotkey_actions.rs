@@ -280,10 +280,9 @@ impl ShellApp {
         }
     }
 
-    /// Enter on the Map action drawer loads the card's threat-model action
-    /// into the prompt — bootstrap when no model exists, refine when stale,
-    /// otherwise the journey planner. Kuzushi recommends; the operator still
-    /// presses Enter to authorize the actual run.
+    /// Enter on an artifact action opens the Map planner with the relevant
+    /// descriptor-backed tasks selected. Raw `run … {json}` stays an expert
+    /// surface; ordinary workflow review happens in the planner.
     fn draft_map_action_card_command(&mut self) {
         let model = crate::ui_view_models::phase_cockpit_model_for_phase(
             self,
@@ -292,20 +291,26 @@ impl ShellApp {
         let crate::ui_view_models::PhaseCockpitBody::Map(map) = model.body else {
             return;
         };
-        let (command, note) = if map.decompose_first.is_some() {
+        if map.decompose_first.is_some() {
+            self.open_map_action_plan(PlanningTaskId::DecomposeModules);
+            self.log(
+                "map",
+                "Map planner opened with repository context and module decomposition selected",
+            );
+            return;
+        }
+        if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
+            self.open_map_action_plan(PlanningTaskId::BuildThreatModel);
+            self.log(
+                "map",
+                "Map planner opened with repository context and threat modeling selected",
+            );
+            return;
+        }
+        let (command, note) = if map.context.state.eq_ignore_ascii_case("stale") {
             (
-                "run pack:suggest-shards {\"emitScopes\": true}",
-                "module-decomposition draft loaded — Enter to propose scoped modules",
-            )
-        } else if map.dfd.empty_hint.is_some() || map.empty_hint.is_some() {
-            (
-                "run threat-model:build {}",
-                "threat-model draft loaded — Enter to generate (seeds scan recommendations)",
-            )
-        } else if map.context.state.eq_ignore_ascii_case("stale") {
-            (
-                "run threat-model:build {}",
-                "refine draft loaded — Enter to update the stale threat model",
+                "next",
+                "Map planner loaded — review cached artifacts and mark rebuilds before launch",
             )
         } else {
             (
@@ -316,6 +321,36 @@ impl ShellApp {
         self.set_input(command.to_string());
         self.set_input_mode(InputMode::Prompt);
         self.log("map", note);
+    }
+
+    fn open_map_action_plan(&mut self, task: PlanningTaskId) {
+        self.open_phase_picker(kuzushi_core::WorkflowPhase::Map);
+        if self.shell_view() != ShellView::PlanningPicker {
+            return;
+        }
+        for selected in [PlanningTaskId::GatherRepoContext, task] {
+            let cached = self
+                .engagement
+                .planning_picker()
+                .tasks()
+                .iter()
+                .find(|row| row.id == selected)
+                .is_some_and(|row| {
+                    matches!(
+                        row.artifact_state,
+                        crate::app::PlanningArtifactState::Cached
+                    )
+                });
+            if !cached {
+                self.engagement
+                    .planning_picker_mut()
+                    .selected_mut()
+                    .insert(selected);
+            }
+        }
+        self.engagement
+            .planning_picker_mut()
+            .set_cursor_to_task(task);
     }
 
     /// Enter on the Next-Investigation-Plan drawer loads the journey planner
@@ -615,7 +650,7 @@ impl ShellApp {
             .open_search_capture();
         self.log(
             "review",
-            "search: type to filter · sev:/tool:/status:/actor: facets · Enter keep · Esc clear",
+            "search: type to filter · severity/source/path/actor/confidence/status facets · Enter keep · Esc clear",
         );
     }
 
@@ -1319,6 +1354,73 @@ mod invariant_hunt_focus_tests {
             "{focus}"
         );
         assert!(focus.contains("Hunt the whole repository"), "{focus}");
+    }
+}
+
+#[cfg(test)]
+mod map_action_card_tests {
+    use super::*;
+
+    fn map_action_app(files: u64) -> (tempfile::TempDir, ShellApp) {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let workspace_root = workspace.root().to_path_buf();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.domain_mut().context_view_mut().files_indexed = Some(files);
+        app.workbench_cache()
+            .borrow_mut()
+            .apply_view_hydration(crate::app::ViewHydrationResult {
+                target: workspace_root,
+                key: crate::app::ViewHydrationKey::ProjectScopeTree,
+                value: crate::app::ViewHydrationValue::ProjectScopeTree(
+                    crate::app::ProjectScopeTreeState::RootOnly,
+                ),
+            });
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Map));
+        app.router
+            .workbench_mut()
+            .set_focus(crate::ui_view_models::PhaseSurfaceId::MapReadiness);
+        (target, app)
+    }
+
+    #[test]
+    fn large_repo_next_card_opens_decomposition_plan_without_json_draft() {
+        let (_target, mut app) = map_action_app(81_259);
+
+        app.workbench_open_focused();
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        let picker = app.engagement.planning_picker();
+        assert!(
+            picker
+                .selected()
+                .contains(&PlanningTaskId::DecomposeModules),
+            "selected={:?}; decomposition={:?}",
+            picker.selected(),
+            picker
+                .tasks()
+                .iter()
+                .find(|row| row.id == PlanningTaskId::DecomposeModules)
+        );
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn missing_threat_model_card_opens_threat_model_plan_without_json_draft() {
+        let (_target, mut app) = map_action_app(1200);
+
+        app.workbench_open_focused();
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert!(app
+            .engagement
+            .planning_picker()
+            .selected()
+            .contains(&PlanningTaskId::BuildThreatModel));
+        assert!(app.input().is_empty());
     }
 }
 

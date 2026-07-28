@@ -66,6 +66,7 @@ fn verification(stable_fp: &str) -> VerificationWrite {
         identity_id: Some("fi_test".to_string()),
         verification_run_id: Some("verify-run-1".to_string()),
         verified_scan_id: Some("scan-run-1".to_string()),
+        provenance: None,
         proof_level: 4,
         proof_verdict: "exploited".to_string(),
         backend: "bwrap".to_string(),

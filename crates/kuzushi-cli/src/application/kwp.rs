@@ -32,10 +32,9 @@ pub(crate) fn kwp_command(command: KwpCommand, default_target: Option<PathBuf>) 
         } => kwp_inspect_command(specifier, lockfile, json),
         KwpCommand::Audit {
             lockfile,
-            target,
             run_id,
             json,
-        } => kwp_audit_command(lockfile, target.or(default_target), run_id, json),
+        } => kwp_audit_command(lockfile, default_target, run_id, json),
     }
 }
 

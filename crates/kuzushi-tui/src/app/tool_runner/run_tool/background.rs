@@ -444,15 +444,27 @@ impl ShellApp {
         }
         session = self.capture_run_focus_origin(session);
         session.seed_task_sequence(self.engagement.planning_tool_sequence());
-        if let Some(task) = self.engagement.running_planning_task() {
-            session.bind_tool_task(tool_name, task.activity_task_id());
-        } else {
-            // Other launch paths (chain, steer, ad hoc re-runs) must still
-            // land trace rows on the seeded planned row instead of minting
-            // a duplicate task for the same logical run.
-            session.alias_tool_to_unique_planned_row(tool_name);
-        }
+        self.bind_background_session_task(&mut session, run, tool_name);
         session
+    }
+
+    fn bind_background_session_task(
+        &self,
+        session: &mut ActivitySession,
+        run: &BackgroundToolRun,
+        tool_name: &str,
+    ) {
+        let Some(task) = self.engagement.running_planning_task() else {
+            // Chain, steer, and ad hoc launches can still match one seeded row.
+            session.alias_tool_to_unique_planned_row(tool_name);
+            if let Some(activity_task_id) = session.task_id_for_bound_tool(tool_name) {
+                session.bind_lifecycle_task(run.task_id, activity_task_id);
+            }
+            return;
+        };
+        let activity_task_id = task.activity_task_id();
+        session.bind_tool_task(tool_name, activity_task_id.clone());
+        session.bind_lifecycle_task(run.task_id, activity_task_id);
     }
 }
 

@@ -60,6 +60,7 @@ impl<'a> TracedRuntime<'a> {
     fn record_query(
         &self,
         verb: &str,
+        stage: &str,
         model: &str,
         result: &Result<Observed<AgentQueryResponse>>,
         elapsed_ms: u64,
@@ -68,7 +69,9 @@ impl<'a> TracedRuntime<'a> {
         if let Err(error) = result {
             self.record_failed_query(verb, error);
         }
-        let (cost, usage, error_class) = observed_query_telemetry(result);
+        let (cost, usage) = observed_query_telemetry(result);
+        let failure = model_call_failure(result, lifecycle, stage);
+        let error_class = model_call_error_class(result, usage, failure.as_ref());
         self.record_model_call_finish(
             lifecycle,
             model,
@@ -77,6 +80,7 @@ impl<'a> TracedRuntime<'a> {
             usage,
             cost,
             error_class,
+            failure,
         )
     }
 
@@ -107,7 +111,8 @@ impl<'a> TracedRuntime<'a> {
             |_| ModelTokenUsage::unavailable_call(),
             |outcome| outcome.usage,
         );
-        let error_class = model_call_error_class(result, usage);
+        let failure = model_call_failure(result, lifecycle, "triage");
+        let error_class = model_call_error_class(result, usage, failure.as_ref());
         self.record_model_call_finish(
             lifecycle,
             model,
@@ -116,6 +121,7 @@ impl<'a> TracedRuntime<'a> {
             usage,
             cost,
             error_class,
+            failure,
         )
     }
 
@@ -137,7 +143,8 @@ impl<'a> TracedRuntime<'a> {
     ) -> Result<()> {
         self.record_step_trace(result, history_len);
         let (cost, usage) = observed_step_telemetry(result);
-        let error_class = model_call_error_class(result, usage);
+        let failure = model_call_failure(result, lifecycle, "next-step");
+        let error_class = model_call_error_class(result, usage, failure.as_ref());
         self.record_model_call_finish(
             lifecycle,
             model,
@@ -146,14 +153,11 @@ impl<'a> TracedRuntime<'a> {
             usage,
             cost,
             error_class,
+            failure,
         )
     }
 
-    fn record_step_trace(
-        &self,
-        result: &Result<Observed<AgentLoopStep>>,
-        history_len: usize,
-    ) {
+    fn record_step_trace(&self, result: &Result<Observed<AgentLoopStep>>, history_len: usize) {
         match result {
             Ok(Observed {
                 value: AgentLoopStep::ToolCall { call, cost_usd: _ },
@@ -176,6 +180,7 @@ impl<'a> TracedRuntime<'a> {
         usage: ModelTokenUsage,
         cost: crate::runtime::RuntimeCostReport,
         error_class: Option<&'static str>,
+        failure: Option<crate::runtime::RuntimeFailureMetadata>,
     ) -> Result<()> {
         let Some(observation) = self.trace.run_observation() else {
             return Ok(());
@@ -192,15 +197,12 @@ impl<'a> TracedRuntime<'a> {
                         model,
                     )),
                     model: crate::run_lifecycle::SafeText::operator_visible(model),
-                    status: if succeeded {
-                        crate::run_lifecycle::RunItemStatus::Completed
-                    } else {
-                        crate::run_lifecycle::RunItemStatus::Failed
-                    },
+                    status: model_call_status(succeeded),
                     latency_ms,
                     usage: persisted_model_usage(usage),
                     cost,
                     error_class: error_class.map(crate::run_lifecycle::SafeText::operator_visible),
+                    failure,
                 },
             )
             .with_call(lifecycle.call_id),
@@ -256,14 +258,50 @@ impl<'a> TracedRuntime<'a> {
     }
 }
 
-fn model_call_error_class<T>(result: &Result<T>, usage: ModelTokenUsage) -> Option<&'static str> {
+fn model_call_status(succeeded: bool) -> crate::run_lifecycle::RunItemStatus {
+    if succeeded {
+        crate::run_lifecycle::RunItemStatus::Completed
+    } else {
+        crate::run_lifecycle::RunItemStatus::Failed
+    }
+}
+
+fn model_call_error_class<T>(
+    result: &Result<T>,
+    usage: ModelTokenUsage,
+    failure: Option<&crate::runtime::RuntimeFailureMetadata>,
+) -> Option<&'static str> {
     match result {
-        Err(error) => Some(model_error_class(error)),
+        Err(_) => failure.map(|failure| failure.error_class.as_str()),
         Ok(_) if !usage.is_complete() && !usage.is_unavailable() => {
             Some("usage_incomplete_lower_bound")
         }
         Ok(_) => None,
     }
+}
+
+fn model_call_failure<T>(
+    result: &Result<T>,
+    lifecycle: ModelCallLifecycle,
+    stage: &str,
+) -> Option<crate::runtime::RuntimeFailureMetadata> {
+    let error = result.as_ref().err()?;
+    let metadata = crate::runtime::runtime_failure_metadata(error)
+        .unwrap_or_else(|| fallback_runtime_failure_metadata(error));
+    Some(metadata.with_model_call(lifecycle.call_id, Some(stage)))
+}
+
+fn fallback_runtime_failure_metadata(
+    error: &anyhow::Error,
+) -> crate::runtime::RuntimeFailureMetadata {
+    use crate::runtime::{RuntimeFailureClass as Class, RuntimeFailureMetadata};
+    let legacy = model_error_class(error);
+    let class = match legacy {
+        "canceled" => Class::Cancelled,
+        "invalid_response" => Class::ProviderResponseInvalid,
+        other => Class::from_safe_class(other),
+    };
+    RuntimeFailureMetadata::new(class, None, None)
 }
 
 fn observed_step_telemetry(
@@ -282,11 +320,7 @@ fn observed_step_telemetry(
 
 fn observed_query_telemetry(
     result: &Result<Observed<AgentQueryResponse>>,
-) -> (
-    crate::runtime::RuntimeCostReport,
-    ModelTokenUsage,
-    Option<&'static str>,
-) {
+) -> (crate::runtime::RuntimeCostReport, ModelTokenUsage) {
     let cost = result
         .as_ref()
         .ok()
@@ -296,7 +330,7 @@ fn observed_query_telemetry(
         |_| ModelTokenUsage::unavailable_call(),
         |response| response.usage,
     );
-    (cost, usage, model_call_error_class(result, usage))
+    (cost, usage)
 }
 
 fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelUsage {
@@ -321,6 +355,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         let start = Instant::now();
         let prompt_len = request.prompt.len();
         let model = request.model.clone();
+        let stage = request.stage.clone().unwrap_or_else(|| "query".to_string());
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
         let lifecycle = self.record_model_call_start(
             "query",
@@ -334,6 +369,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             "query",
+            &stage,
             &model,
             &result,
             start.elapsed().as_millis() as u64,
@@ -359,6 +395,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         let start = Instant::now();
         let prompt_len = request.prompt.len();
         let model = request.model.clone();
+        let stage = request.stage.clone().unwrap_or_else(|| "query".to_string());
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
         let lifecycle = self.record_model_call_start(
             "query",
@@ -372,6 +409,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             "query",
+            &stage,
             &model,
             &result,
             start.elapsed().as_millis() as u64,
@@ -499,6 +537,7 @@ impl AgentRuntime for TracedRuntime<'_> {
         let model = request.model.clone();
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
         let verb = subagent_trace_verb(role);
+        let stage = request.stage.clone().unwrap_or_else(|| verb.to_string());
         let lifecycle = self.record_model_call_start(
             verb,
             format!("{verb} · sending {prompt_len} chars"),
@@ -511,6 +550,7 @@ impl AgentRuntime for TracedRuntime<'_> {
             .and_then(|observed| observed.try_map(AgentQueryResponse::validate_cost));
         self.record_query(
             verb,
+            &stage,
             &model,
             &result,
             start.elapsed().as_millis() as u64,

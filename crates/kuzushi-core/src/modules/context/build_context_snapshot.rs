@@ -10,46 +10,10 @@ pub(in crate::modules) fn build_context_snapshot(
             "context:build",
         ))?;
     let options = context_build_options(&input)?;
-
-    emit_context_build_start(ctx, workspace.root());
-    emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
-    let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
-    let mut snapshot = context_snapshot_value_with_progress(
-        workspace.root(),
-        &options,
-        &file_sample,
-        |stage, detail| {
-            let detail = detail.or_else(|| {
-                (stage == ContextBuildStage::InferRepository)
-                    .then(|| format!("{} files indexed", file_sample.files_indexed))
-            });
-            emit_context_build_stage(ctx, stage, detail);
-        },
-        &|| {
-            ctx.cancellation
-                .is_some_and(crate::scan::ScanCancellation::is_cancelled)
-        },
-    )?;
+    let (file_sample, mut snapshot) = assemble_context_snapshot(workspace.root(), &options, ctx)?;
     emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
     let snapshot_path = save_context_snapshot(workspace.root(), &mut snapshot)?;
-    emit_context_build_stage(ctx, ContextBuildStage::RegisterTreeIdentity, None);
-    let mut identity_heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
-    let mut on_files_hashed = |files: usize| {
-        if identity_heartbeat.ready() {
-            emit_context_build_stage(
-                ctx,
-                ContextBuildStage::RegisterTreeIdentity,
-                Some(format!("{files} files hashed")),
-            );
-        }
-    };
-    let provenance = match index_snapshot_provenance(workspace, &mut on_files_hashed) {
-        Ok(provenance) => Some(provenance),
-        Err(error) => {
-            emit_context_build_note(ctx, format!("tree identity unavailable: {error:#}"));
-            None
-        }
-    };
+    let provenance = trace_snapshot_provenance(workspace, ctx);
     let partial = context_partial(&file_sample, &snapshot);
     emit_context_build_done(ctx, file_sample.files_indexed, partial);
     let state_dir = workspace.state_dir();
@@ -63,6 +27,62 @@ pub(in crate::modules) fn build_context_snapshot(
         partial,
         provenance,
     ))
+}
+
+fn assemble_context_snapshot(
+    root: &Path,
+    options: &ContextBuildOptions,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<(ContextFileSample, Value)> {
+    emit_context_build_start(ctx, root);
+    emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
+    let file_sample = collect_context_file_sample(root, options.sample_limit)?;
+    let snapshot = context_snapshot_value_with_progress(
+        root,
+        options,
+        &file_sample,
+        |stage, detail| {
+            let detail = context_stage_detail(stage, detail, file_sample.files_indexed);
+            emit_context_build_stage(ctx, stage, detail);
+        },
+        &|| ctx.is_cancelled(),
+    )?;
+    Ok((file_sample, snapshot))
+}
+
+fn context_stage_detail(
+    stage: ContextBuildStage,
+    detail: Option<String>,
+    files_indexed: usize,
+) -> Option<String> {
+    detail.or_else(|| {
+        (stage == ContextBuildStage::InferRepository)
+            .then(|| format!("{files_indexed} files indexed"))
+    })
+}
+
+fn trace_snapshot_provenance(
+    workspace: &crate::workspace::WorkspaceTarget,
+    ctx: &ToolExecutionContext<'_>,
+) -> Option<SnapshotProvenance> {
+    emit_context_build_stage(ctx, ContextBuildStage::RegisterTreeIdentity, None);
+    let mut heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
+    let mut on_files_hashed = |files: usize| {
+        if heartbeat.ready() {
+            emit_context_build_stage(
+                ctx,
+                ContextBuildStage::RegisterTreeIdentity,
+                Some(format!("{files} files hashed")),
+            );
+        }
+    };
+    match index_snapshot_provenance(workspace, &mut on_files_hashed) {
+        Ok(provenance) => Some(provenance),
+        Err(error) => {
+            emit_context_build_note(ctx, format!("tree identity unavailable: {error:#}"));
+            None
+        }
+    }
 }
 
 struct SnapshotProvenance {

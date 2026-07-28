@@ -6,6 +6,7 @@ use super::review_state::{
     EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 use super::workspace::findings_db_relative_path;
+use super::FindingSearch;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::{
     ScannedSnippetWindow, ShellApp, ViewDataState, VisibleFindingProjection,
@@ -203,7 +204,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         app.review_decisions(),
     );
     let rows = finding_rows(app, &visible, &review_index);
-    let selected_out_of_window = selected_out_of_window_notice(app, &rows);
+    let selected_out_of_window = selected_finding_out_of_window_notice(app);
     let total = visible.len();
     let triaged = visible_triaged_count(&visible, &review_index);
     let pending = total.saturating_sub(triaged);
@@ -243,66 +244,6 @@ struct BacklogReconciliationState {
     active: bool,
     severity: Option<&'static str>,
     tool: Option<String>,
-}
-
-#[cfg(test)]
-mod search_terms_tests {
-    use super::*;
-
-    fn finding(title: &str, severity: kuzushi_core::findings::Severity) -> Finding {
-        let mut finding = Finding::new_tool(
-            "carlini-threat-hunt",
-            "carlini-threat-hunt/finding",
-            "src/gateway.go",
-            42,
-            None,
-            severity,
-            title,
-        );
-        finding.title = title.to_string();
-        finding.actor_fingerprint = Some("carlini-threat-hunt:RouterRPC:0".to_string());
-        finding
-    }
-
-    fn empty_review_index() -> EffectiveReviewStateIndex {
-        EffectiveReviewStateIndex::from_findings_and_decisions(&[], &[])
-    }
-
-    #[test]
-    fn free_words_fuzzy_match_across_title_message_path_and_rule() {
-        let terms = parse_search_terms("gateway uuid");
-        let hit = finding(
-            "ForwardRequest trusts in.Uuid",
-            kuzushi_core::findings::Severity::High,
-        );
-        let miss = finding("cookie bypass", kuzushi_core::findings::Severity::High);
-
-        let review = empty_review_index();
-        assert!(finding_matches_search(&hit, &terms, &review));
-        assert!(!finding_matches_search(&miss, &terms, &review));
-    }
-
-    #[test]
-    fn facet_terms_filter_severity_tool_and_actor() {
-        let review = empty_review_index();
-        let high = finding("t", kuzushi_core::findings::Severity::High);
-
-        assert!(finding_matches_search(
-            &high,
-            &parse_search_terms("sev:high tool:carlini actor:routerrpc"),
-            &review,
-        ));
-        assert!(!finding_matches_search(
-            &high,
-            &parse_search_terms("sev:low"),
-            &review,
-        ));
-        assert!(finding_matches_search(
-            &high,
-            &parse_search_terms("status:open"),
-            &review,
-        ));
-    }
 }
 
 /// The active search chip: the live capture draft (suffixed with the caret
@@ -482,7 +423,7 @@ pub(crate) fn finding_detail_model_for_projection(
 pub(crate) const SNIPPET_CONTEXT_BEFORE: usize = 3;
 pub(crate) const SNIPPET_CONTEXT_AFTER: usize = 4;
 
-/// Read the finding's source context through the workbench cache. `None`
+/// Project the finding's hydrated source context from the workbench cache. `None`
 /// means the finding carries no usable location (no file, line 0, or no
 /// way to resolve a relative path without a target); an unreadable file
 /// still yields a model whose `note` says why, so the operator learns the
@@ -494,11 +435,19 @@ fn source_snippet_model(app: &ShellApp, finding: &Finding) -> Option<SourceSnipp
     if focus_line == 0 {
         return None;
     }
+    let target = app.target()?;
     let path = finding_source_path(app, finding)?;
-    let content = app.workbench_cache().borrow_mut().read_source_file(&path);
-    let live = match content {
-        Ok(content) => snippet_from_content(&content, focus_line),
-        Err(error) => snippet_note(focus_line, format!("source unavailable · {error}")),
+    let state = app
+        .workbench_cache()
+        .borrow()
+        .cached_source_file(target, &path);
+    let live = match state {
+        ViewDataState::Ready(Ok(content)) => snippet_from_content(&content, focus_line),
+        ViewDataState::Ready(Err(error)) => {
+            snippet_note(focus_line, format!("source unavailable · {error}"))
+        }
+        ViewDataState::Loading => snippet_note(focus_line, "source loading".to_string()),
+        ViewDataState::NotRequested => snippet_note(focus_line, "source not requested".to_string()),
     };
     Some(resolve_snippet_with_scanned_copy(app, finding, live))
 }
@@ -713,9 +662,13 @@ fn selected_outside_loaded_findings(
     (!selected_is_loaded).then_some(selected.clone())
 }
 
-fn selected_out_of_window_notice(app: &ShellApp, rows: &[FindingListRow]) -> Option<String> {
+pub(crate) fn selected_finding_out_of_window_notice(app: &ShellApp) -> Option<String> {
     let selected = app.selected_finding().as_ref()?;
-    if rows.iter().any(|row| row.selected) {
+    let selected_key = engagement_projection_key(selected);
+    if projected_visible_findings(app)
+        .iter()
+        .any(|projected| engagement_projection_key(&projected.finding) == selected_key)
+    {
         return None;
     }
     Some(format!(
@@ -762,6 +715,11 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
 }
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
+    let visible = visible_finding_alias_indices_before_search(app);
+    search_filtered_finding_alias_indices(app, visible)
+}
+
+fn visible_finding_alias_indices_before_search(app: &ShellApp) -> Vec<(String, usize)> {
     let sorted = cached_sorted_finding_alias_indices(app);
     // The backlog preset keeps the severity-major base order (skipping the
     // confidence-first display reorder) so an operator can burn down the
@@ -773,14 +731,11 @@ pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(Strin
     };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
     let filtered = active_filter_finding_alias_indices(app, component_filtered);
-    let searched = search_filtered_finding_alias_indices(app, filtered);
-    backlog_open_only_finding_alias_indices(app, searched)
+    backlog_open_only_finding_alias_indices(app, filtered)
 }
 
-/// Item 13: the Review search query narrows the visible queue. Free words
-/// fuzzy-match title/message/path/rule id; `sev:`/`tool:`/`status:`/`actor:`
-/// terms filter facets. Empty query is a no-op; plain output shares this
-/// pipeline, so parity is automatic.
+/// Item 13: the Review query narrows the shared TTY/plain projection through
+/// the descriptor in `finding_search`; an empty query remains a no-op.
 fn search_filtered_finding_alias_indices(
     app: &ShellApp,
     visible: Vec<(String, usize)>,
@@ -793,95 +748,15 @@ fn search_filtered_finding_alias_indices(
         app.findings(),
         app.review_decisions(),
     );
-    let terms = parse_search_terms(&query);
+    let search = FindingSearch::parse(&query);
     visible
         .into_iter()
         .filter(|(_, index)| {
             app.findings()
                 .get(*index)
-                .is_some_and(|finding| finding_matches_search(finding, &terms, &review_index))
+                .is_some_and(|finding| search.matches(finding, &review_index))
         })
         .collect()
-}
-
-#[derive(Debug, Default)]
-struct FindingSearchTerms {
-    words: Vec<String>,
-    severity: Option<String>,
-    tool: Option<String>,
-    status: Option<String>,
-    actor: Option<String>,
-}
-
-fn parse_search_terms(query: &str) -> FindingSearchTerms {
-    let mut terms = FindingSearchTerms::default();
-    for token in query.split_whitespace() {
-        match token.split_once(':') {
-            Some(("sev" | "severity", value)) => terms.severity = Some(value.to_lowercase()),
-            Some(("tool", value)) => terms.tool = Some(value.to_lowercase()),
-            Some(("status", value)) => terms.status = Some(value.to_lowercase()),
-            Some(("actor", value)) => terms.actor = Some(value.to_lowercase()),
-            _ => terms.words.push(token.to_lowercase()),
-        }
-    }
-    terms
-}
-
-fn finding_matches_search(
-    finding: &Finding,
-    terms: &FindingSearchTerms,
-    review_index: &EffectiveReviewStateIndex,
-) -> bool {
-    if !search_facets_match(finding, terms, review_index) {
-        return false;
-    }
-    if terms.words.is_empty() {
-        return true;
-    }
-    let haystack = format!(
-        "{} {} {} {}",
-        finding.title, finding.message, finding.file_path, finding.rule_id
-    )
-    .to_lowercase();
-    terms
-        .words
-        .iter()
-        .all(|word| kuzushi_core::text::fuzzy::subsequence_score(&haystack, word).is_some())
-}
-
-fn search_facets_match(
-    finding: &Finding,
-    terms: &FindingSearchTerms,
-    review_index: &EffectiveReviewStateIndex,
-) -> bool {
-    let severity_ok = terms
-        .severity
-        .as_deref()
-        .is_none_or(|wanted| finding.severity.as_str().eq_ignore_ascii_case(wanted));
-    let tool_ok = terms
-        .tool
-        .as_deref()
-        .is_none_or(|wanted| finding.tool.to_lowercase().contains(wanted));
-    let actor_ok = terms.actor.as_deref().is_none_or(|wanted| {
-        finding
-            .actor_fingerprint
-            .as_deref()
-            .is_some_and(|actor| actor.to_lowercase().contains(wanted))
-    });
-    let status_ok = terms
-        .status
-        .as_deref()
-        .is_none_or(|wanted| search_status_label(finding, review_index).contains(wanted));
-    severity_ok && tool_ok && actor_ok && status_ok
-}
-
-/// The status facet matches what the queue displays: the effective review
-/// decision when one exists, "open" otherwise.
-fn search_status_label(finding: &Finding, review_index: &EffectiveReviewStateIndex) -> String {
-    review_index
-        .effective_decision_for(finding)
-        .map(|decision| format!("{decision:?}").to_lowercase())
-        .unwrap_or_else(|| "open".to_string())
 }
 
 pub(crate) fn review_backlog_active(app: &ShellApp) -> bool {
@@ -1057,12 +932,52 @@ pub(crate) fn projected_visible_findings(app: &ShellApp) -> Arc<[ProjectedFindin
     if let Some(cached) = app.workbench_cache().borrow().visible_findings(&key) {
         return cached;
     }
-    let projected: Arc<[ProjectedFinding]> =
-        engagement_projected_findings(app, visible_sorted_finding_alias_indices(app)).into();
-    app.workbench_cache()
-        .borrow_mut()
-        .cache_visible_findings(key, Arc::clone(&projected));
+    let before_search: Arc<[ProjectedFinding]> =
+        engagement_projected_findings(app, visible_finding_alias_indices_before_search(app)).into();
+    let projected = search_projected_findings(app, &before_search);
+    app.workbench_cache().borrow_mut().cache_visible_findings(
+        key,
+        Arc::clone(&projected),
+        before_search,
+    );
     projected
+}
+
+pub(crate) fn projected_findings_before_search(app: &ShellApp) -> Arc<[ProjectedFinding]> {
+    let key = visible_findings_cache_key(app);
+    if let Some(cached) = app
+        .workbench_cache()
+        .borrow()
+        .visible_findings_before_search(&key)
+    {
+        return cached;
+    }
+    projected_visible_findings(app);
+    app.workbench_cache()
+        .borrow()
+        .visible_findings_before_search(&key)
+        .unwrap_or_default()
+}
+
+fn search_projected_findings(
+    app: &ShellApp,
+    before_search: &[ProjectedFinding],
+) -> Arc<[ProjectedFinding]> {
+    let query = &app.router.workbench().review().search_query;
+    if query.trim().is_empty() {
+        return Arc::from(before_search);
+    }
+    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+        app.findings(),
+        app.review_decisions(),
+    );
+    let search = FindingSearch::parse(query);
+    before_search
+        .iter()
+        .filter(|projected| search.matches(&projected.finding, &review_index))
+        .cloned()
+        .collect::<Vec<_>>()
+        .into()
 }
 
 pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCacheKey {
@@ -1072,7 +987,13 @@ pub(crate) fn visible_findings_cache_key(app: &ShellApp) -> VisibleFindingsCache
         target_base(app),
         active_component_rel_path(app),
         active_findings_filter_cache_value(app),
+        review_search_cache_value(app),
     )
+}
+
+fn review_search_cache_value(app: &ShellApp) -> Option<String> {
+    let query = &app.router.workbench().review().search_query;
+    (!query.is_empty()).then(|| query.clone())
 }
 
 fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
@@ -1139,6 +1060,7 @@ fn engagement_projection_key(finding: &Finding) -> String {
 fn merge_projected_finding(projected: &mut ProjectedFinding, alias: String, finding: Finding) {
     let previous = projected.finding.clone();
     let next_sources = finding.sources.clone();
+    let next_evidence = finding.evidence.clone();
     let next_count = finding.corroboration_count;
     let mut representative = if finding_rank(&finding) > finding_rank(&previous) {
         projected.alias = alias;
@@ -1147,12 +1069,26 @@ fn merge_projected_finding(projected: &mut ProjectedFinding, alias: String, find
         previous.clone()
     };
     representative.sources = merged_sources(&previous.sources, &next_sources);
+    representative.evidence = merged_evidence(&previous.evidence, &next_evidence);
     representative.corroboration_count = merged_corroboration_count(
         previous.corroboration_count,
         next_count,
         representative.sources.len(),
     );
     projected.finding = representative;
+}
+
+fn merged_evidence(
+    left: &[kuzushi_core::FindingEvidence],
+    right: &[kuzushi_core::FindingEvidence],
+) -> Vec<kuzushi_core::FindingEvidence> {
+    let mut merged = Vec::new();
+    for evidence in left.iter().chain(right) {
+        if !merged.contains(evidence) {
+            merged.push(evidence.clone());
+        }
+    }
+    merged
 }
 
 fn finding_rank(finding: &Finding) -> (u8, u8) {
@@ -1425,6 +1361,7 @@ fn finding_proof_label(finding: &Finding) -> String {
 fn finding_proof_badge(finding: &Finding) -> ProofBadge {
     runtime_proof_label(finding)
         .or_else(|| static_proof_label(finding))
+        .or_else(|| non_runtime_verification_label(finding))
         .unwrap_or_else(|| proof_badge("unverified", ProofTier::Suspected))
 }
 
@@ -1449,7 +1386,13 @@ pub(crate) fn finding_unique_source_count(finding: &Finding) -> usize {
 
 fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
     let verification = finding.verification.as_ref()?;
+    if verification.is_model_assessment()
+        || verification.proof_verdict == PersistedProofVerdict::NotAttempted
+    {
+        return None;
+    }
     Some(match verification.proof_verdict {
+        PersistedProofVerdict::NotAttempted => unreachable!("not-attempted handled above"),
         PersistedProofVerdict::Exploited => proof_badge(
             format!("verified L{}", verification.proof_level),
             ProofTier::RuntimeVerified,
@@ -1468,6 +1411,15 @@ fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
             proof_badge("needs-detail", ProofTier::Suspected)
         }
     })
+}
+
+fn non_runtime_verification_label(finding: &Finding) -> Option<ProofBadge> {
+    let verification = finding.verification.as_ref()?;
+    if verification.is_model_assessment() {
+        return Some(proof_badge("model-assessed", ProofTier::Suspected));
+    }
+    (verification.proof_verdict == PersistedProofVerdict::NotAttempted)
+        .then(|| proof_badge("needs-runtime", ProofTier::Suspected))
 }
 
 fn static_proof_label(finding: &Finding) -> Option<ProofBadge> {

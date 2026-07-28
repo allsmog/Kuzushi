@@ -15,8 +15,7 @@ pub(super) fn emit_artifact_references(
     artifacts: &[RunArtifact],
     producing_call: ToolCallIdentity,
 ) -> Result<()> {
-    let known = crate::run_lifecycle::load_run_projection(target, run_id)?
-        .projection
+    let known = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?
         .artifacts
         .into_values()
         .collect::<Vec<_>>();

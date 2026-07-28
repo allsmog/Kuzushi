@@ -1,8 +1,8 @@
 use super::{
     AbortReason, JobHub, ProjectScopeDiscoveryResult, ProjectScopeDiscoveryRuntime,
-    TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime, TargetCandidateFacts,
-    TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey,
-    ViewHydrationRuntime, WorkerHandleRegistry,
+    StampedTargetCandidateFacts, TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime,
+    TargetFactsRuntime, TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain,
+    ViewHydrationKey, ViewHydrationRuntime, WorkerHandleRegistry,
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
@@ -21,6 +21,7 @@ pub(crate) struct RuntimeState {
     jobs: JobHub,
     project_scope_discovery: ProjectScopeDiscoveryRuntime,
     target_candidate_discovery: TargetCandidateDiscoveryRuntime,
+    active_target_facts: TargetFactsRuntime,
     view_hydration: ViewHydrationRuntime,
     /// Handle of the campaign dispatcher THIS shell launched. Held so the
     /// deck can reap it (no zombie) and so kill targets a verified-live pid
@@ -115,13 +116,21 @@ impl RuntimeState {
         self.target_candidate_discovery.drain_current()
     }
 
-    pub(crate) fn start_target_candidate_facts(&mut self, path: PathBuf) {
+    pub(crate) fn start_target_candidate_facts(&mut self, path: PathBuf) -> u64 {
         self.target_candidate_discovery
-            .start_facts(path, self.loop_wake.clone());
+            .start_facts(path, self.loop_wake.clone())
     }
 
-    pub(crate) fn drain_target_candidate_facts(&mut self) -> Vec<TargetCandidateFacts> {
+    pub(crate) fn drain_target_candidate_facts(&mut self) -> Vec<StampedTargetCandidateFacts> {
         self.target_candidate_discovery.drain_current_facts()
+    }
+
+    pub(crate) fn start_active_target_facts(&mut self, path: PathBuf) -> u64 {
+        self.active_target_facts.start(path, self.loop_wake.clone())
+    }
+
+    pub(crate) fn drain_active_target_facts(&mut self) -> Vec<StampedTargetCandidateFacts> {
+        self.active_target_facts.drain_current()
     }
 
     pub(crate) fn scan_cancel(&self) -> Option<&ScanCancellation> {

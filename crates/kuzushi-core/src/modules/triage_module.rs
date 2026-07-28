@@ -42,7 +42,7 @@ fn triage_chain_hunt_tool() -> ToolDescriptor {
         "triage:chain-hunt",
         "Compose confirmed findings into attack chains (two or more findings where one \
          enables or escalates another) with an ordered attack path, cumulative impact, and \
-         detection-difficulty narrative; each validated chain persists as an open finding \
+         detection-difficulty narrative; each member-resolved chain persists as an open finding \
          (tool `chains`, rule `chains/model`) for the next triage pass.",
         chain_hunt_options(),
     )
@@ -64,7 +64,7 @@ fn dedupe_options() -> Vec<OptionSpec> {
         opt(
             "maxGroups",
             OptionType::Int,
-            "Maximum validated duplicate groups to accept per run.",
+            "Maximum accepted duplicate groups per run.",
         )
         .aliases(&["max_groups"])
         .default(json!(16)),
@@ -100,7 +100,7 @@ fn chain_hunt_options() -> Vec<OptionSpec> {
         opt(
             "maxChains",
             OptionType::Int,
-            "Maximum validated chains to persist per hunt.",
+            "Maximum member-resolved chains to persist per hunt.",
         )
         .aliases(&["max_chains"])
         .default(json!(8)),

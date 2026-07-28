@@ -11,7 +11,7 @@ const PUBLIC_FAILURES = Object.freeze({
   provider_unavailable: "Provider is temporarily unavailable.",
   rate_limited: "Provider rate limited the request.",
   sdk_client_validation:
-    "Provider SDK rejected the request client-side before sending (invalid invocation parameters).",
+    "Provider SDK rejected incompatible client-side invocation parameters before sending.",
   timeout: "Provider request timed out.",
   transport: "Provider request failed before a response was received.",
 });
@@ -44,7 +44,7 @@ export function invalidProviderResponseError() {
 export function bridgeErrorResponse(error) {
   const failure = classifyBridgeError(error);
   const retryAfterSeconds = retryAfterSecondsFromError(error);
-  const detail = bridgeErrorDetail(error);
+  const detail = bridgeErrorDetail(error, failure.errorClass);
   return {
     ok: false,
     error: publicFailureMessage(failure.errorClass, failure.status),
@@ -55,16 +55,17 @@ export function bridgeErrorResponse(error) {
   };
 }
 
-const MAX_DETAIL_CHARS = 300;
+const ADAPTIVE_THINKING_DETAIL =
+  "temperature is incompatible with adaptive thinking; omit the pinned temperature";
 
-/** Bounded, single-line raw error identity (name/code/message) so a failure
- * never disappears into "details were suppressed". The Rust side redacts
- * credential-shaped content again before anything is persisted. */
-export function bridgeErrorDetail(error) {
-  const parts = [error?.name, error?.code ?? error?.cause?.code, error?.message]
-    .filter((part) => typeof part === "string" && part.length > 0);
-  if (parts.length === 0) return undefined;
-  return parts.join(": ").replaceAll(/\s+/g, " ").slice(0, MAX_DETAIL_CHARS);
+/** Only canonical operator guidance crosses the durable protocol. Raw SDK and
+ * provider messages may contain proprietary source even after secret redaction. */
+export function bridgeErrorDetail(error, errorClass) {
+  if (errorClass !== "sdk_client_validation") return undefined;
+  const message = boundedLower(error?.message);
+  return message.includes("temperature") && message.includes("thinking")
+    ? ADAPTIVE_THINKING_DETAIL
+    : undefined;
 }
 
 const RETRY_AFTER_MAX_SECONDS = 300;

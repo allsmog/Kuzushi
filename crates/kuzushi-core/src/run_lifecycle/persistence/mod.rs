@@ -9,6 +9,7 @@ pub use delivery_fault::{RunItemDeliveryFailureStage, RunItemDeliveryFault};
 pub use reader::{
     load_run_projection, read_run_items, RunItemRead, RunProjectionRead, RunProjectionSource,
 };
+pub(crate) use reader::load_run_projection_unhydrated;
 pub use writer::{
     CommittedItemSubscriber, CommittedRange, CommittedRangeSubscriber, DerivativeRangeSubscriber,
     RunItemDeliveryFaultSubscriber, RunItemWriter,

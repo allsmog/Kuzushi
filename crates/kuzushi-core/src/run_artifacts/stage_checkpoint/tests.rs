@@ -10,6 +10,17 @@ fn workspace() -> tempfile::TempDir {
 
 fn open_handle(target: &Path, run_id: &str) -> StageCheckpointHandle {
     let store = StageCheckpointStore::discover(target, &[7u8; 32]).unwrap();
+    StageCheckpointHandle::open_with_tree_identity(
+        store,
+        target,
+        run_id,
+        "demo:staged",
+        Some("test-tree".to_string()),
+    )
+}
+
+fn open_real_handle(target: &Path, run_id: &str) -> StageCheckpointHandle {
+    let store = StageCheckpointStore::discover(target, &[7u8; 32]).unwrap();
     StageCheckpointHandle::open(store, target, run_id, "demo:staged")
 }
 
@@ -44,6 +55,39 @@ fn completed_stages_survive_into_the_next_identical_run() {
         coordinates.checkpoint_artifacts,
         vec!["research.json".to_string()]
     );
+}
+
+#[test]
+fn continuation_coordinates_require_the_failed_runs_matching_fingerprint() {
+    let temp = workspace();
+    let handle = open_handle(temp.path(), "run-1");
+    handle.stage("research").complete(Vec::new());
+
+    write_requested_operation(temp.path(), "run-1", [9u8; 32]);
+    assert!(matching_checkpoint_coordinates_for_run(temp.path(), "run-1").is_none());
+
+    let other = workspace();
+    open_handle(other.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+    write_requested_operation(other.path(), "run-1", [7u8; 32]);
+    assert!(matching_checkpoint_coordinates_for_run(other.path(), "run-1").is_some());
+}
+
+fn write_requested_operation(target: &Path, run_id: &str, digest: [u8; 32]) {
+    use crate::run_lifecycle::*;
+    let writer = RunItemWriter::open(target, run_id, None).unwrap();
+    let item = RunItemV1::ToolCallRequested {
+        tool_name: SafeText::operator_visible("demo:staged"),
+        operation_fingerprint: OperationFingerprint::from_digest(digest),
+        safe_option_names: Vec::new(),
+    };
+    writer
+        .emit_and_flush(
+            RunItemRecord::new(RunItemId::new(), RunItemSource::Dispatch, item)
+                .with_call(RunCallId::new()),
+        )
+        .unwrap();
 }
 
 #[test]
@@ -86,6 +130,99 @@ fn different_operation_fingerprints_do_not_share_checkpoints() {
 }
 
 #[test]
+fn changed_clean_revision_does_not_reuse_a_stage_checkpoint() {
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join("source.rs"), "fn first() {}\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "first"]);
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+
+    fs::write(temp.path().join("source.rs"), "fn second() {}\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "second"]);
+
+    let next = open_real_handle(temp.path(), "run-2");
+    assert!(next.resumed_from().is_none());
+    assert!(next.completed_stage("research").is_none());
+}
+
+#[test]
+fn non_git_target_never_reuses_a_stage_checkpoint() {
+    let temp = workspace();
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+
+    let next = open_real_handle(temp.path(), "run-2");
+
+    assert!(next.resumed_from().is_none());
+    assert!(next.completed_stage("research").is_none());
+}
+
+#[test]
+fn dirty_target_never_reuses_a_clean_stage_checkpoint() {
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join("source.rs"), "fn clean() {}\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "clean"]);
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+    fs::write(temp.path().join("source.rs"), "fn dirty() {}\n").unwrap();
+
+    let next = open_real_handle(temp.path(), "run-2");
+
+    assert!(next.resumed_from().is_none());
+    assert!(next.completed_stage("research").is_none());
+}
+
+#[test]
+fn checkpoint_publish_does_not_reuse_a_fixed_temp_sibling() {
+    let temp = workspace();
+    let path = temp.path().join(".kuzushi/v3/checkpoints/stage-test.json");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let fixed = path.with_extension("json.tmp");
+    fs::write(&fixed, "unrelated staging file").unwrap();
+
+    write_checkpoint_atomically(&path, "{\"version\":1}").unwrap();
+
+    assert_eq!(fs::read_to_string(fixed).unwrap(), "unrelated staging file");
+    assert_eq!(fs::read_to_string(path).unwrap(), "{\"version\":1}");
+}
+
+fn git(target: &Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(["-c", "user.email=kuzushi@example.invalid"])
+        .args(["-c", "user.name=Kuzushi Test"])
+        .args(["-c", "commit.gpgsign=false"])
+        .args(args)
+        .current_dir(target)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?} failed");
+}
+
+#[test]
 fn scoped_install_isolates_nested_dispatch() {
     assert!(active_stage_checkpoints().is_none());
     let temp = workspace();
@@ -124,9 +261,12 @@ fn stage_payload_round_trips_across_runs() {
     let artifact = first
         .write_stage_payload("actor:fp-0", &payload)
         .expect("payload write");
-    first.stage("actor:fp-0").complete(vec![artifact]);
+    assert!(temp.path().join(&artifact).exists(), "missing {artifact}");
+    first.stage("actor:fp-0").complete(vec![artifact.clone()]);
 
     let second = open_handle(temp.path(), "run-2");
-    let receipt = second.completed_stage("actor:fp-0").expect("receipt");
+    let receipt = second
+        .completed_stage("actor:fp-0")
+        .unwrap_or_else(|| panic!("missing receipt for {artifact}"));
     assert_eq!(second.read_stage_payload(&receipt), Some(payload));
 }

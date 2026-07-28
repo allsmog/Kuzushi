@@ -302,8 +302,8 @@ impl TraceHandle {
 
     fn item_id_for(&self, activity: &PendingRunActivity) -> RunItemId {
         match activity.kind.as_str() {
-            "tool-progress" => self.call_item_id.unwrap_or_else(RunItemId::new),
-            "reasoning" => self.reasoning_item_id.unwrap_or_else(RunItemId::new),
+            "tool-progress" => self.call_item_id.unwrap_or_default(),
+            "reasoning" => self.reasoning_item_id.unwrap_or_default(),
             _ => RunItemId::new(),
         }
     }

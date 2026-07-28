@@ -15,6 +15,10 @@
 use crate::findings::Severity;
 use serde::Serialize;
 
+mod keyword_classification;
+
+use keyword_classification::class_from_keywords;
+
 /// Closed attacker-precondition vocabulary (weakest credible attacker that
 /// can reach the flaw). Unknown strings parse to `None` — the caller keeps
 /// the claim unmodified but uncapped severity is then its own risk.
@@ -275,34 +279,6 @@ fn class_from_cwe_number(number: u32) -> Option<FindingClass> {
     })
 }
 
-fn class_from_keywords(text: &str) -> Option<FindingClass> {
-    let text = text.to_ascii_lowercase();
-    let table: &[(&[&str], FindingClass)] = &[
-        (&["oob write", "out-of-bounds write", "heap overflow", "stack overflow", "buffer overflow"], FindingClass::MemOobWrite),
-        (&["oob read", "out-of-bounds read", "overread"], FindingClass::MemOobRead),
-        (&["use-after-free", "use after free", "uaf"], FindingClass::MemUseAfterFree),
-        (&["double free", "double-free"], FindingClass::MemDoubleFree),
-        (&["uninitialized"], FindingClass::MemUninit),
-        (&["integer overflow", "integer truncation", "int overflow"], FindingClass::IntOverflow),
-        (&["sql injection", "command injection", "xss", "code injection", "template injection"], FindingClass::Injection),
-        (&["path traversal", "directory traversal", "zip slip"], FindingClass::PathTraversal),
-        (&["ssrf", "server-side request forgery"], FindingClass::Ssrf),
-        (&["xxe", "xml external entity"], FindingClass::Xxe),
-        (&["deserialization", "unsafe pickle", "unsafe yaml"], FindingClass::Deserialization),
-        (&["auth bypass", "authentication bypass", "missing authentication"], FindingClass::AuthBypass),
-        (&["authorization", "idor", "missing authz", "privilege escalation"], FindingClass::AuthzMissing),
-        (&["weak cipher", "weak hash", "hardcoded iv", "insecure random", "crypto"], FindingClass::CryptoMisuse),
-        (&["hardcoded secret", "hardcoded credential", "hardcoded password", "api key"], FindingClass::SecretExposure),
-        (&["race condition", "toctou"], FindingClass::RaceCondition),
-        (&["denial of service", "infinite loop", "resource exhaustion"], FindingClass::Dos),
-        (&["information leak", "info leak", "information disclosure"], FindingClass::InfoLeak),
-    ];
-    table
-        .iter()
-        .find(|(needles, _)| needles.iter().any(|needle| text.contains(needle)))
-        .map(|(_, class)| *class)
-}
-
 /// Span-extended clustering: rows in the same file whose lines sit within
 /// `CLUSTER_WINDOW_LINES` of any row already in the cluster merge into one
 /// cluster. The window extends with the span, so a chain of nearby rows
@@ -345,10 +321,8 @@ mod tests {
 
     #[test]
     fn preauth_claims_stand_but_local_critical_claims_are_capped() {
-        let preauth = enforce_severity_ceiling(
-            Severity::Critical,
-            Precondition::parse("unauth-network"),
-        );
+        let preauth =
+            enforce_severity_ceiling(Severity::Critical, Precondition::parse("unauth-network"));
         assert_eq!(preauth.severity, Severity::Critical);
         assert!(!preauth.tier_capped);
 
@@ -356,8 +330,7 @@ mod tests {
         assert_eq!(local.severity, Severity::High);
         assert!(local.tier_capped);
 
-        let physical =
-            enforce_severity_ceiling(Severity::High, Precondition::parse("physical"));
+        let physical = enforce_severity_ceiling(Severity::High, Precondition::parse("physical"));
         assert_eq!(physical.severity, Severity::Medium);
         assert!(physical.tier_capped);
     }

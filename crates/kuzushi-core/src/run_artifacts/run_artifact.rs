@@ -26,6 +26,84 @@ impl RunArtifact {
     }
 }
 
+pub(crate) fn normalize_run_artifact_identity(
+    target: &Path,
+    run_id: &str,
+    artifact: &RunArtifact,
+) -> Option<RunArtifact> {
+    let mut artifact = artifact.normalized()?;
+    artifact.path = normalize_run_artifact_path(target, run_id, &artifact.path);
+    Some(artifact)
+}
+
+pub(crate) fn normalize_run_artifact_identities(
+    target: &Path,
+    run_id: &str,
+    artifacts: Vec<RunArtifact>,
+) -> Vec<RunArtifact> {
+    let mut normalized = Vec::new();
+    for artifact in artifacts {
+        if let Some(artifact) = normalize_run_artifact_identity(target, run_id, &artifact) {
+            upsert_by_path(&mut normalized, artifact);
+        }
+    }
+    normalized
+}
+
+pub(crate) fn normalize_run_artifact_path(target: &Path, run_id: &str, value: &str) -> String {
+    let value = value.trim();
+    run_contained_relative_path(target, run_id, Path::new(value))
+        .and_then(|path| ArtifactPath::parse(path).ok())
+        .map(|path| slash_separated(path.as_path()))
+        .unwrap_or_else(|| value.to_string())
+}
+
+fn run_contained_relative_path(target: &Path, run_id: &str, path: &Path) -> Option<PathBuf> {
+    if !path.is_absolute() {
+        return Some(relative_declared_path(target, run_id, path));
+    }
+    absolute_run_roots(target, run_id)
+        .into_iter()
+        .find_map(|root| path.strip_prefix(root).ok().map(Path::to_path_buf))
+}
+
+fn relative_declared_path(target: &Path, run_id: &str, path: &Path) -> PathBuf {
+    let target_relative_root = run_dir(Path::new(""), run_id);
+    let target_named_root = run_dir(target, run_id);
+    path.strip_prefix(&target_relative_root)
+        .or_else(|_| path.strip_prefix(&target_named_root))
+        .map_or_else(|_| path.to_path_buf(), Path::to_path_buf)
+}
+
+fn absolute_run_roots(target: &Path, run_id: &str) -> Vec<PathBuf> {
+    let mut roots = vec![run_dir(target, run_id)];
+    if let Ok(canonical_target) = fs::canonicalize(target) {
+        let canonical = run_dir(canonical_target, run_id);
+        if !roots.contains(&canonical) {
+            roots.push(canonical);
+        }
+    }
+    roots
+}
+
+fn slash_separated(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn upsert_by_path(artifacts: &mut Vec<RunArtifact>, artifact: RunArtifact) {
+    if let Some(existing) = artifacts.iter_mut().find(|item| item.path == artifact.path) {
+        *existing = artifact;
+    } else {
+        artifacts.push(artifact);
+    }
+}
+
 fn deserialize_artifact_label<'de, D>(deserializer: D) -> std::result::Result<String, D::Error>
 where
     D: serde::Deserializer<'de>,

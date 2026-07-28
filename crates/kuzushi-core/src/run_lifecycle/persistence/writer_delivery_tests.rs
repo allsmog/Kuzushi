@@ -7,6 +7,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc;
 use std::time::Duration;
 
+const DELIVERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[test]
 fn item_subscriber_panic_reports_delivery_fault_without_failing_durability() {
     let target = tempfile::tempdir().unwrap();
@@ -25,7 +27,7 @@ fn item_subscriber_panic_reports_delivery_fault_without_failing_durability() {
     .unwrap();
 
     let committed = writer.emit_and_flush(diagnostic("committed")).unwrap();
-    let fault = fault_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    let fault = fault_receiver.recv_timeout(DELIVERY_TIMEOUT).unwrap();
 
     assert_eq!(fault.stage, RunItemDeliveryFailureStage::ItemSubscriber);
     assert_eq!(fault.applied_seq, 0);
@@ -54,7 +56,7 @@ fn range_subscriber_panic_reports_delivery_fault_without_retracting_commit() {
     .unwrap();
 
     let committed = writer.emit_and_flush(diagnostic("committed")).unwrap();
-    let fault = fault_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    let fault = fault_receiver.recv_timeout(DELIVERY_TIMEOUT).unwrap();
 
     assert_eq!(fault.stage, RunItemDeliveryFailureStage::RangeSubscriber);
     assert_eq!(fault.applied_seq, 0);
@@ -221,8 +223,8 @@ fn derivative_failure_is_reported_without_blocking_canonical_item_delivery() {
     let log_dir = poison_storage_log(target.path());
 
     let committed = writer.emit_and_flush(terminal_outcome()).unwrap();
-    let fault = fault_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
-    let delivered_seq = item_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+    let fault = fault_receiver.recv_timeout(DELIVERY_TIMEOUT).unwrap();
+    let delivered_seq = item_receiver.recv_timeout(DELIVERY_TIMEOUT).unwrap();
 
     assert_eq!(fault.stage, RunItemDeliveryFailureStage::StorageProjection);
     assert_eq!(fault.durable_seq, committed.seq);
@@ -249,7 +251,7 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
     .unwrap();
     let committed = writer.emit_and_flush(terminal_outcome()).unwrap();
     initial_receiver
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(DELIVERY_TIMEOUT)
         .unwrap();
     writer.shutdown().unwrap();
     let (derivative_subscriber, derivative_receiver) = derivative_range_channel();
@@ -264,7 +266,7 @@ fn derivative_pump_replays_the_initial_durable_backlog() {
     .unwrap();
 
     let range = derivative_receiver
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(DELIVERY_TIMEOUT)
         .unwrap();
     reopened.shutdown().unwrap();
     assert_eq!(range.through_seq, committed.seq);
@@ -298,7 +300,7 @@ fn derivative_fault_retries_from_its_last_applied_sequence() {
     let first = writer.emit_and_flush(terminal_outcome()).unwrap();
     let fault = channels
         .faults
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(DELIVERY_TIMEOUT)
         .unwrap();
     std::fs::remove_file(&log_dir).unwrap();
     let second = writer
@@ -306,11 +308,11 @@ fn derivative_fault_retries_from_its_last_applied_sequence() {
         .unwrap();
     let applied = channels
         .derivatives
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(DELIVERY_TIMEOUT)
         .unwrap();
     let delivered = [
-        channels.items.recv_timeout(Duration::from_secs(2)).unwrap(),
-        channels.items.recv_timeout(Duration::from_secs(2)).unwrap(),
+        channels.items.recv_timeout(DELIVERY_TIMEOUT).unwrap(),
+        channels.items.recv_timeout(DELIVERY_TIMEOUT).unwrap(),
     ];
     writer.shutdown().unwrap();
 

@@ -201,7 +201,7 @@ fn threat_prompt_row(threat: &Value) -> Option<String> {
     Some(format!("{stable_id} · {title}"))
 }
 
-/// Deterministic fold of the closer response: validated answers remove their
+/// Deterministic fold of the closer response: accepted answers remove their
 /// question and land as a control on the named threat or as a context note;
 /// rejected answers leave the question open and record why.
 fn fold_answered_questions(

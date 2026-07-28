@@ -8,6 +8,7 @@
 # rows and ONE dominant primary action, "Run holistic repository scan" —
 # and no authoritative child-scope recommendations.
 name: Holistic root-first gate (real target)
+require-env: KUZUSHI_DEVEX_TARGET
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1

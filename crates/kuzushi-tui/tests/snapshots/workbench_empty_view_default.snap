@@ -8,10 +8,16 @@ Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
  type Esc then B review decision backlog · type Enter open in Prove · type findings show full queue
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
-∅ review queue empty
+0 of 0 · [completeness:all] · * proof · s sources · @ author
+facets before search · severity:0
+  source:0
+  file:0
+  actor:0
+  confidence:0
+  status:0
+∅ 0 matches
 no findings loaded for review
-> findings
-> findings filter completeness:open
+Reset: `findings` clears loaded filters
  -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
        ∅  no finding selected
        move through FINDINGS to inspect a result

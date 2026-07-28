@@ -8,13 +8,8 @@ pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 
 pub(crate) const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];
 
-pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] = &[
-    "context",
-    "threat-model",
-    "x-ray",
-    "entry-points",
-    "none",
-];
+pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] =
+    &["context", "threat-model", "x-ray", "entry-points", "none"];
 
 pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
 
@@ -35,35 +30,9 @@ pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
     "elevation-of-privilege",
 ];
 
-/// Closed actor vocabulary from the harness schema contract. The model
-/// chooses the value during synthesis; normalization only canonicalizes
-/// spelling and synonyms afterwards.
-pub(crate) const VALID_ACTORS: &[&str] = &[
-    "remote_unauth",
-    "remote_auth",
-    "adjacent_network",
-    "local_user",
-    "local_admin",
-    "supply_chain",
-    "insider",
-];
-
 /// Five-band likelihood ladder, least to most likely.
-pub(crate) const LIKELIHOOD_BANDS: &[&str] = &[
-    "very_rare",
-    "rare",
-    "possible",
-    "likely",
-    "almost_certain",
-];
-
-/// Mitigation status of a threat after existing controls are considered.
-pub(crate) const VALID_STATUSES: &[&str] = &[
-    "unmitigated",
-    "partially_mitigated",
-    "mitigated",
-    "risk_accepted",
-];
+pub(crate) const LIKELIHOOD_BANDS: &[&str] =
+    &["very_rare", "rare", "possible", "likely", "almost_certain"];
 
 /// Asset sensitivity tiers for the document-level assets table.
 pub(crate) const VALID_SENSITIVITIES: &[&str] = &["low", "medium", "high", "critical"];
@@ -129,6 +98,13 @@ impl ReadFlavor {
         match self {
             Self::ThreatModel => "threat-model:read",
             Self::Randori => "randori:threat-model",
+        }
+    }
+
+    pub(crate) fn default_methodology(self) -> &'static str {
+        match self {
+            Self::ThreatModel => "stride",
+            Self::Randori => "pasta",
         }
     }
 }

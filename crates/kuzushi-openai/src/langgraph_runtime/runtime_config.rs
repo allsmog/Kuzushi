@@ -24,7 +24,7 @@ pub struct LangGraphRuntime {
 /// outwaited by raising the base instead of the attempt count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeRetryPolicy {
-    pub(crate) attempts: usize,
+    pub(crate) attempts: Option<usize>,
     pub(crate) backoff_ms: u64,
 }
 
@@ -35,7 +35,7 @@ const MAX_BRIDGE_RETRY_DELAY_MS: u64 = 120_000;
 impl Default for BridgeRetryPolicy {
     fn default() -> Self {
         Self {
-            attempts: DEFAULT_BRIDGE_RETRY_ATTEMPTS,
+            attempts: None,
             backoff_ms: DEFAULT_BRIDGE_RETRY_BACKOFF_MS,
         }
     }
@@ -46,8 +46,7 @@ impl BridgeRetryPolicy {
         Self {
             attempts: runtime
                 .bridge_retry_attempts
-                .map(|attempts| attempts.max(1) as usize)
-                .unwrap_or(DEFAULT_BRIDGE_RETRY_ATTEMPTS),
+                .map(|attempts| attempts.max(1) as usize),
             backoff_ms: runtime
                 .bridge_retry_backoff_ms
                 .filter(|ms| *ms > 0)
@@ -56,7 +55,11 @@ impl BridgeRetryPolicy {
     }
 
     pub(crate) fn attempts(&self) -> usize {
-        self.attempts
+        self.attempts.unwrap_or(DEFAULT_BRIDGE_RETRY_ATTEMPTS)
+    }
+
+    pub(crate) fn rate_limit_attempts(&self) -> usize {
+        self.attempts.unwrap_or(5)
     }
 
     pub(crate) fn delay_ms(&self, attempt: usize) -> u64 {

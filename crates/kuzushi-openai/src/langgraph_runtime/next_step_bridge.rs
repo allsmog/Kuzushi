@@ -7,7 +7,7 @@ use super::bridge_payloads::{
     BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
-    public_bridge_failure_with_detail, run_next_step_bridge, run_next_step_preflight_bridge,
+    bridge_runtime_failure, run_next_step_bridge, run_next_step_preflight_bridge,
 };
 use super::runtime_config::LangGraphRuntime;
 use super::transport_retry;
@@ -45,11 +45,13 @@ pub(crate) fn next_step_observed_blocking(
             Ok(step) => return Ok(step),
             Err(error) => error,
         };
-        let Some(failure) = failure.filter(|f| attempt < transport_retry::max_attempts(f)) else {
+        let Some(failure) =
+            failure.filter(|f| attempt < transport_retry::max_attempts(f, &runtime.retry))
+        else {
             return Err(error);
         };
         transport_retry::sleep_before_retry(
-            transport_retry::backoff_delay(attempt, &failure),
+            transport_retry::backoff_delay(attempt, &failure, &runtime.retry),
             || ensure_not_cancelled(runtime),
         )?;
     }
@@ -143,13 +145,12 @@ fn ensure_next_step_response_ok(
     response: NextStepBridgeResponse,
 ) -> Result<Observed<AgentLoopStep>> {
     if !response.ok {
-        let message = public_bridge_failure_with_detail(
+        return Err(bridge_runtime_failure(
             response.error_class.as_deref(),
             response.status,
             response.error.as_deref(),
             response.detail.as_deref(),
-        );
-        anyhow::bail!("LangGraph next-step bridge failed: {message}");
+        ));
     }
     step_from_bridge_response(response)
 }
@@ -158,13 +159,12 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
     if response.ok {
         return Ok(());
     }
-    let message = public_bridge_failure_with_detail(
+    Err(bridge_runtime_failure(
         response.error_class.as_deref(),
         response.status,
         response.error.as_deref(),
         response.detail.as_deref(),
-    );
-    anyhow::bail!("LangGraph next-step preflight failed: {message}")
+    ))
 }
 
 fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<Observed<AgentLoopStep>> {

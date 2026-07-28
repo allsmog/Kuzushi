@@ -142,7 +142,8 @@ fn canonical_tool_result_status(status: &str) -> ToolResultStatus {
         "failed" => ToolResultStatus::Failed,
         "partial" => ToolResultStatus::Partial,
         "skipped" => ToolResultStatus::Skipped,
-        _ => ToolResultStatus::Completed,
+        "completed" => ToolResultStatus::Completed,
+        _ => ToolResultStatus::Failed,
     }
 }
 
@@ -247,14 +248,21 @@ fn inferred_status(object: &Map<String, Value>) -> String {
     if object.get("ok").and_then(Value::as_bool) == Some(false) {
         return "failed".to_string();
     }
-    if let Some(status) = object
-        .get("status")
-        .and_then(Value::as_str)
-        .and_then(canonical_status)
-    {
-        return status.to_string();
+    if let Some(status) = object.get("status") {
+        return status
+            .as_str()
+            .and_then(canonical_status)
+            .unwrap_or("failed")
+            .to_string();
     }
-    nested_status(object).unwrap_or("completed").to_string()
+    match object.get("data").and_then(|data| data.get("status")) {
+        Some(status) => status
+            .as_str()
+            .and_then(canonical_status)
+            .unwrap_or("failed")
+            .to_string(),
+        None => "completed".to_string(),
+    }
 }
 
 fn inferred_ok(object: &Map<String, Value>, status: &str) -> bool {
@@ -262,14 +270,6 @@ fn inferred_ok(object: &Map<String, Value>, status: &str) -> bool {
         return false;
     }
     object.get("ok").and_then(Value::as_bool).unwrap_or(true)
-}
-
-fn nested_status(object: &Map<String, Value>) -> Option<&'static str> {
-    let status = object
-        .get("data")
-        .and_then(|data| data.get("status"))
-        .and_then(Value::as_str)?;
-    canonical_status(status)
 }
 
 fn canonical_status(status: &str) -> Option<&'static str> {
@@ -476,6 +476,24 @@ mod tests {
             tool_result_status(&json!({"status": "completed"})),
             ToolResultStatus::Completed
         );
+        assert_eq!(
+            tool_result_status(&json!({"status": "canceled"})),
+            ToolResultStatus::Failed
+        );
+        assert_eq!(
+            tool_result_status(&json!({"data": {"status": "cancelled"}})),
+            ToolResultStatus::Failed
+        );
+    }
+
+    #[test]
+    fn unknown_explicit_status_fails_closed_and_preserves_the_spelling() {
+        let output = normalize_module_result(json!({"status": "canceled"}));
+
+        assert_eq!(output["ok"], json!(false));
+        assert_eq!(output["status"], json!("failed"));
+        assert_eq!(output["data"]["status"], json!("canceled"));
+        assert_eq!(tool_result_status(&output), ToolResultStatus::Failed);
     }
 
     #[test]

@@ -20,6 +20,14 @@ pub struct TrendMetrics {
     pub confirmed_findings: usize,
     /// Summed dispatcher job spend across every readable campaign.
     pub campaign_spend_usd: f64,
+    /// True when the observed spend is only a lower bound.
+    pub provider_spend_unresolved: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct WorkspaceCampaignSpend {
+    pub observed_usd: f64,
+    pub provider_spend_unresolved: bool,
 }
 
 impl TrendMetrics {
@@ -38,12 +46,19 @@ impl TrendMetrics {
     /// `TREND  FP rate 25% (1/4) · 2 confirmed · $32.26 spent · $16.13/confirmed`.
     pub fn strip_label(&self) -> String {
         format!(
-            "TREND  FP rate {} · {} confirmed · ${:.2} spent · {}",
+            "TREND  FP rate {} · {} confirmed · {} · {}",
             self.fp_rate_label(),
             self.confirmed_findings,
-            self.campaign_spend_usd,
+            self.spend_label(),
             self.cost_per_confirmed_label(),
         )
+    }
+
+    fn spend_label(&self) -> String {
+        if self.provider_spend_unresolved {
+            return format!(">=${:.2} spent (incomplete)", self.campaign_spend_usd);
+        }
+        format!("${:.2} spent", self.campaign_spend_usd)
     }
 
     fn fp_rate_label(&self) -> String {
@@ -60,6 +75,7 @@ impl TrendMetrics {
 
     fn cost_per_confirmed_label(&self) -> String {
         match self.cost_per_confirmed_usd() {
+            Some(cost) if self.provider_spend_unresolved => format!(">=${cost:.2}/confirmed"),
             Some(cost) => format!("${cost:.2}/confirmed"),
             None => "—/confirmed".to_string(),
         }
@@ -70,8 +86,22 @@ impl TrendMetrics {
 /// (same reversal rule as the coverage matrix's confirmed fold), so a
 /// confirm followed by a rejection counts as one rejected false positive.
 pub fn trend_metrics(records: &[ReviewDecisionRecord], campaign_spend_usd: f64) -> TrendMetrics {
+    trend_metrics_with_spend(
+        records,
+        WorkspaceCampaignSpend {
+            observed_usd: campaign_spend_usd,
+            provider_spend_unresolved: false,
+        },
+    )
+}
+
+pub fn trend_metrics_with_spend(
+    records: &[ReviewDecisionRecord],
+    spend: WorkspaceCampaignSpend,
+) -> TrendMetrics {
     let mut metrics = TrendMetrics {
-        campaign_spend_usd,
+        campaign_spend_usd: spend.observed_usd,
+        provider_spend_unresolved: spend.provider_spend_unresolved,
         ..TrendMetrics::default()
     };
     for verdict in latest_verdicts(records).values() {
@@ -94,9 +124,7 @@ pub fn trend_metrics(records: &[ReviewDecisionRecord], campaign_spend_usd: f64) 
 /// rule: a confirm followed by a rejection is a rejection. Shared by the
 /// trend fold and the confirmed-findings SARIF export so both report the
 /// same set of decided findings.
-pub fn latest_verdicts(
-    records: &[ReviewDecisionRecord],
-) -> BTreeMap<i64, ReviewDecisionVerdict> {
+pub fn latest_verdicts(records: &[ReviewDecisionRecord]) -> BTreeMap<i64, ReviewDecisionVerdict> {
     let mut latest: BTreeMap<i64, (i64, ReviewDecisionVerdict)> = BTreeMap::new();
     for record in records {
         let entry = latest
@@ -115,7 +143,9 @@ pub fn latest_verdicts(
 /// Finding ids whose LATEST review decision confirms them (`Confirmed` or
 /// `ToFix`). One shared definition of "confirmed" for the SARIF export and
 /// the CI gate, so they can never disagree with the trend fold.
-pub fn latest_confirmed_finding_ids(records: &[ReviewDecisionRecord]) -> std::collections::BTreeSet<i64> {
+pub fn latest_confirmed_finding_ids(
+    records: &[ReviewDecisionRecord],
+) -> std::collections::BTreeSet<i64> {
     latest_verdicts(records)
         .into_iter()
         .filter(|(_, verdict)| {
@@ -131,12 +161,28 @@ pub fn latest_confirmed_finding_ids(records: &[ReviewDecisionRecord]) -> std::co
 /// Summed job spend across every readable campaign. Unreadable campaign
 /// directories are skipped — one corrupt plan must not blind the trend.
 pub fn workspace_campaign_spend(root: &Path) -> f64 {
-    campaign_ids(root)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|id| load_campaign_snapshot(root, id).ok())
-        .map(|snapshot| snapshot.total_cost_usd)
-        .sum()
+    workspace_campaign_spend_report(root).observed_usd
+}
+
+pub fn workspace_campaign_spend_report(root: &Path) -> WorkspaceCampaignSpend {
+    let Ok(ids) = campaign_ids(root) else {
+        return WorkspaceCampaignSpend {
+            provider_spend_unresolved: true,
+            ..WorkspaceCampaignSpend::default()
+        };
+    };
+    let mut spend = WorkspaceCampaignSpend::default();
+    for campaign_id in ids {
+        match load_campaign_snapshot(root, &campaign_id) {
+            Ok(snapshot) => {
+                spend.observed_usd += snapshot.total_cost_usd;
+                spend.provider_spend_unresolved |= snapshot.provider_spend_unresolved;
+            }
+            Err(_) => spend.provider_spend_unresolved = true,
+        }
+    }
+    spend.observed_usd += 0.0;
+    spend
 }
 
 pub fn trend_json(metrics: &TrendMetrics) -> serde_json::Value {
@@ -146,6 +192,7 @@ pub fn trend_json(metrics: &TrendMetrics) -> serde_json::Value {
         "confirmedFindings": metrics.confirmed_findings,
         "fpRate": metrics.fp_rate(),
         "campaignSpendUsd": metrics.campaign_spend_usd,
+        "providerSpendUnresolved": metrics.provider_spend_unresolved,
         "costPerConfirmedUsd": metrics.cost_per_confirmed_usd(),
     })
 }
@@ -220,5 +267,22 @@ mod tests {
             metrics.strip_label(),
             "TREND  FP rate 25% (1/4) · 2 confirmed · $32.26 spent · $16.13/confirmed"
         );
+    }
+
+    #[test]
+    fn unresolved_spend_renders_as_an_incomplete_lower_bound() {
+        let metrics = trend_metrics_with_spend(
+            &[record(1, 1, ReviewDecisionVerdict::Confirmed)],
+            WorkspaceCampaignSpend {
+                observed_usd: 3.25,
+                provider_spend_unresolved: true,
+            },
+        );
+
+        assert_eq!(
+            metrics.strip_label(),
+            "TREND  FP rate 0% (0/1) · 1 confirmed · >=$3.25 spent (incomplete) · >=$3.25/confirmed"
+        );
+        assert_eq!(trend_json(&metrics)["providerSpendUnresolved"], true);
     }
 }

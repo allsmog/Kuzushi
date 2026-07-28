@@ -45,7 +45,7 @@ impl ShellApp {
         self.open_workbench_effects()
     }
 
-    /// Open the Workbench command center with the finding-list surface focused.
+    /// Open the Review workflow with the finding-list surface focused.
     /// Command reducers should prefer `open_workbench_effects` so the findings
     /// store read happens in the effect runtime.
     pub(crate) fn open_workbench(&mut self) {

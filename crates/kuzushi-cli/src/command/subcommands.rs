@@ -99,9 +99,6 @@ pub(crate) enum KwpCommand {
         /// Lockfile path. Defaults to ./kuzushi.lock.
         #[arg(long)]
         lockfile: Option<PathBuf>,
-        /// Target workspace containing `.kuzushi/v3/runs/<run-id>/kwp-audit.jsonl`.
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Include KWP audit records for this run id.
         #[arg(long)]
         run_id: Option<String>,
@@ -117,8 +114,6 @@ pub(crate) enum CampaignCommand {
     Run {
         /// Campaign id under `.kuzushi/v3/campaigns/` (from `campaign:plan`).
         campaign_id: String,
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Concurrent `kuzushi run` worker processes (1-8).
         #[arg(long, default_value_t = 2)]
         workers: usize,
@@ -169,8 +164,6 @@ pub(crate) enum CampaignCommand {
 pub(crate) enum RunsCommand {
     /// List run summaries.
     List {
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Filter by run status: running, completed, blocked, failed, canceled, interrupted, partial, skipped.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
@@ -182,8 +175,6 @@ pub(crate) enum RunsCommand {
     Show {
         /// Run id under the target's `.kuzushi/v3/runs` directory.
         run_id: String,
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Emit the run summary as machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -192,8 +183,6 @@ pub(crate) enum RunsCommand {
     Trace {
         /// Run id under the target's `.kuzushi/v3/runs` directory.
         run_id: String,
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Emit parsed trace events as machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -202,8 +191,6 @@ pub(crate) enum RunsCommand {
     Replay {
         /// Run id under the target's `.kuzushi/v3/runs` directory.
         run_id: String,
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Emit the semantic projection as machine-readable JSON.
         #[arg(long)]
         json: bool,
@@ -214,16 +201,12 @@ pub(crate) enum RunsCommand {
         base_run_id: String,
         /// Comparison run id.
         compare_run_id: String,
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Emit the diff as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Delete old run artifact directories.
     Prune {
-        #[arg(long, help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
         /// Delete runs older than this many days.
         #[arg(long = "older-than-days")]
         older_than_days: Option<u64>,

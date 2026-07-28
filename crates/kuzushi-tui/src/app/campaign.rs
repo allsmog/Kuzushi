@@ -49,11 +49,17 @@ impl ShellApp {
             return;
         };
         let (campaigns, unreadable) = load_campaign_snapshots(&target);
-        let spend = campaigns
-            .iter()
-            .map(|campaign| campaign.total_cost_usd)
-            .sum();
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics(
+        let spend = kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
+            observed_usd: campaigns
+                .iter()
+                .map(|campaign| campaign.total_cost_usd)
+                .sum(),
+            provider_spend_unresolved: unreadable > 0
+                || campaigns
+                    .iter()
+                    .any(|campaign| campaign.provider_spend_unresolved),
+        };
+        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
             self.review_decisions(),
             spend,
         );
@@ -76,9 +82,9 @@ impl ShellApp {
         let Some(target) = self.target_path_buf().cloned() else {
             return;
         };
-        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics(
+        let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
             self.review_decisions(),
-            kuzushi_core::capabilities::campaign::trend::workspace_campaign_spend(&target),
+            kuzushi_core::capabilities::campaign::trend::workspace_campaign_spend_report(&target),
         );
         let history = refresh_trend_history(&target, &trend);
         let deck = self.router.campaign_mut();

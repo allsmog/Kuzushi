@@ -133,10 +133,11 @@ fn drops_artifact_objects_without_canonical_path() {
 }
 
 #[test]
-fn preserves_unknown_domain_status_under_data() {
+fn preserves_unknown_domain_status_under_data_and_fails_closed() {
     let output = normalize_output_value(json!({"status": "planned"}));
 
-    assert_eq!(output["status"], "completed");
+    assert_eq!(output["ok"], false);
+    assert_eq!(output["status"], "failed");
     assert_eq!(output["data"]["status"], "planned");
 }
 

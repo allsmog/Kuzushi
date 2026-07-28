@@ -17,6 +17,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use kuzushi_core::{Finding, FindingStore, Severity, WorkspaceTarget};
 use serde_json::Value;
@@ -31,6 +32,11 @@ fn workspace_root() -> PathBuf {
 }
 
 fn kuzushi_eval_bin() -> PathBuf {
+    static EVAL_BINARY: OnceLock<PathBuf> = OnceLock::new();
+    EVAL_BINARY.get_or_init(resolve_kuzushi_eval_bin).clone()
+}
+
+fn resolve_kuzushi_eval_bin() -> PathBuf {
     let workspace = workspace_root();
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)

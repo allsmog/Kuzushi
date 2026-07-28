@@ -75,93 +75,93 @@ fn mcp_artifact_env_for_attachments(
         .collect()
 }
 
+#[cfg(test)]
 pub(crate) fn public_bridge_error(message: &str) -> String {
-    let class = legacy_error_class(message);
-    if class == "openai_authentication" {
+    if legacy_error_class(message) == "openai_authentication" {
         return "OpenAI OAuth authentication failed; run `kuzushi auth login openai`.".to_string();
     }
-    public_failure_message(class, None)
+    bridge_failure_metadata(None, None, Some(message), None).public_message()
 }
 
+#[cfg(test)]
 pub(crate) fn public_bridge_failure_with_detail(
     error_class: Option<&str>,
     status: Option<u16>,
     fallback: Option<&str>,
     detail: Option<&str>,
 ) -> String {
+    bridge_failure_metadata(error_class, status, fallback, detail).public_message()
+}
+
+pub(crate) fn bridge_failure_metadata(
+    error_class: Option<&str>,
+    status: Option<u16>,
+    fallback: Option<&str>,
+    detail: Option<&str>,
+) -> kuzushi_core::runtime::RuntimeFailureMetadata {
+    let fallback = fallback.unwrap_or_default();
     let class = error_class
-        .and_then(allowed_error_class)
-        .or_else(|| status.map(error_class_for_status));
-    let message = match class {
-        Some(class) => public_failure_message(class, status),
-        None => public_bridge_error(fallback.unwrap_or_default()),
-    };
-    append_bridge_detail(message, detail)
+        .and_then(runtime_failure_class)
+        .or_else(|| status.map(runtime_failure_class_for_status))
+        .unwrap_or_else(|| legacy_runtime_failure_class(fallback));
+    let detail = detail.or_else(|| legacy_safe_failure_detail(fallback));
+    kuzushi_core::runtime::RuntimeFailureMetadata::new(class, status, detail)
 }
 
-const MAX_BRIDGE_DETAIL_CHARS: usize = 300;
-
-/// Bounded raw-error identity from the bridge, so a failure card never dead
-/// ends at "details were suppressed". Persistence redacts credential-shaped
-/// content again before the text lands in durable artifacts.
-fn append_bridge_detail(message: String, detail: Option<&str>) -> String {
-    let Some(detail) = detail.map(str::trim).filter(|detail| !detail.is_empty()) else {
-        return message;
-    };
-    let bounded = detail
-        .chars()
-        .take(MAX_BRIDGE_DETAIL_CHARS)
-        .collect::<String>();
-    format!("{message} — detail: {bounded}")
+fn legacy_safe_failure_detail(message: &str) -> Option<&'static str> {
+    (legacy_error_class(message) == "openai_authentication")
+        .then_some("OpenAI OAuth authentication failed; run `kuzushi auth login openai`.")
 }
 
-fn public_failure_message(class: &str, status: Option<u16>) -> String {
-    let base = match class {
-        "authentication" => "Provider authentication failed",
-        "cancelled" => "Bridge operation was cancelled",
-        "mcp_timeout" => "MCP tool request timed out",
-        "provider_rejected" => "Provider rejected the request",
-        "provider_response_invalid" => "Provider returned an invalid response",
-        "provider_unavailable" => "Provider is temporarily unavailable",
-        "rate_limited" => "Provider rate limited the request",
-        "sdk_client_validation" => {
-            "Provider SDK rejected the request client-side before sending (invalid invocation parameters)"
-        }
-        "timeout" => "Provider request timed out",
-        "transport" => "Provider request failed before a response was received",
-        _ => "Bridge operation failed; raw error details were suppressed",
-    };
-    match status.filter(|status| (100..=599).contains(status)) {
-        Some(status) => format!("{base} (HTTP {status})."),
-        None => format!("{base}."),
+pub(crate) fn bridge_runtime_failure(
+    error_class: Option<&str>,
+    status: Option<u16>,
+    fallback: Option<&str>,
+    detail: Option<&str>,
+) -> anyhow::Error {
+    anyhow::Error::new(kuzushi_core::runtime::RuntimeFailure::new(
+        bridge_failure_metadata(error_class, status, fallback, detail),
+    ))
+}
+
+fn runtime_failure_class(class: &str) -> Option<kuzushi_core::runtime::RuntimeFailureClass> {
+    use kuzushi_core::runtime::RuntimeFailureClass as Class;
+    const CLASSES: [(&str, Class); 11] = [
+        ("authentication", Class::Authentication),
+        ("bridge_internal", Class::BridgeInternal),
+        ("cancelled", Class::Cancelled),
+        ("mcp_timeout", Class::McpTimeout),
+        ("provider_rejected", Class::ProviderRejected),
+        ("provider_response_invalid", Class::ProviderResponseInvalid),
+        ("provider_unavailable", Class::ProviderUnavailable),
+        ("rate_limited", Class::RateLimited),
+        ("sdk_client_validation", Class::SdkClientValidation),
+        ("timeout", Class::Timeout),
+        ("transport", Class::Transport),
+    ];
+    CLASSES
+        .iter()
+        .find_map(|(name, value)| (*name == class).then_some(*value))
+}
+
+fn runtime_failure_class_for_status(status: u16) -> kuzushi_core::runtime::RuntimeFailureClass {
+    use kuzushi_core::runtime::RuntimeFailureClass as Class;
+    match status {
+        401 | 403 => Class::Authentication,
+        408 => Class::Timeout,
+        425 | 429 => Class::RateLimited,
+        500..=599 => Class::ProviderUnavailable,
+        _ => Class::ProviderRejected,
     }
 }
 
-fn allowed_error_class(class: &str) -> Option<&str> {
-    matches!(
-        class,
-        "authentication"
-            | "bridge_internal"
-            | "cancelled"
-            | "mcp_timeout"
-            | "provider_rejected"
-            | "provider_response_invalid"
-            | "provider_unavailable"
-            | "rate_limited"
-            | "sdk_client_validation"
-            | "timeout"
-            | "transport"
-    )
-    .then_some(class)
-}
-
-fn error_class_for_status(status: u16) -> &'static str {
-    match status {
-        401 | 403 => "authentication",
-        408 => "timeout",
-        425 | 429 => "rate_limited",
-        500..=599 => "provider_unavailable",
-        _ => "provider_rejected",
+fn legacy_runtime_failure_class(message: &str) -> kuzushi_core::runtime::RuntimeFailureClass {
+    use kuzushi_core::runtime::RuntimeFailureClass as Class;
+    let class = legacy_error_class(message);
+    if class == "openai_authentication" {
+        Class::Authentication
+    } else {
+        runtime_failure_class(class).unwrap_or(Class::BridgeInternal)
     }
 }
 
@@ -204,7 +204,7 @@ where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let mut cmd = configured_bridge_command(command);
+    let (mut cmd, process_group) = configured_bridge_command(command)?;
     for (env, value) in extra_env {
         cmd.env(env, value);
     }
@@ -213,7 +213,13 @@ where
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
     write_bridge_request(&mut child, request, label)?;
-    let output = wait_with_output_deadline(child, label, bridge_timeout(), cancellation)?;
+    let output = wait_with_output_deadline(
+        child,
+        process_group,
+        label,
+        Some(bridge_timeout()?),
+        cancellation,
+    )?;
     parse_bridge_output(output, label)
 }
 
@@ -278,17 +284,28 @@ enum BridgeDiagnosticStopClass {
     Other,
 }
 
-/// Optional wall-clock ceiling for one bridge invocation. Off by default: a
-/// single invocation can legitimately run for a very long time (large-monorepo
-/// synthesis prompts, long agent steps with MCP tool calls), and the wait loop
-/// still kills a wedged child on cancellation or pipe failure. Operators who
-/// want a hard ceiling opt in with `KUZUSHI_BRIDGE_TIMEOUT_MS`.
-fn bridge_timeout() -> Option<Duration> {
-    std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|ms| *ms > 0)
-        .map(Duration::from_millis)
+const DEFAULT_BRIDGE_TIMEOUT_MS: u64 = 10 * 60 * 1_000;
+
+fn bridge_timeout() -> Result<Duration> {
+    match std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS") {
+        Ok(raw) => bridge_timeout_from_env_value(Some(&raw)),
+        Err(std::env::VarError::NotPresent) => bridge_timeout_from_env_value(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            anyhow::bail!("KUZUSHI_BRIDGE_TIMEOUT_MS is not valid Unicode")
+        }
+    }
+}
+
+pub(super) fn bridge_timeout_from_env_value(raw: Option<&str>) -> Result<Duration> {
+    let Some(raw) = raw else {
+        return Ok(Duration::from_millis(DEFAULT_BRIDGE_TIMEOUT_MS));
+    };
+    let millis = raw
+        .trim()
+        .parse::<u64>()
+        .context("KUZUSHI_BRIDGE_TIMEOUT_MS must be a positive integer")?;
+    anyhow::ensure!(millis > 0, "KUZUSHI_BRIDGE_TIMEOUT_MS must be positive");
+    Ok(Duration::from_millis(millis))
 }
 
 /// `wait_with_output` with an optional deadline: drains stdout/stderr on
@@ -296,12 +313,14 @@ fn bridge_timeout() -> Option<Duration> {
 /// and cancellation, and kills the process if a configured deadline passes.
 fn wait_with_output_deadline(
     child: Child,
+    process_group: kuzushi_core::scan::PreparedProcessGroup,
     label: &str,
     timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<Output> {
     wait_with_output_deadline_limits(
         child,
+        process_group,
         label,
         timeout,
         cancellation,
@@ -312,6 +331,7 @@ fn wait_with_output_deadline(
 
 pub(super) fn wait_with_output_deadline_limits(
     mut child: Child,
+    process_group: kuzushi_core::scan::PreparedProcessGroup,
     label: &str,
     timeout: Option<Duration>,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
@@ -334,7 +354,7 @@ pub(super) fn wait_with_output_deadline_limits(
         "stderr",
         Arc::clone(&pipe_failure),
     );
-    let registered = register_bridge_child(child, cancellation)?;
+    let registered = register_bridge_child(child, process_group, cancellation)?;
     let status = wait_status_deadline(&registered, label, timeout, cancellation, &pipe_failure)?;
     Ok(Output {
         status,
@@ -345,9 +365,9 @@ pub(super) fn wait_with_output_deadline_limits(
 
 fn register_bridge_child(
     child: Child,
+    process_group: kuzushi_core::scan::PreparedProcessGroup,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<kuzushi_core::scan::RegisteredChild> {
-    let process_group_id = bridge_process_group_id(&child);
     let local_cancellation;
     let registry = match cancellation {
         Some(cancellation) => cancellation,
@@ -356,7 +376,7 @@ fn register_bridge_child(
             &local_cancellation
         }
     };
-    registry.register_child(child, process_group_id)
+    registry.register_prepared_child(child, process_group)
 }
 
 type BridgePipeFailure = Arc<Mutex<Option<String>>>;
@@ -418,10 +438,10 @@ fn wait_status_deadline(
     loop {
         kill_cancelled_bridge(child, label, cancellation)?;
         kill_bridge_on_pipe_failure(child, pipe_failure)?;
+        kill_expired_bridge(child, label, deadline)?;
         if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
-        kill_expired_bridge(child, label, deadline)?;
         std::thread::sleep(Duration::from_millis(50));
     }
 }
@@ -475,7 +495,7 @@ fn kill_expired_bridge(
     }
     kill_child(child);
     anyhow::bail!(
-        "{label} exceeded the configured KUZUSHI_BRIDGE_TIMEOUT_MS ceiling ({}s) and was killed",
+        "{label} exceeded the KUZUSHI_BRIDGE_TIMEOUT_MS ceiling ({}s) and was killed",
         timeout.as_secs()
     );
 }
@@ -484,44 +504,26 @@ fn kill_child(child: &kuzushi_core::scan::RegisteredChild) {
     let _ = child.kill_and_wait();
 }
 
-fn configured_bridge_command(command: &[String]) -> Command {
+fn configured_bridge_command(
+    command: &[String],
+) -> Result<(Command, kuzushi_core::scan::PreparedProcessGroup)> {
     let mut cmd = Command::new(&command[0]);
     cmd.args(&command[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    configure_bridge_process_group(&mut cmd);
+    let process_group = configure_bridge_process_group(&mut cmd)?;
     for (env, path) in mcp_binary_env_defaults() {
         cmd.env(env, path);
     }
-    cmd
+    Ok((cmd, process_group))
 }
 
-#[cfg(unix)]
-pub(super) fn configure_bridge_process_group(command: &mut Command) {
-    use std::os::unix::process::CommandExt;
-
-    unsafe {
-        command.pre_exec(|| {
-            if libc::setpgid(0, 0) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        });
-    }
-}
-
-#[cfg(not(unix))]
-pub(super) fn configure_bridge_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn bridge_process_group_id(child: &Child) -> Option<u32> {
-    Some(child.id())
-}
-
-#[cfg(not(unix))]
-fn bridge_process_group_id(_child: &Child) -> Option<u32> {
-    None
+pub(super) fn configure_bridge_process_group(
+    command: &mut Command,
+) -> Result<kuzushi_core::scan::PreparedProcessGroup> {
+    kuzushi_core::scan::PreparedProcessGroup::configure(command)
+        .context("prepare LangGraph bridge parent-death process group")
 }
 
 fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {

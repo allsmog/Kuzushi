@@ -1,32 +1,32 @@
 # J1 — Keyless first launch (⭐ highest priority)
-# Persona: brand-new user, no credentials. Walk the ordered gate
-# Target → Model → Credentials, then take the `d` offline-demo escape hatch.
-# Known risk (July): credential dead-end dumped the operator on an empty
-# Workbench instead of the inline credential-entry step.
+# Persona: brand-new user, no credentials. Confirm a target, inspect aggregate
+# Setup's plan-dependent readiness, then take the `demo` offline escape hatch.
 name: Keyless first launch
 note: HOME is redirected to a temp dir. Keychain/OAuth-cached credentials cannot be masked from here — if the auth gate never appears, check for cached credentials before judging.
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
-wait-for: 2 CHOOSE A TARGET
+wait-for: 25 CHOOSE A TARGET
 snap: target-gate
 expect: Nothing defaults to cwd silently
-expect: offline fixture
+expect: :demo
 ask: Target gate — is the operator told WHY they are stopped here, and is the next action obvious without docs?
 keys: Enter
-wait-for: 2 CHOOSE A MODEL
-snap: model-gate
-expect: does not silently pick a model
-ask: Model gate — can a keyless user tell which rows are usable right now vs. which need credentials they do not have?
-keys: Enter
-wait-for: 15 CHOOSE AUTH METHOD
-snap: credentials-gate
-expect: needs credentials
-expect: Offline demo
-ask: Credentials gate — July regression check: does the keyless user get an inline credential-entry step (paste / OAuth / demo) rather than being dumped on an empty Workbench?
+wait-for: 5 SETUP · READY THE MAP RUN
+snap: aggregate-setup
+expect: Model          NOT NEEDED
+expect: Credentials    NOT NEEDED
+expect: Start Map      READY
+ask: Aggregate Setup — can a keyless user tell why this deterministic plan needs neither a model nor credentials, and is the single Start Map commit obvious?
+submit: demo
+wait-for: 120 run completed
 keys: d
-wait-for: 90 run completed
+wait: 2
+submit: findings
+wait: 3
 snap: offline-demo-result
 expect: findings
-ask: Offline escape hatch — did `d` make a real scanner signal, redacted location, and signal_only proof state legible, not just dump logs?
+expect: signal
+expect: config.env:2
+ask: Offline escape hatch — did `demo` make a real scanner signal, redacted location, and signal_only proof state legible, not just dump logs?

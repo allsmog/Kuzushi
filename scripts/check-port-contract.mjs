@@ -123,6 +123,11 @@ const ciRequirements = [
   "pnpm quality:architecture",
   "pnpm quality:model-safety",
   "pnpm check:docs",
+  "pnpm test:coverage",
+  "pnpm test:mutations",
+  "rhysd/actionlint:1.7.12",
+  "OXIDIZED_JOERN_TOKEN",
+  "quality-gauntlet:",
   "verify-pack:",
   "pnpm verify:pack",
   "node scripts/build-native-runtime.mjs",
@@ -133,7 +138,6 @@ const ciRequirements = [
 ];
 
 const releaseRequirements = [
-  "name: dist",
   // Release jobs stage every green matrix build into native/<slug>/ so the
   // npm tarball and the release .tgz are multi-platform.
   "pattern: release-native-*",

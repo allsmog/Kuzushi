@@ -55,6 +55,30 @@ impl AuthProvider {
     pub(crate) fn api_key_provider(self) -> &'static str {
         self.login_command_name()
     }
+
+    pub(crate) fn missing_credential_guidance(self, model: &str, provider: &str) -> String {
+        match self {
+            Self::OpenAi => openai_credential_guidance(model, provider),
+            Self::Anthropic => {
+                format!("{model} requires ANTHROPIC_API_KEY or stored Anthropic OAuth")
+            }
+            Self::GitHubCopilot => {
+                format!("{model} requires stored GitHub Copilot OAuth")
+            }
+        }
+    }
+}
+
+fn openai_credential_guidance(model: &str, provider: &str) -> String {
+    match provider {
+        "openai" => format!(
+            "{model} requires OPENAI_API_KEY; OpenAI OAuth is compatible with openai-codex models only"
+        ),
+        "openai-codex" => {
+            format!("{model} requires stored OpenAI OAuth; run `auth login openai`")
+        }
+        _ => format!("{model} uses unsupported OpenAI provider namespace {provider:?}"),
+    }
 }
 
 pub(crate) fn auth_provider_label(provider: &str) -> &str {
@@ -109,5 +133,17 @@ mod tests {
                 provider
             );
         }
+    }
+
+    #[test]
+    fn openai_guidance_distinguishes_api_key_and_oauth_model_namespaces() {
+        let provider = AuthProvider::OpenAi;
+
+        assert!(provider
+            .missing_credential_guidance("openai:gpt-5.5", "openai")
+            .contains("requires OPENAI_API_KEY"));
+        assert!(provider
+            .missing_credential_guidance("openai-codex:gpt-5.4", "openai-codex")
+            .contains("requires stored OpenAI OAuth"));
     }
 }

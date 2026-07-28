@@ -183,6 +183,7 @@ pub struct ActivitySession {
     pub tasks: BTreeMap<String, DagTaskRow>,
     task_order: Vec<String>,
     tool_task_aliases: BTreeMap<String, String>,
+    lifecycle_task_aliases: BTreeMap<String, String>,
     pub subsystem_aggregate: SubsystemAggregate,
     last_run_item_at: Option<Instant>,
     open_model_call_starts: BTreeMap<kuzushi_core::run_lifecycle::RunCallId, Instant>,
@@ -371,6 +372,7 @@ impl ActivitySession {
             tasks: BTreeMap::new(),
             task_order: Vec::new(),
             tool_task_aliases: BTreeMap::new(),
+            lifecycle_task_aliases: BTreeMap::new(),
             subsystem_aggregate: SubsystemAggregate::default(),
             last_run_item_at: None,
             open_model_call_starts: BTreeMap::new(),
@@ -825,17 +827,35 @@ impl ActivitySession {
             return;
         }
         if delta.plan_changed || !delta.task_ids.is_empty() {
-            self.task_order = typed_task_order(&self.run_projection);
+            self.task_order = typed_task_order(&self.run_projection)
+                .into_iter()
+                .map(|task_id| self.display_task_id(&task_id))
+                .collect();
+            self.task_order.dedup();
         }
         for task_id in &delta.task_ids {
-            let Some(task) = self.run_projection.tasks.get(task_id) else {
-                continue;
-            };
-            let key = task_id.to_string();
-            let prior = self.tasks.get(&key);
-            let row = typed_task_row(&self.run_projection, key.clone(), task, prior);
-            self.tasks.insert(key, row);
+            self.apply_projection_task_delta(task_id);
         }
+    }
+
+    fn apply_projection_task_delta(&mut self, task_id: &kuzushi_core::run_lifecycle::RunTaskId) {
+        let Some(task) = self.run_projection.tasks.get(task_id) else {
+            return;
+        };
+        let projection_key = task_id.to_string();
+        let key = self.display_task_id(&projection_key);
+        let prior = self.tasks.get(&key);
+        let row = typed_task_row(
+            &self.run_projection,
+            projection_key.clone(),
+            key.clone(),
+            task,
+            prior,
+        );
+        if projection_key != key {
+            self.tasks.remove(&projection_key);
+        }
+        self.tasks.insert(key, row);
     }
 
     pub(crate) fn seed_task_sequence(&mut self, task_ids: impl IntoIterator<Item = String>) {
@@ -851,6 +871,28 @@ impl ActivitySession {
     pub(crate) fn bind_tool_task(&mut self, tool_name: &str, task_id: String) {
         self.tool_task_aliases
             .insert(collapse_doubled_tail(tool_name), task_id);
+    }
+
+    pub(crate) fn bind_lifecycle_task(
+        &mut self,
+        lifecycle_task_id: kuzushi_core::run_lifecycle::RunTaskId,
+        activity_task_id: String,
+    ) {
+        self.lifecycle_task_aliases
+            .insert(lifecycle_task_id.to_string(), activity_task_id);
+    }
+
+    pub(crate) fn task_id_for_bound_tool(&self, tool_name: &str) -> Option<String> {
+        self.tool_task_aliases
+            .get(&collapse_doubled_tail(tool_name))
+            .cloned()
+    }
+
+    fn display_task_id(&self, lifecycle_task_id: &str) -> String {
+        self.lifecycle_task_aliases
+            .get(lifecycle_task_id)
+            .cloned()
+            .unwrap_or_else(|| lifecycle_task_id.to_string())
     }
 
     /// Bind trace-minted rows for `tool_name` onto the ONE seeded planned row
@@ -1181,23 +1223,38 @@ fn typed_task_order(projection: &kuzushi_core::run_lifecycle::RunProjection) -> 
 
 fn typed_task_row(
     projection: &kuzushi_core::run_lifecycle::RunProjection,
-    task_id: String,
+    projection_task_id: String,
+    display_task_id: String,
     task: &kuzushi_core::run_lifecycle::TaskProjection,
     prior: Option<&DagTaskRow>,
 ) -> DagTaskRow {
     let title = task.title.as_str();
-    let mut row = DagTaskRow::queued(task_id.clone(), title.to_string(), Vec::new());
-    row.state = typed_task_state(task.status);
+    let mut row = DagTaskRow::queued(display_task_id, title.to_string(), Vec::new());
+    let cancellation_pending = prior.is_some_and(|row| row.state == DagTaskState::Canceling)
+        && matches!(
+            task.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Pending
+                | kuzushi_core::run_lifecycle::RunItemStatus::Running
+        );
+    row.state = if cancellation_pending {
+        DagTaskState::Canceling
+    } else {
+        typed_task_state(task.status)
+    };
     row.started_at = typed_started_at(task.status, prior);
     row.completed_at = typed_completed_at(task.status, prior);
-    row.last_label = typed_task_latest_label(projection, &task_id, task);
-    row.details = typed_call_details(projection, &task_id);
+    row.last_label = if cancellation_pending {
+        "cancel requested; cleanup in progress".to_string()
+    } else {
+        typed_task_latest_label(projection, &projection_task_id, task)
+    };
+    row.details = typed_call_details(projection, &projection_task_id);
     row.steps_done = row
         .details
         .iter()
         .filter(|detail| detail.state != DagTaskDetailState::Active)
         .count();
-    row.cost_usd = typed_task_cost(projection, &task_id);
+    row.cost_usd = typed_task_cost(projection, &projection_task_id);
     row.severity = typed_task_severity(task.status);
     row
 }
@@ -1573,7 +1630,8 @@ mod tests {
     fn typed_active_task_exposes_its_latest_exact_substep() {
         let (projection, task_id) = active_task_projection();
         let task = &projection.tasks[&task_id];
-        let row = typed_task_row(&projection, task_id.to_string(), task, None);
+        let task_id = task_id.to_string();
+        let row = typed_task_row(&projection, task_id.clone(), task_id, task, None);
 
         assert_eq!(row.last_label, "Scanning repository files · 421/832");
         assert_eq!(row.details.len(), 1);
@@ -1597,6 +1655,37 @@ mod tests {
         push_active_call_start(&mut items, &run_id, task_id, call_id, call_item_id);
         push_active_progress(&mut items, &run_id, task_id, call_id, call_item_id);
         (reduce_run_items(items), task_id)
+    }
+
+    #[test]
+    fn typed_lifecycle_task_replaces_its_planned_activity_row() {
+        let (projection, task_id) = active_task_projection();
+        let mut session = ActivitySession::new("run-active-substep");
+        session.seed_task_sequence(["agentic-sast:scan".to_string()]);
+        session.bind_lifecycle_task(task_id, "agentic-sast:scan".to_string());
+
+        for item in projection.timeline {
+            session.apply_run_item(item).unwrap();
+        }
+
+        assert_eq!(session.tasks.len(), 1);
+        let row = session.tasks.get("agentic-sast:scan").unwrap();
+        assert_eq!(row.last_label, "Scanning repository files · 421/832");
+        assert!(!session.tasks.contains_key(&task_id.to_string()));
+    }
+
+    #[test]
+    fn late_running_projection_does_not_erase_canceling_state() {
+        let (projection, task_id) = active_task_projection();
+        let task = &projection.tasks[&task_id];
+        let task_id = task_id.to_string();
+        let mut prior = typed_task_row(&projection, task_id.clone(), task_id.clone(), task, None);
+        prior.state = DagTaskState::Canceling;
+
+        let row = typed_task_row(&projection, task_id.clone(), task_id, task, Some(&prior));
+
+        assert_eq!(row.state, DagTaskState::Canceling);
+        assert_eq!(row.last_label, "cancel requested; cleanup in progress");
     }
 
     fn push_active_work(

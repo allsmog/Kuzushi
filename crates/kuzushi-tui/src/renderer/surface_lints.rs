@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Rendered-surface lints: deterministic checks over the operator-facing
 //! text corpus — every phase-cockpit snapshot fixture body plus the plain
 //! projection of every `ShellView`.

@@ -10,8 +10,9 @@ use kuzushi_core::run_artifacts::{
     load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
 use kuzushi_core::{
-    failed_tool_output, tool_result_status, AgentRuntime, ToolExecutionContext, ToolOptionStore,
-    ToolResultStatus, TraceHandle, WorkspaceTarget,
+    failed_tool_output, load_persisted_run_terminal_outcome, run_lifecycle::RunItemStatus,
+    scan::ScanCancellation, AgentRuntime, ToolExecutionContext, ToolOptionStore, TraceHandle,
+    WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
@@ -20,6 +21,55 @@ use std::path::{Path, PathBuf};
 enum CliExecutionTiming {
     BeforeDispatch,
     AfterDispatch,
+}
+
+struct CliToolOutcome {
+    output: serde_json::Value,
+    status: RunItemStatus,
+    terminal_persisted: bool,
+}
+
+impl CliToolOutcome {
+    fn persisted(output: serde_json::Value, status: RunItemStatus) -> Self {
+        Self {
+            output,
+            status,
+            terminal_persisted: true,
+        }
+    }
+
+    fn persistence_failed(output: serde_json::Value) -> Self {
+        Self {
+            output,
+            status: RunItemStatus::Failed,
+            terminal_persisted: false,
+        }
+    }
+}
+
+struct RunSignalWatcher {
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl RunSignalWatcher {
+    fn install(cancel: ScanCancellation) -> Option<Self> {
+        let runtime = tokio::runtime::Handle::try_current().ok()?;
+        let task = runtime.spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                cancel.cancel();
+            }
+            if tokio::signal::ctrl_c().await.is_ok() {
+                std::process::exit(super::run_exit::EXIT_RUN_CANCELED);
+            }
+        });
+        Some(Self { task })
+    }
+}
+
+impl Drop for RunSignalWatcher {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
 }
 
 impl CliExecutionTiming {
@@ -42,10 +92,12 @@ pub(crate) fn run_tool_command(
     let tool_label = tool.clone();
     match prepare_cli_tool_run(tool, input, options, autonomy, target, load, run_id) {
         Ok(run) => {
-            let output = execute_cli_tool_run(&run)?;
-            println!("{}", serde_json::to_string_pretty(&output)?);
-            publish_done_sentinel(&run, &output);
-            fail_cli_on_failure_like_tool_output(&output)
+            let cancellation = ScanCancellation::default();
+            let _signal_watcher = RunSignalWatcher::install(cancellation.clone());
+            let outcome = execute_cli_tool_run(&run, &cancellation)?;
+            println!("{}", serde_json::to_string_pretty(&outcome.output)?);
+            publish_done_sentinel(&run, &outcome);
+            fail_cli_on_terminal_outcome(&outcome)
         }
         // Prepare-stage failures (unknown tool, bad JSON, unknown option, missing
         // workspace) must emit the same machine-readable envelope as execution
@@ -90,24 +142,25 @@ fn prepare_failure_output(tool: &str, error: &str) -> serde_json::Value {
     output
 }
 
-fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
+fn execute_cli_tool_run(
+    run: &PreparedCliToolRun,
+    cancellation: &ScanCancellation,
+) -> Result<CliToolOutcome> {
     emit_cli_repository_execution_disclosure(run)?;
     let trace = cli_tool_trace(run)?;
-    let runtime = match cli_tool_runtime(run) {
+    let runtime = match cli_tool_runtime(run, cancellation) {
         Ok(runtime) => runtime,
         Err(error) => {
             let message = error.to_string();
             let output = cli_blocked_tool_output(run, &message);
-            return Ok(cli_output_after_persistence(
+            let persistence = persist_cli_failure_or_cancellation(
                 run,
-                output,
-                fail_cli_tool_run_artifacts(
-                    run,
-                    &message,
-                    trace.as_ref(),
-                    CliExecutionTiming::BeforeDispatch,
-                ),
-            ));
+                &message,
+                trace.as_ref(),
+                CliExecutionTiming::BeforeDispatch,
+                cancellation,
+            );
+            return Ok(cli_output_after_persistence(run, output, persistence));
         }
     };
     let runtime_ref = active_cli_tool_runtime(runtime.as_ref());
@@ -116,7 +169,7 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         workspace: run.workspace.as_ref(),
         findings_store: run.store.as_ref(),
         trace: trace.as_ref(),
-        cancellation: None,
+        cancellation: Some(cancellation),
         authorization: Default::default(),
     };
     mark_trace_task_running(trace.as_ref())?;
@@ -126,8 +179,8 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         runtime_ref,
     );
     match result {
-        Ok(outcome) => handle_cli_observed_tool_result(run, outcome, trace.as_ref()),
-        Err(error) => handle_cli_tool_result(run, Err(error), trace.as_ref()),
+        Ok(outcome) => handle_cli_observed_tool_result(run, outcome, trace.as_ref(), cancellation),
+        Err(error) => handle_cli_unobserved_result(run, error, trace.as_ref(), cancellation),
     }
 }
 
@@ -201,19 +254,25 @@ fn authorize_explicit_cli_tool(
     prepared.authorize_explicit_headless()
 }
 
-fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
+fn cli_tool_runtime(
+    run: &PreparedCliToolRun,
+    cancellation: &ScanCancellation,
+) -> Result<Option<LangGraphRuntime>> {
     if run
         .registry
         .tool_wants_runtime(&run.tool, run.input.value(), &run.config)
     {
-        return Ok(Some(LangGraphRuntime::from_config(
-            &run.config,
-            run.workspace
-                .as_ref()
-                .map(|workspace| workspace.root())
-                .unwrap_or(&run.artifact_target)
-                .to_path_buf(),
-        )?));
+        return Ok(Some(
+            LangGraphRuntime::from_config(
+                &run.config,
+                run.workspace
+                    .as_ref()
+                    .map(|workspace| workspace.root())
+                    .unwrap_or(&run.artifact_target)
+                    .to_path_buf(),
+            )?
+            .with_cancellation(cancellation.clone()),
+        ));
     }
     Ok(None)
 }
@@ -233,11 +292,31 @@ fn active_cli_tool_runtime<'a>(
     runtime.map(|runtime| runtime as &dyn AgentRuntime)
 }
 
+fn handle_cli_unobserved_result(
+    run: &PreparedCliToolRun,
+    error: anyhow::Error,
+    trace: Option<&TraceHandle>,
+    cancellation: &ScanCancellation,
+) -> Result<CliToolOutcome> {
+    let Some(disposition) = cancellation.disposition() else {
+        return handle_cli_tool_result(run, Err(error), trace);
+    };
+    let output = cli_cancellation_output(disposition);
+    let persistence = crate::tool_run_artifacts::cancel_cli_tool_run_observed(
+        &run.artifact_target,
+        &run.run_id,
+        &run.tool,
+        disposition,
+        trace.and_then(TraceHandle::run_observation).as_ref(),
+    );
+    Ok(cli_output_after_persistence(run, output, persistence))
+}
+
 fn handle_cli_tool_result(
     run: &PreparedCliToolRun,
     result: Result<serde_json::Value>,
     trace: Option<&TraceHandle>,
-) -> Result<serde_json::Value> {
+) -> Result<CliToolOutcome> {
     match result {
         Ok(output) => {
             let persistence = finish_cli_tool_run_artifacts(run, &output, trace);
@@ -264,10 +343,23 @@ fn handle_cli_observed_tool_result(
     run: &PreparedCliToolRun,
     outcome: kuzushi_core::ObservedDispatchOutcome,
     trace: Option<&TraceHandle>,
-) -> Result<serde_json::Value> {
+    cancellation: &ScanCancellation,
+) -> Result<CliToolOutcome> {
     let observation = trace
         .and_then(TraceHandle::run_observation)
         .context("observed CLI dispatch lost its run observation")?;
+    if let Some(disposition) = cancellation.disposition() {
+        let output = cli_cancellation_output(disposition);
+        let persistence = crate::tool_run_artifacts::cancel_cli_tool_run_settled(
+            &run.artifact_target,
+            &run.run_id,
+            &run.tool,
+            disposition,
+            &observation,
+            outcome.completion,
+        );
+        return Ok(cli_output_after_persistence(run, output, persistence));
+    }
     match outcome.execution {
         Ok(output) => {
             let persistence = crate::tool_run_artifacts::finish_cli_tool_run_settled(
@@ -296,14 +388,62 @@ fn handle_cli_observed_tool_result(
     }
 }
 
+fn persist_cli_failure_or_cancellation(
+    run: &PreparedCliToolRun,
+    error: &str,
+    trace: Option<&TraceHandle>,
+    timing: CliExecutionTiming,
+    cancellation: &ScanCancellation,
+) -> Result<()> {
+    let Some(disposition) = cancellation.disposition() else {
+        return fail_cli_tool_run_artifacts(run, error, trace, timing);
+    };
+    crate::tool_run_artifacts::cancel_cli_tool_run_observed(
+        &run.artifact_target,
+        &run.run_id,
+        &run.tool,
+        disposition,
+        trace.and_then(TraceHandle::run_observation).as_ref(),
+    )
+}
+
+fn cli_cancellation_output(
+    disposition: kuzushi_core::scan::CancellationDisposition,
+) -> serde_json::Value {
+    let (status, summary) = match disposition {
+        kuzushi_core::scan::CancellationDisposition::Canceled => {
+            ("canceled", "operator canceled headless execution")
+        }
+        kuzushi_core::scan::CancellationDisposition::Interrupted => {
+            ("interrupted", "headless execution was interrupted")
+        }
+    };
+    serde_json::json!({
+        "ok": false,
+        "status": status,
+        "summary": summary,
+        "data": {},
+        "artifacts": [],
+        "warnings": [],
+        "errors": [summary],
+    })
+}
+
 fn cli_output_after_persistence(
     run: &PreparedCliToolRun,
     output: serde_json::Value,
     persistence: Result<()>,
-) -> serde_json::Value {
+) -> CliToolOutcome {
     match persistence {
-        Ok(()) => cli_output_with_fallback_context(run, output),
-        Err(error) => cli_persistence_failure_output(run, output, &error),
+        Ok(()) => match load_persisted_run_terminal_outcome(&run.artifact_target, &run.run_id) {
+            Ok(persisted) => CliToolOutcome::persisted(persisted.result, persisted.status),
+            Err(error) => CliToolOutcome::persistence_failed(cli_persistence_failure_output(
+                run, output, &error,
+            )),
+        },
+        Err(error) => {
+            CliToolOutcome::persistence_failed(cli_persistence_failure_output(run, output, &error))
+        }
     }
 }
 
@@ -390,31 +530,34 @@ fn output_has_artifacts(object: &serde_json::Map<String, serde_json::Value>) -> 
 // The sentinel is a poller convenience, never an outcome input: a write
 // failure is reported on stderr and the exit code stays whatever the tool
 // envelope dictates.
-fn publish_done_sentinel(run: &PreparedCliToolRun, output: &serde_json::Value) {
+fn publish_done_sentinel(run: &PreparedCliToolRun, outcome: &CliToolOutcome) {
+    if !outcome.terminal_persisted {
+        return;
+    }
     let result = write_done_sentinel(
         &run.artifact_target,
         &run.run_id,
         &run.tool,
-        output,
-        run_exit_code(output),
+        outcome.status,
+        run_exit_code(outcome.status),
     );
     if let Err(error) = result {
         eprintln!("kuzushi: warning: done sentinel not written: {error}");
     }
 }
 
-fn fail_cli_on_failure_like_tool_output(output: &serde_json::Value) -> Result<()> {
-    let status = tool_result_status(output);
-    if status.is_failure_like() {
+fn fail_cli_on_terminal_outcome(outcome: &CliToolOutcome) -> Result<()> {
+    let exit_code = run_exit_code(outcome.status);
+    if exit_code != 0 {
         return Err(anyhow::Error::new(RunCommandExit::new(
-            run_exit_code(output),
-            cli_failure_like_tool_message(output, status),
+            exit_code,
+            cli_failure_like_tool_message(&outcome.output, outcome.status),
         )));
     }
     Ok(())
 }
 
-fn cli_failure_like_tool_message(output: &serde_json::Value, status: ToolResultStatus) -> String {
+fn cli_failure_like_tool_message(output: &serde_json::Value, status: RunItemStatus) -> String {
     output
         .get("errors")
         .and_then(serde_json::Value::as_array)
@@ -422,7 +565,10 @@ fn cli_failure_like_tool_message(output: &serde_json::Value, status: ToolResultS
         .and_then(serde_json::Value::as_str)
         .or_else(|| output.get("summary").and_then(serde_json::Value::as_str))
         .unwrap_or(match status {
-            ToolResultStatus::Partial => "tool returned status=partial",
+            RunItemStatus::Partial => "tool returned status=partial",
+            RunItemStatus::Blocked => "tool execution was blocked",
+            RunItemStatus::Canceled => "tool execution was canceled",
+            RunItemStatus::Interrupted => "tool execution was interrupted",
             _ => "tool returned status=failed",
         })
         .to_string()
@@ -503,27 +649,32 @@ pub(crate) fn parse_option_override(raw: &str) -> Result<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::{
-        fail_cli_on_failure_like_tool_output, handle_cli_tool_result, prepare_cli_tool_run,
-        CliExecutionTiming,
+        cli_cancellation_output, execute_cli_tool_run, fail_cli_on_terminal_outcome,
+        handle_cli_tool_result, prepare_cli_tool_run, publish_done_sentinel, CliExecutionTiming,
+        CliToolOutcome,
+    };
+    use kuzushi_core::{
+        run_lifecycle::RunItemStatus,
+        scan::{CancellationDisposition, ScanCancellation},
     };
     use serde_json::json;
 
     #[test]
-    fn cli_exit_semantics_follow_the_canonical_tool_result_status() {
-        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "completed"})).is_ok());
-        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "skipped"})).is_ok());
-        assert!(fail_cli_on_failure_like_tool_output(&json!({"status": "partial"})).is_err());
-        assert!(fail_cli_on_failure_like_tool_output(&json!({"ok": false})).is_err());
+    fn cli_exit_semantics_follow_the_host_terminal_status() {
+        assert!(fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Completed)).is_ok());
+        assert!(fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Skipped)).is_ok());
+        assert!(fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Partial)).is_err());
+        assert!(fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Blocked)).is_err());
     }
 
     #[test]
     fn failure_like_output_carries_the_deterministic_batch_exit_code() {
-        let partial = fail_cli_on_failure_like_tool_output(&json!({"status": "partial"}))
+        let partial = fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Partial))
             .unwrap_err()
             .downcast::<crate::application::run_exit::RunCommandExit>()
             .expect("partial must carry a typed exit");
         assert_eq!(partial.code(), 4);
-        let failed = fail_cli_on_failure_like_tool_output(&json!({"status": "failed"}))
+        let failed = fail_cli_on_terminal_outcome(&outcome(RunItemStatus::Failed))
             .unwrap_err()
             .downcast::<crate::application::run_exit::RunCommandExit>()
             .expect("failed must carry a typed exit");
@@ -553,7 +704,7 @@ mod tests {
         std::fs::remove_dir_all(&run_dir).unwrap();
         std::fs::write(&run_dir, "not a directory").unwrap();
 
-        let output = handle_cli_tool_result(
+        let outcome = handle_cli_tool_result(
             &run,
             Ok(json!({
                 "ok": true,
@@ -565,12 +716,87 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(output["status"], "failed");
-        assert_eq!(output["ok"], false);
-        assert_eq!(output["data"]["originalResult"]["status"], "completed");
-        assert!(output["data"]["artifactPersistenceError"]
+        assert_eq!(outcome.output["status"], "failed");
+        assert_eq!(outcome.output["ok"], false);
+        assert_eq!(
+            outcome.output["data"]["originalResult"]["status"],
+            "completed"
+        );
+        assert!(outcome.output["data"]["artifactPersistenceError"]
             .as_str()
             .is_some_and(|error| error.contains("persistence failed")));
-        assert!(fail_cli_on_failure_like_tool_output(&output).is_err());
+        assert_eq!(outcome.status, RunItemStatus::Failed);
+        assert!(!outcome.terminal_persisted);
+        assert!(fail_cli_on_terminal_outcome(&outcome).is_err());
+    }
+
+    #[test]
+    fn canceled_headless_execution_has_one_terminal_identity() {
+        let target = tempfile::tempdir().unwrap();
+        let run = prepare_cli_tool_run(
+            "workspace:status".to_string(),
+            "{}".to_string(),
+            Vec::new(),
+            None,
+            Some(target.path().to_path_buf()),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+
+        let outcome = execute_cli_tool_run(&run, &cancellation).unwrap();
+        publish_done_sentinel(&run, &outcome);
+        let lifecycle =
+            kuzushi_core::run_lifecycle::load_run_projection(&run.artifact_target, &run.run_id)
+                .unwrap();
+
+        assert_eq!(
+            outcome.status,
+            RunItemStatus::Canceled,
+            "{}; lifecycle={:?}",
+            outcome.output,
+            lifecycle.projection
+        );
+        assert_eq!(outcome.output["status"], "canceled");
+        let persisted =
+            kuzushi_core::load_persisted_run_terminal_outcome(&run.artifact_target, &run.run_id)
+                .unwrap();
+        assert_eq!(persisted.status, RunItemStatus::Canceled);
+        let done: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                kuzushi_core::run_dir(&run.artifact_target, &run.run_id).join("done.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(done["status"], "canceled");
+        assert_eq!(done["exitCode"], 130);
+        let exit = fail_cli_on_terminal_outcome(&outcome)
+            .unwrap_err()
+            .downcast::<crate::application::run_exit::RunCommandExit>()
+            .unwrap();
+        assert_eq!(exit.code(), 130);
+    }
+
+    #[test]
+    fn mutation_survivor_cancellation_output_preserves_disposition_and_batch_shape() {
+        let canceled = cli_cancellation_output(CancellationDisposition::Canceled);
+        assert_eq!(canceled["ok"], false);
+        assert_eq!(canceled["status"], "canceled");
+        assert_eq!(canceled["summary"], "operator canceled headless execution");
+        assert_eq!(
+            canceled["errors"],
+            json!(["operator canceled headless execution"])
+        );
+
+        let interrupted = cli_cancellation_output(CancellationDisposition::Interrupted);
+        assert_eq!(interrupted["status"], "interrupted");
+        assert_eq!(interrupted["summary"], "headless execution was interrupted");
+    }
+
+    fn outcome(status: RunItemStatus) -> CliToolOutcome {
+        CliToolOutcome::persisted(json!({"status": status.label()}), status)
     }
 }

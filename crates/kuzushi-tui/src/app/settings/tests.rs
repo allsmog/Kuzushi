@@ -53,6 +53,22 @@ mod tests {
     }
 
     #[test]
+    fn visible_catalog_contains_every_choice_once_with_configured_choice_first() {
+        let configured = "anthropic:claude-opus-4-7";
+        let visible = visible_model_choices(Some(" anthropic:claude-opus-4-7 "));
+        let ids = visible.iter().map(|choice| choice.id).collect::<Vec<_>>();
+        let unique = ids
+            .iter()
+            .copied()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(ids.first().copied(), Some(configured));
+        assert_eq!(ids.len(), MODEL_CHOICES.len());
+        assert_eq!(unique.len(), MODEL_CHOICES.len());
+        assert!(MODEL_CHOICES.iter().all(|choice| ids.contains(&choice.id)));
+    }
+
+    #[test]
     fn legacy_codex_shorthands_are_not_public_selectors() {
         assert!(normalize_auth_provider("codex").is_err());
         assert!(normalize_auth_provider("openai-codex").is_err());

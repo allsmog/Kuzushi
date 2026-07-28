@@ -141,6 +141,7 @@ pub struct CallProjection {
     pub latency_ms: Option<u64>,
     pub usage: ModelUsage,
     pub error_class: Option<SafeText>,
+    pub failure: Option<crate::runtime::RuntimeFailureMetadata>,
     pub cost: RuntimeCostReport,
     pub preview: Vec<SafeText>,
     pub warning_count: u64,

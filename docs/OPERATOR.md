@@ -365,8 +365,10 @@ ledger with source `import`; the agentic-sast digest and carlini hunts
 prepend a staleness warning when the live document's revision no
 longer matches HEAD, and `threats use <n>` re-verifies after every
 restore), `threat-model:methodologies`; PASTA-style `randori:pasta` +
-`randori:threat-model`; `threat-intel:discover`, `threat-intel:harvest`,
-`threat-intel:apply`, `threat-intel:list`; lead generation
+`randori:threat-model`; `threat-intel:discover` (target-local package inventory
+only), `threat-intel:research` (explicit external action: bounded OSV package
+queries followed directly by catalog harvest, with no hand-authored CVE JSON),
+`threat-intel:harvest`, `threat-intel:apply`, `threat-intel:list`; lead generation
 `threat-leads:build` + `threat-leads:read`; system X-ray `x-ray:run`,
 `x-ray:read` (and the `x-ray:x-ray` alias verb); attack-surface
 extraction `entry-points:extract`.

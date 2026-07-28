@@ -107,12 +107,15 @@ impl DispatchLifecycle {
 
     pub(super) fn pending_completion(self, result: &Result<Value>) -> PendingToolCallCompletion {
         let (status, cost, preview, warning_count, error_count) = result_fields(result);
-        let identity = self.observation.as_ref().map(|observation| ToolCallIdentity {
-            call_id: self.call_id,
-            item_id: self.call_item_id,
-            task_id: self.task_id,
-            parent_item_id: observation.parent_item_id(),
-        });
+        let identity = self
+            .observation
+            .as_ref()
+            .map(|observation| ToolCallIdentity {
+                call_id: self.call_id,
+                item_id: self.call_item_id,
+                task_id: self.task_id,
+                parent_item_id: observation.parent_item_id(),
+            });
         PendingToolCallCompletion {
             observation: self.observation,
             identity,
@@ -126,14 +129,12 @@ impl DispatchLifecycle {
     }
 
     pub(super) fn execution_trace(&self) -> Option<crate::run_artifacts::TraceHandle> {
-        self.observation
-            .as_ref()
-            .map(|observation| {
-                observation
-                    .for_call_progress(self.call_id, self.call_item_id)
-                    .with_parent(self.call_item_id)
-                    .trace_handle()
-            })
+        self.observation.as_ref().map(|observation| {
+            observation
+                .for_call_progress(self.call_id, self.call_item_id)
+                .with_parent(self.call_item_id)
+                .trace_handle()
+        })
     }
 
     fn emit_request(&self, operation_binding: [u8; 32], input: &Value) -> Result<()> {
@@ -187,12 +188,15 @@ impl DispatchLifecycle {
     }
 
     fn rejected_completion(self) -> PendingToolCallCompletion {
-        let identity = self.observation.as_ref().map(|observation| ToolCallIdentity {
-            call_id: self.call_id,
-            item_id: self.call_item_id,
-            task_id: self.task_id,
-            parent_item_id: observation.parent_item_id(),
-        });
+        let identity = self
+            .observation
+            .as_ref()
+            .map(|observation| ToolCallIdentity {
+                call_id: self.call_id,
+                item_id: self.call_item_id,
+                task_id: self.task_id,
+                parent_item_id: observation.parent_item_id(),
+            });
         PendingToolCallCompletion {
             observation: self.observation,
             identity,

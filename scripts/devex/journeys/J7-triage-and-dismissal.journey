@@ -9,12 +9,17 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
-wait-for: 90 run completed
-keys: Escape
-wait: 2
+submit: demo
+wait-for: 120 run completed
 submit: findings
 wait: 3
+# Findings are durable independently of the workflow disposition. Once Review
+# owns the result card, discard it so subsequent commands are no longer modal.
+nav-mode:
+keys: d
+wait: 2
+submit: findings
+wait: 2
 snap: findings-before
 submit: open F-0001
 wait: 3

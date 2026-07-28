@@ -183,6 +183,27 @@ mod tests {
         }
     }
 
+    struct FailingRuntime;
+
+    impl AgentRuntime for FailingRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!(
+                "provider returned 401 Authorization: Bearer sk-etr003-secret with raw payload"
+            )
+        }
+    }
+
+    struct SelectiveFailureRuntime;
+
+    impl AgentRuntime for SelectiveFailureRuntime {
+        fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
+            if request.finding.rule_id == "rule-fail" {
+                anyhow::bail!("provider transport leaked-body-sentinel")
+            }
+            Ok(true_positive_outcome())
+        }
+    }
+
     #[test]
     fn triage_stage2_stops_on_runtime_cancellation() {
         let store = FindingStore::open_in_memory().unwrap();
@@ -204,6 +225,156 @@ mod tests {
 
         assert!(format!("{err:#}").contains("triage:run cancelled"));
         assert_eq!(*runtime.calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn total_runtime_failure_is_failed_and_not_counted_as_triaged() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let input = retriage_input();
+        let config = triage_config("/repo-total-failure");
+        let stats = run_triage_stage2(
+            &store,
+            &FailingRuntime,
+            &input,
+            &config,
+            vec![finding_with(
+                Severity::High,
+                "semgrep",
+                "unique total failure",
+            )],
+        )
+        .unwrap();
+
+        assert_triage_counts(&stats, 1, 0, 1);
+        assert_eq!(stats.triaged(), 0);
+        assert_eq!(stats.needs_review, 0);
+        assert!(stats.results.is_empty());
+        assert!(!stats.cost_report().is_complete());
+        assert_eq!(
+            stats.error_summaries,
+            ["model request failed (authentication)"]
+        );
+
+        let response = triage_response(&input, &config, &stage1_for(1), &stats, Vec::new());
+        assert_eq!(response["ok"], json!(false));
+        assert_eq!(response["status"], json!("failed"));
+        assert!(crate::module_result::tool_result_status(&response).is_failure_like());
+        assert_eq!(response["data"]["triaged"], json!(0));
+        assert_eq!(response["data"]["failed"], json!(1));
+        assert!(response["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("model request failed (authentication)"));
+        assert!(!response.to_string().contains("sk-etr003-secret"));
+        assert!(!response.to_string().contains("raw payload"));
+        assert!(!response.to_string().contains("were preserved"));
+    }
+
+    #[test]
+    fn mixed_runtime_results_are_partial_and_preserve_successes() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let input = retriage_input();
+        let config = triage_config("/repo-mixed-results");
+        let findings = vec![
+            finding_for_rule("rule-ok", 10, "successful classification"),
+            finding_for_rule("rule-fail", 200, "failed classification"),
+        ];
+
+        let stats =
+            run_triage_stage2(&store, &SelectiveFailureRuntime, &input, &config, findings).unwrap();
+
+        assert_triage_counts(&stats, 2, 1, 1);
+        assert_eq!(stats.triaged(), 1);
+        assert_eq!(stats.tp, 1);
+        assert_eq!(stats.results.len(), 1);
+        assert!(!stats.cost_report().is_complete());
+        let response = triage_response(&input, &config, &stage1_for(2), &stats, Vec::new());
+        assert_eq!(response["ok"], json!(true));
+        assert_eq!(response["status"], json!("partial"));
+        assert!(crate::module_result::tool_result_status(&response).is_failure_like());
+        assert_eq!(response["data"]["successful"], json!(1));
+        assert_eq!(response["data"]["failed"], json!(1));
+        assert!(response["summary"]
+            .as_str()
+            .unwrap()
+            .contains("model request failed (transport)"));
+        assert!(!response.to_string().contains("leaked-body-sentinel"));
+    }
+
+    #[test]
+    fn failed_cluster_representative_does_not_create_duplicate_successes() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let input = retriage_input();
+        let config = triage_config("/repo-cluster-failure");
+        let findings = vec![
+            finding_for_rule("same-rule", 10, "cluster member one"),
+            finding_for_rule("same-rule", 12, "cluster member two with more evidence"),
+        ];
+
+        let stats = run_triage_stage2(&store, &FailingRuntime, &input, &config, findings).unwrap();
+
+        assert_eq!(stats.clusters, 1);
+        assert_triage_counts(&stats, 1, 0, 1);
+        assert_eq!(stats.triaged(), 0);
+        assert_eq!(stats.duplicates_inherited, 0);
+        assert!(stats.results.is_empty());
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Failed
+        );
+    }
+
+    #[test]
+    fn runtime_error_summaries_are_classified_and_bounded() {
+        use crate::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+
+        let classes = [
+            RuntimeFailureClass::Authentication,
+            RuntimeFailureClass::BridgeInternal,
+            RuntimeFailureClass::McpTimeout,
+            RuntimeFailureClass::ProviderRejected,
+            RuntimeFailureClass::ProviderResponseInvalid,
+            RuntimeFailureClass::ProviderUnavailable,
+            RuntimeFailureClass::RateLimited,
+            RuntimeFailureClass::SdkClientValidation,
+            RuntimeFailureClass::Timeout,
+        ];
+        let mut stats = TriageRunStats::default();
+        let finding = finding_for_rule("rule-failure", 1, "runtime failure");
+        for class in classes {
+            let metadata = RuntimeFailureMetadata::new(class, None, Some("raw-provider-detail"));
+            let error = anyhow::Error::new(RuntimeFailure::new(metadata));
+            stats.record_runtime_error(&finding, &error);
+        }
+
+        assert_triage_counts(&stats, 9, 0, 9);
+        assert_eq!(stats.error_summaries.len(), 8);
+        assert!(stats
+            .error_summaries
+            .iter()
+            .all(|summary| !summary.contains("raw-provider-detail")));
+    }
+
+    #[test]
+    fn bounded_failure_details_disclose_the_omitted_count() {
+        let finding = finding_for_rule("rule-many-failures", 1, "many failures");
+        let mut stats = TriageRunStats::default();
+        for _ in 0..40 {
+            let error = anyhow::anyhow!("provider unavailable");
+            stats.record_runtime_error(&finding, &error);
+        }
+
+        assert_eq!(stats.failure_details.len(), 32);
+        assert_eq!(stats.failure_details_omitted, 8);
+        let response = triage_response(
+            &retriage_input(),
+            &triage_config("/repo-many-failures"),
+            &stage1_for(40),
+            &stats,
+            Vec::new(),
+        );
+        assert_eq!(response["data"]["failureDetailsOmitted"], json!(8));
+        assert!(response.to_string().contains("additional per-finding failure"));
     }
 
     #[test]
@@ -470,7 +641,9 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome { first_link: None, refute_reason: None,
+                TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -483,6 +656,9 @@ mod tests {
         let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
 
         assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["data"]["attempted"], json!(1));
+        assert_eq!(response["data"]["successful"], json!(1));
+        assert_eq!(response["data"]["failed"], json!(0));
         assert_eq!(
             response["data"]["findings"][0]["verdict"],
             json!("true_positive")
@@ -497,7 +673,9 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome { first_link: None, refute_reason: None,
+                TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -532,7 +710,9 @@ mod tests {
         stats
             .record_persisted_outcome(
                 finding_with(Severity::High, "semgrep", "sql injection"),
-                TriageOutcome { first_link: None, refute_reason: None,
+                TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.8,
                     rationale: "reachable sink".to_string(),
@@ -599,8 +779,54 @@ mod tests {
         store
     }
 
+    fn retriage_input() -> TriageRunInput {
+        TriageRunInput::from_tool_input(&json!({"retriage": true}), Path::new(".")).unwrap()
+    }
+
+    fn triage_config(cwd: &str) -> TriageExecutionConfig {
+        TriageExecutionConfig::new(
+            PathBuf::from(cwd),
+            "openai-codex:etr-003-test-model".to_string(),
+        )
+    }
+
+    fn stage1_for(total: usize) -> PrefilteredTriageFindings {
+        PrefilteredTriageFindings {
+            total,
+            kept_count: total,
+            kept: Vec::new(),
+            dropped: 0,
+        }
+    }
+
+    fn finding_for_rule(rule: &str, line: u32, message: &str) -> Finding {
+        Finding::new_tool(
+            "semgrep",
+            rule,
+            "src/lib.rs",
+            line,
+            None,
+            Severity::High,
+            message,
+        )
+    }
+
+    fn assert_triage_counts(
+        stats: &TriageRunStats,
+        attempted: usize,
+        successful: usize,
+        failed: usize,
+    ) {
+        assert_eq!(stats.attempted, attempted);
+        assert_eq!(stats.successful, successful);
+        assert_eq!(stats.failed, failed);
+        assert_eq!(stats.attempted, stats.successful + stats.failed);
+    }
+
     fn true_positive_outcome() -> TriageOutcome {
-        TriageOutcome { first_link: None, refute_reason: None,
+        TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "confirmed once".to_string(),
@@ -609,11 +835,25 @@ mod tests {
         }
     }
 
-
     /// Returns a scripted verdict per call so consensus paths are exercised
     /// deterministically (call 1 -> TP, call 2 -> FP, call 3 -> TP).
     struct ScriptedVoteRuntime {
         calls: std::sync::Mutex<usize>,
+    }
+
+    struct LaterVoteFailureRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for LaterVoteFailureRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            if *calls > 1 {
+                anyhow::bail!("provider returned 401 with vote-secret");
+            }
+            Ok(true_positive_outcome())
+        }
     }
 
     impl AgentRuntime for ScriptedVoteRuntime {
@@ -625,7 +865,9 @@ mod tests {
             } else {
                 TriageVerdict::TruePositive
             };
-            Ok(TriageOutcome { first_link: None, refute_reason: None,
+            Ok(TriageOutcome {
+                first_link: None,
+                refute_reason: None,
                 verdict,
                 confidence: 0.8,
                 rationale: format!("vote {}", *calls),
@@ -652,7 +894,11 @@ mod tests {
             "anthropic:votes-majority-model".to_string(),
         );
         store
-            .record_run_started("scan-votes-majority", Path::new("/repo-votes-majority"), "completed")
+            .record_run_started(
+                "scan-votes-majority",
+                Path::new("/repo-votes-majority"),
+                "completed",
+            )
             .unwrap();
         store
             .insert_finding(
@@ -660,7 +906,9 @@ mod tests {
                 &finding_with(Severity::High, "semgrep", "votes-majority unique finding"),
             )
             .unwrap();
-        let findings = store.list_findings_for_scan_id("scan-votes-majority").unwrap();
+        let findings = store
+            .list_findings_for_scan_id("scan-votes-majority")
+            .unwrap();
 
         let stats = run_triage_stage2(&store, &runtime, &input, &config, findings).unwrap();
 
@@ -673,6 +921,109 @@ mod tests {
             .unwrap()
             .starts_with("consensus 2/3 true_positive:"));
         assert!((stats.cost_report().observed_usd() - 0.03).abs() < 1e-9);
+    }
+
+    #[test]
+    fn failed_consensus_vote_makes_the_run_partial_without_losing_the_verdict() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let runtime = LaterVoteFailureRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(
+            &json!({"retriage": true, "votes": 2}),
+            Path::new("/repo-vote-failure"),
+        )
+        .unwrap();
+        let config = triage_config("/repo-vote-failure");
+        let finding = finding_for_rule("rule-vote-failure", 10, "vote failure");
+
+        let stats = run_triage_stage2(&store, &runtime, &input, &config, vec![finding]).unwrap();
+
+        assert_triage_counts(&stats, 1, 1, 0);
+        assert_eq!(stats.vote_failures, 1);
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Partial
+        );
+        assert_eq!(stats.failure_details[0]["stage"], json!("consensus"));
+        assert!(!serde_json::to_string(&stats.failure_details)
+            .unwrap()
+            .contains("vote-secret"));
+    }
+
+    #[test]
+    fn protected_human_triage_is_not_reported_as_a_persisted_success() {
+        let store = store_with_scan_findings(&[(
+            "scan-human-triage",
+            finding_for_rule("rule-human", 10, "human triage"),
+        )]);
+        let finding = store
+            .list_findings_for_scan_id("scan-human-triage")
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        store
+            .record_triage_with_author(
+                finding.id.unwrap(),
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 1.0,
+                    rationale: "human decision".to_string(),
+                    ..TriageOutcome::default()
+                },
+                crate::findings::TriageAuthor::Human,
+            )
+            .unwrap();
+
+        let stats = run_triage_stage2(
+            &store,
+            &SelectiveFailureRuntime,
+            &retriage_input(),
+            &triage_config("/repo-human-triage"),
+            vec![finding],
+        )
+        .unwrap();
+
+        assert_triage_counts(&stats, 1, 0, 1);
+        assert_eq!(stats.persistence_failures, 1);
+        assert!(stats.results.is_empty());
+        assert_eq!(stats.failure_details[0]["stage"], json!("verdict-write"));
+        let response = triage_response(
+            &retriage_input(),
+            &triage_config("/repo-human-triage"),
+            &stage1_for(1),
+            &stats,
+            Vec::new(),
+        );
+        assert!(response["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("failed classifications=1, failed consensus votes=0, failed persistence writes=1"));
+    }
+
+    #[test]
+    fn classification_without_a_durable_identity_is_partial() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let input = retriage_input();
+        let config = triage_config("/repo-unpersisted");
+        let finding = finding_for_rule("rule-ok", 10, "unpersisted classification");
+
+        let stats = run_triage_stage2(
+            &store,
+            &SelectiveFailureRuntime,
+            &input,
+            &config,
+            vec![finding],
+        )
+        .unwrap();
+
+        assert_triage_counts(&stats, 1, 1, 0);
+        assert_eq!(stats.persistence_failures, 1);
+        assert_eq!(
+            stats.result_status(),
+            crate::module_result::ToolResultStatus::Partial
+        );
     }
 
     /// Alternating verdicts across two votes -> no majority -> needs_review.
@@ -689,7 +1040,9 @@ mod tests {
             } else {
                 TriageVerdict::TruePositive
             };
-            Ok(TriageOutcome { first_link: None, refute_reason: None,
+            Ok(TriageOutcome {
+                first_link: None,
+                refute_reason: None,
                 verdict,
                 confidence: 0.9,
                 rationale: format!("vote {}", *calls),
@@ -705,17 +1058,19 @@ mod tests {
         let runtime = SplitVoteRuntime {
             calls: std::sync::Mutex::new(0),
         };
-        let input = TriageRunInput::from_tool_input(
-            &json!({"votes": 2}),
-            Path::new("/repo-votes-split"),
-        )
-        .unwrap();
+        let input =
+            TriageRunInput::from_tool_input(&json!({"votes": 2}), Path::new("/repo-votes-split"))
+                .unwrap();
         let config = TriageExecutionConfig::new(
             PathBuf::from("/repo-votes-split"),
             "anthropic:votes-split-model".to_string(),
         );
         store
-            .record_run_started("scan-votes-split", Path::new("/repo-votes-split"), "completed")
+            .record_run_started(
+                "scan-votes-split",
+                Path::new("/repo-votes-split"),
+                "completed",
+            )
             .unwrap();
         store
             .insert_finding(
@@ -748,6 +1103,7 @@ mod tests {
         TriageRuntimeOutcome {
             outcome,
             cached: false,
+            failed_vote_summaries: Vec::new(),
         }
     }
 }

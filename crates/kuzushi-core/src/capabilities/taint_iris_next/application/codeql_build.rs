@@ -703,13 +703,10 @@ mod tests {
 
         let workspace = tempdir().unwrap();
         let outside = tempdir().unwrap();
-        std::fs::create_dir(workspace.path().join(".kuzushi")).unwrap();
+        let destination = crate::workspace::workspace_codeql_db_path(workspace.path());
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
         std::fs::write(outside.path().join("sentinel"), "keep").unwrap();
-        symlink(
-            outside.path(),
-            crate::workspace::workspace_codeql_db_path(workspace.path()),
-        )
-        .unwrap();
+        symlink(outside.path(), destination).unwrap();
 
         assert!(prepare_codeql_db_path(workspace.path()).is_err());
         assert_eq!(

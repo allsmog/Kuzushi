@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
+use super::runtime_config::BridgeRetryPolicy;
+
 /// A bridge failure worth retrying, with what we know about why.
 pub(super) struct TransientFailure {
     pub(super) rate_limited: bool,
@@ -17,25 +19,28 @@ pub(super) struct TransientFailure {
     pub(super) retry_after: Option<Duration>,
 }
 
-const TRANSPORT_ATTEMPTS: usize = 3;
-const RATE_LIMIT_ATTEMPTS: usize = 5;
 const RETRY_AFTER_CAP: Duration = Duration::from_secs(300);
 
-pub(super) fn max_attempts(failure: &TransientFailure) -> usize {
+pub(super) fn max_attempts(failure: &TransientFailure, retry_policy: &BridgeRetryPolicy) -> usize {
     if failure.rate_limited {
-        RATE_LIMIT_ATTEMPTS
+        retry_policy.rate_limit_attempts()
     } else {
-        TRANSPORT_ATTEMPTS
+        retry_policy.attempts()
     }
 }
 
 /// Delay before the next attempt. The provider's `Retry-After` raises (never
 /// lowers below) the schedule so we don't hammer inside a declared window.
-pub(super) fn backoff_delay(attempt: usize, failure: &TransientFailure) -> Duration {
+pub(super) fn backoff_delay(
+    attempt: usize,
+    failure: &TransientFailure,
+    retry_policy: &BridgeRetryPolicy,
+) -> Duration {
+    let configured = Duration::from_millis(retry_policy.delay_ms(attempt));
     let scheduled = if failure.rate_limited {
-        rate_limit_delay(attempt)
+        rate_limit_delay(attempt).max(configured)
     } else {
-        Duration::from_millis(retry_delay_ms(attempt))
+        configured
     };
     match failure.retry_after {
         Some(after) => scheduled.max(after.min(RETRY_AFTER_CAP)),
@@ -50,14 +55,6 @@ fn rate_limit_delay(attempt: usize) -> Duration {
         3 => 10,
         _ => 20,
     })
-}
-
-pub(super) fn retry_delay_ms(attempt: usize) -> u64 {
-    match attempt {
-        0 | 1 => 250,
-        2 => 500,
-        _ => 1_000,
-    }
 }
 
 /// Sleep out a backoff without ignoring cancellation: long rate-limit waits
@@ -150,11 +147,31 @@ mod tests {
             retry_after: None,
         };
 
-        assert_eq!(max_attempts(&rate_limited), 5);
-        assert_eq!(max_attempts(&transport), 3);
-        assert_eq!(backoff_delay(1, &rate_limited), Duration::from_secs(2));
-        assert_eq!(backoff_delay(4, &rate_limited), Duration::from_secs(20));
-        assert_eq!(backoff_delay(1, &transport), Duration::from_millis(250));
+        let policy = BridgeRetryPolicy::default();
+        assert_eq!(max_attempts(&rate_limited, &policy), 5);
+        assert_eq!(max_attempts(&transport, &policy), 3);
+        assert_eq!(
+            backoff_delay(1, &rate_limited, &policy),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            backoff_delay(4, &rate_limited, &policy),
+            Duration::from_secs(20)
+        );
+        assert_eq!(
+            backoff_delay(1, &transport, &policy),
+            Duration::from_millis(250)
+        );
+        let configured = BridgeRetryPolicy {
+            attempts: Some(1),
+            backoff_ms: 20_000,
+        };
+        assert_eq!(max_attempts(&rate_limited, &configured), 1);
+        assert_eq!(max_attempts(&transport, &configured), 1);
+        assert_eq!(
+            backoff_delay(1, &rate_limited, &configured),
+            Duration::from_secs(20)
+        );
     }
 
     #[test]
@@ -163,14 +180,18 @@ mod tests {
             rate_limited: true,
             retry_after: Some(Duration::from_secs(45)),
         };
-        assert_eq!(backoff_delay(1, &declared), Duration::from_secs(45));
+        let policy = BridgeRetryPolicy::default();
+        assert_eq!(
+            backoff_delay(1, &declared, &policy),
+            Duration::from_secs(45)
+        );
 
         let shorter_than_schedule = TransientFailure {
             rate_limited: true,
             retry_after: Some(Duration::from_secs(1)),
         };
         assert_eq!(
-            backoff_delay(4, &shorter_than_schedule),
+            backoff_delay(4, &shorter_than_schedule, &policy),
             Duration::from_secs(20)
         );
 
@@ -178,7 +199,7 @@ mod tests {
             rate_limited: true,
             retry_after: Some(Duration::from_secs(86_400)),
         };
-        assert_eq!(backoff_delay(1, &absurd), RETRY_AFTER_CAP);
+        assert_eq!(backoff_delay(1, &absurd, &policy), RETRY_AFTER_CAP);
     }
 
     #[test]

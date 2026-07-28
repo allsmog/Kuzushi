@@ -69,6 +69,12 @@ enum WatcherHandle {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WatcherRegistrationHealth {
+    Ready,
+    Failed,
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct WatcherMessageOutcome {
     pub(crate) changed: bool,
@@ -103,28 +109,33 @@ impl WorkspaceWatcherRuntime {
         self.target == target
     }
 
-    /// Adopt the watcher handle once background registration settles. Writes
-    /// that landed while the walk was still registering subtrees were never
-    /// observed, so settling (success or failure) surfaces one overflow
-    /// refresh to close that gap.
-    fn adopt_watch_registration(&mut self) {
+    /// Adopt the watcher handle once background registration settles.
+    /// Registration health is not a workspace mutation; only channel overflow
+    /// may synthesize a full-refresh marker.
+    fn adopt_watch_registration(&mut self) -> Option<WatcherRegistrationHealth> {
         let WatcherHandle::Registering(ready) = &self.watcher else {
-            return;
+            return None;
         };
-        let settled = match ready.try_recv() {
-            Err(TryRecvError::Empty) => return,
-            Ok(Ok(watcher)) => WatcherHandle::Ready {
-                _keep_alive: watcher,
-            },
-            Ok(Err(_)) | Err(TryRecvError::Disconnected) => WatcherHandle::Failed,
+        let (settled, health) = match ready.try_recv() {
+            Err(TryRecvError::Empty) => return None,
+            Ok(Ok(watcher)) => (
+                WatcherHandle::Ready {
+                    _keep_alive: watcher,
+                },
+                WatcherRegistrationHealth::Ready,
+            ),
+            Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
+                (WatcherHandle::Failed, WatcherRegistrationHealth::Failed)
+            }
         };
-        self.overflowed.store(true, Ordering::SeqCst);
         self.watcher = settled;
+        Some(health)
     }
 
     fn drain_changes(&mut self, release_deferred_state: bool) -> WatcherDrainOutcome {
-        self.adopt_watch_registration();
+        let registration_health = self.adopt_watch_registration();
         let mut outcome = self.collect_pending_changes(release_deferred_state);
+        outcome.registration_health = registration_health;
         let new_state_event = outcome.new_state_event;
         let drained = &mut outcome.batch;
         drained.changes = coalesce_changes(std::mem::take(&mut drained.changes));
@@ -135,21 +146,37 @@ impl WorkspaceWatcherRuntime {
     }
 
     fn collect_pending_changes(&mut self, release_deferred_state: bool) -> WatcherDrainOutcome {
-        let mut drained = overflow_marker(&self.overflowed);
-        let from_overflow = drained.state_artifact_paths.len();
-        if from_overflow > 0 {
-            // Overflow means writes went unobserved: forget the applied
-            // identities so the refresh sentinel cannot be gated as
-            // "unchanged".
+        let (mut drained, overflow_state_event) = self.take_overflow_marker();
+        self.release_deferred_state_paths(&mut drained, release_deferred_state);
+        let (channel_state_event, tail_may_remain) = self.drain_channel_batches(&mut drained);
+        WatcherDrainOutcome {
+            batch: drained,
+            new_state_event: overflow_state_event || channel_state_event,
+            tail_may_remain,
+            registration_health: None,
+        }
+    }
+
+    fn take_overflow_marker(&mut self) -> (WorkspaceWatcherBatch, bool) {
+        let drained = overflow_marker(&self.overflowed);
+        let overflowed = !drained.state_artifact_paths.is_empty();
+        if overflowed {
+            // Unobserved writes invalidate every applied artifact identity.
             self.applied_state_fingerprints.clear();
         }
-        let mut new_state_event = !drained.state_artifact_paths.is_empty();
-        let mut tail_may_remain = true;
-        if release_deferred_state {
+        (drained, overflowed)
+    }
+
+    fn release_deferred_state_paths(&mut self, drained: &mut WorkspaceWatcherBatch, release: bool) {
+        if release {
             drained
                 .state_artifact_paths
                 .append(&mut self.deferred_state_artifact_paths);
         }
+    }
+
+    fn drain_channel_batches(&mut self, drained: &mut WorkspaceWatcherBatch) -> (bool, bool) {
+        let mut new_state_event = false;
         for _ in 0..WATCHER_DRAIN_LIMIT {
             match self.rx.try_recv() {
                 Ok(batch) => {
@@ -157,16 +184,11 @@ impl WorkspaceWatcherRuntime {
                     drained.merge(batch);
                 }
                 Err(TryRecvError::Empty | TryRecvError::Disconnected) => {
-                    tail_may_remain = false;
-                    break;
+                    return (new_state_event, false);
                 }
             }
         }
-        WatcherDrainOutcome {
-            batch: drained,
-            new_state_event,
-            tail_may_remain,
-        }
+        (new_state_event, true)
     }
 
     fn debounce_state_artifacts(
@@ -237,6 +259,7 @@ struct WatcherDrainOutcome {
     batch: WorkspaceWatcherBatch,
     new_state_event: bool,
     tail_may_remain: bool,
+    registration_health: Option<WatcherRegistrationHealth>,
 }
 
 #[derive(Default)]
@@ -288,32 +311,69 @@ pub(crate) fn apply_watcher_messages_with_outcome(
     };
     let work_running = app.has_running_work();
     let drained = watcher.drain_changes(!work_running);
-    let batch = drained.batch;
+    let health_changed = report_watcher_registration_health(app, drained.registration_health);
+    let workspace_changed = apply_watcher_batch(app, watcher, drained.batch, work_running);
+    WatcherMessageOutcome {
+        changed: health_changed || workspace_changed,
+        tail_may_remain: drained.tail_may_remain,
+    }
+}
+
+fn apply_watcher_batch(
+    app: &mut ShellApp,
+    watcher: &mut WorkspaceWatcherRuntime,
+    batch: WorkspaceWatcherBatch,
+    work_running: bool,
+) -> bool {
     if batch.is_empty() {
-        return WatcherMessageOutcome {
-            changed: false,
-            tail_may_remain: drained.tail_may_remain,
-        };
+        return false;
     }
     // External writers changed the workspace: even when the refresh is
     // deferred/debounced, the liveness badge must stop claiming "idle".
     app.ui_mut().record_external_sync(Instant::now());
-    let source_changed = !batch.changes.is_empty()
-        && update_and_execute_effects(app, Msg::WorkspaceChanged(batch.changes));
-    let state_changed = if batch.state_artifact_paths.is_empty() {
-        false
-    } else if work_running {
-        watcher.defer_state_artifact_paths(batch.state_artifact_paths);
-        false
-    } else {
-        let effects = app.apply_external_workspace_state_change(&batch.state_artifact_paths);
-        EffectRuntime::execute(app, effects);
-        true
-    };
-    WatcherMessageOutcome {
-        changed: source_changed || state_changed,
-        tail_may_remain: drained.tail_may_remain,
+    let source_changed = apply_source_changes(app, batch.changes);
+    let state_changed =
+        apply_state_artifact_changes(app, watcher, batch.state_artifact_paths, work_running);
+    source_changed || state_changed
+}
+
+fn apply_source_changes(app: &mut ShellApp, changes: Vec<WorkspaceChange>) -> bool {
+    if changes.is_empty() {
+        return false;
     }
+    update_and_execute_effects(app, Msg::WorkspaceChanged(changes))
+}
+
+fn apply_state_artifact_changes(
+    app: &mut ShellApp,
+    watcher: &mut WorkspaceWatcherRuntime,
+    paths: Vec<PathBuf>,
+    work_running: bool,
+) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+    if work_running {
+        watcher.defer_state_artifact_paths(paths);
+        return false;
+    }
+    let effects = app.apply_external_workspace_state_change(&paths);
+    EffectRuntime::execute(app, effects);
+    true
+}
+
+fn report_watcher_registration_health(
+    app: &mut ShellApp,
+    health: Option<WatcherRegistrationHealth>,
+) -> bool {
+    if health != Some(WatcherRegistrationHealth::Failed) {
+        return false;
+    }
+    app.set_warn_notice(
+        "workspace watcher",
+        "automatic workspace change detection is unavailable; reopen the target after fixing filesystem watch limits",
+    );
+    true
 }
 
 /// Registering the recursive watch must not run on the shell thread: the
@@ -713,8 +773,8 @@ mod tests {
 
     /// `start` must return without waiting for the recursive watch walk —
     /// a blocking walk deafens the shell to input for minutes on large
-    /// targets. The handle is adopted on a later drain, and settling
-    /// surfaces exactly one overflow refresh to cover the unwatched gap.
+    /// targets. Clean registration is health-only and must not fabricate a
+    /// source or `.kuzushi` change.
     #[test]
     fn start_returns_immediately_and_adopts_the_registration_later() {
         let tmp = tempfile::tempdir().unwrap();
@@ -726,23 +786,19 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(5);
         while matches!(runtime.watcher, WatcherHandle::Registering(_)) {
             assert!(Instant::now() < deadline, "registration never settled");
-            runtime.adopt_watch_registration();
+            let _ = runtime.adopt_watch_registration();
             std::thread::sleep(Duration::from_millis(10));
         }
 
         assert!(matches!(runtime.watcher, WatcherHandle::Ready { .. }));
         let refresh = runtime.drain_changes(true);
-        assert_eq!(
-            refresh.batch.changes,
-            vec![WorkspaceChange::GitHeadChanged],
-            "settling must surface the overflow refresh"
-        );
+        assert!(refresh.batch.changes.is_empty());
+        assert!(refresh.batch.state_artifact_paths.is_empty());
         assert!(runtime.drain_changes(true).batch.changes.is_empty());
     }
 
     /// A registration thread that dies (unreadable root, inotify limits)
-    /// degrades to an unwatched shell with one overflow refresh — it must
-    /// not abort the shell or wedge the drain path.
+    /// reports degraded health without claiming the source snapshot changed.
     #[test]
     fn failed_registration_degrades_instead_of_aborting() {
         let (_input, wake) = TerminalLoopInbox::channel_for_test();
@@ -751,10 +807,17 @@ mod tests {
         watcher.runtime.watcher = WatcherHandle::Registering(ready_rx);
         drop(ready_tx);
 
-        let refresh = watcher.runtime.drain_changes(true);
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let outcome = apply_watcher_messages_with_outcome(&mut app, Some(&mut watcher.runtime));
 
         assert!(matches!(watcher.runtime.watcher, WatcherHandle::Failed));
-        assert_eq!(refresh.batch.changes, vec![WorkspaceChange::GitHeadChanged]);
+        assert!(outcome.changed);
+        assert!(app.workspace_stale().is_none());
+        assert!(app
+            .advisory()
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.source == "workspace watcher"));
         assert!(watcher.runtime.drain_changes(true).batch.changes.is_empty());
     }
 

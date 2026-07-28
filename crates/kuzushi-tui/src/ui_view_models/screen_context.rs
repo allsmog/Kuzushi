@@ -3,7 +3,7 @@ use crate::app::{PaneFocus, ShellView};
 use crate::ShellApp;
 use kuzushi_core::{
     finding_next_action, runtime_validation_summary, stable_finding_alias, static_proof_summary,
-    Finding, FindingEvidence, FindingNextAction, PersistedProofVerdict, PersistedVerification,
+    Finding, FindingEvidence, FindingNextAction, PersistedVerification,
 };
 use std::collections::BTreeMap;
 
@@ -274,7 +274,13 @@ fn runtime_verification_state(finding: &Finding) -> String {
     finding
         .verification
         .as_ref()
-        .map(|verification| verification.proof_verdict.as_str().to_string())
+        .map(|verification| {
+            if verification.is_model_assessment() {
+                "model_assessed".to_string()
+            } else {
+                verification.proof_verdict.as_str().to_string()
+            }
+        })
         .unwrap_or_else(|| "not_verified".to_string())
 }
 
@@ -354,13 +360,10 @@ fn runtime_proven_findings(findings: &[Finding]) -> Vec<&Finding> {
     findings
         .iter()
         .filter(|finding| {
-            matches!(
-                finding
-                    .verification
-                    .as_ref()
-                    .map(|verification| verification.proof_verdict),
-                Some(PersistedProofVerdict::Exploited)
-            )
+            finding
+                .verification
+                .as_ref()
+                .is_some_and(PersistedVerification::is_empirically_verified)
         })
         .collect()
 }
@@ -389,7 +392,13 @@ fn proof_state_bucket(finding: &Finding) -> String {
     finding
         .verification
         .as_ref()
-        .map(|verification| verification.proof_verdict.as_str().to_string())
+        .map(|verification| {
+            if verification.is_model_assessment() {
+                "model_assessed".to_string()
+            } else {
+                verification.proof_verdict.as_str().to_string()
+            }
+        })
         .or_else(|| {
             finding
                 .static_proof_state

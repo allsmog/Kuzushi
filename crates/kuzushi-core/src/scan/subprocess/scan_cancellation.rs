@@ -105,7 +105,9 @@ impl ScanCancellation {
         self.insert_managed_child(managed)
     }
 
-    pub(crate) fn register_prepared_child(
+    /// Register a child configured by [`PreparedProcessGroup`], retaining its
+    /// parent-death lifeline until the child and all descendants are reaped.
+    pub fn register_prepared_child(
         &self,
         child: Child,
         process_group: PreparedProcessGroup,
@@ -315,15 +317,9 @@ mod tests {
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             if let Ok(value) = std::fs::read_to_string(path) {
-                let values = value
-                    .split_whitespace()
-                    .map(|value| value.parse::<u32>().unwrap())
-                    .collect::<Vec<_>>();
-                return OwnerProcesses {
-                    process_group_id: values[0],
-                    scanner_pid: values[1],
-                    descendant_pid: values[2],
-                };
+                if let Some(processes) = parse_owner_processes(&value) {
+                    return processes;
+                }
             }
             assert!(
                 owner.try_wait().unwrap().is_none(),
@@ -334,6 +330,16 @@ mod tests {
         let _ = owner.kill();
         let _ = owner.wait();
         panic!("owner helper did not publish its scanner process group");
+    }
+
+    #[cfg(unix)]
+    fn parse_owner_processes(value: &str) -> Option<OwnerProcesses> {
+        let mut values = value.split_whitespace();
+        Some(OwnerProcesses {
+            process_group_id: values.next()?.parse().ok()?,
+            scanner_pid: values.next()?.parse().ok()?,
+            descendant_pid: values.next()?.parse().ok()?,
+        })
     }
 
     #[cfg(unix)]

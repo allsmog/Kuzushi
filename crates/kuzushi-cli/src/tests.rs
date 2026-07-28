@@ -128,6 +128,26 @@ mod tests {
     }
 
     #[test]
+    fn nested_commands_reuse_the_global_target_identity() {
+        for argv in [
+            vec!["kuzushi", "runs", "list", "--target", "/tmp/target"],
+            vec!["kuzushi", "kwp", "audit", "--target", "/tmp/target"],
+            vec![
+                "kuzushi",
+                "campaign",
+                "run",
+                "campaign-1",
+                "--target",
+                "/tmp/target",
+            ],
+            vec!["kuzushi", "pr-comment", "--target", "/tmp/target"],
+        ] {
+            let cli = crate::cli::Cli::try_parse_from(argv).unwrap();
+            assert_eq!(cli.target, Some(PathBuf::from("/tmp/target")));
+        }
+    }
+
+    #[test]
     fn sessions_cli_parses_management_subcommands() {
         let list = crate::cli::Cli::try_parse_from([
             "kuzushi",
@@ -589,6 +609,28 @@ mod tests {
         )
         .expect_err("triage:run must be refused under deprecated --autonomy hunt alias");
         assert!(error.to_string().contains("raise posture"), "{error}");
+        let exit = error
+            .downcast_ref::<crate::application::run_exit::RunCommandExit>()
+            .expect("autonomy refusal must carry a deterministic batch exit");
+        assert_eq!(
+            exit.code(),
+            crate::application::run_exit::EXIT_RUN_PREPARE_FAILED
+        );
+        let run_id = latest_cli_run_id(&workspace);
+        let outcome = kuzushi_core::load_persisted_run_terminal_outcome(workspace.root(), &run_id)
+            .expect("autonomy refusal must have one agreeing terminal bundle");
+        assert_eq!(
+            outcome.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+        );
+        assert_eq!(outcome.result["status"], "blocked");
+        let done: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(kuzushi_core::run_dir(workspace.root(), &run_id).join("done.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(done["status"], "blocked");
+        assert_eq!(done["exitCode"], 2);
     }
 
     #[test]
@@ -1038,13 +1080,23 @@ mod tests {
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(labels, vec!["tool input", "tool result"]);
+        assert_eq!(
+            labels,
+            vec![
+                "tool input",
+                "run metadata",
+                "run events",
+                "semantic run items",
+                "failure handoff",
+                "report",
+                "artifact manifest",
+                "tool result",
+            ]
+        );
         for artifact in &summary.artifacts {
-            assert!(
-                std::path::Path::new(&artifact.path).exists(),
-                "missing artifact {}",
-                artifact.path
-            );
+            let path =
+                kuzushi_core::run_artifacts::run_artifact_path(tmp.path(), &run_id, &artifact.path);
+            assert!(path.exists(), "missing artifact {}", artifact.path);
         }
 
         let failed_run_id = start_cli_tool_run_with_loaded_modules(
@@ -1073,14 +1125,24 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(
             failed_labels,
-            vec!["tool input", "failure handoff", "tool result"]
+            vec![
+                "tool input",
+                "run metadata",
+                "run events",
+                "semantic run items",
+                "failure handoff",
+                "report",
+                "artifact manifest",
+                "tool result",
+            ]
         );
         for artifact in &failed_summary.artifacts {
-            assert!(
-                std::path::Path::new(&artifact.path).exists(),
-                "missing artifact {}",
-                artifact.path
+            let path = kuzushi_core::run_artifacts::run_artifact_path(
+                tmp.path(),
+                &failed_run_id,
+                &artifact.path,
             );
+            assert!(path.exists(), "missing artifact {}", artifact.path);
         }
     }
 

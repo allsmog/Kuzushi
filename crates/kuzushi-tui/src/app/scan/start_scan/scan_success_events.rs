@@ -65,6 +65,14 @@ impl ShellApp {
             ));
         };
         let findings_count = scan_result_findings_count(&result);
+        if let Some(reason) = self.scan_failure_abort_reason() {
+            let message = "scanner returned after the abort request";
+            return if reason.records_canceled() {
+                self.apply_scan_canceled(message, reason)
+            } else {
+                self.apply_scan_interrupted(message, reason)
+            };
+        }
         let cost = match kuzushi_core::run_artifacts::tool_run_output_cost_report(&result) {
             Ok(cost) => cost,
             Err(error) => {
@@ -910,6 +918,34 @@ mod tests {
     }
 
     #[test]
+    fn completed_result_after_operator_abort_stays_canceled() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "scan-completed-after-abort";
+        seed_test_scan_run(temp.path(), run_id);
+        let mut app = running_scan_app_at(run_id, temp.path());
+        app.scan_mut().unwrap().abort_requested = true;
+        app.set_scan_abort_reason(Some(AbortReason::Operator));
+
+        let effects = app.apply_scan_result(scan_result(run_id, "completed", true, &[]));
+
+        assert_eq!(app.scan().unwrap().stage, "canceled");
+        assert!(effects.iter().any(|effect| matches!(
+            effect,
+            ShellEffect::RecordScanRun(ScanRunRecord {
+                outcome: ScanRunOutcome::Canceled { .. },
+                ..
+            })
+        )));
+        EffectRuntime::execute(&mut app, effects);
+        assert_eq!(
+            kuzushi_core::load_run_summary(temp.path(), run_id)
+                .unwrap()
+                .status,
+            "canceled"
+        );
+    }
+
+    #[test]
     fn lifecycle_persistence_failure_is_visible_and_not_reported_as_durable() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::write(temp.path().join(".kuzushi"), "not a directory").unwrap();
@@ -1289,6 +1325,7 @@ mod tests {
                 },
                 cost,
                 error_class: None,
+                failure: None,
             },
         )
     }

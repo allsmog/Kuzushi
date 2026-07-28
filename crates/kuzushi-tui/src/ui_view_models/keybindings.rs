@@ -80,6 +80,7 @@ fn view_owns_its_input_contract(app: &ShellApp) -> bool {
                 | crate::ShellView::ConfirmDialog
                 | crate::ShellView::QuitConfirm
                 | crate::ShellView::Keymap
+                | crate::ShellView::Scene
         )
 }
 
@@ -199,7 +200,7 @@ fn idle_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if uses_default && !view_owns_its_input_contract(app) {
         push_view_keybindings(&mut bindings, app);
     }
-    push_unique_binding(&mut bindings, bind("workbench", "command center"));
+    push_unique_binding(&mut bindings, bind("workbench", "phase workflow"));
     bindings
 }
 
@@ -230,7 +231,7 @@ fn default_keybindings() -> Vec<FooterKeybinding> {
     // cost, patch, failure-handoff, …) must never read as a dead-end.
     vec![
         bind("Esc", "back"),
-        bind("workbench", "command center"),
+        bind("workbench", "phase workflow"),
         bind("Ctrl+G", "palette"),
         bind("help", "command list"),
         bind("Ctrl+C", "exit"),

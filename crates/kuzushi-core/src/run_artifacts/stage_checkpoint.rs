@@ -6,8 +6,9 @@ use std::sync::Mutex;
 #[path = "stage_checkpoint/discovery.rs"]
 mod discovery;
 pub use discovery::{
-    active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
-    PendingStageCheckpoint, StageCheckpointCoordinates, StageCheckpointScope,
+    active_stage_checkpoints, checkpoint_coordinates_for_run,
+    matching_checkpoint_coordinates_for_run, pending_stage_checkpoints, PendingStageCheckpoint,
+    StageCheckpointCoordinates, StageCheckpointScope,
 };
 
 #[cfg(test)]
@@ -36,7 +37,7 @@ pub struct StageCheckpointFile {
     /// The run that most recently wrote this checkpoint.
     pub source_run_id: String,
     /// Workspace content identity at write time (clean git revision). None
-    /// for dirty or non-git targets — resume proceeds but discloses it.
+    /// for dirty or non-git targets; those checkpoints are never reused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tree_identity: Option<String>,
     /// Last stage that started but has not completed — the resume point.
@@ -88,11 +89,7 @@ impl StageCheckpointStore {
 }
 
 fn write_checkpoint_atomically(path: &Path, contents: &str) -> std::io::Result<()> {
-    let parent = path.parent().expect("checkpoint path has a parent");
-    fs::create_dir_all(parent)?;
-    let temp = path.with_extension("json.tmp");
-    fs::write(&temp, contents)?;
-    fs::rename(&temp, path)
+    crate::fs_atomic::write_atomic(path, contents).map_err(std::io::Error::other)
 }
 
 fn hex_fingerprint(fingerprint: &[u8; 32]) -> String {
@@ -126,6 +123,16 @@ pub struct StageCheckpointHandle {
 impl StageCheckpointHandle {
     pub fn open(store: StageCheckpointStore, target: &Path, run_id: &str, tool: &str) -> Self {
         let tree_identity = clean_tree_identity(target);
+        Self::open_with_tree_identity(store, target, run_id, tool, tree_identity)
+    }
+
+    fn open_with_tree_identity(
+        store: StageCheckpointStore,
+        target: &Path,
+        run_id: &str,
+        tool: &str,
+        tree_identity: Option<String>,
+    ) -> Self {
         let prior_file = store
             .load()
             .filter(|file| prior_checkpoint_is_fresh(file, tool, tree_identity.as_deref()));
@@ -193,10 +200,10 @@ impl StageCheckpointHandle {
     /// Best-effort: None when the write fails.
     pub fn write_stage_payload(&self, stage: &str, payload: &Value) -> Option<String> {
         let leaf = format!("stage-{}.json", sanitized_stage_leaf(stage));
-        let artifact =
-            write_run_artifact_json(&self.target, &self.run_id, &leaf, "stage payload", payload)
-                .ok()?;
-        relative_to_target(&self.target, &artifact.path)
+        write_run_artifact_json(&self.target, &self.run_id, &leaf, "stage payload", payload)
+            .ok()?;
+        let path = run_dir(&self.target, &self.run_id).join(leaf);
+        relative_to_target(&self.target, &path.to_string_lossy())
     }
 
     /// Read back the payload a completed stage persisted (possibly in a
@@ -260,8 +267,9 @@ impl StageCheckpointHandle {
     }
 }
 
-/// A prior checkpoint is only trusted for the same tool and, when both
-/// sides know their tree identity, the same workspace content.
+/// A prior checkpoint is trusted only for the same tool and the same known,
+/// clean workspace revision. Dirty and non-git targets rerun paid stages
+/// rather than risking stale evidence reuse.
 fn prior_checkpoint_is_fresh(
     file: &StageCheckpointFile,
     tool: &str,
@@ -270,10 +278,10 @@ fn prior_checkpoint_is_fresh(
     if file.tool != tool {
         return false;
     }
-    match (file.tree_identity.as_deref(), tree_identity) {
-        (Some(prior), Some(current)) => prior == current,
-        _ => true,
-    }
+    matches!(
+        (file.tree_identity.as_deref(), tree_identity),
+        (Some(prior), Some(current)) if prior == current
+    )
 }
 
 fn sanitized_stage_leaf(stage: &str) -> String {

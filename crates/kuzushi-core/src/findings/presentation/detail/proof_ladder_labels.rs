@@ -61,6 +61,15 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
             next_step: "suppress with expiry if the operator accepts the evidence",
         },
     ),
+    (
+        ProofLadderKind::ModelAssessed,
+        ProofLadderText {
+            stage: "model_assessed",
+            label: "model-assessed - unverified at runtime",
+            reason: "automated review assessed exploitability without executing target code",
+            next_step: "run verify:finding with a runtime-backed mode",
+        },
+    ),
     (ProofLadderKind::Suspected, SUSPECTED_PROOF_LADDER),
 ];
 

@@ -1,3 +1,4 @@
+use crate::content_store::ObjectRef;
 use serde::{Deserialize, Serialize};
 
 /// Durable state of a reviewed patch after synthesis has finished.
@@ -87,6 +88,8 @@ pub struct PatchLifecycleRecord {
     pub state: PatchLifecycleState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reverify_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reverify_evidence: Option<ObjectRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub actor: String,
@@ -100,6 +103,13 @@ pub struct PatchLifecycleRecord {
 impl PatchLifecycleRecord {
     pub fn touched_paths(&self) -> impl Iterator<Item = &str> {
         self.touched_files.iter().map(|file| file.path.as_str())
+    }
+
+    pub fn is_empirically_verified(&self) -> bool {
+        self.state == PatchLifecycleState::Verified
+            && self.reverify_evidence.as_ref().is_some_and(|evidence| {
+                super::patch_reverification::validate_proof_snapshot_ref(evidence).is_ok()
+            })
     }
 }
 
@@ -125,5 +135,32 @@ mod tests {
             assert_eq!(PatchLifecycleState::from_str(state.as_str()), Some(state));
         }
         assert_eq!(PatchLifecycleState::from_str("made_up"), None);
+    }
+
+    #[test]
+    fn empirical_verification_requires_a_complete_receipt_reference() {
+        let mut value = serde_json::json!({
+            "applicationId": "application-1",
+            "stableFp": "stable-1",
+            "fingerprint": "finding-1",
+            "patchRunId": "patch-1",
+            "target": "/repo",
+            "diffHash": "diff",
+            "touchedFiles": [],
+            "state": "verified",
+            "actor": "operator",
+            "applicationStartedAt": "1",
+            "updatedAt": "2"
+        });
+        let legacy: PatchLifecycleRecord = serde_json::from_value(value.clone()).unwrap();
+        assert!(!legacy.is_empirically_verified());
+
+        value["reverifyEvidence"] = serde_json::json!({
+            "kind": "proof-snapshot",
+            "hash": "a".repeat(64),
+            "sizeBytes": 1
+        });
+        let current: PatchLifecycleRecord = serde_json::from_value(value).unwrap();
+        assert!(current.is_empirically_verified());
     }
 }

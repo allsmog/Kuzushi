@@ -16,6 +16,8 @@ pub struct AgentQueryRequest {
     pub cwd: PathBuf,
     pub system_prompt: String,
     pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<String>,
     #[serde(default)]
     pub tool_policy: AgentToolPolicy,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -46,6 +48,7 @@ impl AgentQueryRequest {
             cwd: cwd.into(),
             system_prompt: system_prompt.into(),
             prompt: prompt.into(),
+            stage: None,
             tool_policy: AgentToolPolicy::default(),
             structured_output: None,
             thinking_level: None,
@@ -57,6 +60,11 @@ impl AgentQueryRequest {
 
     pub fn with_tool_policy(mut self, tool_policy: AgentToolPolicy) -> Self {
         self.tool_policy = tool_policy;
+        self
+    }
+
+    pub fn with_stage(mut self, stage: impl Into<String>) -> Self {
+        self.stage = Some(stage.into());
         self
     }
 

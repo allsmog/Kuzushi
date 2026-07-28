@@ -11,7 +11,7 @@ Feature: Durable phase pages survive in-place terminal resizing
 
   Scenario Outline: A canonical phase survives the complete resize sequence
     When I launch the shell
-    And I press "F2"
+    And I press "Esc"
     And I press "<key>"
     Then an alternate-screen capture shows "Viewing <title>"
     When I resize the live terminal to 120 by 36
@@ -38,18 +38,20 @@ Feature: Durable phase pages survive in-place terminal resizing
       | 4   | PROVE  | Prove  |
       | 5   | FIX    | Fix    |
 
-  Scenario: A hidden compact fallback restores semantic focus when space returns
+  Scenario: A contextual DFD survives compact fallback and restores its origin
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\"}"
     And the artifact ".kuzushi/threat-model.json" is seeded with "{\"version\":\"2.0\",\"dfd\":{\"nodes\":[{\"id\":\"client\",\"type\":\"external-entity\",\"name\":\"Client\",\"trustZone\":\"external\"},{\"id\":\"api\",\"type\":\"process\",\"name\":\"API\",\"trustZone\":\"application\"}],\"flows\":[{\"id\":\"f1\",\"sourceId\":\"client\",\"targetId\":\"api\",\"description\":\"request\",\"trustBoundaryIds\":[]}],\"trustBoundaries\":[]},\"threats\":[]}"
     When I launch the shell
-    And I press "F2"
+    And I press "Esc"
     And I press "1"
+    And I press "z"
     And I press "Tab"
-    Then an alternate-screen capture shows "THREAT MODEL / DFD"
+    And I press "Tab"
+    Then an alternate-screen capture shows "DATA-FLOW DIAGRAM"
     When I resize the live terminal to 40 by 12
-    Then the resized live frame shows "MAP"
+    Then the resized live frame shows "DATA-FLOW DIAGRAM"
     When I resize the live terminal to 160 by 48
-    And I press "Z"
-    Then an alternate-screen capture shows "ZOOM DFD"
-    When I press "Z"
+    Then an alternate-screen capture shows "DATA-FLOW DIAGRAM"
+    And an alternate-screen capture shows "Client"
+    When I press "Esc"
     Then an alternate-screen capture shows "Viewing Map"

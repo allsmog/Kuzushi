@@ -752,7 +752,9 @@ mod triage_band_and_state_tests {
             Severity::High,
             "demo finding",
         );
-        finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+        finding.triage = Some(TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict,
             confidence,
             rationale: "test".to_string(),

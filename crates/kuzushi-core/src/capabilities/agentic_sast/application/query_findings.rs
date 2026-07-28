@@ -7,43 +7,59 @@ pub(crate) fn query_agentic_sast_findings_with_cost(
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
     query_required_structured_json_with_cost(
         runtime,
-        AgentQueryRequest::new(
-            run.model.clone(),
-            run.target.clone(),
-            run.system_prompt.clone(),
-            build_agentic_sast_prompt(
-                &run.target,
-                &run.options,
-                &run.inventory,
-                review_context,
-                run.whitebox_static,
-                &run.enrichment,
-            ),
-        )
-        .with_tool_policy(run.tool_policy.clone()),
+        agentic_sast_query_request(run, review_context),
         StructuredJsonContract::from_schema::<crate::structured_output::FindingsOutput>(
             "agentic-sast:scan",
             "AgenticSastFindings",
         ),
-        |raw| {
-            require_json_object(raw).and_then(|raw| {
-                let mut findings = normalize_agentic_sast_findings(
-                    raw,
-                    &run.target,
-                    run.options.max_findings,
-                    run.whitebox_static,
-                )?;
-                findings.retain(|finding| {
-                    agentic_path_allowed(
-                        &finding.file_path,
-                        &run.options.include_patterns,
-                        &run.options.exclude_patterns,
-                    )
-                });
-                Ok(findings)
-            })
-        },
+        |raw| normalize_and_filter_agentic_sast_findings(raw, run),
     )
+}
+
+fn agentic_sast_query_request(
+    run: &AgenticSastRun,
+    review_context: Option<&str>,
+) -> AgentQueryRequest {
+    let stage = if review_context.is_some() {
+        "agentic-sast:review"
+    } else {
+        "agentic-sast:hunt"
+    };
+    AgentQueryRequest::new(
+        run.model.clone(),
+        run.target.clone(),
+        run.system_prompt.clone(),
+        build_agentic_sast_prompt(
+            &run.target,
+            &run.options,
+            &run.inventory,
+            review_context,
+            run.whitebox_static,
+            &run.enrichment,
+        ),
+    )
+    .with_stage(stage)
+    .with_tool_policy(run.tool_policy.clone())
+}
+
+fn normalize_and_filter_agentic_sast_findings(
+    raw: Value,
+    run: &AgenticSastRun,
+) -> Result<Vec<Finding>> {
+    let mut findings = normalize_agentic_sast_findings(
+        require_json_object(raw)?,
+        &run.target,
+        run.options.max_findings,
+        run.whitebox_static,
+    )?;
+    findings.retain(|finding| {
+        agentic_path_allowed(
+            &finding.file_path,
+            &run.options.include_patterns,
+            &run.options.exclude_patterns,
+        )
+    });
+    Ok(findings)
 }
 
 pub(crate) fn merge_agentic_sast_findings(

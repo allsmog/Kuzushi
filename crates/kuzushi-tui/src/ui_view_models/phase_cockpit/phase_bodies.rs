@@ -5,21 +5,20 @@ use super::{
 use crate::ui_view_models::{
     active_review_queue_mode, attack_tree, current_finding_for_detail, dfd_model,
     finding_detail_model_for_projection, findings_model, patch_review_model, report_preview_model,
-    review_queue_model, selected_finding_detail_model, threat_patch_card_model,
-    visible_finding_at_cursor, workbench_report_command,
+    review_queue_model, selected_finding_detail_model, selected_finding_out_of_window_notice,
+    threat_patch_card_model, visible_finding_at_cursor, workbench_report_command,
 };
 use crate::ShellApp;
 use crate::{FindingPatchTruthState, ViewDataState};
 use kuzushi_core::{PatchLifecycleRecord, PatchLifecycleState, WorkspaceExportFormat};
 
 pub(super) fn review_phase_model(app: &ShellApp) -> ReviewPhaseModel {
-    let findings = findings_model(app);
     let finding = visible_finding_at_cursor(app)
         .map(|(alias, finding)| finding_detail_model_for_projection(app, Some(alias), &finding));
     ReviewPhaseModel {
         review: review_queue_model(app, active_review_queue_mode(app)),
         finding,
-        selection_disclosure: review_selection_disclosure(app, &findings),
+        selection_disclosure: review_selection_disclosure(app),
         next_plan: super::map::next_scans_state(app),
         chains: super::chain_artifacts::chain_artifacts_model(app),
     }
@@ -218,11 +217,8 @@ fn empty_remediation_model(stage: RemediationLifecycleStage) -> RemediationLifec
     }
 }
 
-pub(super) fn review_selection_disclosure(
-    app: &ShellApp,
-    findings: &crate::ui_view_models::FindingsModel,
-) -> Option<SelectionDisclosureModel> {
-    let notice = findings.selected_out_of_window.as_ref()?;
+pub(super) fn review_selection_disclosure(app: &ShellApp) -> Option<SelectionDisclosureModel> {
+    let notice = selected_finding_out_of_window_notice(app)?;
     Some(SelectionDisclosureModel {
         message: format!("{notice}; Review actions target the highlighted visible row"),
         filter: active_filter_label(app),
@@ -251,6 +247,10 @@ pub(super) fn actionable_selection_disclosure(
 }
 
 fn active_filter_label(app: &ShellApp) -> String {
+    let search = app.router.workbench().review().search_query.trim();
+    if !search.is_empty() {
+        return format!("search:{search}");
+    }
     app.active_findings_filter()
         .as_deref()
         .filter(|filter| !filter.trim().is_empty())

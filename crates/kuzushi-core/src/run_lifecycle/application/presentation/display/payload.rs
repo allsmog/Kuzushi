@@ -120,7 +120,25 @@ fn model_call_lines(value: &ModelCallPresentationV1) -> Vec<String> {
     if let Some(error) = value.error_class.as_ref() {
         line.push_str(&format!(" · error={error}"));
     }
-    vec![line]
+    append_model_failure(&mut line, value.failure.as_ref());
+    let mut lines = vec![line];
+    if let Some(detail) = value.failure.as_ref().and_then(|failure| failure.detail.as_deref()) {
+        lines.push(format!("  detail: {detail}"));
+    }
+    lines
+}
+
+fn append_model_failure(
+    line: &mut String,
+    failure: Option<&crate::runtime::RuntimeFailureMetadata>,
+) {
+    let Some(failure) = failure else { return };
+    if let Some(stage) = failure.stage.as_deref() {
+        line.push_str(&format!(" · stage={stage}"));
+    }
+    if let Some(status) = failure.http_status {
+        line.push_str(&format!(" · http={status}"));
+    }
 }
 
 fn result_lines(value: &ResultSummaryPresentationV1) -> Vec<String> {

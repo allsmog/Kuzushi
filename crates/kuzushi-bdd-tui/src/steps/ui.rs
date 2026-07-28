@@ -120,16 +120,10 @@ async fn compact_run_focus_capture_is_stacked(
     upper: String,
     lower: String,
 ) {
-    if world
-        .last_run_focus_capture
-        .as_deref()
-        .is_some_and(|snapshot| {
-            compact_run_focus_matches(snapshot, &first_task, &second_task, &upper, &lower)
-        })
-    {
+    if last_compact_capture_matches(world, &first_task, &second_task, &upper, &lower) {
         return;
     }
-    let captured_run_focus = world.last_run_focus_capture.clone();
+    let mut captured_run_focus = world.last_run_focus_capture.clone();
     let session = world.require_session();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -137,6 +131,7 @@ async fn compact_run_focus_capture_is_stacked(
         if compact_run_focus_matches(&snapshot, &first_task, &second_task, &upper, &lower) {
             return;
         }
+        remember_run_focus_capture(&mut captured_run_focus, &snapshot);
         assert!(
             Instant::now() < deadline,
             "compact Run Focus never showed `{first_task}` then `{second_task}` with `{upper}` above `{lower}` and no shell prompt. Last captured Run Focus:\n{}\nFinal frame:\n{snapshot}",
@@ -144,6 +139,27 @@ async fn compact_run_focus_capture_is_stacked(
         );
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn remember_run_focus_capture(captured: &mut Option<String>, snapshot: &str) {
+    if snapshot.contains("RUN FOCUS") {
+        *captured = Some(snapshot.to_string());
+    }
+}
+
+fn last_compact_capture_matches(
+    world: &OnboardingWorld,
+    first_task: &str,
+    second_task: &str,
+    upper: &str,
+    lower: &str,
+) -> bool {
+    world
+        .last_run_focus_capture
+        .as_deref()
+        .is_some_and(|snapshot| {
+            compact_run_focus_matches(snapshot, first_task, second_task, upper, lower)
+        })
 }
 
 fn settle_after_key(session: &crate::tmux_harness::TmuxSession, key: &str) -> Option<String> {
@@ -366,7 +382,7 @@ fn translate_key(key: &str) -> String {
 mod tests {
     use super::{
         compact_run_focus_matches, planning_row_is_checked, planning_row_is_unchecked,
-        run_focus_shows_both,
+        remember_run_focus_capture, run_focus_shows_both,
     };
 
     const STACKED_RUN_FOCUS: &str = "\
@@ -416,5 +432,16 @@ OUTPUT\n";
             snapshot,
             "Build code property graph"
         ));
+    }
+
+    #[test]
+    fn run_focus_diagnostic_capture_ignores_unrelated_frames() {
+        let mut captured = Some("previous Run Focus".to_string());
+
+        remember_run_focus_capture(&mut captured, "SETUP\nTarget ready");
+        assert_eq!(captured.as_deref(), Some("previous Run Focus"));
+
+        remember_run_focus_capture(&mut captured, "RUN FOCUS\nTASKS");
+        assert_eq!(captured.as_deref(), Some("RUN FOCUS\nTASKS"));
     }
 }

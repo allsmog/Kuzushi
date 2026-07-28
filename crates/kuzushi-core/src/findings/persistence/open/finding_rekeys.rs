@@ -10,7 +10,7 @@ pub const MODEL_REKEY_CONFIDENCE_FLOOR_MILLIS: u16 = 800;
 
 const MAX_REKEY_HOPS: usize = 8;
 
-/// A validated model-dedupe link: the duplicate's stable key rekeys onto the
+/// An evidence-backed model-dedupe link: the duplicate's stable key rekeys onto the
 /// canonical's stable key, with the evidence the projector needs to attach
 /// the duplicate fingerprint to the canonical identity.
 #[derive(Debug, Clone, PartialEq)]
@@ -46,7 +46,9 @@ impl FindingStore {
     /// Stable keys that already carry an outgoing rekey edge — these rows are
     /// settled duplicates and drop out of dedupe candidate selection.
     pub fn rekeyed_stable_keys(&self) -> Result<BTreeSet<String>> {
-        let mut stmt = self.conn.prepare("select distinct old_fp from rekey_edges")?;
+        let mut stmt = self
+            .conn
+            .prepare("select distinct old_fp from rekey_edges")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<rusqlite::Result<BTreeSet<_>>>()
             .context("Could not list rekeyed stable keys")

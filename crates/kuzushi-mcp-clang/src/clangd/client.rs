@@ -25,14 +25,16 @@ pub struct ClangdClient {
     pub(crate) initialized: Mutex<bool>,
     pub(crate) request_gate: Mutex<()>,
     pub(crate) process_group_id: AtomicU32,
+    pub(crate) _process_group: Option<kuzushi_mcp_common::process::ParentDeathProcessGroup>,
     pub(crate) _sandbox_scratch: Option<tempfile::TempDir>,
 }
 
 impl ClangdClient {
     pub async fn spawn(repo: kuzushi_mcp_common::AuthorizedDirectory) -> Result<Self> {
-        let (mut child, scratch) = spawn_clangd(repo).await?;
+        let (mut child, scratch, process_group) = spawn_clangd(repo).await?;
         let (stdin, stdout) = take_child_io(&mut child)?;
         let mut client = Self::from_child_io(child, stdin, stdout);
+        client._process_group = Some(process_group);
         client._sandbox_scratch = Some(scratch);
         Ok(client)
     }
@@ -47,6 +49,7 @@ impl ClangdClient {
             initialized: Mutex::new(false),
             request_gate: Mutex::new(()),
             process_group_id: AtomicU32::new(process_group_id.unwrap_or(0)),
+            _process_group: None,
             _sandbox_scratch: None,
         }
     }
@@ -286,7 +289,11 @@ fn kill_process_group(_group_id: u32) {}
 
 pub(crate) async fn spawn_clangd(
     repo: kuzushi_mcp_common::AuthorizedDirectory,
-) -> Result<(Child, tempfile::TempDir)> {
+) -> Result<(
+    Child,
+    tempfile::TempDir,
+    kuzushi_mcp_common::process::ParentDeathProcessGroup,
+)> {
     clangd_command(repo)
         .await?
         .spawn("clangd")

@@ -35,6 +35,7 @@ mod context_strip;
 mod cost;
 mod display_text;
 mod failure_handoff;
+mod finding_search;
 mod finding_summary;
 mod findings;
 mod health;
@@ -81,6 +82,7 @@ mod setup;
 mod severity_tone;
 mod status_footer;
 mod strategy_queue;
+mod target_facts;
 mod terminal_title;
 mod theme_picker;
 mod threat_dfd_diagram;
@@ -151,6 +153,7 @@ pub(crate) use display_text::{
     scoped_target_path_label, workspace_artifact_path_label,
 };
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
+pub(crate) use finding_search::{finding_facet_values, FindingSearch};
 pub(crate) use finding_summary::{
     ci_result_findings_summary, compact_status_footer_findings_summary_from_counts,
     compact_status_footer_findings_summary_with_total, findings_count_summary_with_total,
@@ -161,12 +164,12 @@ pub(crate) use finding_summary::{
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{
     current_finding_for_detail, finding_detail_model_for_projection, findings_model,
-    review_backlog_active, selected_finding_detail_model, visible_finding_at_cursor,
-    visible_finding_at_index, visible_finding_position_for, visible_findings_len,
-    visible_sorted_finding_alias_indices, CleanScanEmptyState, FilteredFindingsEmptyState,
-    FindingDetailModel, FindingEvidenceRow, FindingListRow, FindingsEmptyState, FindingsModel,
-    ProofTier, SourceSnippetModel, TriageSummaryModel, SNIPPET_CONTEXT_AFTER,
-    SNIPPET_CONTEXT_BEFORE,
+    review_backlog_active, selected_finding_detail_model, selected_finding_out_of_window_notice,
+    visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
+    visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
+    FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
+    FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel, TriageSummaryModel,
+    SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
@@ -212,8 +215,9 @@ pub(crate) use module_run::{
     ModuleRunSummary,
 };
 pub(crate) use options::{
-    options_model, plain_options_model, OptionsBody, OptionsSummaryRow, OptionsTable,
-    OptionsTableRow, PlainOptionRow, PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
+    option_display_name, options_model, plain_options_model, OptionsBody, OptionsSummaryRow,
+    OptionsTable, OptionsTableRow, PlainOptionRow, PlainOptionsBody, PlainOptionsModel,
+    PlainOptionsTable,
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use permission_policy::{
@@ -269,7 +273,8 @@ pub(crate) use report_preview::{
 };
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use review_queue::{
-    review_queue_model, ReviewQueueMode, ReviewQueueModel, ReviewQueueRow, ReviewWorkflowGroup,
+    review_queue_model, ReviewFacetCount, ReviewFacetGroup, ReviewQueueMode, ReviewQueueModel,
+    ReviewQueueRow, ReviewWorkflowGroup,
 };
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,
@@ -310,6 +315,7 @@ pub(crate) use strategy_queue::{
     strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
     StrategyQueueRow,
 };
+pub(crate) use target_facts::target_fact_detail_lines;
 pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_model::{

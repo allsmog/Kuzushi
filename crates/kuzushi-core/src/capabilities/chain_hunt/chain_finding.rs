@@ -1,4 +1,4 @@
-//! Mapping a validated chain onto an ordinary open `Finding` with a
+//! Mapping a member-resolved chain onto an ordinary open `Finding` with a
 //! deterministic identity so re-proposals stay triage-idempotent.
 
 use super::{Finding, MemberRef, ModelChain, Severity};

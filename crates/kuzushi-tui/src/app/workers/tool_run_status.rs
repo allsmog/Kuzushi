@@ -203,8 +203,14 @@ fn prepare_root_shell_tool_loop(
         .with_cancellation(cancel.clone());
     let request = root_shell_agent_request(model, cwd.clone(), system_prompt, prompt);
     if let Err(error) = runtime.preflight_tool_loop_blocking(&request) {
-        settle_preflight_failure(&observation, run_id, intent.terminalize_in_loop, &error)
-            .map_err(CostedWorkerError::before_call)?;
+        settle_preflight_failure(
+            &observation,
+            run_id,
+            intent.terminalize_in_loop,
+            cancel,
+            &error,
+        )
+        .map_err(CostedWorkerError::before_call)?;
         return Err(CostedWorkerError::before_call(error));
     }
     if !intent.task_already_running {
@@ -249,6 +255,7 @@ fn execute_root_shell_tool_loop(
         &observation,
         run_id,
         sink,
+        cancel,
         terminalize_in_loop,
     )
 }
@@ -260,6 +267,7 @@ fn run_observed_model_loop(
     observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
     run_id: &str,
     sink: &JobEventSink,
+    cancel: &ScanCancellation,
     terminalize_in_loop: bool,
 ) -> CostedWorkerResult<String> {
     let outcome = match kuzushi_core::runtime::run_tool_loop_observed(runtime, request, handler) {
@@ -269,7 +277,10 @@ fn run_observed_model_loop(
                 observation,
                 run_id,
                 terminalize_in_loop,
-                kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+                terminal_status_after_cancellation(
+                    cancel,
+                    kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+                ),
                 kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
                 "model-backed workflow failed",
             );
@@ -281,7 +292,14 @@ fn run_observed_model_loop(
             )));
         }
     };
-    finish_root_shell_tool_loop(outcome, observation, run_id, sink, terminalize_in_loop)
+    finish_root_shell_tool_loop(
+        outcome,
+        observation,
+        run_id,
+        sink,
+        cancel,
+        terminalize_in_loop,
+    )
 }
 
 fn finish_root_shell_tool_loop(
@@ -289,11 +307,12 @@ fn finish_root_shell_tool_loop(
     observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
     run_id: &str,
     sink: &JobEventSink,
+    cancel: &ScanCancellation,
     terminalize_in_loop: bool,
 ) -> CostedWorkerResult<String> {
     let outcome = outcome.value;
     let cost = agent_loop_cost_report(&outcome).map_err(CostedWorkerError::unresolved)?;
-    let status = usable_agent_outcome_status(&outcome);
+    let status = terminal_status_after_cancellation(cancel, usable_agent_outcome_status(&outcome));
     let summary = model_outcome_summary(status, outcome.steps_used);
     let settlement = settle_root_model_run_if_owned(
         observation,
@@ -364,19 +383,38 @@ fn settle_preflight_failure(
     observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
     run_id: &str,
     terminalize_in_loop: bool,
+    cancel: &ScanCancellation,
     error: &anyhow::Error,
 ) -> anyhow::Result<()> {
     settle_root_model_run_if_owned(
         observation,
         run_id,
         terminalize_in_loop,
-        kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+        terminal_status_after_cancellation(
+            cancel,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+        ),
         kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
         &format!(
             "model runtime refused execution: {}",
             safe_runtime_error_class(error)
         ),
     )
+}
+
+fn terminal_status_after_cancellation(
+    cancel: &ScanCancellation,
+    fallback: kuzushi_core::run_lifecycle::RunItemStatus,
+) -> kuzushi_core::run_lifecycle::RunItemStatus {
+    match cancel.disposition() {
+        Some(kuzushi_core::scan::CancellationDisposition::Canceled) => {
+            kuzushi_core::run_lifecycle::RunItemStatus::Canceled
+        }
+        Some(kuzushi_core::scan::CancellationDisposition::Interrupted) => {
+            kuzushi_core::run_lifecycle::RunItemStatus::Interrupted
+        }
+        None => fallback,
+    }
 }
 
 fn settle_root_model_run_if_owned(

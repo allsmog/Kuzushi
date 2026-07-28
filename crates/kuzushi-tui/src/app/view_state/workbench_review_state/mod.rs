@@ -31,9 +31,9 @@ pub struct WorkbenchReviewState {
     /// latest verdict. Undo appends the inverse records — history is never
     /// deleted; the latest-decision-wins fold makes an append a reversal.
     pub backlog_last_batch: Vec<BacklogUndoEntry>,
-    /// Item 13: incremental search over the visible queue. Free text
-    /// fuzzy-matches title/message/path/rule id; `sev:`/`tool:`/`status:`/
-    /// `actor:` terms filter facets. Persists after Enter closes capture.
+    /// Item 13: incremental search over the visible queue. Free text covers
+    /// finding text, evidence, and sources; textual facets cover severity,
+    /// source/path, actor, confidence, and canonical status.
     pub search_query: String,
     /// True while the palette-style capture owns typing (`/` opens it) —
     /// keys never leak into the composer.

@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Snapshot fixtures for the failure-path decision cards.
 //!
 //! The happy-path phase snapshots never show a RESULT READY card, so the

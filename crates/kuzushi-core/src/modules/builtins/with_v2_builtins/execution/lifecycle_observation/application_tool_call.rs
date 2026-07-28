@@ -14,12 +14,7 @@ impl ApplicationToolCall {
     ) -> Result<PendingToolCallCompletion> {
         let identity = application_call_identity(&observation)?;
         emit_application_call_requested(&observation, identity, tool_name, input)?;
-        emit_application_call_rejected(
-            &observation,
-            identity,
-            reason_class,
-            detail,
-        )?;
+        emit_application_call_rejected(&observation, identity, reason_class, detail)?;
         Ok(rejected_completion(
             observation,
             identity,

@@ -128,6 +128,11 @@ impl ShellApp {
         let Some(tool) = summary.tool.filter(|_| resumable) else {
             return Ok(None);
         };
+        if kuzushi_core::run_artifacts::matching_checkpoint_coordinates_for_run(&target, run_id)
+            .is_none()
+        {
+            return Ok(None);
+        }
         let input_path = kuzushi_core::run_artifacts::run_dir(&target, run_id).join("input.json");
         let input = std::fs::read_to_string(&input_path)
             .with_context(|| format!("Could not read recorded input {}", input_path.display()))?;
@@ -320,8 +325,37 @@ mod resume_tests {
         let run_dir = kuzushi_core::run_artifacts::run_dir(workspace.root(), &run_id);
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("input.json"), r#"{"target":"."}"#).unwrap();
+        if status_failed {
+            write_resume_checkpoint(workspace.root(), &run_id);
+        }
         let app = ShellApp::new(V2Config::default(), Some(&workspace));
         (temp, app, run_id)
+    }
+
+    fn write_resume_checkpoint(target: &std::path::Path, run_id: &str) {
+        use kuzushi_core::run_lifecycle::*;
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        let requested = RunItemV1::ToolCallRequested {
+            tool_name: SafeText::operator_visible("x-ray:run"),
+            operation_fingerprint: OperationFingerprint::from_digest([7u8; 32]),
+            safe_option_names: Vec::new(),
+        };
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(RunItemId::new(), RunItemSource::Dispatch, requested)
+                    .with_call(RunCallId::new()),
+            )
+            .unwrap();
+        let store =
+            kuzushi_core::run_artifacts::StageCheckpointStore::discover(target, &[7; 32]).unwrap();
+        kuzushi_core::run_artifacts::StageCheckpointHandle::open(
+            store,
+            target,
+            run_id,
+            "x-ray:run",
+        )
+        .stage("query")
+        .complete(Vec::new());
     }
 
     #[test]

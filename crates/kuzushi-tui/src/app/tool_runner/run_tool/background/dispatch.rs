@@ -8,6 +8,7 @@ pub(super) struct BackgroundToolRun {
     pub(super) trace_handle: TraceHandle,
     pub(super) phase: Option<crate::app::WorkflowPhase>,
     pub(super) attempt_id: Option<kuzushi_core::run_lifecycle::RunAttemptId>,
+    pub(super) task_id: kuzushi_core::run_lifecycle::RunTaskId,
 }
 
 pub(super) struct BackgroundToolRunSeed {
@@ -271,6 +272,7 @@ fn prepare_background_tool_run(
         trace_handle,
         phase: seed.phase,
         attempt_id: seed.attempt_id,
+        task_id: seed.task_id,
     })
 }
 

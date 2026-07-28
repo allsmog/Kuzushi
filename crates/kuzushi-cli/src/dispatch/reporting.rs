@@ -101,7 +101,7 @@ fn dispatch_pr_comment_command(command: Command, default_target: Option<PathBuf>
     let Command::PrComment(args) = command else {
         unreachable!("non-pr-comment command routed to PR comment dispatcher")
     };
-    let target = require_cli_target("pr-comment", args.target, default_target)?;
+    let target = require_cli_target("pr-comment", None, default_target)?;
     pr_comment_command(
         target,
         args.repo,

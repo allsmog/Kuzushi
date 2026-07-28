@@ -205,8 +205,17 @@ fn triage_done_label(stats: &TriageRunStats, cost: crate::runtime::RuntimeCostRe
         )
     };
     format!(
-        "verdict-write · tp={} fp={} review={} byDesign={}{}",
-        stats.tp, stats.fp, stats.needs_review, stats.by_design, unresolved,
+        "triage-finish · classifications={}/{} failed={} voteFailures={} persistenceFailures={} · tp={} fp={} review={} byDesign={}{}",
+        stats.successful,
+        stats.attempted,
+        stats.failed,
+        stats.vote_failures,
+        stats.persistence_failures,
+        stats.tp,
+        stats.fp,
+        stats.needs_review,
+        stats.by_design,
+        unresolved,
     )
 }
 

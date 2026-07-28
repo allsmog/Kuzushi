@@ -263,6 +263,7 @@ fn connector_v_zroute(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_view_models::{DfdFlowModel, DfdKind, DfdModel, DfdNodeModel};
 
     fn render_to_text(widget: impl Widget, w: u16, h: u16) -> String {
         let area = Rect::new(0, 0, w, h);
@@ -274,44 +275,40 @@ mod tests {
             .join("\n")
     }
 
-    fn sample_dfd() -> crate::ui_view_models::DfdModel {
-        use crate::ui_view_models::{DfdFlowModel, DfdKind, DfdModel, DfdNodeModel};
+    fn sample_dfd() -> DfdModel {
         DfdModel {
             zones: vec!["internet".into(), "app".into(), "data".into()],
             nodes: vec![
-                DfdNodeModel {
-                    name: "user".into(),
-                    zone: "internet".into(),
-                    kind: DfdKind::Entity,
-                },
-                DfdNodeModel {
-                    name: "api".into(),
-                    zone: "app".into(),
-                    kind: DfdKind::Process,
-                },
-                DfdNodeModel {
-                    name: "db".into(),
-                    zone: "data".into(),
-                    kind: DfdKind::Store,
-                },
+                sample_node("user", "internet", DfdKind::Entity),
+                sample_node("api", "app", DfdKind::Process),
+                sample_node("db", "data", DfdKind::Store),
             ],
             flows: vec![
-                DfdFlowModel {
-                    from: "user".into(),
-                    to: "api".into(),
-                    crosses: true,
-                    label: "https".into(),
-                    boundary_ids: vec!["tb-edge".into()],
-                },
-                DfdFlowModel {
-                    from: "api".into(),
-                    to: "db".into(),
-                    crosses: true,
-                    label: "sql".into(),
-                    boundary_ids: vec!["tb-data".into()],
-                },
+                sample_flow("user", "api", "https", "tb-edge"),
+                sample_flow("api", "db", "sql", "tb-data"),
             ],
             empty_hint: None,
+        }
+    }
+
+    fn sample_node(key: &str, zone: &str, kind: DfdKind) -> DfdNodeModel {
+        DfdNodeModel {
+            key: key.into(),
+            name: key.into(),
+            zone: zone.into(),
+            kind,
+        }
+    }
+
+    fn sample_flow(from: &str, to: &str, label: &str, boundary: &str) -> DfdFlowModel {
+        DfdFlowModel {
+            from_id: from.into(),
+            to_id: to.into(),
+            from: from.into(),
+            to: to.into(),
+            crosses: true,
+            label: label.into(),
+            boundary_ids: vec![boundary.into()],
         }
     }
 
@@ -353,6 +350,7 @@ mod tests {
                     DfdDiagram {
                         model: sample_dfd(),
                         selection: Some(0),
+                        detail_scroll: 0,
                     },
                     w,
                     24
@@ -386,6 +384,7 @@ mod tests {
             DfdDiagram {
                 model: dfd,
                 selection: None,
+                detail_scroll: 0,
             },
             72,
             24,

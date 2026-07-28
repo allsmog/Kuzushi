@@ -1,5 +1,4 @@
 use crate::modules::ToolCallIdentity;
-use crate::run_artifacts::load_run_summary;
 use crate::run_lifecycle::{
     CallKind, ModelUsage, RunCallId, RunId, RunItemId, RunItemRecord, RunItemSource,
     RunItemStatus, RunItemV1, RunObservationHandle, RunProjection, SafeText,
@@ -20,7 +19,7 @@ pub(crate) fn emit_recovered_interruption(
     reason: &str,
     cost: crate::runtime::RuntimeCostReport,
 ) -> Result<()> {
-    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     if projection.terminal.is_some() {
         return Ok(());
     }
@@ -103,6 +102,7 @@ fn interrupted_model_finish(call: &crate::run_lifecycle::CallProjection) -> RunI
         },
         cost: crate::runtime::RuntimeCostReport::UNAVAILABLE,
         error_class: Some(SafeText::operator_visible("process_interrupted")),
+        failure: None,
     }
 }
 
@@ -191,14 +191,31 @@ pub fn emit_persisted_terminal_outcome_for_call(
     output: &Value,
     producing_call: Option<ToolCallIdentity>,
 ) -> Result<()> {
-    if crate::run_lifecycle::load_run_projection(target, run_id)?
-        .projection
+    let summary = crate::run_artifacts::load_run_summary_without_repair(target, run_id)?;
+    emit_terminal_outcome_for_summary(
+        observation,
+        target,
+        run_id,
+        output,
+        &summary,
+        producing_call,
+    )
+}
+
+pub(crate) fn emit_terminal_outcome_for_summary(
+    observation: &RunObservationHandle,
+    target: &Path,
+    run_id: &str,
+    output: &Value,
+    summary: &crate::run_artifacts::RunSummary,
+    producing_call: Option<ToolCallIdentity>,
+) -> Result<()> {
+    if crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?
         .terminal
         .is_some()
     {
         return Ok(());
     }
-    let summary = load_run_summary(target, run_id)?;
     let status = terminal_status_for_call(target, run_id, &summary.status, producing_call)?;
     let terminal_item_id = RunItemId::new();
     if let Some(identity) = producing_call {
@@ -209,9 +226,9 @@ pub fn emit_persisted_terminal_outcome_for_call(
     observation.emit_and_flush(RunItemRecord::new(
         terminal_item_id,
         RunItemSource::Workflow,
-        terminal_item(&summary, run_id, output, status)?,
+        terminal_item(summary, run_id, output, status)?,
     ))?;
-    record_coverage_baseline(target, &summary);
+    record_coverage_baseline(target, summary);
     Ok(())
 }
 
@@ -277,7 +294,7 @@ fn terminalize_semantic_plan(
     run_id: &str,
     status: RunItemStatus,
 ) -> Result<()> {
-    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     let Some(plan) = projection.plan else {
         return Ok(());
     };
@@ -344,7 +361,7 @@ fn terminalize_task_by_identity(
     let Some(task_id) = identity.task_id else {
         return Ok(());
     };
-    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     let task = projection
         .tasks
         .get(&task_id)
@@ -376,7 +393,7 @@ fn terminalize_semantic_task(
     status: RunItemStatus,
     producing_call: Option<ToolCallIdentity>,
 ) -> Result<()> {
-    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     if let Some(task) = observation.task_handle() {
         return terminalize_scoped_task(&projection, &task, status);
     }
@@ -477,7 +494,7 @@ fn terminal_status_for_call(
     let Some(identity) = producing_call else {
         return Ok(persisted);
     };
-    let projection = crate::run_lifecycle::load_run_projection(target, run_id)?.projection;
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, run_id)?;
     Ok(projection
         .calls
         .get(&identity.call_id)

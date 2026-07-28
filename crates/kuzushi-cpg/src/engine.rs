@@ -14,6 +14,15 @@ use std::time::SystemTime;
 /// scoped subtrees are the supported shape for very large targets.
 pub const DEFAULT_MAX_SOURCE_FILES: usize = 25_000;
 
+pub fn validate_graph_artifact(path: &Path) -> Result<(), String> {
+    let path = path.to_string_lossy().into_owned();
+    match std::panic::catch_unwind(|| Cpg::load(&path)) {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(error)) => Err(format!("invalid cpg-rs graph: {error}")),
+        Err(_) => Err("invalid cpg-rs graph: decoder panicked".to_string()),
+    }
+}
+
 /// Resource ceilings for one graph build. Loads of fresh artifacts are
 /// never limited — only fresh builds are.
 #[derive(Debug, Clone, Copy)]

@@ -19,7 +19,18 @@ pub(super) fn project_patch_lifecycle_event(
         .unwrap_or_else(|| serde_json::json!([]));
     let touched_files_json = serde_json::to_string(&touched_files)
         .context("Could not serialize patch lifecycle touched files")?;
-    let values = lifecycle_values(event, &touched_files_json)?;
+    let reverify_evidence_json = event
+        .payload
+        .get("reverifyEvidence")
+        .filter(|value| !value.is_null())
+        .map(serde_json::to_string)
+        .transpose()
+        .context("Could not serialize patch lifecycle reverification evidence")?;
+    let values = lifecycle_values(
+        event,
+        &touched_files_json,
+        reverify_evidence_json.as_deref(),
+    )?;
     insert_event(tx, &values)?;
     upsert_current(tx, &values)?;
     Ok(())
@@ -38,6 +49,7 @@ struct LifecycleValues<'a> {
     touched_files_json: &'a str,
     state: &'a str,
     reverify_run_id: Option<&'a str>,
+    reverify_evidence_json: Option<&'a str>,
     detail: Option<&'a str>,
     application_started_at: &'a str,
     applied_at: Option<&'a str>,
@@ -47,6 +59,7 @@ struct LifecycleValues<'a> {
 fn lifecycle_values<'a>(
     event: &'a EventEnvelope,
     touched_files_json: &'a str,
+    reverify_evidence_json: Option<&'a str>,
 ) -> Result<LifecycleValues<'a>> {
     Ok(LifecycleValues {
         event,
@@ -61,6 +74,7 @@ fn lifecycle_values<'a>(
         touched_files_json,
         state: require_payload_str(&event.payload, "state")?,
         reverify_run_id: payload_str(&event.payload, "reverifyRunId"),
+        reverify_evidence_json,
         detail: payload_str(&event.payload, "detail"),
         application_started_at: payload_str(&event.payload, "applicationStartedAt")
             .or_else(|| payload_str(&event.payload, "appliedAt"))
@@ -72,18 +86,7 @@ fn lifecycle_values<'a>(
 
 fn insert_event(tx: &Transaction<'_>, values: &LifecycleValues<'_>) -> Result<()> {
     tx.execute(
-        r#"
-        insert into patch_lifecycle_events(
-          event_hash, seq, application_id, stable_fp, fingerprint,
-          finding_scan_id, patch_run_id, target, diff_hash, base_commit,
-          touched_files_json, state, reverify_run_id, detail, actor,
-          application_started_at, applied_at, updated_at, created_at, payload_json
-        ) values (
-          ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-          ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
-        )
-        on conflict(event_hash) do nothing
-        "#,
+        PATCH_LIFECYCLE_EVENT_INSERT,
         params![
             values.event.event_hash.as_str(),
             sql_seq(values.event.seq)?,
@@ -98,6 +101,7 @@ fn insert_event(tx: &Transaction<'_>, values: &LifecycleValues<'_>) -> Result<()
             values.touched_files_json,
             values.state,
             values.reverify_run_id,
+            values.reverify_evidence_json,
             values.detail,
             values.event.actor,
             values.application_started_at,
@@ -126,6 +130,7 @@ fn upsert_current(tx: &Transaction<'_>, values: &LifecycleValues<'_>) -> Result<
             values.touched_files_json,
             values.state,
             values.reverify_run_id,
+            values.reverify_evidence_json,
             values.detail,
             values.event.actor,
             values.application_started_at,
@@ -136,15 +141,29 @@ fn upsert_current(tx: &Transaction<'_>, values: &LifecycleValues<'_>) -> Result<
     Ok(())
 }
 
+const PATCH_LIFECYCLE_EVENT_INSERT: &str = r#"
+insert into patch_lifecycle_events(
+  event_hash, seq, application_id, stable_fp, fingerprint,
+  finding_scan_id, patch_run_id, target, diff_hash, base_commit,
+  touched_files_json, state, reverify_run_id, reverify_evidence_json,
+  detail, actor, application_started_at, applied_at, updated_at,
+  created_at, payload_json
+) values (
+  ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+  ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21
+)
+on conflict(event_hash) do nothing
+"#;
+
 const PATCH_LIFECYCLE_CURRENT_UPSERT: &str = r#"
 insert into patch_lifecycle_current(
   application_id, latest_seq, stable_fp, fingerprint, finding_scan_id,
   patch_run_id, target, diff_hash, base_commit, touched_files_json,
-  state, reverify_run_id, detail, actor, application_started_at,
-  applied_at, updated_at
+  state, reverify_run_id, reverify_evidence_json, detail, actor,
+  application_started_at, applied_at, updated_at
 ) values (
   ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-  ?11, ?12, ?13, ?14, ?15, ?16, ?17
+  ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
 )
 on conflict(application_id) do update set
   latest_seq = excluded.latest_seq,
@@ -158,6 +177,7 @@ on conflict(application_id) do update set
   touched_files_json = excluded.touched_files_json,
   state = excluded.state,
   reverify_run_id = excluded.reverify_run_id,
+  reverify_evidence_json = excluded.reverify_evidence_json,
   detail = excluded.detail,
   actor = excluded.actor,
   application_started_at = excluded.application_started_at,

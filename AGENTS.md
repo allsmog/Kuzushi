@@ -435,7 +435,9 @@ is expected to behave identically and should be filed as a parity bug.
   decks over the workflow origin, not replacement workflow screens. A
   foreground completion first restores its exact origin, then opens the
   relevant non-empty deck; a background completion only emits a notice and
-  never steals focus. `scan` maps to Heatmap when findings exist, and
+  never steals focus. Threat-model completion is notification-only and never
+  force-opens the DFD; explicit `scene` access remains available. `scan` maps
+  to Heatmap when findings exist, and
   `viz_page_for_tool(tool_name)` maps artifact-emitting verbs exactly —
   `taint-iris:hunt`→AttackPath and `exploit-chain:scan`→ExploitChain. DFDs,
   terrain, heatmaps, attack trees, and trace content therefore remain available
@@ -659,10 +661,11 @@ terminal receipt. Planned task identities are authoritative; do not rebuild a
 second checklist from trace labels or special-case `context:build`.
 
 Run Focus has one pure geometry contract shared by render, scrolling, and hit
-testing: width ≥78 is Steps/Output side by side (Steps 36%, clamped to 28–46,
-Output at least 48); width 50–77 stacks vertically with Steps content-sized and
-capped at 40% of the body; width <50 or body height <14 uses one viewport and
-Tab switches Steps/Output. Terminal height alone must not stack a wide screen.
+testing: width ≥78 uses measured task/output content, keeping Steps/Output side
+by side with Output at least 48 when both panes are useful, while sparse output
+and materially wider task labels stack to preserve those labels. Width 50–77
+stacks vertically with Steps content-sized and capped at 40% of the body; width
+<50 or body height <14 uses one viewport and Tab switches Steps/Output.
 Foreground Run Focus owns input in Navigate mode and reserves no generic prompt
 row. `s` opens a compact editor that accepts only valid `run <tool> …`; `b`
 backgrounds without cancellation and restores the captured origin.

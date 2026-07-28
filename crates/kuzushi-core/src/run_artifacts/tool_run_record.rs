@@ -121,27 +121,23 @@ fn try_record_tool_run_complete_with_settlement(
         lock_and_prepare_terminal_result(record, observation, completion, true, || {
             prepare_completed_result(record, output)
         })?;
-    let cost = completion
-        .as_ref()
-        .map_or(RuntimeCostReport::UNAVAILABLE, |pending| {
-            pending.cost_report()
-        });
-    let (execution_status, execution_may_have_occurred) =
-        completion_failure_context(&completion, true);
+    let failure_context = settlement_failure_context(completion.as_ref());
     let producing_call = settle_result_artifact(record, completion.take())?;
-    if let Err(error) = persist_completed_summary(record, &prepared) {
-        return fail_after_result_settlement(
-            observation,
-            record,
-            producing_call,
-            cost,
-            execution_status,
-            execution_may_have_occurred,
-            error,
-        );
-    }
-    emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    Ok(())
+    let summary = after_result_settlement(
+        completed_summary_for_prepared(record, &prepared),
+        observation,
+        record,
+        producing_call,
+        failure_context,
+    )?;
+    persist_terminal_after_settlement(
+        record,
+        observation,
+        &prepared.output,
+        &summary,
+        producing_call,
+        failure_context,
+    )
 }
 
 struct PreparedCompletedResult {
@@ -181,14 +177,15 @@ fn prepare_completed_result(
     })
 }
 
-fn persist_completed_summary(
+fn completed_summary_for_prepared(
     record: ToolRunRecord<'_>,
     prepared: &PreparedCompletedResult,
-) -> Result<()> {
+) -> Result<RunSummary> {
     let summary = completed_summary(record, &prepared.output, prepared.artifacts.clone())?;
-    let summary = apply_output_status(prepared.status, summary, &prepared.output)
-        .with_terminal_result_sha256(Some(prepared.terminal_digest.clone()));
-    write_run_summary(record.target, &summary).map(|_| ())
+    Ok(
+        apply_output_status(prepared.status, summary, &prepared.output)
+            .with_terminal_result_sha256(Some(prepared.terminal_digest.clone())),
+    )
 }
 
 pub fn record_tool_run_failed(record: ToolRunRecord<'_>, error: &str) {
@@ -255,27 +252,16 @@ fn try_record_tool_run_failed_with_settlement(
         execution_may_have_occurred_without_completion,
         || prepare_unsuccessful_result(record, error, terminal_status),
     )?;
-    let cost = completion
-        .as_ref()
-        .map_or(RuntimeCostReport::UNAVAILABLE, |pending| {
-            pending.cost_report()
-        });
-    let (execution_status, execution_may_have_occurred) =
-        completion_failure_context(&completion, execution_may_have_occurred_without_completion);
+    let failure_context = settlement_failure_context(completion.as_ref());
     let producing_call = settle_result_artifact(record, completion.take())?;
-    if let Err(error) = write_run_summary(record.target, &prepared.summary) {
-        return fail_after_result_settlement(
-            observation,
-            record,
-            producing_call,
-            cost,
-            execution_status,
-            execution_may_have_occurred,
-            error,
-        );
-    }
-    emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    Ok(())
+    persist_terminal_after_settlement(
+        record,
+        observation,
+        &prepared.output,
+        &prepared.summary,
+        producing_call,
+        failure_context,
+    )
 }
 
 fn lock_and_prepare_terminal_result<T>(
@@ -337,17 +323,18 @@ fn prepare_unsuccessful_result(
     error: &str,
     status: RunItemStatus,
 ) -> Result<PreparedUnsuccessfulResult> {
+    let error = crate::session_transcript::redaction::redact_text(error);
     let status = unsuccessful_status_label(status);
-    let terminal_digest = terminal_result_digest(status, &json!({ "error": error }));
+    let terminal_digest = terminal_result_digest(status, &json!({ "error": &error }));
     validate_terminalization(record, status, &terminal_digest)?;
     let mut artifacts = existing_run_artifacts(record)?;
-    let mut summary = unsuccessful_summary(record, error, &artifacts, status)?;
+    let mut summary = unsuccessful_summary(record, &error, &artifacts, status)?;
     let failure = write_run_failures(
         record.target,
         record.run_id,
         record.tool,
         status,
-        error,
+        &error,
         &artifacts,
     )?;
     artifacts.push(failure.clone());
@@ -356,7 +343,7 @@ fn prepare_unsuccessful_result(
         record.target,
         record.run_id,
         record.tool,
-        error,
+        &error,
         &artifacts,
     );
     set_unsuccessful_output_status(&mut output, record.tool, status);
@@ -496,18 +483,16 @@ fn try_record_reason_terminal(
         execution_may_have_occurred,
         || prepare_reason_terminal(record, status, reason),
     )?;
-    if let Err(error) = write_run_summary(record.target, &prepared.summary) {
-        return fail_before_result_settlement(
-            observation,
-            record,
-            completion,
-            execution_may_have_occurred,
-            error,
-        );
-    }
-    let producing_call = settle_call_without_result(completion)?;
-    emit_typed_terminal(observation, record, &prepared.output, producing_call)?;
-    Ok(())
+    let failure_context = settlement_failure_context(completion.as_ref());
+    let producing_call = settle_reason_result(record, completion, reason_terminal_status(status)?)?;
+    persist_terminal_after_settlement(
+        record,
+        observation,
+        &prepared.output,
+        &prepared.summary,
+        producing_call,
+        failure_context,
+    )
 }
 
 struct PreparedReasonTerminal {
@@ -524,11 +509,13 @@ fn prepare_reason_terminal(
     validate_terminalization(record, status, &terminal_digest)?;
     let artifacts = existing_run_artifacts(record)?;
     let summary = reason_terminal_summary(record, status, reason)?;
+    let output = terminal_reason_output(status, reason);
+    let result = result_artifact(record, &output)?;
     let summary = artifacts
         .into_iter()
         .fold(summary, RunSummary::with_artifact)
+        .with_artifact(result)
         .with_terminal_result_sha256(Some(terminal_digest));
-    let output = terminal_reason_output(status, reason);
     Ok(PreparedReasonTerminal { output, summary })
 }
 
@@ -555,39 +542,91 @@ fn reason_terminal_summary(
     )
 }
 
-fn settle_call_without_result(
+fn settle_reason_result(
+    record: ToolRunRecord<'_>,
     completion: Option<crate::modules::PendingToolCallCompletion>,
+    status: crate::run_lifecycle::RunItemStatus,
 ) -> Result<Option<crate::modules::ToolCallIdentity>> {
     let Some(completion) = completion else {
         return Ok(None);
     };
     let execution_may_have_occurred = completion.execution_may_have_occurred();
+    let identity = completion
+        .identity()
+        .context("observed tool completion has no call identity")?;
+    let reference = crate::run_lifecycle::verified_result_artifact_reference(
+        record.target,
+        record.run_id,
+        identity.item_id,
+    )?;
     completion
-        .finish(None)
+        .finish_as(status, Some(reference))
         .map_err(|error| annotate_writer_fault(error, execution_may_have_occurred))
+}
+
+fn reason_terminal_status(status: &str) -> Result<crate::run_lifecycle::RunItemStatus> {
+    use crate::run_lifecycle::RunItemStatus;
+    match status {
+        "blocked" => Ok(RunItemStatus::Blocked),
+        "canceled" => Ok(RunItemStatus::Canceled),
+        "interrupted" => Ok(RunItemStatus::Interrupted),
+        "skipped" => Ok(RunItemStatus::Skipped),
+        other => anyhow::bail!("unsupported reason terminal status {other:?}"),
+    }
+}
+
+fn persist_terminal_after_settlement(
+    record: ToolRunRecord<'_>,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
+    output: &Value,
+    summary: &RunSummary,
+    producing_call: Option<crate::modules::ToolCallIdentity>,
+    failure_context: Option<SettlementFailureContext>,
+) -> Result<()> {
+    after_result_settlement(
+        super::terminal_intent::write_terminal_intent(record.target, summary),
+        observation,
+        record,
+        producing_call,
+        failure_context,
+    )?;
+    after_result_settlement(
+        emit_typed_terminal(observation, record, output, summary, producing_call),
+        observation,
+        record,
+        producing_call,
+        failure_context,
+    )?;
+    super::terminal_intent::mark_typed_terminal(record.target, record.run_id)?;
+    write_run_summary(record.target, summary)?;
+    super::terminal_intent::clear_terminal_intent_best_effort(record.target, record.run_id);
+    Ok(())
 }
 
 fn emit_typed_terminal(
     observation: Option<&crate::run_lifecycle::RunObservationHandle>,
     record: ToolRunRecord<'_>,
     output: &Value,
+    summary: &RunSummary,
     producing_call: Option<crate::modules::ToolCallIdentity>,
 ) -> Result<()> {
     match observation {
-        Some(observation) => crate::run_lifecycle::emit_persisted_terminal_outcome_for_call(
+        Some(observation) => crate::run_lifecycle::emit_terminal_outcome_for_summary(
             observation,
             record.target,
             record.run_id,
             output,
+            summary,
             producing_call,
         ),
         None => {
             let observation = terminal_observation(record)?;
-            crate::run_lifecycle::emit_persisted_terminal_outcome_for_call(
+            crate::run_lifecycle::emit_terminal_outcome_for_summary(
                 &observation,
                 record.target,
                 record.run_id,
                 output,
+                summary,
                 producing_call,
             )
         }
@@ -614,6 +653,45 @@ fn settle_result_artifact(
         .finish(Some(reference))
         .map_err(|error| annotate_writer_fault(error, execution_may_have_occurred))?;
     Ok(Some(identity))
+}
+
+#[derive(Clone, Copy)]
+struct SettlementFailureContext {
+    cost: RuntimeCostReport,
+    execution_status: crate::run_lifecycle::RunItemStatus,
+    execution_may_have_occurred: bool,
+}
+
+fn settlement_failure_context(
+    completion: Option<&crate::modules::PendingToolCallCompletion>,
+) -> Option<SettlementFailureContext> {
+    completion.map(|pending| SettlementFailureContext {
+        cost: pending.cost_report(),
+        execution_status: pending.terminal_status(),
+        execution_may_have_occurred: pending.execution_may_have_occurred(),
+    })
+}
+
+fn after_result_settlement<T>(
+    result: Result<T>,
+    observation: Option<&crate::run_lifecycle::RunObservationHandle>,
+    record: ToolRunRecord<'_>,
+    identity: Option<crate::modules::ToolCallIdentity>,
+    context: Option<SettlementFailureContext>,
+) -> Result<T> {
+    match (result, context) {
+        (Ok(value), _) => Ok(value),
+        (Err(error), None) => Err(error),
+        (Err(error), Some(context)) => fail_after_result_settlement(
+            observation,
+            record,
+            identity,
+            context.cost,
+            context.execution_status,
+            context.execution_may_have_occurred,
+            error,
+        ),
+    }
 }
 
 fn fail_before_result_settlement<T>(
@@ -651,24 +729,6 @@ fn fail_before_result_settlement<T>(
         execution_status,
         execution_may_have_occurred,
         error,
-    )
-}
-
-fn completion_failure_context(
-    completion: &Option<crate::modules::PendingToolCallCompletion>,
-    execution_may_have_occurred_without_completion: bool,
-) -> (crate::run_lifecycle::RunItemStatus, bool) {
-    completion.as_ref().map_or(
-        (
-            crate::run_lifecycle::RunItemStatus::Failed,
-            execution_may_have_occurred_without_completion,
-        ),
-        |pending| {
-            (
-                pending.terminal_status(),
-                pending.execution_may_have_occurred(),
-            )
-        },
     )
 }
 
@@ -840,15 +900,31 @@ fn result_output_for_status(
     output: &Value,
     artifacts: &mut Vec<RunArtifact>,
 ) -> Result<Value> {
-    if failure_like_status(status) {
+    let mut result = if failure_like_status(status) {
         attach_failure_artifact(record, status, output, artifacts)?;
-        return Ok(normalize_module_result(output_with_run_fallback_context(
+        normalize_module_result(output_with_run_fallback_context(
             record.target,
             record.run_id,
             output.clone(),
-        )));
+        ))
+    } else {
+        normalize_module_result(output.clone())
+    };
+    if let Some(object) = result.as_object_mut() {
+        let mut listed = artifacts.clone();
+        let spec = tool_result_artifact_spec("result.json")
+            .expect("tool result artifact must be in shared spec");
+        let result_artifact = RunArtifact::from_declared(spec.label, spec.leaf, Some(spec.kind))
+            .expect("tool result artifact spec is valid");
+        if !listed
+            .iter()
+            .any(|known| known.path == result_artifact.path)
+        {
+            listed.push(result_artifact);
+        }
+        object.insert("artifacts".to_string(), serde_json::to_value(listed)?);
     }
-    Ok(normalize_module_result(output.clone()))
+    Ok(result)
 }
 
 fn apply_output_status(status: &str, mut summary: RunSummary, output: &Value) -> RunSummary {
@@ -959,9 +1035,16 @@ fn is_terminal_run_status(status: &str) -> bool {
 }
 
 fn existing_run_artifacts(record: ToolRunRecord<'_>) -> Result<Vec<RunArtifact>> {
-    super::run_summary_store::load_run_summary_without_repair(record.target, record.run_id)
-        .map(|summary| summary.artifacts)
-        .with_context(|| format!("could not load artifacts for run {}", record.run_id))
+    let mut artifacts =
+        super::run_summary_store::load_run_summary_without_repair(record.target, record.run_id)
+            .map(|summary| summary.artifacts)
+            .with_context(|| format!("could not load artifacts for run {}", record.run_id))?;
+    for artifact in super::load_run_artifacts(record.target, record.run_id)? {
+        if !artifacts.iter().any(|known| known.path == artifact.path) {
+            artifacts.push(artifact);
+        }
+    }
+    Ok(artifacts)
 }
 
 pub(crate) fn terminal_result_digest(status: &str, result: &Value) -> String {

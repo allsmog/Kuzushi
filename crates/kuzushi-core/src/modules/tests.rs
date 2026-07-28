@@ -3412,8 +3412,10 @@ OUT
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "taint-iris-next");
     }
 
+    #[cfg(unix)]
     #[test]
     fn sast_scan_routes_taint_iris_next_task_through_runtime_and_persists() {
+        let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -3426,19 +3428,11 @@ OUT
             "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
         )
         .unwrap();
-        // taint-iris-next:hunt now refuses to dispatch without the
-        // CPG + CodeQL DB artifacts (the artifact-aware MCP probe
-        // gates the policy). Stub both so the hunt phase routes.
-        let kuzushi = temp.path().join(".kuzushi");
-        fs::create_dir_all(&kuzushi).unwrap();
-        fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
-        let codeql_db = kuzushi.join("codeql-db");
-        fs::create_dir_all(&codeql_db).unwrap();
-        fs::write(
-            codeql_db.join("codeql-database.yml"),
-            "primaryLanguage: javascript\n",
-        )
-        .unwrap();
+        // Model a separately authorized codeql:create-db run with a hermetic
+        // launcher so a host CodeQL install cannot mutate the fixture database.
+        let launcher = fake_codeql_binary(temp.path());
+        let _bin = crate::test_env::ScopedEnv::set("KUZUSHI_CODEQL_BIN", launcher);
+        fs::write(temp.path().join(".kuzushi/cpg.bin"), b"CPG\0stub").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
@@ -3751,10 +3745,9 @@ OUT
         assert_eq!(run_summary.status, "completed");
         assert_eq!(run_summary.tool.as_deref(), Some("sast:scan"));
         assert_eq!(run_summary.findings, Some(1));
-        assert!(run_summary
-            .artifacts
-            .iter()
-            .any(|artifact| { artifact.label == "sast summary" && artifact.path == summary }));
+        assert!(run_summary.artifacts.iter().any(|artifact| {
+            artifact.label == "sast summary" && artifact.path == "sast-summary.json"
+        }));
         let canonical_summary =
             crate::run_artifacts::run_artifact_path(temp.path(), run_id, "run.json");
         assert!(canonical_summary.exists());

@@ -196,14 +196,14 @@ fn selection_critical_mockup(mockup: &str) -> bool {
 }
 
 #[test]
-fn parity_target_contains_exactly_114_implement_rows() {
+fn parity_target_contains_exactly_111_implement_rows() {
     let target = std::fs::read_to_string(repo_root().join("design/PARITY_TARGET.md"))
         .expect("read parity target");
     let implement_rows = target
         .lines()
         .filter(|line| line.starts_with("| `") && line.contains("| Implement |"))
         .count();
-    assert_eq!(implement_rows, 114);
+    assert_eq!(implement_rows, 111);
 }
 
 fn fresh_app() -> ShellApp {

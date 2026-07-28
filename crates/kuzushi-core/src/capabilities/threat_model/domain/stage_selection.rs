@@ -1,10 +1,31 @@
 use super::*;
 
-pub(crate) fn read_stages(input: &Value, tool_name: &str) -> Result<Vec<String>> {
+pub(crate) fn read_stages(
+    input: &Value,
+    tool_name: &str,
+    methodology: &str,
+) -> Result<Vec<String>> {
+    if methodology != "pasta" {
+        reject_pasta_stages_for_other_methodologies(input, tool_name, methodology)?;
+        return Ok(Vec::new());
+    }
     let Some(items) = read_stage_items(input, tool_name)? else {
         return Ok(default_stages());
     };
     read_valid_stages(items, tool_name)
+}
+
+fn reject_pasta_stages_for_other_methodologies(
+    input: &Value,
+    tool_name: &str,
+    methodology: &str,
+) -> Result<()> {
+    if input.get("stages").is_some() {
+        anyhow::bail!(
+            "{tool_name} stages s1-s4 are PASTA-specific and cannot be selected for methodology={methodology}"
+        );
+    }
+    Ok(())
 }
 
 fn read_valid_stages(items: &[Value], tool_name: &str) -> Result<Vec<String>> {
@@ -78,4 +99,27 @@ fn stages_or_default(stages: Vec<String>) -> Vec<String> {
 
 fn default_stages() -> Vec<String> {
     VALID_STAGES.iter().map(|stage| stage.to_string()).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_pasta_selects_pasta_stages() {
+        assert_eq!(
+            read_stages(&json!({}), "threat-model:build", "pasta").unwrap(),
+            vec!["s1", "s2", "s3", "s4"]
+        );
+        assert!(read_stages(&json!({}), "threat-model:build", "stride")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn non_pasta_methodology_rejects_stage_selection() {
+        let error =
+            read_stages(&json!({"stages": ["s1"]}), "threat-model:build", "dread").unwrap_err();
+        assert!(error.to_string().contains("PASTA-specific"));
+    }
 }

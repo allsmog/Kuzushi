@@ -16,12 +16,19 @@ impl McpClient {
     /// Spawn a server binary by name. Caller is responsible for ensuring
     /// the binary is on PATH; otherwise this errors.
     pub async fn spawn(binary: &str) -> Result<Self> {
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .kill_on_drop(true);
+        let mut process_group =
+            kuzushi_mcp_common::process::ParentDeathProcessGroup::configure(&mut command)
+                .context("could not guard code-index MCP server process tree")?;
+        let mut child = command
             .spawn()
             .with_context(|| format!("could not spawn MCP server `{binary}`"))?;
+        process_group.attach_child(&child)?;
         let stdin = child.stdin.take().context("server stdin missing")?;
         let stdout = child.stdout.take().context("server stdout missing")?;
         let stderr = child.stderr.take().context("server stderr missing")?;
@@ -33,6 +40,7 @@ impl McpClient {
             next_id: AtomicI64::new(1),
             initialized: Mutex::new(false),
             binary: binary.to_string(),
+            process_group,
         })
     }
 
@@ -69,6 +77,7 @@ impl McpClient {
     pub async fn shutdown(&self) -> Result<()> {
         let _ = self.notify("shutdown", json!({})).await;
         let _ = self.notify("exit", json!({})).await;
+        self.process_group.kill();
         let mut child = self.child.lock().await;
         let _ = child.kill().await;
         drop(child);

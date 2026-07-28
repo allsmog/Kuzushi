@@ -41,11 +41,12 @@ pub(super) fn ensure_typed_projection(
         read.source == RunProjectionSource::TypedV1,
         "final phase run has no typed stream"
     );
-    anyhow::ensure!(
-        read.projection.health == ProjectionHealth::Healthy,
-        "final phase run stream is degraded"
-    );
-    Ok(())
+    match &read.projection.health {
+        ProjectionHealth::Healthy => Ok(()),
+        ProjectionHealth::Degraded { reason, .. } => {
+            anyhow::bail!("final phase run stream is degraded: {reason}")
+        }
+    }
 }
 
 fn phase_receipt_item(target: &Path, completed: &PhaseAttemptCompleted) -> Result<RunItemV1> {

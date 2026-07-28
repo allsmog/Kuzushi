@@ -1,10 +1,7 @@
 use clap::Args;
-use std::path::PathBuf;
 
 #[derive(Debug, Args)]
 pub(crate) struct PrCommentArgs {
-    #[arg(long, help = crate::support::TARGET_HELP)]
-    pub(crate) target: Option<PathBuf>,
     /// Repository slug or URL to include in the generated comment context.
     #[arg(long)]
     pub(crate) repo: Option<String>,

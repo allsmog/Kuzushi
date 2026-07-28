@@ -129,7 +129,11 @@ export const tokenChecks = [
   {
     label: "run artifact manifest writer uses shared canonical artifacts",
     file: "crates/kuzushi-core/src/run_artifacts/artifact_manifest.rs",
-    tokens: ["CANONICAL_RUN_ARTIFACTS", "spec.artifact(target, run_id)"],
+    tokens: [
+      "CANONICAL_RUN_ARTIFACTS",
+      ".map(CanonicalRunArtifactSpec::artifact)",
+      "path: self.leaf.to_string()",
+    ],
   },
   {
     label: "tool input writer uses shared artifact spec",

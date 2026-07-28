@@ -34,14 +34,20 @@ impl SandboxedCommand {
         Ok(&mut self.command)
     }
 
-    pub fn spawn(mut self, label: &str) -> Result<(Child, TempDir)> {
+    pub fn spawn(
+        mut self,
+        label: &str,
+    ) -> Result<(Child, TempDir, crate::process::ParentDeathProcessGroup)> {
         verify_directories(&self.protected)?;
-        configure_long_lived_group(&mut self.command);
+        self.command.kill_on_drop(true);
+        let mut process_group =
+            crate::process::ParentDeathProcessGroup::configure(&mut self.command)?;
         let child = self
             .command
             .spawn()
             .with_context(|| format!("could not start sandboxed {label}"))?;
-        Ok((child, self.scratch))
+        process_group.attach_child(&child)?;
+        Ok((child, self.scratch, process_group))
     }
 }
 
@@ -64,15 +70,12 @@ pub async fn sandbox_available() -> bool {
     verified_backend().await.is_ok()
 }
 
-pub async fn terminate_child_group(child: &mut Child) {
-    #[cfg(unix)]
-    if let Some(pid) = child.id() {
-        // SAFETY: sandbox children are placed in a dedicated process group
-        // whose id is the launcher pid before spawn returns.
-        unsafe { libc::killpg(pid as libc::pid_t, libc::SIGKILL) };
-    }
-    #[cfg(not(unix))]
-    let _ = child.kill().await;
+pub async fn terminate_child_group(
+    child: &mut Child,
+    process_group: &crate::process::ParentDeathProcessGroup,
+) {
+    process_group.kill();
+    let _ = child.start_kill();
     let _ = child.wait().await;
 }
 
@@ -135,15 +138,6 @@ async fn verified_backend() -> Result<ReadOnlySandboxBackend> {
         .get_or_init(|| async { probe::self_probe_candidate().await })
         .await
         .context("no supported read-only MCP sandbox passed its self-probe")
-}
-
-fn configure_long_lived_group(command: &mut Command) {
-    command.kill_on_drop(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.as_std_mut().process_group(0);
-    }
 }
 
 #[cfg(unix)]

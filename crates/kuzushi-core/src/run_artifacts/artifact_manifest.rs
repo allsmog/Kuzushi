@@ -25,14 +25,12 @@ pub struct RunArtifactObject {
 }
 
 pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<RunArtifact>> {
-    Ok(normalized_artifacts(
-        load_manifest(target, run_id)?.artifacts,
-    ))
+    Ok(load_manifest(target, run_id)?.artifacts)
 }
 
 pub(crate) fn record_canonical_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<()> {
     let target = target.as_ref();
-    for artifact in canonical_run_artifacts(target, run_id) {
+    for artifact in canonical_run_artifacts() {
         record_run_artifact(target, run_id, &artifact)?;
     }
     Ok(())
@@ -50,6 +48,8 @@ pub(crate) fn record_run_artifact(
         .normalized()
         .context("run artifact path must not be empty")?;
     validate_manifest_artifact_path(target, run_id, &artifact.path)?;
+    let artifact = super::run_artifact::normalize_run_artifact_identity(target, run_id, &artifact)
+        .context("run artifact path must not be empty")?;
     upsert_artifact(&mut manifest.artifacts, artifact);
     write_manifest(target, &manifest)
 }
@@ -67,6 +67,8 @@ pub(crate) fn record_run_artifact_object_under_lock(
         .normalized()
         .context("run artifact path must not be empty")?;
     validate_manifest_artifact_path(target, run_id, &artifact.path)?;
+    let artifact = super::run_artifact::normalize_run_artifact_identity(target, run_id, &artifact)
+        .context("run artifact path must not be empty")?;
     upsert_artifact(&mut manifest.artifacts, artifact.clone());
     upsert_artifact_object(
         &mut manifest.objects,
@@ -84,7 +86,7 @@ fn load_manifest(target: impl AsRef<Path>, run_id: &str) -> Result<RunArtifactMa
     let Some((path, text)) = read_manifest_text(target, run_id)? else {
         return Ok(empty_manifest(run_id));
     };
-    let manifest = parse_manifest_body(&text, &path)?;
+    let mut manifest = parse_manifest_body(&text, &path)?;
     if manifest.run_id != run_id {
         anyhow::bail!(
             "Artifact manifest runId does not match requested run id: {}",
@@ -92,7 +94,23 @@ fn load_manifest(target: impl AsRef<Path>, run_id: &str) -> Result<RunArtifactMa
         );
     }
     validate_manifest_artifact_paths(target, run_id, &manifest)?;
+    normalize_manifest_identities(target, run_id, &mut manifest);
     Ok(manifest)
+}
+
+fn normalize_manifest_identities(target: &Path, run_id: &str, manifest: &mut RunArtifactManifest) {
+    manifest.artifacts = super::run_artifact::normalize_run_artifact_identities(
+        target,
+        run_id,
+        std::mem::take(&mut manifest.artifacts),
+    );
+    let mut objects = Vec::new();
+    for mut object in std::mem::take(&mut manifest.objects) {
+        object.path =
+            super::run_artifact::normalize_run_artifact_path(target, run_id, &object.path);
+        upsert_artifact_object(&mut objects, object);
+    }
+    manifest.objects = objects;
 }
 
 fn read_manifest_text(target: &Path, run_id: &str) -> Result<Option<(PathBuf, String)>> {
@@ -344,27 +362,18 @@ fn upsert_artifact_object(objects: &mut Vec<RunArtifactObject>, object: RunArtif
     }
 }
 
-fn canonical_run_artifacts(target: &Path, run_id: &str) -> Vec<RunArtifact> {
+fn canonical_run_artifacts() -> Vec<RunArtifact> {
     CANONICAL_RUN_ARTIFACTS
         .iter()
-        .map(|spec| spec.artifact(target, run_id))
-        .collect()
-}
-
-fn normalized_artifacts(artifacts: Vec<RunArtifact>) -> Vec<RunArtifact> {
-    artifacts
-        .into_iter()
-        .filter_map(|artifact| artifact.normalized())
+        .map(CanonicalRunArtifactSpec::artifact)
         .collect()
 }
 
 impl CanonicalRunArtifactSpec {
-    fn artifact(&self, target: &Path, run_id: &str) -> RunArtifact {
+    fn artifact(&self) -> RunArtifact {
         RunArtifact {
             label: self.label.to_string(),
-            path: run_artifact_path(target, run_id, self.leaf)
-                .display()
-                .to_string(),
+            path: self.leaf.to_string(),
             kind: self.kind.to_string(),
         }
     }

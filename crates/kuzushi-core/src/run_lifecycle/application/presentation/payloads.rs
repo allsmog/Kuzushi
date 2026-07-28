@@ -119,6 +119,8 @@ pub struct ModelCallPresentationV1 {
     pub usage: Option<ModelUsage>,
     pub cost: RuntimeCostReport,
     pub error_class: Option<SafeText>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<crate::runtime::RuntimeFailureMetadata>,
     pub timing: CallTimingV1,
 }
 

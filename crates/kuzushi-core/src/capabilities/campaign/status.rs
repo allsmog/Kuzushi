@@ -35,8 +35,10 @@ fn workspace_trend_json(root: &Path, ctx: &ToolExecutionContext<'_>) -> (Value, 
             store.list_review_decisions_for_findings(&findings).ok()
         })
         .unwrap_or_default();
-    let metrics =
-        super::trend::trend_metrics(&records, super::trend::workspace_campaign_spend(root));
+    let metrics = super::trend::trend_metrics_with_spend(
+        &records,
+        super::trend::workspace_campaign_spend_report(root),
+    );
     let _ = super::trend_history::record_trend_snapshot(root, &metrics);
     let history =
         super::trend_history::load_trend_history(root, super::trend_history::TREND_HISTORY_LIMIT);
@@ -56,6 +58,8 @@ fn all_campaigns_status(root: &Path, trend: Value, trend_history: Value) -> Resu
             "createdAtMs": snapshot.created_at_ms,
             "jobCount": snapshot.jobs.len(),
             "states": snapshot.state_counts(),
+            "totalCostUsd": snapshot.total_cost_usd,
+            "providerSpendUnresolved": snapshot.provider_spend_unresolved,
         }));
     }
     let output = format!("campaign:status found {} campaign(s)", rows.len());
@@ -95,6 +99,7 @@ fn single_campaign_status(
             "fillGaps": snapshot.fill_gaps,
             "skippedCoveredCells": snapshot.skipped_covered_cells,
             "totalCostUsd": snapshot.total_cost_usd,
+            "providerSpendUnresolved": snapshot.provider_spend_unresolved,
             "trend": trend,
             "trendHistory": trend_history,
             "jobs": job_rows(root, &snapshot),
@@ -116,6 +121,7 @@ fn job_rows(root: &Path, snapshot: &CampaignSnapshot) -> Vec<Value> {
                 "attempts": job.attempts,
                 "exitCode": job.exit_code,
                 "costUsd": job.cost_usd,
+                "providerSpendUnresolved": job.provider_spend_unresolved,
                 "findings": job.findings,
                 "runId": job.run_id,
                 "reason": job.reason,

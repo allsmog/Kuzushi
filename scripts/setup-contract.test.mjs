@@ -10,7 +10,10 @@ test("bootstrap and devcontainer enforce the pinned complete Rust toolchain", ()
   const toolchain = readFileSync(resolve(repoRoot, "rust-toolchain.toml"), "utf8");
   const channel = toolchain.match(/^channel\s*=\s*"([^"]+)"/m)?.[1];
   assert.ok(channel, "rust-toolchain.toml must declare a channel");
-  assert.match(toolchain, /components\s*=\s*\[[^\]]*"clippy"[^\]]*"rustfmt"/);
+  assert.match(
+    toolchain,
+    /components\s*=\s*\[[^\]]*"clippy"[^\]]*"rustfmt"[^\]]*"llvm-tools-preview"/,
+  );
 
   const bootstrap = readFileSync(resolve(repoRoot, "scripts/bootstrap.sh"), "utf8");
   assert.match(bootstrap, /RUSTC_VERSION_LINE=.*rustc --version/);
@@ -24,7 +27,10 @@ test("bootstrap and devcontainer enforce the pinned complete Rust toolchain", ()
   );
   const rust = devcontainer.features["ghcr.io/devcontainers/features/rust:1"];
   assert.equal(rust.version, channel);
-  assert.deepEqual(new Set(rust.components.split(",")), new Set(["rustfmt", "clippy"]));
+  assert.deepEqual(
+    new Set(rust.components.split(",")),
+    new Set(["rustfmt", "clippy", "llvm-tools-preview"]),
+  );
 });
 
 test("devcontainer and doctor share the exact Semgrep dependency pin", () => {

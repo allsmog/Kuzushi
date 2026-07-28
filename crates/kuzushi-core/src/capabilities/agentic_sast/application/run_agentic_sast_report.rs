@@ -78,16 +78,118 @@ fn collect_agentic_sast_findings(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<crate::run_lifecycle::RunItemId>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
-    let mut result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
+    let checkpoints = ctx.stage_checkpoints();
+    let mut result = checkpointed_agentic_hunt(
+        checkpoints.as_deref(),
+        runtime,
+        run,
+        ctx,
+        parent_step,
+    )?;
     emit_agentic_sast_validation_count(ctx, parent_step, result.value.len());
     let initial_cost = result.cost_report()?;
-    let review = review_agentic_sast_with_scope(runtime, run, result.value, ctx, parent_step)?;
+    let review = checkpointed_agentic_review(
+        checkpoints.as_deref(),
+        runtime,
+        run,
+        result.value,
+        ctx,
+        parent_step,
+    )?;
     let cost =
         initial_cost.checked_add(review.cost_report()?, "agentic SAST hunt plus review cost")?;
     result.value = review.value;
     result.cost_usd = cost.observed_usd();
     result.cost_usd_exact = cost.is_complete();
     Ok(result)
+}
+
+const AGENTIC_HUNT_STAGE: &str = "agentic-sast:hunt";
+const AGENTIC_REVIEW_STAGE: &str = "agentic-sast:review";
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgenticSastStageCheckpoint {
+    findings: Vec<Finding>,
+    cost_usd: f64,
+    cost_usd_exact: bool,
+}
+
+fn checkpointed_agentic_hunt(
+    checkpoints: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    runtime: &dyn AgentRuntime,
+    run: &AgenticSastRun,
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
+    if let Some(result) = read_agentic_stage_checkpoint(checkpoints, AGENTIC_HUNT_STAGE) {
+        return Ok(result);
+    }
+    let stage = checkpoints.map(|handle| handle.stage(AGENTIC_HUNT_STAGE));
+    let result = query_agentic_sast_with_scope(runtime, run, ctx, parent_step)?;
+    write_agentic_stage_checkpoint(checkpoints, stage, AGENTIC_HUNT_STAGE, &result);
+    Ok(result)
+}
+
+fn checkpointed_agentic_review(
+    checkpoints: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    runtime: &dyn AgentRuntime,
+    run: &AgenticSastRun,
+    findings: Vec<Finding>,
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<crate::run_lifecycle::RunItemId>,
+) -> Result<CostedStructuredJson<Vec<Finding>>> {
+    if let Some(result) = read_agentic_stage_checkpoint(checkpoints, AGENTIC_REVIEW_STAGE) {
+        return Ok(result);
+    }
+    let stage = checkpoints.map(|handle| handle.stage(AGENTIC_REVIEW_STAGE));
+    let result = review_agentic_sast_with_scope(runtime, run, findings, ctx, parent_step)?;
+    write_agentic_stage_checkpoint(checkpoints, stage, AGENTIC_REVIEW_STAGE, &result);
+    Ok(result)
+}
+
+fn read_agentic_stage_checkpoint(
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    stage_id: &str,
+) -> Option<CostedStructuredJson<Vec<Finding>>> {
+    let handle = handle?;
+    let receipt = handle.completed_stage(stage_id)?;
+    let payload = handle.read_stage_payload(&receipt)?;
+    let checkpoint = serde_json::from_value::<AgenticSastStageCheckpoint>(payload).ok()?;
+    handle.stage(stage_id).skip("reused completed agentic SAST stage");
+    Some(checkpoint.into_reused_result())
+}
+
+fn write_agentic_stage_checkpoint(
+    handle: Option<&crate::run_artifacts::StageCheckpointHandle>,
+    stage: Option<crate::run_artifacts::StageGuard<'_>>,
+    stage_id: &str,
+    result: &CostedStructuredJson<Vec<Finding>>,
+) {
+    let (Some(handle), Some(stage)) = (handle, stage) else { return };
+    let Ok(payload) = serde_json::to_value(AgenticSastStageCheckpoint::from_result(result)) else {
+        return;
+    };
+    let Some(artifact) = handle.write_stage_payload(stage_id, &payload) else { return };
+    stage.complete(vec![artifact]);
+}
+
+impl AgenticSastStageCheckpoint {
+    fn from_result(result: &CostedStructuredJson<Vec<Finding>>) -> Self {
+        Self {
+            findings: result.value.clone(),
+            cost_usd: result.cost_usd,
+            cost_usd_exact: result.cost_usd_exact,
+        }
+    }
+
+    fn into_reused_result(self) -> CostedStructuredJson<Vec<Finding>> {
+        CostedStructuredJson {
+            value: self.findings,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        }
+    }
 }
 
 fn query_agentic_sast_with_scope(

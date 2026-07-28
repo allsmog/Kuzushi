@@ -24,7 +24,7 @@ impl ShellApp {
         effects
     }
 
-    fn scan_failure_abort_reason(&self) -> Option<AbortReason> {
+    pub(super) fn scan_failure_abort_reason(&self) -> Option<AbortReason> {
         self.scan_abort_reason().or_else(|| {
             self.scan()
                 .is_some_and(|scan| scan.abort_requested)
@@ -37,7 +37,11 @@ impl ShellApp {
     /// notice, no "go block semgrep" remediation), record the run as
     /// interrupted rather than failed, and surface the partial findings that
     /// streamed into the store before the abort.
-    fn apply_scan_canceled(&mut self, error: &str, reason: AbortReason) -> Vec<ShellEffect> {
+    pub(super) fn apply_scan_canceled(
+        &mut self,
+        error: &str,
+        reason: AbortReason,
+    ) -> Vec<ShellEffect> {
         let run_id = self.scan().and_then(|scan| scan.run_id.clone());
         let retained = run_id
             .as_deref()
@@ -68,7 +72,11 @@ impl ShellApp {
         effects
     }
 
-    fn apply_scan_interrupted(&mut self, error: &str, reason: AbortReason) -> Vec<ShellEffect> {
+    pub(super) fn apply_scan_interrupted(
+        &mut self,
+        error: &str,
+        reason: AbortReason,
+    ) -> Vec<ShellEffect> {
         let run_id = self.mark_scan_interrupted(error);
         self.settle_unreported_scan_cost(run_id.as_deref());
         self.mark_scan_activity_failed(error);
@@ -506,6 +514,7 @@ mod tests {
                 },
                 cost,
                 error_class: Some(SafeText::operator_visible("provider_error")),
+                failure: None,
             },
         )
     }

@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -46,7 +47,7 @@ fn cpg_build_options() -> Vec<OptionSpec> {
         opt(
             "importPath",
             OptionType::Path,
-            "Reuse a prebuilt cpg-rs graph instead of building: the file is validated and \
+            "Reuse a prebuilt cpg-rs graph instead of building: the file is format-checked and \
              copied to the canonical .kuzushi/cpg-rs/ location. The file name must keep the \
              engine convention `<lang>.v<shape>.cpg` (or `<key>.<lang>.v<shape>.cpg` from the \
              engine's own cache) so the language and shape version are explicit.",
@@ -243,7 +244,7 @@ fn run_cpg_import(
     target: &Path,
     import_path: &Path,
 ) -> Result<Value> {
-    let source_bytes = validated_cpg_import_source(import_path)?;
+    let source = open_cpg_import_source(import_path)?;
     let lang = import_language(import_path)?;
     let output_path = prepare_cpg_artifact_path(target, &kuzushi_cpg::artifact_path(target, lang))?;
     announce_cpg_phase(
@@ -252,19 +253,8 @@ fn run_cpg_import(
         &format!("cpg:build import {lang} graph from {}", import_path.display()),
     );
     let started = Instant::now();
-    fs::copy(import_path, &output_path).with_context(|| {
-        format!(
-            "Could not copy prebuilt CPG {} to {}",
-            import_path.display(),
-            output_path.display()
-        )
-    })?;
+    let bytes = install_cpg_import(source, &output_path)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    let bytes = fs::metadata(&output_path).map(|m| m.len()).unwrap_or(0);
-    anyhow::ensure!(
-        bytes == source_bytes,
-        "prebuilt CPG copy is truncated: {bytes} bytes copied of {source_bytes}"
-    );
     announce_cpg_phase(ctx, "done", &format!("cpg:build imported {lang} graph"));
     Ok(cpg_import_response(
         target,
@@ -308,14 +298,24 @@ fn cpg_cli_lang_of(name: &str) -> String {
     parts.pop().unwrap_or_default().to_string()
 }
 
-/// A usable import source is an existing, non-empty regular file (symlinks are
-/// followed; the resolved file must still be regular). Returns its size.
-fn validated_cpg_import_source(import_path: &Path) -> Result<u64> {
-    let metadata = fs::metadata(import_path).with_context(|| {
+const CPG_FILE_MAGIC: [u8; 4] = *b"CPG1";
+
+struct CpgImportSource {
+    file: fs::File,
+    bytes: u64,
+}
+
+/// A usable import source is an existing current-format regular file (symlinks
+/// are followed; the resolved file must still be regular). Returns its size.
+fn open_cpg_import_source(import_path: &Path) -> Result<CpgImportSource> {
+    let mut file = fs::File::open(import_path).with_context(|| {
         format!(
             "prebuilt CPG not found at {} — check importPath",
             import_path.display()
         )
+    })?;
+    let metadata = file.metadata().with_context(|| {
+        format!("Could not inspect prebuilt CPG {}", import_path.display())
     })?;
     anyhow::ensure!(
         metadata.is_file(),
@@ -323,11 +323,42 @@ fn validated_cpg_import_source(import_path: &Path) -> Result<u64> {
         import_path.display()
     );
     anyhow::ensure!(
-        metadata.len() > 0,
-        "prebuilt CPG {} is empty",
+        metadata.len() >= CPG_FILE_MAGIC.len() as u64,
+        "prebuilt CPG {} is truncated",
         import_path.display()
     );
-    Ok(metadata.len())
+    let mut magic = [0u8; CPG_FILE_MAGIC.len()];
+    file.read_exact(&mut magic)
+        .with_context(|| format!("Could not read prebuilt CPG header at {}", import_path.display()))?;
+    anyhow::ensure!(
+        magic == CPG_FILE_MAGIC,
+        "prebuilt CPG {} has invalid file magic",
+        import_path.display()
+    );
+    file.seek(SeekFrom::Start(0))?;
+    Ok(CpgImportSource {
+        file,
+        bytes: metadata.len(),
+    })
+}
+
+fn install_cpg_import(mut source: CpgImportSource, output_path: &Path) -> Result<u64> {
+    let parent = output_path.parent().context("CPG output has no parent")?;
+    let mut staged = tempfile::NamedTempFile::new_in(parent)
+        .with_context(|| format!("Could not stage CPG import below {}", parent.display()))?;
+    let copied = std::io::copy(&mut source.file, staged.as_file_mut())?;
+    anyhow::ensure!(
+        copied == source.bytes,
+        "prebuilt CPG copy is truncated: {copied} bytes copied of {}",
+        source.bytes
+    );
+    staged.as_file_mut().flush()?;
+    staged.as_file().sync_all()?;
+    kuzushi_cpg::validate_graph_artifact(staged.path()).map_err(anyhow::Error::msg)?;
+    staged.persist(output_path).map_err(|error| {
+        anyhow::anyhow!("Could not publish imported CPG {}: {}", output_path.display(), error.error)
+    })?;
+    Ok(copied)
 }
 
 /// Validate + create one artifact location, keeping the write inside the
@@ -500,24 +531,64 @@ mod cpg_build_tests {
     }
 
     #[test]
-    fn import_source_must_exist_and_be_nonempty() {
+    fn import_source_must_exist_and_have_current_magic() {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("absent.cpg");
-        assert!(validated_cpg_import_source(&missing).is_err());
+        assert!(open_cpg_import_source(&missing).is_err());
 
         let empty = temp.path().join("empty.cpg");
         std::fs::write(&empty, b"").unwrap();
-        assert!(validated_cpg_import_source(&empty).is_err());
+        assert!(open_cpg_import_source(&empty).is_err());
 
-        let real = temp.path().join("real.cpg");
-        std::fs::write(&real, b"CPG\0payload").unwrap();
-        assert_eq!(validated_cpg_import_source(&real).unwrap(), 11);
+        let truncated = temp.path().join("truncated.cpg");
+        std::fs::write(&truncated, b"CPG").unwrap();
+        assert!(open_cpg_import_source(&truncated).is_err());
+
+        let wrong = temp.path().join("wrong.cpg");
+        std::fs::write(&wrong, b"CPG\0payload").unwrap();
+        assert!(open_cpg_import_source(&wrong).is_err());
+
+        let current = temp.path().join("current.cpg");
+        std::fs::write(&current, b"CPG1payload").unwrap();
+        assert_eq!(open_cpg_import_source(&current).unwrap().bytes, 11);
+    }
+
+    #[test]
+    fn import_validation_accepts_an_engine_produced_graph() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("main.go"), "package main\nfunc main() {}\n").unwrap();
+        let scope = kuzushi_cpg::BuildScope::whole(target.path());
+        let (_, report) = kuzushi_cpg::ensure_project_in(
+            &scope,
+            "go",
+            &kuzushi_cpg::BuildLimits::default(),
+        )
+        .unwrap();
+
+        let expected = std::fs::metadata(&report.cpg_path).unwrap().len();
+        let source = open_cpg_import_source(&report.cpg_path).unwrap();
+        assert_eq!(source.bytes, expected);
+        let output = target.path().join("imported.cpg");
+        assert_eq!(install_cpg_import(source, &output).unwrap(), expected);
+        kuzushi_cpg::validate_graph_artifact(&output).unwrap();
+    }
+
+    #[test]
+    fn malformed_current_magic_is_not_published() {
+        let temp = tempfile::tempdir().unwrap();
+        let source_path = temp.path().join("go.v11.cpg");
+        let output = temp.path().join("canonical.cpg");
+        std::fs::write(&source_path, b"CPG1payload").unwrap();
+
+        let source = open_cpg_import_source(&source_path).unwrap();
+        assert!(install_cpg_import(source, &output).is_err());
+        assert!(!output.exists());
     }
 
     #[test]
     fn import_source_rejects_directory() {
         let temp = tempfile::tempdir().unwrap();
-        assert!(validated_cpg_import_source(temp.path()).is_err());
+        assert!(open_cpg_import_source(temp.path()).is_err());
     }
 
     #[cfg(unix)]

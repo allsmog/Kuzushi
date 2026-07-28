@@ -49,6 +49,14 @@ impl PendingToolCallCompletion {
         self.finish_with_status(status, result_artifact, None)
     }
 
+    pub(crate) fn finish_as(
+        self,
+        status: RunItemStatus,
+        result_artifact: Option<ArtifactReference>,
+    ) -> Result<Option<ToolCallIdentity>> {
+        self.finish_with_status(status, result_artifact, None)
+    }
+
     pub fn finish_after_persistence_failure(
         self,
         detail: impl AsRef<str>,

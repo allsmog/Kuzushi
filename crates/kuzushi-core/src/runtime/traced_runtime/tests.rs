@@ -87,9 +87,10 @@ fn query_emits_correlated_typed_model_lifecycle_and_safe_summary() {
         _ => None,
     });
     let finished = read.items.iter().find_map(|envelope| match envelope.item {
-        RunItemV1::ModelCallFinished { status, .. } if status == RunItemStatus::Completed => {
-            envelope.call_id
-        }
+        RunItemV1::ModelCallFinished {
+            status: RunItemStatus::Completed,
+            ..
+        } => envelope.call_id,
         _ => None,
     });
     assert_eq!(started, finished);
@@ -140,16 +141,17 @@ fn partial_aggregate_usage_is_disclosed_as_a_lower_bound() {
         .unwrap();
     let success: Result<()> = Ok(());
     assert_eq!(
-        super::model_call_error_class(&success, usage),
+        super::model_call_error_class(&success, usage, None),
         Some("usage_incomplete_lower_bound")
     );
     assert_eq!(
-        super::model_call_error_class(&success, ModelTokenUsage::unavailable_call()),
+        super::model_call_error_class(&success, ModelTokenUsage::unavailable_call(), None),
         None
     );
     let failure: Result<()> = Err(anyhow::anyhow!("model timeout"));
+    let metadata = super::fallback_runtime_failure_metadata(failure.as_ref().unwrap_err());
     assert_eq!(
-        super::model_call_error_class(&failure, usage),
+        super::model_call_error_class(&failure, usage, Some(&metadata)),
         Some("timeout")
     );
     assert_eq!(super::persisted_model_usage(usage).input_tokens, Some(12));
@@ -173,9 +175,18 @@ fn model_call_failure_classes_are_sanitized() {
 
     for (message, expected) in cases {
         let result: Result<()> = Err(anyhow::anyhow!(message));
-        let error_class =
-            super::model_call_error_class(&result, ModelTokenUsage::unavailable_call());
+        let metadata = super::fallback_runtime_failure_metadata(result.as_ref().unwrap_err());
+        let error_class = super::model_call_error_class(
+            &result,
+            ModelTokenUsage::unavailable_call(),
+            Some(&metadata),
+        );
 
+        let expected = match expected {
+            "canceled" => "cancelled",
+            "invalid_response" => "provider_response_invalid",
+            expected => expected,
+        };
         assert_eq!(error_class, Some(expected));
         assert!(!error_class.unwrap().contains(sentinel));
     }
@@ -240,7 +251,7 @@ fn observed_query_persists_usage_without_model_response_content() {
 }
 
 #[test]
-fn failed_query_returns_raw_detail_but_persists_only_the_safe_error_class() {
+fn failed_query_persists_class_without_untyped_failure_detail() {
     let target = tempfile::tempdir().unwrap();
     let sentinel = "raw-model-response-sentinel";
     let runtime = runtime_with(Err(anyhow::anyhow!("could not parse response: {sentinel}")));
@@ -264,8 +275,55 @@ fn failed_query_returns_raw_detail_but_persists_only_the_safe_error_class() {
         }
         _ => None,
     });
-    assert_eq!(error_class, Some("invalid_response"));
+    assert_eq!(error_class, Some("provider_response_invalid"));
     assert!(!run_item_stream(target.path(), "failed-query").contains(sentinel));
+}
+
+#[test]
+fn typed_runtime_failure_keeps_stage_call_model_class_status_and_safe_detail() {
+    use crate::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+    let target = tempfile::tempdir().unwrap();
+    let metadata = RuntimeFailureMetadata::new(
+        RuntimeFailureClass::SdkClientValidation,
+        Some(400),
+        Some("temperature incompatible with adaptive thinking; token=secret-sentinel"),
+    );
+    let runtime = runtime_with(Err(anyhow::Error::new(RuntimeFailure::new(metadata))));
+
+    let _ = traced(&runtime, target.path(), "typed-failure")
+        .query_blocking(
+            AgentQueryRequest::new("anthropic:claude-test", ".", "system", "prompt")
+                .with_stage("agentic-sast:review"),
+        )
+        .unwrap_err();
+
+    let read = crate::run_lifecycle::read_run_items(target.path(), "typed-failure")
+        .unwrap()
+        .unwrap();
+    let (call_id, model, failure) = read
+        .items
+        .iter()
+        .find_map(|item| match &item.item {
+            RunItemV1::ModelCallFinished {
+                model,
+                failure: Some(failure),
+                ..
+            } => Some((item.call_id.unwrap().to_string(), model.as_str(), failure)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(model, "anthropic:claude-test");
+    assert_eq!(
+        failure.error_class,
+        RuntimeFailureClass::SdkClientValidation
+    );
+    assert_eq!(failure.http_status, Some(400));
+    assert_eq!(failure.stage.as_deref(), Some("agentic-sast:review"));
+    assert_eq!(failure.model_call_id.as_deref(), Some(call_id.as_str()));
+    assert_eq!(
+        failure.detail.as_deref(),
+        Some("temperature is incompatible with adaptive thinking; omit the pinned temperature")
+    );
 }
 
 #[test]

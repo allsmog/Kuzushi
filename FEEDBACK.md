@@ -99,3 +99,28 @@ Target: `/private/tmp/kuzushi-opencode-review.HPIrp9`, opencode `411eff73f026d49
 ## Fixed & removed
 
 None. `FEEDBACK.md` did not exist when this audit began, so there were no prior items to re-verify or remove.
+
+---
+
+## Verification update — 2026-07-24, refreshed 2026-07-27
+
+The feedback implementation pass is complete for the TUI behavior covered by the automated contracts and live DevEx journeys below. This update records evidence rather than deleting the original dogfood reports.
+
+### Live TUI evidence
+
+- **J1 keyless first launch:** 11 machine checks passed, 0 failed, and all 3 human reviews passed. Target consent explains why selection is required; deterministic Setup now states `deterministic/runtime-free · no model or credentials`; the offline demo exposes real findings, target-relative locations, and signal-only proof state. Evidence: `scripts/devex/artifacts/20260724-163854/J1/`.
+- **J7 findings triage and dismissal:** 2 machine checks passed, 0 failed, and all 4 human reviews passed. Finding detail now advertises decision, dismiss, and expiring suppression commands; durable decisions and suppression remain visibly distinct from gone findings. Evidence: `scripts/devex/artifacts/20260724-163854/J7/`.
+- **J8 interrupt honesty:** 9 machine checks passed, 0 failed, and all 4 human reviews passed. Operator cancellation wins before terminal persistence, Jobs records `canceled`, Run Focus remains lifecycle-healthy, and no canceled task is presented as completed. Evidence: `scripts/devex/artifacts/20260724-174901/J8/`.
+- **J12 Activity/viz auto-open:** 3 machine checks passed, 0 failed, and all 3 human reviews passed. Run Focus opens for live work, findings open the non-empty heatmap, and pages without backing artifacts render explicit empty guidance rather than fabricated data. Evidence: `scripts/devex/artifacts/20260724-154613/J12/`.
+- **J18 failed Map recovery:** 11 machine checks passed, 0 failed, and all 3 human reviews passed. Prompt mode remains editable under an unresolved result, Navigate mode exposes the recovery actions, discard clears the checkpoint while retaining honest run evidence, and `next` opens a fresh Map plan. Evidence: `scripts/devex/artifacts/20260727-181144/J18/`.
+- **Additional matrix:** J14, J16, and J20 passed their machine runs. J4 skips honestly without an Anthropic/OpenAI credential. J25, J26, J27, and J29 skip unless `KUZUSHI_DEVEX_TARGET` names a real monorepo; J29's root-first holistic state machine remains an explicit expected-fail product gap.
+
+### Automated evidence
+
+- `cargo fmt --all -- --check` passes.
+- Focused cancellation, lifecycle settlement, key-remapping, planner-history, Setup, review-action, and canonical phase-snapshot tests pass.
+- TUI integration suites pass: parity 113/113, snapshots 25/25, and stress 3/3.
+- The TUI library suite passes with 2,460 passed, 0 failed, and 2 ignored, including the selected-proof and stale-proof provenance regressions.
+- `cargo test --workspace --locked` passes across all crates, TUI integration suites, and doc tests.
+- `pnpm verify:quick` passes its complete eight-step plan: Node tests, Rust formatting, workspace/all-target compilation, architecture, model safety, docs, CRAP risk, and Biome.
+- `pnpm quality:architecture` passes 17 boundaries and 74 rules; `pnpm quality:crap-risk` passes for 365 changed code files.

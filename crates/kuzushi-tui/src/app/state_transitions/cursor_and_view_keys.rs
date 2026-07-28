@@ -2,6 +2,9 @@ use super::*;
 
 impl ShellApp {
     pub(super) fn handle_cursor_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if self.handle_scene_view_key(key, modifiers) {
+            return true;
+        }
         let Some(handler) = cursor_key_handler(key.code, modifiers) else {
             return false;
         };
@@ -145,8 +148,8 @@ impl ShellApp {
             return false;
         }
         // 3D controls only apply on the attack-surface page; on the DFD page
-        // j/k drive the node/flow inspector cursor instead. Other 2D pages
-        // fall through. Tab/Shift+Tab/Esc/q work on every page.
+        // selection keys drive the node/flow inspector cursor instead. Other
+        // 2D pages fall through. Tab/Shift+Tab/Esc/q work on every page.
         let is_3d = self.router.scene().page().is_3d();
         let is_dfd = matches!(self.router.scene().page(), crate::scene3d::VizPage::Dfd);
         match key.code {
@@ -162,8 +165,10 @@ impl ShellApp {
             KeyCode::Char('l') if is_3d => self.nudge_scene_yaw(1.0),
             KeyCode::Char('k') if is_3d => self.nudge_scene_pitch(1.0),
             KeyCode::Char('j') if is_3d => self.nudge_scene_pitch(-1.0),
-            KeyCode::Char('j') if is_dfd => self.cycle_dfd_selection(1),
-            KeyCode::Char('k') if is_dfd => self.cycle_dfd_selection(-1),
+            KeyCode::Char('j') | KeyCode::Down if is_dfd => self.cycle_dfd_selection(1),
+            KeyCode::Char('k') | KeyCode::Up if is_dfd => self.cycle_dfd_selection(-1),
+            KeyCode::PageDown if is_dfd => self.scroll_dfd_detail(1),
+            KeyCode::PageUp if is_dfd => self.scroll_dfd_detail(-1),
             _ => return false,
         }
         true
@@ -174,6 +179,12 @@ impl ShellApp {
         let model = crate::ui_view_models::dfd_model(self);
         let len = crate::ui_view_models::dfd_selectable_count(&model);
         self.router.scene_mut().cycle_dfd_selection(direction, len);
+    }
+
+    fn scroll_dfd_detail(&mut self, direction: i32) {
+        self.router
+            .scene_mut()
+            .scroll_dfd_detail(direction, VIEWPORT_PAGE_LINES);
     }
 
     fn cycle_scene(&mut self, direction: i32) {

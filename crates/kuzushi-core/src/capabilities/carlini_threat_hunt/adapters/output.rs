@@ -27,9 +27,10 @@ impl CarliniThreatHuntReport {
 
     fn summary(&self) -> String {
         format!(
-            "carlini-threat-hunt: {} finding{} under {}",
+            "carlini-threat-hunt: {} finding{}, {} rejected by finding schema under {}",
             self.count,
             if self.count == 1 { "" } else { "s" },
+            self.rejected_count,
             self.target
         )
     }
@@ -45,6 +46,7 @@ impl CarliniThreatHuntReport {
                 self.target
             ),
             format!("  Actor runs: {}", self.actor_runs),
+            format!("  Rejected by finding schema: {}", self.rejected_count),
             format!(
                 "  Prompt source files: {} ({} threat-focused)",
                 self.prompt_inventory_files, self.threat_focused_prompt_files

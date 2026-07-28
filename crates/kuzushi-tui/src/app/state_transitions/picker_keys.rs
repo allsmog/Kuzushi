@@ -1,7 +1,6 @@
 use super::*;
 use crate::app::{
-    api_key_model_choice_for_provider, auth_ready_for_provider, build_execution_plan,
-    display_model_selector, oauth_model_choice_for_provider, toggle_planning_row,
+    auth_ready_for_provider, build_execution_plan, display_model_selector, toggle_planning_row,
     visible_model_choices, AuthMethodRowKind, ToggleOutcome,
 };
 
@@ -599,10 +598,9 @@ impl ShellApp {
     fn accept_auth_api_key_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
         let api_key_provider = api_key_auth_provider(provider);
         if !self.router.auth_picker().key_draft_trimmed().is_empty() {
-            return self.accept_pasted_auth_api_key(provider, api_key_provider);
+            return self.accept_pasted_auth_api_key(api_key_provider);
         }
         if self.provider_auth_ready_for(api_key_provider) {
-            let effects = self.select_api_key_model_for_provider(provider);
             self.set_success_notice(
                 "onboarding",
                 format!(
@@ -611,7 +609,7 @@ impl ShellApp {
                 ),
             );
             self.transition_after_auth_ready();
-            return effects;
+            return Vec::new();
         }
         let env_var = api_key_env_var(api_key_provider);
         let message =
@@ -620,14 +618,9 @@ impl ShellApp {
         Vec::new()
     }
 
-    fn accept_pasted_auth_api_key(
-        &mut self,
-        provider: &str,
-        api_key_provider: &str,
-    ) -> Vec<ShellEffect> {
+    fn accept_pasted_auth_api_key(&mut self, api_key_provider: &str) -> Vec<ShellEffect> {
         let env_var = api_key_env_var(api_key_provider);
         let key = self.router.auth_picker_mut().take_key_draft_trimmed();
-        let mut effects = self.select_api_key_model_for_provider(provider);
         self.session_mut()
             .mark_session_api_key_ready(api_key_provider);
         self.set_success_notice(
@@ -635,17 +628,15 @@ impl ShellApp {
             format!("{env_var} accepted for this session; value hidden"),
         );
         self.transition_after_auth_ready();
-        effects.push(ShellEffect::SetSessionEnv(SessionEnvVar {
+        vec![ShellEffect::SetSessionEnv(SessionEnvVar {
             key: env_var.to_string(),
             value: key,
-        }));
-        effects
+        })]
     }
 
     fn accept_auth_oauth_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
         let oauth_provider = oauth_credential_provider(provider);
         if auth_ready_for_provider(oauth_provider) {
-            let effects = self.select_oauth_model_for_provider(provider);
             self.set_success_notice(
                 "onboarding",
                 format!(
@@ -654,7 +645,7 @@ impl ShellApp {
                 ),
             );
             self.transition_after_auth_ready();
-            return effects;
+            return Vec::new();
         }
         self.clear_credential_notice();
         self.log(
@@ -676,43 +667,6 @@ impl ShellApp {
         if belongs_to_credential_flow {
             self.clear_notice();
         }
-    }
-
-    fn select_api_key_model_for_provider(&mut self, provider: &str) -> Vec<ShellEffect> {
-        let Some(choice) = api_key_model_choice_for_provider(provider) else {
-            return Vec::new();
-        };
-        self.select_auth_model_choice(choice, "API key")
-    }
-
-    pub(crate) fn select_oauth_model_for_provider(&mut self, provider: &str) -> Vec<ShellEffect> {
-        let Some(choice) = oauth_model_choice_for_provider(provider) else {
-            return Vec::new();
-        };
-        self.select_auth_model_choice(choice, "OAuth")
-    }
-
-    fn select_auth_model_choice(
-        &mut self,
-        choice: &ModelChoice,
-        auth_method: &str,
-    ) -> Vec<ShellEffect> {
-        if self.config().model.as_deref() == Some(choice.id) {
-            return Vec::new();
-        }
-        self.config_mut().model = Some(choice.id.to_string());
-        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
-        self.log(
-            "model",
-            format!(
-                "{} selected for {auth_method} (no fallback model)",
-                display_model_selector(choice.id)
-            ),
-        );
-        vec![crate::app::global_model_selection_persist_effect(
-            choice.id,
-            Some(choice.thinking_level),
-        )]
     }
 
     fn defer_auth_picker(&mut self) {
@@ -1395,30 +1349,24 @@ mod tests {
     }
 
     #[test]
-    fn selecting_openai_oauth_auth_method_selects_oauth_model() {
-        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.config_mut().model = Some("openai:gpt-5.5".to_string());
-
-        app.select_oauth_model_for_provider("openai");
-
-        assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
-        assert_eq!(app.session_thinking_level(), Some("xhigh"));
-        assert!(app.log_lines().iter().any(|line| {
-            line.prefix == "model"
-                && line.body.contains("openai-oauth:gpt-5.4")
-                && !line.body.contains("openai-codex")
-        }));
-    }
-
-    #[test]
-    fn selecting_openai_api_key_auth_method_selects_api_key_model() {
+    fn accepting_api_key_preserves_model_and_thinking_level() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.config_mut().model = Some("openai-codex:gpt-5.4".to_string());
+        app.set_session_thinking_level(Some("medium".to_string()));
+        app.open_auth_method_picker("openai-codex".to_string());
+        app.router.auth_picker_mut().push_key_str("sk-session");
 
-        app.select_api_key_model_for_provider("openai-codex");
+        let effects = app.accept_pasted_auth_api_key("openai");
 
-        assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
-        assert_eq!(app.session_thinking_level(), Some("xhigh"));
+        assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+        assert_eq!(app.session_thinking_level(), Some("medium"));
+        assert!(matches!(
+            effects.as_slice(),
+            [ShellEffect::SetSessionEnv(_)]
+        ));
+        assert!(!effects
+            .iter()
+            .any(|effect| matches!(effect, ShellEffect::PersistGlobalModelSelection(_))));
     }
 
     #[test]

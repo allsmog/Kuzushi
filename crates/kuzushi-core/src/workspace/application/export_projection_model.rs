@@ -82,6 +82,7 @@ pub struct WorkspaceRemediationExportSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finding_scan_id: Option<String>,
     pub application_state: String,
+    pub empirically_verified: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reverify_outcome: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -108,6 +109,7 @@ impl From<&crate::findings::PatchLifecycleRecord> for WorkspaceRemediationExport
             patch_run_id: record.patch_run_id.clone(),
             finding_scan_id: record.finding_scan_id.clone(),
             application_state: record.state.as_str().to_string(),
+            empirically_verified: record.is_empirically_verified(),
             reverify_outcome,
             reverify_run_id: record.reverify_run_id.clone(),
             diff_hash: record.diff_hash.clone(),
@@ -152,7 +154,8 @@ pub struct WorkspaceEvidenceExportSummary {
     pub raw_http_blob_present: bool,
     /// Highest per-evidence confidence, when any evidence row carries one.
     /// External-ledger imports store their verdict-derived confidence here
-    /// (e.g. VALIDATED→90, REFUTED→10), which is otherwise summarized away.
+    /// Input validation maps legacy verdicts here (e.g. VALIDATED→90,
+    /// REFUTED→10), which is otherwise summarized away.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence_confidence_max: Option<u8>,
 }
@@ -178,6 +181,10 @@ pub struct WorkspaceVerificationExportSummary {
     pub backend: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_identity: Option<crate::workflow_attempts::TargetContentIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reproducer: Option<crate::content_store::ObjectRef>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]

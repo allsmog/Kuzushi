@@ -836,6 +836,7 @@ fn reducer_accepts_model_start_as_the_first_model_call_item() {
             },
             cost: RuntimeCostReport::INCOMPLETE_ZERO,
             error_class: None,
+            failure: None,
         },
         Some(&started),
     )
@@ -943,6 +944,7 @@ fn reducer_keeps_mixed_outer_tool_and_model_call_sequence_healthy() {
             },
             cost: RuntimeCostReport::INCOMPLETE_ZERO,
             error_class: None,
+            failure: None,
         },
         Some(&model_started),
     )
@@ -1440,6 +1442,50 @@ fn reader_stops_at_the_last_valid_prefix_for_corruption_and_truncation() {
         projection.health,
         ProjectionHealth::Degraded { .. }
     ));
+}
+
+#[test]
+fn writer_reopen_heals_a_torn_tail_and_preserves_the_hash_chain() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = crate::run_artifacts::new_run_id("heal-torn");
+    let writer = RunItemWriter::open(target.path(), &run_id, None).unwrap();
+    writer
+        .emit_and_flush(RunItemRecord::new(
+            RunItemId::new(),
+            RunItemSource::Persistence,
+            RunItemV1::DiagnosticNotice {
+                level: DiagnosticLevel::Info,
+                message: SafeText::operator_visible("before crash"),
+            },
+        ))
+        .unwrap();
+    writer.shutdown().unwrap();
+    let path = crate::run_artifacts::run_dir(target.path(), &run_id).join("items.jsonl");
+    OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(br#"{"schemaVersion":1,"torn":"#)
+        .unwrap();
+
+    let reopened = RunItemWriter::open(target.path(), &run_id, None).unwrap();
+    reopened
+        .emit_and_flush(RunItemRecord::new(
+            RunItemId::new(),
+            RunItemSource::Persistence,
+            RunItemV1::DiagnosticNotice {
+                level: DiagnosticLevel::Info,
+                message: SafeText::operator_visible("after recovery"),
+            },
+        ))
+        .unwrap();
+    reopened.shutdown().unwrap();
+
+    let read = read_run_items(target.path(), &run_id).unwrap().unwrap();
+    assert_eq!(read.items.len(), 2);
+    assert_eq!(read.items[0].seq, 1);
+    assert_eq!(read.items[1].seq, 2);
+    assert!(matches!(read.health, ProjectionHealth::Healthy));
 }
 
 #[test]

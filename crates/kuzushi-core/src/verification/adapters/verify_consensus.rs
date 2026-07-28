@@ -20,7 +20,9 @@ use serde_json::{json, Map, Value};
 /// the winning side, its `confidence` replaced by the mean confidence of
 /// the winning side, plus a `consensus` block recording the vote split
 /// so the operator can see disagreement.
-pub(in crate::verification::adapters) fn combine_verify_passes(passes: Vec<Value>) -> Result<Value> {
+pub(in crate::verification::adapters) fn combine_verify_passes(
+    passes: Vec<Value>,
+) -> Result<Value> {
     anyhow::ensure!(
         !passes.is_empty(),
         "verification consensus requires at least one pass"
@@ -166,12 +168,9 @@ mod tests {
 
     #[test]
     fn strict_majority_confirms_exploitable() {
-        let combined = combine_verify_passes(vec![
-            pass(true, 0.9),
-            pass(true, 0.6),
-            pass(false, 0.5),
-        ])
-        .unwrap();
+        let combined =
+            combine_verify_passes(vec![pass(true, 0.9), pass(true, 0.6), pass(false, 0.5)])
+                .unwrap();
         assert_eq!(combined["exploitable"], json!(true));
         // Mean over the two winning (exploitable) passes.
         assert_eq!(combined["confidence"], json!(0.75));

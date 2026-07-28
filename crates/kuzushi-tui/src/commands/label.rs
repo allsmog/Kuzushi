@@ -10,7 +10,7 @@ pub enum ShellCommand {
     Tools(Option<String>),
     /// Toggle a tool as a favorite on the per-workspace shelf.
     FavoriteTool(String),
-    /// Open the Workbench command center with the given pane focused. The
+    /// Open the phase Workbench with the given workflow surface focused. The
     /// shell's default landing surface; `findings` and `open` also route here
     /// with the appropriate pane focus / selection.
     Workbench,

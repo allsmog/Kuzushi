@@ -15,7 +15,7 @@ home - open the current phase cockpit
   aliases / examples: /home, /
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
-workbench - open the split-pane command center
+workbench - open the current Map/Scan/Review/Prove/Fix phase
   aliases / examples: /workbench
 report - export the engagement report with a durable receipt
   aliases / examples: /report

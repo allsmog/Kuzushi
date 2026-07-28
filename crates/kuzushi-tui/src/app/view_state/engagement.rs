@@ -45,6 +45,7 @@ pub struct EngagementState {
         String,
         kuzushi_core::workflow_attempts::PhaseAttemptDerivation,
     )>,
+    pending_phase_rerun: Option<crate::app::PhaseRerunReview>,
     guided_scan: Option<GuidedScanFlow>,
 }
 
@@ -203,6 +204,22 @@ impl EngagementState {
         {
             self.pending_attempt_lineage = None;
         }
+    }
+
+    pub(crate) fn pending_phase_rerun(&self) -> Option<&crate::app::PhaseRerunReview> {
+        self.pending_phase_rerun.as_ref()
+    }
+
+    pub(crate) fn set_pending_phase_rerun(&mut self, review: crate::app::PhaseRerunReview) {
+        self.pending_phase_rerun = Some(review);
+    }
+
+    pub(crate) fn take_pending_phase_rerun(&mut self) -> Option<crate::app::PhaseRerunReview> {
+        self.pending_phase_rerun.take()
+    }
+
+    pub(crate) fn clear_pending_phase_rerun(&mut self) {
+        self.pending_phase_rerun = None;
     }
 
     pub(crate) fn mark_current_phase_skipped(&mut self) -> Option<WorkflowPhase> {

@@ -11,6 +11,7 @@ pub mod findings_ground;
 pub mod full_mode_multi;
 pub mod fuzz_engine;
 pub mod module_recommender;
+pub(crate) mod patch_reverification;
 pub mod scan_recommender;
 pub mod pack_lint;
 pub mod shard_suggest;

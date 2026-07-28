@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::path::Path;
 
+mod execution;
+
 pub(crate) struct VerifyFindingToolRequest<'a> {
     pub(crate) input: Value,
     pub(crate) workspace_root: &'a Path,
@@ -18,80 +20,17 @@ pub(crate) struct VerifyFindingToolRequest<'a> {
 }
 
 pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
-    let input = VerifyFindingInput::from_tool_input(&request.input, request.workspace_root)?;
-    let Some(finding) = request
-        .store
-        .get_finding_by_operator_reference(&input.fingerprint)?
-    else {
-        return Ok(missing_finding_response(&input.fingerprint));
-    };
-    // Require a triage verdict to exist before spending a verify pass, but
-    // deliberately do NOT forward the triage reasoning to the verifier — it
-    // must reach its own verdict from the claim and the code (see
-    // build_verify_prompt).
-    if finding.triage.is_none() {
-        return Ok(untriaged_finding_response(&finding.fingerprint));
-    }
+    execution::run(request)
+}
 
-    let runtime = require_verify_finding_runtime(request.runtime)?;
-    let model = verify_finding_model(&request.input, request.configured_model)?;
-    let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
-
-    // Optional staged gauntlet: one cheap-tier pass runs first, and only
-    // its rejection is final — most false positives die here for a fraction
-    // of the full-pass cost. An exploitable verdict from the cheap model is
-    // never trusted as confirmation; it escalates to the panel below.
-    let mut gate_cost = RuntimeCostReport::known(RuntimeCost::ZERO);
-    if let Some(gate_model) = &input.gate_model {
-        let gate_pass = run_one_verify_pass(
-            runtime,
-            gate_model,
-            request.workspace_root,
-            &prompt,
-            &finding.fingerprint,
-            &input,
-        )?;
-        gate_cost = gate_cost.checked_add(gate_pass.cost_report()?, "verification gate cost")?;
-        let exploitable = gate_pass
-            .value
-            .get("exploitable")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        if !exploitable {
-            let mut result = gate_pass.value;
-            annotate_gate_stage(&mut result, gate_model, false);
-            return bind_verification_result(result, &finding)
-                .and_then(|result| verify_finding_response(result, gate_cost));
-        }
-    }
-
-    // Each pass is an independent adversarial verifier with no shared
-    // context; a strict majority must agree before a finding is confirmed
-    // exploitable (see verify_consensus). passes == 1 is the single-pass
-    // default and skips the consensus machinery entirely.
-    let mut passes = Vec::with_capacity(input.passes as usize);
-    for _ in 0..input.passes {
-        passes.push(run_one_verify_pass(
-            runtime,
-            &model,
-            request.workspace_root,
-            &prompt,
-            &finding.fingerprint,
-            &input,
-        )?);
-    }
-    let cost = passes.iter().try_fold(gate_cost, |total, pass| {
-        total.checked_add(pass.cost_report()?, "verification consensus cost")
-    })?;
-    let mut result = super::verify_consensus::combine_verify_passes(
-        passes.into_iter().map(|pass| pass.value).collect(),
-    )?;
-    if let Some(gate_model) = &input.gate_model {
-        annotate_gate_stage(&mut result, gate_model, true);
-    }
-
-    bind_verification_result(result, &finding)
-        .and_then(|result| verify_finding_response(result, cost))
+fn bind_prompt_to_source_identity(
+    prompt: String,
+    source_identity: &crate::workflow_attempts::TargetContentIdentity,
+) -> Result<String> {
+    let canonical = crate::verification::canonical_source_identity(source_identity)?;
+    Ok(format!(
+        "{prompt}\n\nVerification source identity (canonical JSON):\n{canonical}\nBase every source claim on this exact captured identity."
+    ))
 }
 
 /// The gate's involvement must stay visible in the result: a rejection that
@@ -113,6 +52,7 @@ fn annotate_gate_stage(result: &mut Value, gate_model: &str, escalated: bool) {
 fn bind_verification_result(
     mut result: Value,
     finding: &crate::findings::Finding,
+    source_identity: &crate::workflow_attempts::TargetContentIdentity,
 ) -> Result<Value> {
     let scan_id = finding
         .scan_id
@@ -125,6 +65,7 @@ fn bind_verification_result(
         .context("normalized verification result must be an object")?;
     object.insert("verifiedScanId".to_string(), json!(scan_id));
     object.insert("identityId".to_string(), json!(finding.identity_id.clone()));
+    object.insert("sourceIdentity".to_string(), json!(source_identity));
     Ok(result)
 }
 
@@ -289,6 +230,7 @@ fn verification_proof_snapshot(result: &Value) -> Result<Value> {
         "confidence": required_result_field(result, "confidence")?,
         "verifiedScanId": required_result_field(result, "verifiedScanId")?,
         "identityId": required_result_field(result, "identityId")?,
+        "sourceIdentity": required_result_field(result, "sourceIdentity")?,
     }))
 }
 
@@ -340,7 +282,8 @@ mod tests {
                 "proofLevel": 2,
                 "proofVerdict": "exploited",
                 "verifiedScanId": "scan-1",
-                "identityId": "identity-1"
+                "identityId": "identity-1",
+                "sourceIdentity": source_identity_fixture()
             }),
             known_cost(0.25),
         )
@@ -396,7 +339,8 @@ mod tests {
                 "proofLevel": 2,
                 "proofVerdict": "not_reproduced",
                 "verifiedScanId": "scan-1",
-                "identityId": null
+                "identityId": null,
+                "sourceIdentity": source_identity_fixture()
             }),
             RuntimeCostReport::UNAVAILABLE,
         )
@@ -419,10 +363,27 @@ mod tests {
         finding.scan_id = Some("scan-current".to_string());
         finding.identity_id = Some("identity-current".to_string());
 
-        let result = bind_verification_result(json!({"fingerprint": "fp"}), &finding).unwrap();
+        let source_identity = source_identity_fixture_typed();
+        let result =
+            bind_verification_result(json!({"fingerprint": "fp"}), &finding, &source_identity)
+                .unwrap();
 
         assert_eq!(result["verifiedScanId"], "scan-current");
         assert_eq!(result["identityId"], "identity-current");
+        assert_eq!(result["sourceIdentity"], source_identity_fixture());
+    }
+
+    fn source_identity_fixture_typed() -> crate::workflow_attempts::TargetContentIdentity {
+        crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+            snapshot_hash: crate::run_lifecycle::SafeText::operator_visible("a".repeat(64)),
+            tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
+                "b".repeat(64),
+            )),
+        }
+    }
+
+    fn source_identity_fixture() -> Value {
+        json!(source_identity_fixture_typed())
     }
 
     #[test]

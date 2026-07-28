@@ -1,4 +1,4 @@
-//! Pure pane-body line builders for the Workbench command center. Shared by the
+//! Pure pane-body line builders for the phase Workbench. Shared by the
 //! frame renderer (each list drawn inside a bordered `Block`) and the plain
 //! `workbench_lines` path (each list stacked under a text divider).
 

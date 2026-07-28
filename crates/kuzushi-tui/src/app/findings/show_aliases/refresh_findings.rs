@@ -141,12 +141,21 @@ impl ShellApp {
     ) -> FindingLedgerCounts {
         match self.selected_scan_findings(store) {
             Ok(Some(findings)) => self.count_journey_findings(store, &findings, findings.len()),
-            Ok(None) => self.count_journey_findings_with_decisions(
-                store,
-                fallback_findings,
-                fallback_decisions,
-                fallback_total,
-            ),
+            Ok(None) => match store.list_all_findings() {
+                Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
+                Err(error) => {
+                    self.log(
+                        "error",
+                        format!("could not load the full findings ledger: {error}"),
+                    );
+                    self.count_journey_findings_with_decisions(
+                        store,
+                        fallback_findings,
+                        fallback_decisions,
+                        fallback_total,
+                    )
+                }
+            },
             Err(error) => {
                 self.log(
                     "error",

@@ -83,6 +83,7 @@ pub fn append_run_event(
     let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
     let path = checked_run_artifact_path(target, run_id, run_events_spec().leaf)?;
     reject_non_file_event_target(&path)?;
+    super::jsonl_append::heal_torn_run_jsonl(&path, "Run event log")?;
     let mut numbered = event.clone();
     numbered.n = next_event_number_from_path(&path)?;
     let mut line = serde_json::to_string(&numbered)?;

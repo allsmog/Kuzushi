@@ -20,7 +20,7 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
           │Outcome · completed · scenario completed                                                          │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │
-          │lineage: target rev unrecorded                                                                    │
+          │target revision was not recorded for this attempt                                                 │
           │next: phase result ledger is degraded; repair it before selecting this result                     │
           │›  1 ● Open run evidence  RECOMMENDED · Inspect the canonical run receipt and trace.              │
           │2 ○ Run again                                                                                     │

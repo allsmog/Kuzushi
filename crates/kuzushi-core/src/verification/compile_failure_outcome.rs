@@ -15,17 +15,6 @@ pub(crate) fn compile_failure_outcome(
     })
 }
 
-pub(in crate::verification) fn node_run_command(
-    project: &ScaffoldedProject,
-    opts: &VerifyOptions,
-    runner: NodeRunner,
-) -> SandboxExecOptions {
-    let trigger_name = runner.trigger_name();
-    let mut argv = runner.argv;
-    argv.push(project.path.join(trigger_name).display().to_string());
-    project_command(project, opts, argv)
-}
-
 pub(crate) fn c_compile_command(
     project: &ScaffoldedProject,
     opts: &VerifyOptions,
@@ -53,7 +42,9 @@ pub(crate) fn c_run_command(
     opts: &VerifyOptions,
     binary_path: &Path,
 ) -> SandboxExecOptions {
-    project_command(project, opts, vec![binary_path.display().to_string()])
+    let mut command = project_command(project, opts, vec![binary_path.display().to_string()]);
+    configure_sink_marker(&mut command, &project.path);
+    command
 }
 
 pub(crate) fn rust_test_argv() -> Vec<String> {
@@ -77,10 +68,11 @@ pub(crate) fn infrastructure_error(
         backend,
         language: None,
         harness_path,
-        crash_evidence: Some(message),
+        crash_evidence: bounded_runtime_evidence(&message),
         duration_ms: 0,
         cost_usd: 0.0,
         notes: vec![],
+        provenance: None,
     }
 }
 
@@ -96,18 +88,29 @@ pub(crate) fn harness_failed_to_build(
         backend,
         language: None,
         harness_path: Some(project_path),
-        crash_evidence: Some(evidence),
+        crash_evidence: bounded_runtime_evidence(&evidence),
         duration_ms,
         cost_usd: 0.0,
         notes: vec![],
+        provenance: None,
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct ScaffoldedProject {
     pub(crate) path: PathBuf,
+    pub(crate) fidelity: HarnessFidelity,
+    pub(crate) payload: Vec<u8>,
+    pub(crate) provenance: Option<crate::findings::VerificationProvenance>,
     /// Held to keep the temp dir alive for the lifetime of verify().
     /// Field name with `_` prefix is intentional: it's never read but
     /// must not be dropped early.
     pub(crate) _tempdir: tempfile::TempDir,
+}
+
+impl ScaffoldedProject {
+    pub(crate) fn bind(&self, mut outcome: VerificationOutcome) -> VerificationOutcome {
+        outcome.provenance = self.provenance.clone();
+        outcome
+    }
 }

@@ -39,7 +39,7 @@ pub(crate) fn build_actor_prompt(
 /// normalizer, so the prompt says so up front.
 fn actor_findings_contract_line() -> String {
     format!(
-        "Each finding object MUST include: title, severity (critical|high|medium|low|info), filePath (target-relative source path), startLine (1-based integer), and message. Optional: endLine, ruleId, evidence, confidence, likelihood, impact, cwe[]. Findings without filePath + startLine are rejected by a deterministic normalizer. JSON Schema for the response: {}",
+        "Each finding object MUST include: title, severity (critical|high|medium|low|info), filePath (target-relative source path), startLine (1-based integer), and message. Optional: endLine, ruleId, evidence, confidence, likelihood, impact, cwe[]. Every item is checked by a deterministic normalizer. JSON Schema for the response: {}",
         findings_schema()
     )
 }

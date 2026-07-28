@@ -19,9 +19,8 @@ use lifecycle::require_state;
 pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
-    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite,
-    PatchLifecycleWrite, RekeyWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta,
-    VerificationWrite,
+    FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, PatchLifecycleWrite,
+    RekeyWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta, VerificationWrite,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -90,11 +89,26 @@ impl StorageWriter {
 
     fn record_verification(&mut self, verification: VerificationWrite) -> Result<WriteReceipt> {
         require_state(self.lifecycle.state(), WriterActorState::Live)?;
+        if let Some(provenance) = &verification.provenance {
+            provenance.validate()?;
+        }
+        let target_snapshot = verification
+            .provenance
+            .as_ref()
+            .and_then(|provenance| match &provenance.source_identity {
+                crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                    snapshot_hash,
+                    ..
+                } => Some(snapshot_hash.as_str()),
+                _ => None,
+            })
+            .map(|hash| crate::identity::Blake3Hash::new(hash.to_string()))
+            .transpose()?;
         let event = self.log.append(
             EventKind::VerificationRecorded,
             verification.actor.clone(),
-            None,
-            None,
+            verification.verification_run_id.clone(),
+            target_snapshot,
             verification.payload(),
         )?;
         self.apply_appended_event(&event)

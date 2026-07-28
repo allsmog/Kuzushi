@@ -45,6 +45,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         notes: vec!["runtime path did not reach the sink".to_string()],
         verification_run_id: None,
         verified_scan_id: None,
+        provenance: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
     });
     finding.evidence = vec![FindingEvidence {

@@ -163,7 +163,9 @@ artifact contract as the run manifest.
 `schemas/run.failures.schema.json` is the machine-readable contract for
 `failures.json`, including each failed tool, the bounded failure-to-LLM context,
 available/missing artifacts, recovery options, fallback prompt, and forbidden
-claims.
+claims. Model-backed failures add the exact model plus provider-neutral typed
+failure metadata: safe error class, optional HTTP status, bounded redacted
+detail, model-call id, and failed stage.
 `schemas/run.events.schema.json` is the machine-readable contract for each
 non-authoritative diagnostic JSON line in `events.jsonl`, including sequence
 number, kind, status, message, timestamp, optional tool, and optional artifact
@@ -342,12 +344,28 @@ the agent is allowed to infer:
 - next files or artifacts to inspect;
 - recovery options;
 - fallback prompt for the inherited agent/session mechanism.
+- for model-backed failures, exact model/call/stage, safe class, optional HTTP
+  status, and bounded redacted detail.
 
 The failure list and all array fields inside the failure handoff context are
 capped at twelve entries in the writer and in
 `schemas/run.failures.schema.json`. Longer reports should point to
 `artifacts.json` or a concrete report artifact instead of expanding the
 handoff payload.
+
+The same typed failure metadata is additive on failed `ModelCallFinished`
+items. Its class/status fields are authoritative and are copied into
+`failures.json`; consumers must not reconstruct them from `error`, `cause`, or
+other rendered strings. Secret, authorization, credential, and token-shaped
+content is redacted before live presentation and before any run artifact is
+written.
+
+Stage continuation is eligible only when the pending checkpoint names the
+failed run and its fingerprint matches that run's hash-linked
+`ToolCallRequested` operation. `agentic-sast:scan` checkpoints its initial hunt
+findings and cost receipt before optional review, so a review failure resumes
+without repeating the hunt. Changed prepared input, model, or clean repository
+revision starts fresh.
 
 When `report.md` or optional `report.sarif` already exists for the failed run,
 the bounded next-inspection list should include those report artifacts so a

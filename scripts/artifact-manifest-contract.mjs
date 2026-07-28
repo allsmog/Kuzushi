@@ -1681,7 +1681,10 @@ const cliRunsPathRequirementsByFile = {
     },
   ],
   "crates/kuzushi-cli/src/application/runs_prune.rs": [
-    { needle: "run_dir(", message: "CLI runs prune must use run_dir" },
+    {
+      needle: "prune_run_artifacts(",
+      message: "CLI runs prune must use the shared retention adapter",
+    },
     {
       needle: "repair_latest_run_pointer(",
       message: "CLI runs prune must use atomic chronological latest repair",

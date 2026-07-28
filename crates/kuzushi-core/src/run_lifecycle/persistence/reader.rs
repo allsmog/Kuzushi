@@ -38,6 +38,27 @@ pub fn read_run_items(target: impl AsRef<Path>, run_id: &str) -> Result<Option<R
 
 pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<RunProjectionRead> {
     let target = target.as_ref();
+    let projection = load_run_projection_unhydrated(target, run_id)?;
+    let run_id = projection
+        .run_id
+        .as_ref()
+        .expect("loaded projection retains its accepted run id");
+    let presentation_hydration = super::presentation_hydration::load_presentation_hydration(
+        target,
+        run_id.as_str(),
+        &projection,
+    );
+    Ok(RunProjectionRead {
+        projection,
+        source: RunProjectionSource::TypedV1,
+        presentation_hydration,
+    })
+}
+
+pub(crate) fn load_run_projection_unhydrated(
+    target: &Path,
+    run_id: &str,
+) -> Result<RunProjection> {
     let run_id = RunId::parse(run_id)?;
     let path =
         crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
@@ -49,16 +70,7 @@ pub fn load_run_projection(target: impl AsRef<Path>, run_id: &str) -> Result<Run
         ..RunProjection::default()
     };
     reduce_lines(reader, &mut projection);
-    let presentation_hydration = super::presentation_hydration::load_presentation_hydration(
-        target,
-        run_id.as_str(),
-        &projection,
-    );
-    Ok(RunProjectionRead {
-        projection,
-        source: RunProjectionSource::TypedV1,
-        presentation_hydration,
-    })
+    Ok(projection)
 }
 
 fn open_stream(root: &Path, path: &Path) -> Result<Option<RunItemStreamReader>> {

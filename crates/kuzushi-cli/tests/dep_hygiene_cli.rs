@@ -927,7 +927,7 @@ fn run_context_build_writes_compatible_snapshot_artifact() {
     assert_eq!(
         body.pointer("/data/snapshot/repoContext/frameworks/0")
             .and_then(Value::as_str),
-        Some("express")
+        Some("Express")
     );
     assert_eq!(
         body.pointer("/data/snapshot/staleSlices/0")
@@ -2242,6 +2242,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     std::fs::write(repo.join("package.json"), "{}\n").unwrap();
     std::fs::write(repo.join("server.js"), "db.query(req.query.q)\n").unwrap();
     fake_codeql_binary(&fake_bin);
+    seed_taint_iris_next_mcp_artifacts(&repo, &home);
 
     let old_path = std::env::var_os("PATH").unwrap_or_default();
     let path = format!("{}:{}", fake_bin.display(), old_path.to_string_lossy());
@@ -2308,6 +2309,7 @@ fn scan_tasks_codeql_reaches_scan_engine_path() {
     std::fs::write(repo.join("package.json"), "{}\n").unwrap();
     std::fs::write(repo.join("server.js"), "db.query(req.query.q)\n").unwrap();
     fake_codeql_binary(&fake_bin);
+    seed_taint_iris_next_mcp_artifacts(&repo, &home);
 
     let old_path = std::env::var_os("PATH").unwrap_or_default();
     let path = format!("{}:{}", fake_bin.display(), old_path.to_string_lossy());

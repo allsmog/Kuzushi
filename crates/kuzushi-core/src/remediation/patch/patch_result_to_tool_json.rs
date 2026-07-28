@@ -314,6 +314,9 @@ mod tests {
             detector_tool: Some("semgrep:scan".to_string()),
             detector_run_id: Some("run-scan".to_string()),
             detector_input_digest: Some("digest".to_string()),
+            reproducer: None,
+            verification_source_identity: None,
+            verification_run_id: None,
         }
     }
 }

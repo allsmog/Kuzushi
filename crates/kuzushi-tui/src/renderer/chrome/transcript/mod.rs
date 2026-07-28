@@ -36,7 +36,7 @@ pub(crate) fn transcript_line(prefix: &str, body: &str, continuation: bool) -> L
 /// `transcript_line` with an optional wall-clock timestamp prefix, matching
 /// `design/mockups/_shared.jsx::logLine`:
 ///
-///   ` 14:32:14  ⏵ run  body…`
+///   ` 14:32:14Z  ⏵ run  body…`
 ///     subtle     glyph subtle  body
 ///
 /// `time_secs == 0` skips the timestamp so synthetic lines (built inside
@@ -81,7 +81,7 @@ fn transcript_line_dated_fitted(
     transcript_line_dated(prefix, &fitted, continuation, time_secs)
 }
 
-/// Format wall-clock seconds-since-epoch as `HH:MM:SS` (UTC).  Used by
+/// Format wall-clock seconds-since-epoch as `HH:MM:SSZ` (UTC). Used by
 /// transcript timestamps; keeping it UTC keeps log-comparison across
 /// machines deterministic without a timezone database.
 pub(crate) fn wall_hms(time_secs: u64) -> String {
@@ -89,7 +89,7 @@ pub(crate) fn wall_hms(time_secs: u64) -> String {
     let h = day_secs / 3600;
     let m = (day_secs % 3600) / 60;
     let s = day_secs % 60;
-    format!("{h:02}:{m:02}:{s:02}")
+    format!("{h:02}:{m:02}:{s:02}Z")
 }
 
 pub(crate) fn transcript_glyph(prefix: &str, continuation: bool) -> (&'static str, Style, bool) {

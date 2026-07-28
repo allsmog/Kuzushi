@@ -1,101 +1,226 @@
 use super::*;
-use kuzushi_sandbox::SandboxExecResult;
+use kuzushi_sandbox::{ExitOutcome, SandboxExecResult};
+use std::io::Read;
 
-/// Classify a sandbox run result into a `VerificationOutcome`. Public
-/// for testing — the unit tests construct synthetic `SandboxExecResult`s
-/// rather than running real cargo.
+pub(crate) const SINK_MARKER_ENV: &str = "KUZUSHI_SINK_MARKER";
+pub(crate) const SINK_MARKER_FILE: &str = ".kuzushi-sink-reached-v1";
+pub(crate) const SINK_MARKER_CONTENT: &str = "kuzushi-sink-reached-v1";
+const MAX_RUNTIME_EVIDENCE_CHARS: usize = 16 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HarnessFidelity {
+    Faithful,
+    PayloadOnly,
+    Placeholder,
+}
+
+impl HarnessFidelity {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Faithful => "faithful",
+            Self::PayloadOnly => "payload-only",
+            Self::Placeholder => "placeholder",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SinkEvidence {
+    Reached,
+    NotReached,
+    Invalid(String),
+}
+
+struct RunClassification {
+    proof_level: u8,
+    proof_verdict: ProofVerdict,
+    note: String,
+}
+
+/// Classify a sandbox run only when a faithful harness proves that execution
+/// reached the generated sink call.
 pub fn classify_run_result(
     run: &SandboxExecResult,
     backend: SandboxBackend,
     project_path: &Path,
-    opts: &VerifyOptions,
+    fidelity: HarnessFidelity,
 ) -> VerificationOutcome {
-    use kuzushi_sandbox::ExitOutcome::*;
-    let mut notes = Vec::new();
-    let crash_evidence = if run.stderr.is_empty() {
-        None
-    } else {
-        Some(run.stderr.clone())
-    };
+    if fidelity != HarnessFidelity::Faithful {
+        return not_attempted_for_harness(backend, fidelity);
+    }
 
-    // Sanitizer crash signature: ASan and UBSan default to
-    // `abort_on_error=0` on Linux (clean exit_code=1 instead of
-    // SIGABRT). Their stderr is unmistakable and we treat it as a
-    // crash regardless of how the process exited.
-    let stderr_indicates_sanitizer_crash = stderr_has_sanitizer_crash(&run.stderr);
-
-    // Decide raw level from sandbox observation.
-    let raw_level = match (run.outcome, run.exit_code, run.signal) {
-        // Observed signal → SIGABRT / SIGSEGV / SIGBUS / SIGILL count as crashes.
-        (Signaled, _, Some(sig)) if is_crash_signal(sig) => 4,
-        // Sanitizer-reported crash — strong evidence even with clean exit.
-        _ if stderr_indicates_sanitizer_crash => 4,
-        // Cargo test asserts/panics typically exit 101 with no signal —
-        // still a strong reproduction signal but not an OS-level crash.
-        (Exited, Some(101), _) => 3,
-        // Any non-zero clean exit is suspicious but not exploited.
-        (Exited, Some(code), _) if code != 0 => 3,
-        // Timeout — could be a livelock; not promotable.
-        (TimedOut, _, _) => 2,
-        // Clean zero-exit means harness built and ran with no observed crash.
-        (Exited, Some(0), _) => 2,
-        _ => 2,
-    };
-
-    // Plain backend can't be trusted for proof_level=4 unless the
-    // operator explicitly opted in. We still record that the crash
-    // was *observed* — the level downgrade is about trust, not about
-    // the observation itself.
-    let observed_crash = raw_level == 4;
-    let final_level = if raw_level == 4
-        && backend == SandboxBackend::Plain
-        && !opts.trust_plain_backend
-    {
-        notes.push(
-            "verify: observed crash but Plain backend is not trusted for proof_level=4; clamped to 3 — rerun under Bwrap/Podman to promote"
-                .to_string(),
-        );
-        3
-    } else {
-        raw_level
-    };
-
-    let verdict = if observed_crash {
-        // We saw a real crash signal (SIGSEGV/SIGABRT/SIGBUS/SIGILL).
-        // Even when clamped for trust reasons, the *observation* is
-        // exploited.
-        ProofVerdict::Exploited
-    } else {
-        match final_level {
-            3 => ProofVerdict::NotReproduced,
-            _ => ProofVerdict::NotReproduced,
-        }
-    };
+    let sink_evidence = read_sink_evidence(project_path);
+    let classification = classify_observation(run, sink_evidence);
 
     VerificationOutcome {
-        proof_level: final_level,
-        proof_verdict: verdict,
+        proof_level: classification.proof_level,
+        proof_verdict: classification.proof_verdict,
         backend,
         language: None,
         harness_path: Some(project_path.to_path_buf()),
-        crash_evidence,
+        crash_evidence: bounded_runtime_evidence(&run.stderr),
         duration_ms: run.duration_ms,
         cost_usd: 0.0,
-        notes,
+        notes: vec![classification.note],
+        provenance: None,
     }
 }
 
+fn classify_observation(run: &SandboxExecResult, evidence: SinkEvidence) -> RunClassification {
+    if run.outcome == ExitOutcome::TimedOut {
+        return infrastructure_classification(
+            "verify: harness timed out; runtime result is inconclusive".to_string(),
+        );
+    }
+    match evidence {
+        SinkEvidence::Reached => classify_reached_sink(run),
+        SinkEvidence::NotReached => infrastructure_classification(
+            "verify: harness terminated without durable reached-sink evidence; runtime result is inconclusive"
+                .to_string(),
+        ),
+        SinkEvidence::Invalid(reason) => infrastructure_classification(format!(
+            "verify: reached-sink marker was invalid ({reason}); runtime result is inconclusive"
+        )),
+    }
+}
+
+fn classify_reached_sink(run: &SandboxExecResult) -> RunClassification {
+    if observed_crash(run) {
+        return RunClassification {
+            proof_level: 4,
+            proof_verdict: ProofVerdict::Exploited,
+            note: "verify: sink marker matched before the observed crash".to_string(),
+        };
+    }
+    if run.outcome == ExitOutcome::Exited && run.exit_code == Some(0) {
+        return RunClassification {
+            proof_level: 2,
+            proof_verdict: ProofVerdict::NotReproduced,
+            note: "verify: sink marker matched and the harness exited cleanly".to_string(),
+        };
+    }
+    infrastructure_classification(
+        "verify: sink was reached but the harness had an unexplained nonzero or non-crash termination"
+            .to_string(),
+    )
+}
+
+fn observed_crash(run: &SandboxExecResult) -> bool {
+    let signaled = run.outcome == ExitOutcome::Signaled && run.signal.is_some_and(is_crash_signal);
+    signaled
+        || stderr_has_sanitizer_crash(&run.stderr)
+        || stderr_has_wrapped_process_crash(&run.stderr)
+}
+
+fn infrastructure_classification(note: String) -> RunClassification {
+    RunClassification {
+        proof_level: 1,
+        proof_verdict: ProofVerdict::InfrastructureError,
+        note,
+    }
+}
+
+pub(crate) fn not_attempted_for_harness(
+    backend: SandboxBackend,
+    fidelity: HarnessFidelity,
+) -> VerificationOutcome {
+    VerificationOutcome::not_attempted(
+        backend,
+        format!(
+            "{} harness does not invoke the finding sink; compile and execution were skipped",
+            fidelity.label()
+        ),
+    )
+}
+
+pub(crate) fn prepare_sink_marker(project_path: &Path) -> Result<()> {
+    let marker_path = sink_marker_path(project_path);
+    match std::fs::symlink_metadata(&marker_path) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            std::fs::remove_file(&marker_path).with_context(|| {
+                format!(
+                    "could not remove stale sink marker {}",
+                    marker_path.display()
+                )
+            })?;
+        }
+        Ok(_) => anyhow::bail!(
+            "refusing to replace non-regular stale sink marker {}",
+            marker_path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "could not inspect stale sink marker {}",
+                    marker_path.display()
+                )
+            });
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn configure_sink_marker(command: &mut SandboxExecOptions, project_path: &Path) {
+    command.env.insert(
+        SINK_MARKER_ENV.to_string(),
+        sink_marker_path(project_path).display().to_string(),
+    );
+}
+
+pub(crate) fn sink_marker_path(project_path: &Path) -> PathBuf {
+    project_path.join(SINK_MARKER_FILE)
+}
+
+fn read_sink_evidence(project_path: &Path) -> SinkEvidence {
+    let marker_path = sink_marker_path(project_path);
+    let marker = match std::fs::File::open(&marker_path) {
+        Ok(marker) => marker,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return SinkEvidence::NotReached;
+        }
+        Err(error) => return SinkEvidence::Invalid(error.to_string()),
+    };
+    match marker.metadata() {
+        Ok(metadata) if metadata.file_type().is_file() => {}
+        Ok(_) => return SinkEvidence::Invalid("marker is not a regular file".to_string()),
+        Err(error) => return SinkEvidence::Invalid(error.to_string()),
+    }
+
+    let mut bytes = Vec::with_capacity(SINK_MARKER_CONTENT.len() + 1);
+    if let Err(error) = marker
+        .take((SINK_MARKER_CONTENT.len() + 1) as u64)
+        .read_to_end(&mut bytes)
+    {
+        return SinkEvidence::Invalid(error.to_string());
+    }
+    if bytes == SINK_MARKER_CONTENT.as_bytes() {
+        SinkEvidence::Reached
+    } else {
+        SinkEvidence::Invalid("marker content did not match".to_string())
+    }
+}
+
+pub(crate) fn bounded_runtime_evidence(value: &str) -> Option<String> {
+    if value.is_empty() {
+        return None;
+    }
+    let redacted = crate::session_transcript::redaction::redact_text(value);
+    let mut chars = redacted.chars();
+    let mut bounded = chars
+        .by_ref()
+        .take(MAX_RUNTIME_EVIDENCE_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        bounded.push_str("\n[kuzushi verify evidence truncated]");
+    }
+    Some(bounded)
+}
+
 pub(super) fn is_crash_signal(sig: i32) -> bool {
-    // SIGILL=4, SIGABRT=6, SIGBUS=7, SIGSEGV=11.
     matches!(sig, 4 | 6 | 7 | 11)
 }
 
-/// Detect AddressSanitizer / UndefinedBehaviorSanitizer / MemorySanitizer
-/// / ThreadSanitizer crash output. Their default behaviour on Linux is
-/// `abort_on_error=0`, meaning the sanitizer reports the bug to stderr
-/// and then `_exit(1)` rather than raising SIGABRT — so we'd otherwise
-/// classify a real crash as "non-zero exit, not a crash". This rescues
-/// that case.
 pub(crate) fn stderr_has_sanitizer_crash(stderr: &str) -> bool {
     pub(super) const PATTERNS: &[&str] = &[
         "AddressSanitizer:",
@@ -103,7 +228,7 @@ pub(crate) fn stderr_has_sanitizer_crash(stderr: &str) -> bool {
         "ThreadSanitizer:",
         "MemorySanitizer:",
         "UndefinedBehaviorSanitizer:",
-        "runtime error:", // ubsan minimal output prefix
+        "runtime error:",
         "stack-buffer-overflow",
         "heap-buffer-overflow",
         "global-buffer-overflow",
@@ -114,5 +239,16 @@ pub(crate) fn stderr_has_sanitizer_crash(stderr: &str) -> bool {
         "double-free",
         "SEGV on unknown address",
     ];
-    PATTERNS.iter().any(|p| stderr.contains(p))
+    PATTERNS.iter().any(|pattern| stderr.contains(pattern))
+}
+
+fn stderr_has_wrapped_process_crash(stderr: &str) -> bool {
+    [
+        "signal: 4, SIGILL",
+        "signal: 6, SIGABRT",
+        "signal: 7, SIGBUS",
+        "signal: 11, SIGSEGV",
+    ]
+    .iter()
+    .any(|pattern| stderr.contains(pattern))
 }

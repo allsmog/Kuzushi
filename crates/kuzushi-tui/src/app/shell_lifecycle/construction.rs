@@ -131,7 +131,8 @@ impl ShellApp {
     fn hydrate_initial_workspace(app: &mut Self, target: Option<&WorkspaceTarget>) {
         refresh_auto_open_prefs_from_store(app);
         app.refresh_phase_attempt_projection();
-        if target.is_some() {
+        if let Some(target) = target {
+            app.start_active_target_facts(target.root().to_path_buf());
             if let Err(error) = app.refresh_context_view() {
                 app.log(
                     "context",

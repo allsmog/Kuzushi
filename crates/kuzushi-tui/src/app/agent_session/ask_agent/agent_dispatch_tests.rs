@@ -37,6 +37,8 @@ fn failure_context_is_injected_into_agent_prompt_without_replacing_question() {
         completed_stages: Vec::new(),
         checkpoint_artifacts: Vec::new(),
         checkpoint_fingerprint: None,
+        runtime_failure: None,
+        model: None,
     };
 
     let prompt = agent_question_with_failure_context("what should I do next?", Some(&context));
@@ -102,6 +104,8 @@ fn legacy_failure_context_lists_are_bounded_in_agent_prompt() {
         completed_stages: Vec::new(),
         checkpoint_artifacts: Vec::new(),
         checkpoint_fingerprint: None,
+        runtime_failure: None,
+        model: None,
     };
 
     let prompt = agent_question_with_failure_context("continue", Some(&context));

@@ -56,16 +56,17 @@ pub use crate::repository_inventory::{
 };
 pub use crate::run_artifacts::{
     latest_run_path, list_recent_run_summary_entries, list_run_summaries, list_run_summary_entries,
-    list_run_summary_entries_cursor_page, list_run_summary_entries_page, load_run_events,
-    load_run_summary, new_run_id, read_latest_run_pointer, read_run_artifact_bytes,
-    read_run_artifact_text, repair_latest_run_pointer, resolve_run_artifact_path,
-    run_artifact_path, run_dir, runs_root, tool_result_artifact_spec, write_run_artifact_json,
-    write_run_summary, ArtifactPath, LatestRunPointerIssue, LatestRunPointerState, ParentScope,
+    list_run_summary_entries_cursor_page, list_run_summary_entries_page,
+    load_persisted_run_terminal_outcome, load_run_events, load_run_summary, new_run_id,
+    prune_run_artifacts, read_latest_run_pointer, read_run_artifact_bytes, read_run_artifact_text,
+    repair_latest_run_pointer, resolve_run_artifact_path, run_artifact_path, run_dir, runs_root,
+    tool_result_artifact_spec, write_run_artifact_json, write_run_summary, ArtifactPath,
+    LatestRunPointerIssue, LatestRunPointerState, ParentScope, PersistedRunTerminalOutcome,
     RunActivityBuilder, RunArtifact, RunArtifactBytesRead, RunArtifactRead, RunArtifactTextRead,
     RunEnvFingerprint, RunEventRead, RunHistoryCursor, RunHistoryPageInfo, RunHouseRuleFingerprint,
-    RunId, RunLlmCallAudit, RunPromptOverrideFingerprint, RunSummary, RunSummaryEntriesCursorPage,
-    RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue, RunTargetGitMetadata, TraceHandle,
-    MAX_RUN_ARTIFACT_READ_BYTES,
+    RunId, RunLlmCallAudit, RunPromptOverrideFingerprint, RunPruneDisposition, RunSummary,
+    RunSummaryEntriesCursorPage, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue,
+    RunTargetGitMetadata, TraceHandle, MAX_RUN_ARTIFACT_READ_BYTES,
 };
 pub use crate::runtime::{
     append_structured_output_contract, mcp_attachment_plan_for_target, model_provider,
@@ -73,9 +74,10 @@ pub use crate::runtime::{
     try_mcp_attachment_plan_for_target, AgentLoopOutcome, AgentLoopStep, AgentQueryControl,
     AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
     AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpArtifactSpec, McpAttachment, ModelTier, ModelTokenUsage, Observed, SubagentRole, ToolBox,
-    ToolCall, ToolCallHandler, ToolResult, TracedRuntime, TriageRequest, INTERACTION_REQUIRED_CODE,
-    MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES, REQUEST_USER_INPUT_TOOL_NAME,
+    McpArtifactSpec, McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeFailure,
+    RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
+    ToolResult, TracedRuntime, TriageRequest, INTERACTION_REQUIRED_CODE, MCP_ARTIFACT_TABLE,
+    MCP_CONSTANT_NAMES, REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use crate::strategy::{
     append_strategy_correction, append_strategy_proposal, apply_strategy_corrections,

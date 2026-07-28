@@ -1,4 +1,6 @@
-use super::{StageCheckpointFile, StageCheckpointHandle, STAGE_CHECKPOINT_VERSION};
+use super::{
+    clean_tree_identity, StageCheckpointFile, StageCheckpointHandle, STAGE_CHECKPOINT_VERSION,
+};
 use std::cell::RefCell;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,6 +60,34 @@ pub fn checkpoint_coordinates_for_run(
         .map(|(_, file)| coordinates(file))
 }
 
+/// Continuation coordinates are eligible only when they match the operation
+/// requested by that exact failed run.
+pub fn matching_checkpoint_coordinates_for_run(
+    target: &Path,
+    run_id: &str,
+) -> Option<StageCheckpointCoordinates> {
+    let coordinates = checkpoint_coordinates_for_run(target, run_id)?;
+    let requested = requested_operation_fingerprint(target, run_id)?;
+    (requested == coordinates.fingerprint).then_some(coordinates)
+}
+
+fn requested_operation_fingerprint(target: &Path, run_id: &str) -> Option<String> {
+    let read = crate::run_lifecycle::read_run_items(target, run_id).ok()??;
+    read.items.into_iter().find_map(|envelope| {
+        let crate::run_lifecycle::RunItemV1::ToolCallRequested {
+            operation_fingerprint,
+            ..
+        } = envelope.item
+        else {
+            return None;
+        };
+        operation_fingerprint
+            .as_str()
+            .strip_prefix("blake3:")
+            .map(str::to_string)
+    })
+}
+
 fn coordinates(file: StageCheckpointFile) -> StageCheckpointCoordinates {
     StageCheckpointCoordinates {
         fingerprint: file.fingerprint,
@@ -84,24 +114,39 @@ pub struct PendingStageCheckpoint {
     pub completed_stages: u32,
     pub current_stage: Option<String>,
     pub modified_at_unix: Option<u64>,
+    pub reuse_eligible: bool,
 }
 
 /// List the target's pending stage checkpoints, newest first. Presentation
 /// surfaces use this to disclose that re-running the failed operation
 /// resumes from its checkpointed stages.
 pub fn pending_stage_checkpoints(target: &Path) -> Vec<PendingStageCheckpoint> {
+    let tree_identity = clean_tree_identity(target);
     let mut pending: Vec<PendingStageCheckpoint> = checkpoint_files(target)
         .into_iter()
-        .map(|(path, file)| PendingStageCheckpoint {
-            tool: file.tool,
-            source_run_id: file.source_run_id,
-            completed_stages: file.completed.len() as u32,
-            current_stage: file.current_stage,
-            modified_at_unix: modified_at_unix(&path),
-        })
+        .map(|(path, file)| pending_checkpoint(path, file, tree_identity.as_deref()))
         .collect();
-    pending.sort_by(|left, right| right.modified_at_unix.cmp(&left.modified_at_unix));
+    pending.sort_by_key(|entry| std::cmp::Reverse(entry.modified_at_unix));
     pending
+}
+
+fn pending_checkpoint(
+    path: PathBuf,
+    file: StageCheckpointFile,
+    tree_identity: Option<&str>,
+) -> PendingStageCheckpoint {
+    let reuse_eligible = matches!(
+        (file.tree_identity.as_deref(), tree_identity),
+        (Some(prior), Some(current)) if prior == current
+    );
+    PendingStageCheckpoint {
+        tool: file.tool,
+        source_run_id: file.source_run_id,
+        completed_stages: file.completed.len() as u32,
+        current_stage: file.current_stage,
+        modified_at_unix: modified_at_unix(&path),
+        reuse_eligible,
+    }
 }
 
 fn checkpoint_files(target: &Path) -> Vec<(PathBuf, StageCheckpointFile)> {

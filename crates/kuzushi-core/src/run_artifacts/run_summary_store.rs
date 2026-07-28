@@ -4,7 +4,9 @@ use super::canonical_run_files::{
 use super::run_reproducibility_metadata::{
     summary_with_dynamic_metadata, summary_with_lifecycle_metadata,
 };
-use super::{checked_latest_run_path, checked_run_artifact_path, checked_runs_root, RunSummary};
+use super::{
+    checked_latest_run_path, checked_run_artifact_path, checked_runs_root, RunArtifact, RunSummary,
+};
 use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -129,6 +131,8 @@ fn write_run_summary_snapshot(
     let metadata_path =
         checked_run_artifact_path(target, &summary.run_id, run_metadata_artifact_spec().leaf)?;
     let (summary, transition) = summary_for_write(target, &metadata_path, summary);
+    let run_id = summary.run_id.clone();
+    let summary = summary_with_normalized_artifacts(target, &run_id, summary);
     super::process_identity::persist_running_identity_best_effort(target, &summary);
     let summary_path = write_run_summary_file(&metadata_path, &summary)?;
     Ok((summary_path, summary, transition))
@@ -176,7 +180,7 @@ fn load_run_summary_raw(target: &Path, run_id: &str) -> Result<(PathBuf, RunSumm
         run_metadata_artifact_spec().leaf,
         "Run metadata",
     )?;
-    let summary = parse_run_summary_body(&body, &path)?;
+    let summary = parse_run_summary_body(target, run_id, &body, &path)?;
     if summary.run_id != run_id {
         anyhow::bail!(
             "Run metadata runId {:?} does not match requested run id {run_id:?}: {}",
@@ -187,7 +191,7 @@ fn load_run_summary_raw(target: &Path, run_id: &str) -> Result<(PathBuf, RunSumm
     Ok((path, summary))
 }
 
-pub(super) fn load_run_summary_without_repair(target: &Path, run_id: &str) -> Result<RunSummary> {
+pub(crate) fn load_run_summary_without_repair(target: &Path, run_id: &str) -> Result<RunSummary> {
     load_run_summary_raw(target, run_id).map(|(_, summary)| summary)
 }
 
@@ -464,7 +468,7 @@ fn parse_run_summary_entry(
         Ok((_, body)) => body,
         Err(error) => return issue(RunSummaryIssue::UnreadableMetadata(error.to_string())),
     };
-    let summary = match parse_run_summary_body(&body, path) {
+    let summary = match parse_run_summary_body(target, run_id, &body, path) {
         Ok(summary) => summary,
         Err(error) => return issue(RunSummaryIssue::InvalidMetadata(error.to_string())),
     };
@@ -641,10 +645,15 @@ fn read_run_summary_file(target: &Path, run_id: &str, expected_path: &Path) -> O
     if path != expected_path {
         return None;
     }
-    parse_run_summary_body(&value, &path).ok()
+    parse_run_summary_body(target, run_id, &value, &path).ok()
 }
 
-fn parse_run_summary_body(body: &str, path: &Path) -> Result<RunSummary> {
+fn parse_run_summary_body(
+    target: &Path,
+    run_id: &str,
+    body: &str,
+    path: &Path,
+) -> Result<RunSummary> {
     let value: Value = serde_json::from_str(body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     if !value.is_object() {
@@ -653,9 +662,20 @@ fn parse_run_summary_body(body: &str, path: &Path) -> Result<RunSummary> {
     let summary = serde_json::from_value(value).map_err(|error| {
         anyhow::anyhow!("Run metadata is not canonical: {error}: {}", path.display())
     })?;
+    let summary = summary_with_normalized_artifacts(target, run_id, summary);
     validate_run_summary_costs(&summary)
         .with_context(|| format!("Run metadata cost is invalid: {}", path.display()))?;
     Ok(summary)
+}
+
+fn summary_with_normalized_artifacts(
+    target: &Path,
+    run_id: &str,
+    mut summary: RunSummary,
+) -> RunSummary {
+    summary.artifacts =
+        super::run_artifact::normalize_run_artifact_identities(target, run_id, summary.artifacts);
+    summary
 }
 
 fn run_metadata_artifact_spec() -> &'static CanonicalRunArtifactSpec {
@@ -805,27 +825,40 @@ fn repair_stale_running_summary(
     _summary_path: &Path,
     summary: RunSummary,
 ) -> Result<RunSummary> {
-    if !needs_interruption_recovery(target, &summary) {
+    if !needs_run_truth_recovery(target, &summary) {
         return Ok(summary);
     }
     let _guard = super::run_ledger::acquire_run_terminal_lock(target, &summary.run_id)?;
     let (_, current) = load_run_summary_raw(target, &summary.run_id)?;
-    recover_interrupted_summary_under_lock(target, current)
+    recover_run_truth_under_lock(target, current)
 }
 
-fn needs_interruption_recovery(target: &Path, summary: &RunSummary) -> bool {
-    stale_running_process(target, summary).is_some() || is_recovered_interruption(summary)
+fn needs_run_truth_recovery(target: &Path, summary: &RunSummary) -> bool {
+    stale_running_process(target, summary).is_some()
+        || is_recovered_interruption(summary)
+        || super::terminal_intent::has_terminal_intent(target, &summary.run_id)
+        || (summary.status != "running"
+            && summary.terminal_result_sha256.is_some()
+            && !super::terminal_intent::has_typed_terminal_marker(target, &summary.run_id))
 }
 
-fn recover_interrupted_summary_under_lock(
+fn recover_run_truth_under_lock(
     target: &Path,
     current: RunSummary,
 ) -> Result<RunSummary> {
+    let projection = crate::run_lifecycle::load_run_projection_unhydrated(target, &current.run_id)?;
+    if current.status == "running" && projection.terminal.is_some() {
+        return recover_summary_from_terminal_intent(target, current, &projection);
+    }
     // A completed recovery is terminal. Rewriting it would bump the history
     // generation on every read, so a generation-verified page could never
     // stabilize. Incomplete recovery artifacts still fall through and repair.
-    if recovered_interruption_is_complete(target, &current) {
+    if recovered_interruption_is_complete(target, &current) && projection.terminal.is_some() {
+        mark_existing_terminal_if_present(target, &current, &projection)?;
         return Ok(current);
+    }
+    if current.status != "running" && !is_recovered_interruption(&current) {
+        return recover_missing_typed_terminal(target, current, &projection);
     }
     let reason = interruption_reason(target, &current)?;
     let digest = super::tool_run_record::terminal_result_digest(
@@ -841,6 +874,80 @@ fn recover_interrupted_summary_under_lock(
     };
     let repaired = repaired_interruption(current, reason, digest, recovered_cost);
     persist_recovered_interruption(target, repaired)
+}
+
+fn recover_summary_from_terminal_intent(
+    target: &Path,
+    current: RunSummary,
+    projection: &crate::run_lifecycle::RunProjection,
+) -> Result<RunSummary> {
+    let terminal = projection.terminal.as_ref().context("typed terminal is missing")?;
+    let intended = super::terminal_intent::load_terminal_intent(target, &current.run_id)?
+        .context("typed terminal has no recoverable terminal intent")?;
+    anyhow::ensure!(
+        terminal.status.label() == intended.status,
+        "typed terminal status does not match terminal intent for run {}",
+        current.run_id
+    );
+    write_run_summary(target, &intended)?;
+    super::terminal_intent::mark_typed_terminal(target, &current.run_id)?;
+    super::terminal_intent::clear_terminal_intent_best_effort(target, &current.run_id);
+    Ok(intended)
+}
+
+fn recover_missing_typed_terminal(
+    target: &Path,
+    current: RunSummary,
+    projection: &crate::run_lifecycle::RunProjection,
+) -> Result<RunSummary> {
+    if let Some(terminal) = &projection.terminal {
+        anyhow::ensure!(
+            terminal.status.label() == current.status,
+            "typed terminal disagrees with run summary for run {}",
+            current.run_id
+        );
+    } else {
+        let output = terminal_recovery_output(&current);
+        let observation = crate::run_lifecycle::RunObservationHandle::jsonl(
+            target.to_path_buf(),
+            current.run_id.clone(),
+        )?;
+        crate::run_lifecycle::emit_terminal_outcome_for_summary(
+            &observation,
+            target,
+            &current.run_id,
+            &output,
+            &current,
+            None,
+        )?;
+    }
+    super::terminal_intent::mark_typed_terminal(target, &current.run_id)?;
+    super::terminal_intent::clear_terminal_intent_best_effort(target, &current.run_id);
+    Ok(current)
+}
+
+fn mark_existing_terminal_if_present(
+    target: &Path,
+    current: &RunSummary,
+    projection: &crate::run_lifecycle::RunProjection,
+) -> Result<()> {
+    if projection.terminal.is_some() {
+        super::terminal_intent::mark_typed_terminal(target, &current.run_id)?;
+        super::terminal_intent::clear_terminal_intent_best_effort(target, &current.run_id);
+    }
+    Ok(())
+}
+
+fn terminal_recovery_output(summary: &RunSummary) -> Value {
+    serde_json::json!({
+        "ok": matches!(summary.status.as_str(), "completed" | "skipped"),
+        "status": summary.status,
+        "summary": summary.error.as_deref().unwrap_or("tool run finished"),
+        "artifacts": summary.artifacts,
+        "warnings": [],
+        "errors": summary.error.iter().collect::<Vec<_>>(),
+        "data": { "recoveredTypedTerminal": true },
+    })
 }
 
 fn recovered_interruption_is_complete(target: &Path, summary: &RunSummary) -> bool {
@@ -909,14 +1016,7 @@ fn persist_recovered_interruption(target: &Path, mut repaired: RunSummary) -> Re
         .error
         .clone()
         .unwrap_or_else(|| "run interrupted".to_string());
-    let result = recovered_interruption_result(&reason);
-    let artifact = super::write_run_artifact_json(
-        target,
-        &repaired.run_id,
-        "result.json",
-        "tool result",
-        &result,
-    )?;
+    let artifact = preserve_or_write_recovered_result(target, &repaired.run_id, &reason)?;
     repaired = repaired.with_artifact(artifact);
     ensure_canonical_run_files(target, &repaired.run_id, "interrupted")?;
     crate::run_lifecycle::emit_recovered_interruption(
@@ -927,7 +1027,27 @@ fn persist_recovered_interruption(target: &Path, mut repaired: RunSummary) -> Re
     )?;
     super::tool_run_record_events::append_recovered_interruption_event(target, &repaired, &reason)?;
     write_run_summary(target, &repaired)?;
+    super::terminal_intent::mark_typed_terminal(target, &repaired.run_id)?;
+    super::terminal_intent::clear_terminal_intent_best_effort(target, &repaired.run_id);
     Ok(repaired)
+}
+
+fn preserve_or_write_recovered_result(
+    target: &Path,
+    run_id: &str,
+    reason: &str,
+) -> Result<RunArtifact> {
+    if regular_run_artifact_exists(target, run_id, "result.json") {
+        return RunArtifact::from_declared("tool result", "result.json", Some("json"))
+            .context("canonical result artifact descriptor is invalid");
+    }
+    super::write_run_artifact_json(
+        target,
+        run_id,
+        "result.json",
+        "tool result",
+        &recovered_interruption_result(reason),
+    )
 }
 
 fn recovered_interruption_result(reason: &str) -> Value {
@@ -1011,6 +1131,94 @@ fn is_unverified_process_owner_reason(reason: &str) -> bool {
 #[cfg(test)]
 mod liveness_tests {
     use super::*;
+
+    #[test]
+    fn completed_summary_without_typed_terminal_is_reconciled() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "run-summary-before-terminal";
+        let output = serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "real result",
+            "data": {"value": 7}
+        });
+        let digest = super::super::tool_run_record::terminal_result_digest("completed", &output);
+        let summary = RunSummary::running(run_id, "tool", None, "target")
+            .complete()
+            .with_terminal_result_sha256(Some(digest));
+        write_run_summary(target.path(), &summary).unwrap();
+        let result_path = super::super::run_artifact_path(target.path(), run_id, "result.json");
+        std::fs::write(&result_path, serde_json::to_vec(&output).unwrap()).unwrap();
+        let original = std::fs::read(&result_path).unwrap();
+
+        let repaired = load_run_summary(target.path(), run_id).unwrap();
+
+        assert_eq!(repaired.status, "completed");
+        assert_eq!(std::fs::read(&result_path).unwrap(), original);
+        let projection = crate::run_lifecycle::load_run_projection(target.path(), run_id).unwrap();
+        assert_eq!(
+            projection
+                .projection
+                .terminal
+                .map(|terminal| terminal.status),
+            Some(crate::run_lifecycle::RunItemStatus::Completed)
+        );
+    }
+
+    #[test]
+    fn typed_terminal_without_terminal_summary_uses_the_atomic_intent() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "run-terminal-before-summary";
+        let running = RunSummary::running(run_id, "tool", None, "target");
+        write_run_summary(target.path(), &running).unwrap();
+        let intended = running
+            .complete()
+            .with_terminal_result_sha256(Some("intent-digest".to_string()));
+        super::super::terminal_intent::write_terminal_intent(target.path(), &intended).unwrap();
+        let observation = crate::run_lifecycle::RunObservationHandle::jsonl(
+            target.path().to_path_buf(),
+            run_id.to_string(),
+        )
+        .unwrap();
+        crate::run_lifecycle::emit_terminal_outcome_for_summary(
+            &observation,
+            target.path(),
+            run_id,
+            &serde_json::json!({"summary": "completed"}),
+            &intended,
+            None,
+        )
+        .unwrap();
+
+        let repaired = load_run_summary(target.path(), run_id).unwrap();
+
+        assert_eq!(repaired.status, "completed");
+        assert_eq!(
+            repaired.terminal_result_sha256.as_deref(),
+            Some("intent-digest")
+        );
+        assert!(!super::super::terminal_intent::has_terminal_intent(
+            target.path(),
+            run_id
+        ));
+    }
+
+    #[test]
+    fn interrupted_recovery_preserves_an_existing_real_result() {
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "run-preserve-real-result";
+        let running = RunSummary::running(run_id, "tool", None, "target")
+            .with_process_id(u32::MAX);
+        write_run_summary(target.path(), &running).unwrap();
+        let result_path = super::super::run_artifact_path(target.path(), run_id, "result.json");
+        let real_result = br#"{"ok":true,"status":"completed","data":{"real":true}}"#;
+        std::fs::write(&result_path, real_result).unwrap();
+
+        let repaired = load_run_summary(target.path(), run_id).unwrap();
+
+        assert_eq!(repaired.status, "interrupted");
+        assert_eq!(std::fs::read(result_path).unwrap(), real_result);
+    }
 
     #[test]
     fn current_process_is_alive() {
@@ -1221,6 +1429,7 @@ mod liveness_tests {
             },
             cost,
             error_class: None,
+            failure: None,
         }
     }
 

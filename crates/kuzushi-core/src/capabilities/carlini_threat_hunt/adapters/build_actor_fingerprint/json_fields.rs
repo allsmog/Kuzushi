@@ -30,15 +30,6 @@ pub(in crate::capabilities::carlini_threat_hunt) fn read_object_string(
         .map(ToString::to_string)
 }
 
-pub(in crate::capabilities::carlini_threat_hunt) fn read_object_u64(
-    object: &Map<String, Value>,
-    keys: &[&str],
-) -> Option<u64> {
-    keys.iter()
-        .find_map(|key| object.get(*key))
-        .and_then(Value::as_u64)
-}
-
 pub(in crate::capabilities::carlini_threat_hunt) fn read_object_string_array(
     object: &Map<String, Value>,
     keys: &[&str],

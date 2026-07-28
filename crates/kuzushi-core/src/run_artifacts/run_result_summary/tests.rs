@@ -45,7 +45,42 @@ fn loads_bounded_semantic_fields_from_canonical_result() {
     assert_eq!(summary.status, "partial");
     assert_eq!(summary.output_lines, ["Method: STRIDE", "Threats: 0"]);
     assert_eq!(summary.warnings, ["choose another target"]);
-    assert_eq!(summary.artifacts[0].label, "normalized model");
+    assert!(summary
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.label == "normalized model"));
+}
+
+#[test]
+fn persisted_projection_preserves_host_owned_terminal_statuses() {
+    for status in ["blocked", "canceled", "interrupted"] {
+        let result = json!({"ok": false, "status": status});
+        assert_eq!(
+            project_run_result(Path::new("target"), "run-host-status", &result).status,
+            status
+        );
+    }
+}
+
+#[test]
+fn result_projection_deduplicates_run_contained_absolute_and_relative_paths() {
+    let target = tempfile::tempdir().unwrap();
+    let run_id = "run-result-mixed-identity";
+    let absolute = crate::run_artifacts::run_artifact_path(target.path(), run_id, "items.jsonl")
+        .display()
+        .to_string();
+    let result = json!({
+        "artifacts": [
+            {"label": "semantic run items", "path": absolute, "kind": "jsonl"},
+            {"label": "semantic run items", "path": "items.jsonl", "kind": "jsonl"}
+        ]
+    });
+
+    let summary = project_run_result(target.path(), run_id, &result);
+
+    assert_eq!(summary.artifact_count, 2);
+    assert_eq!(summary.artifacts.len(), 1);
+    assert_eq!(summary.artifacts[0].path, "items.jsonl");
 }
 
 #[test]

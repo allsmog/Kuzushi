@@ -10,6 +10,8 @@ pub(in crate::verification) struct RustTriggerSource {
     /// resolve into it. `None` when `build_rust_trigger` decided not
     /// to wire a sink call.
     pub(in crate::verification) suspect_source: Option<String>,
+    pub(in crate::verification) fidelity: HarnessFidelity,
+    pub(in crate::verification) payload: Vec<u8>,
 }
 
 pub(in crate::verification) async fn scaffold_rust_project(
@@ -27,6 +29,9 @@ pub(in crate::verification) async fn scaffold_rust_project(
     tokio::fs::write(root.join("tests").join("trigger.rs"), &src.trigger_test).await?;
     Ok(ScaffoldedProject {
         path: root,
+        fidelity: src.fidelity,
+        payload: src.payload.clone(),
+        provenance: None,
         _tempdir: tempdir,
     })
 }

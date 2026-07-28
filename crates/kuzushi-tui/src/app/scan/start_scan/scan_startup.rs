@@ -494,11 +494,12 @@ mod tests {
         let request = test_scan_start_request(target.path(), run_id);
         let items_lock =
             kuzushi_core::run_artifacts::run_artifact_path(target.path(), run_id, "items.lock");
-        std::fs::create_dir_all(items_lock).unwrap();
+        std::fs::create_dir_all(&items_lock).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         app.start_prepared_scan(request);
 
+        std::fs::remove_dir(items_lock).unwrap();
         let summary = kuzushi_core::load_run_summary(target.path(), run_id).unwrap();
         assert_eq!(summary.status, "failed");
         assert!(summary

@@ -1,7 +1,7 @@
 pub(crate) use verify_exploit_tool::*;
 pub(in crate::verification::adapters) use verify_finding_input::*;
-pub(in crate::verification::adapters) use verify_finding_result::*;
 pub(crate) use verify_finding_result::DEFAULT_VERIFY_PROMPT;
+pub(in crate::verification::adapters) use verify_finding_result::*;
 pub(crate) use verify_finding_tool::*;
 
 mod json_fields;

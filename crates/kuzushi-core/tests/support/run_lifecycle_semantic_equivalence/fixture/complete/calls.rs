@@ -108,6 +108,7 @@ fn unavailable_model_finished(ids: FixtureIds) -> RunItemRecord {
             },
             cost: RuntimeCostReport::UNAVAILABLE,
             error_class: None,
+            failure: None,
         },
     )
     .with_task(ids.task)
@@ -205,6 +206,7 @@ fn exact_model_finished(ids: FixtureIds, exact: RuntimeCostReport) -> RunItemRec
             },
             cost: exact,
             error_class: None,
+            failure: None,
         },
     )
     .with_task(ids.task)

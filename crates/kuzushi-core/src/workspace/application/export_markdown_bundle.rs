@@ -83,7 +83,10 @@ fn push_readme_header(
     total_count: usize,
 ) {
     out.push_str("# Kuzushi findings bundle\n\n");
-    out.push_str(&format!("- **Target:** `{}`\n", workspace.root().display()));
+    out.push_str(&format!(
+        "- **Target:** {}\n",
+        markdown_code_span(&workspace.root().display().to_string())
+    ));
     out.push_str("- **Projection:** `WorkspaceFindingExportRecord`\n");
     out.push_str(&format!(
         "- **Completeness:** `{}`\n",
@@ -153,15 +156,17 @@ fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExpor
     out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for record in records {
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | `{}:{}` |\n",
+            "| {} | {} | {} | {} | {} | {} | {} |\n",
             markdown_table_cell(&record.alias),
             markdown_table_cell(&record.severity),
             markdown_table_cell(&record.proof_confidence),
             markdown_table_cell(&record.review_decision),
             markdown_table_cell(&record.lifecycle_status),
             markdown_table_cell(&record.evidence.state),
-            markdown_table_cell(&record.location.file),
-            record.location.start_line
+            markdown_table_cell(&markdown_code_span(&format!(
+                "{}:{}",
+                record.location.file, record.location.start_line
+            )))
         ));
     }
     if records.is_empty() {
@@ -171,21 +176,37 @@ fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExpor
 }
 
 fn markdown_table_cell(value: &str) -> String {
-    value.replace('|', "\\|").replace(['\n', '\r'], " ")
+    markdown_inline_text(value).replace('|', "\\|")
 }
 
 /// Finding-derived text placed on a single markdown line (headers, list
 /// items). Newlines would let hostile capture content inject its own
 /// markdown lines into the bundle.
 fn markdown_inline_text(value: &str) -> String {
-    value.replace(['\n', '\r'], " ")
+    value
+        .replace('\\', "\\\\")
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('@', "&#64;")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('!', "\\!")
+        .replace(['\n', '\r'], " ")
+}
+
+fn markdown_code_span(value: &str) -> String {
+    let value = value.replace(['\n', '\r'], " ");
+    let fence = "`".repeat(longest_backtick_run(&value) + 1);
+    format!("{fence}{value}{fence}")
 }
 
 /// Wrap finding-derived text in a code fence longer than any backtick run
 /// inside it, so snippet content (e.g. a captured HTTP body containing
 /// ```` ``` ````) cannot close the fence and inject markdown.
 fn fenced_snippet_block(snippet: &str) -> String {
-    let fence = "`".repeat(longest_backtick_run(snippet).max(2) + 1);
+    let snippet = snippet.replace("\r\n", "\n").replace('\r', "\n");
+    let fence = "`".repeat(longest_backtick_run(&snippet).max(2) + 1);
     format!("{fence}\n{snippet}\n{fence}\n\n")
 }
 
@@ -250,34 +271,55 @@ fn render_bundle_finding_markdown(
 }
 
 fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    push_bundle_finding_summary(out, record);
+    push_bundle_evidence_summary(out, record);
+    push_bundle_analysis_summary(out, record);
+    out.push_str(&format!(
+        "- **Tool:** {}\n",
+        markdown_inline_text(&record.tool)
+    ));
+    out.push_str(&format!(
+        "- **Rule:** {}\n",
+        markdown_code_span(&record.rule_id)
+    ));
+    out.push_str(&format!(
+        "- **Fingerprint:** {}\n",
+        markdown_code_span(&record.fingerprint)
+    ));
+    push_bundle_run_provenance(out, record);
+    push_bundle_remediation(out, record);
+    out.push_str(&format!(
+        "- **Location:** {}\n\n",
+        markdown_code_span(&format!(
+            "{}:{}",
+            record.location.file, record.location.start_line
+        ))
+    ));
+}
+
+fn push_bundle_finding_summary(out: &mut String, record: &WorkspaceFindingExportRecord) {
     out.push_str(&format!(
         "# {} · {}\n\n",
         record.alias,
         markdown_inline_text(&record.title)
     ));
-    out.push_str(&format!("- **Severity:** {}\n", record.severity));
+    out.push_str(&format!(
+        "- **Severity:** {}\n",
+        markdown_inline_text(&record.severity)
+    ));
     out.push_str(&format!(
         "- **Review decision:** {}\n",
-        record.review_decision
+        markdown_inline_text(&record.review_decision)
     ));
     if let Some(conflict) = record.review_decision_conflict.as_deref() {
-        out.push_str(&format!("- **Decision conflict:** {conflict}\n"));
+        out.push_str(&format!(
+            "- **Decision conflict:** {}\n",
+            markdown_inline_text(conflict)
+        ));
     }
     out.push_str(&format!(
         "- **Lifecycle status:** {}\n",
-        record.lifecycle_status
-    ));
-    push_bundle_evidence_summary(out, record);
-    push_bundle_analysis_summary(out, record);
-    out.push_str(&format!("- **Tool:** {}\n", record.tool));
-    out.push_str(&format!("- **Rule:** `{}`\n", record.rule_id));
-    out.push_str(&format!("- **Fingerprint:** `{}`\n", record.fingerprint));
-    push_bundle_run_provenance(out, record);
-    push_bundle_remediation(out, record);
-    out.push_str(&format!(
-        "- **Location:** `{}:{}`\n\n",
-        markdown_inline_text(&record.location.file),
-        record.location.start_line
+        markdown_inline_text(&record.lifecycle_status)
     ));
 }
 
@@ -286,24 +328,38 @@ fn push_bundle_remediation(out: &mut String, record: &WorkspaceFindingExportReco
         return;
     };
     out.push_str(&format!(
-        "- **Remediation:** {} (`{}`)\n",
-        remediation.application_state, remediation.application_id
+        "- **Remediation:** {} ({})\n",
+        markdown_inline_text(&remediation.application_state),
+        markdown_code_span(&remediation.application_id)
     ));
     out.push_str(&format!(
-        "- **Patch run:** `{}` · diff `{}`\n",
-        remediation.patch_run_id, remediation.diff_hash
+        "- **Empirically verified:** {}\n",
+        remediation.empirically_verified
+    ));
+    out.push_str(&format!(
+        "- **Patch run:** {} · diff {}\n",
+        markdown_code_span(&remediation.patch_run_id),
+        markdown_code_span(&remediation.diff_hash)
     ));
     if let Some(outcome) = remediation.reverify_outcome.as_deref() {
-        out.push_str(&format!("- **Re-verification:** {outcome}"));
+        out.push_str(&format!(
+            "- **Re-verification:** {}",
+            markdown_inline_text(outcome)
+        ));
         if let Some(run_id) = remediation.reverify_run_id.as_deref() {
-            out.push_str(&format!(" (`{run_id}`)"));
+            out.push_str(&format!(" ({})", markdown_code_span(run_id)));
         }
         out.push('\n');
     }
     if !remediation.touched_paths.is_empty() {
         out.push_str(&format!(
             "- **Touched paths:** {}\n",
-            remediation.touched_paths.join(", ")
+            remediation
+                .touched_paths
+                .iter()
+                .map(|path| markdown_code_span(path))
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
     }
 }
@@ -311,7 +367,8 @@ fn push_bundle_remediation(out: &mut String, record: &WorkspaceFindingExportReco
 fn push_bundle_evidence_summary(out: &mut String, record: &WorkspaceFindingExportRecord) {
     out.push_str(&format!(
         "- **Evidence state:** {} ({} observed)\n",
-        record.evidence.state, record.evidence.observed_count
+        markdown_inline_text(&record.evidence.state),
+        record.evidence.observed_count
     ));
     out.push_str(&format!(
         "- **Evidence origin:** observed={} code={} capture={} other={} model-generated-reasoning={} derived-source={}\n",
@@ -329,35 +386,53 @@ fn push_bundle_analysis_summary(out: &mut String, record: &WorkspaceFindingExpor
         "- **Automated reasoning:** {}\n",
         record.analysis.automated_reasoning_present
     ));
-    out.push_str(&format!("- **Confidence:** {}\n", record.proof_confidence));
+    out.push_str(&format!(
+        "- **Confidence:** {}\n",
+        markdown_inline_text(&record.proof_confidence)
+    ));
     out.push_str(&format!(
         "- **Static proof:** {} ({})\n",
-        record.static_proof_label, record.static_proof_state
+        markdown_inline_text(&record.static_proof_label),
+        markdown_inline_text(&record.static_proof_state)
     ));
     out.push_str(&format!(
         "- **Verification:** {}\n",
-        record.verification.label
+        markdown_inline_text(&record.verification.label)
     ));
+    if let Some(identity) = &record.verification.source_identity {
+        let identity =
+            serde_json::to_string(identity).unwrap_or_else(|_| "unavailable".to_string());
+        out.push_str(&format!(
+            "- **Verification source:** {}\n",
+            markdown_code_span(&identity)
+        ));
+    }
+    if let Some(reproducer) = &record.verification.reproducer {
+        out.push_str(&format!(
+            "- **Verification reproducer:** {} ({})\n",
+            markdown_code_span(reproducer.hash.as_str()),
+            markdown_inline_text(reproducer.kind.as_str())
+        ));
+    }
 }
 
 fn push_bundle_run_provenance(out: &mut String, record: &WorkspaceFindingExportRecord) {
     let Some(run_id) = record.provenance.run_id.as_deref() else {
         return;
     };
-    out.push_str(&format!("- **Run:** `{run_id}`"));
+    out.push_str(&format!("- **Run:** {}", markdown_code_span(run_id)));
     if let Some(status) = record.provenance.run_status.as_deref() {
-        out.push_str(&format!(" ({status})"));
+        out.push_str(&format!(" ({})", markdown_inline_text(status)));
     }
     if let Some(model) = record.provenance.model.as_deref() {
-        out.push_str(&format!(" model `{model}`"));
+        out.push_str(&format!(" model {}", markdown_code_span(model)));
     }
     out.push('\n');
 }
 
 fn push_bundle_message(out: &mut String, finding: &Finding) {
     out.push_str("## Message\n\n");
-    out.push_str(&finding.message);
-    out.push_str("\n\n");
+    out.push_str(&fenced_snippet_block(&finding.message));
 }
 
 fn push_bundle_evidence(out: &mut String, evidence: &FindingEvidence) {
@@ -369,14 +444,13 @@ fn push_bundle_evidence(out: &mut String, evidence: &FindingEvidence) {
     ));
     out.push_str(&format!(
         "_Origin: {}_\n\n",
-        finding_evidence_origin_label(evidence)
+        markdown_inline_text(finding_evidence_origin_label(evidence))
     ));
     if !evidence.snippet.is_empty() {
         out.push_str(&fenced_snippet_block(&evidence.snippet));
     }
     if !evidence.rationale.is_empty() {
-        out.push_str(&evidence.rationale);
-        out.push_str("\n\n");
+        out.push_str(&fenced_snippet_block(&evidence.rationale));
     }
 }
 

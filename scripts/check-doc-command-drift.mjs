@@ -3,6 +3,9 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const repo = process.cwd();
+const packageScripts = new Set(
+  Object.keys(JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8")).scripts ?? {}),
+);
 
 const roots = [
   "README.md",
@@ -58,6 +61,9 @@ const currentGuidanceFiles = [
 
 const modelGuidanceFiles = currentGuidanceFiles;
 
+const packageScriptGuidanceFiles = ["CONTRIBUTING.md", ".github/PULL_REQUEST_TEMPLATE.md"];
+const pnpmCommandsWithoutScripts = new Set(["exec", "install"]);
+
 const staleSplitPathPatterns = [
   { label: "deleted TS Copilot core path", regex: /src\/copilot\/core\.ts/ },
   { label: "deleted TS core-sast path", regex: /src\/modules\/core-sast\.ts/ },
@@ -107,6 +113,7 @@ const failures = [
 ];
 
 failures.push(...currentGuidanceFiles.flatMap(checkReferencedRepoPaths));
+failures.push(...packageScriptGuidanceFiles.flatMap(checkPackageScriptReferences));
 failures.push(...canonicalContributorFailures());
 failures.push(...canonicalReadmeFailures());
 failures.push(...canonicalRoadmapFailures());
@@ -231,6 +238,46 @@ function checkReferencedRepoPaths(file) {
   const fileLabeledLegacy = allowedContext.test(header);
   if (fileLabeledLegacy) return [];
   return lines.flatMap((line, index) => referencedPathFailures(file, lines, line, index));
+}
+
+function checkPackageScriptReferences(file) {
+  const lines = readFileSync(path.join(repo, file), "utf8").split(/\r?\n/);
+  const failures = [];
+  let inShellBlock = false;
+  for (let index = 0; index < lines.length; index += 1) {
+    const fence = lines[index].match(/^\s*```([A-Za-z]*)/);
+    if (fence) {
+      inShellBlock = ["sh", "bash", "shell"].includes(fence[1]);
+      continue;
+    }
+    failures.push(...missingPackageScriptFailures(file, lines[index], index, inShellBlock));
+  }
+  return failures;
+}
+
+function missingPackageScriptFailures(file, line, index, allowBare) {
+  return pnpmScriptReferences(line, allowBare)
+    .filter((script) => !pnpmCommandsWithoutScripts.has(script) && !packageScripts.has(script))
+    .map((script) => ({
+      file,
+      line: index + 1,
+      pattern: "missing package script",
+      text: `pnpm ${script}`,
+    }));
+}
+
+function pnpmScriptReferences(line, allowBare) {
+  const scripts = [];
+  const regex = /\bpnpm\s+(?:run\s+)?([A-Za-z0-9][A-Za-z0-9:._-]*)/g;
+  for (const match of line.matchAll(regex)) {
+    if (isCommandReference(line, match.index, allowBare)) scripts.push(match[1]);
+  }
+  return scripts;
+}
+
+function isCommandReference(line, index, allowBare) {
+  const prefix = line.slice(0, index);
+  return prefix.endsWith("`") || (allowBare && /^\s*(?:[$>]\s*)?$/.test(prefix));
 }
 
 function referencedPathFailures(file, lines, line, index) {

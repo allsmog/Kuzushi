@@ -8,10 +8,10 @@
 //! sees effectiveness alongside the findings. Deterministic; no model calls.
 
 use crate::capabilities::campaign::trend::{
-    latest_confirmed_finding_ids, trend_json, trend_metrics, workspace_campaign_spend,
+    latest_confirmed_finding_ids, trend_json, trend_metrics_with_spend,
+    workspace_campaign_spend_report,
 };
 use crate::findings::{extract_cwe, Finding, ReviewDecisionRecord};
-use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -23,22 +23,19 @@ const DRIVER_NAME: &str = "kuzushi";
 const DRIVER_INFORMATION_URI: &str = "https://github.com/allsmog/Kuzushi";
 const DEFAULT_OUTPUT: &str = "reports/confirmed-findings.sarif";
 
-pub fn execute_report_sarif(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let workspace = ctx
-        .workspace
-        .context("report:sarif requires an active workspace target")?;
-    let store = ctx
-        .findings_store
-        .context("report:sarif requires a findings store")?;
-    let findings = store.list_all_findings()?;
-    let records = store.list_review_decisions_for_findings(&findings)?;
-    let confirmed = confirmed_findings(&findings, &records);
-    let trend = trend_json(&trend_metrics(
-        &records,
-        workspace_campaign_spend(workspace.root()),
+pub fn export_confirmed_sarif(
+    root: &Path,
+    input: &Value,
+    findings: &[Finding],
+    records: &[ReviewDecisionRecord],
+) -> Result<Value> {
+    let confirmed = confirmed_findings(findings, records);
+    let trend = trend_json(&trend_metrics_with_spend(
+        records,
+        workspace_campaign_spend_report(root),
     ));
     let document = sarif_document(&confirmed, trend.clone());
-    let path = write_sarif(workspace.root(), input, &document)?;
+    let path = write_sarif(root, input, &document)?;
     Ok(export_result(&path, &confirmed, trend))
 }
 
@@ -80,7 +77,10 @@ fn sarif_rules(findings: &[Finding]) -> Vec<Value> {
     for finding in findings {
         rules.entry(sarif_rule_id(finding)).or_insert(finding);
     }
-    rules.iter().map(|(id, finding)| sarif_rule(id, finding)).collect()
+    rules
+        .iter()
+        .map(|(id, finding)| sarif_rule(id, finding))
+        .collect()
 }
 
 fn sarif_rule_id(finding: &Finding) -> String {
@@ -177,11 +177,9 @@ fn export_result(path: &Path, confirmed: &[Finding], trend: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::V2Config;
     use crate::findings::{
         FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity, TriageAuthor,
     };
-    use crate::workspace::WorkspaceTarget;
 
     fn decision(verdict: ReviewDecisionVerdict) -> ReviewDecision {
         ReviewDecision {
@@ -200,17 +198,9 @@ mod tests {
     }
 
     fn export(root: &Path, store: &FindingStore, input: Value) -> Value {
-        let workspace = WorkspaceTarget::new(root).unwrap();
-        let config = V2Config::default();
-        let ctx = ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: Some(store),
-            trace: None,
-            cancellation: None,
-            authorization: Default::default(),
-        };
-        execute_report_sarif(&input, &ctx).unwrap()
+        let findings = store.list_all_findings().unwrap();
+        let records = store.list_review_decisions_for_findings(&findings).unwrap();
+        export_confirmed_sarif(root, &input, &findings, &records).unwrap()
     }
 
     fn written_document(result: &Value) -> Value {
@@ -225,7 +215,12 @@ mod tests {
         store
             .record_run_started("run-sarif", tmp.path(), "running")
             .unwrap();
-        let confirmed = insert(&store, "cwe-787.stack-write", Severity::Critical, "OOB write");
+        let confirmed = insert(
+            &store,
+            "cwe-787.stack-write",
+            Severity::Critical,
+            "OOB write",
+        );
         let reversed = insert(&store, "cwe-89.sqli", Severity::High, "SQL injection");
         let to_fix = insert(&store, "custom.rule", Severity::Medium, "hardening gap");
         insert(&store, "cwe-321.key", Severity::Low, "undecided finding");
@@ -293,7 +288,8 @@ mod tests {
         store
             .record_run_started("run-sarif", tmp.path(), "running")
             .unwrap();
-        let hostile_message = "\"}]}],\"runs\":[{\"results\":[{\"ruleId\":\"forged\"}\n\u{1b}]52;c;x\u{7}";
+        let hostile_message =
+            "\"}]}],\"runs\":[{\"results\":[{\"ruleId\":\"forged\"}\n\u{1b}]52;c;x\u{7}";
         let id = insert(&store, "custom.hostile", Severity::High, hostile_message);
         store
             .append_user_review_decision(id, &decision(ReviewDecisionVerdict::Confirmed))
@@ -320,21 +316,18 @@ mod tests {
     fn sarif_output_outside_the_workspace_is_rejected() {
         let tmp = tempfile::tempdir().unwrap();
         let store = FindingStore::open_in_memory().unwrap();
-        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-        let config = V2Config::default();
-        let ctx = ToolExecutionContext {
-            config: &config,
-            workspace: Some(&workspace),
-            findings_store: Some(&store),
-            trace: None,
-            cancellation: None,
-            authorization: Default::default(),
-        };
+        let findings = store.list_all_findings().unwrap();
+        let records = store.list_review_decisions_for_findings(&findings).unwrap();
 
         for output in ["../escape.sarif", "/tmp/outside-report.sarif"] {
-            let error = execute_report_sarif(&json!({ "output": output }), &ctx)
-                .unwrap_err()
-                .to_string();
+            let error = export_confirmed_sarif(
+                tmp.path(),
+                &json!({ "output": output }),
+                &findings,
+                &records,
+            )
+            .unwrap_err()
+            .to_string();
             assert!(
                 error.contains("inside the workspace root"),
                 "{output}: {error}"
@@ -366,7 +359,12 @@ mod tests {
         store
             .record_run_started("run-sarif", tmp.path(), "running")
             .unwrap();
-        insert(&store, "cwe-787.stack-write", Severity::Critical, "OOB write");
+        insert(
+            &store,
+            "cwe-787.stack-write",
+            Severity::Critical,
+            "OOB write",
+        );
 
         let result = export(tmp.path(), &store, json!({ "output": "out/custom.sarif" }));
 

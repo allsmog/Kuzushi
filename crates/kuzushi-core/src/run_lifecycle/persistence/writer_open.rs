@@ -1,8 +1,11 @@
 use super::super::stream_reader::{parse_record, RunItemStreamReader};
 use super::WriterState;
-use crate::run_lifecycle::{RunId, RunItemEnvelopeV1};
+use crate::run_lifecycle::{
+    RunId, RunItemEnvelopeV1, MAX_SERIALIZED_RUN_ITEM_BYTES,
+};
 use anyhow::{Context, Result};
 use std::fs::File;
+use std::io::{Seek, SeekFrom};
 use std::path::Path;
 
 pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterState> {
@@ -12,8 +15,14 @@ pub(super) fn open_writer_state(target: &Path, run_id: &str) -> Result<WriterSta
     let lock = crate::file_lock::ExclusiveFileLock::acquire(&directory.join("items.lock"))?;
     let path =
         crate::run_artifacts::checked_run_artifact_path(target, run_id.as_str(), "items.jsonl")?;
-    let file = crate::bounded_file::open_append_regular_file_within(target, &path)
+    let mut file = crate::bounded_file::open_append_regular_file_within(target, &path)
         .with_context(|| format!("open {}", path.display()))?;
+    crate::jsonl_tail::heal_torn_jsonl_tail(
+        &mut file,
+        &path,
+        MAX_SERIALIZED_RUN_ITEM_BYTES,
+        "Run item stream",
+    )?;
     let recovery_file = file.try_clone().context("clone run-item stream handle")?;
     let (next_seq, previous_hash, bytes_written) = recover_tail(target, &path, recovery_file)?;
     let state = WriterState {
@@ -39,7 +48,8 @@ fn record_stream_artifact(target: &Path, run_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn recover_tail(root: &Path, path: &Path, file: File) -> Result<(u64, Option<String>, u64)> {
+fn recover_tail(root: &Path, path: &Path, mut file: File) -> Result<(u64, Option<String>, u64)> {
+    file.seek(SeekFrom::Start(0))?;
     let mut reader = RunItemStreamReader::from_open_file_within(root, path, file)
         .with_context(|| format!("open {}", path.display()))?;
     let mut next_seq = 1;

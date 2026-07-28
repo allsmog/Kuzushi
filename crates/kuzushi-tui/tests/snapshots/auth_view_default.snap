@@ -13,7 +13,7 @@ view: auth
 
  -- MODEL · effective --------------------------------------------------------------------------------------------------
  current   unconfigured · backend LangGraph · routing direct
- reasoning xhigh
+ reasoning default
 
  -- SPEND · this session -----------------------------------------------------------------------------------------------
  session   $0.00 · last tool —

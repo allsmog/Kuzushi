@@ -329,6 +329,9 @@ fn forbidden_project_fields(patch: &PartialConfig) -> Vec<&'static str> {
     if patch.model.is_some() {
         fields.push("model");
     }
+    if patch.phases.is_some() {
+        fields.push("phases");
+    }
     fields.extend(forbidden_runtime_fields(patch.runtime.as_ref()));
     fields.extend(forbidden_operator_fields(patch.operator.as_ref()));
     fields

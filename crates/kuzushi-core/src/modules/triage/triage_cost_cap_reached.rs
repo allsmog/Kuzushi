@@ -16,6 +16,7 @@ struct TriageRuntimeCacheKey {
 pub(in crate::modules) struct TriageRuntimeOutcome {
     pub(in crate::modules) outcome: TriageOutcome,
     pub(in crate::modules) cached: bool,
+    pub(in crate::modules) failed_vote_summaries: Vec<String>,
 }
 
 #[derive(Default)]
@@ -75,6 +76,7 @@ pub(in crate::modules) fn call_triage_runtime(
             return Ok(TriageRuntimeOutcome {
                 outcome,
                 cached: true,
+                failed_vote_summaries: Vec::new(),
             });
         }
     }
@@ -83,6 +85,7 @@ pub(in crate::modules) fn call_triage_runtime(
     Ok(TriageRuntimeOutcome {
         outcome,
         cached: false,
+        failed_vote_summaries: Vec::new(),
     })
 }
 
@@ -171,27 +174,40 @@ pub(in crate::modules) fn persist_triage_outcome(
     finding: Finding,
     runtime_outcome: TriageRuntimeOutcome,
 ) -> Result<()> {
+    let TriageRuntimeOutcome {
+        outcome,
+        cached,
+        failed_vote_summaries: _,
+    } = runtime_outcome;
     let Some(_finding_id) = finding.id else {
-        stats.record_unpersisted_outcome(finding, runtime_outcome.outcome)?;
+        stats.record_unpersisted_outcome(finding, outcome)?;
         return Ok(());
     };
-    if let Err(error) =
-        store.record_auto_triage_for_fingerprint(&finding.fingerprint, &runtime_outcome.outcome)
-    {
-        crate::runtime_diagnostics::record_runtime_diagnostic(
-            "triage:run",
-            format!(
-                "could not persist triage for finding {}: {error}",
-                finding.fingerprint
-            ),
-        );
-    }
-    if runtime_outcome.cached {
-        stats.record_cached_outcome(finding, runtime_outcome.outcome);
-    } else {
-        stats.record_persisted_outcome(finding, runtime_outcome.outcome)?;
+    match store.record_auto_triage_for_fingerprint(&finding.fingerprint, &outcome) {
+        Ok(updated) if updated > 0 => {
+            if cached {
+                stats.record_cached_outcome(finding, outcome);
+            } else {
+                stats.record_persisted_outcome(finding, outcome)?;
+            }
+        }
+        Ok(_) => stats.record_persistence_error(&finding, &outcome, cached)?,
+        Err(error) => {
+            record_triage_persistence_diagnostic(&finding, &error);
+            stats.record_persistence_error(&finding, &outcome, cached)?;
+        }
     }
     Ok(())
+}
+
+fn record_triage_persistence_diagnostic(finding: &Finding, error: &anyhow::Error) {
+    crate::runtime_diagnostics::record_runtime_diagnostic(
+        "triage:run",
+        format!(
+            "could not persist triage for finding {}: {error}",
+            finding.fingerprint
+        ),
+    );
 }
 
 /// A cluster duplicate inherits the representative's verdict without an LLM
@@ -213,16 +229,16 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
         cost_usd_exact: true,
         ..representative_outcome.clone()
     };
-    if let Err(error) = store.record_auto_triage_for_fingerprint(&finding.fingerprint, &inherited) {
-        crate::runtime_diagnostics::record_runtime_diagnostic(
-            "triage:run",
-            format!(
-                "could not persist inherited triage for finding {}: {error}",
-                finding.fingerprint
-            ),
-        );
+    match store.record_auto_triage_for_fingerprint(&finding.fingerprint, &inherited) {
+        Ok(updated) if updated > 0 => {
+            stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);
+        }
+        Ok(_) => stats.record_duplicate_persistence_error(&finding, representative_fingerprint),
+        Err(error) => {
+            record_triage_persistence_diagnostic(&finding, &error);
+            stats.record_duplicate_persistence_error(&finding, representative_fingerprint);
+        }
     }
-    stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);
 }
 
 pub(in crate::modules) fn high_confidence_false_positive(result: &Value) -> bool {
@@ -253,9 +269,34 @@ pub(in crate::modules) fn triage_response(
         dropped_high_conf_fp,
         &summary,
     );
-    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    let mut result = triage_response_envelope(&summary, data, &warnings, stats.result_status());
     add_triage_response_metadata(&mut result, warnings, stats.cost_report());
     result
+}
+
+fn triage_response_envelope(
+    summary: &str,
+    data: Value,
+    warnings: &[String],
+    status: crate::module_result::ToolResultStatus,
+) -> Value {
+    match status {
+        crate::module_result::ToolResultStatus::Completed => {
+            crate::module_result::completed_output_result(summary, summary, data)
+        }
+        crate::module_result::ToolResultStatus::Partial => {
+            crate::module_result::partial_output_result(
+                summary,
+                summary,
+                warnings.iter().map(|warning| json!(warning)).collect(),
+                data,
+            )
+        }
+        crate::module_result::ToolResultStatus::Failed => {
+            crate::module_result::failed_output_result(summary, summary, data)
+        }
+        crate::module_result::ToolResultStatus::Skipped => unreachable!("triage stats cannot skip"),
+    }
 }
 
 fn add_triage_response_metadata(
@@ -281,6 +322,14 @@ fn triage_response_data(
     let mut data = json!({
         "summary": summary,
         "triaged": stats.triaged(),
+        "attempted": stats.attempted,
+        "successful": stats.successful,
+        "failed": stats.failed,
+        "voteFailures": stats.vote_failures,
+        "persistenceFailures": stats.persistence_failures,
+        "errorSummaries": stats.error_summaries,
+        "failures": stats.failure_details,
+        "failureDetailsOmitted": stats.failure_details_omitted,
         "total": stage1.total,
         "tp": stats.tp,
         "fp": stats.fp,
@@ -303,7 +352,7 @@ fn triage_response_data(
 }
 
 fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> Vec<String> {
-    let mut warnings = Vec::new();
+    let mut warnings = triage_failure_warnings(stats);
     if stats.cost_cap_hit {
         warnings.push(cost_cap_warning(stats));
     }
@@ -320,6 +369,33 @@ fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> V
         ));
     }
     warnings
+}
+
+fn triage_failure_warnings(stats: &TriageRunStats) -> Vec<String> {
+    if stats.failed == 0 && stats.vote_failures == 0 && stats.persistence_failures == 0 {
+        return Vec::new();
+    }
+    let mut warnings = vec![triage_failure_warning(stats)];
+    warnings.extend(stats.error_summaries.iter().cloned());
+    if stats.failure_details_omitted > 0 {
+        warnings.push(format!(
+            "{} additional per-finding failure detail(s) were omitted from the bounded response.",
+            stats.failure_details_omitted
+        ));
+    }
+    warnings
+}
+
+fn triage_failure_warning(stats: &TriageRunStats) -> String {
+    let preservation = if stats.successful > 0 {
+        " Successful classifications were preserved where storage policy allowed."
+    } else {
+        " No classification completed successfully."
+    };
+    format!(
+        "Triage degraded: failed classifications={}, failed consensus votes={}, failed persistence writes={}.{}",
+        stats.failed, stats.vote_failures, stats.persistence_failures, preservation
+    )
 }
 
 fn cost_cap_warning(stats: &TriageRunStats) -> String {
@@ -342,14 +418,14 @@ pub(in crate::modules) fn triage_stages(
     stats: &TriageRunStats,
     dropped_high_conf_fp: usize,
 ) -> Value {
-    let mut stages = json!([
-        {
+    let mut stages = Value::Array(vec![
+        json!({
             "stage": "prefilter",
             "kept": stage1.kept_count,
             "dropped": stage1.dropped,
             "rule": format!("prefilter_score >= {}", input.prefilter_threshold),
-        },
-        {
+        }),
+        json!({
             "stage": "dedupe",
             "clusters": stats.clusters,
             "duplicatesInherited": stats.duplicates_inherited,
@@ -357,24 +433,40 @@ pub(in crate::modules) fn triage_stages(
                 "same tool+rule within {} lines inherits the representative verdict",
                 crate::findings::ingest_contract::CLUSTER_WINDOW_LINES
             ),
-        },
-        {
-            "stage": "haiku",
-            "model": config.stage2_model,
-            "concurrency": input.concurrency,
-            "votes": input.votes,
-            "triaged": stats.triaged(),
-            "tp": stats.tp,
-            "fp": stats.fp,
-            "needsReview": stats.needs_review,
-            "byDesign": stats.by_design,
-            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
-            "costCapHit": stats.cost_cap_hit,
-            "pendingAfterCap": stats.pending_after_cap,
-        }
+        }),
+        triage_haiku_stage(input, config, stats, dropped_high_conf_fp),
     ]);
     if let Some(stage) = stages.get_mut(1) {
         crate::module_result::apply_runtime_cost_report(stage, stats.cost_report());
     }
     stages
+}
+
+fn triage_haiku_stage(
+    input: &TriageRunInput,
+    config: &TriageExecutionConfig,
+    stats: &TriageRunStats,
+    dropped_high_conf_fp: usize,
+) -> Value {
+    json!({
+        "stage": "haiku",
+        "model": config.stage2_model,
+        "concurrency": input.concurrency,
+        "votes": input.votes,
+        "triaged": stats.triaged(),
+        "attempted": stats.attempted,
+        "successful": stats.successful,
+        "failed": stats.failed,
+        "voteFailures": stats.vote_failures,
+        "persistenceFailures": stats.persistence_failures,
+        "errorSummaries": stats.error_summaries,
+        "failureDetailsOmitted": stats.failure_details_omitted,
+        "tp": stats.tp,
+        "fp": stats.fp,
+        "needsReview": stats.needs_review,
+        "byDesign": stats.by_design,
+        "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+        "costCapHit": stats.cost_cap_hit,
+        "pendingAfterCap": stats.pending_after_cap,
+    })
 }

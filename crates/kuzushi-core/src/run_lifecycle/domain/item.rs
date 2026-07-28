@@ -40,6 +40,21 @@ impl RunItemStatus {
             Self::Interrupted => "interrupted",
         }
     }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "pending" => Some(Self::Pending),
+            "running" => Some(Self::Running),
+            "completed" => Some(Self::Completed),
+            "partial" => Some(Self::Partial),
+            "skipped" => Some(Self::Skipped),
+            "blocked" => Some(Self::Blocked),
+            "failed" => Some(Self::Failed),
+            "canceled" => Some(Self::Canceled),
+            "interrupted" => Some(Self::Interrupted),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -274,6 +289,8 @@ pub enum RunItemV1 {
         cost: RuntimeCostReport,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error_class: Option<SafeText>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        failure: Option<crate::runtime::RuntimeFailureMetadata>,
     },
     SafeReasoningSummary {
         text: SafeText,

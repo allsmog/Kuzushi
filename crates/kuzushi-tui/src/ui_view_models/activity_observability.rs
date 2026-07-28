@@ -3,9 +3,6 @@ use crate::{ActivitySession, DagTaskState};
 use std::time::{Duration, Instant};
 
 pub(crate) const ACTIVITY_STALE_PROGRESS_AFTER: Duration = Duration::from_secs(30);
-/// A model call is quiet by nature; only past this age does an open call
-/// escalate to the stall banners instead of "query in flight".
-pub(crate) const MODEL_CALL_WATCHDOG: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActivityHeartbeatTone {
@@ -52,9 +49,8 @@ pub(crate) fn activity_heartbeat_model(
     }
 }
 
-/// A stale progress signal with an in-flight model call under the watchdog
-/// is honest quiet work, not a stall; only past the watchdog does the
-/// NO PROGRESS banner fire.
+/// A typed open model call is authoritative quiet work until a typed terminal,
+/// timeout, or cancellation item closes it.
 fn stale_heartbeat(
     session: &ActivitySession,
     running_tool: Option<&str>,
@@ -139,11 +135,9 @@ fn active_task(session: &ActivitySession) -> Option<&crate::DagTaskRow> {
         .find(|task| matches!(task.state, DagTaskState::Active | DagTaskState::Canceling))
 }
 
-/// The age of an open model call still under the watchdog, if one exists.
+/// The age of the oldest typed model call that remains open, if one exists.
 pub(crate) fn open_query_in_flight(session: &ActivitySession, now: Instant) -> Option<Duration> {
-    session
-        .open_model_call_age(now)
-        .filter(|age| *age < MODEL_CALL_WATCHDOG)
+    session.open_model_call_age(now)
 }
 
 fn progress_signal(session: &ActivitySession, now: Instant) -> (Duration, String) {
@@ -230,6 +224,7 @@ mod tests {
                     kuzushi_core::runtime::RuntimeCost::ZERO,
                 ),
                 error_class: None,
+                failure: None,
             },
             session.run_projection.last_event_hash.clone(),
         )
@@ -257,17 +252,6 @@ mod tests {
         );
         assert!(
             !heartbeat.text.contains("NO PROGRESS SIGNAL"),
-            "{}",
-            heartbeat.text
-        );
-    }
-
-    fn assert_watchdog_stalled(session: &ActivitySession, probe: Instant) {
-        let heartbeat =
-            activity_heartbeat_model(session, Some("threat-model:build"), true, None, probe);
-        assert_eq!(heartbeat.tone, ActivityHeartbeatTone::Stalled);
-        assert!(
-            heartbeat.text.contains("NO PROGRESS SIGNAL"),
             "{}",
             heartbeat.text
         );
@@ -317,8 +301,8 @@ mod tests {
         );
     }
 
-    /// C1: a quiet-but-open model call under the watchdog reads as work in
-    /// flight, not a stall; past the watchdog it escalates like any stall.
+    /// C1: a quiet-but-open typed model call remains work in flight regardless
+    /// of age. Its typed terminal/timeout/cancel item owns closure.
     #[test]
     fn open_model_call_reports_query_in_flight_instead_of_a_false_stall() {
         let mut session = ActivitySession::for_phase("model-run", WorkflowPhase::Scan);
@@ -333,11 +317,15 @@ mod tests {
             observed_at + Duration::from_secs(45),
             Duration::from_secs(45),
         );
-        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(400));
+        assert_query_in_flight(
+            &session,
+            observed_at + Duration::from_secs(400),
+            Duration::from_secs(400),
+        );
     }
 
     #[test]
-    fn overlapping_model_calls_use_the_remaining_calls_own_watchdog_age() {
+    fn overlapping_model_calls_use_the_remaining_calls_own_age() {
         let mut session = ActivitySession::for_phase("overlap-run", WorkflowPhase::Scan);
         let observed_at = Instant::now();
         let first_call = RunCallId::new();
@@ -363,11 +351,15 @@ mod tests {
             observed_at + Duration::from_secs(326),
             Duration::from_secs(36),
         );
-        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(591));
+        assert_query_in_flight(
+            &session,
+            observed_at + Duration::from_secs(591),
+            Duration::from_secs(301),
+        );
     }
 
     #[test]
-    fn duplicate_model_start_preserves_the_original_watchdog_clock() {
+    fn duplicate_model_start_preserves_the_original_open_call_clock() {
         let mut session = ActivitySession::for_phase("duplicate-start", WorkflowPhase::Scan);
         let observed_at = Instant::now();
         let start = model_call_started(&session, 1, RunItemId::new(), RunCallId::new());
@@ -383,7 +375,11 @@ mod tests {
             observed_at + Duration::from_secs(250),
             Duration::from_secs(250),
         );
-        assert_watchdog_stalled(&session, observed_at + Duration::from_secs(301));
+        assert_query_in_flight(
+            &session,
+            observed_at + Duration::from_secs(301),
+            Duration::from_secs(301),
+        );
     }
 
     #[test]

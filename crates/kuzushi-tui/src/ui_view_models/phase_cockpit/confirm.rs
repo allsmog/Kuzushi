@@ -84,14 +84,18 @@ fn investigation_evidence_goals(
     if finding.corroboration_count <= 1 && finding.sources.len() <= 1 {
         goals.push("Corroborate the signal through an independent source".to_string());
     }
-    match proof {
-        None => {
+    let has_runtime_attempt = finding
+        .verification
+        .as_ref()
+        .is_some_and(PersistedVerification::has_terminal_runtime_verification);
+    match (has_runtime_attempt, proof) {
+        (false, _) => {
             goals.push("Attempt safe reproduction and record a runtime witness".to_string());
         }
-        Some(replay) if replay.requires_revalidation => {
+        (true, Some(replay)) if replay.requires_revalidation => {
             goals.push("Re-validate the stale proof against the current observation".to_string());
         }
-        Some(_) => {}
+        _ => {}
     }
     goals.push("Record the verifier verdict and rationale as durable evidence".to_string());
     goals
@@ -145,7 +149,9 @@ fn run_trace_exists(app: &ShellApp, run_id: &str) -> bool {
 #[cfg(test)]
 mod investigation_goal_tests {
     use super::*;
-    use kuzushi_core::{Finding, Severity};
+    use kuzushi_core::{
+        Finding, PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, Severity,
+    };
 
     fn bare_finding() -> Finding {
         Finding::new_semgrep(
@@ -191,11 +197,39 @@ mod investigation_goal_tests {
 
     #[test]
     fn proven_finding_only_re_validates_when_the_proof_went_stale() {
-        let fresh = investigation_evidence_goals(&bare_finding(), Some(&replay(false)));
+        let mut finding = bare_finding();
+        let mut verification = crate::test_support::test_empirical_verification(3);
+        verification.verified_scan_id = finding.scan_id.clone();
+        finding.verification = Some(verification);
+
+        let fresh = investigation_evidence_goals(&finding, Some(&replay(false)));
         assert!(!fresh.iter().any(|goal| goal.contains("runtime witness")));
         assert!(!fresh.iter().any(|goal| goal.contains("stale proof")));
 
-        let stale = investigation_evidence_goals(&bare_finding(), Some(&replay(true)));
+        let stale = investigation_evidence_goals(&finding, Some(&replay(true)));
         assert!(stale.iter().any(|goal| goal.contains("stale proof")));
+    }
+
+    #[test]
+    fn model_assessment_keeps_runtime_witness_as_an_open_goal() {
+        let mut finding = bare_finding();
+        finding.verification = Some(PersistedVerification {
+            proof_level: 3,
+            proof_verdict: PersistedProofVerdict::NotAttempted,
+            backend: PersistedSandboxBackend::Model,
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 1,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            verification_run_id: Some("model-run".to_string()),
+            verified_scan_id: Some("scan-1".to_string()),
+            provenance: None,
+            created_at: "now".to_string(),
+        });
+
+        let goals = investigation_evidence_goals(&finding, Some(&replay(false)));
+        assert!(goals.iter().any(|goal| goal.contains("runtime witness")));
     }
 }

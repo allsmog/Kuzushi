@@ -181,8 +181,9 @@ mod full_ledger_fetch_tests {
         let store = FindingStore::open(tmp.path().join("findings.db")).unwrap();
         store
             .with_run_lifecycle("run-alias-test", tmp.path(), || {
-                for (index, severity) in
-                    [Severity::High, Severity::High, Severity::Low].iter().enumerate()
+                for (index, severity) in [Severity::High, Severity::High, Severity::Low]
+                    .iter()
+                    .enumerate()
                 {
                     let finding = Finding::new_tool(
                         "alias-test",
@@ -207,11 +208,8 @@ mod full_ledger_fetch_tests {
 
         assert_eq!(report.findings.len(), 1);
         let all = store.list_all_findings().unwrap();
-        let ledger_alias = crate::findings::stable_finding_alias(
-            &all,
-            &report.findings[0].fingerprint,
-        )
-        .unwrap();
+        let ledger_alias =
+            crate::findings::stable_finding_alias(&all, &report.findings[0].fingerprint).unwrap();
         // The low row sorts after both highs, so subset-positional aliasing
         // would mislabel it F-0001.
         assert_eq!(ledger_alias, "F-0003");

@@ -43,6 +43,7 @@ impl TaintIrisNextCatalogReport {
     pub(crate) fn to_tool_json(&self) -> Value {
         let mut output = json!({
             "ok": self.ok,
+            "status": if self.ok { "completed" } else { "failed" },
             "output": render_catalog_summary(self),
             "data": serde_json::to_value(self).unwrap_or(Value::Null),
         });
@@ -594,6 +595,28 @@ mod tests {
         ) -> Result<crate::findings::TriageOutcome> {
             anyhow::bail!("not used by catalog prompt tests")
         }
+    }
+
+    #[test]
+    fn generated_catalog_envelope_has_a_canonical_completed_status() {
+        let output = TaintIrisNextCatalogReport {
+            target: "/tmp/catalog-target".to_string(),
+            status: "generated".to_string(),
+            catalog_path: "/tmp/catalog.json".to_string(),
+            entries: Vec::new(),
+            raw_agent_output: None,
+            parse_error: None,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+            ok: true,
+        }
+        .to_tool_json();
+
+        assert_eq!(output["status"], "completed");
+        assert_eq!(
+            crate::module_result::tool_result_status(&output),
+            crate::module_result::ToolResultStatus::Completed
+        );
     }
 
     #[test]

@@ -481,6 +481,12 @@ be read at config boundaries. Presentation flags such as `KUZUSHI_PLAIN`,
 `KUZUSHI_SCREEN_READER`, and terminal accessibility variables remain
 presentation concerns.
 
+LangGraph bridge invocations have a 600,000 ms wall-clock ceiling by default.
+The existing adapter-boundary `KUZUSHI_BRIDGE_TIMEOUT_MS` override accepts only
+a positive integer; invalid or zero values fail closed instead of restoring an
+unbounded wait. Cancellation and pipe-failure guards can still stop a bridge
+earlier.
+
 Some existing scanner/tool adapters still read compatibility env vars for
 local binaries, caches, timeouts, or external toolchain integration (for
 example CodeQL, Clang, rev.ng, and MCP bridge knobs). Treat those as

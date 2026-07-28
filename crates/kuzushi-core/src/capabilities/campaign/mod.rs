@@ -9,6 +9,7 @@
 //! Neither tool calls a model: planning is pure workspace-file computation.
 
 pub mod coverage;
+mod dispatcher_lease;
 mod plan;
 mod prior_runs;
 mod shards;
@@ -21,6 +22,7 @@ pub mod trend;
 pub mod trend_history;
 
 pub use coverage::execute_campaign_coverage;
+pub use dispatcher_lease::{acquire_dispatcher_lease, CampaignDispatcherLease};
 pub use plan::execute_campaign_plan;
 pub use status::execute_campaign_status;
 
@@ -48,18 +50,15 @@ pub fn campaign_queue_path(root: &Path, campaign_id: &str) -> PathBuf {
     campaign_dir(root, campaign_id).join(CAMPAIGN_QUEUE_FILE)
 }
 
-/// Atomic JSON publish: write to a sibling temp file, then rename. Readers
-/// (status tool, cockpit deck, dispatcher) never observe a partial document.
+/// Durable atomic JSON publish. Readers never observe a partial document.
 fn write_json_atomic(path: &Path, document: &Value) -> Result<()> {
     let parent = path
         .parent()
         .with_context(|| format!("{} has no parent directory", path.display()))?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("Could not create {}", parent.display()))?;
-    let body = serde_json::to_vec_pretty(document).context("Could not serialize document")?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, body).with_context(|| format!("Could not write {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)
+    let body = serde_json::to_string_pretty(document).context("Could not serialize document")?;
+    crate::fs_atomic::write_atomic(path, &body)
         .with_context(|| format!("Could not publish {}", path.display()))?;
     Ok(())
 }

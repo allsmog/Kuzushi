@@ -22,7 +22,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // PATH / HOME / process-integration lookups.
     "capabilities/fuzz_engine/engine_cli.rs", // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries
-    "modules/codeql_db_module.rs",            // PATH which
+    "codeql_repository_execution/launcher.rs", // CodeQL launcher env/PATH/HOME adapter
     "modules/fuzz_module.rs",                 // HOME for the derived engine workspace
     "modules/pwn/mod.rs",                     // HOME for installed revng
     "process_lookup.rs",                      // PATH which
@@ -32,7 +32,8 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "modules/dynamic_loader.rs", // worker env sanitizer + KUZUSHI_DYNAMIC_MODULE_HOST
     "remediation/patch_process_adapter.rs", // PATH/CARGO_HOME/RUSTUP_HOME for validation env
     "scan/subprocess/try_wait.rs", // scanner env scrubber (allowlist filter)
-    "worker_protocol.rs",        // MCP/fuzz env sanitizers + credential tokens
+    "verification/build_rust_trigger.rs", // generated sandbox harness reads its injected sink marker
+    "worker_protocol.rs",                 // MCP/fuzz env sanitizers + credential tokens
     // Git integration mirrors git's own environment contract.
     "workspace/domain/workspace_state_initialization/git_policy/inputs.rs",
     "workspace/domain/workspace_state_initialization/proof_cache/path_snapshot.rs",

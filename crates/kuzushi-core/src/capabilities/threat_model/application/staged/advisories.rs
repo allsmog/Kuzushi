@@ -1,9 +1,7 @@
 use super::super::*;
-use std::process::Command;
 
 const MAX_QUERIED_PACKAGES: usize = 5;
 const MAX_ADVISORIES_PER_PACKAGE: usize = 3;
-const OSV_QUERY_URL: &str = "https://api.osv.dev/v1/query";
 
 #[derive(Debug, Clone)]
 pub(crate) struct AdvisoryRecord {
@@ -20,48 +18,54 @@ pub(crate) fn fetch_osv_advisories(input: &BuildInput) -> Result<Vec<AdvisoryRec
     if input.advisories != "osv" {
         return Ok(Vec::new());
     }
-    if let Some(fixtures) = &input.advisory_fixtures {
-        return Ok(records_from_fixtures(fixtures));
-    }
-    if input.offline {
+    if input.offline && input.advisory_fixtures.is_none() {
         return Ok(Vec::new());
     }
-    let mut records = Vec::new();
-    for (ecosystem, name) in direct_dependencies(&input.target)? {
-        records.extend(query_osv_package(&ecosystem, &name));
-    }
-    Ok(records)
+    let mut packages = fixture_package_queries(input.advisory_fixtures.as_ref());
+    packages.extend(
+        direct_dependencies(&input.target)?
+            .into_iter()
+            .map(
+                |(ecosystem, name)| crate::capabilities::threat_intel::OsvPackageQuery {
+                    ecosystem,
+                    name,
+                    version: None,
+                },
+            ),
+    );
+    packages.sort();
+    packages.dedup();
+    packages.truncate(MAX_QUERIED_PACKAGES);
+    let report = crate::capabilities::threat_intel::query_osv_candidates(
+        &packages,
+        MAX_ADVISORIES_PER_PACKAGE,
+        MAX_QUERIED_PACKAGES * MAX_ADVISORIES_PER_PACKAGE,
+        input.advisory_fixtures.as_ref(),
+    );
+    Ok(report
+        .candidates
+        .into_iter()
+        .map(|candidate| AdvisoryRecord {
+            id: candidate.id,
+            summary: candidate.summary,
+            package: candidate.package,
+        })
+        .collect())
 }
 
-/// Fixture shape: `{"<package>": [{"id": "...", "summary": "..."}]}`.
-fn records_from_fixtures(fixtures: &Value) -> Vec<AdvisoryRecord> {
-    let Some(entries) = fixtures.as_object() else {
-        return Vec::new();
-    };
-    entries
-        .iter()
-        .flat_map(|(package, rows)| {
-            rows.as_array()
-                .map(|rows| {
-                    rows.iter()
-                        .filter_map(|row| fixture_record(package, row))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default()
+fn fixture_package_queries(
+    fixtures: Option<&Value>,
+) -> Vec<crate::capabilities::threat_intel::OsvPackageQuery> {
+    fixtures
+        .and_then(Value::as_object)
+        .into_iter()
+        .flat_map(|fixtures| fixtures.keys())
+        .map(|name| crate::capabilities::threat_intel::OsvPackageQuery {
+            ecosystem: "fixture".to_string(),
+            name: name.clone(),
+            version: None,
         })
         .collect()
-}
-
-fn fixture_record(package: &str, row: &Value) -> Option<AdvisoryRecord> {
-    Some(AdvisoryRecord {
-        id: row.get("id")?.as_str()?.to_string(),
-        summary: row
-            .get("summary")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        package: package.to_string(),
-    })
 }
 
 /// Direct dependencies from the top-level manifests kuzushi already
@@ -141,78 +145,13 @@ fn is_safe_package_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '@' | '_' | '/' | '.' | '-'))
 }
 
-/// One bounded OSV query; failures degrade to "no advisories for this
-/// package" — advisory intake is enrichment, never a build blocker.
-fn query_osv_package(ecosystem: &str, name: &str) -> Vec<AdvisoryRecord> {
-    let body = json!({"package": {"name": name, "ecosystem": ecosystem}}).to_string();
-    let Some(response) = curl_post_json(OSV_QUERY_URL, &body) else {
-        return Vec::new();
-    };
-    response
-        .get("vulns")
-        .and_then(Value::as_array)
-        .map(|vulns| {
-            vulns
-                .iter()
-                .take(MAX_ADVISORIES_PER_PACKAGE)
-                .filter_map(|vuln| osv_record(name, vuln))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn osv_record(package: &str, vuln: &Value) -> Option<AdvisoryRecord> {
-    Some(AdvisoryRecord {
-        id: vuln.get("id")?.as_str()?.to_string(),
-        summary: vuln
-            .get("summary")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string(),
-        package: package.to_string(),
-    })
-}
-
-/// https-only POST with the same bounds as variant_ndiff's curl helpers:
-/// fixed URL, 15s wall clock, argv-only construction (no shell).
-fn curl_post_json(url: &str, body: &str) -> Option<Value> {
-    if !url.starts_with("https://") {
-        return None;
-    }
-    let mut command = Command::new("curl");
-    command
-        .args([
-            "-fsSL",
-            "--max-time",
-            "15",
-            "-X",
-            "POST",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-        ])
-        .arg(body)
-        .arg("--")
-        .arg(url);
-    let output = crate::bounded_subprocess::output(&mut command, "osv advisory query").ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    serde_json::from_slice(&output.stdout).ok()
-}
-
 pub(crate) fn advisories_section(records: &[AdvisoryRecord]) -> String {
     if records.is_empty() {
         return String::new();
     }
     let body = records
         .iter()
-        .map(|record| {
-            format!(
-                "- {} · {} · {}",
-                record.id, record.package, record.summary
-            )
-        })
+        .map(|record| format!("- {} · {} · {}", record.id, record.package, record.summary))
         .collect::<Vec<_>>()
         .join("\n");
     format!(
@@ -225,7 +164,12 @@ pub(crate) fn advisories_section(records: &[AdvisoryRecord]) -> String {
 mod tests {
     use super::*;
 
-    fn base_input(temp: &Path, advisories: &str, offline: bool, fixtures: Option<Value>) -> BuildInput {
+    fn base_input(
+        temp: &Path,
+        advisories: &str,
+        offline: bool,
+        fixtures: Option<Value>,
+    ) -> BuildInput {
         BuildInput {
             target: temp.to_path_buf(),
             repo_name: "t".to_string(),
@@ -280,7 +224,9 @@ mod tests {
 
         let offline_no_fixtures = base_input(temp.path(), "osv", true, None);
         assert!(
-            fetch_osv_advisories(&offline_no_fixtures).unwrap().is_empty(),
+            fetch_osv_advisories(&offline_no_fixtures)
+                .unwrap()
+                .is_empty(),
             "offline without fixtures must skip, never fetch"
         );
     }
@@ -295,7 +241,9 @@ mod tests {
         .unwrap();
         let dependencies = direct_dependencies(temp.path()).unwrap();
         assert!(dependencies.len() <= MAX_QUERIED_PACKAGES);
-        assert!(dependencies.iter().all(|(_, name)| is_safe_package_name(name)));
+        assert!(dependencies
+            .iter()
+            .all(|(_, name)| is_safe_package_name(name)));
         assert!(!dependencies.iter().any(|(_, name)| name == "bad name!"));
     }
 }

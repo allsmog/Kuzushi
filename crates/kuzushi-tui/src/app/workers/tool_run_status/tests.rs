@@ -1,5 +1,35 @@
 use super::*;
 
+#[test]
+fn terminal_status_samples_cancellation_at_settlement_time() {
+    let canceled = ScanCancellation::default();
+    assert_eq!(
+        terminal_status_after_cancellation(
+            &canceled,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        ),
+        kuzushi_core::run_lifecycle::RunItemStatus::Failed
+    );
+    canceled.cancel();
+    assert_eq!(
+        terminal_status_after_cancellation(
+            &canceled,
+            kuzushi_core::run_lifecycle::RunItemStatus::Completed
+        ),
+        kuzushi_core::run_lifecycle::RunItemStatus::Canceled
+    );
+
+    let interrupted = ScanCancellation::default();
+    interrupted.interrupt();
+    assert_eq!(
+        terminal_status_after_cancellation(
+            &interrupted,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed
+        ),
+        kuzushi_core::run_lifecycle::RunItemStatus::Interrupted
+    );
+}
+
 fn question_request(run_id: &str) -> OperatorQuestionRequest {
     OperatorQuestionRequest {
         request_id: "question-private".to_string(),

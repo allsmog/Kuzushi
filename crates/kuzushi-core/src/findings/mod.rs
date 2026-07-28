@@ -6,6 +6,8 @@ mod persistence;
 pub mod presentation;
 
 #[cfg(test)]
+pub(crate) mod test_support;
+#[cfg(test)]
 mod tests;
 
 pub use application::{
@@ -17,19 +19,23 @@ pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
     GenericPersistedRun,
 };
-pub(crate) use domain::{is_runtime_proof_state, now_isoish, safe_target_path};
+#[cfg(test)]
+pub(crate) use domain::test_verified_receipt;
 pub use domain::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
     extract_cwe, ground_finding_location, grounding_prompt_note, is_attack_chain_finding,
-    normalize_cwe, ConfidenceBand, DismissReason, Finding,
-    FindingEvidence, GroundingStatus,
-    FindingSource, FindingTriageState, PatchAttempt, PatchAttemptSummary, PatchLifecycleFile,
-    PatchLifecycleRecord, PatchLifecycleState, PatchProvenance, PatchResult, PatchStatus,
-    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
-    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus,
-    RefuteReason, StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
-    VulnSource,
+    normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence, FindingSource,
+    FindingTriageState, GroundingStatus, PatchAttempt, PatchAttemptSummary,
+    PatchDetectorReplayOutcome, PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord,
+    PatchLifecycleState, PatchProvenance, PatchResult, PatchReverificationCaseKind,
+    PatchReverificationFileHash, PatchReverificationReceipt, PatchReverificationStep,
+    PatchReverificationTarget, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision, ReviewDecisionRecord,
+    ReviewDecisionVerdict, Severity, StableLifecycleStatus, StaticProofState,
+    StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VerificationProvenance,
+    VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
 };
+pub(crate) use domain::{is_runtime_proof_state, now_isoish, safe_target_path};
 pub use persistence::{
     threat_model_document_sha256, FindingStore, ModelRekeyRequest, ObservationSourceRef,
     SuppressionLifecycleEvent, ThreatModelVersionRecord,

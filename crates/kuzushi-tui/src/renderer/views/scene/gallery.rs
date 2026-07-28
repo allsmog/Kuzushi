@@ -222,10 +222,14 @@ fn append_dfd_node_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &D
             theme::muted(),
         )]));
         for node in model.nodes.iter().filter(|node| &node.zone == zone) {
-            lines.push(Line::from(vec![Span::raw(fit_plain(
-                &format!("    - {} · {}", node.name, dfd_kind_label(node.kind)),
-                width,
-            ))]));
+            lines.extend(
+                crate::renderer::shared::text::wrap_text(
+                    &format!("    - {} · {}", node.name, dfd_kind_label(node.kind)),
+                    width,
+                )
+                .into_iter()
+                .map(Line::from),
+            );
         }
     }
 }
@@ -233,18 +237,24 @@ fn append_dfd_node_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &D
 fn append_dfd_flow_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
     lines.push(Line::from(vec![Span::styled("FLOWS", theme::heading())]));
     for flow in &model.flows {
-        let boundary = if flow.crosses {
-            " · crosses boundary"
+        let boundary = if !flow.boundary_ids.is_empty() {
+            format!(" · boundaries: {}", flow.boundary_ids.join(", "))
+        } else if flow.crosses {
+            " · crosses boundary".to_string()
         } else {
-            ""
+            String::new()
         };
-        lines.push(Line::from(vec![Span::raw(fit_plain(
-            &format!(
-                "  {} -> {} · {}{}",
-                flow.from, flow.to, flow.label, boundary
-            ),
-            width,
-        ))]));
+        lines.extend(
+            crate::renderer::shared::text::wrap_text(
+                &format!(
+                    "  {} -> {} · {}{}",
+                    flow.from, flow.to, flow.label, boundary
+                ),
+                width,
+            )
+            .into_iter()
+            .map(Line::from),
+        );
     }
 }
 
@@ -278,6 +288,12 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
         "  ·  Esc/q return".to_string(),
         theme::muted(),
     ));
+    if matches!(page, VizPage::Dfd) {
+        spans.push(Span::styled(
+            "  ·  j/k select · PgUp/PgDn details".to_string(),
+            theme::muted(),
+        ));
+    }
     if page.is_3d() {
         let motion = if app.router.scene().paused() {
             "paused"
@@ -370,7 +386,7 @@ mod tests {
         );
         assert!(text.contains("Browser · entity"));
         assert!(text.contains("API server · process"));
-        assert!(text.contains("Browser -> API server · https · crosses boundary"));
+        assert!(text.contains("Browser -> API server · https · boundaries: tb-edge"));
         assert!(
             text.contains("API server -> Postgres · sql\n")
                 || text.contains("API server -> Postgres · sql"),

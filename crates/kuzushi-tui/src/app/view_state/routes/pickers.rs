@@ -364,6 +364,7 @@ pub struct PlanningPickerRouteState {
     selected: BTreeSet<PlanningTaskId>,
     default_selected: BTreeSet<PlanningTaskId>,
     draft_selected: BTreeMap<WorkflowPhase, BTreeSet<PlanningTaskId>>,
+    draft_defaults: BTreeMap<WorkflowPhase, BTreeSet<PlanningTaskId>>,
     draft_rebuild: BTreeMap<WorkflowPhase, BTreeSet<PlanningTaskId>>,
     tasks: Vec<PlanningTaskRow>,
     rebuild: BTreeSet<PlanningTaskId>,
@@ -424,7 +425,11 @@ impl PlanningPickerRouteState {
         let selected = self
             .draft_selected
             .get(&phase)
-            .map(|draft| available_tasks(draft, &tasks))
+            .map(|draft| {
+                let previous_defaults =
+                    self.draft_defaults.get(&phase).cloned().unwrap_or_default();
+                refreshed_profile_selection(draft, &previous_defaults, &defaults, &tasks)
+            })
             .unwrap_or_else(|| defaults.clone());
         let rebuild = self
             .draft_rebuild
@@ -436,6 +441,8 @@ impl PlanningPickerRouteState {
         self.default_selected = defaults;
         self.selected = selected;
         self.rebuild = rebuild;
+        self.selected.extend(self.rebuild.iter().copied());
+        self.reconcile_selection_with_reality();
         self.profile_pending = profile_pending;
         self.reset_open_state();
     }
@@ -445,6 +452,8 @@ impl PlanningPickerRouteState {
             return;
         };
         self.draft_selected.insert(phase, self.selected.clone());
+        self.draft_defaults
+            .insert(phase, self.default_selected.clone());
         self.draft_rebuild.insert(phase, self.rebuild.clone());
     }
 
@@ -452,7 +461,34 @@ impl PlanningPickerRouteState {
     /// reopened planner shows honest defaults instead of a stale pass.
     pub(crate) fn reset_phase_drafts(&mut self) {
         self.draft_selected.clear();
+        self.draft_defaults.clear();
         self.draft_rebuild.clear();
+    }
+
+    fn reconcile_selection_with_reality(&mut self) {
+        for row in &self.tasks {
+            match selection_override_for_reality(row, self.rebuild.contains(&row.id)) {
+                Some(true) => {
+                    self.selected.insert(row.id);
+                }
+                Some(false) => {
+                    self.selected.remove(&row.id);
+                }
+                None => {}
+            }
+        }
+    }
+
+    pub(crate) fn mark_default_cached_for_rebuild(&mut self) {
+        let cached_defaults = self
+            .tasks
+            .iter()
+            .filter(|row| self.default_selected.contains(&row.id))
+            .filter(|row| matches!(row.artifact_state, PlanningArtifactState::Cached))
+            .map(|row| row.id)
+            .collect::<BTreeSet<_>>();
+        self.rebuild.extend(cached_defaults.iter().copied());
+        self.selected.extend(cached_defaults);
     }
 
     /// A tool finished since the rows were built; the next time the picker
@@ -481,7 +517,6 @@ impl PlanningPickerRouteState {
             .iter()
             .map(|row| PlanningTaskRow::for_task(row.id, target))
             .collect();
-        crate::app::onboarding::overlay_last_attempts(&mut self.tasks, target);
         let now_cached: BTreeSet<PlanningTaskId> = self
             .tasks
             .iter()
@@ -493,6 +528,7 @@ impl PlanningPickerRouteState {
         for draft in self.draft_selected.values_mut() {
             draft.retain(|task| !now_cached.contains(task));
         }
+        self.reconcile_selection_with_reality();
     }
 
     fn reset_open_state(&mut self) {
@@ -538,7 +574,9 @@ impl PlanningPickerRouteState {
         self.default_selected = defaults;
         self.rebuild
             .retain(|task| tasks.iter().any(|row| row.id == *task));
+        self.selected.extend(self.rebuild.iter().copied());
         self.tasks = tasks;
+        self.reconcile_selection_with_reality();
         self.cursor = refreshed_profile_cursor(focused, &self.tasks, &self.selected);
         self.profile_pending = false;
         self.option_cursor = 0;
@@ -688,6 +726,21 @@ fn available_tasks(
     selected.intersection(&available).copied().collect()
 }
 
+fn selection_override_for_reality(row: &PlanningTaskRow, rebuilding: bool) -> Option<bool> {
+    if matches!(row.artifact_state, PlanningArtifactState::Cached) && !rebuilding {
+        return Some(false);
+    }
+    match row.last_attempt {
+        Some(crate::app::LastAttempt::Completed)
+            if matches!(row.artifact_state, PlanningArtifactState::Action) =>
+        {
+            Some(false)
+        }
+        Some(crate::app::LastAttempt::Failed { .. }) => Some(true),
+        _ => None,
+    }
+}
+
 fn refreshed_profile_selection(
     selected: &BTreeSet<PlanningTaskId>,
     previous_defaults: &BTreeSet<PlanningTaskId>,
@@ -796,6 +849,98 @@ mod tests {
         );
 
         assert!(route.selected().is_empty());
+    }
+
+    #[test]
+    fn reopened_draft_inverts_completed_and_failed_current_actions() {
+        let mut route = PlanningPickerRouteState::default();
+        let tasks = [PlanningTaskId::ScanAgenticSast, PlanningTaskId::ScanSecrets];
+        route.open_phase_profiled(
+            WorkflowPhase::Scan,
+            rows_for(&tasks),
+            tasks.into_iter().collect(),
+            false,
+        );
+        let mut refreshed = rows_for(&tasks);
+        refreshed[0].artifact_state = PlanningArtifactState::Action;
+        refreshed[1].artifact_state = PlanningArtifactState::Action;
+        refreshed[0].last_attempt = Some(crate::app::LastAttempt::Completed);
+        refreshed[1].last_attempt = Some(crate::app::LastAttempt::Failed {
+            resumable: false,
+            resume_from: None,
+        });
+
+        route.open_phase_profiled(WorkflowPhase::Scan, refreshed, BTreeSet::new(), false);
+
+        assert_eq!(
+            route.selected(),
+            &BTreeSet::from([PlanningTaskId::ScanSecrets])
+        );
+    }
+
+    #[test]
+    fn reopened_draft_deselects_an_externally_created_artifact() {
+        let mut route = PlanningPickerRouteState::default();
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            rows_for(&[PlanningTaskId::DecomposeModules]),
+            BTreeSet::from([PlanningTaskId::DecomposeModules]),
+            false,
+        );
+        let mut cached = rows_for(&[PlanningTaskId::DecomposeModules]);
+        cached[0].artifact_state = PlanningArtifactState::Cached;
+
+        route.open_phase_profiled(WorkflowPhase::Map, cached, BTreeSet::new(), false);
+
+        assert!(route.selected().is_empty());
+        assert_eq!(
+            route.tasks()[0].artifact_state,
+            PlanningArtifactState::Cached
+        );
+    }
+
+    #[test]
+    fn profile_refresh_keeps_a_fresh_cached_rebuild_selected() {
+        let task = PlanningTaskId::GatherRepoContext;
+        let mut cached = rows_for(&[task]);
+        cached[0].artifact_state = PlanningArtifactState::Cached;
+        let mut route = PlanningPickerRouteState::default();
+        route.open_phase_profiled(
+            WorkflowPhase::Map,
+            cached.clone(),
+            BTreeSet::from([task]),
+            true,
+        );
+        route.mark_default_cached_for_rebuild();
+
+        route.refresh_profiled(cached, BTreeSet::new());
+
+        assert_eq!(route.selected(), &BTreeSet::from([task]));
+        assert_eq!(route.rebuild(), &BTreeSet::from([task]));
+    }
+
+    #[test]
+    fn mutation_survivor_artifact_refresh_clears_the_stale_marker() {
+        let target = tempfile::tempdir().expect("temp target");
+        let task = PlanningTaskId::GatherRepoContext;
+        let mut route = PlanningPickerRouteState::default();
+        route.open(rows_for(&[task]), BTreeSet::from([task]));
+        route.mark_artifacts_stale();
+        assert!(route.artifacts_stale());
+
+        route.refresh_artifact_states(target.path());
+
+        assert!(!route.artifacts_stale());
+    }
+
+    #[test]
+    fn mutation_survivor_completed_attempt_only_deselects_action_rows() {
+        let mut row = test_row(PlanningTaskId::ScanAgenticSast);
+        row.last_attempt = Some(crate::app::LastAttempt::Completed);
+
+        assert_eq!(selection_override_for_reality(&row, false), None);
+        row.artifact_state = PlanningArtifactState::Action;
+        assert_eq!(selection_override_for_reality(&row, false), Some(false));
     }
 
     fn rows_for(tasks: &[PlanningTaskId]) -> Vec<PlanningTaskRow> {

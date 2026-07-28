@@ -1,6 +1,9 @@
 use crate::command::{McpBackend, McpCommand};
 use anyhow::{Context, Result};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::time::Duration;
 
 pub(crate) async fn mcp_command(command: McpCommand) -> Result<()> {
     match command {
@@ -11,21 +14,83 @@ pub(crate) async fn mcp_command(command: McpCommand) -> Result<()> {
 
 pub(crate) fn serve_mcp_backend(backend: McpBackend) -> Result<()> {
     let binary = resolve_mcp_binary(backend.binary());
-    let status = std::process::Command::new(&binary)
-        .args::<[&str; 0], _>([])
-        .status()
+    let mut command = Command::new(&binary);
+    let (child, process_group) = spawn_guarded_mcp(&mut command)
         .with_context(|| mcp_spawn_error(&binary.display().to_string()))?;
+    let status = wait_for_mcp_child(register_mcp_child(child, process_group)?)?;
     exit_with_mcp_status(status, &binary);
 }
 
 pub(crate) fn health_mcp_backend(backend: McpBackend) -> Result<()> {
     let binary = resolve_mcp_binary(backend.binary());
-    let output = std::process::Command::new(&binary)
+    let mut command = Command::new(&binary);
+    command
         .arg("--health")
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = guarded_mcp_output(&mut command)
         .with_context(|| mcp_health_spawn_error(&binary.display().to_string()))?;
     write_mcp_output(&output.stdout, &output.stderr);
     exit_with_mcp_status(output.status, &binary);
+}
+
+fn guarded_mcp_output(command: &mut Command) -> Result<Output> {
+    let (mut child, process_group) = spawn_guarded_mcp(command)?;
+    let stdout = child
+        .stdout
+        .take()
+        .context("MCP health stdout unavailable")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("MCP health stderr unavailable")?;
+    let stdout = std::thread::spawn(move || read_pipe(stdout));
+    let stderr = std::thread::spawn(move || read_pipe(stderr));
+    let status = wait_for_mcp_child(register_mcp_child(child, process_group)?)?;
+    Ok(Output {
+        status,
+        stdout: join_pipe(stdout, "stdout")?,
+        stderr: join_pipe(stderr, "stderr")?,
+    })
+}
+
+fn spawn_guarded_mcp(
+    command: &mut Command,
+) -> Result<(Child, kuzushi_core::scan::PreparedProcessGroup)> {
+    let process_group = kuzushi_core::scan::PreparedProcessGroup::configure(command)?;
+    Ok((command.spawn()?, process_group))
+}
+
+fn register_mcp_child(
+    child: Child,
+    process_group: kuzushi_core::scan::PreparedProcessGroup,
+) -> Result<kuzushi_core::scan::RegisteredChild> {
+    kuzushi_core::scan::ScanCancellation::default().register_prepared_child(child, process_group)
+}
+
+fn wait_for_mcp_child(child: kuzushi_core::scan::RegisteredChild) -> Result<ExitStatus> {
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn read_pipe(mut pipe: impl Read) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    pipe.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
+fn join_pipe(
+    reader: std::thread::JoinHandle<std::io::Result<Vec<u8>>>,
+    stream: &str,
+) -> Result<Vec<u8>> {
+    reader
+        .join()
+        .map_err(|_| anyhow::anyhow!("MCP health {stream} reader panicked"))?
+        .with_context(|| format!("could not read MCP health {stream}"))
 }
 
 fn exit_with_mcp_status(status: std::process::ExitStatus, binary: &Path) -> ! {
@@ -87,6 +152,13 @@ fn sibling_mcp_binary(executable: &Path, binary_name: &str) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pipe_reader_preserves_the_complete_byte_stream() {
+        let bytes = read_pipe(std::io::Cursor::new(b"mcp health\nready")).unwrap();
+
+        assert_eq!(bytes, b"mcp health\nready");
+    }
 
     #[test]
     fn sibling_mcp_binary_prefers_packaged_runtime() {

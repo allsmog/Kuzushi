@@ -562,11 +562,7 @@ pub(super) fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Resul
 }
 
 fn read_optional_file(root: &Path, path: &Path) -> Result<Option<Vec<u8>>> {
-    match crate::bounded_file::read_regular_bytes_within(
-        root,
-        path,
-        MAX_OBSERVATION_SOURCE_BYTES,
-    ) {
+    match crate::bounded_file::read_regular_bytes_within(root, path, MAX_OBSERVATION_SOURCE_BYTES) {
         Ok(bytes) => Ok(Some(bytes)),
         Err(error) if provenance_read_is_safely_omitted(&error) => Ok(None),
         Err(error) => Err(error).with_context(|| format!("Could not read {}", path.display())),

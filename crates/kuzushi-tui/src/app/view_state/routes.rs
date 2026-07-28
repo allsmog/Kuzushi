@@ -1063,6 +1063,8 @@ pub struct SceneRouteState {
     last_advance: Option<Instant>,
     /// DFD inspector cursor over the flattened nodes-then-flows order.
     dfd_selection: usize,
+    /// Requested first row in the wrapped DFD detail panel.
+    dfd_detail_scroll: usize,
 }
 
 impl Default for SceneRouteState {
@@ -1074,6 +1076,7 @@ impl Default for SceneRouteState {
             paused: false,
             last_advance: None,
             dfd_selection: 0,
+            dfd_detail_scroll: 0,
         }
     }
 }
@@ -1132,6 +1135,10 @@ impl SceneRouteState {
         self.dfd_selection
     }
 
+    pub(crate) fn dfd_detail_scroll(&self) -> usize {
+        self.dfd_detail_scroll
+    }
+
     /// Cycle the DFD selection with wrap over `len` items (nodes then flows).
     /// A shrunken model clamps the cursor instead of pointing past the end.
     pub(crate) fn cycle_dfd_selection(&mut self, direction: i32, len: usize) {
@@ -1141,6 +1148,15 @@ impl SceneRouteState {
         }
         let current = self.dfd_selection.min(len - 1) as i32;
         self.dfd_selection = (current + direction).rem_euclid(len as i32) as usize;
+        self.dfd_detail_scroll = 0;
+    }
+
+    pub(crate) fn scroll_dfd_detail(&mut self, direction: i32, amount: usize) {
+        if direction >= 0 {
+            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount);
+        } else {
+            self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_sub(amount);
+        }
     }
 
     pub(crate) fn clear_advance_baseline(&mut self) {

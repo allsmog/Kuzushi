@@ -25,6 +25,8 @@ pub struct TrendSnapshot {
     pub confirmed_findings: usize,
     pub rejected_false_positives: usize,
     pub campaign_spend_usd: f64,
+    #[serde(default)]
+    pub provider_spend_unresolved: bool,
 }
 
 impl TrendSnapshot {
@@ -39,6 +41,7 @@ impl TrendSnapshot {
             && self.confirmed_findings == other.confirmed_findings
             && self.rejected_false_positives == other.rejected_false_positives
             && self.campaign_spend_usd == other.campaign_spend_usd
+            && self.provider_spend_unresolved == other.provider_spend_unresolved
     }
 }
 
@@ -56,6 +59,7 @@ pub fn record_trend_snapshot(root: &Path, metrics: &TrendMetrics) -> Result<bool
         confirmed_findings: metrics.confirmed_findings,
         rejected_false_positives: metrics.rejected_false_positives,
         campaign_spend_usd: metrics.campaign_spend_usd,
+        provider_spend_unresolved: metrics.provider_spend_unresolved,
     };
     let path = trend_history_path(root);
     if last_snapshot(&path).is_some_and(|last| last.same_state(&snapshot)) {
@@ -110,6 +114,7 @@ pub fn history_json(history: &[TrendSnapshot]) -> Value {
                 "confirmedFindings": snapshot.confirmed_findings,
                 "rejectedFalsePositives": snapshot.rejected_false_positives,
                 "campaignSpendUsd": snapshot.campaign_spend_usd,
+                "providerSpendUnresolved": snapshot.provider_spend_unresolved,
                 "fpRate": snapshot.fp_rate(),
             })
         })
@@ -123,9 +128,9 @@ pub fn sparkline(values: &[f64]) -> String {
     if values.len() < 2 {
         return String::new();
     }
-    let (min, max) = values.iter().fold((f64::MAX, f64::MIN), |(lo, hi), v| {
-        (lo.min(*v), hi.max(*v))
-    });
+    let (min, max) = values
+        .iter()
+        .fold((f64::MAX, f64::MIN), |(lo, hi), v| (lo.min(*v), hi.max(*v)));
     let span = max - min;
     values
         .iter()
@@ -155,8 +160,16 @@ pub fn history_strip_label(history: &[TrendSnapshot]) -> Option<String> {
         .iter()
         .map(|snapshot| snapshot.campaign_spend_usd)
         .collect();
+    let spend_label = if history
+        .iter()
+        .any(|snapshot| snapshot.provider_spend_unresolved)
+    {
+        "spend >="
+    } else {
+        "spend"
+    };
     Some(format!(
-        "HISTORY  fp {} · spend {} · {} snapshot(s)",
+        "HISTORY  fp {} · {spend_label} {} · {} snapshot(s)",
         sparkline(&fp),
         sparkline(&spend),
         history.len()
@@ -180,6 +193,7 @@ mod tests {
             rejected_false_positives: rejected,
             confirmed_findings: confirmed,
             campaign_spend_usd: spend,
+            provider_spend_unresolved: false,
         }
     }
 
@@ -219,7 +233,10 @@ mod tests {
 
         assert_eq!(history.len(), TREND_HISTORY_LIMIT);
         assert_eq!(history[0].decided_findings, 10);
-        assert_eq!(history.last().unwrap().decided_findings, TREND_HISTORY_LIMIT + 9);
+        assert_eq!(
+            history.last().unwrap().decided_findings,
+            TREND_HISTORY_LIMIT + 9
+        );
     }
 
     #[test]
@@ -238,6 +255,7 @@ mod tests {
             confirmed_findings: 1,
             rejected_false_positives: 1,
             campaign_spend_usd: 3.0,
+            provider_spend_unresolved: false,
         }];
         assert_eq!(history_strip_label(&[]), None);
         assert_eq!(history_strip_label(&one), None);
@@ -249,6 +267,7 @@ mod tests {
             confirmed_findings: 3,
             rejected_false_positives: 1,
             campaign_spend_usd: 9.0,
+            provider_spend_unresolved: false,
         });
         let label = history_strip_label(&two).unwrap();
         assert_eq!(label, "HISTORY  fp █▁ · spend ▁█ · 2 snapshot(s)");

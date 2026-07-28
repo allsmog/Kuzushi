@@ -65,12 +65,14 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
-        "pack:lint" => Some(crate::capabilities::pack_lint::execute_pack_lint(input, ctx)),
+        "pack:lint" => Some(crate::capabilities::pack_lint::execute_pack_lint(
+            input, ctx,
+        )),
         "pack:suggest-shards" => Some(crate::capabilities::shard_suggest::execute_suggest_shards(
             input, ctx,
         )),
         "report:build" => Some(build_report_tool(input, ctx)),
-        "report:sarif" => Some(crate::report::execute_report_sarif(input, ctx)),
+        "report:sarif" => Some(execute_report_sarif_tool(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => dispatch_finding_ledger_tool(name, input, ctx),
     }
@@ -101,9 +103,9 @@ fn dispatch_finding_ledger_tool(
         "findings:chains" => Some(crate::capabilities::chains::execute_findings_chains(
             input, ctx,
         )),
-        "findings:ground" => Some(
-            crate::capabilities::findings_ground::execute_findings_ground(input, ctx),
-        ),
+        "findings:ground" => {
+            Some(crate::capabilities::findings_ground::execute_findings_ground(input, ctx))
+        }
         "suppress:add" => Some(run_suppress_add(input, ctx)),
         "suppress:list" => Some(run_suppress_list(input, ctx)),
         "suppress:remove" => Some(run_suppress_remove(input, ctx)),
@@ -236,6 +238,10 @@ fn scope_skip_suffix(skipped: usize) -> String {
 
 pub(in crate::modules) fn workspace_status_json(ctx: &ToolExecutionContext<'_>) -> Value {
     let output = workspace_status_output(ctx);
+    let pending_checkpoints = ctx
+        .workspace
+        .map(|workspace| crate::run_artifacts::pending_stage_checkpoints(workspace.root()))
+        .unwrap_or_default();
     let data = json!({
         "active": ctx.workspace.is_some(),
         "root": ctx.workspace.map(|workspace| workspace.root().display().to_string()),
@@ -243,6 +249,14 @@ pub(in crate::modules) fn workspace_status_json(ctx: &ToolExecutionContext<'_>) 
         "findingsDb": ctx.workspace.map(|workspace| workspace.findings_db_path().display().to_string()),
         "runtime": ctx.config.runtime.kind,
         "model": ctx.config.model,
+        "pendingStageCheckpoints": pending_checkpoints.iter().map(|checkpoint| json!({
+            "tool": checkpoint.tool,
+            "sourceRunId": checkpoint.source_run_id,
+            "completedStages": checkpoint.completed_stages,
+            "currentStage": checkpoint.current_stage,
+            "modifiedAtUnix": checkpoint.modified_at_unix,
+            "reuseEligible": checkpoint.reuse_eligible,
+        })).collect::<Vec<_>>(),
     });
     crate::module_result::completed_output_result(output.clone(), output, data)
 }

@@ -117,7 +117,7 @@ pub fn pending_agent_loop_checkpoints(target: &Path) -> Vec<PendingLoopCheckpoin
         .flatten()
         .filter_map(|entry| pending_checkpoint(&entry.path()))
         .collect();
-    pending.sort_by(|left, right| right.modified_at_unix.cmp(&left.modified_at_unix));
+    pending.sort_by_key(|entry| std::cmp::Reverse(entry.modified_at_unix));
     pending
 }
 

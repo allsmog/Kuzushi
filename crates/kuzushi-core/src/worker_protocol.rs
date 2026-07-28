@@ -2033,7 +2033,7 @@ fn spawn_supervised_mcp_process(
     session: &McpSessionKey,
     cancellation: Option<&crate::scan::ScanCancellation>,
 ) -> Result<SupervisedMcpProcess, KwpError> {
-    let mut child = spawn_mcp_process(mount, session)?;
+    let (mut child, process_group) = spawn_mcp_process(mount, session)?;
     let stdin = child
         .stdin
         .take()
@@ -2043,9 +2043,8 @@ fn spawn_supervised_mcp_process(
         .take()
         .ok_or_else(|| KwpError::Internal("MCP server stdout unavailable".to_string()))?;
     let stderr = supervise_mcp_stderr(&mut child, &mount.alias);
-    let process_group_id = kwp_child_process_group_id(&child);
     let cancellation = cancellation.cloned().unwrap_or_default();
-    let (child, stderr) = register_mcp_child(child, process_group_id, &cancellation, stderr)?;
+    let (child, stderr) = register_mcp_child(child, process_group, &cancellation, stderr)?;
     Ok(SupervisedMcpProcess {
         child,
         stdin,
@@ -2057,11 +2056,11 @@ fn spawn_supervised_mcp_process(
 
 fn register_mcp_child(
     child: Child,
-    process_group_id: Option<u32>,
+    process_group: crate::scan::PreparedProcessGroup,
     cancellation: &crate::scan::ScanCancellation,
     stderr: Option<SupervisedStderr>,
 ) -> Result<(crate::scan::RegisteredChild, Option<SupervisedStderr>), KwpError> {
-    match cancellation.register_child(child, process_group_id) {
+    match cancellation.register_prepared_child(child, process_group) {
         Ok(child) => Ok((child, stderr)),
         Err(error) => {
             let _ = join_supervised_stderr(stderr);
@@ -2135,7 +2134,10 @@ fn read_mcp_stdout(
     }
 }
 
-fn spawn_mcp_process(mount: &StdioMcpMount, session: &McpSessionKey) -> Result<Child, KwpError> {
+fn spawn_mcp_process(
+    mount: &StdioMcpMount,
+    session: &McpSessionKey,
+) -> Result<(Child, crate::scan::PreparedProcessGroup), KwpError> {
     let Some((program, args)) = mount.command.split_first() else {
         return Err(KwpError::BadRequest(
             "MCP mount command omitted".to_string(),
@@ -2148,13 +2150,15 @@ fn spawn_mcp_process(mount: &StdioMcpMount, session: &McpSessionKey) -> Result<C
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     sanitize_mcp_environment(&mut command, session);
-    configure_kwp_process_group(&mut command);
-    command.spawn().map_err(|error| {
+    let process_group = crate::scan::PreparedProcessGroup::configure(&mut command)
+        .map_err(|error| KwpError::Internal(format!("could not guard MCP process: {error}")))?;
+    let child = command.spawn().map_err(|error| {
         KwpError::Internal(format!(
             "could not start MCP alias {}: {error}",
             mount.alias
         ))
-    })
+    })?;
+    Ok((child, process_group))
 }
 
 fn sanitize_mcp_environment(command: &mut Command, session: &McpSessionKey) {
@@ -9257,13 +9261,7 @@ mod tests {
         let (origin, request) = fuzz_executor_fixture(temp.path());
 
         let error = mount
-            .run_with_timeout(
-                temp.path(),
-                origin,
-                request,
-                Duration::from_millis(100),
-                None,
-            )
+            .run_with_timeout(temp.path(), origin, request, Duration::from_secs(1), None)
             .unwrap_err();
 
         assert_eq!(error, KwpError::Deadline);

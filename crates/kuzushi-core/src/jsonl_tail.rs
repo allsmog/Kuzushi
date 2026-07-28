@@ -34,14 +34,7 @@ pub(crate) fn heal_torn_jsonl_tail(
     if tail.last() == Some(&b'\n') {
         return Ok(());
     }
-    let keep = match tail.iter().rposition(|byte| *byte == b'\n') {
-        Some(position) => start + position as u64 + 1,
-        None if start == 0 => 0,
-        None => anyhow::bail!(
-            "{label} {} ends in an oversized newline-less tail; refusing to truncate",
-            path.display()
-        ),
-    };
+    let keep = bytes_before_torn_tail(&tail, start, len, max_line_bytes, path, label)?;
     crate::runtime_diagnostics::record_runtime_diagnostic(
         "jsonl",
         format!(
@@ -55,6 +48,26 @@ pub(crate) fn heal_torn_jsonl_tail(
     file.sync_all()
         .with_context(|| format!("Could not fsync {}", path.display()))?;
     Ok(())
+}
+
+fn bytes_before_torn_tail(
+    tail: &[u8],
+    start: u64,
+    len: u64,
+    max_line_bytes: usize,
+    path: &Path,
+    label: &str,
+) -> Result<u64> {
+    if let Some(position) = tail.iter().rposition(|byte| *byte == b'\n') {
+        return Ok(start + position as u64 + 1);
+    }
+    if len <= max_line_bytes as u64 && start == 0 {
+        return Ok(0);
+    }
+    anyhow::bail!(
+        "{label} {} ends in an oversized newline-less tail; refusing to truncate",
+        path.display()
+    )
 }
 
 /// Open `path` (if it exists) and heal a torn tail in place. A missing
@@ -140,6 +153,21 @@ mod tests {
         let path = dir.path().join("ledger.jsonl");
         let mut body = String::from("{\"a\":1}\n");
         body.push_str(&"x".repeat(64));
+        fs::write(&path, &body).unwrap();
+
+        let error = heal_torn_jsonl_tail_at(&path, 16, LABEL)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("oversized newline-less tail"), "{error}");
+        assert_eq!(fs::read_to_string(&path).unwrap(), body);
+    }
+
+    #[test]
+    fn a_whole_file_one_byte_over_the_limit_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ledger.jsonl");
+        let body = "x".repeat(17);
         fs::write(&path, &body).unwrap();
 
         let error = heal_torn_jsonl_tail_at(&path, 16, LABEL)

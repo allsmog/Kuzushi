@@ -13,10 +13,10 @@ pub(in crate::capabilities::carlini_threat_hunt) fn require_json_object(
     }
 }
 
-/// Per-item required keys are the contract that keeps the deterministic
-/// normalizer from silently dropping real findings: a finding the model
-/// cannot anchor to filePath + startLine is re-asked by the repair pass
-/// instead of vanishing.
+/// Per-item required keys are shared by the provider contract, actor prompt,
+/// and deterministic normalizer. The normalizer still checks every item
+/// because some providers return top-level structured JSON without enforcing
+/// the nested item schema.
 pub(in crate::capabilities::carlini_threat_hunt) fn findings_schema() -> Value {
     json!({
         "type": "object",

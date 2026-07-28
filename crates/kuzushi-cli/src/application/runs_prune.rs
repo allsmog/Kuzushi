@@ -1,9 +1,9 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use kuzushi_core::{
-    list_run_summaries, repair_latest_run_pointer, run_dir, RunSummary, WorkspaceTarget,
+    list_run_summaries, prune_run_artifacts, repair_latest_run_pointer, RunPruneDisposition,
+    RunSummary, WorkspaceTarget,
 };
 use std::collections::HashSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 const DAY_SECONDS: u64 = 86_400;
@@ -36,7 +36,9 @@ pub(crate) struct RunsPruneReport {
     target: String,
     dry_run: bool,
     selected: Vec<String>,
+    eligible: Vec<String>,
     deleted: Vec<String>,
+    skipped_live: Vec<String>,
 }
 
 pub(crate) fn runs_prune_plan(
@@ -79,12 +81,17 @@ fn newest_run_ids(runs: &[RunSummary], keep_last: Option<usize>) -> HashSet<Stri
 
 fn apply_runs_prune(target: &Path, plan: &RunsPrunePlan, dry_run: bool) -> Result<RunsPruneReport> {
     let mut deleted = Vec::new();
+    let mut eligible = Vec::new();
+    let mut skipped_live = Vec::new();
     for run_id in &plan.run_ids {
-        let dir = safe_run_dir(target, run_id)?;
-        if !dry_run && dir.exists() {
-            fs::remove_dir_all(&dir)
-                .with_context(|| format!("Could not delete {}", dir.display()))?;
-            deleted.push(run_id.clone());
+        match prune_run_artifacts(target, run_id, dry_run)? {
+            RunPruneDisposition::Deleted => {
+                eligible.push(run_id.clone());
+                deleted.push(run_id.clone());
+            }
+            RunPruneDisposition::WouldDelete => eligible.push(run_id.clone()),
+            RunPruneDisposition::SkippedLive => skipped_live.push(run_id.clone()),
+            RunPruneDisposition::Missing => {}
         }
     }
     if !dry_run {
@@ -94,20 +101,10 @@ fn apply_runs_prune(target: &Path, plan: &RunsPrunePlan, dry_run: bool) -> Resul
         target: target.display().to_string(),
         dry_run,
         selected: plan.run_ids.clone(),
+        eligible,
         deleted,
+        skipped_live,
     })
-}
-
-fn safe_run_dir(target: &Path, run_id: &str) -> Result<PathBuf> {
-    if run_id.is_empty()
-        || run_id == "."
-        || run_id == ".."
-        || run_id.contains('/')
-        || run_id.contains('\\')
-    {
-        bail!("refusing to prune unsafe run id {run_id:?}");
-    }
-    Ok(run_dir(target, run_id))
 }
 
 fn repair_latest_after_prune(target: &Path) -> Result<()> {
@@ -127,7 +124,9 @@ fn runs_prune_output(
                 "target": report.target,
                 "dryRun": report.dry_run,
                 "selected": report.selected,
+                "eligible": report.eligible,
                 "deleted": report.deleted,
+                "skippedLive": report.skipped_live,
             }))?
         ));
     }
@@ -137,7 +136,7 @@ fn runs_prune_output(
 fn runs_prune_plain(target: &Path, report: &RunsPruneReport, dry_run: bool) -> String {
     let action = if dry_run { "would delete" } else { "deleted" };
     let displayed_run_ids = if dry_run {
-        &report.selected
+        &report.eligible
     } else {
         &report.deleted
     };
@@ -147,7 +146,14 @@ fn runs_prune_plain(target: &Path, report: &RunsPruneReport, dry_run: bool) -> S
         format!("{action}: {}", displayed_run_ids.len()),
     ];
     lines.extend(displayed_run_ids.iter().map(|run_id| format!("  {run_id}")));
-    if displayed_run_ids.is_empty() {
+    lines.push(format!("skipped live: {}", report.skipped_live.len()));
+    lines.extend(
+        report
+            .skipped_live
+            .iter()
+            .map(|run_id| format!("  {run_id}")),
+    );
+    if displayed_run_ids.is_empty() && report.skipped_live.is_empty() {
         lines.push("No matching run artifacts.".to_string());
     }
     format!("{}\n", lines.join("\n"))
@@ -158,4 +164,28 @@ fn now_unix_for_prune() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prune_output_discloses_live_skips() {
+        let report = RunsPruneReport {
+            target: "/target".to_string(),
+            dry_run: false,
+            selected: vec!["run-live".to_string()],
+            eligible: Vec::new(),
+            deleted: Vec::new(),
+            skipped_live: vec!["run-live".to_string()],
+        };
+
+        let json = runs_prune_output(Path::new("/target"), &report, false, true).unwrap();
+        assert!(json.contains("\"skippedLive\""));
+        assert!(json.contains("run-live"));
+        let plain = runs_prune_output(Path::new("/target"), &report, false, false).unwrap();
+        assert!(plain.contains("skipped live: 1"));
+        assert!(!plain.contains("No matching run artifacts"));
+    }
 }

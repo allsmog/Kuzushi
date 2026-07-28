@@ -75,22 +75,76 @@ impl ShellApp {
         let kind = event.kind();
         let finishes_slot = self.job_event_finishes_slot(&event);
         let terminal_fallback = finishes_slot.then(|| run_focus_event_outcome(&event));
-        if finishes_slot {
-            self.jobs_mut().finish(kind);
-        }
         let mut effects = self.apply_current_job_event(event);
         if finishes_slot {
             self.mark_run_focus_terminal_pending(
                 terminal_fallback.as_deref().unwrap_or("completed"),
             );
             self.clear_finished_job(kind);
-            // Centralized steer-queue drain: every terminal job event (scan
-            // success/failure, tool success/failure, agent/plan/threat finish)
-            // flows through here, so the operator steer queue drains on ALL
-            // completion paths — not just a successful background-tool finish.
-            effects.extend(self.advance_steer_queue());
+            let after_persistence = matches!(
+                effects.first(),
+                Some(
+                    ShellEffect::RecordAgentRun(_)
+                        | ShellEffect::RecordScanRun(_)
+                        | ShellEffect::RecordToolRun(_)
+                )
+            ) as usize;
+            effects.insert(after_persistence, ShellEffect::FinalizeJob(kind));
         }
         effects
+    }
+
+    pub(crate) fn finalize_job_effect(&mut self, kind: JobKind) {
+        self.drain_terminal_lifecycle_events();
+        self.catch_up_focused_run_from_disk();
+        self.jobs_mut().finish(kind);
+        let effects = self.advance_steer_queue();
+        EffectRuntime::execute(self, effects);
+    }
+
+    fn drain_terminal_lifecycle_events(&mut self) {
+        for _ in 0..JOB_DRAIN_LIMIT {
+            let event = match self.jobs_mut().drain_one() {
+                JobDrainResult::Event(event) => event,
+                JobDrainResult::Stale => continue,
+                JobDrainResult::Empty => break,
+            };
+            let effects = self.apply_current_job_event(event);
+            EffectRuntime::execute(self, effects);
+        }
+    }
+
+    fn catch_up_focused_run_from_disk(&mut self) {
+        if let Err(error) = self.try_catch_up_focused_run_from_disk() {
+            self.log(
+                "run",
+                format!("terminal lifecycle catch-up failed: {error}"),
+            );
+        }
+    }
+
+    fn try_catch_up_focused_run_from_disk(&mut self) -> anyhow::Result<()> {
+        let Some((target, run_id, applied_seq)) = self.focused_run_catch_up_request() else {
+            return Ok(());
+        };
+        let Some(read) = kuzushi_core::run_lifecycle::read_run_items(&target, &run_id)? else {
+            return Ok(());
+        };
+        let session = self.activity_mut().expect("activity checked above");
+        for item in read.items.into_iter().filter(|item| item.seq > applied_seq) {
+            session.apply_run_item(item)?;
+        }
+        Ok(())
+    }
+
+    fn focused_run_catch_up_request(&self) -> Option<(PathBuf, String, u64)> {
+        let target = self.target_owned()?;
+        let session = self.activity()?;
+        Some((
+            target,
+            session.run_id.clone(),
+            session.run_projection.last_committed_seq,
+        ))
     }
 
     fn mark_run_focus_terminal_pending(&mut self, fallback: &str) {
@@ -178,22 +232,6 @@ impl ShellApp {
             return false;
         }
         let origin = completion.origin.expect("restore decision requires origin");
-        // A committed phase run never lands back on the setup card that
-        // committed it — that card still promises "Start Map" for a run
-        // that already happened. The honest landing is the phase RESULT
-        // checkpoint, which publish_run_focus_receipt records right after
-        // this restore.
-        if origin.view == ShellView::Setup {
-            if let Some(phase) = completion
-                .receipt
-                .as_ref()
-                .and_then(|receipt| receipt.origin_phase)
-            {
-                self.set_workbench_page(crate::app::WorkbenchPage::from_phase(phase));
-                self.set_input_mode(InputMode::Navigate);
-                return true;
-            }
-        }
         self.set_shell_view(origin.view);
         self.set_input_mode(origin.input_mode);
         true
@@ -445,10 +483,24 @@ impl ShellApp {
         &mut self,
         item: kuzushi_core::run_lifecycle::RunItemEnvelopeV1,
     ) -> Vec<ShellEffect> {
-        let session =
-            self.activity_or_insert_with(|| ActivitySession::new(default_activity_run_id()));
+        let run_id = item.run_id.as_str().to_string();
+        if self
+            .activity()
+            .is_some_and(|session| session.run_id != run_id)
+        {
+            self.log(
+                "run",
+                format!("ignored stale lifecycle item for run {run_id}"),
+            );
+            return Vec::new();
+        }
+        let cancel_requested =
+            self.scan().is_some_and(|scan| scan.abort_requested) || self.tool_abort_requested();
+        let session = self.activity_or_insert_with(|| ActivitySession::new(run_id));
         if let Err(error) = session.apply_run_item(item) {
             self.log("run", format!("typed run projection degraded: {error}"));
+        } else if cancel_requested {
+            session.mark_active_tasks_canceling();
         }
         Vec::new()
     }
@@ -1531,6 +1583,66 @@ mod run_focus_completion_tests {
     }
 
     #[test]
+    fn stale_run_item_cannot_mutate_the_current_run_focus_projection() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_activity(Some(ActivitySession::new("run-current")));
+
+        app.apply_current_job_event(ShellEvent::RunItem(partial_terminal_item("run-stale")));
+
+        let session = app.activity().unwrap();
+        assert_eq!(session.run_id, "run-current");
+        assert!(session.run_projection.terminal.is_none());
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "run"
+                && line
+                    .body
+                    .contains("ignored stale lifecycle item for run run-stale")
+        }));
+    }
+
+    #[test]
+    fn first_run_item_creates_a_session_with_its_real_run_id() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        app.apply_current_job_event(ShellEvent::RunItem(partial_terminal_item("run-real")));
+
+        assert_eq!(app.activity().unwrap().run_id, "run-real");
+    }
+
+    #[test]
+    fn tool_cancel_request_marks_new_run_items_canceling_without_a_scan() {
+        use kuzushi_core::run_lifecycle::{
+            RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemStatus, RunItemV1,
+            RunTaskId, SafeText,
+        };
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_tool_abort_requested_for_test(true);
+        let task_id = RunTaskId::new();
+        let item = RunItemEnvelopeV1::new(
+            1,
+            RunId::parse("run-canceling").unwrap(),
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TaskUpdated {
+                title: SafeText::operator_visible("active task"),
+                status: RunItemStatus::Running,
+                detail: None,
+            },
+            None,
+        )
+        .unwrap()
+        .with_task(task_id)
+        .unwrap();
+
+        app.apply_current_job_event(ShellEvent::RunItem(item));
+
+        assert_eq!(
+            app.activity().unwrap().tasks[&task_id.to_string()].state,
+            crate::DagTaskState::Canceling
+        );
+    }
+
+    #[test]
     fn derivative_only_failure_does_not_block_phase_completion() {
         use kuzushi_core::run_lifecycle::{
             RunItemDeliveryFailureStage, RunItemDeliveryFault, SafeText,
@@ -2306,14 +2418,4 @@ mod run_focus_completion_tests {
         assert!(app.finalize_run_focus_if_idle());
         assert_eq!(app.shell_view(), ShellView::Home);
     }
-}
-
-fn default_activity_run_id() -> String {
-    format!(
-        "manual-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-    )
 }

@@ -88,17 +88,13 @@ impl StructuredOutputError {
 
 impl fmt::Display for StructuredOutputError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{:#}", self.source)
+        formatter.write_str("structured output failed")
     }
 }
 
 impl std::error::Error for StructuredOutputError {
-    /// Display already renders the complete `{:#}` chain of the wrapped
-    /// error. Exposing the same chain through `source()` again made anyhow's
-    /// alternate formatting print the whole message twice, concatenated —
-    /// the "429 error shown twice" result-card bug.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        None
+        Some(self.source.as_ref())
     }
 }
 
@@ -183,6 +179,7 @@ pub(crate) fn repair_request_from(
     .with_tool_policy(request.tool_policy.clone())
     .with_structured_output(output);
     repair_request.thinking_level = request.thinking_level.clone();
+    repair_request.stage = request.stage.clone();
     repair_request.max_output_tokens = request.max_output_tokens;
     repair_request.runtime_options = request.runtime_options.clone();
     repair_request.temperature = request.temperature;
@@ -210,10 +207,10 @@ pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
 ) -> Result<CostedStructuredJson<T>> {
     let initial_cost = checked_response_cost(&response, RuntimeCostReport::INCOMPLETE_ZERO)?;
     let initial_material = checked_response_material(&response, initial_cost)?;
+    reject_truncated_response(&response, &contract, &initial_material, initial_cost)?;
     match parse_and_validate_measured(&response, &contract, &validate) {
         Ok(value) => Ok(CostedStructuredJson::from_cost_report(value, initial_cost)),
         Err(initial_error) => repair_structured_json_response(
-            response,
             initial_material,
             &contract,
             &validate,
@@ -225,7 +222,6 @@ pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
 }
 
 fn repair_structured_json_response<T>(
-    response: AgentQueryResponse,
     initial_material: ResponseMaterial,
     contract: &StructuredJsonContract,
     validate: &impl Fn(Value) -> Result<T>,
@@ -233,12 +229,6 @@ fn repair_structured_json_response<T>(
     initial_cost: RuntimeCostReport,
     initial_error: anyhow::Error,
 ) -> Result<CostedStructuredJson<T>> {
-    if response.truncated {
-        let error = truncation_error(contract, &response, &initial_error, &initial_material)
-            .context("Could not render bounded structured-output truncation evidence")
-            .map_err(|error| observed_failure(error, initial_cost))?;
-        return Err(observed_failure(error, initial_cost));
-    }
     let repair_prompt = build_repair_prompt(contract, &initial_material, &initial_error)
         .map_err(|error| observed_failure(error, initial_cost))?;
     let repair_response = repair(repair_prompt, contract.runtime_contract())
@@ -251,6 +241,22 @@ fn repair_structured_json_response<T>(
         initial_material,
         repair_response,
     )
+}
+
+fn reject_truncated_response(
+    response: &AgentQueryResponse,
+    contract: &StructuredJsonContract,
+    material: &ResponseMaterial,
+    cost: RuntimeCostReport,
+) -> Result<()> {
+    if !response.truncated {
+        return Ok(());
+    }
+    let cause = anyhow::anyhow!("response stopped before natural structured-output completion");
+    let error = truncation_error(contract, response, &cause, material)
+        .context("Could not render bounded structured-output truncation evidence")
+        .map_err(|error| observed_failure(error, cost))?;
+    Err(observed_failure(error, cost))
 }
 
 fn parse_repaired_response<T>(

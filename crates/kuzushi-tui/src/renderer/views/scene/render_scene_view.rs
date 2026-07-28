@@ -33,6 +33,7 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
             DfdDiagram {
                 model: dfd_model(app),
                 selection: Some(app.router.scene().dfd_selection()),
+                detail_scroll: app.router.scene().dfd_detail_scroll(),
             },
             outer[1],
         ),

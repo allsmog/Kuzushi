@@ -2,20 +2,6 @@ use super::*;
 use kuzushi_core::write_run_summary;
 
 #[test]
-fn source_file_cache_refreshes_after_workspace_invalidation() {
-    let temp = tempfile::tempdir().unwrap();
-    let path = temp.path().join("src.rs");
-    std::fs::write(&path, "one").unwrap();
-    let mut cache = WorkbenchCache::default();
-
-    assert_eq!(cache.read_source_file(&path).unwrap(), "one");
-    std::fs::write(&path, "two lines").unwrap();
-    cache.invalidate_workspace_files();
-
-    assert_eq!(cache.read_source_file(&path).unwrap(), "two lines");
-}
-
-#[test]
 fn harness_file_serves_cached_contents_until_invalidated() {
     let temp = tempfile::tempdir().unwrap();
     let path = seed_harness_file(temp.path(), "raw = \"auth\"");

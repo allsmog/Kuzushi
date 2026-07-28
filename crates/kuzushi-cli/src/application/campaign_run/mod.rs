@@ -17,6 +17,7 @@ use crate::command::CampaignCommand;
 use anyhow::{Context, Result};
 use budget::{effective_job_budget, live_run_spend_usd};
 use child::{run_child, ChildReport, ChildSpec};
+use kuzushi_core::capabilities::campaign::{acquire_dispatcher_lease, CampaignDispatcherLease};
 use kuzushi_core::run_artifacts::load_run_summary;
 use policy::{
     budget_exhausted, looks_rate_limited, transition_for, JobOutcome, QuotaWall, Transition,
@@ -35,7 +36,6 @@ pub(crate) async fn campaign_command(
 ) -> Result<()> {
     let CampaignCommand::Run {
         campaign_id,
-        target,
         workers,
         max_attempts,
         job_timeout_secs,
@@ -48,7 +48,7 @@ pub(crate) async fn campaign_command(
         jobs,
         dry_run,
     } = command;
-    let target = crate::support::require_cli_target("campaign run", target, default_target)?;
+    let target = crate::support::require_cli_target("campaign run", None, default_target)?;
     let settings = DispatchSettings {
         workers: clamped_workers(workers)?,
         max_attempts: max_attempts.max(1),
@@ -185,6 +185,7 @@ struct Dispatcher {
     settings: DispatchSettings,
     wall: QuotaWall,
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    _lease: CampaignDispatcherLease,
 }
 
 impl Dispatcher {
@@ -194,31 +195,12 @@ impl Dispatcher {
         plan_jobs: Vec<PlanJob>,
         settings: DispatchSettings,
     ) -> Result<Self> {
+        let lease = acquire_dispatcher_lease(&target, &campaign_id)?;
         let dir = campaign_dir(&target, &campaign_id);
         let logs_dir = dir.join("logs");
         std::fs::create_dir_all(&logs_dir)
             .with_context(|| format!("Could not create {}", logs_dir.display()))?;
-        let job_ids = plan_jobs
-            .iter()
-            .map(|job| job.job_id.clone())
-            .collect::<Vec<_>>();
-        let mut store = QueueStore::open(
-            &dir,
-            &campaign_id,
-            &job_ids,
-            settings.budget_usd,
-            settings.job_budget_usd,
-        )?;
-        if settings.resume {
-            let resumed = store.resume_resumable()?;
-            if !resumed.is_empty() {
-                eprintln!(
-                    "campaign: resumed {} job(s) to planned: {}",
-                    resumed.len(),
-                    resumed.join(", ")
-                );
-            }
-        }
+        let store = open_dispatch_queue(&target, &dir, &campaign_id, &plan_jobs, &settings)?;
         let binary = std::env::current_exe().context("Could not resolve the kuzushi binary")?;
         let wall = QuotaWall::new(settings.quota_wall_threshold);
         Ok(Self {
@@ -231,6 +213,7 @@ impl Dispatcher {
             settings,
             wall,
             shutdown_rx: spawn_ctrl_c_watch(),
+            _lease: lease,
         })
     }
 
@@ -269,6 +252,10 @@ impl Dispatcher {
         running: &mut JoinSet<(String, String, Result<ChildReport>)>,
     ) -> Result<()> {
         while running.len() < self.settings.workers {
+            if self.store.provider_spend_unresolved() {
+                self.park_pending("provider-spend-unresolved")?;
+                return Ok(());
+            }
             if budget_exhausted(self.store.total_cost_usd(), self.settings.budget_usd) {
                 self.park_pending("budget-exhausted")?;
                 return Ok(());
@@ -327,19 +314,15 @@ impl Dispatcher {
             .cloned()
     }
 
-    fn settle_job(&mut self, job_id: &str, run_id: &str, report: ChildReport) -> Result<()> {
-        let summary = load_run_summary(&self.target, run_id).ok();
+    fn settle_job(&mut self, job_id: &str, run_id: &str, mut report: ChildReport) -> Result<()> {
+        let summary = load_child_summary(&self.target, run_id, &report)?;
+        report.outcome = reconciled_child_outcome(&report, summary.as_ref())?;
         let summary_error = summary.as_ref().and_then(|summary| summary.error.clone());
         // A killed child (over-budget/timeout/shutdown) never finalized its
         // summary, but its money is already spent: fall back to the live
         // trace sum so the campaign-level budget still sees that spend.
-        let cost = summary
-            .as_ref()
-            .and_then(|summary| summary.cost_usd)
-            .or_else(|| {
-                let live = live_run_spend_usd(&self.target, run_id);
-                (live > 0.0).then_some(live)
-            });
+        let (cost, provider_spend_unresolved) =
+            campaign_attempt_cost(summary.as_ref(), &self.target, run_id, report.outcome);
         let failure_text = format!(
             "{} {}",
             summary_error.unwrap_or_default(),
@@ -359,7 +342,7 @@ impl Dispatcher {
             self.settings.max_attempts,
             self.settings.retry_backoff_secs,
         );
-        self.apply_transition(job_id, &report, cost, transition)?;
+        self.apply_transition(job_id, &report, cost, provider_spend_unresolved, transition)?;
         if self.wall.observe(rate_limited) {
             self.pause_for_quota_wall()?;
         }
@@ -371,6 +354,7 @@ impl Dispatcher {
         job_id: &str,
         report: &ChildReport,
         cost: Option<f64>,
+        provider_spend_unresolved: bool,
         transition: Transition,
     ) -> Result<()> {
         let outcome = report.outcome.label();
@@ -378,6 +362,7 @@ impl Dispatcher {
         self.store.update_job(job_id, outcome, |entry| {
             entry.exit_code = exit_code;
             entry.cost_usd = accumulated_job_cost(entry.cost_usd, cost);
+            entry.provider_spend_unresolved |= provider_spend_unresolved;
             match transition {
                 Transition::Complete => entry.state = "completed".to_string(),
                 Transition::Fail => entry.state = "failed".to_string(),
@@ -483,6 +468,7 @@ impl Dispatcher {
         }
         let counts = self.store.state_counts();
         let cost = self.store.total_cost_usd();
+        let provider_spend_unresolved = self.store.provider_spend_unresolved();
         let summary = counts
             .iter()
             .map(|(state, count)| format!("{count} {state}"))
@@ -491,11 +477,16 @@ impl Dispatcher {
         self.store.append_event(
             "dispatch-end",
             None,
-            serde_json::json!({ "states": counts, "totalCostUsd": cost }),
+            serde_json::json!({
+                "states": counts,
+                "totalCostUsd": cost,
+                "providerSpendUnresolved": provider_spend_unresolved,
+            }),
         )?;
         println!(
-            "campaign {} finished: {summary}; total cost ${cost:.2}",
-            self.campaign_id
+            "campaign {} finished: {summary}; {}",
+            self.campaign_id,
+            campaign_cost_label(cost, provider_spend_unresolved)
         );
         let completed = counts.get("completed").copied().unwrap_or(0);
         let total: usize = counts.values().sum();
@@ -504,6 +495,120 @@ impl Dispatcher {
         }
         Err(RunCommandExit::new(3, format!("campaign {}: {summary}", self.campaign_id)).into())
     }
+}
+
+fn campaign_cost_label(observed_usd: f64, provider_spend_unresolved: bool) -> String {
+    if provider_spend_unresolved {
+        return format!("total cost >=${observed_usd:.2} (provider spend incomplete)");
+    }
+    format!("total cost ${observed_usd:.2}")
+}
+
+fn open_dispatch_queue(
+    target: &Path,
+    campaign_dir: &Path,
+    campaign_id: &str,
+    plan_jobs: &[PlanJob],
+    settings: &DispatchSettings,
+) -> Result<QueueStore> {
+    let job_ids = plan_jobs
+        .iter()
+        .map(|job| job.job_id.clone())
+        .collect::<Vec<_>>();
+    let mut store = QueueStore::open(
+        target,
+        campaign_dir,
+        campaign_id,
+        &job_ids,
+        settings.budget_usd,
+        settings.job_budget_usd,
+    )?;
+    if settings.resume {
+        report_resumed_jobs(&mut store)?;
+    }
+    Ok(store)
+}
+
+fn report_resumed_jobs(store: &mut QueueStore) -> Result<()> {
+    let resumed = store.resume_resumable()?;
+    if !resumed.is_empty() {
+        eprintln!(
+            "campaign: resumed {} job(s) to planned: {}",
+            resumed.len(),
+            resumed.join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn campaign_attempt_cost(
+    summary: Option<&kuzushi_core::RunSummary>,
+    target: &Path,
+    run_id: &str,
+    outcome: JobOutcome,
+) -> (Option<f64>, bool) {
+    if let Some(summary) = summary {
+        let observed = summary.cost_usd.or(summary.observed_cost_usd);
+        return (observed, summary.provider_spend_unresolved);
+    }
+    let live = live_run_spend_usd(target, run_id);
+    let observed = (live > 0.0).then_some(live);
+    let unresolved = observed.is_some()
+        || matches!(
+            outcome,
+            JobOutcome::TimedOut | JobOutcome::Interrupted | JobOutcome::OverBudget
+        );
+    (observed, unresolved)
+}
+
+fn load_child_summary(
+    target: &Path,
+    run_id: &str,
+    report: &ChildReport,
+) -> Result<Option<kuzushi_core::RunSummary>> {
+    match load_run_summary(target, run_id) {
+        Ok(summary) => Ok(Some(summary)),
+        Err(_) if report.exit_code.is_none() || report.outcome == JobOutcome::OperationalError => {
+            Ok(None)
+        }
+        Err(error) => Err(error).with_context(|| {
+            format!("campaign child {run_id} exited without readable terminal metadata")
+        }),
+    }
+}
+
+fn reconciled_child_outcome(
+    report: &ChildReport,
+    summary: Option<&kuzushi_core::RunSummary>,
+) -> Result<JobOutcome> {
+    let Some(exit_code) = report.exit_code else {
+        return Ok(report.outcome);
+    };
+    let Some(summary) = summary else {
+        return Ok(report.outcome);
+    };
+    anyhow::ensure!(
+        exit_agrees_with_persisted_status(exit_code, &summary.status),
+        "campaign child exit {exit_code} disagrees with persisted status {:?}",
+        summary.status
+    );
+    JobOutcome::from_persisted_status(&summary.status).with_context(|| {
+        format!(
+            "campaign child has unknown persisted status {:?}",
+            summary.status
+        )
+    })
+}
+
+fn exit_agrees_with_persisted_status(exit_code: i32, status: &str) -> bool {
+    matches!(
+        (exit_code, status),
+        (0, "completed" | "skipped")
+            | (2, "blocked")
+            | (3, "failed" | "interrupted")
+            | (4, "partial")
+            | (130, "canceled")
+    )
 }
 
 /// A job's `costUsd` is the sum of every attempt's spend — each settle adds
@@ -554,6 +659,42 @@ mod cost_accounting_tests {
     use super::*;
 
     #[test]
+    fn child_exit_contract_accepts_only_its_persisted_terminal_statuses() {
+        assert!(exit_agrees_with_persisted_status(130, "canceled"));
+        assert!(exit_agrees_with_persisted_status(3, "interrupted"));
+        assert!(exit_agrees_with_persisted_status(2, "blocked"));
+        assert!(!exit_agrees_with_persisted_status(0, "failed"));
+        assert!(!exit_agrees_with_persisted_status(130, "completed"));
+    }
+
+    #[test]
+    fn campaign_attempt_cost_preserves_incomplete_provider_spend() {
+        let target = tempfile::tempdir().unwrap();
+        let mut summary = kuzushi_core::RunSummary::running("run-cost", "run", None, "target");
+        summary.observed_cost_usd = Some(0.75);
+        summary.provider_spend_unresolved = true;
+
+        assert_eq!(
+            campaign_attempt_cost(
+                Some(&summary),
+                target.path(),
+                "run-cost",
+                JobOutcome::ToolFailed
+            ),
+            (Some(0.75), true)
+        );
+    }
+
+    #[test]
+    fn campaign_cost_label_marks_observed_spend_as_a_lower_bound() {
+        assert_eq!(campaign_cost_label(0.75, false), "total cost $0.75");
+        assert_eq!(
+            campaign_cost_label(0.75, true),
+            "total cost >=$0.75 (provider spend incomplete)"
+        );
+    }
+
+    #[test]
     fn accumulated_cost_adds_each_attempt_once_and_skips_costless_attempts() {
         assert_eq!(accumulated_job_cost(None, None), None);
         assert_eq!(accumulated_job_cost(None, Some(1.5)), Some(1.5));
@@ -573,7 +714,8 @@ mod cost_accounting_tests {
     fn queue_total_equals_the_sum_of_all_attempt_costs_exactly_once() {
         let tmp = tempfile::tempdir().unwrap();
         let job_ids: Vec<String> = (0..5).map(|n| format!("job-{n}")).collect();
-        let mut store = queue::QueueStore::open(tmp.path(), "camp", &job_ids, None, None).unwrap();
+        let mut store =
+            queue::QueueStore::open(tmp.path(), tmp.path(), "camp", &job_ids, None, None).unwrap();
 
         // Deterministic pseudo-random attempt schedule: job n gets n+1
         // attempts; some attempts observe no cost at all.

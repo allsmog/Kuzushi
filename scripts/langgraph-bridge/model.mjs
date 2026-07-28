@@ -251,7 +251,7 @@ function temperatureLockedModel(request) {
 // up long before a per-minute window resets and fail the whole run.
 const MODEL_MAX_RETRIES = 8;
 
-function modelOptions(request) {
+export function modelOptions(request) {
   const options = { maxRetries: MODEL_MAX_RETRIES };
   const temperature = numericTemperature(request);
   const maxTokens = request.maxOutputTokens ?? request.max_output_tokens ?? request.maxTokens;
@@ -387,6 +387,31 @@ export function bridgeUsageFields(usage) {
     model_calls: usage.modelCalls,
     cost_usd_exact: usage.modelCalls > 0 && usage.costReportedCalls === usage.modelCalls,
   };
+}
+
+export function bridgeQueryResult(messages, stopReason) {
+  const text = messageText(messages.at(-1));
+  return {
+    ok: true,
+    text,
+    structured: maybeParseJson(text),
+    ...bridgeUsageFields(usageFromMessages(messages)),
+    truncated: isTruncatedStopReason(stopReason),
+    stopReason,
+  };
+}
+
+export function isTruncatedStopReason(reason) {
+  return [
+    "length",
+    "max_tokens",
+    "max_tokens_reached",
+    "model_turn_limit",
+    "mcp_tool_timeout",
+    "observed_spend_incomplete",
+    "observed_spend_exhausted",
+    "forced_conclusion",
+  ].includes(String(reason ?? ""));
 }
 
 export function interruptedQueryResult(messages, stopReason) {

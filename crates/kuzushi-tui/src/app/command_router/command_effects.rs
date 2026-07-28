@@ -713,7 +713,14 @@ impl ShellApp {
             "phase",
             "fresh pass — Map planner reopened; prior attempts stay recorded and new Map runs re-derive the journey",
         );
-        self.open_requested_phase_picker(crate::app::WorkflowPhase::Map);
+        if self.target().is_none() {
+            self.open_target_picker();
+            return;
+        }
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_map_artifacts();
+        self.open_fresh_map_picker();
     }
 
     fn open_project_model_view(&mut self) {
@@ -1256,5 +1263,27 @@ mod run_focus_steer_tests {
                 .run_focus_origin
                 .is_some_and(|origin| !origin.auto_return)
         }));
+    }
+
+    #[test]
+    fn next_fresh_reopens_map_and_marks_cached_defaults_for_one_rebuild() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        std::fs::write(target.path().join(".kuzushi/context-snapshot.json"), "{}").unwrap();
+        std::fs::write(target.path().join(".kuzushi/entry-points.json"), "{}").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.reduce_next_command(true);
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        let picker = app.engagement.planning_picker();
+        for task in [
+            PlanningTaskId::GatherRepoContext,
+            PlanningTaskId::MapEntryPoints,
+        ] {
+            assert!(picker.selected().contains(&task), "{task:?} selected");
+            assert!(picker.rebuild().contains(&task), "{task:?} rebuild");
+        }
     }
 }

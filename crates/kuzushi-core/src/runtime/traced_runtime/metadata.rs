@@ -75,9 +75,7 @@ pub fn safe_model_failure_message(message: &str) -> String {
         "model request failed ({})",
         model_error_class_from_message(message)
     );
-    let persistence_failure = format!(
-        "{safe}; additionally, terminal run persistence failed"
-    );
+    let persistence_failure = format!("{safe}; additionally, terminal run persistence failed");
     if message == safe || message == persistence_failure {
         return message.to_string();
     }
@@ -180,8 +178,7 @@ mod error_label_tests {
 
         assert_eq!(message, "model request failed (invalid_response)");
         assert_eq!(safe_model_failure_message(&message), message);
-        let persistence =
-            format!("{message}; additionally, terminal run persistence failed");
+        let persistence = format!("{message}; additionally, terminal run persistence failed");
         assert_eq!(safe_model_failure_message(&persistence), persistence);
         assert!(!message.contains(sentinel));
     }

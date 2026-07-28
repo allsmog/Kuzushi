@@ -1,4 +1,6 @@
-use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
+use super::activity_dag_rows::{
+    activity_dag_pane_rows, activity_dag_preferred_width, ActivityDagPaneRow,
+};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
 use super::activity_feed_rows::{
     activity_feed_pane_rows, activity_feed_viewport_rows, ActivityFeedPaneRow,
@@ -9,11 +11,15 @@ use super::activity_footer::{
 use super::activity_header::{
     activity_header_model_with_queue, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
 };
-use super::activity_layout::{activity_frame_layout, ActivityFrameLayout};
+use super::activity_layout::{
+    activity_frame_layout, activity_pane_layout, ActivityFrameLayout, ActivityPaneLayout,
+    ActivityPaneMetrics, ACTIVITY_WIDE_MIN_WIDTH,
+};
 use super::activity_observability::{activity_heartbeat_model, ActivityHeartbeatModel};
 use super::activity_pane_chrome::{activity_pane_chrome_model, ActivityPaneChromeModel};
 use super::activity_scroll::activity_task_scroll_offset;
 use crate::app::PendingOperatorQuestion;
+use crate::renderer::shared::text::{display_width, fit, wrap_text};
 use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp, ViewDataState};
 use kuzushi_core::RunSummary;
 use std::time::Instant;
@@ -84,18 +90,26 @@ fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<Act
     if session.operator_question.is_some() {
         return Some(ActivityRunOutcome::WaitingForOperator);
     }
-    if let Some(outcome) = typed_activity_run_outcome(session) {
+    let summary = activity_run_summary(app, session);
+    let findings = summary
+        .as_ref()
+        .and_then(|summary| summary.findings)
+        .or_else(|| active_scan_findings(app, session));
+    if let Some(outcome) = typed_activity_run_outcome(session, findings) {
         return Some(outcome);
     }
     if activity_session_still_running(app, session) {
         return None;
     }
-    activity_run_summary(app, session)
+    summary
         .and_then(activity_run_summary_outcome)
         .or_else(|| live_activity_run_outcome(app))
 }
 
-fn typed_activity_run_outcome(session: &ActivitySession) -> Option<ActivityRunOutcome> {
+fn typed_activity_run_outcome(
+    session: &ActivitySession,
+    findings: Option<u64>,
+) -> Option<ActivityRunOutcome> {
     let presentation = kuzushi_core::run_lifecycle::present_projection_with_hydration_and_health(
         &session.run_projection,
         kuzushi_core::run_lifecycle::RunProjectionSource::TypedV1,
@@ -103,16 +117,22 @@ fn typed_activity_run_outcome(session: &ActivitySession) -> Option<ActivityRunOu
         session.effective_run_lifecycle_health(),
     );
     let status = presentation.terminal_status?;
-    let reason = session
-        .run_projection
-        .terminal
-        .as_ref()
+    let reason = (status != kuzushi_core::run_lifecycle::RunItemStatus::Completed)
+        .then_some(session.run_projection.terminal.as_ref())
+        .flatten()
         .map(|terminal| terminal.summary.as_str().to_string());
     Some(ActivityRunOutcome::Terminal {
         status: status.label().to_string(),
-        findings: None,
+        findings,
         reason,
     })
+}
+
+fn active_scan_findings(app: &ShellApp, session: &ActivitySession) -> Option<u64> {
+    let scan = app.scan()?;
+    (scan.run_id.as_deref() == Some(session.run_id.as_str()))
+        .then(|| u64::try_from(scan.findings_count).ok())
+        .flatten()
 }
 
 fn live_activity_run_outcome(app: &ShellApp) -> Option<ActivityRunOutcome> {
@@ -317,6 +337,19 @@ impl<'a> RunFocusModel<'a> {
         activity_task_scroll_offset(self.route, rows, viewport_rows)
     }
 
+    pub(crate) fn pane_layout(&self, width: u16, height: u16, now: Instant) -> ActivityPaneLayout {
+        activity_pane_layout(width, height, self.pane_metrics(width, now))
+    }
+
+    fn pane_metrics(&self, width: u16, now: Instant) -> ActivityPaneMetrics {
+        let inner_width = width.saturating_sub(2) as usize;
+        ActivityPaneMetrics {
+            task_content_rows: self.dag_pane_rows(inner_width, now).len(),
+            task_content_width: activity_dag_preferred_width(self.session, self.route),
+            output_event_rows: self.session.event_count(),
+        }
+    }
+
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
         let footer = activity_footer_model(
             self.session,
@@ -333,15 +366,46 @@ impl<'a> RunFocusModel<'a> {
         footer
     }
 
-    pub(crate) fn frame_layout(&self, width: u16) -> ActivityFrameLayout {
+    pub(crate) fn heartbeat_rows(
+        &self,
+        width: u16,
+        now: Instant,
+    ) -> (ActivityHeartbeatModel, Vec<String>) {
+        let heartbeat = self.heartbeat(now);
+        let rows = activity_health_rows(&heartbeat.text, width);
+        (heartbeat, rows)
+    }
+
+    pub(crate) fn frame_layout(&self, width: u16, heartbeat_rows: usize) -> ActivityFrameLayout {
         let footer = self.footer(width);
-        let header_rows = 3 + u16::from(self.abort_banner().is_some());
+        let header_rows = 2
+            + u16::try_from(heartbeat_rows).unwrap_or(u16::MAX)
+            + u16::from(self.abort_banner().is_some());
         let footer_rows = 1
             + u16::try_from(footer.hint_rows.len().max(1)).unwrap_or(u16::MAX)
             + u16::from(footer.steer_line.is_some())
             + u16::from(footer.steer_error.is_some());
         activity_frame_layout(header_rows, footer_rows)
     }
+}
+
+fn activity_health_rows(text: &str, width: u16) -> Vec<String> {
+    let width = width as usize;
+    if width < usize::from(ACTIVITY_WIDE_MIN_WIDTH) || display_width(text) <= width {
+        return vec![fit(text, width)];
+    }
+    let indent = text.strip_prefix(' ').map_or("", |_| " ");
+    let body_width = width.saturating_sub(indent.len());
+    let mut rows = wrap_text(text.trim_start(), body_width);
+    if rows.len() > 2 {
+        let overflow = rows[1..].join(" ");
+        rows[1] = fit(&overflow, body_width);
+        rows.truncate(2);
+    }
+    for row in &mut rows {
+        row.insert_str(0, indent);
+    }
+    rows
 }
 
 fn operator_question_owned_footer(
@@ -499,6 +563,15 @@ mod tests {
     }
 
     #[test]
+    fn heartbeat_wraps_at_the_wide_layout_threshold() {
+        let text = "status ".repeat(20);
+
+        let rows = activity_health_rows(&text, ACTIVITY_WIDE_MIN_WIDTH);
+
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
     fn question_hints_use_the_runtime_keymap_contract() {
         let mut config = V2Config::default();
         config.operator.keybindings = vec![kuzushi_core::config::KeybindingOverrideConfig {
@@ -612,7 +685,7 @@ mod tests {
         .unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.hydrate_all_view_data_for_test();
-        app.set_activity(Some(ActivitySession::new("run-finished")));
+        app.set_activity(Some(completed_terminal_session("run-finished")));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
@@ -626,6 +699,34 @@ mod tests {
             "{}",
             model.header().summary_title
         );
+        assert!(!model.header().summary_title.contains("reason:"));
+    }
+
+    fn completed_terminal_session(run_id: &str) -> ActivitySession {
+        use kuzushi_core::run_lifecycle::{
+            RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemStatus, RunItemV1, SafeText,
+            WorkflowContinuation,
+        };
+
+        let mut session = ActivitySession::new(run_id);
+        let item = RunItemEnvelopeV1::new(
+            1,
+            RunId::parse(run_id).unwrap(),
+            RunItemId::new(),
+            RunItemSource::Workflow,
+            RunItemV1::TerminalOutcome {
+                status: RunItemStatus::Completed,
+                summary: SafeText::operator_visible("run completed"),
+                cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+                continuation: WorkflowContinuation::NoFurtherAction {
+                    reason: SafeText::operator_visible("complete"),
+                },
+            },
+            None,
+        )
+        .unwrap();
+        session.apply_run_item(item).unwrap();
+        session
     }
 
     #[test]

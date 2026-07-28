@@ -385,7 +385,7 @@ call sites :263/:265/:271/:274/:278) and `:291,:294` (E0599), inside
 `#[cfg(target_os = "linux")]`, introduced by the CodeQL/MCP hardening commit
 2afc6624. `kuzushi-cli` depends transitively. Consequence: no HEAD binary, no
 `cargo test` truth, merge train demonstrably not gated on a Linux build.
-Remediation: the 3-line fix (validated in the audit copy: full workspace
+Remediation: the 3-line fix (confirmed in the audit copy: full workspace
 `cargo check --all-targets` passes in 119 s afterward) plus a required Linux
 `cargo check --workspace` merge gate. Regression: CI job on ubuntu.
 
@@ -631,7 +631,7 @@ released. "Live" column = live verification required before closure.
 | ID | Repro evidence | Subsystem | Fix boundary | Regression test | Live check | Release-blocking |
 |---|---|---|---|---|---|---|
 | ETR-001 | static x2 + prior TUI pipeline | findings presentation + verification application | proof_ladder / proof_state_label / model_candidate | model-backend never renders runtime-verified/Confirmed | export SARIF after model verify | **Yes** |
-| ETR-002 | live compile fail; fix validated in copy | kuzushi-mcp-common sandbox | backend.rs 3 lines + Linux CI gate | ubuntu cargo check job | CI green | **Yes** |
+| ETR-002 | live compile fail; fix confirmed in copy | kuzushi-mcp-common sandbox | backend.rs 3 lines + Linux CI gate | ubuntu cargo check job | CI green | **Yes** |
 | ETR-003 | live ×3, artifacts on disk | triage batch loop | per-finding error propagation → partial/failed + failures.json | stub runtime error → non-success | rerun with bad creds | **Yes** |
 | ETR-004 | live panic (2 binaries) | kuzushi-cli clap defs | subcommands.rs target args | `Cli::command().debug_assert()` | debug `runs list` | **Yes** |
 | ETR-005 | live deletion + skeleton dir | runs retention | liveness/lock in runs_prune | prune skips live run | repeat experiment | **Yes** |

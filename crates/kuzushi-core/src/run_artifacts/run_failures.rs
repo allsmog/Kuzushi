@@ -18,10 +18,16 @@ pub struct RunFailure {
     pub tool: String,
     pub status: String,
     pub error: String,
-    /// Coarse failure classification (rate-limit, timeout, transport, …)
-    /// derived from the error text; None when unclassifiable.
+    /// Coarse failure classification from typed metadata when available, or
+    /// from legacy error text when the runtime supplied no metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_class: Option<String>,
+    /// Exact bounded runtime failure associated with the failed model call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_failure: Option<crate::runtime::RuntimeFailureMetadata>,
+    /// Model identity recorded by the failed lifecycle item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub agent_thread_context: FailureToLlmContext,
 }
 
@@ -48,6 +54,18 @@ pub struct FailureToLlmContext {
     pub checkpoint_artifacts: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub checkpoint_fingerprint: Option<String>,
+    /// Exact bounded runtime failure for agent recovery context.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_failure: Option<crate::runtime::RuntimeFailureMetadata>,
+    /// Model identity recorded by the failed lifecycle item.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+#[derive(Clone)]
+struct FailedModelCall {
+    metadata: crate::runtime::RuntimeFailureMetadata,
+    model: String,
 }
 
 const MAX_AVAILABLE_FAILURE_ARTIFACTS: usize = 12;
@@ -61,28 +79,10 @@ pub fn write_run_failures(
     error: &str,
     artifacts: &[RunArtifact],
 ) -> Result<RunArtifact> {
-    // Failure text is persisted verbatim into a durable artifact; redact
-    // credential-shaped content (Authorization headers, api keys echoed by
-    // provider or wrapper errors) before it lands on disk.
+    // Redact credential-shaped content before any derived failure artifact.
     let error = crate::session_transcript::redaction::redact_text(error);
-    let failure = RunFailure {
-        tool: tool.to_string(),
-        status: status.to_string(),
-        error: error.to_string(),
-        error_class: failure_error_class(&error),
-        agent_thread_context: failure_to_llm_context(
-            target.as_ref(),
-            run_id,
-            tool,
-            &error,
-            artifacts,
-        ),
-    };
-    let report = RunFailures {
-        run_id: run_id.to_string(),
-        status: status.to_string(),
-        failures: vec![failure],
-    };
+    let target = target.as_ref();
+    let report = build_run_failures(target, run_id, tool, status, &error, artifacts);
     let spec = failure_artifact_spec();
     write_run_artifact_json(
         target,
@@ -91,6 +91,62 @@ pub fn write_run_failures(
         spec.label,
         &serde_json::to_value(report)?,
     )
+}
+
+fn build_run_failures(
+    target: &Path,
+    run_id: &str,
+    tool: &str,
+    status: &str,
+    error: &str,
+    artifacts: &[RunArtifact],
+) -> RunFailures {
+    let model_failure = latest_failed_model_call(target, run_id);
+    let failure = RunFailure {
+        tool: tool.to_string(),
+        status: status.to_string(),
+        error: error.to_string(),
+        error_class: model_failure
+            .as_ref()
+            .map(|failure| failure.metadata.error_class.to_string())
+            .or_else(|| failure_error_class(error)),
+        runtime_failure: model_failure
+            .as_ref()
+            .map(|failure| failure.metadata.clone()),
+        model: model_failure.as_ref().map(|failure| failure.model.clone()),
+        agent_thread_context: failure_to_llm_context(
+            target,
+            run_id,
+            tool,
+            error,
+            artifacts,
+            model_failure.as_ref(),
+        ),
+    };
+    RunFailures {
+        run_id: run_id.to_string(),
+        status: status.to_string(),
+        failures: vec![failure],
+    }
+}
+
+fn latest_failed_model_call(target: &Path, run_id: &str) -> Option<FailedModelCall> {
+    let read = crate::run_lifecycle::read_run_items(target, run_id).ok()??;
+    read.items.into_iter().rev().find_map(|envelope| {
+        let crate::run_lifecycle::RunItemV1::ModelCallFinished {
+            model,
+            status,
+            failure: Some(metadata),
+            ..
+        } = envelope.item
+        else {
+            return None;
+        };
+        (status == crate::run_lifecycle::RunItemStatus::Failed).then_some(FailedModelCall {
+            metadata,
+            model: model.to_string(),
+        })
+    })
 }
 
 pub fn load_run_failures(target: impl AsRef<Path>, run_id: &str) -> Result<RunFailures> {
@@ -162,8 +218,9 @@ fn failure_to_llm_context(
     tool: &str,
     error: &str,
     artifacts: &[RunArtifact],
+    model_failure: Option<&FailedModelCall>,
 ) -> FailureToLlmContext {
-    let coordinates = super::checkpoint_coordinates_for_run(target, run_id);
+    let coordinates = super::matching_checkpoint_coordinates_for_run(target, run_id);
     let missing_artifacts = missing_failure_artifacts(target, run_id, artifacts);
     let mut context = FailureToLlmContext {
         failed_stage: tool.to_string(),
@@ -180,6 +237,8 @@ fn failure_to_llm_context(
         completed_stages: Vec::new(),
         checkpoint_artifacts: Vec::new(),
         checkpoint_fingerprint: None,
+        runtime_failure: model_failure.map(|failure| failure.metadata.clone()),
+        model: model_failure.map(|failure| failure.model.clone()),
     };
     context.fallback_prompt = failure_context_fallback_prompt(tool, error, &context);
     apply_checkpoint_coordinates(&mut context, tool, coordinates);
@@ -501,6 +560,7 @@ mod tests {
             .stage("research")
             .complete(vec!["research.json".to_string()]);
         handle.mark_current("coverage");
+        write_requested_operation(tmp.path(), "run-checkpointed", [3u8; 32]);
         write_run_failures(
             tmp.path(),
             "run-checkpointed",
@@ -511,6 +571,22 @@ mod tests {
         )
         .unwrap();
         tmp
+    }
+
+    fn write_requested_operation(target: &Path, run_id: &str, digest: [u8; 32]) {
+        use crate::run_lifecycle::*;
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        let requested = RunItemV1::ToolCallRequested {
+            tool_name: SafeText::operator_visible("threat-model:build"),
+            operation_fingerprint: OperationFingerprint::from_digest(digest),
+            safe_option_names: Vec::new(),
+        };
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(RunItemId::new(), RunItemSource::Dispatch, requested)
+                    .with_call(RunCallId::new()),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -618,5 +694,144 @@ mod tests {
         let error = &report.failures[0].error;
         assert!(!error.contains("sk-live-secret"), "{error}");
         assert!(error.contains("[REDACTED]"), "{error}");
+    }
+
+    #[test]
+    fn failed_tool_bundle_redacts_secrets_from_every_failure_surface() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-redacted-bundle";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "demo:tool");
+        record_tool_run_started(record, &serde_json::json!({}));
+        try_record_tool_run_failed(
+            record,
+            "request failed Authorization: Bearer sk-secret-value-123456",
+        )
+        .unwrap();
+
+        for leaf in ["run.json", "result.json", "failures.json", "items.jsonl"] {
+            let body = fs::read_to_string(run_artifact_path(tmp.path(), run_id, leaf)).unwrap();
+            assert!(!body.contains("sk-secret-value"), "{leaf}: {body}");
+        }
+    }
+
+    #[test]
+    fn failure_artifact_projects_the_typed_failed_model_call() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-typed-failure";
+        write_typed_failed_model_call(tmp.path(), run_id);
+        assert_typed_model_call_persisted(tmp.path(), run_id);
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "agentic-sast:scan",
+            "failed",
+            "failed",
+            &[],
+        )
+        .unwrap();
+        let report = load_run_failures(tmp.path(), run_id).unwrap();
+        let failure = &report.failures[0];
+        assert_eq!(
+            failure.error_class.as_deref(),
+            Some("sdk_client_validation")
+        );
+        assert_eq!(failure.model.as_deref(), Some("anthropic:claude-test"));
+        assert_eq!(
+            failure.runtime_failure.as_ref().unwrap().http_status,
+            Some(400)
+        );
+        assert_eq!(
+            failure
+                .agent_thread_context
+                .runtime_failure
+                .as_ref()
+                .unwrap()
+                .stage
+                .as_deref(),
+            Some("agentic-sast:review")
+        );
+    }
+
+    fn write_typed_failed_model_call(target: &Path, run_id: &str) {
+        use crate::run_lifecycle::*;
+        use crate::runtime::{RuntimeFailureClass, RuntimeFailureMetadata};
+        let call_id = RunCallId::new();
+        let metadata = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::SdkClientValidation,
+            Some(400),
+            Some("temperature incompatible with adaptive thinking; token=secret-value"),
+        )
+        .with_model_call(call_id, Some("agentic-sast:review"));
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        let item_id = RunItemId::new();
+        emit_model_item(&writer, item_id, call_id, started_model_item());
+        emit_model_item(&writer, item_id, call_id, failed_model_item(metadata));
+    }
+
+    fn emit_model_item(
+        writer: &crate::run_lifecycle::RunItemWriter,
+        item_id: crate::run_lifecycle::RunItemId,
+        call_id: crate::run_lifecycle::RunCallId,
+        item: crate::run_lifecycle::RunItemV1,
+    ) {
+        use crate::run_lifecycle::{RunItemRecord, RunItemSource};
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(item_id, RunItemSource::Runtime, item).with_call(call_id),
+            )
+            .unwrap();
+    }
+
+    fn started_model_item() -> crate::run_lifecycle::RunItemV1 {
+        use crate::run_lifecycle::*;
+        RunItemV1::ModelCallStarted {
+            provider: SafeText::operator_visible("anthropic"),
+            model: SafeText::operator_visible("anthropic:claude-test"),
+            operation_fingerprint: OperationFingerprint::from_bytes(b"request"),
+        }
+    }
+
+    fn assert_typed_model_call_persisted(target: &Path, run_id: &str) {
+        use crate::run_lifecycle::RunItemV1;
+        let read = crate::run_lifecycle::read_run_items(target, run_id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            read.items.iter().any(|item| matches!(
+                item.item,
+                RunItemV1::ModelCallFinished {
+                    failure: Some(_),
+                    ..
+                }
+            )),
+            "health={:?} raw={}",
+            read.health,
+            fs::read_to_string(crate::run_artifacts::run_artifact_path(
+                target,
+                run_id,
+                "items.jsonl"
+            ))
+            .unwrap()
+        );
+    }
+
+    fn failed_model_item(
+        metadata: crate::runtime::RuntimeFailureMetadata,
+    ) -> crate::run_lifecycle::RunItemV1 {
+        use crate::run_lifecycle::*;
+        RunItemV1::ModelCallFinished {
+            provider: SafeText::operator_visible("anthropic"),
+            model: SafeText::operator_visible("anthropic:claude-test"),
+            status: RunItemStatus::Failed,
+            latency_ms: 5,
+            usage: ModelUsage {
+                input_tokens: None,
+                output_tokens: None,
+            },
+            cost: crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            error_class: Some(SafeText::operator_visible(metadata.error_class.to_string())),
+            failure: Some(metadata),
+        }
     }
 }

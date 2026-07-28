@@ -26,7 +26,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 │                                                                                            │
 │                                                                                            │
 │                                                                                            │PROOF · REPLAY
-│                                                                                            │exploited  L4 · podman
+│                                                                                            │exploited  L4 · bwrap
 │                                                                                            │842ms · $0.0400
 │                                                                                            │▸ replay verify-phase-run  open trace
 │                                                                                            │▸ verify F-0001  recheck

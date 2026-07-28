@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(test)]
 pub(in crate::verification) const JS_HARNESS_TEMPLATE: &str = r#"// kuzushi-verify Node.js trigger harness
 pub(in crate::verification) const payload = Uint8Array.from([{payload_csv}]);
 
@@ -17,58 +18,26 @@ process.exit(0);
 "#;
 
 pub(in crate::verification) async fn verify_node(
-    finding: &Finding,
+    _finding: &Finding,
     backend: SandboxBackend,
-    opts: &VerifyOptions,
-    extension: &str,
+    _opts: &VerifyOptions,
+    _extension: &str,
 ) -> Result<VerificationOutcome> {
-    let runner = match NodeRunner::for_extension(extension) {
-        Some(runner) => runner,
-        None => return Ok(missing_node_runner(backend, extension)),
-    };
-
-    let project = match scaffold_node_project(finding, extension).await {
-        Ok(p) => p,
-        Err(err) => return Ok(scaffold_error(backend, "node scaffold", err)),
-    };
-
-    let run = match sandbox_exec(backend, node_run_command(&project, opts, runner)).await {
-        Ok(r) => r,
-        Err(err) => return Ok(project_error(backend, &project, "node run spawn", err)),
-    };
-
-    Ok(classify_run_result(&run, backend, &project.path, opts))
+    Ok(VerificationOutcome::not_attempted(
+        backend,
+        "Node.js harness is a placeholder and does not invoke the finding sink",
+    ))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg(test)]
 pub(in crate::verification) struct NodeRunner {
     pub(in crate::verification) argv: Vec<String>,
     pub(in crate::verification) typescript: bool,
 }
 
+#[cfg(test)]
 impl NodeRunner {
-    fn for_extension(extension: &str) -> Option<Self> {
-        if is_typescript_extension(extension) {
-            Self::typescript()
-        } else {
-            Self::javascript()
-        }
-    }
-
-    fn typescript() -> Option<Self> {
-        first_present_binary(["tsx", "ts-node", "node"]).map(|binary| Self {
-            argv: vec![binary.to_string()],
-            typescript: true,
-        })
-    }
-
-    fn javascript() -> Option<Self> {
-        first_present_binary(["node"]).map(|binary| Self {
-            argv: vec![binary.to_string()],
-            typescript: false,
-        })
-    }
-
     pub(in crate::verification) fn trigger_name(&self) -> &'static str {
         if self.typescript {
             "trigger.ts"
@@ -78,18 +47,12 @@ impl NodeRunner {
     }
 }
 
-pub(in crate::verification) fn first_present_binary<const N: usize>(
-    candidates: [&'static str; N],
-) -> Option<&'static str> {
-    candidates
-        .into_iter()
-        .find(|binary| kuzushi_sandbox::which(binary).is_some())
-}
-
+#[cfg(test)]
 pub(in crate::verification) fn is_typescript_extension(extension: &str) -> bool {
     matches!(extension, "ts" | "tsx" | "mts" | "cts")
 }
 
+#[cfg(test)]
 pub(in crate::verification) fn missing_node_runner(
     backend: SandboxBackend,
     extension: &str,
@@ -109,6 +72,7 @@ pub(in crate::verification) fn missing_node_runner(
     }
 }
 
+#[cfg(test)]
 pub(in crate::verification) async fn scaffold_node_project(
     finding: &Finding,
     extension: &str,
@@ -135,6 +99,9 @@ pub(in crate::verification) async fn scaffold_node_project(
     }
     Ok(ScaffoldedProject {
         path: root,
+        fidelity: HarnessFidelity::Placeholder,
+        payload,
+        provenance: None,
         _tempdir: tempdir,
     })
 }

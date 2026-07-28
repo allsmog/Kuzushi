@@ -513,9 +513,9 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
 | `.kuzushi/v3/latest` | latest run id, including blocked, canceled, or interrupted terminal runs |
 | `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
-| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked plan, task, call, interaction, diagnostic, and terminal lifecycle; live Run Focus, replay, plain output, and APIs reduce this stream |
+| `.kuzushi/v3/runs/<runId>/items.jsonl` | authoritative typed, hash-linked plan, task, call, interaction, diagnostic, and terminal lifecycle; failed model calls include safe typed class/status/detail/call/stage metadata |
 | `.kuzushi/v3/runs/<runId>/events.jsonl` | non-authoritative compatibility diagnostics such as run-start and recovered-interruption summaries; replay never reduces this stream |
-| `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
+| `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context with typed model failure metadata when available, empty when no failure is recorded |
 | `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown` and `data.reportMarkdown` output fields |
 | `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
 | `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |

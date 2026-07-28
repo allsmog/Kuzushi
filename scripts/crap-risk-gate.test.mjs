@@ -75,6 +75,71 @@ test("non-commit diff bases fail closed", () => {
   }
 });
 
+test("inline Rust tests do not consume production complexity budgets", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-inline-tests-"));
+  try {
+    initializeRepository(repository);
+    const src = path.join(repository, "src");
+    mkdirSync(src);
+    const testLines = Array.from(
+      { length: 45 },
+      (_, index) => `        if value == ${index} { return; }`,
+    ).join("\n");
+    writeFileSync(
+      path.join(src, "small.rs"),
+      `fn small() -> bool { true }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn exhaustive_fixture() {
+        let value = 99;
+${testLines}
+    }
+}
+`,
+    );
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: "HEAD" },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /passed for 1 changed code file/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
+test("Rust test-support modules are excluded from production scoring", () => {
+  const repository = mkdtempSync(path.join(os.tmpdir(), "kuzushi-crap-test-support-"));
+  try {
+    initializeRepository(repository);
+    const src = path.join(repository, "src");
+    mkdirSync(src);
+    writeFileSync(
+      path.join(src, "test_support.rs"),
+      `fn branchy_fixture(value: usize) {
+${Array.from({ length: 45 }, (_, index) => `    if value == ${index} { return; }`).join("\n")}
+}
+`,
+    );
+
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repository,
+      encoding: "utf8",
+      env: { ...process.env, KUZUSHI_CRAP_RISK_BASE_REF: "HEAD" },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /passed for 0 changed code file/);
+  } finally {
+    rmSync(repository, { recursive: true, force: true });
+  }
+});
+
 function initializeRepository(repository) {
   git(repository, ["init", "-q"]);
   git(repository, ["config", "user.name", "Kuzushi Test"]);

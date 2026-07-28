@@ -368,18 +368,6 @@ impl WorkbenchCache {
         summaries
     }
 
-    pub(crate) fn read_source_file(&mut self, path: &Path) -> Result<String, String> {
-        if let Some(cache) = self.source_file.as_ref().filter(|cache| cache.path == path) {
-            return cache.state.clone();
-        }
-        let state = std::fs::read_to_string(path).map_err(|error| error.to_string());
-        self.source_file = Some(SourceFileCache {
-            path: path.to_path_buf(),
-            state: state.clone(),
-        });
-        state
-    }
-
     pub(crate) fn invalidate_workspace_files(&mut self) {
         self.source_file = None;
         self.mark_git_metadata_stale();
@@ -724,14 +712,28 @@ impl WorkbenchCache {
         &mut self,
         key: VisibleFindingsCacheKey,
         projected: Arc<[VisibleFindingProjection]>,
+        before_search: Arc<[VisibleFindingProjection]>,
     ) {
-        self.view_models.cache_visible_findings(key, projected);
+        self.view_models
+            .cache_visible_findings(key, projected, before_search);
+    }
+
+    pub(crate) fn visible_findings_before_search(
+        &self,
+        key: &VisibleFindingsCacheKey,
+    ) -> Option<Arc<[VisibleFindingProjection]>> {
+        self.view_models.visible_findings_before_search(key)
     }
 
     pub(crate) fn review_queue(
         &self,
         key: &ReviewQueueCacheKey,
-    ) -> Option<(Arc<[crate::ui_view_models::ReviewQueueRow]>, usize, usize)> {
+    ) -> Option<(
+        Arc<[crate::ui_view_models::ReviewQueueRow]>,
+        usize,
+        usize,
+        Arc<[crate::ui_view_models::ReviewFacetGroup]>,
+    )> {
         self.view_models.review_queue(key)
     }
 
@@ -741,9 +743,10 @@ impl WorkbenchCache {
         rows: Arc<[crate::ui_view_models::ReviewQueueRow]>,
         open_count: usize,
         complete_count: usize,
+        facet_groups: Arc<[crate::ui_view_models::ReviewFacetGroup]>,
     ) {
         self.view_models
-            .cache_review_queue(key, rows, open_count, complete_count);
+            .cache_review_queue(key, rows, open_count, complete_count, facet_groups);
     }
 
     pub(crate) fn risk_by_module(&self, key: &RiskByModuleCacheKey) -> Option<RiskByModule> {

@@ -13,7 +13,7 @@ fn config_model_summarizes_default_runtime_state() {
         cells: ["model".to_string(), "unconfigured".to_string()],
     }));
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        cells: ["reasoning".to_string(), "xhigh".to_string()],
+        cells: ["reasoning".to_string(), "default".to_string()],
     }));
     assert!(model
         .summary_rows
@@ -38,7 +38,7 @@ fn config_model_summarizes_default_runtime_state() {
         .iter()
         .flat_map(|row| row.cells.iter())
         .any(|cell| cell.contains("openai-codex") || cell.contains("codex")));
-    assert!(model.model_table.rows.iter().any(|row| row.cells[0] == ">"));
+    assert!(model.model_table.rows.iter().all(|row| row.cells[0] != ">"));
     assert_eq!(
         model.commands,
         [
@@ -48,6 +48,44 @@ fn config_model_summarizes_default_runtime_state() {
             "auth login openai|anthropic",
         ]
     );
+}
+
+#[test]
+fn config_marks_only_the_exact_canonical_catalog_model() {
+    let mut config = V2Config::default();
+    config.model = Some(" openai:gpt-5.5 ".to_string());
+    let app = ShellApp::new(config, None);
+
+    let model = config_model(&app);
+    let selected = model
+        .model_table
+        .rows
+        .iter()
+        .filter(|row| row.cells[0] == ">")
+        .collect::<Vec<_>>();
+
+    assert_eq!(selected.len(), 1);
+    assert_eq!(selected[0].cells[2], "openai:gpt-5.5");
+}
+
+#[test]
+fn config_prepends_truthful_explicit_row_for_model_outside_catalog() {
+    let mut config = V2Config::default();
+    config.model = Some("openai-codex:gpt-5.5".to_string());
+    let app = ShellApp::new(config, None);
+
+    let model = config_model(&app);
+    let explicit = &model.model_table.rows[0];
+
+    assert_eq!(explicit.cells[0], ">");
+    assert_eq!(explicit.cells[1], "explicit");
+    assert_eq!(explicit.cells[2], "openai-oauth:gpt-5.5");
+    assert!(model
+        .model_table
+        .rows
+        .iter()
+        .skip(1)
+        .all(|row| row.cells[0] != ">"));
 }
 
 #[test]

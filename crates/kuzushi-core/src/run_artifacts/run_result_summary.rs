@@ -1,7 +1,7 @@
 use super::{
     load_run_summary, read_run_artifact_bytes, read_run_artifact_text, RunArtifact, RunArtifactRead,
 };
-use crate::module_result::{normalize_module_result, tool_result_status, ToolResultStatus};
+use crate::module_result::{tool_result_status, ToolResultStatus};
 use crate::run_lifecycle::{ArtifactReference, RunItemId};
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -89,8 +89,7 @@ pub fn load_run_result_summary(
     };
     let raw = serde_json::from_str::<Value>(&body)
         .with_context(|| format!("Tool result for run {run_id} is malformed"))?;
-    let result = normalize_module_result(raw);
-    Ok(Some(project_run_result(target, run_id, &result)))
+    Ok(Some(project_run_result(target, run_id, &raw)))
 }
 
 /// Load a typed run result only through its exact call-correlated reference.
@@ -125,7 +124,7 @@ pub(crate) fn load_correlated_run_result_value(
     validate_reference_lines(reference, body)?;
     let raw = serde_json::from_str::<Value>(body)
         .with_context(|| format!("Correlated tool result for run {run_id} is malformed"))?;
-    Ok(normalize_module_result(raw))
+    Ok(raw)
 }
 
 fn validate_reference_bytes(reference: &ArtifactReference, bytes: &[u8]) -> Result<()> {
@@ -153,11 +152,11 @@ fn validate_reference_lines(reference: &ArtifactReference, body: &str) -> Result
 }
 
 fn project_run_result(target: &Path, run_id: &str, result: &Value) -> RunResultSummary {
-    let status = result_status_label(tool_result_status(result)).to_string();
+    let status = persisted_result_status(result).to_string();
     let output = output_lines(result);
     let warnings = message_lines(result, "warnings");
     let errors = message_lines(result, "errors");
-    let artifacts = result_artifacts(result);
+    let artifacts = result_artifacts(target, run_id, result);
     RunResultSummary {
         run_id: safe_bounded_line(run_id),
         tool: safe_bounded_line(&result_tool_name(target, run_id, result)),
@@ -226,20 +225,22 @@ fn message_lines(result: &Value, field: &str) -> BoundedValues<String> {
     bounded
 }
 
-fn result_artifacts(result: &Value) -> BoundedValues<RunArtifact> {
+fn result_artifacts(target: &Path, run_id: &str, result: &Value) -> BoundedValues<RunArtifact> {
     let declared = result
         .get("artifacts")
         .and_then(Value::as_array)
         .map_or(0, |values| values.len() as u64);
+    let artifacts = result
+        .get("artifacts")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|artifact| serde_json::from_value::<RunArtifact>(artifact.clone()).ok())
+        .collect::<Vec<_>>();
+    let artifacts =
+        super::run_artifact::normalize_run_artifact_identities(target, run_id, artifacts);
     let mut bounded = collect_bounded(
-        result
-            .get("artifacts")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(|artifact| serde_json::from_value::<RunArtifact>(artifact.clone()).ok())
-            .filter_map(|artifact| artifact.normalized())
-            .map(safe_artifact_projection),
+        artifacts.into_iter().map(safe_artifact_projection),
         MAX_ARTIFACTS,
     );
     bounded.total = declared;
@@ -319,6 +320,26 @@ fn result_status_label(status: ToolResultStatus) -> &'static str {
         ToolResultStatus::Partial => "partial",
         ToolResultStatus::Skipped => "skipped",
         ToolResultStatus::Failed => "failed",
+    }
+}
+
+fn persisted_result_status(result: &Value) -> &str {
+    match result.get("status").and_then(Value::as_str) {
+        Some(status)
+            if matches!(
+                status,
+                "completed"
+                    | "partial"
+                    | "skipped"
+                    | "blocked"
+                    | "failed"
+                    | "canceled"
+                    | "interrupted"
+            ) =>
+        {
+            status
+        }
+        _ => result_status_label(tool_result_status(result)),
     }
 }
 

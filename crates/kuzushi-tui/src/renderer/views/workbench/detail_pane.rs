@@ -254,6 +254,17 @@ fn push_decision_section(
     push_section_header(lines, "DECISION");
     push_decision_summary_lines(lines, detail, budget);
     push_triage_decision_lines(lines, detail, budget);
+    push_review_action_lines(lines, budget);
+}
+
+fn push_review_action_lines(lines: &mut Vec<Line<'static>>, budget: usize) {
+    for action in [
+        "decide: `decision <true-positive|false-positive> <reason>`",
+        "dismiss: `dismiss <reason> <note>`",
+        "suppress: `suppress <id> --reason <text> --days 90`",
+    ] {
+        push_wrapped(lines, action, budget, "  ", theme::muted());
+    }
 }
 
 fn push_decision_summary_lines(
@@ -693,6 +704,21 @@ mod tests {
         );
         assert!(text.contains("… 2 more message lines"), "{text}");
         assert!(text.contains("… 3 more evidence rows"), "{text}");
+    }
+
+    #[test]
+    fn detail_signposts_review_actions() {
+        let text = detail_text(None);
+
+        assert!(
+            text.contains("decision <true-positive|false-positive> <reason>"),
+            "{text}"
+        );
+        assert!(text.contains("dismiss <reason> <note>"), "{text}");
+        assert!(
+            text.contains("suppress <id> --reason <text> --days 90"),
+            "{text}"
+        );
     }
 
     fn assert_detail_provenance_lines(text: &str) {

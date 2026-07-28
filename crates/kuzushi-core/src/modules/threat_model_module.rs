@@ -19,27 +19,24 @@ fn threat_model_tools() -> Vec<ToolDescriptor> {
     vec![
         threat_model_build_tool(),
         tool_with_options(
-                "threat-model:read",
-                "Read the current threat model artifact.",
-                threat_model_read_options(),
-            )
-            .with_policy(tool_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Never,
-                ToolEffect::Read,
-                WorkspaceRequirement::Required,
-                FindingStoreRequirement::Optional,
-            )),
+            "threat-model:read",
+            "Read the current threat model artifact.",
+            threat_model_read_options(),
+        )
+        .with_policy(tool_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            ToolEffect::Read,
+            WorkspaceRequirement::Required,
+            FindingStoreRequirement::Optional,
+        )),
         threat_model_verify_tool(),
         threat_model_import_tool(),
         tool(
-                "threat-model:methodologies",
-                "List supported threat-model methodologies.",
-            )
-            .with_policy(read_policy(
-                ToolPhase::Map,
-                WorkspaceRequirement::Optional,
-            )),
+            "threat-model:methodologies",
+            "List supported threat-model methodologies.",
+        )
+        .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
     ]
 }
 
@@ -259,7 +256,12 @@ fn threat_model_bounds_options() -> Vec<OptionSpec> {
             .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
             .default(json!("all"))
             .advanced(),
-        opt("stages", OptionType::StringList, "PASTA stages to generate.").advanced(),
+        opt(
+            "stages",
+            OptionType::StringList,
+            "PASTA stages to emphasize (s1-s4). Valid only when methodology=pasta.",
+        )
+        .advanced(),
         opt("contextMode", OptionType::Enum, "Context snapshot behavior.")
             .aliases(&["context_mode"])
             .choices(&["auto", "refresh", "require", "off"])
@@ -295,7 +297,13 @@ fn threat_model_read_options() -> Vec<OptionSpec> {
         )
         .aliases(&["output_dir"])
         .workspace_read(),
-        threat_model_methodology_option("pasta"),
+        opt(
+            "methodology",
+            OptionType::Enum,
+            "Optional methodology overlay. Omit it to preserve the methodology recorded in the loaded document.",
+        )
+        .aliases(&["type"])
+        .choices(&["pasta", "stride", "dread"]),
     ]
 }
 
@@ -345,22 +353,26 @@ fn x_ray_tools() -> Vec<ToolDescriptor> {
         x_ray_run_tool(write_policy, false),
         x_ray_run_tool(write_policy, true),
         tool(
-                "x-ray:read",
-                "Read the latest repository architecture and attack-surface report.",
-            )
-            .with_policy(tool_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Never,
-                ToolEffect::Read,
-                WorkspaceRequirement::Required,
-                FindingStoreRequirement::Optional,
-            )),
+            "x-ray:read",
+            "Read the latest repository architecture and attack-surface report.",
+        )
+        .with_policy(tool_policy(
+            ToolPhase::Map,
+            RuntimeRequirement::Never,
+            ToolEffect::Read,
+            WorkspaceRequirement::Required,
+            FindingStoreRequirement::Optional,
+        )),
     ]
 }
 
 fn x_ray_run_tool(policy: ToolPolicy, alias: bool) -> ToolDescriptor {
     let descriptor = if alias {
-        hidden_tool_with_options("x-ray:x-ray", "Compatibility alias for x-ray:run.", x_ray_options())
+        hidden_tool_with_options(
+            "x-ray:x-ray",
+            "Compatibility alias for x-ray:run.",
+            x_ray_options(),
+        )
     } else {
         tool_with_options(
             "x-ray:run",
@@ -427,22 +439,29 @@ pub(crate) fn secret_scan_module() -> BuiltinModule {
         "Secret Scan",
         ModuleKind::Defense,
         "Fast deterministic secret scanner over source files.",
-        tools_with_policy(workspace_policy(ToolPhase::Scan, RuntimeRequirement::Never, FindingStoreRequirement::Required), vec![tool_with_options(
-            "secret-scan:scan",
-            "Scan source files for high-confidence secrets.",
-            vec![
-                target_option(),
-                opt(
-                    "maxFileBytes",
-                    OptionType::Int,
-                    "Maximum file size to scan.",
-                )
-                .aliases(&["max_file_bytes"])
-                .integer_range(1024, crate::secret_scan::MAX_SUPPORTED_FILE_BYTES as i64)
-                .default(json!(524288)),
-                max_findings_option(1000).integer_range(1, 10_000),
-            ],
-        )]),
+        tools_with_policy(
+            workspace_policy(
+                ToolPhase::Scan,
+                RuntimeRequirement::Never,
+                FindingStoreRequirement::Required,
+            ),
+            vec![tool_with_options(
+                "secret-scan:scan",
+                "Scan source files for high-confidence secrets.",
+                vec![
+                    target_option(),
+                    opt(
+                        "maxFileBytes",
+                        OptionType::Int,
+                        "Maximum file size to scan.",
+                    )
+                    .aliases(&["max_file_bytes"])
+                    .integer_range(1024, crate::secret_scan::MAX_SUPPORTED_FILE_BYTES as i64)
+                    .default(json!(524288)),
+                    max_findings_option(1000).integer_range(1, 10_000),
+                ],
+            )],
+        ),
         vec![dag("secret-scan:scan", "findings", &["context:build"])],
     )
 }

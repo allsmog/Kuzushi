@@ -19,7 +19,9 @@ pub use presentation::*;
 pub use projection::*;
 pub use question_identity::{deterministic_choice_id, deterministic_question_id};
 pub(crate) use reducer::apply_envelope;
-pub(crate) use terminal_persistence::emit_recovered_interruption;
+pub(crate) use terminal_persistence::{
+    emit_recovered_interruption, emit_terminal_outcome_for_summary,
+};
 pub use reducer::reduce_run_items;
 pub use terminal_persistence::{
     emit_persisted_terminal_outcome, emit_persisted_terminal_outcome_for_call,

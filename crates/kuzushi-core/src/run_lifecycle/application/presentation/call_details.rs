@@ -14,6 +14,7 @@ pub(super) struct CallDetails {
     pub latency_ms: Option<u64>,
     pub usage: Option<ModelUsage>,
     pub error_class: Option<SafeText>,
+    pub failure: Option<crate::runtime::RuntimeFailureMetadata>,
     pub timing: CallTimingV1,
 }
 
@@ -117,6 +118,7 @@ fn apply_model_call_item(details: &mut CallDetails, envelope: &RunItemEnvelopeV1
             latency_ms,
             usage,
             error_class,
+            failure,
             ..
         } => apply_model_finish(
             details,
@@ -124,6 +126,7 @@ fn apply_model_call_item(details: &mut CallDetails, envelope: &RunItemEnvelopeV1
             *latency_ms,
             usage,
             error_class,
+            failure,
             envelope.occurred_at_ms,
         ),
         _ => {}
@@ -147,6 +150,7 @@ fn apply_model_finish(
     latency_ms: u64,
     usage: &ModelUsage,
     error_class: &Option<SafeText>,
+    failure: &Option<crate::runtime::RuntimeFailureMetadata>,
     occurred_at_ms: u64,
 ) {
     details.provider = Some(identity.0.clone());
@@ -154,5 +158,6 @@ fn apply_model_finish(
     details.latency_ms = Some(latency_ms);
     details.usage = Some(usage.clone());
     details.error_class = error_class.clone();
+    details.failure = failure.clone();
     details.timing.finished_at_ms = Some(occurred_at_ms);
 }

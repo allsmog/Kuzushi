@@ -5,20 +5,48 @@ pub(in crate::modules) fn triage_summary(
     stats: &TriageRunStats,
     missing_fingerprints: &[String],
 ) -> String {
+    let marker = if stats.result_status() == crate::module_result::ToolResultStatus::Completed {
+        "[+]"
+    } else {
+        "[!]"
+    };
     let mut summary = format!(
-        "[+] Triaged {} of {} findings (stage1 dropped {})\n      tp={}  fp={}  needs_review={}",
+        "{marker} Triaged {} of {} findings (stage1 dropped {})\n      classifications attempted={} successful={} failed={}\n      tp={}  fp={}  needs_review={}",
         stats.triaged(),
         stage1.total,
         stage1.dropped,
+        stats.attempted,
+        stats.successful,
+        stats.failed,
         stats.tp,
         stats.fp,
         stats.needs_review
     );
     append_by_design_summary(&mut summary, stats.by_design);
+    append_degraded_operations(&mut summary, stats);
+    append_classification_errors(&mut summary, stats);
     append_cost_summary(&mut summary, stats);
     append_cost_cap_summary(&mut summary, stats);
     append_missing_fingerprints_summary(&mut summary, missing_fingerprints);
     summary
+}
+
+fn append_degraded_operations(summary: &mut String, stats: &TriageRunStats) {
+    if stats.vote_failures > 0 || stats.persistence_failures > 0 {
+        summary.push_str(&format!(
+            "\n[!] failed consensus votes={} persistence writes={}",
+            stats.vote_failures, stats.persistence_failures
+        ));
+    }
+}
+
+fn append_classification_errors(summary: &mut String, stats: &TriageRunStats) {
+    if !stats.error_summaries.is_empty() {
+        summary.push_str(&format!(
+            "\n[!] classification errors: {}",
+            stats.error_summaries.join("; ")
+        ));
+    }
 }
 
 fn append_cost_summary(summary: &mut String, stats: &TriageRunStats) {

@@ -28,6 +28,9 @@ pub struct CampaignSnapshot {
     /// How many covered cells the gap-fill plan skipped.
     pub skipped_covered_cells: Option<u64>,
     pub total_cost_usd: f64,
+    /// The total is only a lower bound when any child could not report its
+    /// complete provider charge.
+    pub provider_spend_unresolved: bool,
     pub jobs: Vec<CampaignJobSnapshot>,
 }
 
@@ -48,6 +51,7 @@ pub struct CampaignJobSnapshot {
     pub attempts: u64,
     pub exit_code: Option<i64>,
     pub cost_usd: Option<f64>,
+    pub provider_spend_unresolved: bool,
     pub run_id: Option<String>,
     pub reason: Option<String>,
     /// Finding count from the job's run artifact (`runs/<runId>/run.json`);
@@ -85,7 +89,7 @@ pub fn campaign_ids(root: &Path) -> Result<Vec<String>> {
 pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<CampaignSnapshot> {
     let plan = read_json_file(&campaign_plan_path(root, campaign_id))
         .with_context(|| format!("campaign {campaign_id:?} has no readable plan"))?;
-    let queue_doc = load_queue_doc(root, campaign_id);
+    let queue_doc = load_queue_doc(root, campaign_id)?;
     let queue = queue_doc
         .get("jobs")
         .and_then(Value::as_object)
@@ -95,6 +99,7 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
         .map(|row| job_snapshot(root, row, &queue))
         .collect::<Vec<_>>();
     let total_cost_usd = jobs.iter().filter_map(|job| job.cost_usd).sum::<f64>() + 0.0;
+    let provider_spend_unresolved = jobs.iter().any(|job| job.provider_spend_unresolved);
     Ok(CampaignSnapshot {
         campaign_id: campaign_id.to_string(),
         tool: plan.get("tool").and_then(Value::as_str).map(str::to_string),
@@ -102,9 +107,13 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
         paused_until_ms: queue_doc.get("pausedUntilMs").and_then(Value::as_u64),
         budget_usd: queue_doc.get("budgetUsd").and_then(Value::as_f64),
         job_budget_usd: queue_doc.get("jobBudgetUsd").and_then(Value::as_f64),
-        fill_gaps: plan.get("fillGaps").and_then(Value::as_bool).unwrap_or(false),
+        fill_gaps: plan
+            .get("fillGaps")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         skipped_covered_cells: plan.get("skippedCoveredCells").and_then(Value::as_u64),
         total_cost_usd,
+        provider_spend_unresolved,
         jobs,
     })
 }
@@ -135,6 +144,10 @@ fn job_snapshot(root: &Path, row: &Value, queue: &Map<String, Value>) -> Campaig
         attempts: entry.get("attempts").and_then(Value::as_u64).unwrap_or(0),
         exit_code: entry.get("exitCode").and_then(Value::as_i64),
         cost_usd: entry.get("costUsd").and_then(Value::as_f64),
+        provider_spend_unresolved: entry
+            .get("providerSpendUnresolved")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         run_id,
         reason: string_field(&entry, "reason"),
         job_id,
@@ -160,10 +173,10 @@ fn string_field(value: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn load_queue_doc(root: &Path, campaign_id: &str) -> Value {
+fn load_queue_doc(root: &Path, campaign_id: &str) -> Result<Value> {
     let path = campaign_queue_path(root, campaign_id);
     if !path.exists() {
-        return Value::Null;
+        return Ok(Value::Null);
     }
-    read_json_file(&path).unwrap_or(Value::Null)
+    read_json_file(&path).with_context(|| format!("campaign {campaign_id:?} has no readable queue"))
 }

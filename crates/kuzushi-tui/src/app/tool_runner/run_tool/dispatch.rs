@@ -402,6 +402,7 @@ mod remembered_confirmation_tests {
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         let input = serde_json::json!({"target": "127.0.0.1"});
+        let runs_before = kuzushi_core::list_run_summaries(workspace.root()).unwrap_or_default();
 
         assert!(prepare(&mut app, &workspace, "recon:nmap", input.clone()).is_empty());
         assert!(app.reduce_key(remember_key('N')).effects.is_empty());
@@ -416,7 +417,11 @@ mod remembered_confirmation_tests {
             std::fs::read_to_string(tmp.path().join("source.txt")).unwrap(),
             "unchanged"
         );
-        assert!(!kuzushi_core::runs_root(workspace.root()).exists());
+        assert_eq!(
+            kuzushi_core::list_run_summaries(workspace.root()).unwrap_or_default(),
+            runs_before,
+            "remembered denial must not create a run artifact"
+        );
     }
 
     #[test]

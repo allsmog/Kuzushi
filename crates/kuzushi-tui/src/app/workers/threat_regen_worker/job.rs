@@ -28,8 +28,9 @@ impl ThreatWorkerJob {
                 Ok(lifecycle) => lifecycle,
                 Err(error) => return send_threat_start_failure(&sink, error, audit),
             };
-        let cancellation = self.cancel.disposition();
+        let cancel = self.cancel.clone();
         let result = self.execute_regen(lifecycle.observation());
+        let cancellation = cancel.disposition();
         let event = settle_threat_regen_result(&run, lifecycle, result, audit, cancellation);
         sink.send(ShellEvent::Threat(event));
     }
@@ -66,8 +67,9 @@ impl ThreatWorkerJob {
                 Ok(lifecycle) => lifecycle,
                 Err(error) => return send_threat_start_failure(&sink, error, audit),
             };
-        let cancellation = self.cancel.disposition();
+        let cancel = self.cancel.clone();
         let result = self.execute_ask(&question, lifecycle.observation());
+        let cancellation = cancel.disposition();
         let event = settle_threat_ask_result(&run, lifecycle, result, audit, cancellation);
         sink.send(ShellEvent::Threat(event));
     }

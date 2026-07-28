@@ -26,9 +26,9 @@ impl TypedReceiptResolution {
     pub(super) fn authoritative_policy(&self) -> PhaseResultPolicy {
         match self {
             Self::Ready(receipt) => receipt_policy(receipt),
-            Self::Invalid { reason, .. } => selection_blocked_result_policy(&format!(
-                "typed phase receipt is degraded: {reason}"
-            )),
+            Self::Invalid { .. } => selection_blocked_result_policy(
+                "run receipt unavailable; open the failed run, run it again, or discard it",
+            ),
         }
     }
 
@@ -44,9 +44,10 @@ impl TypedReceiptResolution {
     pub(super) fn detail_lines(&self) -> Option<Vec<String>> {
         match self {
             Self::Ready(receipt) => Some(receipt_detail_lines(receipt)),
-            Self::Invalid { reason, .. } => {
-                Some(vec![format!("typed phase receipt degraded — {reason}")])
-            }
+            Self::Invalid { reason, .. } => Some(vec![format!(
+                "run receipt unavailable — {}; open the failed run for details",
+                operator_receipt_issue(reason)
+            )]),
         }
     }
 
@@ -56,6 +57,19 @@ impl TypedReceiptResolution {
             fallback_outcome: completed.outcome,
         }
     }
+}
+
+fn operator_receipt_issue(reason: &str) -> &'static str {
+    if reason == "attempt identity is not typed" {
+        return "this attempt uses legacy metadata";
+    }
+    if reason == "phase attempt has no run reference" {
+        return "this attempt has no run reference";
+    }
+    if reason == "typed run has no hash-linked workflow-v2 receipt" {
+        return "the run has no durable workflow receipt";
+    }
+    "the referenced run could not be inspected"
 }
 
 fn classify_missing_receipt(

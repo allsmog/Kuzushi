@@ -1,0 +1,78 @@
+{
+  "findings": [
+    {
+      "title": "Cached account lookup bypasses cookie binding",
+      "severity": "high",
+      "message": "The cache-hit branch returns an account without proving that the request cookie belongs to it.",
+      "evidence": [
+        "bluejay_auth/account_cache.go:73 returns the cached account before cookie validation",
+        {
+          "detail": "A caller can present a stale account identifier with a different cookie."
+        }
+      ],
+      "source": {
+        "kind": "request-cookie",
+        "location": {
+          "path": "bluejay_auth/session.go",
+          "line": 41
+        }
+      },
+      "sink": {
+        "file": "bluejay_auth/account_cache.go",
+        "startLine": 73
+      },
+      "trace": [
+        {
+          "hop": {
+            "file": "bluejay_auth/session.go",
+            "line": 41
+          }
+        },
+        {
+          "hop": {
+            "path": "bluejay_auth/account_cache.go",
+            "startLine": 73
+          }
+        }
+      ]
+    },
+    {
+      "title": "ForwardRequest dispatch omits tenant ownership check",
+      "severity": "critical",
+      "message": "RouterRPC dispatches a ForwardRequest using in.Uuid without checking that the actor owns that UUID.",
+      "evidence": [
+        "The request UUID is attacker-selected.",
+        {
+          "claim": "No ownership predicate appears before dispatch."
+        }
+      ],
+      "source": {
+        "request": {
+          "location": {
+            "file": "router/rpc/forward.go",
+            "startLine": 118
+          },
+          "field": "in.Uuid"
+        }
+      },
+      "sink": {
+        "dispatch": {
+          "path": "router/rpc/forward.go",
+          "line": 129
+        }
+      },
+      "trace": {
+        "hops": [
+          {
+            "path": "router/rpc/forward.go",
+            "line": 118
+          },
+          {
+            "file": "router/rpc/forward.go",
+            "startLine": 129
+          }
+        ]
+      }
+    }
+  ]
+}

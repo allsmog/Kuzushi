@@ -36,14 +36,18 @@ impl ShellApp {
         timeout: Duration,
     ) -> std::result::Result<(), String> {
         let deadline = Instant::now() + timeout;
+        let awaited_tool = self.running_tool_name().map(str::to_string);
         let mut drain_count = 0usize;
         let mut changed_count = 0usize;
         while Instant::now() < deadline {
-            let tool_was_running = self.tool_is_running();
             let changed = self.drain_job_events();
             drain_count += 1;
             changed_count += usize::from(changed);
-            if tool_was_running && !self.tool_is_running() {
+            let current_tool = self.running_tool_name();
+            let next_tool_started =
+                current_tool.is_some() && current_tool != awaited_tool.as_deref();
+            let slot_settled = current_tool.is_none() && !self.jobs().is_running(JobKind::Run);
+            if awaited_tool.is_some() && (next_tool_started || slot_settled) {
                 return Ok(());
             }
             if !changed {

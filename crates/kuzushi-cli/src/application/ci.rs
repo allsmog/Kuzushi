@@ -10,7 +10,8 @@
 use anyhow::{Context, Result};
 use kuzushi_core::capabilities::campaign::snapshot::{campaign_ids, load_campaign_snapshot};
 use kuzushi_core::capabilities::campaign::trend::{
-    latest_confirmed_finding_ids, trend_json, trend_metrics, workspace_campaign_spend, TrendMetrics,
+    latest_confirmed_finding_ids, trend_json, trend_metrics_with_spend,
+    workspace_campaign_spend_report, TrendMetrics,
 };
 use kuzushi_core::findings::ReviewDecisionRecord;
 use kuzushi_core::{Finding, FindingStore, Severity, WorkspaceTarget};
@@ -73,7 +74,7 @@ fn evaluate_and_report(
     let root = workspace.root();
     let baseline = load_baseline(root)?;
     let gate = evaluate_gate(confirmed, baseline.as_ref(), options.fail_on);
-    let trend = trend_metrics(records, workspace_campaign_spend(root));
+    let trend = trend_metrics_with_spend(records, workspace_campaign_spend_report(root));
     let summary_path = write_summary(root, options, findings, confirmed, &gate, &trend)?;
     print_plain_summary(root, findings, confirmed, baseline.as_ref(), &gate, &trend);
     println!("ci: summary written to {}", summary_path.display());

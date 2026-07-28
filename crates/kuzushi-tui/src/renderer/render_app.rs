@@ -1,6 +1,6 @@
 use super::*;
 /// How the primary body region is painted this frame. Most views are
-/// line-based; Activity, the Workbench command center, and the 3D
+/// line-based; Activity, the phase Workbench, and the 3D
 /// attack-surface page each own the whole region with a frame-level layout
 /// (split panes / half-block framebuffer).
 #[derive(Clone, Copy, PartialEq, Eq)]

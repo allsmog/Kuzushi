@@ -1,4 +1,7 @@
-use super::{ShellSessionTranscript, SteerQueue, TargetCandidateScope};
+use super::{
+    ActiveTargetFactsState, ShellSessionTranscript, StampedTargetCandidateFacts, SteerQueue,
+    TargetCandidateFacts, TargetCandidateScope,
+};
 use kuzushi_core::runtime::{RuntimeCost, RuntimeCostReport};
 use kuzushi_core::{ModuleRegistry, NestedProjectScopeTree, ToolOptionStore, V2Config};
 use std::collections::{BTreeMap, BTreeSet};
@@ -10,6 +13,7 @@ pub(crate) struct SessionState {
     registry: ModuleRegistry,
     option_store: ToolOptionStore,
     target: Option<PathBuf>,
+    active_target_facts: ActiveTargetFactsState,
     active_scope: Option<TargetCandidateScope>,
     /// The last scope tree announced as ready, kept here — not in the
     /// invalidation-driven workbench cache — so external state churn can
@@ -51,6 +55,7 @@ impl SessionState {
             registry,
             option_store,
             target,
+            active_target_facts: ActiveTargetFactsState::default(),
             active_scope: None,
             announced_scope_tree: None,
             session_cost: RuntimeCostReport::known(RuntimeCost::ZERO),
@@ -143,6 +148,27 @@ impl SessionState {
 
     pub(crate) fn set_target(&mut self, target: Option<PathBuf>) {
         self.target = target;
+    }
+
+    pub(crate) fn begin_active_target_facts(&mut self, path: PathBuf, generation: u64) {
+        self.active_target_facts.begin(path, generation);
+    }
+
+    pub(crate) fn apply_active_target_facts(&mut self, facts: StampedTargetCandidateFacts) -> bool {
+        self.active_target_facts.apply(facts)
+    }
+
+    pub(crate) fn active_target_facts(&self) -> Option<&TargetCandidateFacts> {
+        self.active_target_facts.facts()
+    }
+
+    pub(crate) fn active_target_facts_loading(&self) -> bool {
+        self.active_target_facts.loading()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_target_facts_path(&self) -> Option<&Path> {
+        self.active_target_facts.path()
     }
 
     pub(crate) fn active_scope(&self) -> Option<&TargetCandidateScope> {
@@ -423,6 +449,14 @@ mod tests {
 
         assert!(error.to_string().contains("below live observed subtotal"));
         assert!((session.session_cost_usd() - 0.4).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn mutation_survivor_active_target_facts_loading_forwards_pending_state() {
+        let mut session = test_session();
+        session.begin_active_target_facts(PathBuf::from("/tmp/target"), 1);
+
+        assert!(session.active_target_facts_loading());
     }
 
     fn test_session() -> SessionState {

@@ -3,6 +3,67 @@ use kuzushi_core::modules::{OptionSpec, OptionType};
 
 const OPTIONS_SUMMARY_COLUMN_COUNT: usize = 2;
 
+pub(crate) fn option_display_name(name: &str) -> String {
+    option_name_words(name)
+        .iter()
+        .enumerate()
+        .map(|(index, word)| display_option_word(word, index == 0))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn option_name_words(name: &str) -> Vec<String> {
+    let chars = name.chars().collect::<Vec<_>>();
+    let mut words = Vec::new();
+    let mut current = String::new();
+    for (index, ch) in chars.iter().copied().enumerate() {
+        if matches!(ch, '_' | '-') {
+            push_option_word(&mut words, &mut current);
+            continue;
+        }
+        let previous = index.checked_sub(1).and_then(|index| chars.get(index));
+        let next = chars.get(index + 1);
+        if option_word_boundary(previous, ch, next) {
+            push_option_word(&mut words, &mut current);
+        }
+        current.push(ch);
+    }
+    push_option_word(&mut words, &mut current);
+    words
+}
+
+fn option_word_boundary(previous: Option<&char>, current: char, next: Option<&char>) -> bool {
+    (current.is_ascii_uppercase()
+        && previous.is_some_and(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()))
+        || (current.is_ascii_uppercase()
+            && previous.is_some_and(|ch| ch.is_ascii_uppercase())
+            && next.is_some_and(|ch| ch.is_ascii_lowercase()))
+}
+
+fn push_option_word(words: &mut Vec<String>, current: &mut String) {
+    if !current.is_empty() {
+        words.push(std::mem::take(current));
+    }
+}
+
+fn display_option_word(word: &str, first: bool) -> String {
+    let lower = word.to_ascii_lowercase();
+    if matches!(
+        lower.as_str(),
+        "api" | "cve" | "id" | "json" | "llm" | "usd"
+    ) {
+        return lower.to_ascii_uppercase();
+    }
+    if first {
+        let mut chars = lower.chars();
+        return chars
+            .next()
+            .map(|first| first.to_ascii_uppercase().to_string() + chars.as_str())
+            .unwrap_or_default();
+    }
+    lower
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OptionsModel {
     pub(crate) title: &'static str,

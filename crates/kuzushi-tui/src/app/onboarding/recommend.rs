@@ -12,6 +12,8 @@ use kuzushi_core::{TargetKind, WorkflowPhase};
 use std::collections::BTreeSet;
 use std::path::Path;
 
+pub const DECOMPOSE_FIRST_FILE_THRESHOLD: u64 = 20_000;
+
 /// The tasks to pre-check for `phase`, given the target kind. Rows whose
 /// required CLI is missing are never recommended (they can't run).
 pub fn recommended_tasks_for_phase(
@@ -110,14 +112,28 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
 fn ledger_preselect(row: &PlanningTaskRow) -> Option<bool> {
     use super::task_row::LastAttempt;
     match &row.last_attempt {
-        Some(LastAttempt::Failed {
-            resumable: true, ..
-        }) => Some(true),
+        Some(LastAttempt::Failed { .. }) => Some(true),
         Some(LastAttempt::Completed) if matches!(row.artifact_state, ArtifactState::Action) => {
             Some(false)
         }
         _ => None,
     }
+}
+
+pub(crate) fn large_repository_needs_decomposition(
+    files_indexed: Option<u64>,
+    target: Option<&Path>,
+) -> bool {
+    let Some(target) = target else {
+        return false;
+    };
+    if files_indexed.unwrap_or_default() < DECOMPOSE_FIRST_FILE_THRESHOLD {
+        return false;
+    }
+    kuzushi_core::load_nested_project_scopes(target)
+        .ok()
+        .flatten()
+        .is_none_or(|tree| tree.non_root_scopes().next().is_none())
 }
 
 fn task_applies_to_target(task: PlanningTaskId, target: TargetProfile) -> bool {
@@ -319,5 +335,31 @@ mod tests {
             recommended_tasks_for_phase(WorkflowPhase::Fix, profile(TargetKind::Source), &rows);
         assert!(picked.contains(&PlanningTaskId::BuildReport));
         assert!(!picked.contains(&PlanningTaskId::PatchFindings));
+    }
+
+    #[test]
+    fn completed_and_failed_action_outcomes_invert_static_defaults() {
+        let mut rows = rows_for(WorkflowPhase::Scan);
+        let completed = rows
+            .iter_mut()
+            .find(|row| row.id == PlanningTaskId::ScanAgenticSast)
+            .unwrap();
+        completed.artifact_state = ArtifactState::Action;
+        completed.last_attempt = Some(crate::app::LastAttempt::Completed);
+        let failed = rows
+            .iter_mut()
+            .find(|row| row.id == PlanningTaskId::ScanSecrets)
+            .unwrap();
+        failed.artifact_state = ArtifactState::Action;
+        failed.last_attempt = Some(crate::app::LastAttempt::Failed {
+            resumable: false,
+            resume_from: None,
+        });
+
+        let picked =
+            recommended_tasks_for_phase(WorkflowPhase::Scan, profile(TargetKind::Source), &rows);
+
+        assert!(!picked.contains(&PlanningTaskId::ScanAgenticSast));
+        assert!(picked.contains(&PlanningTaskId::ScanSecrets));
     }
 }

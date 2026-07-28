@@ -701,11 +701,10 @@ fn scan_reports_with_failure_receipt(
             Ok(reports)
         })
         .map_err(|error| {
-            let task_persistence = update_scan_tasks(
-                &baseline.lifecycle_tasks,
-                crate::run_lifecycle::RunItemStatus::Interrupted,
-                Some("engine outcomes are unavailable because the scan pipeline stopped"),
-            );
+            let (status, detail) =
+                scan_pipeline_stop_task_terminal(sast_cancellation_disposition(input.ctx));
+            let task_persistence =
+                update_scan_tasks(&baseline.lifecycle_tasks, status, Some(detail));
             let stage_persistence = input.record_failed_scan_stage(
                 artifacts,
                 &baseline.selected,
@@ -715,6 +714,21 @@ fn scan_reports_with_failure_receipt(
             );
             error_with_persistence(error, task_persistence.and(stage_persistence))
         })
+}
+
+fn scan_pipeline_stop_task_terminal(
+    cancellation: Option<crate::scan::CancellationDisposition>,
+) -> (crate::run_lifecycle::RunItemStatus, &'static str) {
+    match cancellation {
+        Some(crate::scan::CancellationDisposition::Canceled) => (
+            crate::run_lifecycle::RunItemStatus::Canceled,
+            "engine stopped after scan cancellation",
+        ),
+        _ => (
+            crate::run_lifecycle::RunItemStatus::Interrupted,
+            "engine outcomes are unavailable because the scan pipeline stopped",
+        ),
+    }
 }
 
 fn observe_scan_plan(
@@ -1360,6 +1374,22 @@ mod scan_result_outcome_tests {
 
         assert_eq!(scan_stage_outcome(&reports), PhaseStageOutcome::Partial);
         assert_eq!(tool_result_status(&result), ToolResultStatus::Partial);
+    }
+
+    #[test]
+    fn operator_cancellation_marks_unsettled_engine_tasks_canceled() {
+        let (status, detail) =
+            scan_pipeline_stop_task_terminal(Some(crate::scan::CancellationDisposition::Canceled));
+
+        assert_eq!(status, crate::run_lifecycle::RunItemStatus::Canceled);
+        assert_eq!(detail, "engine stopped after scan cancellation");
+    }
+
+    #[test]
+    fn abnormal_pipeline_stop_keeps_unsettled_engine_tasks_interrupted() {
+        let (status, _) = scan_pipeline_stop_task_terminal(None);
+
+        assert_eq!(status, crate::run_lifecycle::RunItemStatus::Interrupted);
     }
 
     fn reports_with_outcomes(

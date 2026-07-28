@@ -119,12 +119,27 @@ fn load_verified_run(
     );
     validate_run_snapshot(&summary, expected)?;
     let result = read_json_artifact(target, run_id, "result.json", "proof result")?;
-    let digest = crate::run_artifacts::terminal_result_digest("completed", &result);
+    let persisted_digest = crate::run_artifacts::terminal_result_digest("completed", &result);
+    let legacy_digest = crate::run_artifacts::terminal_result_digest(
+        "completed",
+        &result_without_run_artifact_projection(&result),
+    );
     anyhow::ensure!(
-        summary.terminal_result_sha256.as_deref() == Some(&digest),
+        summary
+            .terminal_result_sha256
+            .as_deref()
+            .is_some_and(|digest| digest == persisted_digest || digest == legacy_digest),
         "proof run {run_id:?} result digest does not match run metadata"
     );
     Ok(VerifiedRun { summary, result })
+}
+
+fn result_without_run_artifact_projection(result: &Value) -> Value {
+    let mut digest_view = result.clone();
+    if let Some(object) = digest_view.as_object_mut() {
+        object.insert("artifacts".to_string(), Value::Array(Vec::new()));
+    }
+    digest_view
 }
 
 fn validate_run_snapshot(summary: &RunSummary, expected: &PhaseTargetSnapshot) -> Result<()> {
@@ -147,6 +162,7 @@ fn stage_model_proof(
     run: &VerifiedRun,
 ) -> Result<StagedProof> {
     let candidate = ModelProofCandidate::from_result(&run.result)?;
+    candidate.validate_current_source(workspace.root())?;
     let finding =
         current_candidate_finding(store, workspace.root(), &run.summary.run_id, &candidate)?;
     if proof_is_already_materialized(store, &finding, &run.summary.run_id)? {

@@ -19,9 +19,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ── Gate: run the full CI suite (which also uploads the dist artifact) ──
+  # ── Gate: run the full CI suite and produce the tested native artifact ──
   ci:
     uses: ./.github/workflows/ci.yml
+    secrets: inherit
     permissions:
       contents: read
 
@@ -43,11 +44,6 @@ jobs:
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - name: Download dist artifact from CI
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
       - name: Download cross-platform binaries
         uses: actions/download-artifact@v8
         with:
@@ -180,11 +176,6 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Download dist artifact from CI
-        uses: actions/download-artifact@v8
-        with:
-          name: dist
-          path: dist/
       - name: Download cross-platform binaries
         uses: actions/download-artifact@v8
         with:
@@ -216,8 +207,8 @@ jobs:
           KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
         run: pnpm verify:pack
 
-      # Pack the tarball for users who want to install from the release.
-      # CI already built dist/; native/ was staged above; skip prepack.
+      # Pack the schema/native package after native/ was staged above; skip
+      # prepack so the already-tested binaries are not rebuilt.
       - run: npm pack --ignore-scripts
 
       - name: Generate changelog from commits since previous tag

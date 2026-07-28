@@ -180,7 +180,11 @@ fn plan_errors_when_supplied_documents_yield_no_threats() {
 
     let models = temp.path().join("models");
     std::fs::create_dir_all(&models).unwrap();
-    std::fs::write(models.join("empty.json"), json!({"summary": "x"}).to_string()).unwrap();
+    std::fs::write(
+        models.join("empty.json"),
+        json!({"summary": "x"}).to_string(),
+    )
+    .unwrap();
     let error = run_plan(
         temp.path(),
         json!({"campaignId": "camp-empty-dir", "modelsDir": "models"}),
@@ -247,7 +251,11 @@ fn shard_manifest_rejects_blank_and_non_string_paths() {
     assert!(error.to_string().contains("blank path"));
 
     // A non-string entry would silently shrink the shard's scope.
-    std::fs::write(dir.join("shards.toml"), "[shards.a]\npaths = [\"src\", 42]\n").unwrap();
+    std::fs::write(
+        dir.join("shards.toml"),
+        "[shards.a]\npaths = [\"src\", 42]\n",
+    )
+    .unwrap();
     let error = run_plan(temp.path(), json!({"campaignId": "c2"})).unwrap_err();
     assert!(error.to_string().contains("must all be strings"));
 
@@ -263,11 +271,7 @@ fn plan_reports_jobs_dropped_by_the_cap_instead_of_hiding_them() {
     write_shard_manifest(temp.path());
     write_threat_model(temp.path());
 
-    let result = run_plan(
-        temp.path(),
-        json!({"campaignId": "camp-cap", "maxJobs": 3}),
-    )
-    .unwrap();
+    let result = run_plan(temp.path(), json!({"campaignId": "camp-cap", "maxJobs": 3})).unwrap();
 
     assert_eq!(result["data"]["jobCount"], 3);
     assert_eq!(result["data"]["droppedJobs"], 1);
@@ -369,7 +373,13 @@ fn status_folds_queue_states_over_planned_jobs() {
     let queue = json!({
         "jobs": {
             "job-001": {"state": "running", "runId": "run-x", "attempts": 1},
-            "job-002": {"state": "completed", "runId": "run-y", "costUsd": 1.25, "exitCode": 0},
+            "job-002": {
+                "state": "completed",
+                "runId": "run-y",
+                "costUsd": 1.25,
+                "providerSpendUnresolved": true,
+                "exitCode": 0
+            },
         }
     });
     write_json_atomic(&campaign_queue_path(temp.path(), "camp-status"), &queue).unwrap();
@@ -381,9 +391,24 @@ fn status_folds_queue_states_over_planned_jobs() {
     assert_eq!(states["completed"], 1);
     assert_eq!(states["planned"], 2);
     assert_eq!(result["data"]["totalCostUsd"], 1.25);
+    assert_eq!(result["data"]["providerSpendUnresolved"], true);
+    assert_eq!(result["data"]["trend"]["campaignSpendUsd"], 1.25);
+    assert_eq!(result["data"]["trend"]["providerSpendUnresolved"], true);
     let jobs = result["data"]["jobs"].as_array().unwrap();
     let running = jobs.iter().find(|job| job["jobId"] == "job-001").unwrap();
     assert_eq!(running["doneSentinel"], false);
+}
+
+#[test]
+fn status_refuses_a_malformed_queue_instead_of_forging_planned_state() {
+    let temp = tempdir().unwrap();
+    write_shard_manifest(temp.path());
+    run_plan(temp.path(), json!({"campaignId": "camp-corrupt"})).unwrap();
+    std::fs::write(campaign_queue_path(temp.path(), "camp-corrupt"), "{").unwrap();
+
+    let error = run_status(temp.path(), json!({"campaignId": "camp-corrupt"})).unwrap_err();
+
+    assert!(error.to_string().contains("no readable queue"));
 }
 
 #[test]
@@ -524,11 +549,9 @@ fn coverage_report_folds_campaigns_and_counts_shard_findings() {
     write_threat_model(temp.path());
     run_plan(temp.path(), json!({"campaignId": "camp-cov"})).unwrap();
     // Dispatcher truth: first planned job completed, everything else untouched.
-    let plan = crate::bounded_file::read_utf8_text(
-        &campaign_plan_path(temp.path(), "camp-cov"),
-        1 << 20,
-    )
-    .unwrap();
+    let plan =
+        crate::bounded_file::read_utf8_text(&campaign_plan_path(temp.path(), "camp-cov"), 1 << 20)
+            .unwrap();
     let plan: Value = serde_json::from_str(&plan).unwrap();
     let first_job = plan["jobs"][0]["jobId"].as_str().unwrap();
     let first_shard = plan["jobs"][0]["shard"].as_str().unwrap().to_string();
@@ -552,7 +575,11 @@ fn coverage_report_folds_campaigns_and_counts_shard_findings() {
 
     assert_eq!(report.campaign_count, 1);
     assert_eq!(report.columns, vec!["threat-model.json".to_string()]);
-    let parsers = report.rows.iter().find(|row| row.shard == "parsers").unwrap();
+    let parsers = report
+        .rows
+        .iter()
+        .find(|row| row.shard == "parsers")
+        .unwrap();
     // src/codec2 must NOT leak into the src/codec prefix.
     assert_eq!(parsers.finding_count, 1);
     assert_eq!(parsers.confirmed_count, 1);
@@ -564,7 +591,11 @@ fn coverage_report_folds_campaigns_and_counts_shard_findings() {
     // Only one of the source's two threats completed for this shard, so the
     // cell reports Partial — never full credit for partial coverage.
     assert_eq!(first_row.cells, vec![CoverageCellState::Partial]);
-    let other = report.rows.iter().find(|row| row.shard != first_shard).unwrap();
+    let other = report
+        .rows
+        .iter()
+        .find(|row| row.shard != first_shard)
+        .unwrap();
     assert_eq!(other.cells, vec![CoverageCellState::Planned]);
 }
 
@@ -598,11 +629,9 @@ fn coverage_cell_completes_only_when_every_threat_of_the_source_completed() {
     write_shard_manifest(temp.path());
     write_threat_model(temp.path());
     run_plan(temp.path(), json!({"campaignId": "camp-all"})).unwrap();
-    let plan = crate::bounded_file::read_utf8_text(
-        &campaign_plan_path(temp.path(), "camp-all"),
-        1 << 20,
-    )
-    .unwrap();
+    let plan =
+        crate::bounded_file::read_utf8_text(&campaign_plan_path(temp.path(), "camp-all"), 1 << 20)
+            .unwrap();
     let plan: Value = serde_json::from_str(&plan).unwrap();
     let done_shard = plan["jobs"][0]["shard"].as_str().unwrap().to_string();
     let done: serde_json::Map<String, Value> = plan["jobs"]
@@ -625,7 +654,11 @@ fn coverage_cell_completes_only_when_every_threat_of_the_source_completed() {
 
     let report = coverage_report(temp.path(), &[]).unwrap();
 
-    let done_row = report.rows.iter().find(|row| row.shard == done_shard).unwrap();
+    let done_row = report
+        .rows
+        .iter()
+        .find(|row| row.shard == done_shard)
+        .unwrap();
     assert_eq!(done_row.cells, vec![CoverageCellState::Completed]);
 }
 
@@ -670,8 +703,15 @@ fn plan_fill_gaps_skips_cells_the_coverage_fold_reports_covered() {
         .iter()
         .filter(|job| job["shard"].as_str().unwrap() == done_shard)
         .collect();
-    assert_eq!(done_shard_jobs.len(), 1, "the uncovered threat is re-planned");
-    assert_ne!(done_shard_jobs[0]["threatId"].as_str().unwrap(), done_threat);
+    assert_eq!(
+        done_shard_jobs.len(),
+        1,
+        "the uncovered threat is re-planned"
+    );
+    assert_ne!(
+        done_shard_jobs[0]["threatId"].as_str().unwrap(),
+        done_threat
+    );
 
     // Failed cells stay gaps: a re-plan after failure must re-cover them.
     std::fs::write(
@@ -700,11 +740,9 @@ fn snapshot_joins_dispatcher_budget_and_run_finding_counts() {
     write_shard_manifest(temp.path());
     write_threat_model(temp.path());
     run_plan(temp.path(), json!({"campaignId": "camp-v2"})).unwrap();
-    let plan = crate::bounded_file::read_utf8_text(
-        &campaign_plan_path(temp.path(), "camp-v2"),
-        1 << 20,
-    )
-    .unwrap();
+    let plan =
+        crate::bounded_file::read_utf8_text(&campaign_plan_path(temp.path(), "camp-v2"), 1 << 20)
+            .unwrap();
     let plan: Value = serde_json::from_str(&plan).unwrap();
     let first_job = plan["jobs"][0]["jobId"].as_str().unwrap();
     std::fs::write(
@@ -779,7 +817,10 @@ fn status_reports_workspace_trend_with_spend_even_without_a_findings_store() {
     }
     // Every status run records a deduped history snapshot and carries the
     // bounded window back as trendHistory — two identical runs, one line.
-    for history in [&single["data"]["trendHistory"], &all["data"]["trendHistory"]] {
+    for history in [
+        &single["data"]["trendHistory"],
+        &all["data"]["trendHistory"],
+    ] {
         let rows = history.as_array().expect("trendHistory array");
         assert_eq!(rows.len(), 1, "{history}");
         assert_eq!(rows[0]["campaignSpendUsd"], 5.0);
@@ -787,7 +828,10 @@ fn status_reports_workspace_trend_with_spend_even_without_a_findings_store() {
     }
     let history_file = super::trend_history::trend_history_path(temp.path());
     assert_eq!(
-        std::fs::read_to_string(history_file).unwrap().lines().count(),
+        std::fs::read_to_string(history_file)
+            .unwrap()
+            .lines()
+            .count(),
         1,
         "identical consecutive status runs must not grow the history file"
     );
@@ -812,7 +856,9 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
 
     let workspace = crate::workspace::WorkspaceTarget::new(root).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-    store.record_run_started("perf-run", root, "running").unwrap();
+    store
+        .record_run_started("perf-run", root, "running")
+        .unwrap();
 
     let decision = |verdict| ReviewDecision {
         verdict,
@@ -824,7 +870,11 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
     };
     let generation = Instant::now();
     for index in 0..FINDINGS {
-        let shard_dir = if index % 2 == 0 { "src/codec" } else { "src/api" };
+        let shard_dir = if index % 2 == 0 {
+            "src/codec"
+        } else {
+            "src/api"
+        };
         let finding = crate::findings::Finding::new_tool(
             "perf-fixture",
             format!("perf-rule-{}", index % 40),
@@ -842,14 +892,23 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
         let id = store.insert_finding("perf-run", &finding).unwrap();
         // Three decisions per finding = 30k records, exercising the
         // latest-decision-wins reversal on every finding.
-        store.append_user_review_decision(id, &decision(ReviewDecisionVerdict::Confirmed)).unwrap();
-        store.append_user_review_decision(id, &decision(ReviewDecisionVerdict::RejectedFalsePositive)).unwrap();
+        store
+            .append_user_review_decision(id, &decision(ReviewDecisionVerdict::Confirmed))
+            .unwrap();
+        store
+            .append_user_review_decision(
+                id,
+                &decision(ReviewDecisionVerdict::RejectedFalsePositive),
+            )
+            .unwrap();
         let last = match index % 3 {
             0 => ReviewDecisionVerdict::Confirmed,
             1 => ReviewDecisionVerdict::Deferred,
             _ => ReviewDecisionVerdict::RejectedFalsePositive,
         };
-        store.append_user_review_decision(id, &decision(last)).unwrap();
+        store
+            .append_user_review_decision(id, &decision(last))
+            .unwrap();
     }
     eprintln!(
         "PERF store generation: {:?} ({FINDINGS} findings + {} decisions through the event-sourced writer)",
@@ -859,19 +918,35 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
 
     let timer = Instant::now();
     let findings = store.list_all_findings().unwrap();
-    eprintln!("PERF list_all_findings: {:?} ({} rows)", timer.elapsed(), findings.len());
+    eprintln!(
+        "PERF list_all_findings: {:?} ({} rows)",
+        timer.elapsed(),
+        findings.len()
+    );
 
     let timer = Instant::now();
     let records = store.list_review_decisions_for_findings(&findings).unwrap();
-    eprintln!("PERF list_review_decisions_for_findings: {:?} ({} rows)", timer.elapsed(), records.len());
+    eprintln!(
+        "PERF list_review_decisions_for_findings: {:?} ({} rows)",
+        timer.elapsed(),
+        records.len()
+    );
 
     let timer = Instant::now();
     let metrics = super::trend::trend_metrics(&records, 123.0);
-    eprintln!("PERF trend_metrics fold: {:?} (decided {})", timer.elapsed(), metrics.decided_findings);
+    eprintln!(
+        "PERF trend_metrics fold: {:?} (decided {})",
+        timer.elapsed(),
+        metrics.decided_findings
+    );
 
     let timer = Instant::now();
     let confirmed = super::trend::latest_confirmed_finding_ids(&records);
-    eprintln!("PERF latest_confirmed_finding_ids: {:?} ({} confirmed)", timer.elapsed(), confirmed.len());
+    eprintln!(
+        "PERF latest_confirmed_finding_ids: {:?} ({} confirmed)",
+        timer.elapsed(),
+        confirmed.len()
+    );
 
     let config = crate::config::V2Config::default();
     let ctx = crate::modules::ToolExecutionContext {
@@ -884,7 +959,10 @@ fn perf_baseline_folds_over_10k_findings_30k_decisions() {
     };
     let timer = Instant::now();
     let status = execute_campaign_status(&json!({}), &ctx).unwrap();
-    eprintln!("PERF campaign:status (all shapes, incl store load + history): {:?}", timer.elapsed());
+    eprintln!(
+        "PERF campaign:status (all shapes, incl store load + history): {:?}",
+        timer.elapsed()
+    );
     assert_eq!(status["data"]["campaigns"].as_array().unwrap().len(), 1);
 
     let timer = Instant::now();
@@ -960,9 +1038,14 @@ fn perf_baseline_pure_folds_at_10k_30k() {
             confirmed_findings: (index / 2) as usize,
             rejected_false_positives: (index / 3) as usize,
             campaign_spend_usd: index as f64 * 0.5,
+            provider_spend_unresolved: false,
         })
         .collect();
     let timer = Instant::now();
     let label = super::trend_history::history_strip_label(&history).unwrap();
-    eprintln!("PERF history_strip_label over 90 snapshots: {:?} ({} chars)", timer.elapsed(), label.len());
+    eprintln!(
+        "PERF history_strip_label over 90 snapshots: {:?} ({} chars)",
+        timer.elapsed(),
+        label.len()
+    );
 }

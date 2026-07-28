@@ -151,6 +151,7 @@ impl ShellApp {
         self.config_mut().phases = phases;
         refresh_auto_open_prefs_from_store(self);
         self.set_target(Some(root.clone()));
+        self.start_active_target_facts(root.clone());
         self.schedule_target_profile_hydration(&root);
         self.set_active_scope(None);
         if let Some(error) = option_store_error {

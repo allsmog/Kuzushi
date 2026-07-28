@@ -11,6 +11,7 @@
 # Never deletes pre-existing `.kuzushi` engagement state; never touches
 # target sources or git state.
 name: Monorepo baseline · scan plan and cancellation receipt
+require-env: KUZUSHI_DEVEX_TARGET
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1

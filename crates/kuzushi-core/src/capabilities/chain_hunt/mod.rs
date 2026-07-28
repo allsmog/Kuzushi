@@ -59,7 +59,7 @@ pub fn execute_triage_chain_hunt(
     ))
 }
 
-/// A validated model-proposed chain: every member resolved to a real
+/// A member-resolved model proposal: every member resolved to a real
 /// confirmed finding.
 struct ModelChain {
     title: String,

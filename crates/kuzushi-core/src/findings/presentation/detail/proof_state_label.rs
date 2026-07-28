@@ -32,7 +32,26 @@ fn proof_lifecycle_status(finding: &Finding) -> Option<&'static str> {
     finding
         .verification
         .as_ref()
-        .map(|verification| verification_lifecycle_label(verification.proof_verdict))
+        .filter(|verification| !verification.is_model_assessment())
+        .map(verification_lifecycle_label)
+        .or_else(|| {
+            finding
+                .static_proof_state
+                .filter(|state| {
+                    !matches!(
+                        state,
+                        StaticProofState::SignalOnly | StaticProofState::NeedsRuntimeEvidence
+                    )
+                })
+                .map(static_lifecycle_label)
+        })
+        .or_else(|| {
+            finding
+                .verification
+                .as_ref()
+                .filter(|verification| verification.is_model_assessment())
+                .map(|_| "model_assessed")
+        })
         .or_else(|| finding.static_proof_state.map(static_lifecycle_label))
 }
 
@@ -48,8 +67,9 @@ fn run_lifecycle_status(finding: &Finding) -> &'static str {
     }
 }
 
-fn verification_lifecycle_label(verdict: PersistedProofVerdict) -> &'static str {
-    match verdict {
+fn verification_lifecycle_label(verification: &PersistedVerification) -> &'static str {
+    match verification.proof_verdict {
+        PersistedProofVerdict::NotAttempted => "needs_runtime_evidence",
         PersistedProofVerdict::Exploited => "runtime_verified",
         PersistedProofVerdict::NotReproduced => "runtime_not_reproduced",
         PersistedProofVerdict::HarnessFailedToBuild => "verification_build_failed",
@@ -179,7 +199,14 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
     let Some(verification) = verification else {
         return "not attempted".to_string();
     };
+    if verification.is_model_assessment() {
+        return "model_assessed - automated review only; runtime verification was not attempted"
+            .to_string();
+    }
     match verification.proof_verdict {
+        PersistedProofVerdict::NotAttempted => {
+            "not_attempted - Runtime verification did not execute target code".to_string()
+        }
         PersistedProofVerdict::Exploited => {
             format!(
                 "runtime_verified - empirical verification evidence recorded at proof level {}",
@@ -212,7 +239,13 @@ pub fn runtime_validation_summary(
     let Some(verification) = verification else {
         return runtime_summary("not verified", "runtime verification has not run");
     };
-    if verification.proof_verdict == PersistedProofVerdict::Exploited {
+    if verification.is_model_assessment() {
+        return runtime_summary(
+            "model assessed",
+            "automated review assessed exploitability without executing target code",
+        );
+    }
+    if verification.is_empirically_verified() {
         return RuntimeValidationSummary {
             label: format!("verified L{}", verification.proof_level),
             explanation: "runtime verification recorded empirical evidence for this finding",
@@ -238,6 +271,11 @@ fn runtime_summary(label: &str, explanation: &'static str) -> RuntimeValidationS
 }
 
 const RUNTIME_VALIDATION_SUMMARIES: &[(PersistedProofVerdict, &str, &str)] = &[
+    (
+        PersistedProofVerdict::NotAttempted,
+        "not attempted",
+        "runtime verification did not execute target code",
+    ),
     (
         PersistedProofVerdict::NotReproduced,
         "not reproduced",
@@ -290,11 +328,11 @@ fn patch_next_action(latest_patch: Option<&PatchResult>) -> Option<FindingNextAc
 }
 
 fn verification_next_action(finding: &Finding) -> Option<FindingNextAction> {
-    matches!(
-        finding.verification.as_ref().map(|v| v.proof_verdict),
-        Some(PersistedProofVerdict::Exploited)
-    )
-    .then_some(FindingNextAction::Patch)
+    finding
+        .verification
+        .as_ref()
+        .is_some_and(PersistedVerification::is_empirically_verified)
+        .then_some(FindingNextAction::Patch)
 }
 
 fn rejection_next_action(finding: &Finding) -> Option<FindingNextAction> {
@@ -312,7 +350,10 @@ fn validation_next_action(finding: &Finding) -> Option<FindingNextAction> {
     (matches!(
         finding.static_proof_state,
         Some(StaticProofState::NeedsRuntimeEvidence | StaticProofState::SourceSinkLinked)
-    ) || finding.verification.is_none())
+    ) || !finding
+        .verification
+        .as_ref()
+        .is_some_and(PersistedVerification::has_terminal_runtime_verification))
     .then_some(FindingNextAction::Validate)
 }
 

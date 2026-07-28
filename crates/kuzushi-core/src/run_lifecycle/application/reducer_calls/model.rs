@@ -35,11 +35,13 @@ pub(in crate::run_lifecycle::application) fn apply_model_finished(
     usage: &ModelUsage,
     cost: RuntimeCostReport,
     error_class: &Option<SafeText>,
+    failure: &Option<crate::runtime::RuntimeFailureMetadata>,
 ) -> Result<()> {
     let call_id = required_call_id(envelope)?;
-    let first_model_receipt = !projection.calls.values().any(|call| {
-        call.kind == CallKind::Model && call.status.is_terminal()
-    });
+    let first_model_receipt = !projection
+        .calls
+        .values()
+        .any(|call| call.kind == CallKind::Model && call.status.is_terminal());
     let call = projection
         .calls
         .get_mut(&call_id)
@@ -55,7 +57,16 @@ pub(in crate::run_lifecycle::application) fn apply_model_finished(
         usage,
         cost,
         error_class,
+        failure,
     );
+    record_model_cost(projection, first_model_receipt, cost)
+}
+
+fn record_model_cost(
+    projection: &mut RunProjection,
+    first_model_receipt: bool,
+    cost: RuntimeCostReport,
+) -> Result<()> {
     projection.observed_model_cost = if first_model_receipt {
         cost
     } else {
@@ -97,6 +108,7 @@ fn apply_model_finish(
     usage: &ModelUsage,
     cost: RuntimeCostReport,
     error_class: &Option<SafeText>,
+    failure: &Option<crate::runtime::RuntimeFailureMetadata>,
 ) {
     call.provider = Some(provider.clone());
     call.model = Some(model.clone());
@@ -106,4 +118,5 @@ fn apply_model_finish(
     call.usage = usage.clone();
     call.cost = cost;
     call.error_class = error_class.clone();
+    call.failure = failure.clone();
 }

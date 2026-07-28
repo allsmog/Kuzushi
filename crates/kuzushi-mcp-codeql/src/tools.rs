@@ -545,17 +545,14 @@ async fn execute_prepared_analysis(
     limit: usize,
 ) -> Result<Vec<Value>> {
     let run = prepared.inputs.db.temporary_directory("run-")?;
+    let run_root = std::fs::canonicalize(run.path())?;
+    let database = std::fs::canonicalize(&prepared.inputs.db.directory)?;
+    let selector = canonical_analysis_selector(&prepared.inputs.selector)?;
     let cache = effective_codeql_cache_dir()?;
-    let sarif = run.path().join("result.sarif");
-    let logs = run.path().join("logs");
+    let sarif = run_root.join("result.sarif");
+    let logs = run_root.join("logs");
     std::fs::create_dir(&logs)?;
-    let args = codeql_analyze_args(
-        &prepared.inputs.db.directory,
-        &prepared.inputs.selector,
-        &sarif,
-        &logs,
-        Some(&cache),
-    );
+    let args = codeql_analyze_args(&database, &selector, &sarif, &logs, Some(&cache));
     let access = analysis_sandbox_access(&prepared.execution, &prepared.inputs, &run, &cache)?;
     let mut sandboxed = kuzushi_mcp_common::read_only_sandbox::restricted_command(
         &prepared.execution.launcher,
@@ -565,13 +562,27 @@ async fn execute_prepared_analysis(
     .await
     .context("CodeQL analysis requires an available read-only sandbox")?;
     silence_sandboxed_command(&mut sandboxed)?;
-    let (mut child, _scratch) = sandboxed.spawn("CodeQL analysis")?;
-    let status = wait_for_analysis(&mut child, &prepared.execution, &prepared.inputs.db).await?;
+    let (mut child, _scratch, process_group) = sandboxed.spawn("CodeQL analysis")?;
+    let status = wait_for_analysis(
+        &mut child,
+        &process_group,
+        &prepared.execution,
+        &prepared.inputs.db,
+    )
+    .await?;
     anyhow::ensure!(
         status.success(),
         "codeql database analyze exited with {status}"
     );
     Ok(parse_sarif(&read_generated_sarif(&sarif)?, limit))
+}
+
+fn canonical_analysis_selector(selector: &str) -> Result<String> {
+    let path = Path::new(selector);
+    if !path.is_absolute() {
+        return Ok(selector.to_string());
+    }
+    Ok(std::fs::canonicalize(path)?.display().to_string())
 }
 
 fn silence_sandboxed_command(
@@ -587,17 +598,18 @@ fn silence_sandboxed_command(
 
 async fn wait_for_analysis(
     child: &mut tokio::process::Child,
+    process_group: &kuzushi_mcp_common::process::ParentDeathProcessGroup,
     execution: &CodeqlExecutionSnapshot,
     database: &DatabaseExecutionSnapshot,
 ) -> Result<std::process::ExitStatus> {
     let status = tokio::select! {
         result = child.wait() => result?,
         () = execution.cancelled() => {
-            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child).await;
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child, process_group).await;
             anyhow::bail!("CodeQL execution snapshot became stale during analysis");
         }
         () = database.cancelled() => {
-            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child).await;
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(child, process_group).await;
             anyhow::bail!("CodeQL database snapshot became stale during analysis");
         }
     };
@@ -723,6 +735,7 @@ fn analysis_sandbox_access(
     cache: &Path,
 ) -> Result<kuzushi_mcp_common::read_only_sandbox::RestrictedSandboxAccess> {
     let tool = authorize_directory(&execution.bundle_root)?;
+    let codeql_dist = tool.path().as_os_str().to_owned();
     let database = authorize_directory(&inputs.db.directory)?;
     let read_only = inputs
         .query
@@ -740,10 +753,7 @@ fn analysis_sandbox_access(
                 authorize_directory(run.path())?,
                 authorize_directory(cache)?,
             ],
-            environment: vec![(
-                "CODEQL_DIST".into(),
-                execution.bundle_root.as_os_str().to_owned(),
-            )],
+            environment: vec![("CODEQL_DIST".into(), codeql_dist)],
         },
     )
 }
@@ -956,6 +966,8 @@ async fn run_prewarm_compile(
     selector: &str,
 ) -> Result<std::process::ExitStatus> {
     let cache = effective_codeql_cache_dir()?;
+    let tool_root = authorize_directory(&execution.bundle_root)?;
+    let codeql_dist = tool_root.path().as_os_str().to_owned();
     let args = vec![
         OsString::from("query"),
         OsString::from("compile"),
@@ -964,13 +976,10 @@ async fn run_prewarm_compile(
     ];
     let access = kuzushi_mcp_common::read_only_sandbox::RestrictedSandboxAccess {
         working_directory: authorize_directory(&execution.bundle_root)?,
-        tool_root: authorize_directory(&execution.bundle_root)?,
+        tool_root,
         read_only: Vec::new(),
         read_write: vec![authorize_directory(&cache)?],
-        environment: vec![(
-            "CODEQL_DIST".into(),
-            execution.bundle_root.as_os_str().to_owned(),
-        )],
+        environment: vec![("CODEQL_DIST".into(), codeql_dist)],
     };
     let mut sandboxed = kuzushi_mcp_common::read_only_sandbox::restricted_command(
         &execution.launcher,
@@ -980,11 +989,11 @@ async fn run_prewarm_compile(
     .await
     .context("CodeQL prewarm requires an available read-only sandbox")?;
     silence_sandboxed_command(&mut sandboxed)?;
-    let (mut child, _scratch) = sandboxed.spawn("CodeQL prewarm")?;
+    let (mut child, _scratch, process_group) = sandboxed.spawn("CodeQL prewarm")?;
     tokio::select! {
         result = child.wait() => Ok(result?),
         () = execution.cancelled() => {
-            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(&mut child).await;
+            kuzushi_mcp_common::read_only_sandbox::terminate_child_group(&mut child, &process_group).await;
             anyhow::bail!("CodeQL prewarm snapshot became stale")
         }
     }
@@ -1199,9 +1208,7 @@ if [ -f "$counter" ]; then
 fi
 echo "$((count + 1))" > "$counter"
 if [ -n "$out" ]; then
-  cat > "$out" <<'JSON'
-{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
-JSON
+  printf '%s\n' '{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":7,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":11,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}' > "$out"
 fi
 "#;
 

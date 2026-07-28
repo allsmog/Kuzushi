@@ -42,6 +42,19 @@ pub(crate) fn activity_dag_pane_rows(
     ensure_activity_rows(rows)
 }
 
+pub(crate) fn activity_dag_preferred_width(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+) -> usize {
+    session
+        .ordered_task_rows()
+        .into_iter()
+        .filter(|row| task_row_is_visible(session, route, row))
+        .map(|row| task_preferred_width(route, row))
+        .max()
+        .unwrap_or(28)
+}
+
 fn task_status_rows(
     session: &ActivitySession,
     route: &ActivityRouteState,
@@ -64,11 +77,7 @@ fn task_status_rows(
         .ordered_task_rows()
         .into_iter()
         .enumerate()
-        .filter(|(_, row)| {
-            route.verbose_subsystems
-                || !activity_row_is_never_started(row)
-                || session.task_is_sequence_owned(&row.task_id)
-        })
+        .filter(|(_, row)| task_row_is_visible(session, route, row))
         .flat_map(|(index, row)| task_pane_rows(route, row, index, width, now))
         .collect::<Vec<_>>();
     if hidden_not_run > 0 {
@@ -81,6 +90,16 @@ fn task_status_rows(
         });
     }
     rows
+}
+
+fn task_row_is_visible(
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    row: &DagTaskRow,
+) -> bool {
+    route.verbose_subsystems
+        || !activity_row_is_never_started(row)
+        || session.task_is_sequence_owned(&row.task_id)
 }
 
 fn activity_row_is_never_started(row: &DagTaskRow) -> bool {
@@ -243,6 +262,28 @@ fn task_display_label(row: &DagTaskRow) -> String {
     } else {
         raw.clone()
     }
+}
+
+fn task_preferred_width(route: &ActivityRouteState, row: &DagTaskRow) -> usize {
+    let main = display_width(&task_display_label(row)) + 15 + prior_run_width(row);
+    let detail = if should_show_task_details(route, row) {
+        row.details
+            .iter()
+            .map(|detail| display_width(&detail.label) + display_width(&detail.meta) + 10)
+            .max()
+    } else {
+        active_substep_width(row)
+    };
+    detail.map_or(main, |detail| main.max(detail))
+}
+
+fn active_substep_width(row: &DagTaskRow) -> Option<usize> {
+    (row.state == DagTaskState::Active && !row.last_label.trim().is_empty())
+        .then(|| display_width(row.last_label.trim()) + 10)
+}
+
+fn prior_run_width(row: &DagTaskRow) -> usize {
+    usize::from(row.prior_run_ref.is_some()) * " · prior run".len()
 }
 
 /// A task's row, plus — under a running task — a sub-line showing what it's
@@ -450,6 +491,23 @@ mod tests {
 
         assert!(text.contains("Build project context"));
         assert!(!text.contains(task_id));
+    }
+
+    #[test]
+    fn preferred_width_measures_task_and_active_detail_labels() {
+        let mut session = ActivitySession::new("r-width");
+        let mut row = DagTaskRow::queued(
+            "Review a deliberately long authentication boundary label".to_string(),
+            "custom".to_string(),
+            Vec::new(),
+        );
+        row.state = DagTaskState::Active;
+        row.last_label = "Comparing authorization evidence across trust boundaries".to_string();
+        session.tasks.insert(row.task_id.clone(), row);
+
+        let width = activity_dag_preferred_width(&session, &ActivityRouteState::default());
+
+        assert!(width >= 69, "measured width was {width}");
     }
 
     #[test]

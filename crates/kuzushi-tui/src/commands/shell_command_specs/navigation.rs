@@ -17,7 +17,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         command: "workbench",
         aliases: &["/workbench", "workbench"],
         category: ShellCommandCategory::Navigation,
-        description: "open the split-pane command center",
+        description: "open the current Map/Scan/Review/Prove/Fix phase",
     },
     ShellCommandSpec {
         command: "report",

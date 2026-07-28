@@ -25,7 +25,7 @@ Feature: Root-shell operator questions pause and resume deterministic work
     Then I see "WAITING INPUT"
     And I see "Choose the scan scope."
     When I press "2"
-    Then I do not see "Choose the scan scope."
+    Then I do not see "WAITING INPUT"
     When I press "b"
     Then I see "PROJECT CONTEXT"
     When I submit shell command "logs"

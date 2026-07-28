@@ -57,29 +57,15 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
     MODEL_CHOICES
 }
 
-pub(crate) fn oauth_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
-        return None;
-    }
-    MODEL_CHOICES
-        .iter()
-        .find(|choice| choice.provider == AuthProvider::OpenAi.oauth_model_provider())
-}
-
-pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
-    if AuthProvider::from_scene_provider(provider) != Some(AuthProvider::OpenAi) {
-        return None;
-    }
-    MODEL_CHOICES
-        .iter()
-        .find(|choice| choice.provider == AuthProvider::OpenAi.api_key_provider())
-}
-
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
-    let mut seen = std::collections::BTreeSet::new();
-    [visible_primary_openai_choice(configured_model), 1, 2, 3, 4]
-        .into_iter()
-        .filter(|index| seen.insert(*index))
+    let canonical =
+        configured_model.and_then(|model| kuzushi_core::runtime::canonical_model_spec(model).ok());
+    let configured_model = canonical.as_deref().or(configured_model);
+    let preferred = configured_model
+        .and_then(model_choice_index_by_id)
+        .unwrap_or_else(|| visible_primary_openai_choice(configured_model));
+    std::iter::once(preferred)
+        .chain((0..MODEL_CHOICES.len()).filter(|index| *index != preferred))
         .collect()
 }
 

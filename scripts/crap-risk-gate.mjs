@@ -16,11 +16,12 @@ for (const file of changed) {
   const abs = path.join(root, file);
   if (!existsSync(abs)) continue;
   const source = readFileSync(abs, "utf8");
+  const production = productionSource(file, source);
   const hasFocusedChangedTest =
     changedTests.some((test) => testCoversProductionFile(file, test.file, test.source)) ||
     hasChangedInlineTest(file, source);
-  const blocks = scoredFunctionBlocks(file, source);
-  const logicalFileLines = logicalLines(source).length;
+  const blocks = scoredFunctionBlocks(file, production);
+  const logicalFileLines = logicalLines(production).length;
   if (scoresWholeFile(file) && isProductionCode(file) && logicalFileLines > 300) {
     failures.push(`${file}: file has ${logicalFileLines} logical lines; limit is 300`);
   }
@@ -80,6 +81,11 @@ function hasChangedInlineTest(file, source) {
   const marker = source.split(/\r?\n/).findIndex((line) => line.includes("#[cfg(test)]"));
   if (marker < 0) return false;
   return changedLineRanges(file).some((range) => range.end >= marker + 1);
+}
+
+function productionSource(file, source) {
+  if (!file.endsWith(".rs")) return source;
+  return source.split(/^\s*#\[cfg\(test\)\]/m, 1)[0];
 }
 
 function changedFilesFromGit() {
@@ -272,6 +278,7 @@ function isTestFile(file) {
   return (
     file.includes("/tests/") ||
     file.endsWith("/tests.rs") ||
+    file.endsWith("/test_support.rs") ||
     file.includes("_test.") ||
     file.includes(".test.") ||
     file.includes("/snapshots/")

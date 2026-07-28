@@ -21,15 +21,25 @@ pub(in crate::verification) fn build_rust_trigger(
     workspace_root: &Path,
 ) -> Result<RustTriggerSource> {
     let payload = synth_payload_from_finding(finding);
+    build_rust_trigger_with_payload(finding, workspace_root, &payload)
+}
+
+pub(in crate::verification) fn build_rust_trigger_with_payload(
+    finding: &Finding,
+    workspace_root: &Path,
+    payload: &[u8],
+) -> Result<RustTriggerSource> {
     let suspect = plan_rust_suspect(finding, workspace_root)?;
     let suspect_comment = rust_suspect_comment(finding, &suspect);
-    let (lib_rs, call_block) = rust_harness_modules(&suspect);
-    let trigger_test = rust_trigger_body(finding, &payload, &suspect_comment, &call_block);
+    let (lib_rs, call_block, fidelity) = rust_harness_modules(&suspect);
+    let trigger_test = rust_trigger_body(finding, payload, &suspect_comment, &call_block, fidelity);
     Ok(RustTriggerSource {
         cargo_toml: HARNESS_CARGO_TOML.to_string(),
         lib_rs,
         trigger_test,
         suspect_source: suspect.source,
+        fidelity,
+        payload: payload.to_vec(),
     })
 }
 
@@ -101,7 +111,7 @@ fn rust_suspect_comment(finding: &Finding, suspect: &RustSuspectPlan) -> String 
     }
 }
 
-fn rust_harness_modules(suspect: &RustSuspectPlan) -> (String, String) {
+fn rust_harness_modules(suspect: &RustSuspectPlan) -> (String, String, HarnessFidelity) {
     match (&suspect.source, &suspect.call) {
         (Some(src), Some(plan)) if rust_source_appears_self_contained(src) => {
             // Wrap the suspect file as `pub mod suspect;` inside the
@@ -112,17 +122,19 @@ fn rust_harness_modules(suspect: &RustSuspectPlan) -> (String, String) {
                 .to_string();
             let call = format!(
                 "             // Real sink call (synthesized from {fname}'s signature).\n\
+                 kuzushi_verify_mark_sink_reached();\n\
                  {invoke}",
                 fname = plan.fn_name,
                 invoke = plan.call_expression
             );
-            (lib, call)
+            (lib, call, HarnessFidelity::Faithful)
         }
         _ => (
             "// kuzushi-verify-harness\n".to_string(),
             "             // Payload-only harness — no sink call wired.\n\
              let _ = std::hint::black_box(payload);\n"
                 .to_string(),
+            HarnessFidelity::PayloadOnly,
         ),
     }
 }
@@ -132,10 +144,13 @@ fn rust_trigger_body(
     payload: &[u8],
     suspect_comment: &str,
     call_block: &str,
+    fidelity: HarnessFidelity,
 ) -> String {
+    let marker_helper = rust_marker_helper(fidelity);
     format!(
         "// Synthesised by kuzushi verify for finding {fp}\n\
          {suspect_comment}\n\
+         {marker_helper}\
          #[test]\n\
          fn trigger() {{\n\
              let payload: Vec<u8> = vec!{payload:?};\n\
@@ -144,7 +159,32 @@ fn rust_trigger_body(
          }}\n",
         fp = finding.fingerprint,
         suspect_comment = suspect_comment,
+        marker_helper = marker_helper,
         payload = payload,
         call_block = call_block,
     )
+}
+
+fn rust_marker_helper(fidelity: HarnessFidelity) -> String {
+    let marker_helper = if fidelity == HarnessFidelity::Faithful {
+        format!(
+            "use std::io::Write;\n\
+             \n\
+             fn kuzushi_verify_mark_sink_reached() {{\n\
+                 let path = std::env::var_os(\"KUZUSHI_SINK_MARKER\")\n\
+                     .expect(\"KUZUSHI_SINK_MARKER must be set\");\n\
+                 let mut marker = std::fs::OpenOptions::new()\n\
+                     .write(true)\n\
+                     .create_new(true)\n\
+                     .open(path)\n\
+                     .expect(\"create reached-sink marker\");\n\
+                 marker.write_all(b\"{SINK_MARKER_CONTENT}\")\n\
+                     .expect(\"write reached-sink marker\");\n\
+                 marker.sync_all().expect(\"sync reached-sink marker\");\n\
+             }}\n\n"
+        )
+    } else {
+        String::new()
+    };
+    marker_helper
 }

@@ -247,10 +247,7 @@ fn missing_runtime_proof_lines(finding: &FindingDetailModel, width: usize) -> Ve
 fn proof_summary_lines(proof: &ProofReplayModel, width: usize) -> Vec<Line<'static>> {
     vec![
         Line::from(vec![
-            Span::styled(
-                format!("{}  ", proof.verdict),
-                proof_verdict_style(&proof.verdict),
-            ),
+            Span::styled(format!("{}  ", proof.verdict), proof_verdict_style(proof)),
             Span::styled(
                 format!("L{} · {}", proof.proof_level, proof.backend),
                 theme::primary(),
@@ -330,8 +327,11 @@ fn command_line(command: &str, label: &str, width: usize) -> Line<'static> {
     ])
 }
 
-fn proof_verdict_style(verdict: &str) -> ratatui::style::Style {
-    match verdict {
+fn proof_verdict_style(proof: &ProofReplayModel) -> ratatui::style::Style {
+    if proof.backend == "model" {
+        return theme::warn();
+    }
+    match proof.verdict.as_str() {
         "exploited" => theme::success(),
         "not_reproduced" => theme::warn(),
         _ => theme::danger(),

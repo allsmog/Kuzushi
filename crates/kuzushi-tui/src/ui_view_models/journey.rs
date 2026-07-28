@@ -13,8 +13,8 @@ use crate::{RunSummaryEntriesState, ShellApp};
 use kuzushi_core::findings::ReviewDecisionVerdict;
 use kuzushi_core::workflow_attempts::{PhaseAttemptDisposition, PhaseAttemptOutcome};
 use kuzushi_core::{
-    Finding, PatchLifecycleRecord, PatchLifecycleState, PersistedProofVerdict, RunSummary,
-    RunSummaryEntryState, TriageVerdict,
+    Finding, PatchLifecycleRecord, PatchLifecycleState, RunSummary, RunSummaryEntryState,
+    TriageVerdict,
 };
 use std::collections::BTreeSet;
 
@@ -409,7 +409,7 @@ pub(crate) fn attach_proof_deferral_counts(
 fn finding_has_proof_backing(finding: &Finding) -> bool {
     finding.verification.as_ref().is_some_and(|verification| {
         verification.is_current_for_scan(finding.scan_id.as_deref())
-            && verification.proof_verdict == PersistedProofVerdict::Exploited
+            && verification.is_empirically_verified()
     })
 }
 
@@ -418,7 +418,7 @@ fn finding_has_verified_remediation(
     lifecycles: &[PatchLifecycleRecord],
 ) -> bool {
     lifecycles.iter().any(|record| {
-        record.state == PatchLifecycleState::Verified
+        record.is_empirically_verified()
             && record.finding_scan_id.as_deref() == finding.scan_id.as_deref()
             && (record.fingerprint == finding.fingerprint
                 || finding
@@ -464,10 +464,10 @@ fn journey_progress_from_parts(
 }
 
 fn finding_has_current_terminal_verification(finding: &Finding) -> bool {
-    finding
-        .verification
-        .as_ref()
-        .is_some_and(|verification| verification.is_current_for_scan(finding.scan_id.as_deref()))
+    finding.verification.as_ref().is_some_and(|verification| {
+        verification.is_current_for_scan(finding.scan_id.as_deref())
+            && verification.has_terminal_runtime_verification()
+    })
 }
 
 fn indexed_actionable_finding(index: &EffectiveReviewStateIndex, finding: &Finding) -> bool {
@@ -800,6 +800,24 @@ mod tests {
             assert_eq!(progress.proven_findings, expected);
             assert_eq!(progress.proof_backed_findings, expected);
         }
+
+        let mut model_assessed =
+            actionable_finding_with_verification("scan-2", "scan-2", "model-2");
+        model_assessed.verification.as_mut().unwrap().backend = PersistedSandboxBackend::Model;
+        for verdict in [
+            PersistedProofVerdict::Exploited,
+            PersistedProofVerdict::NotAttempted,
+        ] {
+            model_assessed.verification.as_mut().unwrap().proof_verdict = verdict;
+            let index = EffectiveReviewStateIndex::from_findings_and_decisions(
+                std::slice::from_ref(&model_assessed),
+                &[],
+            );
+            let progress =
+                journey_progress_from_parts(false, std::slice::from_ref(&model_assessed), &index);
+            assert_eq!(progress.proven_findings, 0);
+            assert_eq!(progress.proof_backed_findings, 0);
+        }
     }
 
     #[test]
@@ -860,6 +878,16 @@ mod tests {
         assert_eq!(counts.remediated, 0);
 
         lifecycle.finding_scan_id = Some("scan-2".to_string());
+        lifecycle.reverify_evidence = None;
+        attach_remediation_counts(
+            &mut counts,
+            std::slice::from_ref(&finding),
+            &[],
+            std::slice::from_ref(&lifecycle),
+        );
+        assert_eq!(counts.remediated, 0);
+
+        lifecycle.reverify_evidence = Some(crate::test_support::test_reverify_evidence_ref());
         attach_remediation_counts(
             &mut counts,
             std::slice::from_ref(&finding),
@@ -886,20 +914,10 @@ mod tests {
         verification_run_id: &str,
     ) -> Finding {
         let mut finding = actionable_finding(scan_id);
-        finding.verification = Some(PersistedVerification {
-            proof_level: 3,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Plain,
-            language: None,
-            harness_path: None,
-            crash_evidence: Some("reproduced".to_string()),
-            duration_ms: 1,
-            cost_usd: 0.0,
-            notes: Vec::new(),
-            verification_run_id: Some(verification_run_id.to_string()),
-            verified_scan_id: Some(verified_scan_id.to_string()),
-            created_at: "1".to_string(),
-        });
+        let mut verification = crate::test_support::test_empirical_verification(3);
+        verification.verification_run_id = Some(verification_run_id.to_string());
+        verification.verified_scan_id = Some(verified_scan_id.to_string());
+        finding.verification = Some(verification);
         finding
     }
 
@@ -919,6 +937,7 @@ mod tests {
             touched_files: Vec::new(),
             state: PatchLifecycleState::Verified,
             reverify_run_id: Some("reverify-1".to_string()),
+            reverify_evidence: Some(crate::test_support::test_reverify_evidence_ref()),
             detail: None,
             actor: "operator".to_string(),
             application_started_at: "1".to_string(),

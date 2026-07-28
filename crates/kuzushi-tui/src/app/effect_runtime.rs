@@ -120,6 +120,7 @@ impl EffectRuntime {
             | ShellEffect::CancelActiveJobs
             | ShellEffect::CancelJob(_)
             | ShellEffect::ContinuePastBudget
+            | ShellEffect::FinalizeJob(_)
             | ShellEffect::FinishShellQuit
             | ShellEffect::PauseActiveWork
             | ShellEffect::RequestExitAbort
@@ -157,6 +158,7 @@ impl EffectRuntime {
             ShellEffect::CancelActiveJobs => app.cancel_active_jobs_effect(),
             ShellEffect::CancelJob(kind) => app.cancel_job_effect(kind),
             ShellEffect::ContinuePastBudget => app.continue_past_budget(),
+            ShellEffect::FinalizeJob(kind) => app.finalize_job_effect(kind),
             ShellEffect::FinishShellQuit => app.finish_shell_quit_effect(),
             ShellEffect::PauseActiveWork => app.pause_active_work_effect(),
             ShellEffect::RequestExitAbort => app.request_exit_abort_effect(),

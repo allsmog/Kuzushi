@@ -13,7 +13,7 @@ import {
 } from "./langgraph-bridge/mcp.mjs";
 import {
   appendStructuredOutputContract,
-  bridgeUsageFields,
+  bridgeQueryResult,
   interruptedQueryResult,
   isAiMessage,
   maybeParseJson,
@@ -24,7 +24,6 @@ import {
   systemMessageForRequest,
   toolMessageForOutput,
   usageFromMessage,
-  usageFromMessages,
 } from "./langgraph-bridge/model.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
@@ -52,10 +51,11 @@ async function runQueryGraph(request) {
     const progress = { messages: [] };
     const graph = queryGraphForRequest(request, tools, mcpToolNames, system, progress);
     try {
-      const messages = await runQueryGraphToConclusion(graph, request, system, progress);
+      const completion = await runQueryGraphToConclusion(graph, request, system, progress);
+      const { messages } = completion;
       const message = messages.at(-1);
       debugDumpBridgeCall("query", request, tools, system, message);
-      return queryResultFromMessages(messages, request);
+      return queryResultFromMessages(messages, request, completion.stopReason);
     } catch (error) {
       if (!isMcpToolTimeoutError(error)) throw error;
       const message = progress.messages.at(-1);
@@ -81,11 +81,14 @@ async function runQueryGraphToConclusion(graph, request, system, progress) {
     const result = await graph.invoke(state, {
       recursionLimit: QUERY_GRAPH_RECURSION_LIMIT,
     });
-    return result.messages;
+    return { messages: result.messages };
   } catch (error) {
     if (error?.name !== "GraphRecursionError") throw error;
     const conclusion = await forcedConclusion(request, system, progress);
-    return [...progress.messages, conclusion];
+    return {
+      messages: [...progress.messages, conclusion],
+      stopReason: "forced_conclusion",
+    };
   }
 }
 
@@ -222,19 +225,11 @@ function shouldContinueForRequest(request) {
   };
 }
 
-function queryResultFromMessages(messages, request) {
+function queryResultFromMessages(messages, request, completionStopReason) {
   const message = messages.at(-1);
-  const text = messageText(message);
-  const usage = usageFromMessages(messages);
-  const stopReason = queryStopReason(messages, request) ?? message?.response_metadata?.finish_reason;
-  return {
-    ok: true,
-    text,
-    structured: maybeParseJson(text),
-    ...bridgeUsageFields(usage),
-    truncated: isTruncatedStopReason(stopReason),
-    stopReason,
-  };
+  const stopReason =
+    completionStopReason ?? queryStopReason(messages, request) ?? message?.response_metadata?.finish_reason;
+  return bridgeQueryResult(messages, stopReason);
 }
 
 function queryStopReason(messages, request) {
@@ -244,18 +239,6 @@ function queryStopReason(messages, request) {
   const stop = options.observedSpendStopUsd ?? options.observed_spend_stop_usd;
   const decision = modelContinuationDecision(messages, stop);
   return decision === "continue" ? undefined : decision;
-}
-
-function isTruncatedStopReason(reason) {
-  return [
-    "length",
-    "max_tokens",
-    "max_tokens_reached",
-    "model_turn_limit",
-    "mcp_tool_timeout",
-    "observed_spend_incomplete",
-    "observed_spend_exhausted",
-  ].includes(String(reason ?? ""));
 }
 
 function messagesForNextStep(request) {
@@ -355,7 +338,7 @@ async function main() {
 
 main().catch(async (error) => {
   const response = bridgeErrorResponse(error);
-  // Mirror the bounded raw detail on stderr so `KUZUSHI_BRIDGE_VERBOSE` /
+  // Mirror the bounded redacted detail on stderr so `KUZUSHI_BRIDGE_VERBOSE` /
   // `KUZUSHI_BRIDGE_LOG` capture it even when stdout parsing fails.
   if (response.detail) {
     process.stderr.write(`[bridge-error] ${response.errorClass}: ${response.detail}\n`);

@@ -178,20 +178,16 @@ fn credential_row(
             readiness.label(),
         );
     }
-    let provider = configured_provider(app).unwrap_or("selected provider");
-    blocked_row(
-        SetupRowId::Credentials,
-        "Credentials",
-        "MISSING",
-        format!("{provider}: {}", readiness.label()),
-    )
+    let detail = missing_credential_detail(app)
+        .unwrap_or_else(|| "selected provider: credentials required".to_string());
+    blocked_row(SetupRowId::Credentials, "Credentials", "MISSING", detail)
 }
 
-fn configured_provider(app: &ShellApp) -> Option<&str> {
-    app.config()
-        .model
-        .as_deref()
-        .and_then(|model| model.split(':').next())
+fn missing_credential_detail(app: &ShellApp) -> Option<String> {
+    let model = app.config().model.as_deref()?;
+    let provider = model.split_once(':')?.0;
+    crate::app::AuthProvider::from_scene_provider(provider)
+        .map(|auth| auth.missing_credential_guidance(model, provider))
 }
 
 fn prompt_row(app: &ShellApp, selected_rows: &[&crate::app::PlanningTaskRow]) -> SetupReadinessRow {

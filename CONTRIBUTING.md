@@ -11,16 +11,17 @@ git clone <your-fork>
 cd Kuzushi
 pnpm setup          # verifies pinned Rust + Node 22, then runs pnpm install
 pnpm doctor         # re-check the environment at any time (read-only)
-pnpm verify:quick    # types, tests, formatting, architecture, docs, and policy gates
+pnpm verify:quick    # Node tests, Rust format/check, architecture, docs, and policy gates
 ```
 
-Before a release or when reproducing CI end to end, run `pnpm verify:ci`.
-It adds coverage, codegen drift, Clippy, cargo-deny, the full Rust workspace,
-native/package assembly, and e2e smoke, and reserves stdout for one
-machine-readable receipt. CI keeps those gates parallel for latency. The
-dedicated Node 22 compatibility lane, Linux bubblewrap/AppArmor setup, and
-artifact transfer are matrix/infrastructure checks and remain CI-only; the
-receipt lists those exceptions explicitly.
+Before a release or when reproducing CI end to end, install the pinned
+`cargo-llvm-cov` and `cargo-mutants` versions printed by the commands, then run
+`pnpm verify:ci`. It runs the quick checks plus measured coverage, strict
+Clippy, cargo-deny, full Rust tests, changed-code mutation sampling, native/package
+assembly, and e2e smoke serially. The dedicated Node 22 compatibility lane,
+Linux bubblewrap/AppArmor setup, and artifact transfer are
+matrix/infrastructure checks and remain CI-only; the receipt lists those
+exceptions explicitly.
 
 Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+. The repo has
 `rust-toolchain.toml`, `.nvmrc`, and `.tool-versions` so `rustup`, `nvm use`,
@@ -37,15 +38,18 @@ Using VS Code / Codespaces? Open the repo and "Reopen in Container"; the
 ```sh
 pnpm dev -- --target /path/to/repo  # run the Rust operator shell
 pnpm dev -- scan /path/to/repo      # run a Rust scan from source
-cargo test --workspace              # test the native product
-pnpm typecheck:all                  # type check the retained TypeScript SDK and tooling
-pnpm test                           # test the TypeScript SDK and scripts
+cargo test --workspace --locked     # test the native product
+pnpm test:performance               # run the serial Workbench input-to-paint budget
+pnpm test                           # test Node scripts and repository contracts
+pnpm check                          # run Biome checks
 pnpm quality:architecture           # enforce shared Rust boundaries and artifact contracts
 pnpm quality:model-safety           # enforce no-silent-fallback model policy
 pnpm quality:crap-risk              # enforce complexity/test-risk limits on changed code
+pnpm test:coverage                  # enforce Node and changed-line Rust coverage
+pnpm test:mutations                 # kill all platform-active mutants for small Rust diffs, or a deterministic distributed sample of 12
 cargo deny check advisories licenses bans sources  # dependency policy used by CI
-pnpm build                          # compile the retained TypeScript SDK to dist/
-cargo build --workspace             # build the native product and MCP servers
+pnpm build:native                   # assemble the native npm runtime
+cargo build --workspace --locked    # build the native product and MCP servers
 ```
 
 Benchmark corpus setup:

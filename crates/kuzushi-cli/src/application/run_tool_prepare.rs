@@ -468,16 +468,22 @@ fn record_cli_preparation_rejection(
         &observation,
         completion,
     );
-    // A minted-then-rejected run must still publish its terminal sentinel,
-    // or an unattended poller reads it as a crash instead of a bad job.
-    if let Err(sentinel) = super::run_exit::write_done_sentinel(
-        target,
-        run_id,
-        tool,
-        &serde_json::json!({ "status": "blocked" }),
-        super::run_exit::EXIT_RUN_PREPARE_FAILED,
-    ) {
-        eprintln!("kuzushi: warning: done sentinel not written: {sentinel}");
+    // Sentinel presence is reserved for a verified durable terminal bundle.
+    if recorded.is_ok() {
+        let sentinel =
+            kuzushi_core::load_persisted_run_terminal_outcome(target, run_id).and_then(|outcome| {
+                super::run_exit::write_done_sentinel(
+                    target,
+                    run_id,
+                    tool,
+                    outcome.status,
+                    super::run_exit::run_exit_code(outcome.status),
+                )
+                .map(|_| ())
+            });
+        if let Err(error) = sentinel {
+            eprintln!("kuzushi: warning: done sentinel not written: {error}");
+        }
     }
     recorded
 }
@@ -705,6 +711,20 @@ export default {
                 .status,
             "blocked"
         );
+        let outcome = kuzushi_core::load_persisted_run_terminal_outcome(target.path(), &run_id)
+            .expect("prepare rejection must have one agreeing terminal bundle");
+        assert_eq!(
+            outcome.status,
+            kuzushi_core::run_lifecycle::RunItemStatus::Blocked
+        );
+        assert_eq!(outcome.result["status"], "blocked");
+        let done: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(kuzushi_core::run_dir(target.path(), &run_id).join("done.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(done["status"], "blocked");
+        assert_eq!(done["exitCode"], 2);
         assert_rejection_artifact_correlation(&read);
         assert_items_redact_raw_input(target.path(), &run_id);
     }

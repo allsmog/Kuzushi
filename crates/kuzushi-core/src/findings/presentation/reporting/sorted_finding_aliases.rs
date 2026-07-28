@@ -117,9 +117,7 @@ pub(in crate::findings) fn pad(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod compare_findings_by_confidence_tests {
     use super::*;
-    use crate::findings::domain::{
-        PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification,
-    };
+    use crate::findings::domain::PersistedVerification;
 
     fn finding(
         fingerprint: &str,
@@ -135,20 +133,7 @@ mod compare_findings_by_confidence_tests {
     }
 
     fn confirmed() -> PersistedVerification {
-        PersistedVerification {
-            proof_level: 3,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Plain,
-            language: None,
-            harness_path: None,
-            crash_evidence: None,
-            duration_ms: 0,
-            cost_usd: 0.0,
-            notes: Vec::new(),
-            verification_run_id: None,
-            verified_scan_id: None,
-            created_at: String::new(),
-        }
+        crate::findings::test_support::empirically_verified(3)
     }
 
     #[test]

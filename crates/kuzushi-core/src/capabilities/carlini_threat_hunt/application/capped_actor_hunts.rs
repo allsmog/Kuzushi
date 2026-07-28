@@ -29,9 +29,9 @@ pub(crate) fn unprioritized_actor_hunt(actor: DfdNode) -> ActorHunt {
 /// caller can persist the cost into the report instead of dropping it.
 pub(crate) struct CarliniActorHuntsOutcome {
     pub(crate) findings: Vec<Finding>,
-    /// Reasons for every normalizer-rejected finding — surfaced in trace,
-    /// receipt, and report; never dropped silently.
-    pub(crate) rejected: Vec<String>,
+    pub(crate) rejected_count: usize,
+    /// Bounded, actor-scoped rejection reasons for trace and result receipts.
+    pub(crate) rejection_reasons: Vec<String>,
     pub(crate) cost_usd: f64,
     pub(crate) cost_usd_exact: bool,
 }
@@ -62,7 +62,8 @@ pub(crate) fn run_carlini_actor_hunts(
     }
     Ok(CarliniActorHuntsOutcome {
         findings: state.findings,
-        rejected: state.rejected,
+        rejected_count: state.rejected_count,
+        rejection_reasons: state.rejection_reasons,
         cost_usd: state.cost.observed_usd(),
         cost_usd_exact: state.cost.is_complete(),
     })
@@ -70,7 +71,8 @@ pub(crate) fn run_carlini_actor_hunts(
 
 pub(crate) struct CarliniActorRunState {
     pub(crate) findings: Vec<Finding>,
-    pub(crate) rejected: Vec<String>,
+    pub(crate) rejected_count: usize,
+    pub(crate) rejection_reasons: Vec<String>,
     pub(crate) seen: BTreeSet<String>,
     pub(crate) run_index: usize,
     pub(crate) cost: RuntimeCostReport,
@@ -80,7 +82,8 @@ impl Default for CarliniActorRunState {
     fn default() -> Self {
         Self {
             findings: Vec::new(),
-            rejected: Vec::new(),
+            rejected_count: 0,
+            rejection_reasons: Vec::new(),
             seen: BTreeSet::new(),
             run_index: 0,
             cost: RuntimeCostReport::known(RuntimeCost::ZERO),
@@ -238,7 +241,9 @@ fn reuse_checkpointed_actor_response(
     let Some(payload) = handle.read_stage_payload(&receipt) else {
         return Ok(false);
     };
-    let source = handle.resumed_from().unwrap_or_else(|| "prior run".to_string());
+    let source = handle
+        .resumed_from()
+        .unwrap_or_else(|| "prior run".to_string());
     handle
         .stage(stage_id)
         .skip(&format!("reused checkpointed actor response from {source}"));
@@ -254,12 +259,20 @@ fn record_normalized_actor_findings(
     payload: Value,
 ) -> Result<()> {
     let normalized = normalize_findings(payload, target, options.max_findings, actor_fingerprint)?;
-    state.rejected.extend(
+    state.rejected_count += normalized.rejected_count;
+    let remaining = MAX_CARLINI_REJECTION_REASONS.saturating_sub(state.rejection_reasons.len());
+    state.rejection_reasons.extend(
         normalized
             .rejected
             .into_iter()
-            .map(|reason| format!("{actor_fingerprint}: {reason}")),
+            .take(remaining)
+            .map(|reason| actor_scoped_rejection(actor_fingerprint, &reason)),
     );
     record_unique_carlini_findings(state, normalized.kept);
     Ok(())
+}
+
+fn actor_scoped_rejection(actor_fingerprint: &str, reason: &str) -> String {
+    let actor = actor_fingerprint.chars().take(120).collect::<String>();
+    format!("{actor}: {reason}")
 }

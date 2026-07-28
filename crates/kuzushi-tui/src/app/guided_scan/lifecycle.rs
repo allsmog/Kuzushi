@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn begin_guided_scan_questions(&mut self) {
-        if !self.prepare_phase_picker_state(WorkflowPhase::Map) {
+        if !self.prepare_phase_picker_state(WorkflowPhase::Map, false) {
             return;
         }
         self.engagement
@@ -87,7 +87,7 @@ impl ShellApp {
     }
 
     pub(super) fn prepare_guided_phase(&mut self, phase: WorkflowPhase) {
-        if !self.prepare_phase_picker_state(phase) {
+        if !self.prepare_phase_picker_state(phase, false) {
             self.clear_guided_scan();
             return;
         }

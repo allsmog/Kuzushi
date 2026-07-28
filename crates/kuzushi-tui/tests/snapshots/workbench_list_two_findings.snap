@@ -8,7 +8,13 @@ Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
  type Esc then B review decision backlog · type Enter open in Prove · type findings show full queue
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
-2/2 shown · filter:completeness:all · * proof · s sources · @ author
+2 of 2 · [completeness:all] · * proof · s sources · @ author
+facets before search · severity critical:1 high:1
+  source codeql:1 semgrep:1
+  file apps/api/orders.rs:1 apps/web/server.ts:1
+  actor:0
+  confidence unverified:2
+  status open:1 verified:1
 >F-0001  C [*oo] s1 @A unverified unassigned review-order:1 decision:confirmed...  sql injection via order_id...
  F-0002  H [*oo] s1 @? unverified unassigned review-order:2 decision:needs_revi... path traversal in /assets/<file>...
  -- SELECTED FINDING ---------------------------------------------------------------------------------------------------
@@ -30,6 +36,9 @@ evidence state: source-linked
   review decision: confirmed · confidence 91% · by auto · source selected finding
   legacy triage verdict: true_positive
   automated/model-generated review reasoning: concatenated input
+  decide: `decision <true-positive|false-positive> <reason>`
+  dismiss: `dismiss <reason> <note>`
+  suppress: `suppress <id> --reason <text> --days 90`
 
 -- NEXT --
   validate: `verify F-0001`

@@ -16,7 +16,7 @@ pub(in crate::capabilities::carlini_threat_hunt) use input_options::{
 };
 pub(in crate::capabilities::carlini_threat_hunt) use json_fields::{
     object_string_array, object_string_value, read_object_string, read_object_string_array,
-    read_object_u64, unique_strings,
+    unique_strings,
 };
 pub(in crate::capabilities::carlini_threat_hunt) use output_contract::{
     findings_schema, require_json_object,
@@ -47,15 +47,19 @@ pub(in crate::capabilities::carlini_threat_hunt) fn normalize_file_path(
     target: &Path,
     file_path: &str,
 ) -> Option<String> {
-    let path = PathBuf::from(file_path.trim());
-    if path.is_absolute() {
-        return path
-            .strip_prefix(target)
-            .ok()
-            .map(|path| path.display().to_string());
+    let path = Path::new(file_path.trim());
+    let relative = if path.is_absolute() {
+        path.strip_prefix(target).ok()?
+    } else {
+        path
+    };
+    let mut normalized = PathBuf::new();
+    for component in relative.components() {
+        match component {
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
     }
-    if file_path.trim().starts_with("..") {
-        return None;
-    }
-    Some(file_path.trim().to_string())
+    (!normalized.as_os_str().is_empty()).then(|| normalized.display().to_string())
 }

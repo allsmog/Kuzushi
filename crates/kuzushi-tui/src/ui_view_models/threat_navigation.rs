@@ -25,7 +25,7 @@ pub(crate) fn threat_panel_model(view: ThreatView) -> ThreatPanel {
     }
 }
 
-// The DFD tab moved into the Workbench command center's center pane; the
+// The DFD tab moved into the phase Workbench's center pane; the
 // remaining STRIDE / STORIES / SCOPE / SUMMARY tabs renumber from 1.
 pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 5] {
     [

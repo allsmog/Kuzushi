@@ -112,13 +112,13 @@ pub(crate) fn render_findings_block(
 
 fn finding_table_row(alias: &str, finding: &Finding, run_url: Option<&str>) -> String {
     format!(
-        "| {} | {} | {} | {} | {} | `{}` |",
+        "| {} | {} | {} | {} | {} | {} |",
         finding_id_cell(alias, run_url),
         severity_badge(finding.severity),
         ProofConfidence::classify(finding).label(),
         escape_md(&finding_cwe_label(finding)),
         escape_md(&finding.title),
-        finding_location(finding)
+        markdown_code_span(&finding_location(finding))
     )
 }
 
@@ -187,9 +187,9 @@ pub(crate) fn render_chains_block(chains: &[PrCommentChain]) -> String {
 fn render_chain_steps(out: &mut Vec<String>, steps: &[PrCommentChainStep]) {
     for step in steps.iter().take(4) {
         out.push(format!(
-            "  - {} `{}` - {}",
+            "  - {} {} - {}",
             escape_md(&step.role),
-            chain_step_location(step),
+            markdown_code_span(&chain_step_location(step)),
             escape_md(&step.description)
         ));
     }

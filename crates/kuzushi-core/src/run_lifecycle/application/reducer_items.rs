@@ -141,6 +141,7 @@ fn apply_finished_model_call(
         usage,
         cost,
         error_class,
+        failure,
     } = &envelope.item
     else {
         unreachable!("caller classified a finished model call")
@@ -155,5 +156,6 @@ fn apply_finished_model_call(
         usage,
         *cost,
         error_class,
+        failure,
     )
 }

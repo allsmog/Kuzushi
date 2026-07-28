@@ -15,7 +15,7 @@ Feature: Map-plan editing returns to aggregate Setup
     And the status segment shows "setup:map-plan"
     And "Gather repo context" is checked
     And "Map entry points" is checked
-    And "Build STRIDE threat model" is unchecked
+    And "Build threat model" is unchecked
     And "Build code property graph" is unchecked
 
   Scenario: Space keeps dependency-aware selection
@@ -23,9 +23,9 @@ Feature: Map-plan editing returns to aggregate Setup
     Then I see "SETUP · READY THE MAP RUN"
     When I press "Down"
     And I press "Enter"
-    And I move the cursor to "Build PASTA threat model"
+    And I move the cursor to "Build threat model"
     And I press "Space"
-    Then "Build PASTA threat model" is checked
+    Then "Build threat model" is checked
     And "Gather repo context" is checked
 
   Scenario: Enter saves the plan and returns without launching

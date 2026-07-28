@@ -133,6 +133,7 @@ mod tests {
     fn automatic_backend_rejects_stale_managed_codeql_provenance() {
         let temp = tempdir().unwrap();
         write_js_taint_fixture(temp.path());
+        stub_taint_iris_next_codeql_database(temp.path());
         fs::write(
             temp.path().join("src/routes.ts"),
             "const sql = req.query.sql;\ndb.query(sql);\n",
@@ -233,17 +234,9 @@ mod tests {
         )
         .unwrap();
         initialize_taint_iris_next_test_repository(root);
-        stub_taint_iris_next_mcp_artifacts(root);
     }
 
-    /// Place empty CPG + CodeQL DB stubs under the workspace target so
-    /// the artifact-aware MCP attachment probe attaches the cpg and
-    /// codeql servers. The hunt tests don't actually query these MCPs
-    /// (the stub runtime stands in for the bridge), but the policy
-    /// builder refuses to dispatch without them — see
-    /// `build_taint_iris_next_tool_policy` in
-    /// `application/run_report.rs`.
-    fn stub_taint_iris_next_mcp_artifacts(root: &Path) {
+    fn stub_taint_iris_next_codeql_database(root: &Path) {
         let kuzushi = root.join(".kuzushi");
         fs::create_dir_all(&kuzushi).unwrap();
         let db = crate::workspace::workspace_codeql_db_path(root);

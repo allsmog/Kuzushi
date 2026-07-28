@@ -37,11 +37,12 @@ pub use recommend::{
     applicable_tasks_for_phase, model_recommended_in_phase, recommended_tasks_for_phase,
     TargetProfile,
 };
+pub(crate) use recommend::{large_repository_needs_decomposition, DECOMPOSE_FIRST_FILE_THRESHOLD};
 pub(crate) use runner::PlanningRunStep;
 pub(crate) use target_candidates::{bound_target_candidate, immediate_target_candidate};
 pub use target_candidates::{
     discover_target_candidates, record_recent_target, TargetCandidate, TargetCandidateScope,
 };
 pub use task_id::PlanningTaskId;
-pub(crate) use task_row::overlay_last_attempts;
 pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, LastAttempt, PlanningTaskRow};
+pub(crate) use task_row::{overlay_last_attempts, tasks_with_recent_attempts, PlanningOperation};

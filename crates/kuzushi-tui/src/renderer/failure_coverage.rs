@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 //! Failure-state coverage matrix: every operator-facing failure/attention
 //! state the shell can project must appear in at least one machine-checked
 //! fixture — a journey `expect:`/`wait-for:` line or a phase-cockpit

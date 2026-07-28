@@ -13,12 +13,22 @@ use super::ToolExecutionContext;
 
 pub(in crate::modules) fn workspace_status_output(ctx: &ToolExecutionContext<'_>) -> String {
     let status = workspace_status_for_target(ctx.workspace.map(|workspace| workspace.root()), None);
+    let checkpoints = ctx
+        .workspace
+        .map(|workspace| crate::run_artifacts::pending_stage_checkpoints(workspace.root()))
+        .unwrap_or_default();
+    let reusable = checkpoints
+        .iter()
+        .filter(|checkpoint| checkpoint.reuse_eligible)
+        .count();
     match (&status.root, &status.state_dir, &status.findings_db) {
         (Some(root), Some(state_dir), Some(findings_db)) => format!(
-            "workspace status\n  Root:      {}\n  State:     {}\n  Findings:  {}",
+            "workspace status\n  Root:      {}\n  State:     {}\n  Findings:  {}\n  Checkpoints: {} pending ({} reusable)",
             root.display(),
             state_dir.display(),
-            findings_db.display()
+            findings_db.display(),
+            checkpoints.len(),
+            reusable,
         ),
         _ => format!("workspace status unavailable: {}", status.status),
     }
@@ -121,8 +131,8 @@ mod tests {
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         }
     }
 
@@ -178,7 +188,9 @@ authorization: Default::default(),
         store
             .record_auto_triage(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),

@@ -194,8 +194,10 @@ fn active_model_label(app: &ShellApp) -> String {
 fn active_reasoning_label(app: &ShellApp) -> &str {
     app.session_thinking_level()
         .or_else(|| {
-            crate::app::model_choices()
-                .get(app.router.model_catalog().selected_index())
+            canonical_configured_model(app)
+                .as_deref()
+                .and_then(crate::app::model_choice_index_by_id)
+                .and_then(|index| crate::app::model_choices().get(index))
                 .map(|choice| choice.thinking_level)
         })
         .unwrap_or("default")
@@ -241,36 +243,66 @@ fn onboarding_detail(app: &ShellApp) -> Option<String> {
 }
 
 fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
+    let configured = canonical_configured_model(app);
     let visible_indexes = crate::app::visible_model_choice_indexes(app.config().model.as_deref());
-    let selected_index = visible_selected_model_index(
-        &visible_indexes,
-        app.router.model_catalog().selected_index(),
-    );
-    visible_indexes
-        .into_iter()
-        .filter_map(|index| {
-            let choice = crate::app::model_choices().get(index)?;
-            Some(ConfigModelRow {
-                cells: [
-                    selected_marker(index == selected_index).to_string(),
-                    choice.index.to_string(),
-                    crate::app::model_choice_display_selector(choice),
-                    choice.thinking_level.to_string(),
-                    model_auth_status(choice),
-                ],
-            })
+    let configured_index = configured
+        .as_deref()
+        .and_then(crate::app::model_choice_index_by_id);
+    let mut rows = explicit_configured_model_row(app, configured.as_deref(), configured_index);
+    rows.extend(visible_indexes.into_iter().filter_map(|index| {
+        let choice = crate::app::model_choices().get(index)?;
+        Some(ConfigModelRow {
+            cells: [
+                selected_marker(Some(index) == configured_index).to_string(),
+                choice.index.to_string(),
+                crate::app::model_choice_display_selector(choice),
+                choice.thinking_level.to_string(),
+                model_auth_status(choice),
+            ],
         })
-        .collect()
+    }));
+    rows
 }
 
-fn visible_selected_model_index(visible_indexes: &[usize], selected_model_index: usize) -> usize {
-    if visible_indexes.contains(&selected_model_index) {
-        return selected_model_index;
-    }
-    visible_indexes
-        .first()
-        .copied()
-        .unwrap_or(selected_model_index)
+fn canonical_configured_model(app: &ShellApp) -> Option<String> {
+    app.config().model.as_deref().map(|model| {
+        kuzushi_core::runtime::canonical_model_spec(model)
+            .unwrap_or_else(|_| model.trim().to_string())
+    })
+}
+
+fn explicit_configured_model_row(
+    app: &ShellApp,
+    configured: Option<&str>,
+    configured_index: Option<usize>,
+) -> Vec<ConfigModelRow> {
+    let Some(model) = configured.filter(|_| configured_index.is_none()) else {
+        return Vec::new();
+    };
+    vec![ConfigModelRow {
+        cells: [
+            ">".to_string(),
+            "explicit".to_string(),
+            crate::app::display_model_selector(model),
+            app.session_thinking_level()
+                .unwrap_or("configured")
+                .to_string(),
+            explicit_model_auth_status(app, model),
+        ],
+    }]
+}
+
+fn explicit_model_auth_status(app: &ShellApp, model: &str) -> String {
+    let supported = model
+        .split_once(':')
+        .and_then(|(provider, _)| crate::app::AuthProvider::from_scene_provider(provider));
+    supported
+        .map(|_| {
+            super::configured_model_credential_readiness(app)
+                .label()
+                .to_string()
+        })
+        .unwrap_or_else(|| "unsupported provider".to_string())
 }
 
 fn selected_marker(selected: bool) -> &'static str {

@@ -9,13 +9,14 @@ pub fn proof_ladder_state(
     proof_ladder(text.stage, text.label, text.reason, text.next_step)
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::findings) enum ProofLadderKind {
     Patched,
     RuntimeVerified,
     PathLinked,
     SourceGrounded,
     Rejected,
+    ModelAssessed,
     Suspected,
 }
 
@@ -29,7 +30,7 @@ impl ProofLadderKind {
             Self::Patched | Self::RuntimeVerified => ProofConfidence::Confirmed,
             Self::PathLinked | Self::SourceGrounded => ProofConfidence::Likely,
             Self::Rejected => ProofConfidence::Dismissed,
-            Self::Suspected => ProofConfidence::Unverified,
+            Self::ModelAssessed | Self::Suspected => ProofConfidence::Unverified,
         }
     }
 }
@@ -61,6 +62,7 @@ fn proof_ladder_kind(finding: &Finding, latest_patch: Option<&PatchResult>) -> P
         path_linked_ladder_kind(finding),
         source_grounded_ladder_kind(finding),
         rejected_ladder_kind(finding),
+        model_assessed_ladder_kind(finding),
     ]
     .into_iter()
     .flatten()
@@ -77,11 +79,11 @@ fn patched_ladder_kind(latest_patch: Option<&PatchResult>) -> Option<ProofLadder
 }
 
 fn runtime_verified_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
-    matches!(
-        finding.verification.as_ref().map(|v| v.proof_verdict),
-        Some(PersistedProofVerdict::Exploited)
-    )
-    .then_some(ProofLadderKind::RuntimeVerified)
+    finding
+        .verification
+        .as_ref()
+        .is_some_and(PersistedVerification::is_empirically_verified)
+        .then_some(ProofLadderKind::RuntimeVerified)
 }
 
 fn path_linked_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
@@ -111,6 +113,14 @@ fn rejected_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
     .then_some(ProofLadderKind::Rejected)
 }
 
+fn model_assessed_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
+    finding
+        .verification
+        .as_ref()
+        .is_some_and(PersistedVerification::is_model_assessment)
+        .then_some(ProofLadderKind::ModelAssessed)
+}
+
 pub(in crate::findings) fn proof_ladder(
     stage: &str,
     label: &str,
@@ -135,26 +145,10 @@ pub(in crate::findings) fn indent_lines(value: &str) -> Vec<String> {
 #[cfg(test)]
 mod confidence_tests {
     use super::*;
-    use crate::findings::domain::{
-        PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, TriageOutcome,
-        TriageVerdict,
-    };
+    use crate::findings::domain::{PersistedVerification, TriageOutcome, TriageVerdict};
 
     fn exploited_verification() -> PersistedVerification {
-        PersistedVerification {
-            proof_level: 3,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Plain,
-            language: None,
-            harness_path: None,
-            crash_evidence: None,
-            duration_ms: 0,
-            cost_usd: 0.0,
-            notes: Vec::new(),
-            verification_run_id: None,
-            verified_scan_id: None,
-            created_at: String::new(),
-        }
+        crate::findings::test_support::empirically_verified(3)
     }
 
     fn finding_with_static(state: StaticProofState) -> Finding {
@@ -181,6 +175,25 @@ mod confidence_tests {
         assert_eq!(
             ProofConfidence::classify(&finding),
             ProofConfidence::Confirmed
+        );
+    }
+
+    #[test]
+    fn model_exploited_is_assessed_but_never_confirmed() {
+        let mut verification = exploited_verification();
+        verification.backend = PersistedSandboxBackend::Model;
+        let finding = Finding {
+            verification: Some(verification),
+            ..Finding::default()
+        };
+
+        assert_eq!(
+            proof_ladder_kind(&finding, None),
+            ProofLadderKind::ModelAssessed
+        );
+        assert_eq!(
+            ProofConfidence::classify(&finding),
+            ProofConfidence::Unverified
         );
     }
 

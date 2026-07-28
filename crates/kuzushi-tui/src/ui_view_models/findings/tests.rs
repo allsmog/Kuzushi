@@ -652,24 +652,20 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
         Severity::High,
         "runtime verified",
     );
-    verified.verification = Some(PersistedVerification {
-        proof_level: 4,
-        proof_verdict: PersistedProofVerdict::Exploited,
-        backend: PersistedSandboxBackend::Plain,
-        language: None,
-        harness_path: None,
-        crash_evidence: None,
-        duration_ms: 12,
-        cost_usd: 0.0,
-        notes: vec![],
-        verification_run_id: None,
-        verified_scan_id: None,
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-    });
+    verified.verification = Some(crate::test_support::test_empirical_verification(4));
     assert_eq!(finding_proof_label(&verified), "verified L4");
     assert_eq!(
         finding_proof_badge(&verified).tier,
         ProofTier::RuntimeVerified
+    );
+
+    let mut not_attempted = verified.clone();
+    not_attempted.verification.as_mut().unwrap().proof_verdict =
+        PersistedProofVerdict::NotAttempted;
+    assert_eq!(finding_proof_label(&not_attempted), "needs-runtime");
+    assert_eq!(
+        finding_proof_badge(&not_attempted).tier,
+        ProofTier::Suspected
     );
 
     let linked = Finding::new_tool(
@@ -684,6 +680,21 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
     .with_static_proof_state(StaticProofState::SourceSinkLinked);
     assert_eq!(finding_proof_label(&linked), "path-linked");
     assert_eq!(finding_proof_badge(&linked).tier, ProofTier::StaticLinked);
+
+    let mut model_assessed = verified.clone();
+    model_assessed.verification.as_mut().unwrap().backend = PersistedSandboxBackend::Model;
+    assert_eq!(finding_proof_label(&model_assessed), "model-assessed");
+    assert_eq!(
+        finding_proof_badge(&model_assessed).tier,
+        ProofTier::Suspected
+    );
+
+    model_assessed.static_proof_state = Some(StaticProofState::SourceSinkLinked);
+    assert_eq!(finding_proof_label(&model_assessed), "path-linked");
+    assert_eq!(
+        finding_proof_badge(&model_assessed).tier,
+        ProofTier::StaticLinked
+    );
 
     let mut strong_static = linked.clone();
     strong_static.static_proof_state = Some(StaticProofState::StaticallyConfirmed);
@@ -999,20 +1010,7 @@ fn selected_finding_detail_recommends_patch_for_runtime_verified_findings() {
         "SQL injection\nRemediation: bind the order id parameter",
     )
     .with_static_proof_state(StaticProofState::SourceSinkLinked);
-    finding.verification = Some(PersistedVerification {
-        proof_level: 4,
-        proof_verdict: PersistedProofVerdict::Exploited,
-        backend: PersistedSandboxBackend::Plain,
-        language: None,
-        harness_path: None,
-        crash_evidence: None,
-        duration_ms: 12,
-        cost_usd: 0.0,
-        notes: vec![],
-        verification_run_id: None,
-        verified_scan_id: None,
-        created_at: "2026-01-01T00:00:00Z".to_string(),
-    });
+    finding.verification = Some(crate::test_support::test_empirical_verification(4));
     *app.findings_mut() = vec![finding];
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
@@ -1140,6 +1138,20 @@ fn store_scanned_window(app: &ShellApp, finding: &Finding, state: crate::Scanned
     );
 }
 
+fn store_live_source(app: &ShellApp, finding: &Finding, state: Result<&str, &str>) {
+    let target = app.target().unwrap();
+    let path = target.join(&finding.file_path);
+    app.workbench_cache()
+        .borrow_mut()
+        .apply_view_hydration(crate::app::ViewHydrationResult {
+            target: target.to_path_buf(),
+            key: crate::app::ViewHydrationKey::SourceFile { path },
+            value: crate::app::ViewHydrationValue::SourceFile(
+                state.map(str::to_string).map_err(str::to_string),
+            ),
+        });
+}
+
 #[test]
 fn snippet_falls_back_to_the_scanned_copy_when_the_live_line_drifts() {
     let (temp, app) = scanned_fold_app();
@@ -1155,6 +1167,7 @@ fn snippet_falls_back_to_the_scanned_copy_when_the_live_line_drifts() {
             lines: vec!["let x = 1;".to_string()],
         }),
     );
+    store_live_source(&app, &finding, Ok("let x = 2;\n"));
 
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
@@ -1178,6 +1191,7 @@ fn snippet_keeps_the_live_source_when_it_matches_the_scanned_copy() {
             lines: vec!["let  x  =  2;".to_string()],
         }),
     );
+    store_live_source(&app, &finding, Ok("let x = 2;\n"));
 
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
@@ -1198,6 +1212,7 @@ fn missing_live_source_renders_the_scanned_copy() {
             lines: vec!["let x = 1;".to_string()],
         }),
     );
+    store_live_source(&app, &finding, Err("No such file or directory"));
 
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 
@@ -1210,6 +1225,7 @@ fn missing_live_source_without_a_scanned_copy_notes_the_absence() {
     let (_temp, app) = scanned_fold_app();
     let finding = scanned_fold_finding();
     store_scanned_window(&app, &finding, crate::ScannedSnippetState::Missing);
+    store_live_source(&app, &finding, Err("No such file or directory"));
 
     let snippet = source_snippet_model(&app, &finding).expect("snippet");
 

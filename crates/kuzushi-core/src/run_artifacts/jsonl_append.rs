@@ -5,6 +5,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(super) fn append_jsonl_line(path: &Path, line: &str) -> Result<()> {
+    heal_torn_run_jsonl(path, "Run JSONL artifact")?;
     let mut file =
         open_append_file(path).with_context(|| format!("Could not open {}", path.display()))?;
     file.write_all(line.as_bytes())
@@ -23,6 +24,7 @@ pub(crate) fn append_run_artifact_jsonl_value(
     let _guard = super::run_ledger::acquire_run_ledger_lock(target, run_id)?;
     let path = super::checked_run_artifact_path(target, run_id, leaf)?;
     reject_non_file_target(&path)?;
+    heal_torn_run_jsonl(&path, "Run JSONL artifact")?;
     let mut line = serde_json::to_string(value)?;
     line.push('\n');
     let existing_bytes = fs::symlink_metadata(&path)
@@ -37,6 +39,14 @@ pub(crate) fn append_run_artifact_jsonl_value(
     );
     append_jsonl_line(&path, &line)?;
     Ok(path)
+}
+
+pub(super) fn heal_torn_run_jsonl(path: &Path, label: &str) -> Result<()> {
+    crate::jsonl_tail::heal_torn_jsonl_tail_at(
+        path,
+        super::run_artifact_reader::MAX_RUN_ARTIFACT_READ_BYTES as usize,
+        label,
+    )
 }
 
 fn reject_non_file_target(path: &Path) -> Result<()> {

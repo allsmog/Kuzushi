@@ -3,15 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - ".gitignore"
-      - "LICENSE"
   pull_request:
     branches: [main]
-    paths-ignore:
-      - ".gitignore"
-      - "LICENSE"
+  merge_group:
   workflow_call:
+    secrets:
+      OXIDIZED_JOERN_TOKEN:
+        description: Read-only token for the pinned private oxidized-joern dependency
+        required: true
 
 # Cancel in-progress CI runs on the same PR branch; keep main pushes running.
 concurrency:
@@ -65,6 +64,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
       - name: Check CRAP risk across the complete change
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
@@ -91,7 +92,18 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - run: cargo check --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
         run: cargo fmt --all --check
 
@@ -102,6 +114,16 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories licenses bans sources
@@ -123,6 +145,16 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install patch-validation sandbox
         run: |
           sudo apt-get update
@@ -139,8 +171,9 @@ jobs:
           bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
             --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
             --proc /proc --dev /dev -- /bin/true
-      - run: cargo test --workspace
-      - run: cargo build --workspace
+      - run: cargo test --workspace --locked
+      - run: pnpm test:performance
+      - run: cargo build --workspace --locked
       - run: node scripts/build-native-runtime.mjs
       - name: Upload native artifact
         uses: actions/upload-artifact@v7
@@ -190,6 +223,105 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+
+  # ── Measured coverage: direct Node boundaries + changed executable Rust ──
+  coverage:
+    name: coverage
+    needs: install
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+      - name: Install patch-validation sandbox
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends bubblewrap
+          sudo tee /etc/apparmor.d/usr.bin.bwrap >/dev/null <<'APPARMOR'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/bin/bwrap flags=(unconfined) {
+            userns,
+          }
+          APPARMOR
+          sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
+      - name: Enforce measured coverage
+        env:
+          KUZUSHI_QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm test:coverage
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rust-coverage
+          path: target/llvm-cov/lcov.info
+          if-no-files-found: error
+          retention-days: 14
+
+  # ── Deterministic changed-code mutation sample ───────────────────────────
+  mutation:
+    name: mutation
+    needs: [install, rust-cli]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Install mutation tool
+        run: cargo install cargo-mutants --version 27.1.0 --locked
+      - name: Require sampled changed mutants to be caught
+        env:
+          KUZUSHI_QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm test:mutations
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-results
+          path: target/mutation/
+          if-no-files-found: error
+          retention-days: 14
 
   # ── Verify the packed tarball is consistent (after native build) ─────────
   verify-pack:
@@ -268,3 +400,46 @@ jobs:
         env:
           KUZUSHI_CMD: node bin/kuzushi-rs.mjs
         run: pnpm test:e2e
+
+  # One stable branch-protection context. Every dependency is inspected even
+  # when an upstream failure skips downstream package/E2E jobs.
+  quality-gauntlet:
+    name: quality-gauntlet
+    if: always()
+    needs:
+      - lint
+      - rust-lint
+      - cargo-deny
+      - rust-cli
+      - node22-compat
+      - test
+      - coverage
+      - mutation
+      - verify-pack
+      - e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every quality gate
+        env:
+          LINT: ${{ needs.lint.result }}
+          RUST_LINT: ${{ needs.rust-lint.result }}
+          CARGO_DENY: ${{ needs.cargo-deny.result }}
+          RUST_CLI: ${{ needs.rust-cli.result }}
+          NODE22: ${{ needs.node22-compat.result }}
+          NODE_TESTS: ${{ needs.test.result }}
+          COVERAGE: ${{ needs.coverage.result }}
+          MUTATION: ${{ needs.mutation.result }}
+          PACK: ${{ needs.verify-pack.result }}
+          E2E: ${{ needs.e2e.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for gate in LINT RUST_LINT CARGO_DENY RUST_CLI NODE22 NODE_TESTS COVERAGE MUTATION PACK E2E; do
+            result="${!gate}"
+            if [ "${result}" != "success" ]; then
+              echo "::error::${gate} ended ${result}"
+              failed=1
+            fi
+          done
+          exit "${failed}"

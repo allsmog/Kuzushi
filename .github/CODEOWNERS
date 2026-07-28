@@ -8,18 +8,32 @@
 # Default: everything belongs to the repo owner.
 *                               @allsmog
 
-# Sensitive areas — CLAUDE.md flags these as stable contracts requiring
-# explicit review before changes.
-/src/agent-runtime/             @allsmog
-/src/bus/                       @allsmog
+# Runtime, dispatch, persistence, and acceptance contracts. Changes here alter
+# the constraints used to trust agent-written implementation code.
+/crates/kuzushi-core/src/modules/             @allsmog
+/crates/kuzushi-core/src/runtime/             @allsmog
+/crates/kuzushi-core/src/run_lifecycle/       @allsmog
+/crates/kuzushi-core/src/workspace/domain/    @allsmog
+/crates/kuzushi-bdd-tui/features/             @allsmog
+/schemas/                                      @allsmog
+/AGENTS.md                                     @allsmog
+/CLAUDE.md                                     @allsmog
 
 # CI / release tooling — high-blast-radius.
 /.github/workflows/             @allsmog
 /.github/CODEOWNERS             @allsmog
+/scripts/check-*.mjs            @allsmog
+/scripts/*coverage*             @allsmog
+/scripts/*mutation*             @allsmog
+/scripts/verify-repository*     @allsmog
 
 # Dependency & package metadata — security-sensitive.
 /package.json                   @allsmog
 /pnpm-lock.yaml                 @allsmog
+/Cargo.toml                     @allsmog
+/Cargo.lock                     @allsmog
+/deny.toml                      @allsmog
+/rust-toolchain.toml            @allsmog
 
 # Dev-experience configuration — changes here affect every contributor.
 /.husky/                        @allsmog

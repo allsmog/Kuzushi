@@ -1,4 +1,4 @@
-use crate::ui_view_models::{DfdModel, ReviewQueueRow, RiskByModule};
+use crate::ui_view_models::{DfdModel, ReviewFacetGroup, ReviewQueueRow, RiskByModule};
 use kuzushi_core::Finding;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -27,8 +27,23 @@ impl ViewModelFragmentCache {
         &mut self,
         key: VisibleFindingsCacheKey,
         projected: Arc<[VisibleFindingProjection]>,
+        before_search: Arc<[VisibleFindingProjection]>,
     ) {
-        self.visible_findings = Some(CachedVisibleFindings { key, projected });
+        self.visible_findings = Some(CachedVisibleFindings {
+            key,
+            projected,
+            before_search,
+        });
+    }
+
+    pub(super) fn visible_findings_before_search(
+        &self,
+        key: &VisibleFindingsCacheKey,
+    ) -> Option<Arc<[VisibleFindingProjection]>> {
+        self.visible_findings
+            .as_ref()
+            .filter(|cache| &cache.key == key)
+            .map(|cache| Arc::clone(&cache.before_search))
     }
 
     pub(super) fn invalidate_visible_findings(&mut self) {
@@ -39,7 +54,7 @@ impl ViewModelFragmentCache {
     pub(super) fn review_queue(
         &self,
         key: &ReviewQueueCacheKey,
-    ) -> Option<(Arc<[ReviewQueueRow]>, usize, usize)> {
+    ) -> Option<(Arc<[ReviewQueueRow]>, usize, usize, Arc<[ReviewFacetGroup]>)> {
         self.review_queue
             .as_ref()
             .filter(|cache| &cache.key == key)
@@ -48,6 +63,7 @@ impl ViewModelFragmentCache {
                     Arc::clone(&cache.rows),
                     cache.open_count,
                     cache.complete_count,
+                    Arc::clone(&cache.facet_groups),
                 )
             })
     }
@@ -58,12 +74,14 @@ impl ViewModelFragmentCache {
         rows: Arc<[ReviewQueueRow]>,
         open_count: usize,
         complete_count: usize,
+        facet_groups: Arc<[ReviewFacetGroup]>,
     ) {
         self.review_queue = Some(CachedReviewQueue {
             key,
             rows,
             open_count,
             complete_count,
+            facet_groups,
         });
     }
 
@@ -103,6 +121,7 @@ pub(crate) struct VisibleFindingsCacheKey {
     target_base: Option<String>,
     active_component: Option<String>,
     active_filter: Option<String>,
+    search_query: Option<String>,
 }
 
 impl VisibleFindingsCacheKey {
@@ -112,6 +131,7 @@ impl VisibleFindingsCacheKey {
         target_base: Option<String>,
         active_component: Option<String>,
         active_filter: Option<String>,
+        search_query: Option<String>,
     ) -> Self {
         Self {
             findings: ViewModelVersion(findings_revision),
@@ -119,6 +139,7 @@ impl VisibleFindingsCacheKey {
             target_base,
             active_component,
             active_filter,
+            search_query,
         }
     }
 }
@@ -168,6 +189,7 @@ impl DfdModelCacheKey {
 struct CachedVisibleFindings {
     key: VisibleFindingsCacheKey,
     projected: Arc<[VisibleFindingProjection]>,
+    before_search: Arc<[VisibleFindingProjection]>,
 }
 
 #[derive(Debug)]
@@ -176,6 +198,7 @@ struct CachedReviewQueue {
     rows: Arc<[ReviewQueueRow]>,
     open_count: usize,
     complete_count: usize,
+    facet_groups: Arc<[ReviewFacetGroup]>,
 }
 
 #[derive(Debug)]
@@ -231,18 +254,42 @@ mod tests {
 
     #[test]
     fn visible_findings_cache_key_tracks_findings_revision() {
-        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None);
-        let changed = VisibleFindingsCacheKey::from_app_parts(8, 3, None, None, None);
+        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None, None);
+        let changed = VisibleFindingsCacheKey::from_app_parts(8, 3, None, None, None, None);
 
         assert_ne!(original, changed);
     }
 
     #[test]
     fn visible_findings_cache_key_tracks_review_revision() {
-        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None);
-        let changed = VisibleFindingsCacheKey::from_app_parts(7, 4, None, None, None);
+        let original = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None, None);
+        let changed = VisibleFindingsCacheKey::from_app_parts(7, 4, None, None, None, None);
 
         assert_ne!(original, changed);
+    }
+
+    #[test]
+    fn visible_findings_cache_key_tracks_every_search_edit() {
+        let original = VisibleFindingsCacheKey::from_app_parts(
+            7,
+            3,
+            None,
+            None,
+            None,
+            Some("gate".to_string()),
+        );
+        let edited = VisibleFindingsCacheKey::from_app_parts(
+            7,
+            3,
+            None,
+            None,
+            None,
+            Some("gateway".to_string()),
+        );
+        let cleared = VisibleFindingsCacheKey::from_app_parts(7, 3, None, None, None, None);
+
+        assert_ne!(original, edited);
+        assert_ne!(edited, cleared);
     }
 
     #[test]
@@ -257,19 +304,19 @@ mod tests {
     fn visible_findings_cache_reuses_only_matching_version() {
         let mut cache = ViewModelFragmentCache::default();
         let finding = finding("src/a.rs", Severity::High);
-        let key = VisibleFindingsCacheKey::from_app_parts(1, 1, None, None, None);
+        let key = VisibleFindingsCacheKey::from_app_parts(1, 1, None, None, None, None);
         let projected: Arc<[VisibleFindingProjection]> = vec![VisibleFindingProjection {
             alias: "F-0001".to_string(),
             finding,
         }]
         .into();
-        cache.cache_visible_findings(key.clone(), Arc::clone(&projected));
+        cache.cache_visible_findings(key.clone(), Arc::clone(&projected), Arc::clone(&projected));
 
         let first_hit = cache.visible_findings(&key).expect("cached projection");
         let second_hit = cache.visible_findings(&key).expect("cached projection");
         assert!(Arc::ptr_eq(&projected, &first_hit));
         assert!(Arc::ptr_eq(&first_hit, &second_hit));
-        let stale_key = VisibleFindingsCacheKey::from_app_parts(2, 1, None, None, None);
+        let stale_key = VisibleFindingsCacheKey::from_app_parts(2, 1, None, None, None, None);
         assert!(cache.visible_findings(&stale_key).is_none());
     }
 
@@ -303,6 +350,7 @@ mod tests {
         let key = DfdModelCacheKey::from_threat_doc(Some(&doc));
         let model = DfdModel {
             nodes: vec![DfdNodeModel {
+                key: "api".to_string(),
                 name: "api".to_string(),
                 zone: "app".to_string(),
                 kind: DfdKind::Process,

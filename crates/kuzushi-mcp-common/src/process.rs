@@ -7,6 +7,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+mod parent_death_process_group;
+pub use parent_death_process_group::ParentDeathProcessGroup;
+
 #[cfg(windows)]
 mod windows_job;
 
@@ -66,6 +69,24 @@ pub async fn run_bounded_process(
     })
 }
 
+/// Run a child to completion under parent-death supervision without imposing
+/// an additional deadline or output limit.
+pub async fn run_guarded_output(
+    command: &mut Command,
+    label: &str,
+) -> Result<std::process::Output> {
+    command.kill_on_drop(true);
+    let mut process_group = ParentDeathProcessGroup::configure(command)?;
+    let child = command
+        .spawn()
+        .with_context(|| format!("could not start {label}"))?;
+    process_group.attach_child(&child)?;
+    child
+        .wait_with_output()
+        .await
+        .with_context(|| format!("could not wait for {label}"))
+}
+
 fn validate_limits(label: &str, limits: ProcessLimits) -> Result<()> {
     anyhow::ensure!(
         !limits.timeout.is_zero(),
@@ -84,36 +105,23 @@ fn validate_limits(label: &str, limits: ProcessLimits) -> Result<()> {
 
 fn prepare_command(command: &mut Command) {
     command.kill_on_drop(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.as_std_mut().process_group(0);
-    }
 }
 
 struct ProcessGuard {
     child: Option<Child>,
-    #[cfg(unix)]
-    group_id: Option<u32>,
-    #[cfg(windows)]
-    job_handle: Option<isize>,
+    process_group: ParentDeathProcessGroup,
 }
 
 impl ProcessGuard {
     fn spawn(command: &mut Command, label: &str) -> Result<Self> {
+        let mut process_group = ParentDeathProcessGroup::configure(command)?;
         let child = command
             .spawn()
             .with_context(|| format!("could not start {label}"))?;
-        #[cfg(unix)]
-        let group_id = child.id();
-        #[cfg(windows)]
-        let job_handle = Some(windows_job::create_kill_on_close_job(&child)?);
+        process_group.attach_child(&child)?;
         Ok(Self {
             child: Some(child),
-            #[cfg(unix)]
-            group_id,
-            #[cfg(windows)]
-            job_handle,
+            process_group,
         })
     }
 
@@ -130,28 +138,14 @@ impl ProcessGuard {
     }
 
     fn kill_group(&mut self) {
-        kill_process_group(self.group_id());
-        #[cfg(windows)]
-        windows_job::terminate_job(self.job_handle);
+        self.process_group.kill();
         if let Some(child) = self.child.as_mut() {
             let _ = child.start_kill();
         }
     }
 
-    #[cfg(unix)]
-    fn group_id(&self) -> Option<u32> {
-        self.group_id
-    }
-
-    #[cfg(not(unix))]
-    fn group_id(&self) -> Option<u32> {
-        None
-    }
-
     fn disarm(&mut self) {
         self.child = None;
-        #[cfg(windows)]
-        windows_job::close_job(self.job_handle.take());
     }
 }
 
@@ -160,8 +154,6 @@ impl Drop for ProcessGuard {
         if self.child.is_some() {
             self.kill_group();
         }
-        #[cfg(windows)]
-        windows_job::close_job(self.job_handle.take());
     }
 }
 
@@ -179,19 +171,6 @@ fn attach_cleanup(
         Err(cleanup) => cleanup.context(error),
     }
 }
-
-#[cfg(unix)]
-fn kill_process_group(group_id: Option<u32>) {
-    if let Some(group_id) = group_id {
-        // SAFETY: `group_id` is the id of the dedicated group assigned at spawn.
-        unsafe {
-            libc::killpg(group_id as libc::pid_t, libc::SIGKILL);
-        }
-    }
-}
-
-#[cfg(not(unix))]
-fn kill_process_group(_group_id: Option<u32>) {}
 
 enum CaptureEvent {
     Complete,

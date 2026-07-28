@@ -752,6 +752,7 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "remediation_application_id",
     "remediation_patch_run_id",
     "remediation_application_state",
+    "remediation_empirically_verified",
     "remediation_reverify_outcome",
     "remediation_reverify_run_id",
     "remediation_diff_hash",
@@ -812,12 +813,13 @@ fn csv_finding_row(record: &WorkspaceFindingExportRecord, metadata: &[String; 4]
 
 fn csv_remediation_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
     let Some(remediation) = record.remediation.as_ref() else {
-        return vec![String::new(); 7];
+        return vec![String::new(); 8];
     };
     vec![
         remediation.application_id.clone(),
         remediation.patch_run_id.clone(),
         remediation.application_state.clone(),
+        remediation.empirically_verified.to_string(),
         remediation.reverify_outcome.clone().unwrap_or_default(),
         remediation.reverify_run_id.clone().unwrap_or_default(),
         remediation.diff_hash.clone(),

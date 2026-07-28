@@ -18,7 +18,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 │EVIDENCE · z attack path                     │PROOF LADDER
 │evidence:1 · 1 source(s) · 1                 │● 1 signal captured
 │1. observed code evidence · source-sink...   │PROOF · REPLAY
-│request_input -> database_query              │exploited  L4 · podman
+│request_input -> database_query              │exploited  L4 · bwrap
 │CHOOSE NEXT ACTION
 │ v  Run investigation     draft verify for F-0001 — resolve missing...
 │ c  Generate attack chain model prerequisites, trust transitions, and...

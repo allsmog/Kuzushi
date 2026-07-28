@@ -4,7 +4,11 @@ mod tests {
     use crate::FindingEvidence;
 
     fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
-        Finding { impact: None, category: None, exploit_scenario: None, preconditions: Vec::new(),
+        Finding {
+            impact: None,
+            category: None,
+            exploit_scenario: None,
+            preconditions: Vec::new(),
             grounding: None,
             id: None,
             scan_id: None,
@@ -226,6 +230,51 @@ mod tests {
         assert!(body.contains("session token reuse"));
         assert!(body.contains("src/auth.rs:42"));
         assert!(body.contains("attacker controls callback"));
+    }
+
+    #[test]
+    fn hostile_locations_and_chain_paths_cannot_forge_markdown_structure() {
+        let mut finding = make_finding(
+            Severity::High,
+            "hostile",
+            "title | cell\r\n| forged | row |",
+        );
+        finding.file_path = "src/`x|y.rs\r\n# forged-location".to_string();
+        let input = PrCommentInput {
+            findings: vec![finding],
+            chains: vec![PrCommentChain {
+                id: "chain|id".to_string(),
+                title: "chain\r\n# forged-chain".to_string(),
+                severity: "high".to_string(),
+                steps: vec![PrCommentChainStep {
+                    role: "source".to_string(),
+                    description: "description\r\n| forged-step |".to_string(),
+                    file_path: "src/`chain|step.rs\r\n# forged-step".to_string(),
+                    start_line: 4,
+                }],
+            }],
+            ..PrCommentInput::default()
+        };
+
+        let body = build_pr_comment(&input);
+
+        assert!(
+            !body.lines().any(|line| line.starts_with("# forged")),
+            "{body}"
+        );
+        assert!(
+            !body.lines().any(|line| line.starts_with("| forged")),
+            "{body}"
+        );
+        assert!(body.contains("\\| forged \\| row \\|"), "{body}");
+        assert!(
+            body.contains("``src/`x\\|y.rs  # forged-location:1``"),
+            "{body}"
+        );
+        assert!(
+            body.contains("``src/`chain\\|step.rs  # forged-step:4``"),
+            "{body}"
+        );
     }
 
     #[test]

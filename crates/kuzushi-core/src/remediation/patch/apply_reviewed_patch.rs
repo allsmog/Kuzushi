@@ -40,7 +40,11 @@ pub fn prepare_reviewed_patch_apply(
     let before_hashes = touched_path_hashes(repo_root, &touched_paths)?;
     check_reviewed_patch(repo_root, diff, control)?;
     Ok(ReviewedPatchApplyPlan {
-        touched_files: lifecycle_files(&touched_paths, &before_hashes, &vec![None; touched_paths.len()]),
+        touched_files: lifecycle_files(
+            &touched_paths,
+            &before_hashes,
+            &vec![None; touched_paths.len()],
+        ),
         touched_paths,
         diff_hash: patch_diff_hash(diff),
         source_commit: source_commit.to_string(),
@@ -88,7 +92,9 @@ fn check_reviewed_patch(
 ) -> Result<()> {
     run_git_with_input(repo_root, &["apply", "--check"], diff, control)
         .map(|_| ())
-        .map_err(|error| anyhow::anyhow!("reviewed patch did not pass `git apply --check`: {error:#}"))
+        .map_err(|error| {
+            anyhow::anyhow!("reviewed patch did not pass `git apply --check`: {error:#}")
+        })
 }
 
 fn ensure_planned_files_unchanged(repo_root: &Path, plan: &ReviewedPatchApplyPlan) -> Result<()> {
@@ -121,7 +127,7 @@ fn lifecycle_files(
         .collect()
 }
 
-fn patch_diff_hash(diff: &str) -> String {
+pub(crate) fn patch_diff_hash(diff: &str) -> String {
     crate::identity::hash_parts("kuzushi.patch.diff.v1", &[diff.as_bytes()]).to_string()
 }
 
@@ -133,11 +139,7 @@ fn touched_path_hashes(repo_root: &Path, paths: &[String]) -> Result<Vec<Option<
 }
 
 pub(crate) fn hash_optional_file(root: &Path, path: &Path) -> Result<Option<String>> {
-    match crate::bounded_file::read_regular_bytes_within(
-        root,
-        path,
-        MAX_PATCH_TOUCHED_FILE_BYTES,
-    ) {
+    match crate::bounded_file::read_regular_bytes_within(root, path, MAX_PATCH_TOUCHED_FILE_BYTES) {
         Ok(bytes) => Ok(Some(
             crate::identity::hash_parts("kuzushi.patch.file.v1", &[&bytes]).to_string(),
         )),
@@ -302,7 +304,10 @@ mod tests {
         let plan = prepare_reviewed_patch_apply(repo, demo_diff(), &source).unwrap();
 
         assert_eq!(plan.source_commit, source);
-        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "before\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
+            "before\n"
+        );
     }
 
     #[test]
@@ -320,7 +325,10 @@ mod tests {
             .to_string();
 
         assert!(error.contains("source commit changed"));
-        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "before\n");
+        assert_eq!(
+            std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
+            "before\n"
+        );
     }
 
     fn initialize_repo(repo: &Path) {

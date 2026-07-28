@@ -12,6 +12,7 @@ pub(crate) enum DfdKind {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DfdNodeModel {
+    pub key: String,
     pub name: String,
     pub zone: String,
     pub kind: DfdKind,
@@ -19,6 +20,8 @@ pub(crate) struct DfdNodeModel {
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct DfdFlowModel {
+    pub from_id: String,
+    pub to_id: String,
     pub from: String,
     pub to: String,
     pub crosses: bool,
@@ -86,6 +89,7 @@ fn project_dfd_nodes(nodes: &[DfdNode]) -> Vec<DfdNodeModel> {
     nodes
         .iter()
         .map(|node| DfdNodeModel {
+            key: node.id.clone(),
             name: node.name.clone(),
             zone: node.zone.clone(),
             kind: dfd_kind(&node.kind),
@@ -97,6 +101,8 @@ fn project_dfd_flows(flows: &[DfdFlow]) -> Vec<DfdFlowModel> {
     flows
         .iter()
         .map(|flow| DfdFlowModel {
+            from_id: flow.source_id.clone(),
+            to_id: flow.target_id.clone(),
             from: flow.source.clone(),
             to: flow.target.clone(),
             crosses: flow.crosses,

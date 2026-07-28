@@ -125,6 +125,7 @@ mod tests {
                 },
                 cost,
                 error_class: None,
+                failure: None,
             },
             None,
         )

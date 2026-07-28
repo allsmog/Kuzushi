@@ -403,8 +403,12 @@ call to `runtime.query_blocking`, `runtime.next_step_blocking`,
 `runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
 emits correlated `ModelCallStarted` and `ModelCallFinished` items. The finish
 records provider, selected model, status, latency, usage, and cost when known;
-successful calls may add one bounded `SafeReasoningSummary`. Producers don't
-have to thread the observation handle into their model call sites.
+failed calls additionally carry provider-neutral `RuntimeFailureMetadata` with
+the safe class, optional HTTP status, bounded redacted detail, model-call id,
+and producer stage. Successful calls may add one bounded
+`SafeReasoningSummary`. Producers don't have to thread the observation handle
+into their model call sites. Typed failure fields are authoritative; consumers
+must not recover class or status by parsing the rendered public message.
 
 To group several LLM calls under a labelled phase header, push a
 **parent_scope** RAII guard before the LLM region:

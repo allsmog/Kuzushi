@@ -166,7 +166,7 @@ pub(in crate::verification::adapters) fn verification_result_schema() -> Value {
             "proofLevel": {
                 "type": "integer",
                 "minimum": 1,
-                "maximum": 4,
+                "maximum": 3,
                 "description": "Strength of the evidence behind this verdict: 1 = signal only, 2 = source-grounded static reasoning, 3 = corroborated static analysis (multiple independent code paths inspected), 4 = empirical runtime proof (never claim 4 from static review)."
             },
             "proofVerdict": {

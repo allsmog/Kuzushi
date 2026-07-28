@@ -6,7 +6,9 @@ mod tests {
         TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
     };
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
+    use serde_json::json;
     use std::fs;
+    use std::io::Write;
     use std::path::Path;
     use std::process::Command;
     use std::sync::{Arc, Barrier};
@@ -374,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn run_event_numbering_advances_past_malformed_tail_rows() {
+    fn run_event_append_heals_a_torn_tail_before_numbering() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-event-malformed-tail";
         let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
@@ -389,7 +391,54 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
+        append_run_event(
+            tmp.path(),
+            run_id,
+            &RunEvent::new(0, "tool", "completed", "done"),
+        )
+        .unwrap();
+
+        let read = load_run_events(tmp.path(), run_id).unwrap();
+        assert_eq!(read.malformed_lines, 0);
+        assert_eq!(
+            read.events.iter().map(|event| event.n).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+    }
+
+    #[test]
+    fn run_sidecar_append_heals_a_torn_tail() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-sidecar-torn-tail";
+        append_run_artifact_jsonl_value(
+            tmp.path(),
+            run_id,
+            "triage.jsonl",
+            &json!({"n": 1}),
+        )
+        .unwrap();
+        let path = run_artifact_path(tmp.path(), run_id, "triage.jsonl");
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(br#"{"torn":"#)
+            .unwrap();
+
+        append_run_artifact_jsonl_value(
+            tmp.path(),
+            run_id,
+            "triage.jsonl",
+            &json!({"n": 2}),
+        )
+        .unwrap();
+
+        let lines = fs::read_to_string(path).unwrap();
+        let values = lines
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(values, vec![json!({"n": 1}), json!({"n": 2})]);
     }
 
     #[test]
@@ -1461,6 +1510,84 @@ mod tests {
     }
 
     #[test]
+    fn legacy_absolute_and_relative_items_paths_share_one_run_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-mixed-items-identity";
+        let summary =
+            RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete();
+        write_run_summary(tmp.path(), &summary).unwrap();
+        let absolute_items = run_artifact_path(tmp.path(), run_id, "items.jsonl")
+            .display()
+            .to_string();
+        let mixed = vec![
+            RunArtifact {
+                label: "semantic run items".to_string(),
+                path: absolute_items.clone(),
+                kind: "jsonl".to_string(),
+            },
+            RunArtifact {
+                label: "semantic run items".to_string(),
+                path: "items.jsonl".to_string(),
+                kind: "jsonl".to_string(),
+            },
+        ];
+        write_mixed_identity_manifest(tmp.path(), run_id, &mixed);
+        write_mixed_identity_summary(tmp.path(), run_id, mixed);
+
+        let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+
+        assert_one_items_identity(&manifest);
+        assert_one_items_identity(&summary.artifacts);
+        super::super::artifact_manifest::record_run_artifact(
+            tmp.path(),
+            run_id,
+            &RunArtifact {
+                label: "semantic run items".to_string(),
+                path: absolute_items,
+                kind: "jsonl".to_string(),
+            },
+        )
+        .unwrap();
+        let persisted: RunArtifactManifest = serde_json::from_str(
+            &fs::read_to_string(run_artifact_path(tmp.path(), run_id, "artifacts.json")).unwrap(),
+        )
+        .unwrap();
+        assert_one_items_identity(&persisted.artifacts);
+    }
+
+    fn write_mixed_identity_manifest(target: &Path, run_id: &str, artifacts: &[RunArtifact]) {
+        let manifest = RunArtifactManifest {
+            run_id: run_id.to_string(),
+            artifacts: artifacts.to_vec(),
+            objects: Vec::new(),
+        };
+        fs::write(
+            run_artifact_path(target, run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn write_mixed_identity_summary(target: &Path, run_id: &str, artifacts: Vec<RunArtifact>) {
+        let path = run_artifact_path(target, run_id, "run.json");
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        value["artifacts"] = serde_json::to_value(artifacts).unwrap();
+        fs::write(path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+    }
+
+    fn assert_one_items_identity(artifacts: &[RunArtifact]) {
+        let items = artifacts
+            .iter()
+            .filter(|artifact| artifact.path.ends_with("items.jsonl"))
+            .collect::<Vec<_>>();
+        assert_eq!(items.len(), 1, "items artifacts: {items:?}");
+        assert_eq!(items[0].path, "items.jsonl");
+    }
+
+    #[test]
     fn load_run_artifacts_rejects_unknown_manifest_artifact_field() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-manifest-unknown-artifact-field";
@@ -2347,7 +2474,7 @@ mod tests {
         let object = manifest
             .objects
             .iter()
-            .find(|object| object.path == artifact_path.display().to_string())
+            .find(|object| object.path == "shared.json")
             .unwrap();
         let stored = crate::content_store::ContentStore::open(
             crate::workspace::workspace_objects_dir(tmp.path()),
@@ -4442,11 +4569,11 @@ mod tests {
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert!(summary.artifacts.iter().any(|recorded| {
-            recorded.path == artifact.path && recorded.label == "sast summary"
+            recorded.path == "sast-summary.json" && recorded.label == "sast summary"
         }));
         let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
         assert!(manifest.iter().any(|recorded| {
-            recorded.path == artifact.path && recorded.label == "sast summary"
+            recorded.path == "sast-summary.json" && recorded.label == "sast summary"
         }));
     }
 
@@ -4892,6 +5019,7 @@ mod tests {
                         },
                         cost,
                         error_class: None,
+                        failure: None,
                     },
                 )
                 .with_call(call_id),
@@ -5884,6 +6012,12 @@ mod tests {
     }
 
     fn representative_run_failures() -> RunFailures {
+        let runtime_failure = crate::runtime::RuntimeFailureMetadata::new(
+            crate::runtime::RuntimeFailureClass::Timeout,
+            Some(408),
+            Some("provider request timed out"),
+        )
+        .with_model_call("call-1", Some("triage"));
         RunFailures {
             run_id: "run-failed".to_string(),
             status: "failed".to_string(),
@@ -5892,6 +6026,8 @@ mod tests {
                 status: "failed".to_string(),
                 error: "runtime unavailable".to_string(),
                 error_class: None,
+                runtime_failure: Some(runtime_failure.clone()),
+                model: Some("openai:gpt-test".to_string()),
                 agent_thread_context: FailureToLlmContext {
                     failed_stage: "triage:run".to_string(),
                     cause: "runtime unavailable".to_string(),
@@ -5911,6 +6047,8 @@ mod tests {
                     completed_stages: Vec::new(),
                     checkpoint_artifacts: Vec::new(),
                     checkpoint_fingerprint: None,
+                    runtime_failure: Some(runtime_failure),
+                    model: Some("openai:gpt-test".to_string()),
                 },
             }],
         }

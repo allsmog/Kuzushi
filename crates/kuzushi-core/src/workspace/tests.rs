@@ -3,8 +3,8 @@ mod tests {
     use super::super::*;
     use crate::findings::{
         DismissReason, Finding, FindingEvidence, FindingStore, PatchLifecycleFile,
-        PatchLifecycleRecord, PatchLifecycleState, ReviewDecision, ReviewDecisionVerdict,
-        Severity, StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
+        PatchLifecycleRecord, PatchLifecycleState, ReviewDecision, ReviewDecisionVerdict, Severity,
+        StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
     };
     use crate::run_artifacts::{write_run_summary, RunLlmCallAudit, RunSummary};
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
@@ -500,6 +500,9 @@ mod tests {
             ..Default::default()
         }]);
         finding.title = "Evil\n# fake title".to_string();
+        finding.message = "# forged message\n| forged | table |".to_string();
+        finding.evidence[0].rationale =
+            "## forged rationale\r\n[hostile](javascript:alert(1))".to_string();
         store.insert_finding("run-hostile", &finding).unwrap();
 
         let bundle_dir = tmp.path().join("bundle");
@@ -523,7 +526,11 @@ mod tests {
             .lines()
             .filter(|line| line.trim_end() == "````")
             .collect();
-        assert_eq!(fence_lines.len(), 2, "expected 4-backtick fences:\n{markdown}");
+        assert_eq!(
+            fence_lines.len(),
+            2,
+            "expected 4-backtick fences:\n{markdown}"
+        );
         // Newlines in inline fields collapse to spaces instead of minting
         // injected markdown lines. (The store itself normalizes the unknown
         // evidence kind to "reasoning" before the bundle ever sees it.)
@@ -531,6 +538,19 @@ mod tests {
         assert!(
             !markdown.lines().any(|line| line == "# fake title"),
             "{markdown}"
+        );
+        assert!(
+            markdown.contains("```\n# forged message\n| forged | table |\n```")
+                && markdown.contains("```\n## forged rationale\n[hostile](javascript:alert(1))"),
+            "free-form finding text must stay inside balanced fences:\n{markdown}"
+        );
+        let three_tick_fences = markdown
+            .lines()
+            .filter(|line| line.trim_end() == "```")
+            .count();
+        assert_eq!(
+            three_tick_fences, 5,
+            "two balanced three-tick blocks plus one safely nested hostile fence:\n{markdown}"
         );
 
         let readme = fs::read_to_string(bundle_dir.join("README.md")).unwrap();
@@ -663,30 +683,43 @@ mod tests {
         let stable_fp = store
             .patch_lifecycle_stable_fp(&finding.fingerprint)
             .unwrap();
-        store
-            .insert_patch_lifecycle_record(&PatchLifecycleRecord {
-                application_id: "application-1".to_string(),
-                stable_fp,
-                fingerprint: finding.fingerprint,
-                finding_scan_id: finding.scan_id,
-                patch_run_id: "patch-run-1".to_string(),
-                target: workspace.root().display().to_string(),
-                diff_hash: "sha256:diff".to_string(),
-                base_commit: Some("base-commit".to_string()),
-                touched_files: vec![PatchLifecycleFile {
-                    path: "src/app.ts".to_string(),
-                    before_hash: Some("sha256:before".to_string()),
-                    after_hash: Some("sha256:after".to_string()),
-                }],
-                state: PatchLifecycleState::Verified,
-                reverify_run_id: Some("reverify-run-1".to_string()),
-                detail: Some("originating detector no longer rediscovered it".to_string()),
-                actor: "operator".to_string(),
-                application_started_at: "2026-07-13T11:59:59Z".to_string(),
-                applied_at: Some("2026-07-13T12:00:00Z".to_string()),
-                updated_at: "2026-07-13T12:05:00Z".to_string(),
-            })
+        let mut lifecycle = PatchLifecycleRecord {
+            application_id: "application-1".to_string(),
+            stable_fp,
+            fingerprint: finding.fingerprint,
+            finding_scan_id: finding.scan_id,
+            patch_run_id: "patch-run-1".to_string(),
+            target: workspace.root().display().to_string(),
+            diff_hash: "sha256:diff".to_string(),
+            base_commit: Some("base-commit".to_string()),
+            touched_files: vec![PatchLifecycleFile {
+                path: "src/app.ts".to_string(),
+                before_hash: Some("sha256:before".to_string()),
+                after_hash: Some("sha256:after".to_string()),
+            }],
+            state: PatchLifecycleState::Verified,
+            reverify_run_id: Some("reverify-run-1".to_string()),
+            reverify_evidence: None,
+            detail: Some("originating detector no longer rediscovered it".to_string()),
+            actor: "operator".to_string(),
+            application_started_at: "2026-07-13T11:59:59Z".to_string(),
+            applied_at: Some("2026-07-13T12:00:00Z".to_string()),
+            updated_at: "2026-07-13T12:05:00Z".to_string(),
+        };
+        let objects = crate::content_store::ContentStore::open(workspace.objects_dir()).unwrap();
+        let reproducer = objects
+            .put_json(
+                crate::content_store::ObjectKind::ProofSnapshot,
+                &serde_json::json!({"schemaVersion": 2}),
+            )
             .unwrap();
+        let receipt = crate::findings::test_verified_receipt(&lifecycle, reproducer);
+        lifecycle.reverify_evidence = Some(
+            objects
+                .put_json(crate::content_store::ObjectKind::ProofSnapshot, &receipt)
+                .unwrap(),
+        );
+        store.insert_patch_lifecycle_record(&lifecycle).unwrap();
 
         let json_path = tmp.path().join("findings.json");
         export_workspace_findings(&workspace, &json_path, None).unwrap();
@@ -695,6 +728,7 @@ mod tests {
         let remediation = &json["findings"][0]["remediation"];
         assert_eq!(remediation["applicationId"], "application-1");
         assert_eq!(remediation["applicationState"], "verified");
+        assert_eq!(remediation["empiricallyVerified"], true);
         assert_eq!(remediation["reverifyOutcome"], "verified");
         assert_eq!(remediation["touchedPaths"][0], "src/app.ts");
 
@@ -712,15 +746,19 @@ mod tests {
         export_workspace_findings(&workspace, &csv_path, None).unwrap();
         let csv = fs::read_to_string(csv_path).unwrap();
         assert!(csv.contains("remediation_application_id"));
-        assert!(csv.contains("application-1,patch-run-1,verified,verified,reverify-run-1"));
+        assert!(csv.contains("application-1,patch-run-1,verified,true,verified,reverify-run-1"));
 
         let sarif_path = tmp.path().join("findings.sarif");
         export_workspace_findings(&workspace, &sarif_path, None).unwrap();
         let sarif: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(sarif_path).unwrap()).unwrap();
         let properties = &sarif["runs"][0]["results"][0]["properties"];
-        assert_eq!(properties["kuzushiRemediationApplicationId"], "application-1");
+        assert_eq!(
+            properties["kuzushiRemediationApplicationId"],
+            "application-1"
+        );
         assert_eq!(properties["kuzushiRemediationReverifyOutcome"], "verified");
+        assert_eq!(properties["kuzushiRemediationEmpiricallyVerified"], true);
 
         let markdown_path = tmp.path().join("report");
         export_workspace_findings(
@@ -737,8 +775,9 @@ mod tests {
             .path();
         let markdown = fs::read_to_string(finding_doc).unwrap();
         assert!(markdown.contains("**Remediation:** verified (`application-1`)"));
+        assert!(markdown.contains("**Empirically verified:** true"));
         assert!(markdown.contains("**Re-verification:** verified (`reverify-run-1`)"));
-        assert!(markdown.contains("**Touched paths:** src/app.ts"));
+        assert!(markdown.contains("**Touched paths:** `src/app.ts`"));
     }
 
     #[test]
@@ -1247,7 +1286,9 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.8,
                     rationale: "model believes this is a false positive".to_string(),
@@ -1285,7 +1326,9 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "reviewed source-linked evidence".to_string(),
@@ -1379,7 +1422,9 @@ mod tests {
         store
             .record_triage_with_author(
                 confirmed_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed evidence".to_string(),
@@ -1392,7 +1437,9 @@ mod tests {
         store
             .record_auto_triage(
                 needs_review_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::NeedsReview,
                     confidence: 0.5,
                     rationale: "more evidence required".to_string(),
@@ -1453,7 +1500,9 @@ mod tests {
             store
                 .record_triage_with_author(
                     finding_id,
-                    &TriageOutcome { first_link: None, refute_reason: None,
+                    &TriageOutcome {
+                        first_link: None,
+                        refute_reason: None,
                         verdict: TriageVerdict::TruePositive,
                         confidence: 0.95,
                         rationale: "operator confirmed the evidence".to_string(),
@@ -1560,7 +1609,9 @@ mod tests {
         store
             .record_triage_with_author(
                 first_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed the durable finding".to_string(),
@@ -1635,7 +1686,9 @@ mod tests {
         store
             .record_triage_with_author(
                 first_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.91,
                     rationale: "operator rejected prior occurrence".to_string(),
@@ -1757,7 +1810,9 @@ mod tests {
         store
             .record_auto_triage(
                 confirmed_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "operator confirmed".to_string(),
@@ -1858,7 +1913,9 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.9,
                     rationale: "human confirmed this is real".to_string(),
@@ -1874,7 +1931,9 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::FalsePositive,
                     confidence: 0.7,
                     rationale: "auto re-triage thinks this is fp".to_string(),

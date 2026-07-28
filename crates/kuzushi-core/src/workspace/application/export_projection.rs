@@ -345,6 +345,18 @@ fn verification_summary(
         proof_level: verification.map(|verification| verification.proof_level),
         backend: verification.map(|verification| verification.backend.as_str().to_string()),
         language: verification.and_then(|verification| verification.language.clone()),
+        source_identity: verification.and_then(|verification| {
+            verification
+                .provenance
+                .as_ref()
+                .map(|provenance| provenance.source_identity.clone())
+        }),
+        reproducer: verification.and_then(|verification| {
+            verification
+                .provenance
+                .as_ref()
+                .and_then(|provenance| provenance.reproducer.clone())
+        }),
     }
 }
 

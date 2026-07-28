@@ -225,6 +225,7 @@ mod tests {
             },
             cost,
             error_class: None,
+            failure: None,
         };
         writer
             .emit_and_flush(

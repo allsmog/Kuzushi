@@ -27,8 +27,9 @@ impl PlannerWorkerJob {
             Ok(lifecycle) => lifecycle,
             Err(error) => return send_plan_start_failure(&sink, error, audit),
         };
-        let cancellation = self.cancel.disposition();
+        let cancel = self.cancel.clone();
         let result = self.execute(lifecycle.observation(), sink.clone());
+        let cancellation = cancel.disposition();
         let event = settle_planner_result(&run, lifecycle, result, audit, cancellation);
         sink.send(ShellEvent::Plan(event));
     }

@@ -106,6 +106,7 @@ fn model_finished(ids: FixtureIds, incomplete: RuntimeCostReport) -> RunItemReco
             },
             cost: incomplete,
             error_class: Some(text("usage_incomplete")),
+            failure: None,
         },
     )
     .with_task(ids.task)

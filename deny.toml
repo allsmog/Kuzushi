@@ -50,26 +50,22 @@ external-default-features = "allow"
 skip = [
   # `sha2`/`ring` still use the 0.2 API while `blake3` has moved to 0.3.
   { crate = "cpufeatures@0.2.17", reason = "sha2 and ring have not converged on cpufeatures 0.3" },
-  # The BDD-only cucumber stack has not adopted derive_more 2 used by crossterm.
-  { crate = "derive_more@0.99.20", reason = "cucumber 0.21 pins the pre-1.0 derive_more API" },
-  # Wasmtime/Cranelift's hashbrown 0.15 and the current Ratatui/SQLite graph use
-  # different foldhash/hashbrown APIs.
-  { crate = "foldhash@0.1.5", reason = "Wasmtime 36 pins hashbrown 0.15 and foldhash 0.1" },
-  { crate = "hashbrown@0.15.5", reason = "Wasmtime 36 and Cranelift pin hashbrown 0.15" },
-  { crate = "hashbrown@0.16.1", reason = "Ratatui and sqlite-wasm pin hashbrown 0.16" },
+  # Gimli and kasuari in the Wasmtime 46/Ratatui 0.30 graph still use
+  # hashbrown 0.16 while the primary Cranelift/SQLite graph uses 0.17.
+  { crate = "hashbrown@0.16.1", reason = "Wasmtime 46 and Ratatui 0.30 retain hashbrown 0.16 consumers alongside the 0.17 graph" },
   # ring, serde-saphyr, and uuid/tempfile require three incompatible getrandom
   # major APIs. The associated target-support crates follow those APIs.
   { crate = "getrandom@0.2.17", reason = "ring 0.17 pins getrandom 0.2" },
   { crate = "getrandom@0.3.4", reason = "serde-saphyr pins getrandom 0.3" },
   { crate = "r-efi@5.3.0", reason = "getrandom 0.3 pins r-efi 5 on UEFI targets" },
   { crate = "wit-bindgen@0.51.0", reason = "getrandom 0.4's WASI 0.3 support pins wit-bindgen 0.51" },
-  # The BDD-only cucumber/gherkin stack still exposes its older macro and text
-  # processing APIs while the product graph is on their current majors.
-  { crate = "heck@0.4.1", reason = "cucumber 0.21 and gherkin 0.14 pin heck 0.4" },
-  { crate = "itertools@0.13.0", reason = "cucumber 0.21 pins itertools 0.13" },
-  { crate = "regex-syntax@0.7.5", reason = "cucumber-expressions 0.3 pins regex-syntax 0.7" },
-  { crate = "thiserror@1.0.69", reason = "gherkin 0.14 pins thiserror 1" },
-  { crate = "thiserror-impl@1.0.69", reason = "thiserror 1 requires its matching proc macro" },
+  # Cucumber 0.23 pulls ref-cast's syn 3 proc macro while the rest of the
+  # workspace proc-macro graph remains on syn 2.
+  { crate = "syn@3.0.3", reason = "cucumber 0.23 reaches syn 3 through ref-cast while product and toolchain macros remain on syn 2" },
+  # The pinned oxidized-joern CPG graph uses the 0.25 Go and JavaScript grammar
+  # APIs while Kuzushi's native tree-sitter tooling remains on 0.23.
+  { crate = "tree-sitter-go@0.25.0", reason = "pinned oxidized-joern cpg-lang-ts requires tree-sitter-go 0.25 alongside Kuzushi's 0.23 grammar" },
+  { crate = "tree-sitter-javascript@0.25.0", reason = "pinned oxidized-joern cpg-lang-ts requires tree-sitter-javascript 0.25 alongside Kuzushi's 0.23 grammar" },
 ]
 skip-tree = [
   # windows-sys releases an ABI binding family whose version follows each
@@ -82,3 +78,4 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = ["https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd"]

@@ -539,7 +539,7 @@ fn agentic_sast_scan_tool() -> ToolDescriptor {
         "Run agentic SAST detectors for the current target.",
         agentic_sast_scan_options(),
     )
-    .with_continuation(ContinuationSupport::Loop)
+    .with_continuation(ContinuationSupport::Staged)
     .with_prompt(editable_prompt(
         "scan instructions",
         "agentic-sast",

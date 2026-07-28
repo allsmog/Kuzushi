@@ -42,6 +42,8 @@ const CSV_OMITTED: &[&str] = &[
     "verification.proofLevel",
     "verification.backend",
     "verification.language",
+    "verification.sourceIdentity",
+    "verification.reproducer",
     "provenance.runtimePlatform",
     "references",
     "message",

@@ -187,7 +187,7 @@ fn collect_display_ids(
     }
 }
 
-/// Apply the likelihood rule over every threat using its (already validated)
+/// Apply the likelihood rule over every threat using its normalized
 /// evidence rows. Sibling counts arrive with the variant scan (Phase 4) and
 /// default to zero here.
 pub(crate) fn apply_evidence_likelihood(document: &mut Value) {

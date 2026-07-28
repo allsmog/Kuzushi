@@ -247,15 +247,22 @@ impl ShellApp {
         else {
             return None;
         };
+        let now = std::time::Instant::now();
+        let heartbeat_rows = model.heartbeat_rows(viewport.columns, now).1.len();
+        let frame_layout = model.frame_layout(viewport.columns, heartbeat_rows);
+        let body_height = viewport
+            .rows
+            .saturating_sub(frame_layout.header_rows)
+            .saturating_sub(frame_layout.footer_rows);
         activity_pane_for_click(
             column,
             row,
             viewport.columns,
             viewport.rows,
             session.tasks.is_empty(),
-            session.tasks.len(),
             self.router.activity().pane_focus,
-            model.frame_layout(viewport.columns),
+            frame_layout,
+            model.pane_layout(viewport.columns, body_height, now),
         )
     }
 }
@@ -266,11 +273,11 @@ fn activity_pane_for_click(
     width: u16,
     height: u16,
     tasks_empty: bool,
-    task_rows: usize,
     focused: crate::app::PaneFocus,
     frame_layout: crate::ui_view_models::ActivityFrameLayout,
+    pane_layout: crate::ui_view_models::ActivityPaneLayout,
 ) -> Option<crate::app::PaneFocus> {
-    let (body_height, body_row) = activity_click_body_position(
+    let (_, body_row) = activity_click_body_position(
         row,
         width,
         height,
@@ -280,8 +287,12 @@ fn activity_pane_for_click(
     if tasks_empty {
         return Some(crate::app::PaneFocus::Right);
     }
-    let layout = crate::ui_view_models::activity_pane_layout(width, body_height, task_rows);
-    Some(activity_pane_for_layout(column, body_row, focused, layout))
+    Some(activity_pane_for_layout(
+        column,
+        body_row,
+        focused,
+        pane_layout,
+    ))
 }
 
 fn activity_click_body_position(

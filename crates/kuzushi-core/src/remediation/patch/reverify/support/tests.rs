@@ -1,5 +1,6 @@
+use super::super::{finish_detector_output, ReverifyRequest};
 use super::*;
-use crate::findings::{PatchProvenance, PatchResult, Severity};
+use crate::findings::{PatchProvenance, PatchResult, PatchStatus, Severity};
 use crate::run_artifacts::{
     read_run_artifact_text, record_tool_run_started, RunArtifactRead, ToolRunRecord,
 };
@@ -18,6 +19,7 @@ fn lifecycle_record(fingerprint: &str) -> PatchLifecycleRecord {
         touched_files: Vec::new(),
         state: PatchLifecycleState::Applied,
         reverify_run_id: None,
+        reverify_evidence: None,
         detail: None,
         actor: "operator".to_string(),
         application_started_at: "1".to_string(),
@@ -27,9 +29,61 @@ fn lifecycle_record(fingerprint: &str) -> PatchLifecycleRecord {
 }
 
 #[test]
-fn detector_absence_never_overclaims_nondeterministic_success() {
-    assert_eq!(absence_outcome(true), PatchLifecycleState::Verified);
-    assert_eq!(absence_outcome(false), PatchLifecycleState::NotRediscovered);
+fn detector_absence_is_not_verification() {
+    assert_eq!(absence_outcome(), PatchLifecycleState::NotRediscovered);
+}
+
+#[test]
+fn completed_detector_absence_preserves_candidate_patch_truth() {
+    for run_id in ["reverify-static", "reverify-agentic"] {
+        let (target, store, finding, record) = reverify_fixture();
+        store
+            .record_run_started(run_id, target.path(), "completed")
+            .unwrap();
+
+        let output = finish_reverify(&target, &store, record, run_id);
+        let persisted = store.get_patch_lifecycle("application-1").unwrap().unwrap();
+
+        assert_eq!(persisted.state, PatchLifecycleState::NotRediscovered);
+        assert_eq!(
+            persisted.detail.as_deref(),
+            Some("originating detector completed without rediscovery")
+        );
+        assert_eq!(output["data"]["outcome"], json!("not_rediscovered"));
+        assert_eq!(
+            output["output"],
+            json!("originating detector completed without rediscovery")
+        );
+        let patches = store
+            .get_patch_results_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert_eq!(patches.len(), 1);
+        assert_eq!(patches[0].status, PatchStatus::Sound);
+        assert!(!patches
+            .iter()
+            .any(|patch| patch.status == PatchStatus::Verified));
+    }
+}
+
+#[test]
+fn rediscovery_is_lifecycle_still_vulnerable_without_rewriting_candidate_status() {
+    let (target, store, finding, record) = reverify_fixture();
+    let run_id = "reverify-rediscovered";
+    store
+        .record_run_started(run_id, target.path(), "completed")
+        .unwrap();
+    store.insert_finding(run_id, &finding).unwrap();
+
+    let output = finish_reverify(&target, &store, record, run_id);
+    let persisted = store.get_patch_lifecycle("application-1").unwrap().unwrap();
+
+    assert_eq!(persisted.state, PatchLifecycleState::StillVulnerable);
+    assert_eq!(output["data"]["outcome"], json!("still_vulnerable"));
+    let patches = store
+        .get_patch_results_for_finding(&finding.fingerprint)
+        .unwrap();
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].status, PatchStatus::Sound);
 }
 
 #[test]
@@ -162,6 +216,60 @@ fn legacy_application_without_generation_requires_inconclusive_regeneration() {
     assert!(error.contains("regenerate"), "{error}");
 }
 
+fn reverify_fixture() -> (
+    tempfile::TempDir,
+    crate::findings::FindingStore,
+    Finding,
+    PatchLifecycleRecord,
+) {
+    let target = tempfile::tempdir().unwrap();
+    let store =
+        crate::findings::FindingStore::open(target.path().join(".kuzushi/v3/index.sqlite3"))
+            .unwrap();
+    let finding = persisted_detector_finding(&store, target.path());
+    persist_bound_patch(&store, target.path(), &finding, "{}");
+    let mut record = lifecycle_record(&finding.fingerprint);
+    record.stable_fp = store
+        .patch_lifecycle_stable_fp(&finding.fingerprint)
+        .unwrap();
+    record.finding_scan_id = finding.scan_id.clone();
+    record.target = target.path().display().to_string();
+    store.insert_patch_lifecycle_record(&record).unwrap();
+    (target, store, finding, record)
+}
+
+fn finish_reverify(
+    target: &tempfile::TempDir,
+    store: &crate::findings::FindingStore,
+    mut record: PatchLifecycleRecord,
+    run_id: &str,
+) -> Value {
+    let workspace = crate::workspace::WorkspaceTarget::new(target.path()).unwrap();
+    let config = crate::V2Config::default();
+    let trace = crate::run_artifacts::TraceHandle::jsonl(target.path(), run_id);
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: Some(store),
+        trace: Some(&trace),
+        cancellation: None,
+        authorization: Default::default(),
+    };
+    record.reverify_run_id = Some(run_id.to_string());
+    finish_detector_output(
+        ReverifyRequest {
+            store,
+            target: target.path(),
+            record,
+        },
+        "secret-scan:scan",
+        json!({"ok": true, "status": "completed"}),
+        None,
+        &ctx,
+    )
+    .unwrap()
+}
+
 fn persisted_detector_finding(store: &crate::findings::FindingStore, target: &Path) -> Finding {
     store
         .record_run_started("secret-run", target, "completed")
@@ -222,6 +330,9 @@ fn persist_bound_patch(
             detector_input_digest: Some(PatchProvenance::digest_detector_input(
                 detector_input.as_bytes(),
             )),
+            reproducer: None,
+            verification_source_identity: None,
+            verification_run_id: None,
         }),
         created_at: None,
         updated_at: None,

@@ -164,11 +164,13 @@ impl<'a> ToolExecutionContext<'a> {
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
     }
 
-    pub fn ensure_active(&self) -> anyhow::Result<()> {
-        if self
-            .cancellation
+    pub fn is_cancelled(&self) -> bool {
+        self.cancellation
             .is_some_and(ScanCancellation::is_cancelled)
-        {
+    }
+
+    pub fn ensure_active(&self) -> anyhow::Result<()> {
+        if self.is_cancelled() {
             anyhow::bail!("tool execution was cancelled")
         }
         Ok(())
@@ -285,10 +287,9 @@ authorization: Default::default(),
     }
 
     #[test]
-    fn shared_cancellation_is_visible_to_nested_operations() {
+    fn shared_cancellation_state_is_visible_to_nested_operations() {
         let config = V2Config::default();
         let cancellation = ScanCancellation::default();
-        cancellation.cancel();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: None,
@@ -298,6 +299,10 @@ authorization: Default::default(),
             authorization: Default::default(),
         };
 
+        assert!(!ctx.is_cancelled());
+        ctx.ensure_active().unwrap();
+        cancellation.cancel();
+        assert!(ctx.is_cancelled());
         assert!(ctx.ensure_active().unwrap_err().to_string().contains("cancelled"));
         assert!(ctx.with_cancellation(ScanCancellation::is_cancelled));
     }

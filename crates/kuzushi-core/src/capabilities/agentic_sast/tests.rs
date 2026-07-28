@@ -5,6 +5,9 @@ mod tests {
     use crate::findings::{FindingStore, StaticProofState};
     use crate::runtime::{AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
+    use std::collections::VecDeque;
+    use std::process::Command;
+    use std::sync::Mutex;
     use std::{fs, path::Path};
     use tempfile::tempdir;
 
@@ -15,6 +18,25 @@ mod tests {
     impl AgentRuntime for FakeRuntime {
         fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             Ok(self.response.clone())
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            unreachable!("agentic-sast tests do not triage")
+        }
+    }
+
+    struct SequencedRuntime {
+        responses: Mutex<VecDeque<Result<AgentQueryResponse>>>,
+    }
+
+    impl AgentRuntime for SequencedRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.responses.lock().unwrap().pop_front().unwrap_or_else(|| {
+                panic!("unexpected extra agentic SAST query for stage {:?}", request.stage)
+            })
         }
 
         fn triage_finding_blocking(
@@ -263,6 +285,104 @@ mod tests {
 
         assert_eq!(report.count, 0);
         assert!((report.cost_usd - 0.073).abs() < 1e-9);
+    }
+
+    #[test]
+    fn failed_review_resumes_without_repeating_the_hunt_cost() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
+        fs::write(temp.path().join("src/routes.rs"), "fn vulnerable() {}\n").unwrap();
+        initialize_clean_git(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config { model: Some("test:model".into()), ..V2Config::default() };
+        let ctx = test_context(&config, &workspace, &store);
+        let first_runtime = SequencedRuntime {
+            responses: Mutex::new(VecDeque::from([
+                Ok(agentic_response(0.4)),
+                Err(anyhow::anyhow!("review failed")),
+            ])),
+        };
+        let first = agentic_checkpoint(temp.path(), "run-1");
+        let _scope = crate::run_artifacts::StageCheckpointScope::install(Some(first));
+        let error = run_agentic_sast_report(&json!({"passes": 2}), &ctx, Some(&first_runtime));
+        assert!(error.is_err());
+        drop(_scope);
+
+        let second_runtime = SequencedRuntime {
+            responses: Mutex::new(VecDeque::from([Ok(agentic_response(0.2))])),
+        };
+        let second = agentic_checkpoint(temp.path(), "run-2");
+        let _scope = crate::run_artifacts::StageCheckpointScope::install(Some(second));
+        let report = run_agentic_sast_report(&json!({"passes": 2}), &ctx, Some(&second_runtime))
+            .unwrap();
+
+        assert!(second_runtime.responses.lock().unwrap().is_empty());
+        assert!((report.cost_usd - 0.2).abs() < 1e-9);
+        assert!(report.cost_usd_exact);
+    }
+
+    fn agentic_checkpoint(target: &Path, run_id: &str) -> std::sync::Arc<crate::run_artifacts::StageCheckpointHandle> {
+        let store = crate::run_artifacts::StageCheckpointStore::discover(target, &[7; 32]).unwrap();
+        std::sync::Arc::new(crate::run_artifacts::StageCheckpointHandle::open(
+            store, target, run_id, "agentic-sast:scan",
+        ))
+    }
+
+    fn initialize_clean_git(target: &Path) {
+        for args in [
+            vec!["init", "-q"],
+            vec!["add", "src/routes.rs"],
+            vec![
+                "-c",
+                "user.name=Kuzushi Test",
+                "-c",
+                "user.email=kuzushi@example.invalid",
+                "commit",
+                "-q",
+                "-m",
+                "fixture",
+            ],
+        ] {
+            assert!(Command::new("git")
+                .arg("-C")
+                .arg(target)
+                .args(args)
+                .status()
+                .unwrap()
+                .success());
+        }
+    }
+
+    fn test_context<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+        store: &'a FindingStore,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: Some(store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        }
+    }
+
+    fn agentic_response(cost_usd: f64) -> AgentQueryResponse {
+        AgentQueryResponse {
+            structured: Some(json!({"findings": [{
+                "ruleId": "agentic/test",
+                "filePath": "src/routes.rs",
+                "startLine": 1,
+                "severity": "high",
+                "message": "attacker input reaches a sensitive operation"
+            }]})),
+            cost_usd,
+            cost_usd_reported: true,
+            ..Default::default()
+        }
     }
 
     #[test]

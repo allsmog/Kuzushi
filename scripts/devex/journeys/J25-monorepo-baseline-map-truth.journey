@@ -13,6 +13,7 @@
 # those facts alone. The holistic judgment `ask:` below remains as an honest
 # open question either way.
 name: Monorepo baseline · entry and phase pages (real target)
+require-env: KUZUSHI_DEVEX_TARGET
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1

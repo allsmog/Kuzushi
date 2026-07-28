@@ -10,13 +10,18 @@ env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
 shell: mkdir -p @TMP_TARGET/.kuzushi/v3/workflow && printf '{"event":"phase_attempt_completed","attemptId":"attempt-j18-map","phase":"map","runRefs":["run-j18-map"],"targetSnapshot":{"target":"%s","dirty":false},"outcome":"failed","derivation":"original","completedAtUnix":1}\n' "$(readlink -f @TMP_TARGET)" > @TMP_TARGET/.kuzushi/v3/workflow/phase-attempts.jsonl
 launch: --target @TMP_TARGET
 wait-for: 30 KUZUSHI
-submit: workbench
 wait-for: 8 RESULT
-# Let async target hydration settle — its completion resets the input
-# mode to Prompt, which would swallow the phase-result keys below.
+# An unresolved result is a checkpoint, not a modal: Prompt mode must still
+# accept ordinary command text before Navigate mode resolves the result.
 wait: 4
+type: typing-probe-731
+wait: 1
+live-snap: prompt-remains-editable
+expect: typing-probe-731
 keys: Escape
 wait: 1
+# Converge on the result card's advertised Navigate mode before resolving it.
+nav-mode:
 snap: failed-map-result
 expect: NAVIGATE
 expect: RESULT failed
@@ -33,4 +38,5 @@ ask: Discard recovery — after discarding the failed attempt, does Map return t
 submit: next
 wait: 3
 snap: next-after-recovery
+expect: prior run evidence retained
 ask: Recovery path — does `next` offer a fresh Map plan (the normal guided route) rather than being wedged on the discarded failure?

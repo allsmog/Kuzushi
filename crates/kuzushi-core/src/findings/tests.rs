@@ -1069,9 +1069,7 @@ mod tests {
             .expect("blob bytes");
         assert_eq!(bytes, SOURCE.as_bytes());
 
-        let missing = store
-            .read_observation_blob(&"0".repeat(64))
-            .unwrap();
+        let missing = store.read_observation_blob(&"0".repeat(64)).unwrap();
         assert_eq!(missing, None);
         assert_eq!(
             store
@@ -1179,6 +1177,7 @@ mod tests {
                     notes: vec!["empirical proof".to_string()],
                     verification_run_id: Some("verify-run-v3".to_string()),
                     verified_scan_id: Some(run_id.to_string()),
+                    provenance: None,
                     created_at: String::new(),
                 },
             )
@@ -1248,7 +1247,9 @@ mod tests {
         store
             .record_triage_with_author(
                 finding_id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.95,
                     rationale: "operator confirmed source-to-sink evidence".to_string(),
@@ -1346,6 +1347,9 @@ mod tests {
                     detector_tool: Some("semgrep:scan".to_string()),
                     detector_run_id: Some(run_id.to_string()),
                     detector_input_digest: Some("digest".to_string()),
+                    reproducer: None,
+                    verification_source_identity: None,
+                    verification_run_id: None,
                 }),
                 created_at: None,
                 updated_at: None,
@@ -1473,6 +1477,7 @@ mod tests {
             }],
             state: PatchLifecycleState::Applied,
             reverify_run_id: None,
+            reverify_evidence: None,
             detail: None,
             actor: "operator".to_string(),
             application_started_at: "1".to_string(),
@@ -1483,12 +1488,33 @@ mod tests {
         record.state = PatchLifecycleState::Verified;
         record.reverify_run_id = Some("reverify-1".to_string());
         record.updated_at = "2".to_string();
+        let error = store
+            .insert_patch_lifecycle_record(&record)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("requires a receipt"), "{error}");
+        let objects = crate::content_store::ContentStore::open(
+            db_path
+                .parent()
+                .unwrap()
+                .join(crate::workspace::WORKSPACE_OBJECTS_DIR),
+        )
+        .unwrap();
+        let reproducer = objects
+            .put_json(
+                crate::content_store::ObjectKind::ProofSnapshot,
+                &json!({"schemaVersion": 2}),
+            )
+            .unwrap();
+        let receipt = crate::findings::test_verified_receipt(&record, reproducer);
+        record.reverify_evidence = Some(
+            objects
+                .put_json(crate::content_store::ObjectKind::ProofSnapshot, &receipt)
+                .unwrap(),
+        );
         store.insert_patch_lifecycle_record(&record).unwrap();
 
-        let loaded = store
-            .get_patch_lifecycle("application-1")
-            .unwrap()
-            .unwrap();
+        let loaded = store.get_patch_lifecycle("application-1").unwrap().unwrap();
         assert_eq!(loaded.state, PatchLifecycleState::Verified);
         assert_eq!(
             store
@@ -2131,7 +2157,9 @@ mod tests {
 
     #[test]
     fn review_decision_projection_keeps_author_confidence_and_rationale() {
-        let triage = TriageOutcome { first_link: None, refute_reason: None,
+        let triage = TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::FalsePositive,
             confidence: 0.8,
             rationale: "model signal did not match reachable code".to_string(),
@@ -2446,7 +2474,10 @@ mod tests {
             .unwrap()
             .expect("F-0002 resolves");
 
-        assert_eq!(first.fingerprint, critical.fingerprint, "F-0001 is the top-sorted finding");
+        assert_eq!(
+            first.fingerprint, critical.fingerprint,
+            "F-0001 is the top-sorted finding"
+        );
         assert_eq!(second.fingerprint, low.fingerprint);
         assert!(store
             .get_finding_by_operator_reference("F-0099")
@@ -2582,6 +2613,7 @@ mod tests {
                     notes: vec!["confirmed by fixture".to_string()],
                     verification_run_id: None,
                     verified_scan_id: None,
+                    provenance: None,
                     created_at: String::new(),
                 },
             )
@@ -2607,27 +2639,20 @@ mod tests {
             "Request query data is rendered into HTML without escaping",
         )
         .with_static_proof_state(StaticProofState::SourceSinkLinked);
-        finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+        finding.triage = Some(TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.91,
             rationale: "source and sink are linked".to_string(),
             cost_usd: 0.02,
             cost_usd_exact: true,
         });
-        finding.verification = Some(PersistedVerification {
-            proof_level: 4,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Bwrap,
-            language: Some("javascript".to_string()),
-            harness_path: Some("/tmp/harness.js".to_string()),
-            crash_evidence: Some("runtime fixture recorded marker".to_string()),
-            duration_ms: 321,
-            cost_usd: 0.0,
-            notes: vec!["browser fixture recorded runtime evidence".to_string()],
-            verification_run_id: None,
-            verified_scan_id: None,
-            created_at: "now".to_string(),
-        });
+        let mut verification = crate::findings::test_support::empirically_verified(4);
+        verification.harness_path = Some("/tmp/harness.js".to_string());
+        verification.crash_evidence = Some("runtime fixture recorded marker".to_string());
+        verification.notes = vec!["browser fixture recorded runtime evidence".to_string()];
+        finding.verification = Some(verification);
 
         let report = FindingDetailReport::new(Some("F-0001".to_string()), finding, Vec::new());
         let output = report.output();
@@ -2676,23 +2701,56 @@ mod tests {
         assert_eq!(missing.label, "not verified");
         assert_eq!(missing.explanation, "runtime verification has not run");
 
-        let verification = PersistedVerification {
-            proof_level: 4,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Bwrap,
-            language: Some("javascript".to_string()),
-            harness_path: None,
-            crash_evidence: None,
-            duration_ms: 321,
-            cost_usd: 0.0,
-            notes: Vec::new(),
-            verification_run_id: None,
-            verified_scan_id: None,
-            created_at: "now".to_string(),
-        };
+        let verification = crate::findings::test_support::empirically_verified(4);
         let verified = runtime_validation_summary(Some(&verification));
         assert_eq!(verified.label, "verified L4");
         assert!(verified.explanation.contains("empirical evidence"));
+    }
+
+    #[test]
+    fn model_assessment_never_projects_runtime_authority() {
+        let mut finding = Finding::new_semgrep(
+            "demo.model",
+            "src/app.ts",
+            7,
+            None,
+            Severity::High,
+            "model-assessed finding",
+        );
+        finding.verification = Some(PersistedVerification {
+            proof_level: 3,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Model,
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 10,
+            cost_usd: 0.01,
+            notes: vec!["legacy model verdict".to_string()],
+            verification_run_id: Some("model-run".to_string()),
+            verified_scan_id: Some("scan-1".to_string()),
+            provenance: None,
+            created_at: "now".to_string(),
+        });
+
+        assert_eq!(finding_lifecycle_status(&finding), "model_assessed");
+        assert_eq!(
+            ProofConfidence::classify(&finding),
+            ProofConfidence::Unverified
+        );
+        assert!(runtime_validation_label(finding.verification.as_ref()).contains("model_assessed"));
+        assert_eq!(
+            runtime_validation_summary(finding.verification.as_ref()).label,
+            "model assessed"
+        );
+        assert_eq!(
+            finding_next_action(&finding, None),
+            FindingNextAction::Validate
+        );
+
+        finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);
+        assert_eq!(finding_lifecycle_status(&finding), "statically_supported");
+        assert_eq!(ProofConfidence::classify(&finding), ProofConfidence::Likely);
     }
 
     #[test]
@@ -2712,20 +2770,7 @@ mod tests {
             FindingNextAction::Validate
         );
 
-        finding.verification = Some(PersistedVerification {
-            proof_level: 4,
-            proof_verdict: PersistedProofVerdict::Exploited,
-            backend: PersistedSandboxBackend::Bwrap,
-            language: Some("javascript".to_string()),
-            harness_path: None,
-            crash_evidence: None,
-            duration_ms: 321,
-            cost_usd: 0.0,
-            notes: Vec::new(),
-            verification_run_id: None,
-            verified_scan_id: None,
-            created_at: "now".to_string(),
-        });
+        finding.verification = Some(crate::findings::test_support::empirically_verified(4));
         assert_eq!(
             finding_next_action(&finding, None),
             FindingNextAction::Patch
@@ -2806,7 +2851,9 @@ mod tests {
             "high confirmed",
         );
         confirmed.fingerprint = "zzzz1111".to_string();
-        confirmed.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+        confirmed.triage = Some(TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.72,
             rationale: "source reaches sink".to_string(),
@@ -2862,7 +2909,9 @@ mod tests {
             "http",
         );
         finding.set_static_proof_state(StaticProofState::SourceSinkLinked);
-        finding.triage = Some(TriageOutcome { first_link: None, refute_reason: None,
+        finding.triage = Some(TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "reviewed source-linked evidence".to_string(),
@@ -3319,6 +3368,18 @@ mod tests {
             "test",
         );
         let finding_id = store.insert_finding("run-v1", &finding).unwrap();
+        let reproducer = crate::content_store::ContentStore::open(
+            db_path
+                .parent()
+                .unwrap()
+                .join(crate::workspace::WORKSPACE_OBJECTS_DIR),
+        )
+        .unwrap()
+        .put_json(
+            crate::content_store::ObjectKind::ProofSnapshot,
+            &json!({"schemaVersion": 1, "files": []}),
+        )
+        .unwrap();
 
         let record = PersistedVerification {
             proof_level: 4,
@@ -3332,11 +3393,36 @@ mod tests {
             notes: vec!["one".to_string(), "two".to_string()],
             verification_run_id: Some("verify-run-roundtrip".to_string()),
             verified_scan_id: Some("run-v1".to_string()),
+            provenance: Some(VerificationProvenance {
+                source_identity: crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                    snapshot_hash: crate::run_lifecycle::SafeText::operator_visible("a".repeat(64)),
+                    tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
+                        "b".repeat(64),
+                    )),
+                },
+                reproducer: Some(reproducer),
+            }),
             created_at: String::new(),
         };
         let row_id = store.save_verification(finding_id, &record).unwrap();
         assert!(row_id > 0);
+        let events = crate::event_log::EventLog::open(temp.path().join(".kuzushi/v3/log"))
+            .unwrap()
+            .read_all()
+            .unwrap();
+        let event = events
+            .iter()
+            .find(|event| event.event_kind == crate::event_log::EventKind::VerificationRecorded)
+            .unwrap();
+        assert_eq!(event.run_id.as_deref(), Some("verify-run-roundtrip"));
+        assert_eq!(
+            event.target_snapshot.as_ref().map(|hash| hash.as_str()),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+        assert_eq!(event.payload["provenance"], json!(record.provenance));
+        drop(store);
 
+        let store = FindingStore::open(&db_path).unwrap();
         let fetched = store
             .get_latest_verification(finding_id)
             .unwrap()
@@ -3355,7 +3441,16 @@ mod tests {
             Some("verify-run-roundtrip")
         );
         assert_eq!(fetched.verified_scan_id.as_deref(), Some("run-v1"));
+        assert_eq!(fetched.provenance, record.provenance);
         assert!(!fetched.created_at.is_empty());
+        let restored_finding = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(restored_finding).unwrap()["verification"]["provenance"],
+            json!(record.provenance)
+        );
     }
 
     #[test]
@@ -3389,6 +3484,7 @@ mod tests {
             notes: vec![],
             verification_run_id: None,
             verified_scan_id: None,
+            provenance: None,
             created_at: String::new(),
         };
         let later = PersistedVerification {
@@ -3403,6 +3499,7 @@ mod tests {
             notes: vec![],
             verification_run_id: None,
             verified_scan_id: None,
+            provenance: None,
             created_at: String::new(),
         };
         store.save_verification(finding_id, &earlier).unwrap();
@@ -3504,6 +3601,7 @@ mod tests {
                     notes: vec![],
                     verification_run_id: None,
                     verified_scan_id: None,
+                    provenance: None,
                     created_at: String::new(),
                 },
             )
@@ -3557,6 +3655,7 @@ mod tests {
                     notes: vec![],
                     verification_run_id: Some("verify-a".to_string()),
                     verified_scan_id: Some("scan-a".to_string()),
+                    provenance: None,
                     created_at: String::new(),
                 },
             )
@@ -3586,7 +3685,9 @@ mod tests {
             .record_run_started("run-fk", Path::new("/repo"), "running")
             .unwrap();
         let stale_id: i64 = 9_999_999;
-        let outcome = TriageOutcome { first_link: None, refute_reason: None,
+        let outcome = TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.5,
             rationale: "synthetic".to_string(),
@@ -3627,7 +3728,9 @@ mod tests {
         store
             .record_auto_triage(
                 id,
-                &TriageOutcome { first_link: None, refute_reason: None,
+                &TriageOutcome {
+                    first_link: None,
+                    refute_reason: None,
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.7,
                     rationale: "ok".to_string(),

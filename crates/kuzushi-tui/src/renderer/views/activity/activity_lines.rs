@@ -120,7 +120,7 @@ fn append_activity_heartbeat(
     width: u16,
     activity: &RunFocusModel<'_>,
 ) {
-    let model = activity.heartbeat(Instant::now());
+    let (model, rows) = activity.heartbeat_rows(width, Instant::now());
     let style = match model.tone {
         ActivityHeartbeatTone::Live => theme::success(),
         ActivityHeartbeatTone::Stalled => theme::warn(),
@@ -128,7 +128,7 @@ fn append_activity_heartbeat(
         ActivityHeartbeatTone::Warning => theme::warn(),
         ActivityHeartbeatTone::Failed => theme::danger(),
     };
-    lines.push(Line::styled(fit(&model.text, width as usize), style));
+    lines.extend(rows.into_iter().map(|row| Line::styled(row, style)));
 }
 
 fn append_activity_pane_lines(

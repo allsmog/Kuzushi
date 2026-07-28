@@ -1,5 +1,5 @@
 use crate::event_log::{EventEnvelope, EventKind};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, Transaction};
 
 use super::projection_fts::rebuild_fts_if_available;
@@ -22,11 +22,11 @@ on conflict(event_hash) do nothing
 const VERIFICATION_SQL: &str = r#"
 insert into verification_events(
   event_hash, seq, stable_fp, finding_id, identity_id,
-  verification_run_id, verified_scan_id, proof_level,
+  verification_run_id, verified_scan_id, provenance_json, proof_level,
   proof_verdict, backend, language, harness_path, crash_evidence,
   duration_ms, cost_usd, notes_json, actor, created_at, payload_json
 )
-values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
 on conflict(event_hash) do nothing
 "#;
 
@@ -47,6 +47,7 @@ pub(super) fn project_verification_event(
             payload_str(&event.payload, "identityId"),
             payload_str(&event.payload, "verificationRunId"),
             payload_str(&event.payload, "verifiedScanId"),
+            verification_provenance_json(&event.payload)?,
             require_payload_i64(&event.payload, "proofLevel")?,
             require_payload_str(&event.payload, "proofVerdict")?,
             require_payload_str(&event.payload, "backend")?,
@@ -63,6 +64,16 @@ pub(super) fn project_verification_event(
     )?;
     project_verification_search(tx, event)?;
     Ok(())
+}
+
+fn verification_provenance_json(payload: &serde_json::Value) -> Result<Option<String>> {
+    let Some(value) = payload.get("provenance").filter(|value| !value.is_null()) else {
+        return Ok(None);
+    };
+    let provenance: crate::findings::VerificationProvenance = serde_json::from_value(value.clone())
+        .context("verification event provenance is invalid")?;
+    provenance.validate()?;
+    Ok(Some(serde_json::to_string(&provenance)?))
 }
 
 pub(super) fn project_patch_attempt_event(

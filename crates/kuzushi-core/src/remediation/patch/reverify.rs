@@ -1,6 +1,9 @@
 mod support;
 
 use self::support::*;
+use crate::capabilities::patch_reverification::{
+    prepare_empirical_ladder, EmpiricalLadderRun, ProductionEmpiricalCaseRunner,
+};
 use crate::findings::{PatchLifecycleRecord, PatchLifecycleState};
 use crate::modules::{ModuleRegistry, ToolExecutionContext};
 use crate::runtime::AgentRuntime;
@@ -42,13 +45,96 @@ pub(crate) fn run_patch_reverify(
     if let Some(output) = request.preflight(&input)? {
         return Ok(output);
     }
-    let detector = required_string(&input, DETECTOR_TOOL)?.to_string();
-    let detector_input = input
-        .get(DETECTOR_INPUT)
-        .cloned()
-        .context("patch:reverify is missing its bound detector input")?;
-    request.mark_running(&detector)?;
-    execute_detector(registry, request, &detector, detector_input, ctx, runtime)
+    let detector = BoundDetector::load(&input)?;
+    request.mark_running(&detector.tool)?;
+    continue_reverification(registry, request, detector, ctx, runtime)
+}
+
+fn continue_reverification(
+    registry: &ModuleRegistry,
+    request: ReverifyRequest<'_>,
+    detector: BoundDetector,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    let empirical: Option<EmpiricalLadderRun> = match prepare_empirical_ladder(
+        request.store,
+        request.target,
+        &request.record,
+        &detector.tool,
+        &detector.run_id,
+        &ProductionEmpiricalCaseRunner,
+    ) {
+        Ok(empirical) => empirical,
+        Err(error) => return finish_empirical_error(request, &detector.tool, error),
+    };
+    if let Some(run) = terminal_empirical_run(&empirical) {
+        return finish_terminal_empirical(request, &detector.tool, run);
+    }
+    execute_detector(
+        registry,
+        request,
+        &detector.tool,
+        detector.input,
+        empirical.map(|run| run.receipt),
+        ctx,
+        runtime,
+    )
+}
+
+fn finish_empirical_error(
+    mut request: ReverifyRequest<'_>,
+    detector: &str,
+    error: anyhow::Error,
+) -> Result<Value> {
+    let mut state = PatchLifecycleState::Inconclusive;
+    let mut detail = format!("empirical patch reverification was inconclusive: {error}");
+    if let Some(path) = changed_touched_path(request.target, &request.record)? {
+        state = PatchLifecycleState::ChangedSinceApply;
+        detail = format!("{path} changed during empirical reverification");
+    }
+    record_state(request.store, &mut request.record, state, Some(detail))?;
+    Ok(completed_reverify_output(&request.record, detector))
+}
+
+fn terminal_empirical_run(empirical: &Option<EmpiricalLadderRun>) -> Option<&EmpiricalLadderRun> {
+    empirical
+        .as_ref()
+        .filter(|run| run.terminal_state.is_some())
+}
+
+fn finish_terminal_empirical(
+    request: ReverifyRequest<'_>,
+    detector: &str,
+    run: &EmpiricalLadderRun,
+) -> Result<Value> {
+    let state = run.terminal_state.expect("filtered terminal empirical run");
+    finish_with_receipt(
+        request,
+        state,
+        empirical_outcome_detail(state),
+        run.receipt.clone(),
+        detector,
+    )
+}
+
+struct BoundDetector {
+    tool: String,
+    run_id: String,
+    input: Value,
+}
+
+impl BoundDetector {
+    fn load(input: &Value) -> Result<Self> {
+        Ok(Self {
+            tool: required_string(input, DETECTOR_TOOL)?.to_string(),
+            run_id: required_string(input, DETECTOR_RUN_ID)?.to_string(),
+            input: input
+                .get(DETECTOR_INPUT)
+                .cloned()
+                .context("patch:reverify is missing its bound detector input")?,
+        })
+    }
 }
 
 struct ReverifyRequest<'a> {
@@ -76,10 +162,10 @@ impl<'a> ReverifyRequest<'a> {
     }
 
     fn preflight(&mut self, input: &Value) -> Result<Option<Value>> {
-        if let Some(reason) = input.get(COMPARISON_UNAVAILABLE).and_then(Value::as_str) {
-            return self.finish_preflight(PatchLifecycleState::Inconclusive, reason, false);
-        }
         let Some(path) = changed_touched_path(self.target, &self.record)? else {
+            if let Some(reason) = input.get(COMPARISON_UNAVAILABLE).and_then(Value::as_str) {
+                return self.finish_preflight(PatchLifecycleState::Inconclusive, reason, false);
+            }
             return Ok(None);
         };
         let detail = format!("{path} changed after the patch application");
@@ -114,6 +200,14 @@ impl<'a> ReverifyRequest<'a> {
             Some(format!("replaying {detector}")),
         )
     }
+
+    fn cloned(&self) -> Self {
+        Self {
+            store: self.store,
+            target: self.target,
+            record: self.record.clone(),
+        }
+    }
 }
 
 fn execute_detector(
@@ -121,17 +215,17 @@ fn execute_detector(
     mut request: ReverifyRequest<'_>,
     detector: &str,
     detector_input: Value,
+    receipt: Option<crate::findings::PatchReverificationReceipt>,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let deterministic = !registry.tool_needs_runtime(detector, &detector_input);
     let output =
         match registry.dispatch_delegated_tool_with_runtime(detector, detector_input, ctx, runtime)
         {
             Ok(output) => output,
-            Err(error) => return record_dispatch_error(&mut request, ctx, error),
+            Err(error) => return record_dispatch_error(&mut request, receipt, ctx, error),
         };
-    finish_detector_output(request, detector, output, ctx, deterministic)
+    finish_detector_output(request, detector, output, receipt, ctx)
 }
 
 #[cfg(test)]
@@ -164,7 +258,9 @@ mod legacy_provenance_tests {
             .unwrap()
             .unwrap();
         assert_eq!(persisted.state, PatchLifecycleState::Inconclusive);
-        assert!(persisted.detail.is_some_and(|detail| detail.contains("regenerate")));
+        assert!(persisted
+            .detail
+            .is_some_and(|detail| detail.contains("regenerate")));
     }
 
     fn legacy_reverify_fixture() -> (
@@ -173,10 +269,9 @@ mod legacy_provenance_tests {
         PatchLifecycleRecord,
     ) {
         let target = tempfile::tempdir().unwrap();
-        let store = crate::findings::FindingStore::open(
-            target.path().join(".kuzushi/v3/index.sqlite3"),
-        )
-        .unwrap();
+        let store =
+            crate::findings::FindingStore::open(target.path().join(".kuzushi/v3/index.sqlite3"))
+                .unwrap();
         store
             .record_run_started("scan-1", target.path(), "completed")
             .unwrap();
@@ -223,9 +318,14 @@ mod legacy_provenance_tests {
     ) -> PatchLifecycleRecord {
         PatchLifecycleRecord {
             application_id: "application-legacy".to_string(),
-            stable_fp: store.patch_lifecycle_stable_fp(&finding.fingerprint).unwrap(),
+            stable_fp: store
+                .patch_lifecycle_stable_fp(&finding.fingerprint)
+                .unwrap(),
             fingerprint: finding.fingerprint.clone(),
-            finding_scan_id: finding.scan_id.clone().or_else(|| Some("scan-1".to_string())),
+            finding_scan_id: finding
+                .scan_id
+                .clone()
+                .or_else(|| Some("scan-1".to_string())),
             patch_run_id: "patch-run-1".to_string(),
             target: target.display().to_string(),
             diff_hash: "diff-hash".to_string(),
@@ -233,6 +333,7 @@ mod legacy_provenance_tests {
             touched_files: Vec::new(),
             state: PatchLifecycleState::Applied,
             reverify_run_id: None,
+            reverify_evidence: None,
             detail: None,
             actor: "operator".to_string(),
             application_started_at: "1".to_string(),
@@ -240,48 +341,4 @@ mod legacy_provenance_tests {
             updated_at: "1".to_string(),
         }
     }
-}
-
-fn record_dispatch_error(
-    request: &mut ReverifyRequest<'_>,
-    ctx: &ToolExecutionContext<'_>,
-    error: anyhow::Error,
-) -> Result<Value> {
-    let state = interrupted_state(ctx, &error);
-    let detail = error.to_string();
-    record_state(
-        request.store,
-        &mut request.record,
-        state,
-        Some(detail.clone()),
-    )?;
-    Ok(failed_reverify_output(&request.record, &detail))
-}
-
-fn finish_detector_output(
-    mut request: ReverifyRequest<'_>,
-    detector: &str,
-    output: Value,
-    ctx: &ToolExecutionContext<'_>,
-    deterministic: bool,
-) -> Result<Value> {
-    if crate::module_result::tool_result_status(&output).is_failure_like() {
-        let detail = detector_failure_detail(&output);
-        record_state(
-            request.store,
-            &mut request.record,
-            PatchLifecycleState::Failed,
-            Some(detail.clone()),
-        )?;
-        return Ok(failed_reverify_output(&request.record, &detail));
-    }
-    let outcome = rediscovery_outcome(request.store, ctx, &request.record, deterministic)?;
-    promote_patch_result(request.store, &request.record, outcome)?;
-    record_state(
-        request.store,
-        &mut request.record,
-        outcome,
-        Some(outcome_detail(outcome)),
-    )?;
-    Ok(completed_reverify_output(&request.record, detector))
 }

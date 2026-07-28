@@ -13,6 +13,7 @@ mod jsonl_numbering;
 mod lifecycle_cost;
 mod llm_audit;
 mod output_declared_artifacts;
+mod persisted_terminal_outcome;
 mod process_identity;
 mod run_artifact;
 mod run_artifact_reader;
@@ -23,10 +24,12 @@ mod run_ledger;
 mod run_paths;
 mod run_reproducibility_metadata;
 mod run_result_summary;
+mod run_retention;
 mod run_summary_store;
 mod running;
 mod scan_stage;
 mod stage_checkpoint;
+mod terminal_intent;
 #[cfg(test)]
 mod tests;
 mod tool_output_cost;
@@ -43,6 +46,9 @@ pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub(crate) use jsonl_append::append_run_artifact_jsonl_value;
 pub use lifecycle_cost::{
     lifecycle_cost_report, reconcile_terminal_cost_reports, terminal_model_call_cost_report,
+};
+pub use persisted_terminal_outcome::{
+    load_persisted_run_terminal_outcome, PersistedRunTerminalOutcome,
 };
 pub use run_artifact::RunArtifact;
 pub use run_artifact_reader::{
@@ -70,7 +76,10 @@ pub(crate) use run_result_summary::load_correlated_run_result_value;
 pub use run_result_summary::{
     load_correlated_run_result_summary, load_run_result_summary, RunResultSummary,
 };
-pub(crate) use run_summary_store::{list_current_run_summary_prefix, CurrentRunSummaryPrefix};
+pub use run_retention::{prune_run_artifacts, RunPruneDisposition};
+pub(crate) use run_summary_store::{
+    list_current_run_summary_prefix, load_run_summary_without_repair, CurrentRunSummaryPrefix,
+};
 pub use run_summary_store::{
     list_recent_run_summary_entries, list_run_summaries, list_run_summary_entries,
     list_run_summary_entries_cursor_page, list_run_summary_entries_page, load_run_summary,
@@ -88,9 +97,10 @@ pub use scan_stage::{
     ScanStageEngine, ScanStagePlan, ScanStageScope, SAST_PHASE_STAGES_JSONL_FILE,
 };
 pub use stage_checkpoint::{
-    active_stage_checkpoints, checkpoint_coordinates_for_run, pending_stage_checkpoints,
-    PendingStageCheckpoint, StageCheckpointCoordinates, StageCheckpointHandle,
-    StageCheckpointScope, StageCheckpointStore, StageGuard,
+    active_stage_checkpoints, checkpoint_coordinates_for_run,
+    matching_checkpoint_coordinates_for_run, pending_stage_checkpoints, PendingStageCheckpoint,
+    StageCheckpointCoordinates, StageCheckpointHandle, StageCheckpointScope, StageCheckpointStore,
+    StageGuard,
 };
 pub use tool_output_cost::tool_run_output_cost_report;
 pub(crate) use tool_run_record::terminal_result_digest;

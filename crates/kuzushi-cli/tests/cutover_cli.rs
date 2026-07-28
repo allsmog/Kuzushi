@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -369,6 +369,115 @@ fn cli_run_workspace_status_reports_recorded_artifacts() {
     assert_canonical_run_files(&latest_run_dir(tmp.path()));
 }
 
+#[cfg(unix)]
+#[test]
+fn headless_run_sigint_persists_canceled_across_every_surface() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let binary = tmp.path().join("blocking-nmap.sh");
+    let ready = tmp.path().join("nmap-ready");
+    let pid_file = tmp.path().join("nmap-pid");
+    fs::write(
+        &binary,
+        format!(
+            "#!/bin/sh\nPATH=/usr/bin:/bin\nprintf '%s' \"$$\" > \"{}\"\n: > \"{}\"\nwhile :; do sleep 1; done\n",
+            pid_file.display(),
+            ready.display()
+        ),
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&binary).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&binary, permissions).unwrap();
+    let input = serde_json::json!({
+        "target": "192.0.2.10",
+        "ports": "80",
+        "binary": binary.display().to_string(),
+    });
+    let mut child = kuzushi()
+        .args(["--target"])
+        .arg(tmp.path())
+        .args(["run", "recon:nmap", "--input"])
+        .arg(input.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    wait_for_file(&ready);
+    assert!(Command::new("/bin/kill")
+        .args(["-INT", &child.id().to_string()])
+        .status()
+        .unwrap()
+        .success());
+    let status = wait_for_child(&mut child);
+    let mut stdout = String::new();
+    child
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_string(&mut stdout)
+        .unwrap();
+    let mut stderr = String::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_string(&mut stderr)
+        .unwrap();
+
+    assert_eq!(status.code(), Some(130), "stderr: {stderr}");
+    let output: Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(output["status"], "canceled");
+    let run_dir = latest_run_dir(tmp.path());
+    let run_id = run_dir.file_name().unwrap().to_str().unwrap();
+    let persisted = kuzushi_core::load_persisted_run_terminal_outcome(tmp.path(), run_id).unwrap();
+    assert_eq!(
+        persisted.status,
+        kuzushi_core::run_lifecycle::RunItemStatus::Canceled
+    );
+    let done: Value =
+        serde_json::from_slice(&fs::read(run_dir.join("done.json")).unwrap()).unwrap();
+    assert_eq!(done["status"], "canceled");
+    assert_eq!(done["exitCode"], 130);
+    let child_pid = fs::read_to_string(pid_file).unwrap();
+    assert!(!Command::new("/bin/kill")
+        .args(["-0", child_pid.trim()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .unwrap()
+        .success());
+}
+
+#[cfg(unix)]
+fn wait_for_file(path: &Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !path.is_file() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{} was not created",
+            path.display()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+#[cfg(unix)]
+fn wait_for_child(child: &mut std::process::Child) -> std::process::ExitStatus {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("headless run did not stop after SIGINT");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
 #[test]
 fn runs_list_has_empty_state_and_permissions_has_json_policy() {
     let tmp = tempfile::tempdir().unwrap();
@@ -736,6 +845,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
                 notes: vec!["fixture confirmed".to_string()],
                 verification_run_id: None,
                 verified_scan_id: None,
+                provenance: None,
                 created_at: String::new(),
             },
         )
@@ -772,7 +882,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     assert!(plain.contains("Proof state: source_sink_linked"));
     assert!(plain.contains("Runtime validation: runtime_verified"));
     assert!(plain.contains("Patch result:"));
-    assert!(plain.contains("Next action: patch"));
+    assert!(plain.contains("Next action: validate"));
 
     let prefix = &fingerprint[..8];
     let raw = stdout(
@@ -794,7 +904,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
         .as_str()
         .unwrap()
         .starts_with("runtime_verified"));
-    assert_eq!(report["nextAction"], "patch");
+    assert_eq!(report["nextAction"], "validate");
     assert_eq!(report["patchResults"].as_array().unwrap().len(), 1);
 }
 

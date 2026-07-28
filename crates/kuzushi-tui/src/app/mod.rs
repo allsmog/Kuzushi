@@ -179,7 +179,10 @@ pub use onboarding::{
     PlanningOptionEdit, PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition,
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
-pub(crate) use onboarding::{bound_target_candidate, immediate_target_candidate};
+pub(crate) use onboarding::{
+    bound_target_candidate, immediate_target_candidate, large_repository_needs_decomposition,
+    planning_task_explicit_input, PlanningOperation, DECOMPOSE_FIRST_FILE_THRESHOLD,
+};
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,
     PrereqPlanStep, PrereqStep,
@@ -189,10 +192,9 @@ pub use runtime::{
     run_shell_with_plain, ShellLaunchContext, ShellTargetSource,
 };
 pub(crate) use settings::{
-    api_key_model_choice_for_provider, auth_provider_label, bridge_command_status,
-    display_model_selector, model_choices, oauth_model_choice_for_provider, oauth_provider_status,
-    preferred_visible_model_choice_cursor, runtime_backend_label, validate_shell_model_id,
-    ModelChoice,
+    auth_provider_label, bridge_command_status, display_model_selector, model_choice_index_by_id,
+    model_choices, oauth_provider_status, preferred_visible_model_choice_cursor,
+    runtime_backend_label, validate_shell_model_id, AuthProvider, ModelChoice,
 };
 pub use shellapp::ShellApp;
 pub(crate) use task_durations::compact_secs;

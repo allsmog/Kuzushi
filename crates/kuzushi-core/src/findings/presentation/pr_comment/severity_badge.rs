@@ -1,7 +1,30 @@
 use super::*;
 
 pub(crate) fn escape_md(text: &str) -> String {
-    text.replace('|', "\\|").replace('\n', " ")
+    text.replace('\\', "\\\\")
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('@', "&#64;")
+        .replace('[', "\\[")
+        .replace(']', "\\]")
+        .replace('!', "\\!")
+        .replace('|', "\\|")
+        .replace(['\n', '\r'], " ")
+}
+
+pub(crate) fn markdown_code_span(text: &str) -> String {
+    let text = escape_md(text);
+    let fence = "`".repeat(longest_backtick_run(&text) + 1);
+    format!("{fence}{text}{fence}")
+}
+
+fn longest_backtick_run(value: &str) -> usize {
+    value
+        .split(|ch| ch != '`')
+        .map(str::len)
+        .max()
+        .unwrap_or_default()
 }
 
 pub(crate) fn short(value: &str, n: usize) -> String {

@@ -2,7 +2,10 @@
 mod tests {
     use super::super::*;
     use crate::config::V2Config;
+    use crate::findings::FindingStore;
+    use crate::modules::ModuleRegistry;
     use crate::modules::ToolExecutionContext;
+    use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
     use crate::workspace::artifact_kb::{ArtifactKnowledgeRecord, ArtifactKnowledgeStore};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
@@ -218,6 +221,47 @@ mod tests {
     }
 
     #[test]
+    fn recursively_recovers_locations_from_all_actor_evidence_shapes() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        for name in ["evidence", "source", "sink", "trace", "hops"] {
+            std::fs::write(
+                temp.path().join(format!("src/{name}.rs")),
+                "fn checked() {}\n",
+            )
+            .unwrap();
+        }
+        let shapes = [
+            json!({"evidence": [{"detail": {"file": "src/evidence.rs", "startLine": "11"}}]}),
+            json!({"source": {"location": {"path": "src/source.rs", "line": 12}}}),
+            json!({"sink": {"node": {"file": "src/sink.rs", "startLine": 13}}}),
+            json!({"trace": [{"hop": {"path": "src/trace.rs", "line": 14}}]}),
+            json!({"hops": [{"file": "src/hops.rs", "startLine": 15}]}),
+        ];
+        let findings: Vec<Value> = shapes
+            .into_iter()
+            .enumerate()
+            .map(|(index, shape)| finding_with_evidence_shape(index, shape))
+            .collect();
+
+        let normalized =
+            normalize_findings(json!({"findings": findings}), temp.path(), 10, "actor:0").unwrap();
+
+        assert_eq!(normalized.rejected_count, 0, "{:?}", normalized.rejected);
+        assert_eq!(normalized.kept.len(), 5);
+        assert_eq!(normalized.kept[0].start_line, 11);
+        assert_eq!(normalized.kept[4].file_path, "src/hops.rs");
+    }
+
+    fn finding_with_evidence_shape(index: usize, shape: Value) -> Value {
+        let mut object = shape.as_object().unwrap().clone();
+        object.insert("title".to_string(), json!(format!("finding {index}")));
+        object.insert("severity".to_string(), json!("high"));
+        object.insert("message".to_string(), json!(format!("message {index}")));
+        Value::Object(object)
+    }
+
+    #[test]
     fn unlocatable_finding_is_rejected_with_reason() {
         let temp = tempfile::tempdir().unwrap();
         let raw = json!({
@@ -233,6 +277,206 @@ mod tests {
         assert!(normalized.kept.is_empty());
         assert_eq!(normalized.rejected.len(), 1);
         assert!(normalized.rejected[0].contains("cache-hit bypass"));
+    }
+
+    #[test]
+    fn recursive_location_recovery_rejects_paths_outside_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let raw = json!({
+            "findings": [{
+                "title": "outside evidence",
+                "severity": "high",
+                "message": "evidence points outside scope",
+                "trace": {"hops": [{"path": "../outside.rs", "line": 7}]}
+            }]
+        });
+
+        let normalized = normalize_findings(raw, temp.path(), 10, "actor:0").unwrap();
+
+        assert!(normalized.kept.is_empty());
+        assert_eq!(normalized.rejected_count, 1);
+        assert!(normalized.rejected[0].contains("outside evidence"));
+    }
+
+    #[test]
+    fn offense_review_alias_persists_reported_evidence_and_trace_shape() {
+        let temp = tempfile::tempdir().unwrap();
+        write_carlini_alias_fixture_files(temp.path());
+        let response: Value =
+            serde_json::from_str(include_str!("fixtures/audit1_item12_actor_response.json"))
+                .unwrap();
+        let runtime = StructuredCarliniRuntime { response };
+        let (workspace, store, config) = carlini_alias_test_context(temp.path());
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = ModuleRegistry::with_v2_builtins()
+            .execute_tool_with_runtime(
+                "offense-review:threat-hunt",
+                json!({"maxActors": 1, "runsPerActor": 1}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.pointer("/data/count"), Some(&json!(2)));
+        assert_eq!(result.pointer("/data/rejectedCount"), Some(&json!(0)));
+        assert_eq!(
+            result.pointer("/data/findings/0/start_line"),
+            Some(&json!(73))
+        );
+        assert_eq!(
+            result.pointer("/data/findings/1/start_line"),
+            Some(&json!(118))
+        );
+        assert!(result.pointer("/data/persisted/runId").is_some());
+        let persisted = store.list_findings(10).unwrap();
+        assert_eq!(persisted.len(), 2);
+        assert!(persisted.iter().all(|finding| {
+            finding.actor_fingerprint.as_deref()
+                == Some("carlini-threat-hunt:Cluster_Gateway_User:0")
+        }));
+    }
+
+    #[test]
+    fn rejection_receipt_counts_all_items_and_bounds_actor_scoped_reasons() {
+        let temp = tempfile::tempdir().unwrap();
+        write_carlini_alias_fixture_files(temp.path());
+        let rejected: Vec<Value> = (0..12)
+            .map(|index| {
+                json!({
+                    "title": format!("unlocatable finding {index}"),
+                    "severity": "high",
+                    "message": "No target-contained source location"
+                })
+            })
+            .collect();
+        let runtime = StructuredCarliniRuntime {
+            response: json!({"findings": rejected}),
+        };
+        let (workspace, store, config) = carlini_alias_test_context(temp.path());
+        let trace = crate::run_artifacts::TraceHandle::jsonl(temp.path(), "carlini-rejections");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = ModuleRegistry::with_v2_builtins()
+            .execute_tool_with_runtime(
+                "offense-review:threat-hunt",
+                json!({"maxActors": 1, "maxFindings": 1}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.pointer("/data/rejectedCount"), Some(&json!(12)));
+        let reasons = result
+            .pointer("/data/rejectionReasons")
+            .and_then(Value::as_array)
+            .unwrap();
+        assert_eq!(reasons.len(), MAX_CARLINI_REJECTION_REASONS);
+        assert!(reasons.iter().all(|reason| reason
+            .as_str()
+            .unwrap()
+            .starts_with("carlini-threat-hunt:Cluster_Gateway_User:0:")));
+        assert!(result["summary"].as_str().unwrap().contains("12 rejected"));
+        assert!(result["output"]
+            .as_str()
+            .unwrap()
+            .contains("Rejected by finding schema: 12"));
+        let trace_text = std::fs::read_to_string(
+            crate::run_artifacts::run_dir(temp.path(), "carlini-rejections").join("items.jsonl"),
+        )
+        .unwrap();
+        assert!(trace_text.contains("finding rejected by normalizer"));
+        assert!(trace_text.contains("Cluster_Gateway_User:0"));
+        assert!(trace_text.contains("2 more findings rejected by normalizer"));
+        assert!(trace_text.contains("12 rejected by schema"));
+        assert!(trace_text.contains("actor hunts"));
+        assert!(!trace_text.contains("defender-critic"));
+    }
+
+    struct StructuredCarliniRuntime {
+        response: Value,
+    }
+
+    impl AgentRuntime for StructuredCarliniRuntime {
+        fn query_blocking(
+            &self,
+            _request: AgentQueryRequest,
+        ) -> anyhow::Result<AgentQueryResponse> {
+            Ok(AgentQueryResponse {
+                structured: Some(self.response.clone()),
+                ..AgentQueryResponse::default()
+            })
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: TriageRequest,
+        ) -> anyhow::Result<crate::findings::TriageOutcome> {
+            unreachable!("Carlini actor hunt does not triage")
+        }
+    }
+
+    fn carlini_alias_test_context(target: &Path) -> (WorkspaceTarget, FindingStore, V2Config) {
+        let workspace = WorkspaceTarget::new(target).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let mut config = V2Config::default();
+        config.model = Some("anthropic:test-model".to_string());
+        (workspace, store, config)
+    }
+
+    fn write_carlini_alias_fixture_files(target: &Path) {
+        fs::create_dir_all(target.join("bluejay_auth")).unwrap();
+        fs::create_dir_all(target.join("gateway/rpc")).unwrap();
+        fs::write(
+            target.join("bluejay_auth/account_cache.go"),
+            "package auth\n",
+        )
+        .unwrap();
+        fs::write(target.join("bluejay_auth/session.go"), "package auth\n").unwrap();
+        fs::write(target.join("router/rpc/forward.go"), "package rpc\n").unwrap();
+        let threat_model_path = crate::capabilities::persistent_threat_model_path(target);
+        fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
+        fs::write(
+            threat_model_path,
+            serde_json::to_vec(&carlini_alias_threat_model()).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn carlini_alias_threat_model() -> Value {
+        json!({
+            "dfd": {
+                "nodes": [
+                    {"id":"cluster-user","type":"external-entity","name":"Cluster Gateway User","description":"Remote tenant user","trustZone":"external"},
+                    {"id":"gateway","type":"process","name":"RouterRPC","description":"RPC gateway","trustZone":"internal"}
+                ],
+                "flows": [
+                    {"id":"proxy-flow","sourceId":"cluster-user","targetId":"gateway","description":"ForwardRequest","trustBoundaryIds":["tenant-boundary"]}
+                ]
+            },
+            "threats": [{
+                "id":"T-proxy-owner",
+                "impact":"high",
+                "title":"Cross-tenant ForwardRequest dispatch",
+                "actorIds":["cluster-user"],
+                "flowIds":["proxy-flow"],
+                "affectedFiles":["router/rpc/forward.go"]
+            }]
+        })
     }
 
     #[test]
@@ -502,8 +746,7 @@ mod tests {
             let frame = &remaining[start..];
             let end = frame.find(crate::prompts::UNTRUSTED_REPO_END).unwrap()
                 + crate::prompts::UNTRUSTED_REPO_END.len();
-            decoded_inventory
-                .push(crate::prompts::decode_untrusted_record(&frame[..end]).unwrap());
+            decoded_inventory.push(crate::prompts::decode_untrusted_record(&frame[..end]).unwrap());
             remaining = &frame[end..];
         }
         assert_eq!(

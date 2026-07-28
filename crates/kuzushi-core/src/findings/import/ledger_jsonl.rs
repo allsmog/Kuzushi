@@ -5,7 +5,9 @@
 //! see prior history. Rows are tolerant-parsed: a row missing its file
 //! or title is counted as skipped instead of failing the import.
 
-use crate::findings::{ground_finding_location, Finding, FindingEvidence, FindingStore, GroundingStatus, Severity};
+use crate::findings::{
+    ground_finding_location, Finding, FindingEvidence, FindingStore, GroundingStatus, Severity,
+};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -357,7 +359,7 @@ fn ledger_rationale(row: &LedgerRow) -> String {
 /// untriaged rows so review ordering reflects the source pipeline.
 fn ledger_confidence(verdict: &str) -> u8 {
     match verdict.trim().to_ascii_uppercase().as_str() {
-        "TRUE_POSITIVE" | "VALIDATED" | "CONFIRMED" => 90,
+        "TRUE_POSITIVE" | "VALIDATED" | "CONFIRMED" => 90, // External input validation compatibility.
         "FALSE_POSITIVE" | "REFUTED" | "REJECTED" => 10,
         _ => 50,
     }
@@ -461,7 +463,11 @@ mod tests {
         let findings = store.list_findings(100).unwrap();
         let identities: std::collections::BTreeSet<_> = findings
             .iter()
-            .map(|f| f.identity_id.clone().unwrap_or_else(|| f.fingerprint.clone()))
+            .map(|f| {
+                f.identity_id
+                    .clone()
+                    .unwrap_or_else(|| f.fingerprint.clone())
+            })
             .collect();
         assert_eq!(identities.len(), 1, "same row must map to one identity");
     }
@@ -469,7 +475,8 @@ mod tests {
     #[test]
     fn reimport_after_a_killed_partial_import_heals_instead_of_duplicating() {
         let (temp, workspace) = fixture_workspace();
-        let row_a = r#"{"file":"src/a.cpp","line":10,"title":"OOB write (CWE-787)","severity":"P0"}"#;
+        let row_a =
+            r#"{"file":"src/a.cpp","line":10,"title":"OOB write (CWE-787)","severity":"P0"}"#;
         let row_b = r#"{"file":"src/b.cpp","line":5,"title":"missing authz","severity":"P2"}"#;
         let body = format!("{row_a}\n{row_b}\n");
         let ledger = write_ledger(temp.path(), &body);
@@ -598,7 +605,9 @@ mod tests {
         );
         assert_eq!(finding.title, "OOB write");
         assert!(finding.message.contains("precondition: paired-peer"));
-        assert!(finding.message.contains("trust boundary: peer -> /sd/** write"));
+        assert!(finding
+            .message
+            .contains("trust boundary: peer -> /sd/** write"));
     }
 
     #[test]

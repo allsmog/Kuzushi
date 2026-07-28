@@ -24,10 +24,50 @@ pub(crate) struct TargetCandidateFacts {
     pub(crate) prior_artifacts: Vec<String>,
 }
 
-#[derive(Debug)]
-struct StampedTargetCandidateFacts {
+#[derive(Debug, Clone)]
+pub(crate) struct StampedTargetCandidateFacts {
+    pub(crate) generation: u64,
+    pub(crate) facts: TargetCandidateFacts,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ActiveTargetFactsState {
     generation: u64,
-    facts: TargetCandidateFacts,
+    path: Option<PathBuf>,
+    facts: Option<TargetCandidateFacts>,
+    loading: bool,
+}
+
+impl ActiveTargetFactsState {
+    pub(crate) fn begin(&mut self, path: PathBuf, generation: u64) {
+        self.generation = generation;
+        self.path = Some(path);
+        self.facts = None;
+        self.loading = true;
+    }
+
+    pub(crate) fn apply(&mut self, stamped: StampedTargetCandidateFacts) -> bool {
+        if self.generation != stamped.generation || self.path.as_ref() != Some(&stamped.facts.path)
+        {
+            return false;
+        }
+        self.facts = Some(stamped.facts);
+        self.loading = false;
+        true
+    }
+
+    pub(crate) fn facts(&self) -> Option<&TargetCandidateFacts> {
+        self.facts.as_ref()
+    }
+
+    pub(crate) fn loading(&self) -> bool {
+        self.loading
+    }
+
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
 }
 
 #[derive(Debug)]
@@ -42,25 +82,38 @@ pub(crate) struct TargetCandidateDiscoveryRuntime {
     active_cwd: Option<PathBuf>,
     tx: Sender<StampedTargetCandidateDiscoveryResult>,
     rx: Receiver<StampedTargetCandidateDiscoveryResult>,
-    facts_generation: u64,
-    active_facts_path: Option<PathBuf>,
-    facts_tx: Sender<StampedTargetCandidateFacts>,
-    facts_rx: Receiver<StampedTargetCandidateFacts>,
+    facts: TargetFactsRuntime,
 }
 
 impl Default for TargetCandidateDiscoveryRuntime {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
-        let (facts_tx, facts_rx) = mpsc::channel();
         Self {
             generation: 0,
             active_cwd: None,
             tx,
             rx,
-            facts_generation: 0,
-            active_facts_path: None,
-            facts_tx,
-            facts_rx,
+            facts: TargetFactsRuntime::default(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TargetFactsRuntime {
+    generation: u64,
+    active_path: Option<PathBuf>,
+    tx: Sender<StampedTargetCandidateFacts>,
+    rx: Receiver<StampedTargetCandidateFacts>,
+}
+
+impl Default for TargetFactsRuntime {
+    fn default() -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            generation: 0,
+            active_path: None,
+            tx,
+            rx,
         }
     }
 }
@@ -70,8 +123,9 @@ const TARGET_FACT_FILE_BUDGET: usize = 20_000;
 fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
     let git = kuzushi_core::workspace::target_git_metadata(&path);
     let profile = kuzushi_core::repository_inventory::TargetProfile::detect(&path);
-    let languages = detected_languages(&profile);
-    let build_systems = detected_build_systems(&path);
+    let inventory = kuzushi_core::repository_inventory::build_repository_inventory(&path).ok();
+    let languages = detected_languages(inventory.as_ref(), &profile);
+    let build_systems = detected_build_systems(&path, inventory.as_ref());
     let (file_count, file_count_capped) = bounded_file_count(&path, TARGET_FACT_FILE_BUDGET);
     let nested_scopes = detected_nested_scopes(&path);
     let (prior_artifact_count, _) = bounded_file_count(&path.join(".kuzushi"), 5_000);
@@ -92,7 +146,26 @@ fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
     }
 }
 
-fn detected_languages(profile: &kuzushi_core::repository_inventory::TargetProfile) -> Vec<String> {
+fn detected_languages(
+    inventory: Option<&kuzushi_core::repository_inventory::RepositoryInventory>,
+    profile: &kuzushi_core::repository_inventory::TargetProfile,
+) -> Vec<String> {
+    let inventory_languages = inventory
+        .map(|inventory| {
+            inventory
+                .languages
+                .iter()
+                .map(|language| language.name.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if !inventory_languages.is_empty() {
+        return inventory_languages;
+    }
+    profile_languages(profile)
+}
+
+fn profile_languages(profile: &kuzushi_core::repository_inventory::TargetProfile) -> Vec<String> {
     let mut languages = Vec::new();
     if profile.has_rust_source {
         languages.push("Rust".to_string());
@@ -106,8 +179,11 @@ fn detected_languages(profile: &kuzushi_core::repository_inventory::TargetProfil
     languages
 }
 
-fn detected_build_systems(path: &std::path::Path) -> Vec<String> {
-    [
+fn detected_build_systems(
+    path: &std::path::Path,
+    inventory: Option<&kuzushi_core::repository_inventory::RepositoryInventory>,
+) -> Vec<String> {
+    let mut systems = [
         ("Cargo.toml", "Cargo"),
         ("package.json", "Node"),
         ("go.mod", "Go"),
@@ -115,11 +191,44 @@ fn detected_build_systems(path: &std::path::Path) -> Vec<String> {
         ("build.gradle", "Gradle"),
         ("CMakeLists.txt", "CMake"),
         ("Makefile", "Make"),
+        ("BUILD", "Bazel"),
+        ("BUILD.bazel", "Bazel"),
+        ("WORKSPACE", "Bazel"),
+        ("WORKSPACE.bazel", "Bazel"),
+        ("MODULE.bazel", "Bazel"),
     ]
     .into_iter()
     .filter(|(marker, _)| path.join(marker).exists())
     .map(|(_, label)| label.to_string())
-    .collect()
+    .collect::<std::collections::BTreeSet<_>>();
+    systems.extend(inventory_build_systems(inventory));
+    systems.into_iter().collect()
+}
+
+fn inventory_build_systems(
+    inventory: Option<&kuzushi_core::repository_inventory::RepositoryInventory>,
+) -> impl Iterator<Item = String> + '_ {
+    inventory
+        .into_iter()
+        .flat_map(|inventory| inventory.manifests.iter())
+        .filter_map(|manifest| build_system_for_manifest(&manifest.kind))
+        .map(str::to_string)
+}
+
+fn build_system_for_manifest(kind: &str) -> Option<&'static str> {
+    const SYSTEMS: &[(&[&str], &str)] = &[
+        (&["rust-cargo"], "Cargo"),
+        (&["node-package"], "Node"),
+        (&["python-project", "python-requirements"], "Python"),
+        (&["go-module"], "Go"),
+        (&["maven-project"], "Maven"),
+        (&["gradle-project"], "Gradle"),
+        (&["ruby-gemfile"], "Ruby"),
+    ];
+    SYSTEMS
+        .iter()
+        .find(|(kinds, _)| kinds.contains(&kind))
+        .map(|(_, system)| *system)
 }
 
 fn detected_nested_scopes(path: &std::path::Path) -> Vec<String> {
@@ -205,35 +314,12 @@ fn should_descend_for_facts(path: &std::path::Path) -> bool {
 }
 
 impl TargetCandidateDiscoveryRuntime {
-    pub(crate) fn start_facts(&mut self, path: PathBuf, wake: Option<TerminalLoopWake>) {
-        self.facts_generation = self.facts_generation.wrapping_add(1);
-        self.active_facts_path = Some(path.clone());
-        let generation = self.facts_generation;
-        let tx = self.facts_tx.clone();
-        std::thread::spawn(move || {
-            let facts = inspect_target_candidate(path);
-            let _ = tx.send(StampedTargetCandidateFacts { generation, facts });
-            if let Some(wake) = wake {
-                wake.notify();
-            }
-        });
+    pub(crate) fn start_facts(&mut self, path: PathBuf, wake: Option<TerminalLoopWake>) -> u64 {
+        self.facts.start(path, wake)
     }
 
-    pub(crate) fn drain_current_facts(&mut self) -> Vec<TargetCandidateFacts> {
-        let mut current = Vec::new();
-        loop {
-            match self.facts_rx.try_recv() {
-                Ok(stamped)
-                    if stamped.generation == self.facts_generation
-                        && self.active_facts_path.as_ref() == Some(&stamped.facts.path) =>
-                {
-                    current.push(stamped.facts);
-                }
-                Ok(_) => {}
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
-            }
-        }
-        current
+    pub(crate) fn drain_current_facts(&mut self) -> Vec<StampedTargetCandidateFacts> {
+        self.facts.drain_current()
     }
 
     pub(crate) fn start(&mut self, cwd: PathBuf, wake: Option<TerminalLoopWake>) {
@@ -265,6 +351,40 @@ impl TargetCandidateDiscoveryRuntime {
 
     fn is_current(&self, result: &StampedTargetCandidateDiscoveryResult) -> bool {
         result.generation == self.generation && self.active_cwd.as_ref() == Some(&result.result.cwd)
+    }
+}
+
+impl TargetFactsRuntime {
+    pub(crate) fn start(&mut self, path: PathBuf, wake: Option<TerminalLoopWake>) -> u64 {
+        self.generation = self.generation.wrapping_add(1);
+        self.active_path = Some(path.clone());
+        let generation = self.generation;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let facts = inspect_target_candidate(path);
+            let _ = tx.send(StampedTargetCandidateFacts { generation, facts });
+            if let Some(wake) = wake {
+                wake.notify();
+            }
+        });
+        generation
+    }
+
+    pub(crate) fn drain_current(&mut self) -> Vec<StampedTargetCandidateFacts> {
+        let mut current = Vec::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(stamped) if self.is_current(&stamped) => current.push(stamped),
+                Ok(_) => {}
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+        current
+    }
+
+    fn is_current(&self, stamped: &StampedTargetCandidateFacts) -> bool {
+        stamped.generation == self.generation
+            && self.active_path.as_ref() == Some(&stamped.facts.path)
     }
 }
 
@@ -310,8 +430,11 @@ mod tests {
         }
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].path, second.path());
-        assert!(results[0].build_systems.contains(&"Cargo".to_string()));
+        assert_eq!(results[0].facts.path, second.path());
+        assert!(results[0]
+            .facts
+            .build_systems
+            .contains(&"Cargo".to_string()));
     }
 
     #[test]
@@ -343,5 +466,30 @@ mod tests {
             .any(|scope| scope == "crates/demo"));
         assert!(facts.prior_artifact_count > 0);
         assert!(facts.prior_artifacts.contains(&"runs".to_string()));
+    }
+
+    #[test]
+    fn selected_facts_recognize_bazel_build_markers() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("MODULE.bazel"), "module(name='demo')").unwrap();
+
+        let facts = inspect_target_candidate(target.path().to_path_buf());
+
+        assert!(facts.build_systems.contains(&"Bazel".to_string()));
+    }
+
+    #[test]
+    fn active_target_facts_reject_an_older_generation() {
+        let target = tempfile::tempdir().unwrap();
+        let facts = inspect_target_candidate(target.path().to_path_buf());
+        let mut state = ActiveTargetFactsState::default();
+        state.begin(target.path().to_path_buf(), 2);
+
+        assert!(!state.apply(StampedTargetCandidateFacts {
+            generation: 1,
+            facts,
+        }));
+        assert!(state.loading());
+        assert!(state.facts().is_none());
     }
 }

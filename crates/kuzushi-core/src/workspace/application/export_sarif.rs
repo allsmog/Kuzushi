@@ -263,6 +263,7 @@ fn sarif_remediation_properties(record: &WorkspaceFindingExportRecord) -> serde_
         "kuzushiRemediationApplicationId": remediation.application_id,
         "kuzushiRemediationPatchRunId": remediation.patch_run_id,
         "kuzushiRemediationApplicationState": remediation.application_state,
+        "kuzushiRemediationEmpiricallyVerified": remediation.empirically_verified,
         "kuzushiRemediationReverifyOutcome": remediation.reverify_outcome,
         "kuzushiRemediationReverifyRunId": remediation.reverify_run_id,
         "kuzushiRemediationDiffHash": remediation.diff_hash,
@@ -322,6 +323,8 @@ fn sarif_proof_properties(record: &WorkspaceFindingExportRecord) -> serde_json::
         "kuzushiVerificationProofLevel": record.verification.proof_level,
         "kuzushiVerificationBackend": record.verification.backend,
         "kuzushiVerificationLanguage": record.verification.language,
+        "kuzushiVerificationSourceIdentity": record.verification.source_identity,
+        "kuzushiVerificationReproducer": record.verification.reproducer,
     })
 }
 

@@ -43,17 +43,20 @@ async fn long_lived_sandbox_process_uses_a_dedicated_killable_group() {
         input,
     )
     .unwrap();
-    let (mut child, _scratch) = sandboxed.spawn("group fixture").unwrap();
+    let (mut child, _scratch, process_group) = sandboxed.spawn("group fixture").unwrap();
     let pid = child.id().unwrap();
 
     // SAFETY: the child is live and its process-group identity is read-only here.
     assert_eq!(
         unsafe { libc::getpgid(pid as libc::pid_t) },
-        pid as libc::pid_t
+        process_group.process_group_id().unwrap() as libc::pid_t
     );
-    tokio::time::timeout(Duration::from_secs(2), terminate_child_group(&mut child))
-        .await
-        .expect("sandbox group did not terminate");
+    tokio::time::timeout(
+        Duration::from_secs(2),
+        terminate_child_group(&mut child, &process_group),
+    )
+    .await
+    .expect("sandbox group did not terminate");
     assert!(child.try_wait().unwrap().is_some());
 }
 
@@ -131,7 +134,7 @@ async fn child_cannot_rewrite_a_helper_in_its_authorized_tool_bundle() {
     let sandboxed = restricted_command(&launcher, [&helper, &receipt], access)
         .await
         .unwrap();
-    let (mut child, _scratch) = sandboxed.spawn("rewrite fixture").unwrap();
+    let (mut child, _scratch, _process_group) = sandboxed.spawn("rewrite fixture").unwrap();
 
     assert!(child.wait().await.unwrap().success());
     assert_eq!(std::fs::read_to_string(&helper).unwrap(), "trusted");

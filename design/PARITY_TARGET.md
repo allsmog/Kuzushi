@@ -46,9 +46,6 @@ the mapped Atlas states below.
 | --- | --- | --- | --- |
 | `actor-bind.jsx` | Implement | `ShellCommand::Actor`, `ShellView::ActorDetail`, prompt/model actor state | Treat as actor configuration variant, not a new view family. |
 | `actor.jsx` | Implement | `ShellView::ActorDetail` | Existing actor detail surface; needs parity fixture/copy pass. |
-| `agent-chat-stream.jsx` | Implement | `ShellView::AgentChat` | Streaming state variant of agent chat. |
-| `agent-chat.jsx` | Implement | `ShellView::AgentChat` | Existing chat view. |
-| `agent-refused.jsx` | Implement | agent/chat refusal and permissions/error state | Product-relevant safety state; use existing refusal/error machinery. |
 | `agent-router.jsx` | Implement | router/config/permissions surfaces plus tool dispatch state | Keep generic; do not add a separate router framework. |
 | `agentic-sast-running.jsx` | Implement | `agentic-sast:scan`, `ShellView::Activity` / `ShellView::ModuleRun` | Running variant. |
 | `agentic-sast.jsx` | Implement | `agentic-sast:scan`, generic module view | Visible built-in module. |

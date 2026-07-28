@@ -49,6 +49,7 @@ mod tests {
                         }]
                     })),
                     cost_usd: if self.report_systems_cost { 0.01 } else { 0.0 },
+                    cost_usd_reported: self.report_systems_cost,
                     ..Default::default()
                 });
             }
@@ -69,6 +70,7 @@ mod tests {
                         }]
                     })),
                     cost_usd: if self.report_systems_cost { 0.02 } else { 0.0 },
+                    cost_usd_reported: self.report_systems_cost,
                     ..Default::default()
                 });
             }
@@ -93,6 +95,7 @@ mod tests {
                         }]
                     })),
                     cost_usd: 0.03,
+                    cost_usd_reported: true,
                     ..Default::default()
                 });
             }

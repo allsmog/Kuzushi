@@ -30,17 +30,13 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     }
 }
 
-/// On repositories this large, one whole-repo threat model is noise; the
-/// productive first Map action is breaking the target into logical modules.
-const DECOMPOSE_FIRST_FILE_THRESHOLD: u64 = 20_000;
-
 /// Recommend module decomposition before threat modeling when the indexed
 /// repository is monorepo-sized and no nested scope decomposition exists yet.
 /// A persisted scope tree (or an unhydrated/unreadable verdict) keeps the
 /// regular threat-model recommendation.
 fn decompose_first_hint(app: &ShellApp) -> Option<String> {
     let files = app.domain().context_view().files_indexed?;
-    if files < DECOMPOSE_FIRST_FILE_THRESHOLD {
+    if files < crate::app::DECOMPOSE_FIRST_FILE_THRESHOLD {
         return None;
     }
     let tree = app

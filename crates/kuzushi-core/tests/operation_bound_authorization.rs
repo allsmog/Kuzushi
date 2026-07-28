@@ -174,7 +174,7 @@ fn operation_authorization_rejects_head_movement_after_prepare() {
         .to_string();
 
     assert!(
-        error.contains("source commit changed after preparation"),
+        error.contains("source binding changed after preparation"),
         "{error}"
     );
 }

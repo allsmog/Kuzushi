@@ -1,4 +1,4 @@
-use super::patch_process_adapter::PatchProcessControl as PatchCommandControl;
+pub(crate) use super::patch_process_adapter::PatchProcessControl as PatchCommandControl;
 use crate::findings::{
     Finding, PatchAttempt, PatchProvenance, PatchResult, PatchStatus, TriageOutcome, TriageVerdict,
 };

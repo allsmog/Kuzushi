@@ -70,7 +70,8 @@ pub fn ground_finding_location(
     let Some(path) = safe_target_path(root, file_path) else {
         return GroundingStatus::FileMissing { revision };
     };
-    let Ok(source) = crate::bounded_file::read_utf8_text_within(root, &path, GROUNDING_MAX_FILE_BYTES)
+    let Ok(source) =
+        crate::bounded_file::read_utf8_text_within(root, &path, GROUNDING_MAX_FILE_BYTES)
     else {
         return GroundingStatus::FileMissing { revision };
     };
@@ -276,7 +277,10 @@ mod tests {
         });
         let note = grounding_prompt_note(&finding).unwrap();
         assert!(note.contains("cited file is missing"));
-        assert!(note.contains("deadbeefcafe"), "revision is truncated in: {note}");
+        assert!(
+            note.contains("deadbeefcafe"),
+            "revision is truncated in: {note}"
+        );
         finding.grounding = Some(GroundingStatus::LineDrift {
             nearest_line: 7,
             revision: None,

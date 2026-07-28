@@ -73,17 +73,6 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn auto_open_workbench_dfd(&mut self) {
-        if !self.ui().auto_open_viz() {
-            return;
-        }
-        self.hydrate_latest_threat_model_for_dfd();
-        if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
-            return;
-        }
-        self.auto_open_viz_page(VizPage::Dfd);
-    }
-
     pub(super) fn hydrate_latest_threat_model_for_dfd(&mut self) {
         let Some(target) = self.target_owned() else {
             return;

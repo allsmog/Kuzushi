@@ -7,7 +7,7 @@ use kuzushi_core::{
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{public_bridge_error, public_bridge_failure_with_detail, run_bridge};
+use super::bridge_process::{bridge_runtime_failure, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -36,14 +36,17 @@ impl AgentRuntime for LangGraphRuntime {
         &self,
         request: AgentQueryRequest,
     ) -> Result<Observed<AgentQueryResponse>> {
+        let model = request.model.clone();
         let credential = self.credential_for_model(&request.model)?;
         let bridge_request = bridge_request_from(self, request, credential);
         let response = run_bridge_with_transport_retries(
             &self.command,
             bridge_request,
             self.cancellation.as_ref(),
+            &self.retry,
         )?;
-        observed_agent_response_from_bridge(response)?.try_map(AgentQueryResponse::validate_cost)
+        observed_agent_response_from_bridge(response, &model)?
+            .try_map(AgentQueryResponse::validate_cost)
     }
 
     fn query_blocking_controlled(
@@ -155,16 +158,18 @@ fn bridge_request_from(
 
 fn observed_agent_response_from_bridge(
     response: BridgeResponse,
+    model: &str,
 ) -> Result<Observed<AgentQueryResponse>> {
     let usage = bridge_model_usage(&response)?;
     let (cost_usd, cost_usd_reported) = bridge_cost(&response)?;
+    let estimated_cost_usd = estimated_bridge_cost(&response, model);
     Ok(Observed::new(
         AgentQueryResponse {
             text: response.text.unwrap_or_default(),
             structured: response.structured,
             cost_usd,
             cost_usd_reported,
-            estimated_cost_usd: None,
+            estimated_cost_usd,
             input_tokens: clamp_token_count_u32(response.input_tokens.unwrap_or(0)),
             output_tokens: clamp_token_count_u32(response.output_tokens.unwrap_or(0)),
             truncated: response.truncated,
@@ -172,6 +177,17 @@ fn observed_agent_response_from_bridge(
         },
         usage,
     ))
+}
+
+pub(super) fn estimated_bridge_cost(response: &BridgeResponse, model: &str) -> Option<f64> {
+    if response.cost_usd.is_some() {
+        return None;
+    }
+    crate::anthropic_oauth::estimate_cost_usd(
+        model,
+        clamp_token_count_u32(response.input_tokens?),
+        clamp_token_count_u32(response.output_tokens?),
+    )
 }
 
 fn bridge_model_usage(response: &BridgeResponse) -> Result<ModelTokenUsage> {
@@ -267,6 +283,7 @@ fn run_bridge_with_transport_retries(
     command: &[String],
     request: BridgeRequest,
     cancellation: Option<&kuzushi_core::ScanCancellation>,
+    retry_policy: &super::runtime_config::BridgeRetryPolicy,
 ) -> Result<BridgeResponse> {
     let mut attempt = 0;
     loop {
@@ -277,11 +294,11 @@ fn run_bridge_with_transport_retries(
                 BridgeAttempt::Success(response) => return Ok(response),
                 BridgeAttempt::Retry { error, failure } => (error, failure),
             };
-        if attempt >= transport_retry::max_attempts(&failure) {
+        if attempt >= transport_retry::max_attempts(&failure, retry_policy) {
             return Err(error);
         }
         transport_retry::sleep_before_retry(
-            transport_retry::backoff_delay(attempt, &failure),
+            transport_retry::backoff_delay(attempt, &failure, retry_policy),
             || ensure_not_cancelled(cancellation),
         )?;
     }
@@ -321,30 +338,25 @@ fn bridge_response_error(response: BridgeResponse) -> Result<BridgeAttempt> {
             response.retry_after_seconds,
         )
     };
-    let message = public_bridge_failure_with_detail(
+    let error = bridge_runtime_failure(
         response.error_class.as_deref(),
         response.status,
         response.error.as_deref(),
         response.detail.as_deref(),
     );
     let Some(failure) = failure else {
-        anyhow::bail!("LangGraph bridge failed: {message}");
+        return Err(error);
     };
-    Ok(BridgeAttempt::Retry {
-        error: anyhow::anyhow!("LangGraph bridge failed: {message}"),
-        failure,
-    })
+    Ok(BridgeAttempt::Retry { error, failure })
 }
 
 fn bridge_transport_error(error: anyhow::Error) -> Result<BridgeAttempt> {
     let message = error.to_string();
+    let error = bridge_runtime_failure(None, None, Some(&message), None);
     let Some(failure) = transport_retry::message_transient_failure(&message) else {
-        anyhow::bail!("{}", public_bridge_error(&message));
+        return Err(error);
     };
-    Ok(BridgeAttempt::Retry {
-        error: anyhow::anyhow!("{}", public_bridge_error(&message)),
-        failure,
-    })
+    Ok(BridgeAttempt::Retry { error, failure })
 }
 
 pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {

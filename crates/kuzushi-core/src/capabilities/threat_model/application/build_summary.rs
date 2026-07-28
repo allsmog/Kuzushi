@@ -124,7 +124,7 @@ fn threat_model_build_header_lines(
     persisted: bool,
     has_concrete_content: bool,
 ) -> Vec<String> {
-    vec![
+    let mut lines = vec![
         format!(
             "threat-model:build {} for {} ({})",
             evidence_status(has_concrete_content),
@@ -133,26 +133,34 @@ fn threat_model_build_header_lines(
         ),
         format!("  Method:   {}", methodology_label(&input.methodology)),
         format!("  Slice:    {}", input.slice),
-        format!("  Stages:   {}", input.stages.join(", ")),
+    ];
+    append_pasta_stages(&mut lines, input);
+    lines.extend([
         format!("  Artifact: {}", input.output_dir),
         format!(
             "  Saved:    {}",
             saved_threat_model_status(persisted, has_concrete_content, &input.target)
         ),
-    ]
+    ]);
+    lines
 }
 
 fn randori_pasta_header_lines(input: &BuildInput, has_concrete_content: bool) -> Vec<String> {
-    vec![
-        format!(
-            "randori:pasta {} for {} ({})",
-            evidence_status(has_concrete_content),
-            input.repo_name,
-            input.target.display()
-        ),
-        format!("  Stages:   {}", input.stages.join(", ")),
-        format!("  Artifact: {}", input.output_dir),
-    ]
+    let mut lines = vec![format!(
+        "randori:pasta {} for {} ({})",
+        evidence_status(has_concrete_content),
+        input.repo_name,
+        input.target.display()
+    )];
+    append_pasta_stages(&mut lines, input);
+    lines.push(format!("  Artifact: {}", input.output_dir));
+    lines
+}
+
+fn append_pasta_stages(lines: &mut Vec<String>, input: &BuildInput) {
+    if input.methodology == "pasta" {
+        lines.push(format!("  PASTA stages: {}", input.stages.join(", ")));
+    }
 }
 
 fn evidence_status(has_concrete_content: bool) -> &'static str {

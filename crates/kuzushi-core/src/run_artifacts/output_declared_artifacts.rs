@@ -13,10 +13,17 @@ pub(crate) fn record_output_declared_artifacts(
 ) -> Result<Vec<RunArtifact>> {
     let mut seen = existing
         .iter()
-        .map(|artifact| artifact.path.clone())
+        .map(|artifact| {
+            super::run_artifact::normalize_run_artifact_path(target, run_id, &artifact.path)
+        })
         .collect::<BTreeSet<_>>();
     let mut recorded = Vec::new();
     for artifact in output_artifact_candidates(output) {
+        let Some(artifact) =
+            super::run_artifact::normalize_run_artifact_identity(target, run_id, &artifact)
+        else {
+            continue;
+        };
         if !seen.insert(artifact.path.clone()) {
             continue;
         }

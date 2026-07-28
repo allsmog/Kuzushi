@@ -34,6 +34,24 @@ pub(crate) struct PhaseResultDetailRow {
     pub(crate) text: String,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PhaseRerunReview {
+    pub(crate) phase: WorkflowPhase,
+    pub(crate) parent_attempt_id: String,
+    pub(crate) tool: String,
+    pub(crate) tool_description: String,
+    pub(crate) prepared_input: serde_json::Value,
+    pub(crate) changed_options: Vec<PhaseRerunOptionReview>,
+    pub(crate) derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PhaseRerunOptionReview {
+    pub(crate) label: String,
+    pub(crate) value: String,
+    pub(crate) description: String,
+}
+
 impl PhaseResultDetailRow {
     fn unkeyed(text: impl Into<String>) -> Self {
         Self {
@@ -257,10 +275,7 @@ impl ShellApp {
         details.rows
     }
 
-    /// Disclose the resumable checkpoint on failed/canceled results: stage
-    /// checkpoints name the completed stages and the resume point; agent
-    /// tool loops name the completed turns. `c` resumes from the failure
-    /// point either way. Silent when no checkpoint is waiting.
+    /// Disclose a matching staged checkpoint on failed/canceled results.
     fn resume_checkpoint_row(
         &self,
         completed: &PhaseAttemptCompleted,
@@ -273,7 +288,6 @@ impl ShellApp {
             return None;
         }
         self.stage_checkpoint_row(completed)
-            .or_else(|| self.loop_checkpoint_row())
     }
 
     fn stage_checkpoint_row(
@@ -282,7 +296,7 @@ impl ShellApp {
     ) -> Option<PhaseResultDetailRow> {
         let target = std::path::Path::new(&completed.target_snapshot.target);
         let coordinates = completed.run_refs.iter().rev().find_map(|run_id| {
-            kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id)
+            kuzushi_core::run_artifacts::matching_checkpoint_coordinates_for_run(target, run_id)
         })?;
         let resume = coordinates
             .resume_from
@@ -293,18 +307,6 @@ impl ShellApp {
             "⟲ {} completed stage(s) checkpointed [{}]{resume} — c continue from the failure point",
             coordinates.completed_stages.len(),
             coordinates.completed_stages.join(", "),
-        )))
-    }
-
-    fn loop_checkpoint_row(&self) -> Option<PhaseResultDetailRow> {
-        let target = self.target()?;
-        let newest = kuzushi_core::runtime::pending_agent_loop_checkpoints(target)
-            .into_iter()
-            .next()?;
-        let turns = newest.completed_turns;
-        let plural = if turns == 1 { "" } else { "s" };
-        Some(PhaseResultDetailRow::unkeyed(format!(
-            "⟲ resume checkpoint saved ({turns} completed agent turn{plural}) — c continue resumes from the failure point"
         )))
     }
 
@@ -358,9 +360,8 @@ impl ShellApp {
         policy.actions.insert(0, PhaseResultAction::ContinueRun);
     }
 
-    /// The failed run ref whose checkpoint can resume, when any: a stage
-    /// checkpoint naming this run as its source wins; a pending agent-loop
-    /// checkpoint applies to the recorded request of the newest run ref.
+    /// A checkpoint is eligible only when it names this failed run and its
+    /// fingerprint matches that run's durable ToolCallRequested operation.
     pub(crate) fn continuable_failed_run(
         &self,
         completed: &PhaseAttemptCompleted,
@@ -371,17 +372,10 @@ impl ShellApp {
             .iter()
             .rev()
             .find(|run_id| {
-                kuzushi_core::run_artifacts::checkpoint_coordinates_for_run(target, run_id)
+                kuzushi_core::run_artifacts::matching_checkpoint_coordinates_for_run(target, run_id)
                     .is_some()
             })
             .cloned()
-            .or_else(|| {
-                let pending =
-                    !kuzushi_core::runtime::pending_agent_loop_checkpoints(target).is_empty();
-                pending
-                    .then(|| completed.run_refs.last().cloned())
-                    .flatten()
-            })
     }
 
     pub(crate) fn effective_phase_attempt_outcome(
@@ -520,7 +514,7 @@ fn target_lineage_line(snapshot: &kuzushi_core::workflow_attempts::PhaseTargetSn
             sha.chars().take(7).collect::<String>(),
             if snapshot.dirty { "*" } else { "" }
         ),
-        None => "lineage: target rev unrecorded".to_string(),
+        None => "target revision was not recorded for this attempt".to_string(),
     }
 }
 
@@ -587,7 +581,7 @@ fn terminal_result_details(
         return typed;
     }
     legacy_phase_result_details(vec![
-        "typed run result unavailable — inspect the referenced run".to_string(),
+        "run details unavailable — open the failed run for details".to_string(),
     ])
 }
 
@@ -758,8 +752,19 @@ fn phase_card_shows_cell(
         Kind::Attention => true,
         Kind::Outcome => !matches!(cell.payload, Payload::PhaseReceipt(_)),
         Kind::Evidence => !matches!(cell.payload, Payload::Artifact(_)),
-        Kind::Work => false,
+        Kind::Work => failed_model_call_cell(cell),
     }
+}
+
+fn failed_model_call_cell(cell: &kuzushi_core::run_lifecycle::RunPresentationCellV1) -> bool {
+    use kuzushi_core::run_lifecycle::{RunItemStatus, RunPresentationPayloadV1 as Payload};
+    let Payload::ModelCall(call) = &cell.payload else {
+        return false;
+    };
+    matches!(
+        call.status,
+        RunItemStatus::Failed | RunItemStatus::Interrupted | RunItemStatus::Canceled
+    )
 }
 
 fn selection_blocked_result_policy(reason: &str) -> PhaseResultPolicy {
@@ -956,6 +961,7 @@ mod tests {
 
     fn write_stage_checkpoint(target: &std::path::Path, run_id: &str) {
         std::fs::create_dir_all(target.join(".kuzushi")).unwrap();
+        write_requested_operation(target, run_id, [5u8; 32]);
         std::fs::write(target.join("research.json"), "{}").unwrap();
         let store = kuzushi_core::run_artifacts::StageCheckpointStore::discover(target, &[5u8; 32])
             .unwrap();
@@ -969,6 +975,22 @@ mod tests {
             .stage("research")
             .complete(vec!["research.json".to_string()]);
         handle.mark_current("gapfill");
+    }
+
+    fn write_requested_operation(target: &std::path::Path, run_id: &str, digest: [u8; 32]) {
+        use kuzushi_core::run_lifecycle::*;
+        let writer = RunItemWriter::open(target, run_id, None).unwrap();
+        let item = RunItemV1::ToolCallRequested {
+            tool_name: SafeText::operator_visible("threat-model:build"),
+            operation_fingerprint: OperationFingerprint::from_digest(digest),
+            safe_option_names: Vec::new(),
+        };
+        writer
+            .emit_and_flush(
+                RunItemRecord::new(RunItemId::new(), RunItemSource::Dispatch, item)
+                    .with_call(RunCallId::new()),
+            )
+            .unwrap();
     }
 
     #[test]
@@ -1016,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_results_disclose_a_pending_resume_checkpoint() {
+    fn unrelated_loop_checkpoint_does_not_make_a_failed_result_continuable() {
         let temp = tempfile::tempdir().unwrap();
         write_pending_loop_checkpoint(temp.path());
         let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
@@ -1026,14 +1048,11 @@ mod tests {
             temp.path(),
             PhaseAttemptOutcome::Failed,
         ));
-        assert!(
-            failed
-                .detail_lines
-                .iter()
-                .any(|line| { line.contains("resume checkpoint saved (1 completed agent turn)") }),
-            "failed result must disclose the checkpoint: {:?}",
-            failed.detail_lines
-        );
+        assert!(!failed.actions.contains(&PhaseResultAction::ContinueRun));
+        assert!(!failed
+            .detail_lines
+            .iter()
+            .any(|line| line.contains("resume checkpoint")));
 
         // A successful result never advertises resume.
         let completed = app.phase_result_presentation_for(&attempt_with_outcome(
@@ -1120,6 +1139,95 @@ mod tests {
         assert!(!detail.contains("scan completed"), "{detail}");
     }
 
+    #[test]
+    fn failed_result_card_names_the_exact_model_call_and_failure_metadata() {
+        use kuzushi_core::run_lifecycle::*;
+        let target = tempfile::tempdir().unwrap();
+        let run_id = "typed-model-failure";
+        let observation = terminal_run_observation(target.path(), run_id);
+        let task = observation.task_handle().unwrap();
+        task.update_and_flush(RunItemStatus::Running, None).unwrap();
+        emit_failed_model_call(&observation);
+        task.update_and_flush(RunItemStatus::Failed, None).unwrap();
+        emit_phase_fixture_terminal(&observation, RunItemStatus::Failed);
+
+        let result = typed_run_result_details(target.path(), run_id).unwrap();
+        let detail = result
+            .rows
+            .iter()
+            .map(|row| row.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            detail.contains("anthropic/anthropic:claude-test"),
+            "{detail}"
+        );
+        assert!(detail.contains("error=sdk_client_validation"), "{detail}");
+        assert!(detail.contains("stage=agentic-sast:review"), "{detail}");
+        assert!(detail.contains("http=400"), "{detail}");
+        assert!(
+            detail.contains("detail: temperature is incompatible with adaptive thinking"),
+            "{detail}"
+        );
+    }
+
+    fn emit_failed_model_call(observation: &kuzushi_core::run_lifecycle::RunObservationHandle) {
+        use kuzushi_core::run_lifecycle::*;
+        use kuzushi_core::runtime::{RuntimeFailureClass, RuntimeFailureMetadata};
+        let call_id = RunCallId::new();
+        let item_id = RunItemId::new();
+        let metadata = RuntimeFailureMetadata::new(
+            RuntimeFailureClass::SdkClientValidation,
+            Some(400),
+            Some("temperature incompatible with adaptive thinking"),
+        )
+        .with_model_call(call_id, Some("agentic-sast:review"));
+        observation
+            .emit_and_flush(
+                RunItemRecord::new(
+                    item_id,
+                    RunItemSource::Runtime,
+                    RunItemV1::ModelCallStarted {
+                        provider: SafeText::operator_visible("anthropic"),
+                        model: SafeText::operator_visible("anthropic:claude-test"),
+                        operation_fingerprint: OperationFingerprint::from_bytes(b"model request"),
+                    },
+                )
+                .with_call(call_id),
+            )
+            .unwrap();
+        observation
+            .emit_and_flush(
+                RunItemRecord::new(
+                    item_id,
+                    RunItemSource::Runtime,
+                    failed_model_finish(metadata),
+                )
+                .with_call(call_id),
+            )
+            .unwrap();
+    }
+
+    fn failed_model_finish(
+        metadata: kuzushi_core::runtime::RuntimeFailureMetadata,
+    ) -> kuzushi_core::run_lifecycle::RunItemV1 {
+        use kuzushi_core::run_lifecycle::*;
+        RunItemV1::ModelCallFinished {
+            provider: SafeText::operator_visible("anthropic"),
+            model: SafeText::operator_visible("anthropic:claude-test"),
+            status: RunItemStatus::Failed,
+            latency_ms: 25,
+            usage: ModelUsage {
+                input_tokens: None,
+                output_tokens: None,
+            },
+            cost: kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+            error_class: Some(SafeText::operator_visible(metadata.error_class.to_string())),
+            failure: Some(metadata),
+        }
+    }
+
     fn typed_result_fixture(
         is_problem: bool,
         text: &str,
@@ -1148,6 +1256,7 @@ mod tests {
             touched_files: Vec::new(),
             state: kuzushi_core::PatchLifecycleState::Verified,
             reverify_run_id: Some(run_id.to_string()),
+            reverify_evidence: Some(crate::test_support::test_reverify_evidence_ref()),
             detail: Some("re-verification passed".to_string()),
             actor: "operator".to_string(),
             application_started_at: "1".to_string(),
@@ -1276,8 +1385,8 @@ mod tests {
         let presentation = app.phase_result_presentation_for(&completed);
 
         assert_eq!(presentation.outcome, "partial");
-        assert_contains_detail(&presentation, "typed phase receipt degraded");
-        assert_contains_detail(&presentation, "attempt identity is not typed");
+        assert_contains_detail(&presentation, "run receipt unavailable");
+        assert_contains_detail(&presentation, "open the failed run");
         assert!(!presentation
             .detail_lines
             .iter()

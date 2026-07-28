@@ -1120,7 +1120,7 @@ fn renders_actionable_empty_states_at_80_columns() {
             assert!(rendered.contains(".kuzushi/v3/runs/<id>"), "{rendered}");
         }
         // These line-based empty states must stay free of nested boxes (the
-        // bordered command center is the only box-drawing primary surface).
+        // bordered phase Workbench is the only box-drawing primary surface).
         assert!(!rendered.contains("┌"), "{expected} drew a box");
     }
 }
@@ -3139,6 +3139,8 @@ fn failure_handoff_view_renders_current_context() {
             completed_stages: Vec::new(),
             checkpoint_artifacts: Vec::new(),
             checkpoint_fingerprint: None,
+            runtime_failure: None,
+            model: None,
         }),
         pending_failure_context: None,
     }));
@@ -3419,7 +3421,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         if let Some(patch_alias) = patch_alias {
             app.router.patch_mut().open(patch_alias);
         }
-        // The Workbench command center is the one box-drawing primary surface
+        // The phase Workbench is the one box-drawing primary surface
         // (bordered panes); every other view stays line-based.
         let is_workbench = matches!(view, ShellView::Workbench);
         app.set_shell_view(view);
@@ -4521,6 +4523,86 @@ fn run_focus_at_reported_96x89_size_is_side_by_side_without_shell_prompt() {
 }
 
 #[test]
+fn run_focus_stacks_sparse_output_at_120x36_to_preserve_long_task_labels() {
+    let task_label = "Review authorization evidence across the complete external trust boundary";
+    let mut session = ActivitySession::new("run-long-task");
+    let mut task = DagTaskRow::queued(task_label.to_string(), "custom".to_string(), Vec::new());
+    task.state = DagTaskState::Active;
+    session.tasks.insert(task.task_id.clone(), task);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_activity(Some(session));
+    app.set_shell_view(ShellView::Activity);
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rows = rendered_buffer_rows(terminal.backend().buffer());
+    let tasks_row = rows.iter().position(|row| row.contains("TASKS")).unwrap();
+    let output_row = rows.iter().position(|row| row.contains("OUTPUT")).unwrap();
+    let rendered = rows.join("\n");
+
+    assert!(tasks_row < output_row, "panes should stack: {rendered}");
+    assert!(rendered.contains(task_label), "{rendered}");
+}
+
+#[test]
+fn run_focus_keeps_useful_output_beside_a_measured_task_pane() {
+    let task_label = "Review authorization evidence across trust boundaries";
+    let mut session = ActivitySession::new("run-rich-output");
+    let mut task = DagTaskRow::queued(task_label.to_string(), "custom".to_string(), Vec::new());
+    task.state = DagTaskState::Active;
+    session.tasks.insert(task.task_id.clone(), task);
+    for index in 1..=6 {
+        apply_renderer_notice(&mut session, &format!("Evidence batch {index} collected"));
+    }
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_activity(Some(session));
+    app.set_shell_view(ShellView::Activity);
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rows = rendered_buffer_rows(terminal.backend().buffer());
+    let tasks_row = rows.iter().position(|row| row.contains("TASKS")).unwrap();
+    let output_row = rows.iter().position(|row| row.contains("OUTPUT")).unwrap();
+    let rendered = rows.join("\n");
+
+    assert_eq!(tasks_row, output_row, "panes should stay split: {rendered}");
+    assert!(rendered.contains(task_label), "{rendered}");
+    assert!(
+        rendered.contains("Evidence batch 6 collected"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn run_focus_wraps_a_long_authoritative_health_label_on_wide_screens() {
+    let message =
+        "Comparing authorization evidence from every external and internal trust boundary";
+    let mut session = ActivitySession::new("run-long-health");
+    let mut task = DagTaskRow::queued(
+        "authorization-review".to_string(),
+        "custom".to_string(),
+        Vec::new(),
+    );
+    task.state = DagTaskState::Active;
+    session.tasks.insert(task.task_id.clone(), task);
+    apply_renderer_notice(&mut session, message);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_activity(Some(session));
+    app.set_running_tool_for_test("authorization-review");
+    app.set_shell_view(ShellView::Activity);
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+
+    assert!(rendered.contains("internal trust boundary"), "{rendered}");
+    assert!(!rendered.contains("internal trust..."), "{rendered}");
+}
+
+#[test]
 fn activity_view_renders_partial_terminal_outcome_from_run_summary() {
     let temp = tempfile::tempdir().unwrap();
     let mut summary = RunSummary::running(
@@ -4952,8 +5034,8 @@ fn auth_provider_rows_drop_detail_to_second_line_when_narrow() {
 #[test]
 fn transcript_log_line_renders_wall_clock_timestamp_when_present() {
     // `design/mockups/_shared.jsx::logLine` paints each transcript row
-    // with a leading `HH:MM:SS` in c-subtle.  Verify the dated path
-    // emits a 5-or-8-char timestamp span styled subtle, before the
+    // with a leading UTC `HH:MM:SSZ` in c-subtle. Verify the dated path
+    // emits a labelled timestamp span styled subtle, before the
     // glyph + prefix + body.
     let line = transcript_line_dated(
         "tool",
@@ -4965,14 +5047,14 @@ fn transcript_log_line_renders_wall_clock_timestamp_when_present() {
     let mut saw_subtle_time = false;
     let mut saw_glyph = false;
     for span in &line.spans {
-        if span.content == "14:32:14" && span.style == theme::subtle() {
+        if span.content == "14:32:14Z" && span.style == theme::subtle() {
             saw_subtle_time = true;
         }
         if span.content.contains("⏵") {
             saw_glyph = true;
         }
     }
-    assert!(saw_subtle_time, "subtle HH:MM:SS missing: {line:?}");
+    assert!(saw_subtle_time, "subtle UTC wall time missing: {line:?}");
     assert!(saw_glyph, "transcript glyph missing: {line:?}");
 }
 
@@ -5779,7 +5861,7 @@ fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
     None
 }
 
-// ── Workbench command center ─────────────────────────────────────────────────
+// ── Phase Workbench ──────────────────────────────────────────────────────────
 
 fn workbench_app_with_findings() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -5798,6 +5880,98 @@ fn workbench_app_with_findings() -> ShellApp {
     app
 }
 
+fn review_search_render_app() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    app.set_input_mode(crate::InputMode::Navigate);
+    let mut high = Finding::new_tool(
+        "semgrep",
+        "gateway/high",
+        "src/auth/gateway.rs",
+        12,
+        None,
+        Severity::High,
+        "gateway ownership bypass",
+    );
+    high.dedup_key = Some("gateway-high".to_string());
+    let mut low = Finding::new_tool(
+        "semgrep",
+        "gateway/low",
+        "src/auth/cookie.rs",
+        20,
+        None,
+        Severity::Low,
+        "cookie scope is broad",
+    );
+    low.dedup_key = Some("gateway-low".to_string());
+    let mut critical = Finding::new_tool(
+        "systems-hunt",
+        "gateway/critical",
+        "src/rpc/proxy.rs",
+        30,
+        None,
+        Severity::Critical,
+        "proxy request crosses tenant boundary",
+    );
+    critical.dedup_key = Some("gateway-critical".to_string());
+    app.set_findings(vec![high, low, critical]);
+    app.router.workbench_mut().review_mut().search_query =
+        "severity:critical,high source:semgrep".to_string();
+    app
+}
+
+#[test]
+fn review_search_filters_render_at_reference_sizes() {
+    let app = review_search_render_app();
+    for (width, height) in [(120, 36), (80, 24), (60, 20)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("review search terminal");
+        terminal
+            .draw(|frame| render_app(frame, &app))
+            .expect("render filtered Review");
+        let rendered = rendered_buffer_rows(terminal.backend().buffer()).join("\n");
+
+        for marker in [
+            "1 of 3",
+            "[severity:critical|high]",
+            "[source:semgrep]",
+            "gateway ownership bypass",
+        ] {
+            assert!(
+                rendered.contains(marker),
+                "Review {width}x{height} dropped {marker}: {rendered}"
+            );
+        }
+    }
+}
+
+#[test]
+fn review_search_plain_output_uses_the_same_filter_model() {
+    let app = review_search_render_app();
+    let rendered = render_plain_app(&app, 120);
+
+    for marker in [
+        "1 of 3",
+        "[severity:critical|high]",
+        "[source:semgrep]",
+        "facets before search",
+        "severity critical:1 high:1 low:1",
+        "status open:3",
+        "gateway ownership bypass",
+    ] {
+        assert!(
+            rendered.contains(marker),
+            "plain Review dropped {marker}: {rendered}"
+        );
+    }
+}
+
 #[test]
 fn workbench_keystroke_to_paint_reuses_large_findings_projection() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -5813,6 +5987,7 @@ fn workbench_keystroke_to_paint_reuses_large_findings_projection() {
     let cache_key = crate::app::VisibleFindingsCacheKey::from_app_parts(
         app.findings_revision(),
         app.review_decisions_revision(),
+        None,
         None,
         None,
         None,
@@ -5846,6 +6021,7 @@ fn workbench_keystroke_to_paint_reuses_large_findings_projection() {
 }
 
 #[test]
+#[ignore = "wall-clock performance gate; run serially with pnpm test:performance"]
 fn workbench_warmed_input_to_paint_p95_stays_within_budget() {
     const SAMPLE_COUNT: usize = 60;
     const P95_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
@@ -6130,20 +6306,14 @@ fn render_missing_verification_trace() -> String {
 }
 
 fn verification_without_trace() -> kuzushi_core::PersistedVerification {
-    kuzushi_core::PersistedVerification {
-        proof_level: 3,
-        proof_verdict: kuzushi_core::PersistedProofVerdict::Exploited,
-        backend: kuzushi_core::PersistedSandboxBackend::Plain,
-        language: Some("rust".to_string()),
-        harness_path: None,
-        crash_evidence: Some("verification succeeded".to_string()),
-        duration_ms: 42,
-        cost_usd: 0.01,
-        notes: Vec::new(),
-        verification_run_id: Some("verify-without-trace".to_string()),
-        verified_scan_id: Some("scan-without-trace".to_string()),
-        created_at: "2026-07-10T00:00:00Z".to_string(),
-    }
+    let mut verification = crate::test_support::test_empirical_verification(3);
+    verification.crash_evidence = Some("verification succeeded".to_string());
+    verification.duration_ms = 42;
+    verification.cost_usd = 0.01;
+    verification.verification_run_id = Some("verify-without-trace".to_string());
+    verification.verified_scan_id = Some("scan-without-trace".to_string());
+    verification.created_at = "2026-07-10T00:00:00Z".to_string();
+    verification
 }
 
 fn render_missing_fix_diagrams() -> String {

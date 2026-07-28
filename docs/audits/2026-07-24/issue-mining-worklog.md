@@ -87,7 +87,7 @@ final baseline before being recorded.
   "cmd": "pnpm check:docs",
   "status": "FAIL",
   "class": "environment",
-  "detail": "check-port-contract.mjs requires git remote 'upstream-codex' (https://github.com/openai/codex.git) not present on this box; release contract itself passed"
+  "detail": "check-port-contract.mjs required the configured upstream reference remote, which was not present on this box; release contract itself passed"
 }
 ```
 
@@ -204,7 +204,7 @@ index c16324e7..e902c8f6 100644
 
 ## 3. Node quality gates at a7cd9d9b (gates-node.log)
 
-`pnpm check:docs` (environmental: missing `upstream-codex` remote), `quality:architecture` (11 DDD-boundary violations), `quality:model-safety`, `quality:crap-risk`, `pnpm test`.
+`pnpm check:docs` (environmental: missing configured upstream reference remote), `quality:architecture` (11 DDD-boundary violations), `quality:model-safety`, `quality:crap-risk`, `pnpm test`.
 
 <details>
 <summary>gates-node.log</summary>
@@ -217,9 +217,9 @@ index c16324e7..e902c8f6 100644
 > node scripts/check-release-contract.mjs && node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs
 
 release contract check passed (0.24.0-alpha.8, Rust 1.96.1)
-error: No such remote 'upstream-codex'
+error: No such configured upstream reference remote
 Kuzushi port contract check failed:
-- git remote upstream-codex is missing; add https://github.com/openai/codex.git
+- configured upstream reference remote is missing; add the documented upstream repository
  ELIFECYCLE  Command failed with exit code 1.
 
 real	0m2.943s
@@ -242,7 +242,7 @@ Kuzushi DDD boundary check failed:
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/failure_coverage.rs
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/phase_composition_contract/failure_snapshots.rs
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/surface_lints.rs
-- TUI runtime wording avoids validated without proof: crates/kuzushi-tui/src/renderer/failure_coverage.rs
+- TUI runtime wording avoids unproven validation claims: crates/kuzushi-tui/src/renderer/failure_coverage.rs
 - TUI agent chat renderer reads agent chat view model: no production Rust files matched roots crates/kuzushi-tui/src/renderer/views/chat/agent_chat_lines
  ELIFECYCLE  Command failed with exit code 1.
 
@@ -1080,7 +1080,7 @@ Kuzushi DDD boundary check failed:
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/failure_coverage.rs
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/phase_composition_contract/failure_snapshots.rs
 - TUI presentation reads hydrated view data without synchronous artifact IO: crates/kuzushi-tui/src/renderer/surface_lints.rs
-- TUI runtime wording avoids validated without proof: crates/kuzushi-tui/src/renderer/failure_coverage.rs
+- TUI runtime wording avoids unproven validation claims: crates/kuzushi-tui/src/renderer/failure_coverage.rs
 - TUI agent chat renderer reads agent chat view model: no production Rust files matched roots crates/kuzushi-tui/src/renderer/views/chat/agent_chat_lines
 === model-safety ===
 Model safety check passed.
@@ -1145,4 +1145,3 @@ test_exit=101
 ```
 
 </details>
-

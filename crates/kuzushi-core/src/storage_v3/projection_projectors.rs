@@ -82,7 +82,9 @@ fn attach_model_dedupe_identity(tx: &Transaction<'_>, event: &EventEnvelope) -> 
         return Ok(());
     };
     let identity_id = evidence.get("canonicalIdentityId").and_then(|v| v.as_str());
-    let fingerprint = evidence.get("duplicateFingerprint").and_then(|v| v.as_str());
+    let fingerprint = evidence
+        .get("duplicateFingerprint")
+        .and_then(|v| v.as_str());
     let (Some(identity_id), Some(fingerprint)) = (identity_id, fingerprint) else {
         return Ok(());
     };

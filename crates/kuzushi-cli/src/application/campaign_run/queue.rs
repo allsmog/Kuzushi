@@ -48,6 +48,8 @@ pub(super) struct QueueJob {
     pub(super) exit_code: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) cost_usd: Option<f64>,
+    #[serde(default)]
+    pub(super) provider_spend_unresolved: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) reason: Option<String>,
     /// Epoch ms before which a requeued job must not be redispatched.
@@ -62,10 +64,11 @@ pub(super) struct QueueStore {
 }
 
 impl QueueStore {
-    /// Open or create the queue for a campaign. Jobs left `running` by a
-    /// dead dispatcher are honestly recovered to `planned` (attempts kept):
-    /// their child processes are gone, so the state was a lie.
+    /// Open or create the queue for a campaign. A stale `running` row folds
+    /// terminal child metadata when present, or returns to `planned` only
+    /// when the child never published metadata.
     pub(super) fn open(
+        target: &Path,
         campaign_dir: &Path,
         campaign_id: &str,
         job_ids: &[String],
@@ -77,36 +80,16 @@ impl QueueStore {
         let mut doc = load_or_new_doc(&path, campaign_id)?;
         doc.budget_usd = budget_usd;
         doc.job_budget_usd = job_budget_usd;
-        for job_id in job_ids {
-            doc.jobs.entry(job_id.clone()).or_insert_with(|| QueueJob {
-                state: "planned".to_string(),
-                ..QueueJob::default()
-            });
-        }
-        let recovered = recover_stale_running_jobs(&mut doc);
-        // Queues written before the dispatch counter existed have run ids
-        // minted from `attempts`; start the counter there so the next
-        // dispatch cannot re-mint an already-used run id.
-        for job in doc.jobs.values_mut() {
-            job.dispatches = job.dispatches.max(job.attempts);
-        }
+        add_missing_jobs(&mut doc, job_ids);
+        let recovered = recover_stale_running_jobs(target, &mut doc)?;
+        migrate_dispatch_counters(&mut doc);
         let store = Self {
             path,
             events_path,
             doc,
         };
         store.save()?;
-        // Post-mortem timeline: recoveries must be visible in events.jsonl,
-        // not just silently flipped in queue.json — a dispatcher that died
-        // without a dispatch-end otherwise leaves an unexplained gap.
-        for job_id in recovered {
-            let run_id = store.job(&job_id).and_then(|job| job.run_id.clone());
-            store.append_event(
-                "recovered-stale-running",
-                Some(&job_id),
-                json!({ "runId": run_id, "reason": "recovered from dead dispatcher" }),
-            )?;
-        }
+        record_recoveries(&store, recovered)?;
         Ok(store)
     }
 
@@ -194,6 +177,13 @@ impl QueueStore {
             + 0.0
     }
 
+    pub(super) fn provider_spend_unresolved(&self) -> bool {
+        self.doc
+            .jobs
+            .values()
+            .any(|job| job.provider_spend_unresolved)
+    }
+
     pub(super) fn state_counts(&self) -> BTreeMap<String, usize> {
         let mut counts = BTreeMap::new();
         for job in self.doc.jobs.values() {
@@ -205,12 +195,52 @@ impl QueueStore {
     fn save(&self) -> Result<()> {
         let mut doc = serde_json::to_value(&self.doc).context("Could not serialize queue")?;
         doc["updatedAtMs"] = json!(now_ms());
-        let body = serde_json::to_vec_pretty(&doc).context("Could not serialize queue")?;
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, body).with_context(|| format!("Could not write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path)
-            .with_context(|| format!("Could not publish {}", self.path.display()))
+        let body = serde_json::to_string_pretty(&doc).context("Could not serialize queue")?;
+        let campaign_dir = self
+            .path
+            .parent()
+            .context("campaign queue path has no parent directory")?;
+        kuzushi_core::workspace::write_workspace_file(
+            campaign_dir,
+            Path::new("queue.json"),
+            body.as_bytes(),
+        )
+        .map(|_| ())
+        .with_context(|| format!("Could not publish {}", self.path.display()))
     }
+}
+
+fn add_missing_jobs(doc: &mut QueueDoc, job_ids: &[String]) {
+    for job_id in job_ids {
+        doc.jobs.entry(job_id.clone()).or_insert_with(|| QueueJob {
+            state: "planned".to_string(),
+            ..QueueJob::default()
+        });
+    }
+}
+
+fn migrate_dispatch_counters(doc: &mut QueueDoc) {
+    // Legacy queues minted run ids from `attempts`; start the new counter
+    // there so reopening cannot re-mint an already-used run id.
+    for job in doc.jobs.values_mut() {
+        job.dispatches = job.dispatches.max(job.attempts);
+    }
+}
+
+fn record_recoveries(store: &QueueStore, recovered: Vec<String>) -> Result<()> {
+    for job_id in recovered {
+        let job = store.job(&job_id);
+        store.append_event(
+            "recovered-stale-running",
+            Some(&job_id),
+            json!({
+                "runId": job.and_then(|entry| entry.run_id.clone()),
+                "state": job.map(|entry| entry.state.as_str()),
+                "reason": job.and_then(|entry| entry.reason.clone()),
+            }),
+        )?;
+    }
+    Ok(())
 }
 
 fn load_or_new_doc(path: &Path, campaign_id: &str) -> Result<QueueDoc> {
@@ -232,21 +262,109 @@ fn load_or_new_doc(path: &Path, campaign_id: &str) -> Result<QueueDoc> {
 fn job_is_resumable(job: &QueueJob) -> bool {
     match job.state.as_str() {
         "failed" => true,
-        "parked" => job.reason.as_deref() != Some("prepare-failed"),
+        "parked" => !matches!(job.reason.as_deref(), Some("prepare-failed" | "blocked")),
         _ => false,
     }
 }
 
-fn recover_stale_running_jobs(doc: &mut QueueDoc) -> Vec<String> {
+fn recover_stale_running_jobs(target: &Path, doc: &mut QueueDoc) -> Result<Vec<String>> {
     let mut recovered = Vec::new();
     for (job_id, job) in doc.jobs.iter_mut() {
-        if job.state == "running" {
-            job.state = "planned".to_string();
-            job.reason = Some("recovered from dead dispatcher".to_string());
-            recovered.push(job_id.clone());
+        if job.state != "running" {
+            continue;
         }
+        recover_running_job(target, job_id, job)?;
+        recovered.push(job_id.clone());
     }
-    recovered
+    Ok(recovered)
+}
+
+fn recover_running_job(target: &Path, job_id: &str, job: &mut QueueJob) -> Result<()> {
+    let Some(run_id) = job.run_id.as_deref() else {
+        recover_without_child_metadata(job);
+        return Ok(());
+    };
+    let run_id = kuzushi_core::RunId::parse(run_id)
+        .with_context(|| format!("campaign job {job_id} has an invalid run id"))?;
+    let Some(summary) = load_recoverable_summary(target, job_id, &run_id)? else {
+        recover_without_child_metadata(job);
+        return Ok(());
+    };
+    apply_recovered_terminal(job, &summary, job_id)
+}
+
+fn load_recoverable_summary(
+    target: &Path,
+    job_id: &str,
+    run_id: &kuzushi_core::RunId,
+) -> Result<Option<kuzushi_core::RunSummary>> {
+    let metadata = kuzushi_core::run_artifact_path(target, run_id.as_str(), "run.json");
+    match std::fs::symlink_metadata(&metadata) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Could not inspect {}", metadata.display()))
+        }
+        Ok(_) => {}
+    }
+    let summary = kuzushi_core::load_run_summary(target, run_id.as_str())
+        .with_context(|| format!("could not verify running campaign job {job_id}"))?;
+    anyhow::ensure!(
+        summary.status != "running",
+        "campaign job {job_id} still has a live child owner for run {}",
+        run_id.as_str()
+    );
+    Ok(Some(summary))
+}
+
+fn apply_recovered_terminal(
+    job: &mut QueueJob,
+    summary: &kuzushi_core::RunSummary,
+    job_id: &str,
+) -> Result<()> {
+    let terminal = recovered_terminal_state(&summary.status)
+        .with_context(|| format!("campaign job {job_id} has unknown persisted status"))?;
+    job.state = terminal.state.to_string();
+    job.exit_code = Some(terminal.exit_code);
+    job.reason = terminal.reason.map(str::to_string);
+    job.cost_usd = accumulated_cost(job.cost_usd, summary.cost_usd.or(summary.observed_cost_usd));
+    job.provider_spend_unresolved |= summary.provider_spend_unresolved;
+    Ok(())
+}
+
+fn recover_without_child_metadata(job: &mut QueueJob) {
+    job.state = "planned".to_string();
+    job.reason = Some("recovered from dead dispatcher before child metadata".to_string());
+}
+
+struct RecoveredTerminalState {
+    state: &'static str,
+    exit_code: i32,
+    reason: Option<&'static str>,
+}
+
+fn recovered_terminal_state(status: &str) -> Result<RecoveredTerminalState> {
+    const STATES: [(&str, &str, i32, Option<&str>); 7] = [
+        ("completed", "completed", 0, None),
+        ("skipped", "completed", 0, None),
+        ("blocked", "parked", 2, Some("blocked")),
+        ("canceled", "parked", 130, Some("canceled")),
+        ("interrupted", "parked", 3, Some("interrupted")),
+        ("failed", "failed", 3, Some("failed")),
+        ("partial", "failed", 4, Some("partial")),
+    ];
+    STATES
+        .iter()
+        .find(|entry| entry.0 == status)
+        .map(|entry| RecoveredTerminalState {
+            state: entry.1,
+            exit_code: entry.2,
+            reason: entry.3,
+        })
+        .with_context(|| format!("unsupported terminal run status {status:?}"))
+}
+
+fn accumulated_cost(prior: Option<f64>, recovered_attempt: Option<f64>) -> Option<f64> {
+    recovered_attempt.map_or(prior, |cost| Some(prior.unwrap_or(0.0) + cost + 0.0))
 }
 
 /// events.jsonl was the last unbounded append-only campaign artifact: a
@@ -296,7 +414,7 @@ mod tests {
             .iter()
             .map(|(id, ..)| id.to_string())
             .collect::<Vec<_>>();
-        let mut store = QueueStore::open(dir, "camp", &ids, None, None).unwrap();
+        let mut store = QueueStore::open(dir, dir, "camp", &ids, None, None).unwrap();
         for (id, state, reason, attempts, cost_usd) in jobs {
             store
                 .update_job(id, "seed", |entry| {
@@ -368,8 +486,15 @@ mod tests {
             store.save().unwrap();
         }
 
-        let store =
-            QueueStore::open(tmp.path(), "camp", &["job-a".to_string()], None, None).unwrap();
+        let store = QueueStore::open(
+            tmp.path(),
+            tmp.path(),
+            "camp",
+            &["job-a".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             store.job("job-a").unwrap().dispatches,
@@ -395,14 +520,21 @@ mod tests {
             // Simulated SIGKILL: no terminal transition is written.
         }
 
-        let store =
-            QueueStore::open(tmp.path(), "camp", &["job-a".to_string()], None, None).unwrap();
+        let store = QueueStore::open(
+            tmp.path(),
+            tmp.path(),
+            "camp",
+            &["job-a".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
 
         let job = store.job("job-a").unwrap();
         assert_eq!(job.state, "planned");
         assert_eq!(
             job.reason.as_deref(),
-            Some("recovered from dead dispatcher")
+            Some("recovered from dead dispatcher before child metadata")
         );
         let events = std::fs::read_to_string(tmp.path().join("events.jsonl")).unwrap();
         let recovery = events
@@ -412,6 +544,137 @@ mod tests {
         assert_eq!(recovery.len(), 1, "{events}");
         assert!(recovery[0].contains("camp-job-a-a1"), "{}", recovery[0]);
         assert!(recovery[0].contains("job-a"));
+    }
+
+    #[test]
+    fn live_running_job_identity_refuses_recovery_without_queue_mutation() {
+        let target = tempfile::tempdir().unwrap();
+        let campaign = target.path().join("campaign");
+        std::fs::create_dir_all(&campaign).unwrap();
+        let run_id = "camp-job-live-a1";
+        seed_live_running_job(target.path(), &campaign, run_id);
+        let queue_path = campaign.join("queue.json");
+        let before = std::fs::read(&queue_path).unwrap();
+
+        let error = QueueStore::open(
+            target.path(),
+            &campaign,
+            "camp",
+            &["job-live".to_string()],
+            None,
+            None,
+        )
+        .err()
+        .expect("a live child owner must block stale recovery");
+
+        assert!(error.to_string().contains("still has a live child owner"));
+        assert_eq!(std::fs::read(queue_path).unwrap(), before);
+    }
+
+    fn seed_live_running_job(target: &Path, campaign: &Path, run_id: &str) {
+        let mut store = QueueStore::open(
+            target,
+            campaign,
+            "camp",
+            &["job-live".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
+        store
+            .update_job("job-live", "job-start", |entry| {
+                entry.state = "running".to_string();
+                entry.run_id = Some(run_id.to_string());
+            })
+            .unwrap();
+        let summary = kuzushi_core::RunSummary::running(run_id, "run", None, "target")
+            .with_process_id(std::process::id());
+        kuzushi_core::write_run_summary(target, &summary).unwrap();
+    }
+
+    #[test]
+    fn terminal_child_recovery_never_replans_completed_work() {
+        let completed = recovered_terminal_state("completed").unwrap();
+        assert_eq!(completed.state, "completed");
+        assert_eq!(completed.exit_code, 0);
+        assert_eq!(completed.reason, None);
+
+        let failed = recovered_terminal_state("failed").unwrap();
+        assert_eq!(failed.state, "failed");
+        assert_eq!(failed.reason, Some("failed"));
+
+        assert!(recovered_terminal_state("running").is_err());
+        assert_eq!(accumulated_cost(Some(1.25), Some(0.75)), Some(2.0));
+    }
+
+    #[test]
+    fn recovered_terminal_applies_state_cost_and_spend_truth() {
+        let mut job = QueueJob {
+            state: "running".to_string(),
+            cost_usd: Some(1.25),
+            ..QueueJob::default()
+        };
+        let mut summary =
+            kuzushi_core::RunSummary::running("run-a", "run", None, "target").complete();
+        summary.cost_usd = Some(0.75);
+        summary.provider_spend_unresolved = true;
+
+        apply_recovered_terminal(&mut job, &summary, "job-a").unwrap();
+
+        assert_eq!(job.state, "completed");
+        assert_eq!(job.exit_code, Some(0));
+        assert_eq!(job.reason, None);
+        assert_eq!(job.cost_usd, Some(2.0));
+        assert!(job.provider_spend_unresolved);
+    }
+
+    #[test]
+    fn queue_save_does_not_reuse_a_fixed_temp_sibling() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fixed_temp = tmp.path().join("queue.json.tmp");
+        std::fs::write(&fixed_temp, "unrelated staging file").unwrap();
+        let mut store = seeded_store(tmp.path(), &[("job-a", "planned", None, 0, None)]);
+
+        store
+            .update_job("job-a", "job-start", |entry| {
+                entry.state = "running".to_string()
+            })
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(fixed_temp).unwrap(),
+            "unrelated staging file"
+        );
+        let queue: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(tmp.path().join("queue.json")).unwrap()).unwrap();
+        assert_eq!(queue["jobs"]["job-a"]["state"], "running");
+    }
+
+    #[test]
+    fn unresolved_provider_spend_survives_queue_reopen() {
+        let tmp = tempfile::tempdir().unwrap();
+        {
+            let mut store = seeded_store(tmp.path(), &[("job-a", "completed", None, 1, None)]);
+            store
+                .update_job("job-a", "settle", |entry| {
+                    entry.cost_usd = Some(0.75);
+                    entry.provider_spend_unresolved = true;
+                })
+                .unwrap();
+        }
+
+        let store = QueueStore::open(
+            tmp.path(),
+            tmp.path(),
+            "camp",
+            &["job-a".to_string()],
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(store.total_cost_usd(), 0.75);
+        assert!(store.provider_spend_unresolved());
     }
 
     #[test]

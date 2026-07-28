@@ -2,9 +2,9 @@ use super::*;
 use crate::{ActivitySession, PendingPatch};
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, append_phase_attempt_disposition,
-    append_phase_checkpoint_skipped, PhaseAttemptCompleted, PhaseAttemptDisposition,
-    PhaseAttemptDispositionRecorded, PhaseAttemptOutcome, PhaseAttemptReceipt,
-    PhaseCheckpointSkipped, PhaseResultAction, PhaseTargetSnapshot,
+    append_phase_checkpoint_skipped, PhaseAttemptCompleted, PhaseAttemptDerivation,
+    PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptOutcome,
+    PhaseAttemptReceipt, PhaseCheckpointSkipped, PhaseResultAction, PhaseTargetSnapshot,
 };
 use kuzushi_core::{
     Finding, PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState, PersistedProofVerdict,
@@ -20,6 +20,19 @@ fn result_actions_name_the_rederived_destination_and_never_advance_fix() {
     let review = result_action_labels(WorkflowPhase::Review, "completed");
     assert!(review.contains("Commit & Prove"));
     assert!(!result_action_labels(WorkflowPhase::Fix, "completed").contains(" n "));
+}
+
+#[test]
+fn mutation_survivor_rerun_review_labels_disclose_the_requested_derivation() {
+    assert_eq!(phase_rerun_action_label(None), "run again");
+    assert_eq!(
+        phase_rerun_action_label(Some(PhaseAttemptDerivation::Refine)),
+        "refine"
+    );
+    assert_eq!(
+        phase_rerun_action_label(Some(PhaseAttemptDerivation::Regenerate)),
+        "regenerate"
+    );
 }
 
 #[test]
@@ -142,20 +155,15 @@ fn finding() -> Finding {
 }
 
 fn verification() -> PersistedVerification {
-    PersistedVerification {
-        proof_level: 3,
-        proof_verdict: PersistedProofVerdict::Exploited,
-        backend: PersistedSandboxBackend::Plain,
-        language: Some("rust".to_string()),
-        harness_path: Some(".kuzushi/harness.rs".to_string()),
-        crash_evidence: Some("reproduced SQL execution".to_string()),
-        duration_ms: 420,
-        cost_usd: 0.07,
-        notes: vec!["isolated harness".to_string()],
-        verification_run_id: Some("verify-run".to_string()),
-        verified_scan_id: Some("run-proof".to_string()),
-        created_at: "2026-07-09T10:00:00Z".to_string(),
-    }
+    let mut verification = crate::test_support::test_empirical_verification(3);
+    verification.harness_path = Some(".kuzushi/harness.rs".to_string());
+    verification.crash_evidence = Some("reproduced SQL execution".to_string());
+    verification.duration_ms = 420;
+    verification.cost_usd = 0.07;
+    verification.notes = vec!["isolated harness".to_string()];
+    verification.verified_scan_id = Some("run-proof".to_string());
+    verification.created_at = "2026-07-09T10:00:00Z".to_string();
+    verification
 }
 
 #[test]
@@ -431,6 +439,7 @@ fn fix_model_projects_every_durable_patch_lifecycle_receipt() {
         }],
         state: PatchLifecycleState::Applied,
         reverify_run_id: None,
+        reverify_evidence: None,
         detail: Some("application receipt".to_string()),
         actor: "operator".to_string(),
         application_started_at: "2026-07-13T09:59:59Z".to_string(),
@@ -485,6 +494,12 @@ fn fix_model_projects_every_durable_patch_lifecycle_receipt() {
     ];
     for (state, expected) in cases {
         record.state = state;
+        record.reverify_run_id =
+            (state == PatchLifecycleState::Verified).then(|| "reverify-run-1".to_string());
+        record.reverify_evidence = None;
+        if state == PatchLifecycleState::Verified {
+            crate::test_support::attach_verified_patch_receipt(&workspace, &mut record);
+        }
         store
             .insert_patch_lifecycle_record(&record)
             .expect("receipt");
@@ -523,6 +538,8 @@ fn fix_model_projects_every_durable_patch_lifecycle_receipt() {
 
     record.finding_scan_id = Some("prior-scan-generation".to_string());
     record.state = PatchLifecycleState::Verified;
+    record.reverify_run_id = Some("prior-reverify-run".to_string());
+    crate::test_support::attach_verified_patch_receipt(&workspace, &mut record);
     store
         .insert_patch_lifecycle_record(&record)
         .expect("prior-generation receipt");
@@ -638,9 +655,9 @@ fn legacy_restarted_result_card_requires_typed_run_evidence() {
             PhaseResultAction::Discard,
         ]
     );
-    assert!(card.detail.contains("typed phase receipt degraded"));
+    assert!(card.detail.contains("run receipt unavailable"));
     assert!(!card.detail.contains("$0.4200"));
-    assert!(card.recommended.contains("typed phase receipt is degraded"));
+    assert!(card.recommended.contains("open the failed run"));
     assert_eq!(card.control_hint, "Esc Navigate to resolve this result");
 }
 

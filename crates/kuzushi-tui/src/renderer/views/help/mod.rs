@@ -212,22 +212,41 @@ fn wrapped_log_lines(
     time_secs: u64,
     width: usize,
 ) -> Vec<Line<'static>> {
-    let prefix_width = line_text(&transcript_line_dated(prefix, "", continuation, time_secs))
-        .chars()
-        .count();
-    let body_width = width.saturating_sub(prefix_width).max(8);
-    wrap_text(body, body_width)
-        .into_iter()
-        .enumerate()
-        .map(|(index, chunk)| {
-            transcript_line_dated(
-                prefix,
-                &chunk,
-                continuation || index > 0,
-                if index == 0 { time_secs } else { 0 },
-            )
-        })
-        .collect()
+    let first_prefix = line_width(&transcript_line_dated(prefix, "", continuation, time_secs));
+    let next_prefix = line_width(&transcript_line_dated(prefix, "", true, 0));
+    wrapped_log_body(
+        body,
+        width.saturating_sub(first_prefix).max(8),
+        width.saturating_sub(next_prefix).max(8),
+    )
+    .into_iter()
+    .enumerate()
+    .map(|(index, chunk)| {
+        transcript_line_dated(
+            prefix,
+            &chunk,
+            continuation || index > 0,
+            if index == 0 { time_secs } else { 0 },
+        )
+    })
+    .collect()
+}
+
+fn wrapped_log_body(body: &str, first_width: usize, next_width: usize) -> Vec<String> {
+    let mut initial = wrap_text(body, first_width).into_iter();
+    let Some(first) = initial.next() else {
+        return vec![String::new()];
+    };
+    let remainder = initial.collect::<Vec<_>>().join(" ");
+    let mut lines = vec![first];
+    if !remainder.is_empty() {
+        lines.extend(wrap_text(&remainder, next_width));
+    }
+    lines
+}
+
+fn line_width(line: &Line<'_>) -> usize {
+    line_text(line).chars().count()
 }
 
 fn line_text(line: &Line<'_>) -> String {

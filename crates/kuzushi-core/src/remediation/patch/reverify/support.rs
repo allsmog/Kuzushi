@@ -1,11 +1,15 @@
 use super::super::hash_optional_file;
-use crate::findings::{Finding, PatchLifecycleRecord, PatchLifecycleState, PatchStatus};
+use crate::findings::{Finding, PatchLifecycleRecord, PatchLifecycleState};
 use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 use std::path::{Component, Path};
 
+mod completion;
 mod detector_binding;
+pub(super) use completion::{
+    empirical_outcome_detail, finish_detector_output, finish_with_receipt, record_dispatch_error,
+};
 use detector_binding::originating_detector_binding;
 
 pub(super) const APPLICATION_ID: &str = "applicationId";
@@ -90,7 +94,6 @@ pub(super) fn rediscovery_outcome(
     store: &crate::findings::FindingStore,
     ctx: &ToolExecutionContext<'_>,
     record: &PatchLifecycleRecord,
-    deterministic: bool,
 ) -> Result<PatchLifecycleState> {
     let run_id = ctx
         .run_id()
@@ -103,15 +106,11 @@ pub(super) fn rediscovery_outcome(
     {
         return Ok(PatchLifecycleState::StillVulnerable);
     }
-    Ok(absence_outcome(deterministic))
+    Ok(absence_outcome())
 }
 
-fn absence_outcome(deterministic: bool) -> PatchLifecycleState {
-    if deterministic {
-        PatchLifecycleState::Verified
-    } else {
-        PatchLifecycleState::NotRediscovered
-    }
+fn absence_outcome() -> PatchLifecycleState {
+    PatchLifecycleState::NotRediscovered
 }
 
 fn same_finding(
@@ -124,26 +123,6 @@ fn same_finding(
             .and_then(|finding| finding.identity_id.as_ref())
             .zip(candidate.identity_id.as_ref())
             .is_some_and(|(left, right)| left == right)
-}
-
-pub(super) fn promote_patch_result(
-    store: &crate::findings::FindingStore,
-    record: &PatchLifecycleRecord,
-    outcome: PatchLifecycleState,
-) -> Result<()> {
-    let status = match outcome {
-        PatchLifecycleState::Verified => PatchStatus::Verified,
-        PatchLifecycleState::StillVulnerable => PatchStatus::StillVulnerable,
-        _ => return Ok(()),
-    };
-    let mut result = store
-        .get_patch_results_for_finding(&record.fingerprint)?
-        .into_iter()
-        .find(|result| result.patch_run_id == record.patch_run_id)
-        .context("the originating patch result is unavailable")?;
-    result.status = status;
-    result.updated_at = Some(crate::findings::now_isoish());
-    store.insert_patch_result(&result)
 }
 
 pub(super) fn record_state(
@@ -213,10 +192,10 @@ pub(super) fn detector_failure_detail(output: &Value) -> String {
 
 pub(super) fn outcome_detail(state: PatchLifecycleState) -> String {
     match state {
-        PatchLifecycleState::Verified => "deterministic detector completed without rediscovery",
+        PatchLifecycleState::Verified => "patch verification completed",
         PatchLifecycleState::StillVulnerable => "originating detector rediscovered the finding",
         PatchLifecycleState::NotRediscovered => {
-            "nondeterministic detector completed without rediscovery"
+            "originating detector completed without rediscovery"
         }
         _ => "re-verification completed",
     }

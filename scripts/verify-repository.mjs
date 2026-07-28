@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 
 const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
 const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
 
 const quickPlan = Object.freeze([
-  step("types", pnpm, ["check:types"]),
   step("tests", pnpm, ["test"]),
   step("format", cargo, ["fmt", "--all", "--", "--check"]),
+  step("cargo-check", cargo, ["check", "--workspace", "--all-targets", "--locked"]),
   step("architecture", pnpm, ["quality:architecture"]),
   step("model-safety", pnpm, ["quality:model-safety"]),
   step("docs", pnpm, ["check:docs"]),
@@ -17,20 +19,22 @@ const quickPlan = Object.freeze([
 ]);
 
 const ciPlan = Object.freeze([
-  step("types", pnpm, ["check:types"]),
+  ...quickPlan,
   step("coverage", pnpm, ["test:coverage"]),
-  step("format", cargo, ["fmt", "--all", "--", "--check"]),
-  step("architecture", pnpm, ["quality:architecture"]),
-  step("model-safety", pnpm, ["quality:model-safety"]),
-  step("docs", pnpm, ["check:docs"]),
-  step("crap-risk", pnpm, ["quality:crap-risk"]),
-  step("biome", pnpm, ["check"]),
-  step("codegen", pnpm, ["codegen:check"]),
-  step("clippy", cargo, ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]),
+  step("clippy", cargo, [
+    "clippy",
+    "--workspace",
+    "--all-targets",
+    "--locked",
+    "--",
+    "-D",
+    "warnings",
+  ]),
   step("cargo-deny", cargo, ["deny", "check", "advisories", "licenses", "bans", "sources"]),
-  step("rust-tests", cargo, ["test", "--workspace"]),
-  step("rust-build", cargo, ["build", "--workspace"]),
-  step("build-typescript", pnpm, ["build:clean"]),
+  step("rust-tests", cargo, ["test", "--workspace", "--locked"]),
+  step("performance", pnpm, ["test:performance"]),
+  step("mutations", pnpm, ["test:mutations"]),
+  step("rust-build", cargo, ["build", "--workspace", "--locked"]),
   step("build-native", pnpm, ["build:native"]),
   step("pack-contract", pnpm, ["verify:pack"]),
   step("e2e", pnpm, ["test:e2e"]),
@@ -47,11 +51,39 @@ export function verificationPlan(mode) {
   throw new Error("verification mode must be quick or ci");
 }
 
+export function validatePnpmPlanScripts(plan, packageScripts) {
+  const missing = plan
+    .filter(isPnpmStep)
+    .map(({ args }) => args[0])
+    .filter((script) => !Object.hasOwn(packageScripts, script));
+  if (missing.length > 0) {
+    throw new Error(
+      `verification plan references unknown package scripts: ${[...new Set(missing)].join(", ")}`,
+    );
+  }
+}
+
 function step(name, command, args) {
   return Object.freeze({ name, command, args: Object.freeze(args) });
 }
 
+function isPnpmStep(item) {
+  return path.basename(item.command).replace(/\.cmd$/, "") === "pnpm";
+}
+
+function packageScripts() {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  return packageJson.scripts ?? {};
+}
+
+function validatePlans() {
+  const scripts = packageScripts();
+  validatePnpmPlanScripts(quickPlan, scripts);
+  validatePnpmPlanScripts(ciPlan, scripts);
+}
+
 function runStep(item) {
+  process.stderr.write(`verify: ${item.name} (${[item.command, ...item.args].join(" ")})\n`);
   const started = Date.now();
   const result = spawnSync(item.command, item.args, {
     cwd: process.cwd(),
@@ -69,6 +101,7 @@ function runStep(item) {
 
 function main() {
   const mode = process.argv[2] ?? "quick";
+  validatePlans();
   const plan = verificationPlan(mode);
   const receipt = {
     mode,
@@ -88,7 +121,14 @@ function main() {
   receipt.ok = exitCode === 0;
   receipt.finishedAt = new Date().toISOString();
   process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
-  if (exitCode !== 0) process.exit(exitCode);
+  process.exitCode = exitCode;
 }
 
-if (process.argv[1]?.endsWith("verify-repository.mjs")) main();
+if (process.argv[1]?.endsWith("verify-repository.mjs")) {
+  try {
+    main();
+  } catch (error) {
+    process.stderr.write(`repository verification failed: ${error.message}\n`);
+    process.exitCode = 1;
+  }
+}

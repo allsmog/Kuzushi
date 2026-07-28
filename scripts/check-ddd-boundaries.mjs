@@ -5,6 +5,7 @@ import path from "node:path";
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim(),
   failures = [];
+const sourceCache = new Map();
 
 const boundaries = [
   ["context", ["crates/kuzushi-core/src/context.rs"]],
@@ -342,8 +343,8 @@ const rules = [
       /\b(command_history|is_scan_paused)\b|\.scan\b|\.log\b|row_model\.(?:number|command)\b|(?:scan|event)\.(?:label|body)\b/,
   },
   {
-    name: "TUI agent chat renderer reads agent chat view model",
-    roots: ["crates/kuzushi-tui/src/renderer/views/chat/agent_chat_lines"],
+    name: "TUI failure handoff renderer reads failure handoff view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/chat/failure_handoff_lines.rs"],
     forbidden:
       /\b(AgentChatView|ChatTurn|display_model_selector|FailureToLlmContext)\b|app\.agent_chat|\.config\b|failure_handoff_context|\.failed_stage\b|\.cause\b|\.allowed_proof_level\b|\.artifacts_available\b|\.missing_artifacts\b|\.next_files_or_artifacts_to_inspect\b|\.recovery_options\b|\.claims_forbidden\b|\.fallback_prompt\b/,
   },
@@ -680,7 +681,17 @@ function gitLines(args) {
 }
 
 function sourceWithoutTestModule(file) {
-  return readFileSync(path.join(root, file), "utf8").split(/\n#\[cfg\(test\)\]/)[0];
+  return rustSource(file).split(/\n#\[cfg\(test\)\]/)[0];
+}
+
+function rustSource(file) {
+  if (!sourceCache.has(file))
+    sourceCache.set(file, readFileSync(path.join(root, file), "utf8"));
+  return sourceCache.get(file);
+}
+
+function isExplicitlyTestOnlyRust(file) {
+  return /^\s*#!\s*\[\s*cfg\s*\(\s*test\s*\)\s*\]/.test(rustSource(file));
 }
 
 function isProductionRust(file) {
@@ -688,7 +699,8 @@ function isProductionRust(file) {
     file.endsWith(".rs") &&
     !file.endsWith("/tests.rs") &&
     !file.endsWith("_tests.rs") &&
-    !file.includes("/tests/")
+    !file.includes("/tests/") &&
+    !isExplicitlyTestOnlyRust(file)
   );
 }
 

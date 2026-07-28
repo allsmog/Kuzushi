@@ -10,8 +10,8 @@ mod finding_rekeys;
 mod finding_sources;
 mod finding_writes;
 mod observation_reads;
-mod patch_results;
 mod patch_lifecycle;
+mod patch_results;
 mod rescan_reconciliation;
 mod review_decisions;
 mod run_lifecycle;
@@ -27,4 +27,6 @@ pub use finding_rekeys::ModelRekeyRequest;
 pub use observation_reads::ObservationSourceRef;
 pub use suppression_events::SuppressionLifecycleEvent;
 pub use threat_model_versions::{threat_model_document_sha256, ThreatModelVersionRecord};
-pub(in crate::findings::persistence::open) use v3_commit_target::cost_usd_to_micros;
+pub(in crate::findings::persistence::open) use v3_commit_target::{
+    cost_usd_to_micros, V3FindingTarget,
+};

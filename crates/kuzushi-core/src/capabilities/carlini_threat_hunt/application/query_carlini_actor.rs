@@ -335,6 +335,7 @@ pub(crate) fn carlini_threat_hunt_report(
     threat_focused_prompt_files: usize,
     findings: Vec<Finding>,
     rejected_count: usize,
+    rejection_reasons: Vec<String>,
     cost_usd: f64,
     cost_usd_exact: bool,
 ) -> Result<CarliniThreatHuntReport> {
@@ -348,6 +349,7 @@ pub(crate) fn carlini_threat_hunt_report(
         threat_focused_prompt_files,
         findings,
         rejected_count,
+        rejection_reasons,
         persisted,
         kb_context: Some(options.kb_context),
         cost_usd,

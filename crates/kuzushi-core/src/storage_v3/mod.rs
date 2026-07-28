@@ -400,6 +400,11 @@ fn migrate_patch_lifecycle_columns(conn: &Connection) -> Result<()> {
                 "alter table {table} add column application_started_at text"
             ))?;
         }
+        if !table_has_column(conn, table, "reverify_evidence_json")? {
+            conn.execute_batch(&format!(
+                "alter table {table} add column reverify_evidence_json text"
+            ))?;
+        }
         conn.execute(
             &format!(
                 "update {table} set application_started_at = applied_at \
@@ -421,7 +426,7 @@ fn migrate_patch_cost_columns(conn: &Connection) -> Result<()> {
 }
 
 fn migrate_verification_provenance_columns(conn: &Connection) -> Result<()> {
-    for column in ["verification_run_id", "verified_scan_id"] {
+    for column in ["verification_run_id", "verified_scan_id", "provenance_json"] {
         if !table_has_column(conn, "verification_events", column)? {
             conn.execute_batch(&format!(
                 "alter table verification_events add column {column} text"

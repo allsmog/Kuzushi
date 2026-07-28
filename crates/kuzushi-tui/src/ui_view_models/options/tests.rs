@@ -9,6 +9,20 @@ fn options_view(tool_name: &str, filter: OptionsFilter) -> OptionsView {
 }
 
 #[test]
+fn option_display_names_humanize_canonical_keys() {
+    assert_eq!(option_display_name("sampleLimit"), "Sample limit");
+    assert_eq!(
+        option_display_name("context_sample_limit"),
+        "Context sample limit"
+    );
+    assert_eq!(option_display_name("budgetUsd"), "Budget USD");
+    assert_eq!(
+        option_display_name("THREAT_MODEL_PROMPT"),
+        "Threat model prompt"
+    );
+}
+
+#[test]
 fn options_model_formats_stored_option_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.option_store_mut().set_value(

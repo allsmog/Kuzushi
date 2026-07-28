@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use super::super::classification::stderr_has_sanitizer_crash;
+    use super::super::classification::{
+        sink_marker_path, stderr_has_sanitizer_crash, SINK_MARKER_CONTENT,
+    };
+    use super::super::unsupported::enforce_empirical_provenance;
     use super::super::*;
     use crate::findings::Severity;
     use kuzushi_sandbox::{ExitOutcome, SandboxExecResult};
@@ -45,127 +48,162 @@ mod tests {
     }
 
     #[test]
-    fn classify_promotes_to_4_on_sigsegv_under_isolating_backend() {
-        let opts = VerifyOptions::default();
-        let result = sandbox_result(ExitOutcome::Signaled, None, Some(11));
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Bwrap,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 4);
-        assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
-    }
+    fn classification_requires_matching_reached_sink_evidence() {
+        struct Case {
+            name: &'static str,
+            result: SandboxExecResult,
+            marker: Option<&'static str>,
+            expected_level: u8,
+            expected_verdict: ProofVerdict,
+        }
 
-    #[test]
-    fn classify_clamps_to_3_when_plain_backend_observes_crash() {
-        let opts = VerifyOptions::default();
-        let mut result = sandbox_result(ExitOutcome::Signaled, None, Some(11));
-        result.backend = SandboxBackend::Plain;
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Plain,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 3);
-        assert!(outcome.notes.iter().any(|n| n.contains("Plain backend")));
-    }
+        let mut sanitizer_without_marker = sandbox_result(ExitOutcome::Exited, Some(1), None);
+        sanitizer_without_marker.stderr =
+            "==99==ERROR: AddressSanitizer: stack-buffer-overflow".to_string();
+        let mut wrapped_crash = sandbox_result(ExitOutcome::Exited, Some(101), None);
+        wrapped_crash.stderr =
+            "test failed, process didn't exit successfully (signal: 11, SIGSEGV: invalid memory reference)"
+                .to_string();
+        let cases = [
+            Case {
+                name: "no-marker crash",
+                result: sandbox_result(ExitOutcome::Signaled, None, Some(11)),
+                marker: None,
+                expected_level: 1,
+                expected_verdict: ProofVerdict::InfrastructureError,
+            },
+            Case {
+                name: "marker clean",
+                result: sandbox_result(ExitOutcome::Exited, Some(0), None),
+                marker: Some(SINK_MARKER_CONTENT),
+                expected_level: 2,
+                expected_verdict: ProofVerdict::NotReproduced,
+            },
+            Case {
+                name: "marker matching crash",
+                result: sandbox_result(ExitOutcome::Signaled, None, Some(11)),
+                marker: Some(SINK_MARKER_CONTENT),
+                expected_level: 4,
+                expected_verdict: ProofVerdict::Exploited,
+            },
+            Case {
+                name: "timeout after marker",
+                result: sandbox_result(ExitOutcome::TimedOut, None, None),
+                marker: Some(SINK_MARKER_CONTENT),
+                expected_level: 1,
+                expected_verdict: ProofVerdict::InfrastructureError,
+            },
+            Case {
+                name: "unexplained nonzero after marker",
+                result: sandbox_result(ExitOutcome::Exited, Some(101), None),
+                marker: Some(SINK_MARKER_CONTENT),
+                expected_level: 1,
+                expected_verdict: ProofVerdict::InfrastructureError,
+            },
+            Case {
+                name: "sanitizer crash without marker",
+                result: sanitizer_without_marker,
+                marker: None,
+                expected_level: 1,
+                expected_verdict: ProofVerdict::InfrastructureError,
+            },
+            Case {
+                name: "marker matching wrapped crash",
+                result: wrapped_crash,
+                marker: Some(SINK_MARKER_CONTENT),
+                expected_level: 4,
+                expected_verdict: ProofVerdict::Exploited,
+            },
+        ];
 
-    #[test]
-    fn classify_trust_plain_opt_in_allows_promotion_to_4() {
-        let opts = VerifyOptions {
-            trust_plain_backend: true,
-            ..VerifyOptions::default()
-        };
-        let result = sandbox_result(ExitOutcome::Signaled, None, Some(6));
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Plain,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 4);
-    }
-
-    #[test]
-    fn classify_treats_panic_exit_101_as_level_3() {
-        let opts = VerifyOptions::default();
-        let result = sandbox_result(ExitOutcome::Exited, Some(101), None);
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Bwrap,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 3);
-    }
-
-    #[test]
-    fn classify_zero_exit_is_level_2() {
-        let opts = VerifyOptions::default();
-        let result = sandbox_result(ExitOutcome::Exited, Some(0), None);
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Bwrap,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 2);
-    }
-
-    #[test]
-    fn classify_timeout_is_level_2_not_promotable() {
-        let opts = VerifyOptions::default();
-        let result = sandbox_result(ExitOutcome::TimedOut, None, None);
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Bwrap,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 2);
-    }
-
-    #[test]
-    fn classify_non_crash_signal_is_level_2() {
-        // SIGTERM=15, SIGINT=2 — not crashes.
-        for sig in [2, 15] {
-            let result = sandbox_result(ExitOutcome::Signaled, None, Some(sig));
+        for case in cases {
+            let project = tempfile::tempdir().unwrap();
+            if let Some(marker) = case.marker {
+                std::fs::write(sink_marker_path(project.path()), marker).unwrap();
+            }
             let outcome = classify_run_result(
-                &result,
+                &case.result,
                 SandboxBackend::Bwrap,
-                std::path::Path::new("/p"),
-                &VerifyOptions::default(),
+                project.path(),
+                HarnessFidelity::Faithful,
             );
-            assert_eq!(outcome.proof_level, 2, "sig={sig} should not be a crash");
+            assert_eq!(outcome.proof_level, case.expected_level, "{}", case.name);
+            assert_eq!(
+                outcome.proof_verdict, case.expected_verdict,
+                "{}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_evidence_is_redacted_and_bounded() {
+        let redacted =
+            bounded_runtime_evidence("Authorization: Bearer secret-token-value-1234567890")
+                .unwrap();
+        let bounded = bounded_runtime_evidence(&"x".repeat(20 * 1024)).unwrap();
+
+        assert!(!redacted.contains("secret-token-value"));
+        assert!(redacted.contains("[REDACTED]"));
+        assert!(bounded.contains("evidence truncated"));
+        assert!(bounded.chars().count() < 17 * 1024);
+    }
+
+    #[tokio::test]
+    async fn placeholder_languages_are_not_executed() {
+        let (_workspace, finding) = finding_in_workspace("src/app.py", "# verify fixture\n");
+        let options = VerifyOptions::default();
+        let outcomes = [
+            (
+                "Python",
+                verify_python(&finding, SandboxBackend::Bwrap, &options)
+                    .await
+                    .unwrap(),
+            ),
+            (
+                "Node.js",
+                verify_node(&finding, SandboxBackend::Bwrap, &options, "js")
+                    .await
+                    .unwrap(),
+            ),
+            (
+                "TypeScript",
+                verify_node(&finding, SandboxBackend::Bwrap, &options, "ts")
+                    .await
+                    .unwrap(),
+            ),
+        ];
+        for (label, outcome) in outcomes {
+            assert_eq!(outcome.proof_verdict, ProofVerdict::NotAttempted, "{label}");
+            assert_eq!(outcome.duration_ms, 0, "{label}");
+            assert!(outcome.harness_path.is_none(), "{label}");
         }
     }
 
     #[tokio::test]
-    async fn verify_python_reaches_a_terminal_outcome() {
-        // Python is now wired; the harness writes a tiny script and runs
-        // it under whatever python interpreter is available. When no
-        // interpreter is present we expect InfrastructureError. When one
-        // is, we expect a real outcome.
-        let (workspace, finding) = finding_in_workspace("src/app.py", "# verify fixture\n");
-        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
-            .await
-            .unwrap();
-        assert_eq!(outcome.language.as_deref(), Some("python"));
-        if kuzushi_sandbox::which("python3").is_none() && kuzushi_sandbox::which("python").is_none()
-        {
-            assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
-        } else {
-            assert!(matches!(
-                outcome.proof_verdict,
-                ProofVerdict::Exploited
-                    | ProofVerdict::NotReproduced
-                    | ProofVerdict::HarnessFailedToBuild
-                    | ProofVerdict::InfrastructureError
-            ));
-        }
+    async fn plain_backend_is_refused_even_when_legacy_trust_flag_is_true() {
+        let workspace = tempfile::tempdir().unwrap();
+        let finding = finding_for("../outside.rs");
+        let outcome = verify_finding(
+            &finding,
+            VerifyOptions {
+                backend: Some(SandboxBackend::Plain),
+                trust_plain_backend: true,
+                ..VerifyOptions::default()
+            },
+            workspace.path(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.proof_verdict, ProofVerdict::NotAttempted);
+        assert_eq!(outcome.backend, SandboxBackend::Plain);
+        assert_eq!(outcome.duration_ms, 0);
+        assert!(outcome.harness_path.is_none());
+        assert!(outcome
+            .notes
+            .iter()
+            .any(|note| note.contains("not executed")));
     }
 
     #[tokio::test]
@@ -180,7 +218,8 @@ mod tests {
         assert_eq!(outcome.language.as_deref(), Some("rust"));
         assert!(matches!(
             outcome.proof_verdict,
-            ProofVerdict::Exploited
+            ProofVerdict::NotAttempted
+                | ProofVerdict::Exploited
                 | ProofVerdict::NotReproduced
                 | ProofVerdict::HarnessFailedToBuild
                 | ProofVerdict::InfrastructureError
@@ -199,7 +238,8 @@ mod tests {
         assert_eq!(outcome.language.as_deref(), Some("c"));
         assert!(matches!(
             outcome.proof_verdict,
-            ProofVerdict::Exploited
+            ProofVerdict::NotAttempted
+                | ProofVerdict::Exploited
                 | ProofVerdict::NotReproduced
                 | ProofVerdict::HarnessFailedToBuild
                 | ProofVerdict::InfrastructureError
@@ -207,32 +247,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn verify_node_reaches_a_terminal_outcome() {
+    async fn verify_node_returns_not_attempted() {
         let (workspace, finding) = finding_in_workspace("src/x.js", "// verify fixture\n");
         let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
         assert_eq!(outcome.language.as_deref(), Some("javascript"));
-        assert!(matches!(
-            outcome.proof_verdict,
-            ProofVerdict::Exploited
-                | ProofVerdict::NotReproduced
-                | ProofVerdict::HarnessFailedToBuild
-                | ProofVerdict::InfrastructureError
-        ));
-    }
-
-    #[tokio::test]
-    async fn verify_returns_unsupported_for_unknown_extension() {
-        let (workspace, finding) = finding_in_workspace("src/Makefile", "all:\n\t@true\n");
-        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
-            .await
-            .unwrap();
-        assert_eq!(outcome.proof_verdict, ProofVerdict::LanguageUnsupportedYet);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::NotAttempted);
     }
 
     #[test]
     fn proof_verdict_strings_are_stable() {
+        assert_eq!(ProofVerdict::NotAttempted.as_str(), "not_attempted");
         assert_eq!(ProofVerdict::Exploited.as_str(), "exploited");
         assert_eq!(ProofVerdict::NotReproduced.as_str(), "not_reproduced");
         assert_eq!(
@@ -242,13 +268,33 @@ mod tests {
     }
 
     #[test]
-    fn synth_payload_starts_with_marker_bytes_and_includes_message() {
+    fn synthesized_payload_is_fixed_and_does_not_embed_finding_prose() {
         let finding = finding_for("src/x.rs");
         let payload = synth_payload_from_finding(&finding);
-        assert!(payload.len() >= 8);
-        assert!(payload[..8].iter().all(|b| *b == 0xff));
-        let tail = String::from_utf8_lossy(&payload[8..]);
-        assert!(tail.contains("synthetic finding"));
+        assert_eq!(payload, vec![0xff; 72]);
+        assert!(!String::from_utf8_lossy(&payload).contains("synthetic finding"));
+    }
+
+    #[test]
+    fn rust_and_c_harnesses_accept_an_explicit_internal_payload() {
+        let (rust_workspace, rust_finding) = finding_in_workspace(
+            "src/x.rs",
+            "pub fn parse(input: &[u8]) { let _ = input; }\n",
+        );
+        let rust =
+            build_rust_trigger_with_payload(&rust_finding, rust_workspace.path(), &[1, 2, 3, 4])
+                .unwrap();
+        assert_eq!(rust.payload, vec![1, 2, 3, 4]);
+        assert!(rust.trigger_test.contains("vec![1, 2, 3, 4]"));
+
+        let (c_workspace, c_finding) = finding_in_workspace(
+            "src/x.c",
+            "#include <stdint.h>\nvoid parse(const uint8_t *p) { (void)p; }\n",
+        );
+        let c =
+            build_c_trigger_with_payload(&c_finding, c_workspace.path(), &[1, 2, 3, 4]).unwrap();
+        assert_eq!(c.payload, vec![1, 2, 3, 4]);
+        assert!(c.trigger_c.contains("0x01, 0x02, 0x03, 0x04"));
     }
 
     #[tokio::test]
@@ -280,6 +326,12 @@ mod tests {
         assert_eq!(command.workdir.as_deref(), Some(project.path.as_path()));
         assert_eq!(command.read_write_mounts.len(), 1);
         assert_eq!(command.read_write_mounts[0].host_path, project.path);
+
+        let run_command = rust_run_command(&project, &opts);
+        assert_eq!(
+            run_command.env.get("KUZUSHI_SINK_MARKER"),
+            Some(&sink_marker_path(&project.path).display().to_string())
+        );
     }
 
     #[tokio::test]
@@ -463,21 +515,240 @@ mod tests {
             duration_ms: 1500,
             cost_usd: 0.0,
             notes: vec!["one".to_string(), "two".to_string()],
+            provenance: None,
         };
         let p = outcome.to_persisted();
         assert_eq!(p.proof_level, 4);
         assert_eq!(p.proof_verdict, PersistedProofVerdict::Exploited);
         assert_eq!(p.backend, PersistedSandboxBackend::Bwrap);
         assert_eq!(p.language.as_deref(), Some("rust"));
-        assert_eq!(p.harness_path.as_deref(), Some("/tmp/harness"));
+        assert!(p.harness_path.is_none());
         assert_eq!(p.crash_evidence.as_deref(), Some("SIGSEGV"));
         assert_eq!(p.duration_ms, 1500);
         assert_eq!(p.notes, vec!["one".to_string(), "two".to_string()]);
     }
 
     #[test]
+    fn empirical_reproducer_is_durable_deterministic_and_source_bound() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        let invocation = ReproducerInvocation {
+            compile_argv: vec!["compiler".to_string(), "source.c".to_string()],
+            execute_argv: vec!["./proof".to_string()],
+        };
+        let first_ref = {
+            let project = tempfile::tempdir().unwrap();
+            std::fs::write(
+                project.path().join("source.c"),
+                "int main(void) { return 0; }\n",
+            )
+            .unwrap();
+            persist_empirical_reproducer(
+                workspace.root(),
+                project.path(),
+                "c",
+                invocation.clone(),
+                &["source.c"],
+                &[0xff; 72],
+            )
+            .unwrap()
+        };
+
+        let store = crate::content_store::ContentStore::open(workspace.objects_dir()).unwrap();
+        let bytes = store.get_object(&first_ref).unwrap();
+        let snapshot: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(snapshot["schemaVersion"], 2);
+        assert_eq!(snapshot["files"][0]["path"], "source.c");
+        assert_eq!(snapshot["cases"].as_array().unwrap().len(), 5);
+        assert_eq!(snapshot["cases"][0]["kind"], "original_attack");
+        assert_eq!(snapshot["cases"][1]["kind"], "benign_control");
+        assert!(!snapshot
+            .to_string()
+            .contains(workspace.root().to_string_lossy().as_ref()));
+
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("source.c"),
+            "int main(void) { return 0; }\n",
+        )
+        .unwrap();
+        let same_ref = persist_empirical_reproducer(
+            workspace.root(),
+            project.path(),
+            "c",
+            invocation.clone(),
+            &["source.c"],
+            &[0xff; 72],
+        )
+        .unwrap();
+        assert_eq!(first_ref.hash, same_ref.hash);
+
+        std::fs::write(
+            project.path().join("source.c"),
+            "int main(void) { return 1; }\n",
+        )
+        .unwrap();
+        let changed_ref = persist_empirical_reproducer(
+            workspace.root(),
+            project.path(),
+            "c",
+            invocation,
+            &["source.c"],
+            &[0xff; 72],
+        )
+        .unwrap();
+        assert_ne!(first_ref.hash, changed_ref.hash);
+    }
+
+    #[test]
+    fn empirical_reproducer_read_rejects_case_count_and_size_bounds() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        workspace.ensure_state_dir().unwrap();
+        let store = crate::content_store::ContentStore::open(workspace.objects_dir()).unwrap();
+        let base = serde_json::json!({
+            "schemaVersion": 2,
+            "language": "c",
+            "invocation": {
+                "compileArgv": ["cc", "source.c"],
+                "executeArgv": ["./proof"]
+            },
+            "files": [{"path": "source.c", "source": "int main(void) { return 0; }"}],
+            "cases": [
+                empirical_case_json("original", "original_attack", vec![0xff]),
+                empirical_case_json("control", "benign_control", vec![0]),
+                empirical_case_json("variant-1", "variant", vec![0xfe])
+            ]
+        });
+
+        let valid_ref = store
+            .put_json(crate::content_store::ObjectKind::ProofSnapshot, &base)
+            .unwrap();
+        assert!(load_empirical_reproducer(workspace.root(), &valid_ref).is_ok());
+
+        let mut too_many = base.clone();
+        let cases = too_many["cases"].as_array_mut().unwrap();
+        cases.push(empirical_case_json("variant-2", "variant", vec![0xfd]));
+        cases.push(empirical_case_json("variant-3", "variant", vec![0xfb]));
+        cases.push(empirical_case_json("variant-4", "variant", vec![0xf7]));
+        let too_many_ref = store
+            .put_json(crate::content_store::ObjectKind::ProofSnapshot, &too_many)
+            .unwrap();
+        assert!(load_empirical_reproducer(workspace.root(), &too_many_ref).is_err());
+
+        let mut oversized = base;
+        oversized["cases"][0]["payload"] =
+            serde_json::to_value(vec![0xff; MAX_EMPIRICAL_CASE_BYTES + 1]).unwrap();
+        let oversized_ref = store
+            .put_json(crate::content_store::ObjectKind::ProofSnapshot, &oversized)
+            .unwrap();
+        assert!(load_empirical_reproducer(workspace.root(), &oversized_ref).is_err());
+    }
+
+    fn empirical_case_json(id: &str, kind: &str, payload: Vec<u8>) -> Value {
+        let vulnerable = if kind == "benign_control" {
+            "clean_exit"
+        } else {
+            "exploited"
+        };
+        serde_json::json!({
+            "id": id,
+            "kind": kind,
+            "payload": payload,
+            "oracle": {"vulnerable": vulnerable, "patched": "clean_exit"}
+        })
+    }
+
+    #[test]
+    fn unavailable_source_identity_cannot_produce_runtime_proof() {
+        let mut outcome = VerificationOutcome {
+            proof_level: 4,
+            proof_verdict: ProofVerdict::Exploited,
+            backend: SandboxBackend::Bwrap,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 1,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            provenance: Some(crate::findings::VerificationProvenance {
+                source_identity: crate::workflow_attempts::TargetContentIdentity::Unavailable {
+                    reason: crate::run_lifecycle::SafeText::operator_visible("capture failed"),
+                },
+                reproducer: Some(crate::content_store::ObjectRef {
+                    kind: crate::content_store::ObjectKind::ProofSnapshot,
+                    hash: crate::identity::Blake3Hash::new("d".repeat(64)).unwrap(),
+                    size_bytes: 1,
+                }),
+            }),
+        };
+
+        enforce_empirical_provenance(&mut outcome);
+
+        assert_eq!(outcome.proof_level, 1);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
+    }
+
+    #[test]
+    fn podman_without_an_image_contract_cannot_produce_runtime_proof() {
+        let mut outcome = VerificationOutcome {
+            proof_level: 4,
+            proof_verdict: ProofVerdict::Exploited,
+            backend: SandboxBackend::Podman,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 1,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            provenance: Some(crate::findings::VerificationProvenance {
+                source_identity:
+                    crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                        snapshot_hash: crate::run_lifecycle::SafeText::operator_visible(
+                            "a".repeat(64),
+                        ),
+                        tree_hash: Some(crate::run_lifecycle::SafeText::operator_visible(
+                            "b".repeat(64),
+                        )),
+                    },
+                reproducer: Some(crate::content_store::ObjectRef {
+                    kind: crate::content_store::ObjectKind::ProofSnapshot,
+                    hash: crate::identity::Blake3Hash::new("c".repeat(64)).unwrap(),
+                    size_bytes: 1,
+                }),
+            }),
+        };
+
+        enforce_empirical_provenance(&mut outcome);
+
+        assert_eq!(outcome.proof_level, 1);
+        assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
+    }
+
+    #[test]
+    fn outcome_to_persisted_redacts_and_bounds_runtime_evidence() {
+        let mut outcome = VerificationOutcome::unsupported(SandboxBackend::Bwrap, "rust");
+        outcome.crash_evidence = Some(format!(
+            "api_key=secret-token-value-1234567890\n{}",
+            "x".repeat(20 * 1024)
+        ));
+
+        let evidence = outcome.to_persisted().crash_evidence.unwrap();
+
+        assert!(!evidence.contains("secret-token-value"));
+        assert!(evidence.contains("[REDACTED]"));
+        assert!(evidence.contains("evidence truncated"));
+        assert!(evidence.chars().count() < 17 * 1024);
+    }
+
+    #[test]
     fn outcome_to_persisted_maps_all_verdicts() {
         for (v, expected) in [
+            (
+                ProofVerdict::NotAttempted,
+                PersistedProofVerdict::NotAttempted,
+            ),
             (ProofVerdict::Exploited, PersistedProofVerdict::Exploited),
             (
                 ProofVerdict::NotReproduced,
@@ -509,6 +780,7 @@ mod tests {
     #[test]
     fn persisted_proof_verdict_string_round_trip() {
         for v in [
+            PersistedProofVerdict::NotAttempted,
             PersistedProofVerdict::Exploited,
             PersistedProofVerdict::NotReproduced,
             PersistedProofVerdict::HarnessFailedToBuild,
@@ -730,6 +1002,8 @@ mod tests {
         let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
         assert!(target.contains("#include \"suspect_source.c\""));
         assert!(target.contains("copy_attacker((const uint8_t *)data, len)"));
+        assert!(target.contains("kuzushi_verify_mark_sink_reached();"));
+        assert_eq!(project.fidelity, HarnessFidelity::Faithful);
         let suspect_path = project.path.join("suspect_source.c");
         assert!(
             suspect_path.exists(),
@@ -757,6 +1031,7 @@ mod tests {
         let target = std::fs::read_to_string(project.path.join("target.c")).unwrap();
         // Fallback stub keeps the no-op body.
         assert!(target.contains("(void)data;"));
+        assert_eq!(project.fidelity, HarnessFidelity::PayloadOnly);
         assert!(!project.path.join("suspect_source.c").exists());
     }
 
@@ -803,43 +1078,47 @@ mod tests {
     }
 
     #[test]
-    fn classify_promotes_to_4_on_asan_stderr_signature_even_without_signal() {
-        let opts = VerifyOptions {
-            trust_plain_backend: true,
-            ..VerifyOptions::default()
-        };
+    fn classify_promotes_to_4_on_marker_backed_asan_output() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(sink_marker_path(project.path()), SINK_MARKER_CONTENT).unwrap();
         let mut result = sandbox_result(ExitOutcome::Exited, Some(1), None);
         result.stderr =
             "==99==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x...".to_string();
         let outcome = classify_run_result(
             &result,
-            SandboxBackend::Plain,
-            std::path::Path::new("/p"),
-            &opts,
+            SandboxBackend::Bwrap,
+            project.path(),
+            HarnessFidelity::Faithful,
         );
         assert_eq!(outcome.proof_level, 4);
         assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
     }
 
     #[test]
-    fn classify_keeps_observed_crash_verdict_when_clamped_for_plain_backend() {
-        // Default opts (trust_plain_backend=false) + Plain backend + observed
-        // SIGSEGV: level clamped to 3, but verdict stays Exploited because
-        // we DID observe a crash.
-        let opts = VerifyOptions::default();
-        let result = sandbox_result(ExitOutcome::Signaled, None, Some(11));
-        let outcome = classify_run_result(
-            &result,
-            SandboxBackend::Plain,
-            std::path::Path::new("/p"),
-            &opts,
-        );
-        assert_eq!(outcome.proof_level, 3);
-        assert_eq!(outcome.proof_verdict, ProofVerdict::Exploited);
-        assert!(outcome
-            .notes
-            .iter()
-            .any(|n| n.contains("rerun under Bwrap/Podman to promote")));
+    fn sink_marker_preparation_deletes_only_stale_regular_marker() {
+        let project = tempfile::tempdir().unwrap();
+        let marker = sink_marker_path(project.path());
+        std::fs::write(&marker, "stale").unwrap();
+
+        prepare_sink_marker(project.path()).unwrap();
+
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sink_marker_preparation_rejects_stale_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::NamedTempFile::new().unwrap();
+        let marker = sink_marker_path(project.path());
+        symlink(outside.path(), &marker).unwrap();
+
+        let error = prepare_sink_marker(project.path()).unwrap_err().to_string();
+
+        assert!(error.contains("non-regular stale sink marker"));
+        assert!(marker.symlink_metadata().is_ok());
     }
 
     #[tokio::test]
@@ -913,10 +1192,7 @@ mod tests {
     // ----- new language paths return BackendUnavailable when no toolchain
 
     #[tokio::test]
-    async fn verify_node_reports_infrastructure_error_when_node_missing() {
-        if kuzushi_sandbox::which("node").is_some() {
-            return;
-        }
+    async fn verify_node_placeholder_ignores_runner_availability() {
         let (workspace, finding) = finding_in_workspace(
             "src/x.js",
             "export function parse(value) { return value; }\n",
@@ -924,12 +1200,8 @@ mod tests {
         let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
             .await
             .unwrap();
-        assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
-        assert!(outcome
-            .crash_evidence
-            .as_deref()
-            .unwrap_or_default()
-            .contains("node"));
+        assert_eq!(outcome.proof_verdict, ProofVerdict::NotAttempted);
+        assert!(outcome.crash_evidence.is_none());
     }
 
     #[tokio::test]
@@ -937,10 +1209,20 @@ mod tests {
         if kuzushi_sandbox::which("clang").is_some() || kuzushi_sandbox::which("gcc").is_some() {
             return;
         }
-        let (workspace, finding) = finding_in_workspace("src/x.c", "void parse(void) {}\n");
-        let outcome = verify_finding(&finding, VerifyOptions::default(), workspace.path())
-            .await
-            .unwrap();
+        let (workspace, mut finding) = finding_in_workspace("src/x.c", "void parse(void) {}\n");
+        finding.start_line = 1;
+        let source_identity = capture_verification_source_identity(workspace.path()).unwrap();
+        let outcome = verify_c_like(
+            &finding,
+            SandboxBackend::Bwrap,
+            &VerifyOptions::default(),
+            CCompiler::Gcc,
+            workspace.path(),
+            &source_identity,
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(outcome.proof_verdict, ProofVerdict::InfrastructureError);
     }
 
@@ -1188,6 +1470,8 @@ mod tests {
         assert!(lib.contains("pub mod suspect"));
         let test = std::fs::read_to_string(project.path.join("tests").join("trigger.rs")).unwrap();
         assert!(test.contains("suspect::parse(&payload)"));
+        assert!(test.contains("kuzushi_verify_mark_sink_reached();"));
+        assert_eq!(project.fidelity, HarnessFidelity::Faithful);
     }
 
     #[test]
@@ -1205,5 +1489,61 @@ mod tests {
         // No sink call — payload-only fallback because the file uses
         // `crate::` paths.
         assert!(trigger.trigger_test.contains("Payload-only harness"));
+        assert_eq!(trigger.fidelity, HarnessFidelity::PayloadOnly);
+    }
+
+    #[tokio::test]
+    async fn payload_only_rust_and_c_harnesses_stop_before_compile_or_run() {
+        let (rust_workspace, mut rust_finding) = finding_in_workspace(
+            "src/lib.rs",
+            "use crate::other::Helper;\npub fn parse(input: &[u8]) { let _ = input; }\n",
+        );
+        rust_finding.start_line = 2;
+        let rust_source_identity =
+            capture_verification_source_identity(rust_workspace.path()).unwrap();
+        let rust = verify_rust(
+            &rust_finding,
+            SandboxBackend::Bwrap,
+            &VerifyOptions::default(),
+            rust_workspace.path(),
+            &rust_source_identity,
+            None,
+        )
+        .await
+        .unwrap();
+
+        let (c_workspace, mut c_finding) = finding_in_workspace(
+            "src/x.c",
+            "#include \"private.h\"\nvoid parse(const uint8_t *p, size_t n) { (void)p; (void)n; }\n",
+        );
+        c_finding.start_line = 2;
+        let c_source_identity = capture_verification_source_identity(c_workspace.path()).unwrap();
+        let c = verify_c_like(
+            &c_finding,
+            SandboxBackend::Bwrap,
+            &VerifyOptions::default(),
+            CCompiler::Gcc,
+            c_workspace.path(),
+            &c_source_identity,
+            None,
+        )
+        .await
+        .unwrap();
+
+        for (language, outcome) in [("rust", rust), ("c", c)] {
+            assert_eq!(
+                outcome.proof_verdict,
+                ProofVerdict::NotAttempted,
+                "{language}"
+            );
+            assert_eq!(outcome.duration_ms, 0, "{language}");
+            assert!(
+                outcome
+                    .notes
+                    .iter()
+                    .any(|note| note.contains("payload-only")),
+                "{language}"
+            );
+        }
     }
 }

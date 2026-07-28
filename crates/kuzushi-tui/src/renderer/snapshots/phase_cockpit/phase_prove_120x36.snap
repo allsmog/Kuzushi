@@ -22,7 +22,7 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 │request_input -> database_query                                      │● 3 exploited
 │attacker-controlled input reaches a security boundary                │current [●●●] verified L4 · 1 source(s)
 │                                                                     │PROOF · REPLAY
-│                                                                     │exploited  L4 · podman
+│                                                                     │exploited  L4 · bwrap
 │                                                                     │842ms · $0.0400
 │                                                                     │▸ replay verify-phase-run  open trace
 │                                                                     │▸ verify F-0001  recheck

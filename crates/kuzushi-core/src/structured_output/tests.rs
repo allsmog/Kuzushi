@@ -37,6 +37,27 @@ mod tests {
     }
 
     #[test]
+    fn valid_structured_json_is_refused_when_completion_was_forced() {
+        let response = AgentQueryResponse {
+            text: "{\"verdict\":\"confirmed\"}".to_string(),
+            structured: Some(serde_json::json!({"verdict": "confirmed"})),
+            truncated: true,
+            stop_reason: Some("forced_conclusion".to_string()),
+            ..Default::default()
+        };
+        let contract = StructuredJsonContract::new("verify:finding", "Verdict", Value::Null);
+
+        let result: Result<Value> =
+            parse_or_repair_required_structured_json(response, contract, Ok, |_, _| {
+                panic!("forced conclusions must not reach repair")
+            });
+
+        let message = format!("{:#}", result.expect_err("forced conclusion must error"));
+        assert!(message.contains("forced_conclusion"), "{message}");
+        assert!(message.contains("truncated"), "{message}");
+    }
+
+    #[test]
     fn query_required_structured_json_does_not_retry_full_prompt_on_truncation() {
         use crate::findings::TriageOutcome;
         use crate::runtime::TriageRequest;
@@ -80,6 +101,7 @@ mod tests {
         let response = AgentQueryResponse {
             text: "not json".to_string(),
             cost_usd: 0.11,
+            cost_usd_reported: true,
             ..Default::default()
         };
         let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
@@ -92,6 +114,7 @@ mod tests {
                 Ok(AgentQueryResponse {
                     structured: Some(serde_json::json!({"ok": true})),
                     cost_usd: 0.22,
+                    cost_usd_reported: true,
                     ..Default::default()
                 })
             },
@@ -138,6 +161,7 @@ mod tests {
         let response = AgentQueryResponse {
             text: "not json".to_string(),
             cost_usd: 0.11,
+            cost_usd_reported: true,
             ..Default::default()
         };
         let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
@@ -150,6 +174,7 @@ mod tests {
                 Ok(AgentQueryResponse {
                     text: "still not json".to_string(),
                     cost_usd: 0.22,
+                    cost_usd_reported: true,
                     ..Default::default()
                 })
             },
@@ -163,10 +188,9 @@ mod tests {
 
     #[test]
     fn structured_output_error_renders_its_message_exactly_once() {
-        // Display prints the wrapped `{:#}` chain; exposing the same chain
-        // through `source()` again made anyhow's alternate formatting print
-        // the whole message twice, concatenated — the result-card "429 error
-        // shown twice" bug.
+        // The wrapper contributes one stable context while source() retains
+        // the real typed error chain. Rendering the source in both places made
+        // anyhow concatenate the provider-safe message with itself.
         let source = anyhow::anyhow!(
             "LangGraph bridge failed: Provider rate limited the request (HTTP 429)."
         );
@@ -185,6 +209,7 @@ mod tests {
         let response = AgentQueryResponse {
             text: "not json".to_string(),
             cost_usd: 0.11,
+            cost_usd_reported: true,
             ..Default::default()
         };
         let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);

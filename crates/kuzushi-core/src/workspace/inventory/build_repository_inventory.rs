@@ -66,7 +66,7 @@ pub(crate) fn build_repository_inventory_with_limits(
     let mut builder = InventoryBuilder::default();
     let mut budget = InventoryBudget::new(max_entries, max_inspected_bytes, on_entries);
     budget.cancel = Some(should_cancel);
-    if let Some(tracked) = git_tracked_relative_paths(&root) {
+    if let Some(tracked) = crate::workspace::git_tracked_relative_paths(&root) {
         walk_git_index(&root, &tracked, &mut builder, &mut budget)?;
     } else {
         walk_repository(&root, &root, &mut builder, &mut budget)?;
@@ -172,30 +172,6 @@ impl<'p> InventoryBudget<'p> {
             self.truncation = Some(reason);
         }
     }
-}
-
-/// Enumerates the tracked tree straight from the git index (one `git
-/// ls-files` subprocess, already sorted) instead of a recursive directory
-/// walk: no untracked churn, no read_dir syscalls, and the entry list is
-/// exactly the revision the inventory claims to describe. Returns `None`
-/// when the root is not a git worktree (callers fall back to the fs walk).
-fn git_tracked_relative_paths(root: &Path) -> Option<Vec<String>> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(["ls-files", "-z", "--cached"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let paths = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|segment| !segment.is_empty())
-        .map(|segment| String::from_utf8_lossy(segment).into_owned())
-        .collect::<Vec<_>>();
-    (!paths.is_empty()).then_some(paths)
 }
 
 /// Directory dispositions mirrored from the fs walk so both enumerations

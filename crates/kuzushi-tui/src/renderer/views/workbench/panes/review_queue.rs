@@ -12,27 +12,29 @@ pub(in crate::renderer::views::workbench) fn review_queue_pane_lines(
     inner: Rect,
 ) -> Vec<Line<'static>> {
     if model.rows.is_empty() {
-        return review_queue_empty_lines(model, inner.width as usize);
+        return review_queue_empty_lines(model, inner);
     }
     populated_review_queue_pane_lines(model, inner)
 }
 
-fn review_queue_empty_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<'static>> {
+fn review_queue_empty_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
+    let width = inner.width as usize;
     let reason = model
         .empty_reason
         .as_deref()
         .unwrap_or("no review rows match this mode");
-    vec![
-        Line::styled("∅ review queue empty", theme::muted()),
+    let mut lines = review_queue_chrome_lines(model, inner);
+    lines.extend([
+        Line::styled("∅ 0 matches", theme::muted()),
         Line::raw(fit(reason, width)),
-        Line::styled("▸ findings", theme::accent()),
-        Line::styled("▸ findings filter completeness:open", theme::accent()),
-    ]
+        Line::styled(fit(&review_reset_hint(model), width), theme::accent()),
+    ]);
+    lines
 }
 
 fn populated_review_queue_pane_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
     let width = inner.width as usize;
-    let mut lines = review_queue_chrome_lines(model, width);
+    let mut lines = review_queue_chrome_lines(model, inner);
     let viewport = review_queue_viewport(model, inner, lines.len());
     for (index, row) in model
         .rows
@@ -66,32 +68,111 @@ struct ReviewQueueViewport {
     start: usize,
 }
 
-fn review_queue_chrome_lines(model: &ReviewQueueModel, width: usize) -> Vec<Line<'static>> {
+fn review_queue_chrome_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
+    let width = inner.width as usize;
     let legend = "● proof · s sources · @ author";
-    let mut lines = if width >= 72 {
-        vec![Line::styled(
-            fit(
-                &format!(
-                    "{}/{} shown · filter:{} · {legend}",
-                    model.visible_count, model.total_count, model.filter_label
-                ),
-                width,
-            ),
-            theme::muted(),
-        )]
-    } else {
-        Vec::new()
-    };
-    if width < 72 && should_show_reconciliation(model, width) {
-        lines.push(Line::styled(
-            fit(&responsive_reconciliation_line(model, width), width),
-            theme::muted(),
-        ));
+    let mut summaries = active_filter_lines(model, width);
+    if width >= 72 {
+        append_or_wrap(&mut summaries, legend, width);
     }
-    if width < 72 {
+    let mut lines = summaries
+        .into_iter()
+        .map(|summary| Line::styled(fit(&summary, width), theme::muted()))
+        .collect::<Vec<_>>();
+    lines.extend(review_facet_lines(model, inner));
+    if width < 72 && inner.height >= 5 {
         lines.push(Line::styled(fit(legend, width), theme::muted()));
     }
     lines
+}
+
+fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
+    let mut lines = vec![format!("{} of {}", model.visible_count, model.total_count)];
+    for chip in &model.active_filter_chips {
+        append_or_wrap(&mut lines, &format!("[{chip}]"), width);
+    }
+    lines
+}
+
+fn append_or_wrap(lines: &mut Vec<String>, value: &str, width: usize) {
+    let separator = if lines.len() == 1 { " · " } else { " " };
+    let Some(current) = lines.last_mut() else {
+        lines.push(value.to_string());
+        return;
+    };
+    if current.chars().count() + separator.chars().count() + value.chars().count() <= width {
+        current.push_str(separator);
+        current.push_str(value);
+    } else {
+        lines.push(value.to_string());
+    }
+}
+
+fn review_facet_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
+    let height = inner.height as usize;
+    if height < 9 {
+        return Vec::new();
+    }
+    let width = inner.width as usize;
+    let groups = model
+        .facet_groups
+        .iter()
+        .map(format_facet_group)
+        .collect::<Vec<_>>();
+    if height >= 12 {
+        return groups
+            .into_iter()
+            .enumerate()
+            .map(|(index, group)| {
+                let prefix = if index == 0 {
+                    "facets before search · "
+                } else {
+                    "  "
+                };
+                Line::styled(fit(&format!("{prefix}{group}"), width), theme::subtle())
+            })
+            .collect();
+    }
+    groups
+        .chunks(2)
+        .enumerate()
+        .map(|(index, pair)| {
+            let prefix = if index == 0 { "facets pre · " } else { "" };
+            Line::styled(
+                fit(&format!("{prefix}{}", pair.join(" · ")), width),
+                theme::subtle(),
+            )
+        })
+        .collect()
+}
+
+fn format_facet_group(group: &crate::ui_view_models::ReviewFacetGroup) -> String {
+    if group.values.is_empty() {
+        return format!("{}:0", group.label);
+    }
+    let visible = group
+        .values
+        .iter()
+        .take(3)
+        .map(|value| format!("{}:{}", value.value, value.count))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let overflow = group.values.len().saturating_sub(3);
+    if overflow == 0 {
+        format!("{} {visible}", group.label)
+    } else {
+        format!("{} {visible} +{overflow}", group.label)
+    }
+}
+
+fn review_reset_hint(model: &ReviewQueueModel) -> String {
+    if model.search_capture {
+        return "Reset: Esc clears search · `findings` clears loaded filters".to_string();
+    }
+    if model.search_active {
+        return "Reset: / then Esc clears search · `findings` clears loaded filters".to_string();
+    }
+    "Reset: `findings` clears loaded filters".to_string()
 }
 
 fn review_queue_viewport(
@@ -113,20 +194,6 @@ fn review_queue_viewport(
         visible_findings,
         start: viewport_start_for_cursor(model.rows.len(), visible_findings, cursor),
     }
-}
-
-fn should_show_reconciliation(model: &ReviewQueueModel, width: usize) -> bool {
-    width >= 72 || model.filter_label != format!("completeness:{}", model.completeness_mode)
-}
-
-fn responsive_reconciliation_line(model: &ReviewQueueModel, width: usize) -> String {
-    if width >= 72 {
-        return review_queue_reconciliation_line(model);
-    }
-    format!(
-        "filter:{} · {}/{} shown",
-        model.filter_label, model.visible_count, model.total_count
-    )
 }
 
 fn compact_selected_detail_budget(width: usize, visible: usize, has_selection: bool) -> usize {
@@ -172,13 +239,6 @@ fn compact_selected_detail_lines(
         location,
         action,
     ]
-}
-
-fn review_queue_reconciliation_line(model: &ReviewQueueModel) -> String {
-    format!(
-        "{} · mode:{} · filter:{}",
-        model.header, model.completeness_mode, model.filter_label
-    )
 }
 
 #[cfg(test)]
@@ -445,6 +505,10 @@ mod tests {
             visible_count: rows.len(),
             open_count: rows.len(),
             complete_count: 0,
+            search_active: false,
+            search_capture: false,
+            active_filter_chips: vec!["completeness:all".to_string()],
+            facet_groups: Vec::new().into(),
             filter_label: "completeness:all".to_string(),
             completeness_mode: "all",
             header: format!("REVIEW QUEUE - showing {} of {}", rows.len(), rows.len()),
@@ -623,13 +687,14 @@ mod tests {
     fn compact_viewport_keeps_active_filter_visible() {
         let mut model = review_model(vec![review_row()]);
         model.filter_label = "severity:high".to_string();
+        model.active_filter_chips = vec!["severity:high".to_string()];
 
         let text = lines_text(populated_review_queue_pane_lines(
             &model,
             Rect::new(0, 0, 33, 6),
         ));
 
-        assert!(text.contains("filter:severity:high"), "{text}");
+        assert!(text.contains("[severity:high]"), "{text}");
     }
 
     #[test]
@@ -653,6 +718,10 @@ mod tests {
             visible_count: 0,
             open_count: 0,
             complete_count: 2,
+            search_active: false,
+            search_capture: false,
+            active_filter_chips: vec!["completeness:open".to_string()],
+            facet_groups: Vec::new().into(),
             filter_label: "completeness:open".to_string(),
             completeness_mode: "open",
             header: "REVIEW QUEUE - showing 0 of 2 - 0 open - 2 complete".to_string(),
@@ -661,13 +730,30 @@ mod tests {
             selected_row: None,
         };
 
-        let text = lines_text(review_queue_empty_lines(&model, 80));
+        let text = lines_text(review_queue_empty_lines(&model, Rect::new(0, 0, 80, 8)));
 
-        assert!(text.contains("review queue empty"), "{text}");
+        assert!(text.contains("0 matches"), "{text}");
         assert!(
             text.contains("all visible findings have terminal decisions"),
             "{text}"
         );
-        assert!(text.contains("filter completeness:open"), "{text}");
+        assert!(text.contains("[completeness:open]"), "{text}");
+    }
+
+    #[test]
+    fn zero_search_result_names_filters_and_exact_reset_path() {
+        let mut model = review_model(Vec::new());
+        model.total_count = 7;
+        model.search_active = true;
+        model.active_filter_chips = vec!["text:\"nope\"".to_string(), "status:open".to_string()];
+        model.empty_reason = Some("no findings match the active search and filters".to_string());
+
+        let text = lines_text(review_queue_empty_lines(&model, Rect::new(0, 0, 60, 8)));
+
+        assert!(text.contains("0 of 7"), "{text}");
+        assert!(text.contains("[text:\"nope\"]"), "{text}");
+        assert!(text.contains("[status:open]"), "{text}");
+        assert!(text.contains("no findings match"), "{text}");
+        assert!(text.contains("/ then Esc clears search"), "{text}");
     }
 }

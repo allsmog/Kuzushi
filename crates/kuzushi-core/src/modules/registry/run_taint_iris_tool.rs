@@ -152,6 +152,9 @@ impl ModuleRegistry {
         if name == "threat-intel:discover" {
             return Some(run_threat_intel_discover(input, ctx));
         }
+        if name == "threat-intel:research" {
+            return Some(self.run_threat_intel_research_tool(input, ctx, runtime));
+        }
         if !matches!(
             name,
             "threat-intel:list" | "threat-intel:apply" | "threat-intel:harvest"
@@ -164,10 +167,36 @@ impl ModuleRegistry {
             ctx,
             runtime,
             |inner_name, inner_input, inner_ctx, inner_runtime| {
-                self.execute_tool_with_runtime(inner_name, inner_input, inner_ctx, inner_runtime)
+                self.dispatch_delegated_tool_with_runtime(
+                    inner_name,
+                    inner_input,
+                    inner_ctx,
+                    inner_runtime,
+                )
             },
         );
         Some(result)
+    }
+
+    fn run_threat_intel_research_tool(
+        &self,
+        input: &Value,
+        ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
+        run_threat_intel_research(
+            input,
+            ctx,
+            runtime,
+            |inner_name, inner_input, inner_ctx, inner_runtime| {
+                self.dispatch_delegated_tool_with_runtime(
+                    inner_name,
+                    inner_input,
+                    inner_ctx,
+                    inner_runtime,
+                )
+            },
+        )
     }
 }
 
@@ -308,9 +337,12 @@ fn envelope_cost_report(value: &Value) -> Result<crate::runtime::RuntimeCostRepo
 /// `strategy=deep` run without one falls through to `run_triage`, which
 /// classifies every selected finding through the deep auditor.
 fn deep_triage_target(input: &Value) -> bool {
-    ["findingFingerprint", "fingerprint"]
-        .iter()
-        .any(|key| input.get(*key).and_then(Value::as_str).is_some_and(|v| !v.trim().is_empty()))
+    ["findingFingerprint", "fingerprint"].iter().any(|key| {
+        input
+            .get(*key)
+            .and_then(Value::as_str)
+            .is_some_and(|v| !v.trim().is_empty())
+    })
 }
 
 fn triage_strategy(input: &Value, expected: &str) -> bool {

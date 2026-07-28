@@ -94,7 +94,7 @@ impl ShellApp {
         };
         let (profile, pending) = self.phase_picker_target_profile(&target_root);
         let (rows, selected) =
-            self.phase_picker_input(crate::app::WorkflowPhase::Map, profile, &target_root);
+            self.phase_picker_input(crate::app::WorkflowPhase::Map, profile, &target_root, false);
         self.engagement.planning_picker_mut().open_phase_profiled(
             crate::app::WorkflowPhase::Map,
             rows,
@@ -162,20 +162,47 @@ impl ShellApp {
 
     pub(crate) fn apply_target_candidate_discovery_results(&mut self) -> bool {
         let results = self.runtime_state.drain_target_candidate_discovery();
-        if !matches!(self.shell_view(), ShellView::TargetPicker) {
-            return false;
+        let mut changed = self.apply_pending_active_target_facts();
+        let picker_facts = self.runtime_state.drain_target_candidate_facts();
+        if self.shell_view() != ShellView::TargetPicker {
+            return changed;
         }
-        let mut changed = false;
         for result in results {
             self.apply_discovered_target_candidates(result.candidates);
             changed = true;
         }
-        let facts = self.runtime_state.drain_target_candidate_facts();
-        for facts in facts {
-            self.router.target_picker_mut().apply_facts(facts);
+        for stamped in picker_facts {
+            self.router.target_picker_mut().apply_facts(stamped.facts);
             changed = true;
         }
         changed
+    }
+
+    fn apply_pending_active_target_facts(&mut self) -> bool {
+        let mut changed = false;
+        for facts in self.runtime_state.drain_active_target_facts() {
+            changed |= self.session_mut().apply_active_target_facts(facts);
+        }
+        changed
+    }
+
+    pub(crate) fn start_active_target_facts(&mut self, path: std::path::PathBuf) {
+        let generation = self.runtime_state.start_active_target_facts(path.clone());
+        self.session_mut()
+            .begin_active_target_facts(path, generation);
+    }
+
+    pub(crate) fn active_target_facts(&self) -> Option<&crate::app::TargetCandidateFacts> {
+        self.session().active_target_facts()
+    }
+
+    pub(crate) fn active_target_facts_loading(&self) -> bool {
+        self.session().active_target_facts_loading()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_target_facts_path(&self) -> Option<&std::path::Path> {
+        self.session().active_target_facts_path()
     }
 
     fn apply_discovered_target_candidates(&mut self, candidates: Vec<crate::app::TargetCandidate>) {
@@ -197,7 +224,15 @@ impl ShellApp {
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
     /// presses `g` to regenerate.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
-        if !self.prepare_phase_picker_state(phase) {
+        self.open_phase_picker_with_freshness(phase, false);
+    }
+
+    pub(crate) fn open_fresh_map_picker(&mut self) {
+        self.open_phase_picker_with_freshness(crate::app::WorkflowPhase::Map, true);
+    }
+
+    fn open_phase_picker_with_freshness(&mut self, phase: crate::app::WorkflowPhase, fresh: bool) {
+        if !self.prepare_phase_picker_state(phase, fresh) {
             return;
         }
         self.set_shell_view(ShellView::PlanningPicker);
@@ -213,7 +248,11 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn prepare_phase_picker_state(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+    pub(crate) fn prepare_phase_picker_state(
+        &mut self,
+        phase: crate::app::WorkflowPhase,
+        fresh: bool,
+    ) -> bool {
         if self.phase_blocked_by_config(phase) {
             return false;
         }
@@ -224,21 +263,39 @@ impl ShellApp {
             );
             return false;
         };
-        // Capture where the operator actually was before the picker takes
-        // over, so Esc can restore that exact view instead of a re-derived
-        // one. Phase navigation from inside the picker keeps the original.
-        let origin_page = (self.shell_view() == ShellView::Workbench)
-            .then(|| crate::ui_view_models::active_workbench_page(self));
-        let origin_view =
-            (self.shell_view() != ShellView::PlanningPicker).then(|| self.shell_view());
+        let (origin_page, origin_view) = self.phase_picker_origin();
         let (profile, pending) = self.phase_picker_target_profile(&target_root);
-        let (rows, selected) = self.phase_picker_input(phase, profile, &target_root);
+        let (rows, selected) = self.phase_picker_input(phase, profile, &target_root, fresh);
         self.engagement
             .planning_picker_mut()
             .open_phase_profiled(phase, rows, selected, pending);
+        if fresh {
+            self.engagement
+                .planning_picker_mut()
+                .mark_default_cached_for_rebuild();
+        }
         self.engagement
             .planning_picker_mut()
             .set_return_to_setup(false);
+        self.restore_phase_picker_origin(origin_page, origin_view);
+        self.engagement.set_phase(phase);
+        true
+    }
+
+    /// Capture where the operator actually was before the picker takes over.
+    /// Phase navigation from inside the picker keeps the original origin.
+    fn phase_picker_origin(&self) -> (Option<WorkbenchPage>, Option<ShellView>) {
+        let page = (self.shell_view() == ShellView::Workbench)
+            .then(|| crate::ui_view_models::active_workbench_page(self));
+        let view = (self.shell_view() != ShellView::PlanningPicker).then(|| self.shell_view());
+        (page, view)
+    }
+
+    fn restore_phase_picker_origin(
+        &mut self,
+        origin_page: Option<WorkbenchPage>,
+        origin_view: Option<ShellView>,
+    ) {
         self.engagement
             .planning_picker_mut()
             .set_origin_workbench_page(origin_page);
@@ -247,8 +304,6 @@ impl ShellApp {
                 .planning_picker_mut()
                 .set_origin_shell_view(Some(view));
         }
-        self.engagement.set_phase(phase);
-        true
     }
 
     fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
@@ -354,17 +409,71 @@ impl ShellApp {
         phase: crate::app::WorkflowPhase,
         profile: crate::app::TargetProfile,
         target_root: &std::path::Path,
+        fresh: bool,
     ) -> (Vec<PlanningTaskRow>, BTreeSet<PlanningTaskId>) {
         let mut rows = crate::app::applicable_tasks_for_phase(phase, profile)
             .into_iter()
             .map(|task| PlanningTaskRow::for_task(task, target_root))
             .collect::<Vec<_>>();
-        crate::app::onboarding::overlay_last_attempts(&mut rows, target_root);
-        let mut selected = phase_preselection(phase, profile, &rows);
+        let operations = self.planning_operations(&rows, target_root);
+        crate::app::onboarding::overlay_last_attempts(&mut rows, target_root, &operations);
+        let mut selected = if fresh {
+            fresh_phase_preselection(phase, profile, &rows)
+        } else {
+            phase_preselection(phase, profile, &rows)
+        };
+        if phase == crate::app::WorkflowPhase::Map && self.large_repository_needs_decomposition() {
+            selected.insert(PlanningTaskId::DecomposeModules);
+            selected.insert(PlanningTaskId::GatherRepoContext);
+        }
         self.merge_model_recommendations(phase, &rows, &mut selected);
-        self.drop_failed_dependents(&mut selected);
+        if !fresh {
+            self.drop_failed_dependents(&mut selected);
+        }
         self.drop_model_backed_without_ready_auth(&rows, &mut selected);
         (rows, selected)
+    }
+
+    fn planning_operations(
+        &self,
+        rows: &[PlanningTaskRow],
+        target_root: &std::path::Path,
+    ) -> BTreeMap<PlanningTaskId, crate::app::PlanningOperation> {
+        let attempted = crate::app::onboarding::tasks_with_recent_attempts(rows, target_root);
+        let Ok(workspace) = kuzushi_core::WorkspaceTarget::new(target_root) else {
+            return BTreeMap::new();
+        };
+        rows.iter()
+            .filter(|row| !row.id.is_inline_action())
+            .filter(|row| attempted.contains(&row.id))
+            .filter_map(|row| {
+                self.planning_operation(row.id, &workspace)
+                    .map(|op| (row.id, op))
+            })
+            .collect()
+    }
+
+    fn planning_operation(
+        &self,
+        task: PlanningTaskId,
+        workspace: &kuzushi_core::WorkspaceTarget,
+    ) -> Option<crate::app::PlanningOperation> {
+        let input =
+            crate::app::planning_task_explicit_input(task, self.engagement.option_overrides());
+        let prepared = self
+            .prepare_background_tool_input(task.tool_name(), input, workspace)
+            .ok()?;
+        Some(crate::app::PlanningOperation {
+            prepared_input: prepared.value().clone(),
+            operation_fingerprint: prepared.operation_fingerprint().as_str().to_string(),
+        })
+    }
+
+    fn large_repository_needs_decomposition(&self) -> bool {
+        crate::app::large_repository_needs_decomposition(
+            self.domain().context_view().files_indexed,
+            self.target(),
+        )
     }
 
     pub(crate) fn apply_ready_target_profile(&mut self) {
@@ -399,7 +508,7 @@ impl ShellApp {
         }) else {
             return;
         };
-        let (rows, selected) = self.phase_picker_input(phase, profile, target_root);
+        let (rows, selected) = self.phase_picker_input(phase, profile, target_root, false);
         self.engagement
             .planning_picker_mut()
             .refresh_profiled(rows, selected);
@@ -497,8 +606,23 @@ fn workspace_has_persisted_findings_for_startup(target: &std::path::Path) -> boo
 fn map_artifact_exists_for_startup(target: &std::path::Path) -> bool {
     crate::app::PlanningTaskId::in_phase(crate::app::WorkflowPhase::Map)
         .into_iter()
-        .filter_map(crate::app::PlanningTaskId::artifact_relative_path)
-        .any(|relative| target.join(relative).exists())
+        .filter_map(|task| task.artifact_path(target))
+        .any(|path| path.exists())
+}
+
+fn fresh_phase_preselection(
+    phase: crate::app::WorkflowPhase,
+    profile: crate::app::TargetProfile,
+    rows: &[PlanningTaskRow],
+) -> BTreeSet<PlanningTaskId> {
+    let mut fresh_rows = rows.to_vec();
+    for row in &mut fresh_rows {
+        row.last_attempt = None;
+        if row.artifact_state == crate::app::PlanningArtifactState::Cached {
+            row.artifact_state = crate::app::PlanningArtifactState::Missing;
+        }
+    }
+    phase_preselection(phase, profile, &fresh_rows)
 }
 
 fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
@@ -665,6 +789,69 @@ mod tests {
             .planning_picker()
             .selected()
             .contains(&PlanningTaskId::ScanSecrets));
+    }
+
+    #[test]
+    fn large_undecomposed_repo_preselects_decomposition_before_threat_modeling() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.domain_mut().context_view_mut().files_indexed = Some(81_259);
+
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+
+        let picker = app.engagement.planning_picker();
+        assert!(picker
+            .selected()
+            .contains(&PlanningTaskId::DecomposeModules));
+        let decompose = picker
+            .tasks()
+            .iter()
+            .position(|row| row.id == PlanningTaskId::DecomposeModules)
+            .unwrap();
+        let threat_model = picker
+            .tasks()
+            .iter()
+            .position(|row| row.id == PlanningTaskId::BuildThreatModel)
+            .unwrap();
+        assert!(decompose < threat_model);
+    }
+
+    #[test]
+    fn returned_planner_reads_decomposition_from_the_canonical_v3_path() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.domain_mut().context_view_mut().files_indexed = Some(81_259);
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+
+        std::fs::create_dir_all(target.path().join("packages/api")).unwrap();
+        std::fs::write(target.path().join("packages/api/package.json"), "{}").unwrap();
+        let tree = kuzushi_core::discover_nested_project_scopes(target.path());
+        let path = kuzushi_core::save_nested_project_scopes(target.path(), &tree).unwrap();
+        assert_eq!(
+            path,
+            kuzushi_core::workspace::project_model_scopes_path(target.path())
+        );
+
+        app.open_phase_picker(crate::app::WorkflowPhase::Map);
+
+        let row = app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .find(|row| row.id == PlanningTaskId::DecomposeModules)
+            .unwrap();
+        assert_eq!(
+            row.artifact_state,
+            crate::app::PlanningArtifactState::Cached
+        );
+        assert!(!app
+            .engagement
+            .planning_picker()
+            .selected()
+            .contains(&PlanningTaskId::DecomposeModules));
     }
 
     fn c_target_profile() -> crate::app::TargetProfile {

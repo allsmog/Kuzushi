@@ -272,7 +272,7 @@ fn footer_keybindings_include_shell_completion_prefix() {
 
     assert_eq!(bindings[0], bind("Tab", "complete"));
     assert!(bindings.contains(&bind("modules", "browse")));
-    assert!(bindings.contains(&bind("workbench", "command center")));
+    assert!(bindings.contains(&bind("workbench", "phase workflow")));
     assert!(!bindings.contains(&bind("n", "next phase")));
     assert!(bindings.contains(&bind("options sast:scan", "tune scan")));
     assert!(bindings.contains(&bind("Ctrl+C", "exit")));
@@ -389,7 +389,7 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
     assert!(bindings.contains(&bind("Esc/q", "workbench")));
     assert!(bindings.contains(&bind("COMMAND", ": type")));
     assert!(!bindings.contains(&bind("Esc", "close")));
-    assert!(!bindings.contains(&bind("workbench", "command center")));
+    assert!(!bindings.contains(&bind("workbench", "phase workflow")));
 
     app.engagement
         .planning_picker_mut()
@@ -401,7 +401,7 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
     assert!(bindings.contains(&bind("1-5", "phase")));
     assert!(bindings.contains(&bind("Esc/q", "steps")));
     assert!(bindings.contains(&bind("COMMAND", ": type")));
-    assert!(!bindings.contains(&bind("workbench", "command center")));
+    assert!(!bindings.contains(&bind("workbench", "phase workflow")));
 }
 
 #[test]
@@ -534,15 +534,14 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.set_input_mode(crate::InputMode::Navigate);
 
     let dfd_bindings = footer_keybindings(&app);
-    // The DFD is a frame-rendered graph: j/k drive the inspector cursor.
-    // Advertising a scroll offset here would be false.
-    assert!(dfd_bindings.contains(&bind("j/k", "select node/flow")));
+    // The DFD selects topology separately from its wrapped detail viewport.
+    assert!(dfd_bindings.contains(&bind("j/k/↑/↓", "select node/flow")));
+    assert!(dfd_bindings.contains(&bind("PgUp/PgDn", "scroll details")));
     assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(!dfd_bindings.contains(&bind("g/G", "ends")));
     assert!(dfd_bindings.contains(&bind("Tab", "next page")));
     assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
-    assert!(dfd_bindings.contains(&bind("q", "leave")));
-    assert!(dfd_bindings.contains(&bind("Esc", "prompt")));
+    assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
     assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
@@ -560,6 +559,19 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     let path_bindings = footer_keybindings(&app);
     assert!(path_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(path_bindings.contains(&bind("g/G", "ends")));
+}
+
+#[test]
+fn scene_footer_never_advertises_prompt_completion_for_page_cycle_tab() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.scene_mut().set_page(VizPage::Dfd);
+    app.set_shell_view(ShellView::Scene);
+    app.set_input_mode(crate::InputMode::Prompt);
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("Tab", "next page")));
+    assert!(!bindings.contains(&bind("Tab", "complete")));
 }
 
 fn scan_state(running: bool, abort_requested: bool) -> ScanPanelState {

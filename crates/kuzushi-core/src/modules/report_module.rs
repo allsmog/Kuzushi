@@ -49,3 +49,18 @@ fn report_sarif_tool() -> ToolDescriptor {
         .target_write()],
     )
 }
+
+pub(in crate::modules) fn execute_report_sarif_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("report:sarif requires an active workspace target")?;
+    let store = ctx
+        .findings_store
+        .context("report:sarif requires a findings store")?;
+    let findings = store.list_all_findings()?;
+    let records = store.list_review_decisions_for_findings(&findings)?;
+    crate::report::export_confirmed_sarif(workspace.root(), input, &findings, &records)
+}

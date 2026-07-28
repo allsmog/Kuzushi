@@ -264,8 +264,8 @@ mod tests {
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = registry
@@ -359,9 +359,7 @@ authorization: Default::default(),
             .pointer("/data/document/provenance/builtAtMs")
             .and_then(Value::as_u64)
             .is_some());
-        assert!(requests[0]
-            .prompt
-            .contains(DEFAULT_THREAT_MODEL_GUIDANCE));
+        assert!(requests[0].prompt.contains(DEFAULT_THREAT_MODEL_GUIDANCE));
         assert!(requests[0]
             .prompt
             .contains(r#"<untrusted-source label="context""#));
@@ -502,8 +500,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = registry
@@ -555,8 +553,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let error = registry
@@ -593,8 +591,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = registry
@@ -633,8 +631,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         registry
@@ -672,8 +670,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let error = registry
@@ -704,8 +702,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
         registry.execute_tool_with_runtime(
             "randori:pasta",
@@ -808,10 +806,10 @@ authorization: Default::default(),
             },
         ]);
 
-        let err = run_randori_pasta_with_runtime(temp.path(), &runtime)
-            .unwrap_err()
-            .to_string();
+        let error = run_randori_pasta_with_runtime(temp.path(), &runtime).unwrap_err();
+        let err = format!("{error:#}");
 
+        assert_eq!(error.to_string(), "structured output failed");
         assert!(err.contains("randori:pasta"), "{err}");
         assert!(err.contains("ThreatModelDocument"), "{err}");
         assert!(
@@ -853,8 +851,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -865,7 +863,10 @@ authorization: Default::default(),
             )
             .unwrap();
         assert_eq!(degraded.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(degraded.get("status").and_then(Value::as_str), Some("partial"));
+        assert_eq!(
+            degraded.get("status").and_then(Value::as_str),
+            Some("partial")
+        );
         assert_eq!(
             degraded.pointer("/data/provider").and_then(Value::as_str),
             Some("deterministic")
@@ -922,16 +923,28 @@ authorization: Default::default(),
         assert!(document_has_threat_target(&degraded, "http-route"));
         assert!(document_has_dfd_node(&degraded, "auth-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-auth-control"));
-        assert!(document_has_dfd_trust_boundary(&degraded, "tb-auth-boundary"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-auth-boundary"
+        ));
         assert!(document_has_threat_target(&degraded, "auth-control"));
         assert!(document_has_dfd_node(&degraded, "session-state"));
         assert!(document_has_dfd_flow(&degraded, "flow-session-state"));
-        assert!(document_has_dfd_trust_boundary(&degraded, "tb-session-state"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-session-state"
+        ));
         assert!(document_has_threat_target(&degraded, "session-state"));
         assert!(document_has_dfd_node(&degraded, "request-trust-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-request-trust"));
-        assert!(document_has_dfd_trust_boundary(&degraded, "tb-request-trust"));
-        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-request-trust"
+        ));
+        assert!(document_has_threat_target(
+            &degraded,
+            "request-trust-control"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_has_dfd_trust_boundary(
@@ -952,11 +965,17 @@ authorization: Default::default(),
         assert!(document_has_threat_target(&degraded, "file-upload-parser"));
         assert!(document_has_dfd_node(&degraded, "parser-boundary"));
         assert!(document_has_dfd_flow(&degraded, "flow-parser-boundary"));
-        assert!(document_has_dfd_trust_boundary(&degraded, "tb-parser-boundary"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-parser-boundary"
+        ));
         assert!(document_has_threat_target(&degraded, "parser-boundary"));
         assert!(document_has_dfd_node(&degraded, "cli-entrypoint"));
         assert!(document_has_dfd_flow(&degraded, "flow-cli-entrypoint"));
-        assert!(document_has_dfd_trust_boundary(&degraded, "tb-process-entrypoint"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-process-entrypoint"
+        ));
         assert!(document_has_threat_target(&degraded, "cli-entrypoint"));
         assert!(document_has_dfd_node(&degraded, "background-job"));
         assert!(document_has_dfd_flow(&degraded, "flow-background-job"));
@@ -971,9 +990,21 @@ authorization: Default::default(),
         assert!(document_has_related_cwe(&degraded, "CWE-78"));
         assert!(document_has_related_cwe(&degraded, "CWE-20"));
         assert!(document_has_related_cwe(&degraded, "CWE-400"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
-        assert!(document_threat_target_has_cwe(&degraded, "cli-entrypoint", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "cli-entrypoint",
+            "CWE-20"
+        ));
         assert!(document_threat_target_has_cwe(
             &degraded,
             "background-job",
@@ -1036,12 +1067,16 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({"pipeline": "deterministic"}), &ctx)
+            .execute_tool(
+                "threat-model:build",
+                json!({"pipeline": "deterministic"}),
+                &ctx,
+            )
             .unwrap();
 
         assert_eq!(
@@ -1066,8 +1101,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1100,12 +1135,16 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({"pipeline": "deterministic", "contextMode": "off"}), &ctx)
+            .execute_tool(
+                "threat-model:build",
+                json!({"pipeline": "deterministic", "contextMode": "off"}),
+                &ctx,
+            )
             .unwrap();
 
         assert_eq!(
@@ -1162,8 +1201,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let error = registry
@@ -1175,7 +1214,10 @@ authorization: Default::default(),
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("require the model-backed pipeline"), "{error}");
+        assert!(
+            error.contains("require the model-backed pipeline"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1200,8 +1242,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1212,16 +1254,56 @@ authorization: Default::default(),
             )
             .unwrap();
 
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-640"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-522"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-434"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-601"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-918"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-863"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-639"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-200"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-640"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-522"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-434"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-601"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-918"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-863"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-639"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-200"
+        ));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_narrative_input(
             &degraded,
             "/data/document/narrative/inputCategories/credentialFlows"
@@ -1398,8 +1480,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1450,8 +1532,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1502,8 +1584,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1515,7 +1597,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_dfd_node(&degraded, "auth-control"));
-        assert!(document_threat_target_has_cwe(&degraded, "auth-control", "CWE-287"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "auth-control",
+            "CWE-287"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -1556,8 +1642,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1608,8 +1694,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1660,8 +1746,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1712,8 +1798,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1764,8 +1850,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1779,7 +1865,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -1815,8 +1905,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1830,7 +1920,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -1866,8 +1960,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1881,7 +1975,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -1917,8 +2015,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1932,7 +2030,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -1968,8 +2070,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -1983,7 +2085,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -2019,8 +2125,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2034,7 +2140,11 @@ authorization: Default::default(),
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
         assert!(document_threat_target_has_cwe(
@@ -2070,8 +2180,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2118,8 +2228,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2166,8 +2276,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2186,7 +2296,9 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded, "Python"
+        ));
     }
 
     #[test]
@@ -2207,8 +2319,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2226,7 +2338,9 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded, "Python"
+        ));
     }
 
     #[test]
@@ -2253,8 +2367,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2298,8 +2412,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2310,14 +2424,22 @@ authorization: Default::default(),
             )
             .unwrap();
 
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-522"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-522"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/credentialFlows",
             "ANY /billing/api-keys/"
         ));
         assert!(document_has_dfd_node(&degraded, "auth-control"));
-        assert!(document_threat_target_has_cwe(&degraded, "auth-control", "CWE-287"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "auth-control",
+            "CWE-287"
+        ));
         assert!(document_has_dfd_node(&degraded, "file-upload-parser"));
         assert!(document_has_dfd_flow(&degraded, "flow-file-upload"));
         assert!(document_threat_target_has_cwe(
@@ -2330,7 +2452,11 @@ authorization: Default::default(),
     #[test]
     fn deterministic_threat_model_includes_django_as_view_methods() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("requirements.txt"), "django\ndjangorestframework\n").unwrap();
+        fs::write(
+            temp.path().join("requirements.txt"),
+            "django\ndjangorestframework\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("urls.py"),
             "from django.urls import path\nurlpatterns = [path('imports/file/', ImportView.as_view({'post': 'create'}))]\n",
@@ -2349,8 +2475,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2372,7 +2498,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Django/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Django/Python"
+        ));
     }
 
     #[test]
@@ -2392,8 +2521,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2420,8 +2549,15 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/callbackFlows",
             "OPTIONS,HEAD /saml/callback"
         ));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-601"));
-        assert!(document_has_evidence_anchor_description(&degraded, "FastAPI/Python"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-601"
+        ));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "FastAPI/Python"
+        ));
     }
 
     #[test]
@@ -2446,8 +2582,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2494,8 +2630,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2518,7 +2654,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/authorizationFlows",
             "ANY /organizations/projects/"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Django/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Django/Python"
+        ));
     }
 
     #[test]
@@ -2538,8 +2677,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2550,7 +2689,11 @@ authorization: Default::default(),
             )
             .unwrap();
 
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-522"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-522"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/credentialFlows",
@@ -2558,7 +2701,11 @@ authorization: Default::default(),
         ));
         assert!(document_has_dfd_node(&degraded, "auth-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-auth-control"));
-        assert!(document_threat_target_has_cwe(&degraded, "auth-control", "CWE-287"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "auth-control",
+            "CWE-287"
+        ));
         assert!(document_has_dfd_node(&degraded, "file-upload-parser"));
         assert!(document_has_dfd_flow(&degraded, "flow-file-upload"));
         assert!(document_threat_target_has_cwe(
@@ -2590,8 +2737,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2618,7 +2765,11 @@ authorization: Default::default(),
     #[test]
     fn deterministic_threat_model_includes_flask_jwt_auth_guard() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("requirements.txt"), "flask\nflask-jwt-extended\n").unwrap();
+        fs::write(
+            temp.path().join("requirements.txt"),
+            "flask\nflask-jwt-extended\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("app.py"),
             "from flask import Flask\nfrom flask_jwt_extended import jwt_required\napp = Flask(__name__)\n@app.route('/admin/api-key', methods=['POST'])\n@jwt_required()\ndef rotate_key(): pass\n",
@@ -2632,8 +2783,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2644,10 +2795,18 @@ authorization: Default::default(),
             )
             .unwrap();
 
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-522"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-522"
+        ));
         assert!(document_has_dfd_node(&degraded, "auth-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-auth-control"));
-        assert!(document_threat_target_has_cwe(&degraded, "auth-control", "CWE-287"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "auth-control",
+            "CWE-287"
+        ));
     }
 
     #[test]
@@ -2667,8 +2826,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2690,7 +2849,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Flask/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Flask/Python"
+        ));
     }
 
     #[test]
@@ -2710,8 +2872,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2756,8 +2918,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2784,7 +2946,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "aiohttp/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "aiohttp/Python"
+        ));
     }
 
     #[test]
@@ -2804,8 +2969,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2827,7 +2992,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Tornado/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Tornado/Python"
+        ));
     }
 
     #[test]
@@ -2847,8 +3015,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2875,7 +3043,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Bottle/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Bottle/Python"
+        ));
     }
 
     #[test]
@@ -2895,8 +3066,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2923,7 +3094,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Sanic/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Sanic/Python"
+        ));
     }
 
     #[test]
@@ -2943,8 +3117,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -2966,7 +3140,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Pyramid/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Pyramid/Python"
+        ));
     }
 
     #[test]
@@ -2986,8 +3163,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3009,7 +3186,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Falcon/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Falcon/Python"
+        ));
     }
 
     #[test]
@@ -3029,8 +3209,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3052,7 +3232,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Litestar/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Litestar/Python"
+        ));
     }
 
     #[test]
@@ -3072,8 +3255,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3095,7 +3278,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Litestar/Python"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Litestar/Python"
+        ));
     }
 
     #[test]
@@ -3115,8 +3301,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3163,18 +3349,26 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
-            .execute_tool("threat-model:build", json!({"pipeline": "deterministic"}), &ctx)
+            .execute_tool(
+                "threat-model:build",
+                json!({"pipeline": "deterministic"}),
+                &ctx,
+            )
             .unwrap();
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_dfd_node(&degraded, "file-upload-parser"));
         assert!(document_has_dfd_flow(&degraded, "flow-file-upload"));
         assert!(document_threat_target_has_cwe(
@@ -3208,8 +3402,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3257,8 +3451,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3280,7 +3474,9 @@ authorization: Default::default(),
             "tenant-isolation-control",
             "CWE-639"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Fiber/Go"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded, "Fiber/Go"
+        ));
     }
 
     #[test]
@@ -3305,8 +3501,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3328,7 +3524,9 @@ authorization: Default::default(),
             "tenant-isolation-control",
             "CWE-639"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Chi/Go"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded, "Chi/Go"
+        ));
     }
 
     #[test]
@@ -3353,8 +3551,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3376,7 +3574,9 @@ authorization: Default::default(),
             "tenant-isolation-control",
             "CWE-639"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Echo/Go"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded, "Echo/Go"
+        ));
     }
 
     #[test]
@@ -3401,8 +3601,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3446,8 +3646,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3495,8 +3695,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3546,8 +3746,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3597,8 +3797,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3648,8 +3848,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3695,8 +3895,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3714,7 +3914,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Rails/Ruby"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Rails/Ruby"
+        ));
     }
 
     #[test]
@@ -3741,8 +3944,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3764,7 +3967,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Rails/Ruby"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Rails/Ruby"
+        ));
     }
 
     #[test]
@@ -3791,8 +3997,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3815,7 +4021,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/callbackFlows",
             "POST /webhooks/signed"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Rails/Ruby"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Rails/Ruby"
+        ));
     }
 
     #[test]
@@ -3842,8 +4051,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3866,7 +4075,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/authorizationFlows",
             "POST /accounts/projects"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Rails/Ruby"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Rails/Ruby"
+        ));
     }
 
     #[test]
@@ -3897,8 +4109,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3916,7 +4128,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Laravel/PHP"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Laravel/PHP"
+        ));
     }
 
     #[test]
@@ -3947,8 +4162,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -3970,7 +4185,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Laravel/PHP"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Laravel/PHP"
+        ));
     }
 
     #[test]
@@ -3995,8 +4213,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4045,8 +4263,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4069,7 +4287,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/callbackFlows",
             "POST /webhooks/signed"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Laravel/PHP"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Laravel/PHP"
+        ));
     }
 
     #[test]
@@ -4094,8 +4315,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4145,8 +4366,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4169,7 +4390,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/authorizationFlows",
             "POST /teams/projects"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Laravel/PHP"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Laravel/PHP"
+        ));
     }
 
     #[test]
@@ -4194,8 +4418,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4240,8 +4464,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4281,8 +4505,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4317,8 +4541,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4363,8 +4587,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4415,8 +4639,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4461,8 +4685,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4509,8 +4733,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4554,8 +4778,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4601,8 +4825,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4649,8 +4873,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4696,8 +4920,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4744,8 +4968,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4795,8 +5019,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4842,8 +5066,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4886,8 +5110,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -4947,8 +5171,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5004,8 +5228,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5068,8 +5292,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5126,8 +5350,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5146,7 +5370,10 @@ authorization: Default::default(),
             "auth-control",
             "CWE-287"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5184,8 +5411,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5204,7 +5431,10 @@ authorization: Default::default(),
             "auth-control",
             "CWE-287"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5242,8 +5472,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5262,7 +5492,10 @@ authorization: Default::default(),
             "auth-control",
             "CWE-287"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5297,8 +5530,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5317,7 +5550,10 @@ authorization: Default::default(),
             "auth-control",
             "CWE-287"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5354,8 +5590,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5377,7 +5613,10 @@ authorization: Default::default(),
             "session-state",
             "CWE-384"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5409,8 +5648,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5432,7 +5671,10 @@ authorization: Default::default(),
             "session-state",
             "CWE-384"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5441,7 +5683,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RememberMeSessions.java"),
+            temp.path()
+                .join("src/main/java/app/RememberMeSessions.java"),
             r#"
               import org.springframework.security.web.authentication.RememberMeServices;
               class RememberMeSessions {
@@ -5465,8 +5708,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5488,7 +5731,10 @@ authorization: Default::default(),
             "session-state",
             "CWE-384"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5528,8 +5774,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5559,7 +5805,10 @@ authorization: Default::default(),
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5568,7 +5817,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RequestTrustConfig.java"),
+            temp.path()
+                .join("src/main/java/app/RequestTrustConfig.java"),
             r#"
               import org.springframework.web.filter.ForwardedHeaderFilter;
               import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
@@ -5593,8 +5843,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5616,7 +5866,10 @@ authorization: Default::default(),
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5653,8 +5906,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5671,13 +5924,19 @@ authorization: Default::default(),
             &degraded,
             "tb-request-trust"
         ));
-        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_threat_target(
+            &degraded,
+            "request-trust-control"
+        ));
         assert!(document_threat_target_has_cwe(
             &degraded,
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5713,8 +5972,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5731,13 +5990,19 @@ authorization: Default::default(),
             &degraded,
             "tb-request-trust"
         ));
-        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_threat_target(
+            &degraded,
+            "request-trust-control"
+        ));
         assert!(document_threat_target_has_cwe(
             &degraded,
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5767,8 +6032,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5785,13 +6050,19 @@ authorization: Default::default(),
             &degraded,
             "tb-request-trust"
         ));
-        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_threat_target(
+            &degraded,
+            "request-trust-control"
+        ));
         assert!(document_threat_target_has_cwe(
             &degraded,
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5800,7 +6071,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RequestInputController.java"),
+            temp.path()
+                .join("src/main/java/app/RequestInputController.java"),
             r#"
               import org.springframework.web.bind.annotation.PostMapping;
               class RequestInputController {
@@ -5823,8 +6095,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5841,13 +6113,19 @@ authorization: Default::default(),
             &degraded,
             "tb-request-trust"
         ));
-        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_threat_target(
+            &degraded,
+            "request-trust-control"
+        ));
         assert!(document_threat_target_has_cwe(
             &degraded,
             "request-trust-control",
             "CWE-352"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -5868,8 +6146,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5891,14 +6169,21 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
     fn deterministic_threat_model_includes_kotlin_spring_request_mapping_methods() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src/main/kotlin/app")).unwrap();
-        fs::write(temp.path().join("build.gradle.kts"), "plugins { kotlin(\"jvm\") }\n").unwrap();
+        fs::write(
+            temp.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") }\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("src/main/kotlin/app/ImportController.kt"),
             "import org.springframework.web.bind.annotation.RequestMapping\nclass ImportController {\n@RequestMapping(value = [\"/imports/file\"], method = [RequestMethod.POST])\nfun importFile(importFile: MultipartFile) {}\n}\n",
@@ -5912,8 +6197,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5935,7 +6220,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Kotlin"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Kotlin"
+        ));
     }
 
     #[test]
@@ -5974,8 +6262,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -5994,7 +6282,10 @@ authorization: Default::default(),
             "parser-boundary",
             "CWE-502"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6033,8 +6324,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6053,7 +6344,10 @@ authorization: Default::default(),
             "parser-boundary",
             "CWE-502"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6087,8 +6381,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6107,7 +6401,10 @@ authorization: Default::default(),
             "parser-boundary",
             "CWE-502"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6143,8 +6440,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6163,7 +6460,10 @@ authorization: Default::default(),
             "parser-boundary",
             "CWE-502"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6201,8 +6501,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6221,7 +6521,10 @@ authorization: Default::default(),
             "process-execution",
             "CWE-78"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6255,8 +6558,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6275,7 +6578,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6311,8 +6617,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6331,7 +6637,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6366,8 +6675,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6386,7 +6695,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6419,8 +6731,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6439,7 +6751,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6474,8 +6789,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6494,7 +6809,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6531,8 +6849,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6551,7 +6869,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6590,8 +6911,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6610,7 +6931,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6646,8 +6970,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6666,7 +6990,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6701,8 +7028,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6725,7 +7052,10 @@ authorization: Default::default(),
             "external-service",
             "CWE-918"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6756,8 +7086,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6773,11 +7103,14 @@ authorization: Default::default(),
             "GET /v3/api-docs",
             "GET /swagger-ui/index.html",
         ] {
-            assert!(document_has_narrative_item(
-                &degraded,
-                "/data/document/narrative/inputCategories/attackerControlled",
-                route
-            ), "missing ASP.NET route narrative item: {route}");
+            assert!(
+                document_has_narrative_item(
+                    &degraded,
+                    "/data/document/narrative/inputCategories/attackerControlled",
+                    route
+                ),
+                "missing ASP.NET route narrative item: {route}"
+            );
         }
         assert!(document_has_dfd_node(&degraded, "http-route"));
         assert!(document_has_dfd_flow(&degraded, "flow-http-route"));
@@ -6787,7 +7120,10 @@ authorization: Default::default(),
             "http-route",
             "CWE-20"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6827,8 +7163,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6847,7 +7183,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6883,8 +7222,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6903,7 +7242,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -6946,8 +7288,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -6966,7 +7308,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7006,8 +7351,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7026,7 +7371,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7070,8 +7418,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7090,7 +7438,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7127,8 +7478,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7147,7 +7498,10 @@ authorization: Default::default(),
             "data-store",
             "CWE-89"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7194,8 +7548,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7214,7 +7568,10 @@ authorization: Default::default(),
             "rpc-handler",
             "CWE-20"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7245,8 +7602,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7304,8 +7661,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7324,7 +7681,10 @@ authorization: Default::default(),
             "rpc-handler",
             "CWE-20"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7333,7 +7693,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/ServiceRpcHandlers.java"),
+            temp.path()
+                .join("src/main/java/app/ServiceRpcHandlers.java"),
             r#"
               import org.apache.dubbo.config.annotation.DubboService;
               @DubboService
@@ -7357,8 +7718,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7386,7 +7747,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/StreamingController.java"),
+            temp.path()
+                .join("src/main/java/app/StreamingController.java"),
             r#"
               import org.springframework.web.bind.annotation.GetMapping;
               class StreamingController {
@@ -7410,8 +7772,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7435,7 +7797,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "GET /events/sse"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7465,8 +7830,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7490,7 +7855,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "GET /imports/file"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -7523,8 +7891,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7548,7 +7916,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "POST /accounts/recovery"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "JAX-RS/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "JAX-RS/Java"
+        ));
     }
 
     #[test]
@@ -7579,8 +7950,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7614,7 +7985,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "ANY /accounts/audit"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Servlet/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Servlet/Java"
+        ));
     }
 
     #[test]
@@ -7643,8 +8017,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7705,8 +8079,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7745,7 +8119,11 @@ authorization: Default::default(),
     fn deterministic_threat_model_includes_jvm_ktor_routes() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src/main/kotlin/app")).unwrap();
-        fs::write(temp.path().join("build.gradle.kts"), "plugins { kotlin(\"jvm\") }\n").unwrap();
+        fs::write(
+            temp.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") }\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("src/main/kotlin/app/Routing.kt"),
             r#"
@@ -7775,8 +8153,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7815,7 +8193,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "OPTIONS /accounts/preflight"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Ktor/Kotlin"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Ktor/Kotlin"
+        ));
     }
 
     #[test]
@@ -7852,8 +8233,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -7892,7 +8273,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "OPTIONS /accounts/preflight"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Javalin/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Javalin/Java"
+        ));
     }
 
     #[test]
@@ -7927,8 +8311,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8014,8 +8398,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8054,7 +8438,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "ANY /accounts/audit"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Jooby/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Jooby/Java"
+        ));
     }
 
     #[test]
@@ -8086,8 +8473,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8121,7 +8508,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "ANY /accounts"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Vert.x/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Vert.x/Java"
+        ));
     }
 
     #[test]
@@ -8130,7 +8520,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/VertxHttpMethodRoutes.java"),
+            temp.path()
+                .join("src/main/java/app/VertxHttpMethodRoutes.java"),
             r#"
               import io.vertx.core.http.HttpMethod;
               import io.vertx.ext.web.Router;
@@ -8153,8 +8544,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8183,7 +8574,10 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "HEAD /accounts/status"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Vert.x/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Vert.x/Java"
+        ));
     }
 
     #[test]
@@ -8218,8 +8612,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8297,8 +8691,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8371,8 +8765,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8451,8 +8845,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8524,8 +8918,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8544,7 +8938,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8580,8 +8977,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8600,7 +8997,10 @@ authorization: Default::default(),
             "file-upload-parser",
             "CWE-434"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8630,8 +9030,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8686,8 +9086,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8706,7 +9106,10 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8743,8 +9146,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8763,7 +9166,10 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8797,8 +9203,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8817,7 +9223,10 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8855,8 +9264,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8875,7 +9284,10 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8884,7 +9296,8 @@ authorization: Default::default(),
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/IntegrationHandlers.java"),
+            temp.path()
+                .join("src/main/java/app/IntegrationHandlers.java"),
             r#"
               import org.springframework.integration.annotation.InboundChannelAdapter;
               import org.springframework.integration.annotation.ServiceActivator;
@@ -8924,8 +9337,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -8944,7 +9357,10 @@ authorization: Default::default(),
             "background-job",
             "CWE-400"
         ));
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
     }
 
     #[test]
@@ -8973,8 +9389,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9020,8 +9436,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9072,8 +9488,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9127,8 +9543,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9195,8 +9611,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9247,8 +9663,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9305,8 +9721,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9352,8 +9768,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9408,8 +9824,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9468,8 +9884,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9516,8 +9932,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9552,8 +9968,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9593,8 +10009,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9629,8 +10045,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9674,8 +10090,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9710,8 +10126,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9787,8 +10203,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9799,9 +10215,18 @@ authorization: Default::default(),
             )
             .unwrap();
 
-        assert!(document_has_evidence_anchor_description(&degraded, "Spring/Java"));
-        assert!(document_has_evidence_anchor_description(&degraded, "Rails/Ruby"));
-        assert!(document_has_evidence_anchor_description(&degraded, "Laravel/PHP"));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Spring/Java"
+        ));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Rails/Ruby"
+        ));
+        assert!(document_has_evidence_anchor_description(
+            &degraded,
+            "Laravel/PHP"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "Next.js/TypeScript"
@@ -9857,8 +10282,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9925,8 +10350,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -9979,8 +10404,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10035,8 +10460,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10119,8 +10544,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10178,8 +10603,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10237,8 +10662,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10254,7 +10679,11 @@ authorization: Default::default(),
             "/data/document/narrative/inputCategories/attackerControlled",
             "ANY /{page}"
         ));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "ASP.NET Core/C#"
@@ -10282,8 +10711,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10296,7 +10725,11 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "ASP.NET Core/C#"
@@ -10324,8 +10757,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10419,8 +10852,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10512,8 +10945,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10559,8 +10992,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10624,8 +11057,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10709,8 +11142,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10789,8 +11222,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10849,8 +11282,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10862,7 +11295,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-918"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-918"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/callbackFlows",
@@ -10900,8 +11337,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10960,8 +11397,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -10973,7 +11410,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11016,8 +11457,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11029,7 +11470,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11072,8 +11517,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11085,7 +11530,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11128,8 +11577,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11141,7 +11590,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11174,8 +11627,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11187,7 +11640,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11240,8 +11697,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11253,7 +11710,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11296,8 +11757,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11309,7 +11770,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11347,8 +11812,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11397,8 +11862,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11410,7 +11875,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-862"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-862"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11443,8 +11912,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11456,7 +11925,11 @@ authorization: Default::default(),
             .unwrap();
 
         assert!(document_has_threat_target(&degraded, "http-route"));
-        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "http-route",
+            "CWE-20"
+        ));
         assert!(document_has_narrative_item(
             &degraded,
             "/data/document/narrative/inputCategories/attackerControlled",
@@ -11504,8 +11977,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11518,7 +11991,11 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "ASP.NET Core/C#"
@@ -11546,8 +12023,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11560,7 +12037,11 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "ASP.NET Core/C#"
@@ -11588,8 +12069,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11602,7 +12083,11 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         for route in [
             "ANY /hubs/admin",
             "ANY /realtime/admin",
@@ -11645,8 +12130,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11659,7 +12144,11 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
         assert!(document_has_evidence_anchor_description(
             &degraded,
             "ASP.NET Core/C#"
@@ -11687,8 +12176,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11701,12 +12190,12 @@ authorization: Default::default(),
 
         assert!(document_has_dfd_node(&degraded, "rpc-handler"));
         assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
-        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
-        for route in [
-            "ANY /grpc",
-            "ANY /internal/grpc",
-            "ANY /assigned/grpc",
-        ] {
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "rpc-handler",
+            "CWE-20"
+        ));
+        for route in ["ANY /grpc", "ANY /internal/grpc", "ANY /assigned/grpc"] {
             assert!(
                 document_has_narrative_item(
                     &degraded,
@@ -11755,8 +12244,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11806,8 +12295,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11863,8 +12352,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let degraded = registry
@@ -11937,8 +12426,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = registry
@@ -12004,8 +12493,8 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
         let result = registry
@@ -12036,12 +12525,11 @@ authorization: Default::default(),
             workspace: Some(&workspace),
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
 
-        let missing_dir =
-            read_threat_model(json!({}), &ctx, ReadFlavor::ThreatModel).unwrap();
+        let missing_dir = read_threat_model(json!({}), &ctx, ReadFlavor::ThreatModel).unwrap();
         assert_failed_result(&missing_dir, "missing-output-dir");
 
         let missing_artifacts = registry
@@ -12051,9 +12539,7 @@ authorization: Default::default(),
                 &ctx,
             )
             .unwrap_err();
-        assert!(
-            format!("{missing_artifacts:#}").contains("could not be resolved inside workspace")
-        );
+        assert!(format!("{missing_artifacts:#}").contains("could not be resolved inside workspace"));
     }
 
     #[test]
@@ -12091,6 +12577,95 @@ authorization: Default::default(),
             .get("output")
             .and_then(Value::as_str)
             .is_some_and(|output| output.contains(".kuzushi/threat-model.json (persistent)")));
+    }
+
+    #[test]
+    fn pasta_build_and_read_keep_one_methodology_identity() {
+        assert_build_read_methodology("pasta", &["s1", "s2", "s3", "s4"]);
+    }
+
+    #[test]
+    fn stride_build_and_read_do_not_claim_pasta_stages() {
+        assert_build_read_methodology("stride", &[]);
+    }
+
+    fn assert_build_read_methodology(methodology: &str, expected_stages: &[&str]) {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let output_dir = format!(".kuzushi/threat-model-{methodology}");
+
+        let built = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "methodology": methodology,
+                    "outputDir": output_dir.clone(),
+                    "preserveUserEdits": false,
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+        let read = registry
+            .execute_tool("threat-model:read", json!({}), &ctx)
+            .unwrap();
+        let artifact_read = registry
+            .execute_tool("threat-model:read", json!({"outputDir": output_dir}), &ctx)
+            .unwrap();
+        let normalized: Value = serde_json::from_slice(
+            &fs::read(
+                built
+                    .pointer("/data/normalizedArtifact")
+                    .and_then(Value::as_str)
+                    .unwrap(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let persistent = load_persistent_threat_model(temp.path()).unwrap();
+
+        for value in [&built, &read, &artifact_read] {
+            assert_eq!(
+                value.pointer("/data/methodology").and_then(Value::as_str),
+                Some(methodology)
+            );
+            assert_eq!(
+                value
+                    .pointer("/data/document/methodology")
+                    .and_then(Value::as_str),
+                Some(methodology)
+            );
+        }
+        assert_eq!(built.pointer("/data/stages"), Some(&json!(expected_stages)));
+        assert_eq!(normalized["methodology"], json!(methodology));
+        assert_eq!(persistent["methodology"], json!(methodology));
+        let output = built["output"].as_str().unwrap();
+        let prompt = &runtime.requests()[0].prompt;
+        if methodology == "pasta" {
+            assert!(output.contains("PASTA stages: s1, s2, s3, s4"));
+            assert!(prompt.contains("PASTA stages: s1, s2, s3, s4"));
+        } else {
+            assert!(!output.contains("PASTA stages"));
+            assert!(!prompt.contains("PASTA stages"));
+            assert!(prompt.contains("Methodology scope: full STRIDE analysis"));
+        }
     }
 
     #[test]
@@ -12145,9 +12720,7 @@ authorization: Default::default(),
         assert_eq!(coverage["gapFillMethod"], json!("unresolved"));
         assert!(coverage["gaps"]
             .as_array()
-            .is_some_and(|gaps| gaps
-                .iter()
-                .any(|gap| gap["path"] == json!("src/admin.js"))));
+            .is_some_and(|gaps| gaps.iter().any(|gap| gap["path"] == json!("src/admin.js"))));
     }
 
     fn express_route_workspace() -> tempfile::TempDir {
@@ -12254,12 +12827,15 @@ authorization: Default::default(),
             json!([]),
             "gap-fill threats must not carry invented evidence"
         );
-        assert!(threats
-            .iter()
-            .all(|threat| threat["stableId"].as_str().is_some_and(|id| id.starts_with("tm-"))));
+        assert!(threats.iter().all(|threat| threat["stableId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("tm-"))));
         for artifact in ["research.json", "coverage.json", "gapfill.json"] {
             assert!(
-                temp.path().join(".kuzushi/tm-staged").join(artifact).exists(),
+                temp.path()
+                    .join(".kuzushi/tm-staged")
+                    .join(artifact)
+                    .exists(),
                 "stage artifact {artifact} must be written"
             );
         }
@@ -12491,7 +13067,10 @@ authorization: Default::default(),
             result.pointer("/data/persisted").and_then(Value::as_bool),
             Some(true)
         );
-        assert_eq!(result.pointer("/costUsd").and_then(Value::as_f64), Some(0.0));
+        assert_eq!(
+            result.pointer("/costUsd").and_then(Value::as_f64),
+            Some(0.0)
+        );
     }
 
     #[test]
@@ -12562,9 +13141,8 @@ authorization: Default::default(),
             "taint-iris-next must still read entry points from a stamped document"
         );
 
-        let digest =
-            crate::capabilities::agentic_sast::render_threat_model_digest(&document)
-                .expect("agentic-sast digest must render from a stamped document");
+        let digest = crate::capabilities::agentic_sast::render_threat_model_digest(&document)
+            .expect("agentic-sast digest must render from a stamped document");
         assert!(digest.contains("Session spoofing"));
     }
 
@@ -12577,8 +13155,8 @@ authorization: Default::default(),
             workspace: None,
             findings_store: None,
             trace: None,
-cancellation: None,
-authorization: Default::default(),
+            cancellation: None,
+            authorization: Default::default(),
         };
         let result = registry
             .execute_tool("threat-model:methodologies", json!({}), &ctx)
@@ -12636,8 +13214,14 @@ authorization: Default::default(),
         summary_prefix: &str,
         artifact_labels: impl IntoIterator<Item = &'a str>,
     ) {
-        assert_eq!(value.get("status").and_then(Value::as_str), Some("completed"));
-        assert!(value.get("errors").and_then(Value::as_array).is_some_and(Vec::is_empty));
+        assert_eq!(
+            value.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(value
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
         assert!(value
             .get("summary")
             .and_then(Value::as_str)
@@ -12748,10 +13332,8 @@ authorization: Default::default(),
     }
 
     fn json_array_contains_str(value: Option<&Value>, needle: &str) -> bool {
-        value.and_then(Value::as_array).is_some_and(|items| {
-            items
-                .iter()
-                .any(|item| item.as_str() == Some(needle))
-        })
+        value
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(|item| item.as_str() == Some(needle)))
     }
 }

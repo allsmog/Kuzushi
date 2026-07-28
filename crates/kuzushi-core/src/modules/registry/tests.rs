@@ -143,25 +143,20 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
 
         let prepared = registry
-            .prepare_tool_input(
-                "secret-scan:scan",
-                json!({"maxFileBytes": "12345"}),
-                None,
-            )
+            .prepare_tool_input("secret-scan:scan", json!({"maxFileBytes": "12345"}), None)
             .unwrap();
         assert_eq!(prepared["maxFileBytes"], json!(12_345));
 
         for value in [-1, 0, 1, 67_108_865] {
             let error = registry
-                .prepare_tool_input(
-                    "secret-scan:scan",
-                    json!({"maxFileBytes": value}),
-                    None,
-                )
+                .prepare_tool_input("secret-scan:scan", json!({"maxFileBytes": value}), None)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("maxFileBytes"), "{error}");
-            assert!(error.contains("at least 1024") || error.contains("at most 67108864"), "{error}");
+            assert!(
+                error.contains("at least 1024") || error.contains("at most 67108864"),
+                "{error}"
+            );
         }
     }
 
@@ -2427,6 +2422,33 @@ process.stdin.on("end", () => {
         assert!(threat_intel_harvest.options.iter().any(|option| {
             option.name == "cves" && option.option_type == OptionType::Json && option.required
         }));
+        let threat_intel_research = registry.resolve_tool("threat-intel:research").unwrap();
+        assert_eq!(threat_intel_research.effect, ToolEffect::ExternalAction);
+        assert_eq!(threat_intel_research.approval, ApprovalPolicy::Explicit);
+        assert_eq!(
+            threat_intel_research.runtime_requirement,
+            RuntimeRequirement::Always
+        );
+        assert_eq!(
+            threat_intel_research.workspace_requirement,
+            WorkspaceRequirement::Required
+        );
+        assert_eq!(
+            threat_intel_research.finding_store_requirement,
+            FindingStoreRequirement::Optional
+        );
+        assert!(threat_intel_research.options.iter().any(|option| {
+            option.name == "maxCves"
+                && option.option_type == OptionType::Int
+                && option.default == Some(json!(20))
+        }));
+
+        let threat_model_read = registry.resolve_tool("threat-model:read").unwrap();
+        assert!(threat_model_read.options.iter().any(|option| {
+            option.name == "methodology"
+                && option.option_type == OptionType::Enum
+                && option.default.is_none()
+        }));
     }
 
     #[test]
@@ -2940,7 +2962,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "7df30de3c31bed2ce6f83bdc958e0e6dc37bfc329c7baa3a8466b3a669447868",
+            "b6022ab1ae64f1493e071e1e8b0fb3121085d8677511274bf20cb0a6086b59c1",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

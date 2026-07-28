@@ -20,7 +20,7 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
           │Outcome · partial · scenario partial                                                              │
           │3 run ledger cell(s) omitted from the result card · inspect replay                                │
           │8 timeline cell(s) omitted from the result card · inspect replay                                  │
-          │lineage: target rev unrecorded                                                                    │
+          │target revision was not recorded for this attempt                                                 │
           │next: inspect run-result_partial · inspect the incomplete phase evidence before retrying          │
           │›  1 ● Use scan  RECOMMENDED · Select this attempt without leaving the current phase page.        │
           │2 ○ Open run evidence                                                                             │

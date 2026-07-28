@@ -91,7 +91,13 @@ fn status_line_is_kuzushi_state(line: &str) -> bool {
 
 fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
     let mut command = Command::new("git");
-    command.arg("-C").arg(target).args(args);
+    // Metadata probes must not refresh `.git/index`: the workspace watcher
+    // would treat that optional write as an external change and reschedule us.
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(target)
+        .args(args);
     let output = bounded_git_output(&mut command, GIT_METADATA_TIMEOUT).ok()?;
     output
         .status
@@ -221,6 +227,30 @@ mod tests {
         let metadata = target_git_metadata(repo.path()).unwrap();
 
         assert!(!metadata.dirty);
+    }
+
+    #[test]
+    fn target_git_metadata_does_not_rewrite_the_git_index() {
+        let Some(repo) = temp_git_repo() else {
+            return;
+        };
+        let index_path = repo.path().join(".git/index");
+        let index_before = fs::read(&index_path).unwrap();
+        let tracked = fs::OpenOptions::new()
+            .write(true)
+            .open(repo.path().join("tracked.txt"))
+            .unwrap();
+        tracked
+            .set_times(
+                fs::FileTimes::new()
+                    .set_modified(std::time::SystemTime::now() + Duration::from_secs(60)),
+            )
+            .unwrap();
+
+        let metadata = target_git_metadata(repo.path()).unwrap();
+
+        assert!(!metadata.dirty);
+        assert_eq!(fs::read(index_path).unwrap(), index_before);
     }
 
     #[test]

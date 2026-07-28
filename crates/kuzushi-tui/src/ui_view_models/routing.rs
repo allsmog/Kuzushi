@@ -58,7 +58,7 @@ pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
         && matches!(activity_view_model(app), ActivityViewModel::Active(_))
 }
 
-/// The Workbench command center owns the full body region with a frame-level
+/// The phase Workbench owns the full body region with a frame-level
 /// multi-pane split (SOURCE / CENTER / FINDINGS+DETAILS), like Activity and the
 /// scene gallery. The shared line path is used only for plain/non-TTY output.
 pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {

@@ -24,6 +24,7 @@ pub(crate) enum ShellEffect {
     CancelJob(JobKind),
     ClearConversation,
     ContinuePastBudget,
+    FinalizeJob(JobKind),
     BuildContext(ContextBuild),
     DispatchAgent(AgentDispatch),
     DispatchNextPlanningTask(PlanningTaskDispatch),
@@ -917,6 +918,27 @@ impl ShellApp {
                 session.mark_active_tasks_canceling();
             }
         }
+        self.disclose_armed_steer_queue_after_scoped_cancel();
+    }
+
+    fn disclose_armed_steer_queue_after_scoped_cancel(&mut self) {
+        let count = self.steer_queue().len();
+        if count == 0 {
+            return;
+        }
+        let examples = self
+            .steer_queue()
+            .iter()
+            .take(3)
+            .map(|(selector, command)| format!("{selector} {}", command.summary))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.log(
+            "jobs",
+            format!(
+                "{count} pending command(s) remain armed after scoped cancel: {examples}; dequeue with `jobs -k queued-N`"
+            ),
+        );
     }
 
     pub(super) fn open_run_artifact_effect(&mut self, open: OpenRunArtifact) {
@@ -1244,6 +1266,7 @@ fn begin_patch_application(
         touched_files: plan.touched_files.clone(),
         state: kuzushi_core::PatchLifecycleState::Applying,
         reverify_run_id: None,
+        reverify_evidence: None,
         detail: Some("application intent recorded; mutation pending".to_string()),
         actor: "terminal-operator".to_string(),
         application_started_at: now.clone(),

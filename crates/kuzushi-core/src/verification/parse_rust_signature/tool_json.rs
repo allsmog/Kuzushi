@@ -13,7 +13,8 @@ pub fn to_tool_json(finding: &Finding, outcome: &VerificationOutcome) -> Value {
             "proof": proof,
             "verification": outcome,
     });
-    let mut response = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    let mut response =
+        crate::module_result::completed_output_result(summary.clone(), summary, data);
     add_verification_metadata(&mut response, proof, outcome.cost_usd);
     response
 }
@@ -43,5 +44,6 @@ fn verification_proof_snapshot(finding: &Finding, outcome: &VerificationOutcome)
         "backend": format!("{:?}", outcome.backend),
         "durationMs": outcome.duration_ms,
         "costUsd": outcome.cost_usd,
+        "provenance": outcome.provenance,
     })
 }

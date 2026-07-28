@@ -11,23 +11,23 @@ use super::runs_prune::runs_prune_command;
 #[rustfmt::skip]
 pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>) -> Result<()> {
     match command {
-        RunsCommand::List { target, status, json } => {
-            runs_list_command(require_cli_target("runs list", target, global_target)?, status, json)
+        RunsCommand::List { status, json } => {
+            runs_list_command(require_cli_target("runs list", None, global_target)?, status, json)
         }
-        RunsCommand::Show { run_id, target, json } => {
-            runs_show_command(require_cli_target("runs show", target, global_target)?, &run_id, json)
+        RunsCommand::Show { run_id, json } => {
+            runs_show_command(require_cli_target("runs show", None, global_target)?, &run_id, json)
         }
-        RunsCommand::Trace { run_id, target, json } => {
-            runs_trace_command(require_cli_target("runs trace", target, global_target)?, &run_id, json)
+        RunsCommand::Trace { run_id, json } => {
+            runs_trace_command(require_cli_target("runs trace", None, global_target)?, &run_id, json)
         }
-        RunsCommand::Replay { run_id, target, json } => {
-            runs_replay_command(require_cli_target("runs replay", target, global_target)?, &run_id, json)
+        RunsCommand::Replay { run_id, json } => {
+            runs_replay_command(require_cli_target("runs replay", None, global_target)?, &run_id, json)
         }
-        RunsCommand::Diff { base_run_id, compare_run_id, target, json } => {
-            runs_diff_command(require_cli_target("runs diff", target, global_target)?, &base_run_id, &compare_run_id, json)
+        RunsCommand::Diff { base_run_id, compare_run_id, json } => {
+            runs_diff_command(require_cli_target("runs diff", None, global_target)?, &base_run_id, &compare_run_id, json)
         }
-        RunsCommand::Prune { target, older_than_days, keep_last, dry_run, json } => {
-            runs_prune_command(require_cli_target("runs prune", target, global_target)?, older_than_days, keep_last, dry_run, json)
+        RunsCommand::Prune { older_than_days, keep_last, dry_run, json } => {
+            runs_prune_command(require_cli_target("runs prune", None, global_target)?, older_than_days, keep_last, dry_run, json)
         }
     }
 }

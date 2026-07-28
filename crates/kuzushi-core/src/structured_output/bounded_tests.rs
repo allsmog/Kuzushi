@@ -11,6 +11,7 @@ fn response_text(text: String, cost_usd: f64) -> AgentQueryResponse {
     AgentQueryResponse {
         text,
         cost_usd,
+        cost_usd_reported: true,
         ..Default::default()
     }
 }
@@ -151,7 +152,7 @@ fn oversized_initial_response_is_observed_and_never_repaired() {
     )
     .unwrap_err();
     let failure = error.downcast_ref::<StructuredOutputError>().unwrap();
-    let message = error.to_string();
+    let message = format!("{error:#}");
 
     assert_eq!(failure.cost_report().exact_usd(), Some(0.25));
     assert!(message.contains(&MAX_STRUCTURED_RESPONSE_BYTES.to_string()));
@@ -255,7 +256,7 @@ fn final_repair_diagnostic_is_bounded_and_digests_both_responses() {
         |_, _| Ok(response_text(repair, 0.2)),
     )
     .unwrap_err();
-    let message = error.to_string();
+    let message = format!("{error:#}");
 
     assert!(message.len() <= MAX_STRUCTURED_DIAGNOSTIC_BYTES);
     assert!(std::str::from_utf8(message.as_bytes()).is_ok());
@@ -277,7 +278,7 @@ fn truncation_diagnostic_is_bounded_utf8_and_digests_partial_response() {
             panic!("truncated response must not repair")
         })
         .unwrap_err();
-    let message = error.to_string();
+    let message = format!("{error:#}");
 
     assert!(message.len() <= MAX_STRUCTURED_DIAGNOSTIC_BYTES);
     assert!(std::str::from_utf8(message.as_bytes()).is_ok());
@@ -301,5 +302,5 @@ fn oversized_repair_response_keeps_both_observed_costs() {
 
     assert!((failure.cost_report().observed_usd() - 0.3).abs() < 1e-9);
     assert!(failure.cost_report().is_complete());
-    assert!(error.to_string().contains(&digest));
+    assert!(format!("{error:#}").contains(&digest));
 }
