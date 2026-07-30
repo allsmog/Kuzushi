@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod confidence_band;
+mod deterministic_scanners;
 mod extract_cwe;
 mod finding_identity;
 mod finding_record;
@@ -20,6 +21,9 @@ mod triage_outcome;
 mod triage_state;
 
 pub use confidence_band::ConfidenceBand;
+pub(crate) use deterministic_scanners::{
+    all_components_deterministic, is_deterministic_scanner, tool_components,
+};
 pub use extract_cwe::extract_cwe;
 pub(crate) use finding_identity::finding_identity_key_for_finding;
 pub use finding_identity::{

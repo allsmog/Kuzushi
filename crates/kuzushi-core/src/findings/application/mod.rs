@@ -4,10 +4,15 @@ use serde::Serialize;
 
 mod generic_tool_findings;
 mod projections;
+mod scan_comparison;
 
 pub(crate) use generic_tool_findings::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
     GenericPersistedRun,
+};
+pub use scan_comparison::{
+    compare_scan_runs, ComparedFinding, ScanComparisonClass, ScanFindingSignature,
+    ScanRunComparison, ScanUncertainMatch,
 };
 pub use projections::{
     finding_confidence_label, finding_cwe_label, finding_evidence_preview, finding_location,

@@ -13,4 +13,5 @@ pub use open::{
     threat_model_document_sha256, ModelRekeyRequest, ObservationSourceRef,
     SuppressionLifecycleEvent, ThreatModelVersionRecord,
 };
+pub(in crate::findings) use open::{finding_stable_fp, CompletedScanScope};
 pub(in crate::findings) use store_rows::*;

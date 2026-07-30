@@ -170,7 +170,7 @@ fn escape_like_prefix(reference: &str) -> String {
 }
 
 /// Stable projection key: identity id when present, else fingerprint.
-fn finding_stable_fp(finding: &Finding) -> String {
+pub(crate) fn finding_stable_fp(finding: &Finding) -> String {
     finding
         .identity_id
         .clone()

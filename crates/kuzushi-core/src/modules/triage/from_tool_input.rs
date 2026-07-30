@@ -26,6 +26,9 @@ pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) retriage: bool,
     pub(in crate::modules) votes: usize,
     pub(in crate::modules) deep_tuning: DeepTriageTuning,
+    /// Stable-key → reviewer-feedback note from stored suppressions.
+    /// Populated during run preparation, never parsed from tool input.
+    pub(in crate::modules) suppression_feedback: std::collections::BTreeMap<String, String>,
 }
 
 /// Optional deep-auditor tuning for bulk deep triage, read from the same
@@ -74,6 +77,7 @@ impl TriageRunInput {
             retriage: parse_triage_retriage(input),
             votes: parse_triage_votes(input)?,
             deep_tuning: parse_deep_triage_tuning(input),
+            suppression_feedback: std::collections::BTreeMap::new(),
         })
     }
 }

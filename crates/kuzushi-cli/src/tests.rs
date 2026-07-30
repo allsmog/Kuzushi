@@ -752,14 +752,16 @@ mod tests {
         diff: &crate::application::runs_diff::RunsDiff,
         artifact_identity: &str,
     ) {
-        assert_eq!(diff.base_status, "completed");
-        assert_eq!(diff.compare_status, "completed");
+        use kuzushi_core::findings::ScanComparisonClass;
+        assert_eq!(diff.base_status(), "completed");
+        assert_eq!(diff.compare_status(), "completed");
         assert!(diff.warnings.is_empty(), "{:?}", diff.warnings);
-        assert_eq!(diff.stable, 1);
-        assert!(diff.new.is_empty());
-        assert!(diff.not_seen.is_empty());
-        assert!(diff.changed.is_empty());
-        assert!(diff.uncertain_matches.is_empty());
+        assert_eq!(diff.stable_count(), 1);
+        assert!(diff.keys_of(ScanComparisonClass::New).is_empty());
+        assert!(diff.keys_of(ScanComparisonClass::Resolved).is_empty());
+        assert!(diff.keys_of(ScanComparisonClass::NotRescanned).is_empty());
+        assert!(diff.changed().is_empty());
+        assert!(diff.comparison.uncertain.is_empty());
         let summary = diff.decision_summary.as_ref().expect("decision summary");
         assert_eq!(summary.identities, 1);
         assert_eq!(summary.with_stored_decision, 0);
@@ -1318,46 +1320,98 @@ mod tests {
         );
     }
 
+    fn diff_run_with_findings(
+        store: &FindingStore,
+        target: &Path,
+        run_id: &str,
+        findings: &[Finding],
+    ) {
+        // A real run materializes its artifact directory at start; without it
+        // the run's scan scope reads as unknown and nothing may be retired.
+        std::fs::create_dir_all(kuzushi_core::run_dir(target, run_id)).unwrap();
+        store.record_run_started(run_id, target, "running").unwrap();
+        for finding in findings {
+            store.insert_finding(run_id, finding).unwrap();
+        }
+        store
+            .record_run_finished(run_id, "completed", findings.len())
+            .unwrap();
+    }
+
     #[test]
-    fn runs_diff_classifies_new_not_seen_changed_and_stable_findings() {
+    fn runs_diff_classifies_new_resolved_changed_and_stable_findings() {
+        use kuzushi_core::findings::ScanComparisonClass;
         let temp = tempfile::tempdir().unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-a",
-            serde_json::json!([
-                {"fingerprint": "absent", "severity": "high", "confidence": "high"},
-                {"identityId": "fi_drift", "fingerprint": "drift-old", "severity": "medium", "confidence": "low", "triage": {"verdict": "needs_more_info"}},
-                {"identityId": "fi_stable", "fingerprint": "stable-old", "severity": "low", "confidence": 0.5}
-            ]),
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let absent = Finding::new_tool(
+            "semgrep",
+            "demo.absent",
+            "src/a.rs",
+            5,
+            Some(5),
+            Severity::High,
+            "resolved by the compare run",
         );
-        write_result_findings_snapshot(
-            temp.path(),
+        let drift_before = Finding::new_tool(
+            "semgrep",
+            "demo.drift",
+            "src/b.rs",
+            10,
+            Some(10),
+            Severity::Medium,
+            "severity drifts",
+        );
+        let mut drift_after = drift_before.clone();
+        drift_after.severity = Severity::High;
+        let steady = Finding::new_tool(
+            "semgrep",
+            "demo.steady",
+            "src/c.rs",
+            20,
+            Some(20),
+            Severity::Low,
+            "unchanged",
+        );
+        let fresh = Finding::new_tool(
+            "semgrep",
+            "demo.fresh",
+            "src/d.rs",
+            30,
+            Some(30),
+            Severity::Critical,
+            "newly discovered",
+        );
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
+            "run-a",
+            &[absent, drift_before, steady.clone()],
+        );
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
             "run-b",
-            serde_json::json!([
-                {"fingerprint": "new", "severity": "critical", "confidence": "high"},
-                {"identityId": "fi_drift", "fingerprint": "drift-new", "severity": "high", "confidence": "medium", "triage": {"verdict": "true_positive"}},
-                {"identityId": "fi_stable", "fingerprint": "stable-new", "severity": "low", "confidence": 0.5}
-            ]),
+            &[drift_after, steady, fresh],
         );
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
-        assert_eq!(diff.base_status, "completed");
-        assert_eq!(diff.compare_status, "completed");
+        assert_eq!(diff.base_status(), "completed");
+        assert_eq!(diff.compare_status(), "completed");
         assert!(diff.warnings.is_empty());
-        assert_eq!(diff.new, vec!["new"]);
-        assert_eq!(diff.not_seen, vec!["absent"]);
-        assert_eq!(diff.stable, 1);
-        assert_eq!(diff.changed.len(), 1);
-        assert_eq!(diff.changed[0].finding_key, "fi_drift");
-        assert_eq!(diff.changed[0].before.severity.as_deref(), Some("medium"));
-        assert_eq!(diff.changed[0].after.severity.as_deref(), Some("high"));
+        assert_eq!(diff.keys_of(ScanComparisonClass::New).len(), 1);
         assert_eq!(
-            diff.changed[0].after.verdict.as_deref(),
-            Some("true_positive")
+            diff.keys_of(ScanComparisonClass::Resolved).len(),
+            1,
+            "same-target completed semgrep re-scan proves absence"
         );
+        assert!(diff.keys_of(ScanComparisonClass::NotRescanned).is_empty());
+        assert_eq!(diff.stable_count(), 1);
+        let changed = diff.changed();
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].before.severity.as_deref(), Some("medium"));
+        assert_eq!(changed[0].after.severity.as_deref(), Some("high"));
     }
 
     #[test]
@@ -1366,100 +1420,126 @@ mod tests {
 
         let error = runs_diff(target.path(), "../outside", "run-safe").unwrap_err();
 
-        assert!(error.to_string().contains("unsafe"));
+        assert!(error.to_string().contains("run id"), "{error:#}");
     }
 
-    #[cfg(unix)]
     #[test]
-    fn runs_diff_rejects_symlinked_run_directory() {
-        use std::os::unix::fs::symlink;
-
+    fn runs_diff_requires_a_recorded_findings_database() {
         let target = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        std::fs::write(
-            outside.path().join("result.json"),
-            r#"{"ok":true,"data":{"coreFindings":[]}}"#,
-        )
-        .unwrap();
-        let runs = kuzushi_core::runs_root(target.path());
-        std::fs::create_dir_all(&runs).unwrap();
-        symlink(outside.path(), runs.join("run-link")).unwrap();
 
-        let error = runs_diff(target.path(), "run-link", "run-link").unwrap_err();
+        let error = runs_diff(target.path(), "run-a", "run-b").unwrap_err();
 
-        assert!(error.to_string().contains("unsafe"));
-        assert!(outside.path().join("result.json").is_file());
+        assert!(
+            error
+                .to_string()
+                .contains("Run a scan against this target first"),
+            "{error:#}"
+        );
     }
 
     #[test]
-    fn runs_diff_preserves_completed_status() {
+    fn runs_diff_reports_not_rescanned_when_the_engine_did_not_rerun() {
+        use kuzushi_core::findings::ScanComparisonClass;
         let temp = tempfile::tempdir().unwrap();
-        write_run_summary(
-            temp.path(),
-            &summary_started_at_with_status("run-a", 1_000_000, "completed"),
-        )
-        .unwrap();
-        write_run_summary(
-            temp.path(),
-            &summary_started_at_with_status("run-b", 1_000_100, "completed"),
-        )
-        .unwrap();
-        write_result_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
-        write_result_findings_snapshot(temp.path(), "run-b", serde_json::json!([]));
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
+            "run-a",
+            &[Finding::new_tool(
+                "semgrep",
+                "demo.gone",
+                "src/a.rs",
+                5,
+                Some(5),
+                Severity::High,
+                "semgrep-only finding",
+            )],
+        );
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
+            "run-b",
+            &[Finding::new_tool(
+                "codeql",
+                "cql.rule",
+                "src/b.rs",
+                9,
+                Some(9),
+                Severity::Low,
+                "codeql-only rescan",
+            )],
+        );
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
-        assert_eq!(diff.base_status, "completed");
-        assert_eq!(diff.compare_status, "completed");
-        assert!(diff.warnings.is_empty(), "{:?}", diff.warnings);
+        assert!(diff.keys_of(ScanComparisonClass::Resolved).is_empty());
+        let not_rescanned = diff.not_rescanned();
+        assert_eq!(not_rescanned.len(), 1);
+        assert_eq!(
+            not_rescanned[0].1,
+            "no run evidence for engine semgrep in the compare scan"
+        );
+        let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(
+            plain.contains("Not rescanned (absence unproven):"),
+            "{plain}"
+        );
+        assert!(
+            plain.contains("no run evidence for engine semgrep in the compare scan"),
+            "{plain}"
+        );
+    }
+
+    /// Two findings that look identical (tool/rule/file/title) but carry
+    /// different fingerprints AND different dedup buckets, so no identity
+    /// tier converges them: the honest answer is `uncertain`, not
+    /// resolved-plus-new.
+    fn uncertain_pair() -> (Finding, Finding) {
+        let mut before = Finding::new_tool(
+            "semgrep",
+            "demo.sql",
+            "src/db.rs",
+            20,
+            Some(20),
+            Severity::Medium,
+            "tainted query built from request input",
+        );
+        before.title = "line shifted item".to_string();
+        before.fingerprint = "fp3_forced_before".to_string();
+        let mut after = Finding::new_tool(
+            "semgrep",
+            "demo.sql",
+            "src/db.rs",
+            60,
+            Some(60),
+            Severity::High,
+            "query concatenates attacker-controlled parameters",
+        );
+        after.title = "line shifted item".to_string();
+        after.fingerprint = "fp3_forced_after".to_string();
+        (before, after)
     }
 
     #[test]
     fn runs_diff_exposes_unique_uncertain_identity_matches() {
+        use kuzushi_core::findings::ScanComparisonClass;
         let temp = tempfile::tempdir().unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-a",
-            serde_json::json!([
-                {
-                    "fingerprint": "line-old",
-                    "ruleId": "demo.sql",
-                    "title": "line shifted item",
-                    "severity": "medium",
-                    "confidence": "low",
-                    "filePath": "src/db.rs",
-                    "startLine": 20,
-                    "tool": "semgrep"
-                }
-            ]),
-        );
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-b",
-            serde_json::json!([
-                {
-                    "fingerprint": "line-new",
-                    "ruleId": "demo.sql",
-                    "title": "line shifted item",
-                    "severity": "high",
-                    "confidence": "medium",
-                    "filePath": "src/db.rs",
-                    "startLine": 24,
-                    "tool": "semgrep"
-                }
-            ]),
-        );
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let (before, after) = uncertain_pair();
+        diff_run_with_findings(&store, workspace.root(), "run-a", &[before]);
+        diff_run_with_findings(&store, workspace.root(), "run-b", &[after]);
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
-        assert!(diff.new.is_empty());
-        assert!(diff.not_seen.is_empty());
-        assert_eq!(diff.uncertain_matches.len(), 1);
-        let uncertain = &diff.uncertain_matches[0];
-        assert_eq!(uncertain.base_finding_key, "line-old");
-        assert_eq!(uncertain.compare_finding_key, "line-new");
+        assert!(diff.keys_of(ScanComparisonClass::New).is_empty());
+        assert!(diff.keys_of(ScanComparisonClass::Resolved).is_empty());
+        assert!(diff.keys_of(ScanComparisonClass::NotRescanned).is_empty());
+        assert_eq!(diff.comparison.uncertain.len(), 1);
+        let uncertain = &diff.comparison.uncertain[0];
+        assert_ne!(uncertain.base_key, uncertain.compare_key);
         assert_eq!(uncertain.before.severity.as_deref(), Some("medium"));
         assert_eq!(uncertain.after.severity.as_deref(), Some("high"));
         assert!(uncertain
@@ -1469,7 +1549,6 @@ mod tests {
         let plain = runs_diff_output(&diff, false).unwrap();
         assert!(plain.contains("uncertain=1"), "{plain}");
         assert!(plain.contains("Uncertain matches:"), "{plain}");
-        assert!(plain.contains("line-old -> line-new"), "{plain}");
         assert!(!plain.contains("Fixed"), "{plain}");
 
         let json: serde_json::Value =
@@ -1477,7 +1556,7 @@ mod tests {
         assert_eq!(json["counts"]["uncertainMatches"], serde_json::json!(1));
         assert_eq!(
             json["uncertainMatches"][0]["baseFindingKey"],
-            serde_json::json!("line-old")
+            serde_json::json!(uncertain.base_key)
         );
     }
 
@@ -1486,52 +1565,28 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        store
-            .record_run_started("stored-decisions", workspace.root(), "completed")
-            .unwrap();
-        let reviewed_identity = stored_identity_with_review(
-            &store,
-            "stored-decisions",
-            "demo.sql",
-            TriageVerdict::TruePositive,
-        );
-        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-a",
-            serde_json::json!([
-                {
-                    "identityId": reviewed_identity,
-                    "fingerprint": "line-old",
-                    "ruleId": "demo.sql",
-                    "title": "line shifted item",
-                    "severity": "medium",
-                    "filePath": "src/db.rs",
-                    "startLine": 20,
-                    "tool": "semgrep"
-                }
-            ]),
-        );
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-b",
-            serde_json::json!([
-                {
-                    "fingerprint": "line-new",
-                    "ruleId": "demo.sql",
-                    "title": "line shifted item",
-                    "severity": "high",
-                    "filePath": "src/db.rs",
-                    "startLine": 24,
-                    "tool": "semgrep"
-                }
-            ]),
-        );
+        let (before, after) = uncertain_pair();
+        diff_run_with_findings(&store, workspace.root(), "run-a", &[before.clone()]);
+        diff_run_with_findings(&store, workspace.root(), "run-b", &[after]);
+        // A stored decision on the base-side identity must not silently carry
+        // onto its uncertain counterpart in the compare run.
+        let base_row = store
+            .list_findings_for_scan_id("run-a")
+            .unwrap()
+            .pop()
+            .expect("base finding");
+        decision_command(
+            Some(temp.path().to_path_buf()),
+            base_row.fingerprint.clone(),
+            "confirmed".to_string(),
+            "operator reviewed the base observation".to_string(),
+            true,
+        )
+        .unwrap();
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
-        assert_eq!(diff.uncertain_matches.len(), 1);
+        assert_eq!(diff.comparison.uncertain.len(), 1);
         let summary = diff.decision_summary.as_ref().expect("decision summary");
         assert_eq!(summary.identities, 0);
         assert_eq!(summary.with_stored_decision, 0);
@@ -1544,32 +1599,47 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
-        store
-            .record_run_started("stored-decisions", workspace.root(), "completed")
-            .unwrap();
-        let carried = stored_identity_with_review(
-            &store,
-            "stored-decisions",
+        let carried = Finding::new_tool(
+            "semgrep",
             "demo.carried",
-            TriageVerdict::TruePositive,
+            "src/carried.rs",
+            5,
+            Some(5),
+            Severity::High,
+            "decision carries forward",
         );
-        let conflict = stored_identity_with_review(
-            &store,
-            "stored-decisions",
+        let mut conflict = Finding::new_tool(
+            "semgrep",
             "demo.conflict",
-            TriageVerdict::TruePositive,
+            "src/conflict.rs",
+            9,
+            Some(9),
+            Severity::High,
+            "snapshot disagrees with stored decision",
         );
-        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
-        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
-        write_result_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
-        write_result_findings_snapshot(
-            temp.path(),
+        conflict.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::FalsePositive,
+            confidence: 0.9,
+            rationale: "scanner triage disagrees".to_string(),
+            ..Default::default()
+        });
+        diff_run_with_findings(&store, workspace.root(), "run-a", &[]);
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
             "run-b",
-            serde_json::json!([
-                {"identityId": carried, "fingerprint": "carried", "severity": "high"},
-                {"identityId": conflict, "fingerprint": "conflict", "severity": "high", "triage": {"verdict": "false_positive"}}
-            ]),
+            &[carried.clone(), conflict.clone()],
         );
+        for reference in [&carried.fingerprint, &conflict.fingerprint] {
+            decision_command(
+                Some(temp.path().to_path_buf()),
+                reference.clone(),
+                "confirmed".to_string(),
+                "operator confirmed the finding".to_string(),
+                true,
+            )
+            .unwrap();
+        }
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
         let summary = diff.decision_summary.as_ref().expect("decision summary");
@@ -1629,39 +1699,12 @@ mod tests {
         assert_eq!(base_row.identity_id.as_deref(), Some(identity.as_str()));
         let compare_reference = compare_row.fingerprint.clone();
         drop(store);
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-a",
-            serde_json::json!([{
-                "identityId": identity.clone(),
-                "fingerprint": base.fingerprint,
-                "ruleId": base.rule_id,
-                "title": base.title,
-                "severity": "medium",
-                "filePath": base.file_path,
-                "startLine": base.start_line,
-                "tool": base.tool
-            }]),
-        );
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-b",
-            serde_json::json!([{
-                "identityId": identity.clone(),
-                "fingerprint": compare.fingerprint,
-                "ruleId": compare.rule_id,
-                "title": compare.title,
-                "severity": "high",
-                "filePath": compare.file_path,
-                "startLine": compare.start_line,
-                "tool": compare.tool
-            }]),
-        );
 
         let before_review = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
-        assert_eq!(before_review.changed.len(), 1);
-        assert_eq!(before_review.changed[0].finding_key, identity);
+        let before_changed = before_review.changed();
+        assert_eq!(before_changed.len(), 1);
+        assert_eq!(before_changed[0].finding_key, identity);
         let before_summary = before_review
             .decision_summary
             .as_ref()
@@ -1703,81 +1746,75 @@ mod tests {
         );
     }
 
-    fn stored_identity_with_review(
-        store: &FindingStore,
-        run_id: &str,
-        rule_id: &str,
-        verdict: TriageVerdict,
-    ) -> String {
-        let finding = Finding::new_semgrep(
-            rule_id,
-            "src/app.ts",
-            12,
-            Some(12),
-            Severity::High,
-            "reviewed finding",
+    #[test]
+    fn runs_diff_never_resolves_against_a_failed_compare_run() {
+        use kuzushi_core::findings::ScanComparisonClass;
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
+            "run-base",
+            &[Finding::new_tool(
+                "semgrep",
+                "demo.gone",
+                "src/a.rs",
+                5,
+                Some(5),
+                Severity::High,
+                "vanished in a failed rescan",
+            )],
         );
-        let finding_id = store.insert_finding(run_id, &finding).unwrap();
         store
-            .record_triage_with_author(
-                finding_id,
-                &TriageOutcome {
-                    verdict,
-                    confidence: 0.95,
-                    rationale: "operator reviewed durable identity".to_string(),
-                    ..Default::default()
-                },
-                TriageAuthor::Human,
-            )
+            .record_run_started("run-failed", workspace.root(), "running")
             .unwrap();
         store
-            .list_findings_for_scan_id(run_id)
-            .unwrap()
-            .into_iter()
-            .find(|finding| finding.rule_id == rule_id)
-            .and_then(|finding| finding.identity_id)
-            .expect("stored identity")
-    }
+            .record_run_finished("run-failed", "failed", 0)
+            .unwrap();
 
-    #[test]
-    fn runs_diff_warns_that_not_seen_is_uncertain_for_partial_or_failed_runs() {
-        let temp = tempfile::tempdir().unwrap();
-        write_run_summary(
-            temp.path(),
-            &summary_started_at_with_status("run-partial", 1_000_000, "partial"),
-        )
-        .unwrap();
-        write_run_summary(
-            temp.path(),
-            &summary_started_at_with_status("run-failed", 1_000_100, "failed"),
-        )
-        .unwrap();
-        write_result_findings_snapshot(
-            temp.path(),
-            "run-partial",
-            serde_json::json!([{"fingerprint": "left-only", "severity": "high"}]),
-        );
-        write_result_findings_snapshot(temp.path(), "run-failed", serde_json::json!([]));
+        let diff = runs_diff(temp.path(), "run-base", "run-failed").unwrap();
 
-        let diff = runs_diff(temp.path(), "run-partial", "run-failed").unwrap();
-
-        assert_eq!(diff.base_status, "partial");
-        assert_eq!(diff.compare_status, "failed");
-        assert_eq!(diff.not_seen, vec!["left-only"]);
-        assert_eq!(diff.warnings.len(), 2);
-        assert!(
-            diff.warnings[0].contains("run-partial: run status partial")
-                && diff.warnings[0].contains("incomplete coverage")
-        );
-        assert!(
-            diff.warnings[1].contains("run-failed: run status failed")
-                && diff.warnings[1].contains("incomplete coverage")
-        );
+        assert_eq!(diff.base_status(), "completed");
+        assert_eq!(diff.compare_status(), "failed");
+        assert!(diff.keys_of(ScanComparisonClass::Resolved).is_empty());
+        let not_rescanned = diff.not_rescanned();
+        assert_eq!(not_rescanned.len(), 1);
+        assert_eq!(not_rescanned[0].1, "compare run status is failed");
 
         let plain = runs_diff_output(&diff, false).unwrap();
-        assert!(plain.contains("status: partial -> failed"), "{plain}");
-        assert!(plain.contains("warning: run-partial"), "{plain}");
+        assert!(plain.contains("status: completed -> failed"), "{plain}");
+        assert!(plain.contains("compare run status is failed"), "{plain}");
         assert!(!plain.contains("Fixed"), "{plain}");
+    }
+
+    /// A well-formed but unrecorded run id is a typo, not an empty scan: it
+    /// must error with the remedy instead of rendering a plausible diff.
+    #[test]
+    fn runs_diff_rejects_unrecorded_run_ids_with_a_remedy() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        diff_run_with_findings(
+            &store,
+            workspace.root(),
+            "run-recorded",
+            &[Finding::new_tool(
+                "semgrep",
+                "demo.only",
+                "src/a.rs",
+                5,
+                Some(5),
+                Severity::High,
+                "the one recorded run",
+            )],
+        );
+
+        let error = runs_diff(temp.path(), "run-recorded", "run-typo").unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("run-typo"), "{message}");
+        assert!(message.contains("kuzushi runs list"), "{message}");
     }
 
     #[test]
@@ -2372,28 +2409,6 @@ mod tests {
         summary.started_at_unix = started_at_unix;
         summary.completed_at_unix = Some(started_at_unix + 1);
         summary
-    }
-
-    fn summary_started_at_with_status(
-        run_id: &str,
-        started_at_unix: u64,
-        status: &str,
-    ) -> RunSummary {
-        let mut summary = summary_started_at(run_id, started_at_unix);
-        summary.status = status.to_string();
-        summary
-    }
-
-    fn write_result_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
-        std::fs::write(
-            run_dir(target, run_id).join("result.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "ok": true,
-                "data": { "coreFindings": value }
-            }))
-            .unwrap(),
-        )
-        .unwrap();
     }
 
     #[test]

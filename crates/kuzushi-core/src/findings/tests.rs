@@ -5,7 +5,7 @@ mod tests {
     };
     use super::super::persistence::merge_tool_list;
     use super::super::*;
-    use crate::run_artifacts::{RunSummary, RunTargetGitMetadata};
+    use crate::run_artifacts::{RunSummary, RunTargetGitMetadata, ScanEngineStageOutcome};
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::path::Path;
@@ -4147,5 +4147,619 @@ mod tests {
             "human Confirm must survive a later automated re-triage"
         );
         assert_eq!(state_filter_count(&store, "state:removed"), 0);
+    }
+
+    // ---- Reopen emitter + scan-to-scan comparison ----
+
+    fn completed_run(store: &FindingStore, run_id: &str, findings: &[Finding]) {
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        for finding in findings {
+            store.insert_finding(run_id, finding).unwrap();
+        }
+        store
+            .record_run_finished(run_id, "completed", findings.len())
+            .unwrap();
+    }
+
+    fn comparison_class_of(
+        comparison: &ScanRunComparison,
+        rule_fragment: &str,
+    ) -> (ScanComparisonClass, Option<String>) {
+        let row = comparison
+            .findings
+            .iter()
+            .find(|row| row.title.contains(rule_fragment) || row.stable_key.contains(rule_fragment))
+            .unwrap_or_else(|| panic!("no compared finding matching {rule_fragment}"));
+        (row.class, row.reason.clone())
+    }
+
+    #[test]
+    fn reobserving_a_stale_finding_records_a_durable_reopen() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let bug = semgrep_finding("demo.reopen", 10, "vanishes then returns");
+        completed_run(&store, "run-a", std::slice::from_ref(&bug));
+        // run-b re-runs semgrep without the bug → reconciler marks it stale.
+        completed_run(
+            &store,
+            "run-b",
+            &[semgrep_finding("demo.other", 20, "still here")],
+        );
+        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+
+        // run-c observes the bug again → the reopen must be durable, not a
+        // silent status flip.
+        completed_run(
+            &store,
+            "run-c",
+            &[bug, semgrep_finding("demo.other", 20, "still here")],
+        );
+
+        let reopened = store.reopened_stable_fps_for_run("run-c").unwrap();
+        assert_eq!(reopened.len(), 1, "one durable FindingReopened event");
+        assert_eq!(state_filter_count(&store, "state:removed"), 0);
+        assert_eq!(state_filter_count(&store, "state:open"), 2);
+    }
+
+    #[test]
+    fn comparison_classifies_new_persisting_resolved_and_reopened() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let returning = semgrep_finding("demo.reopen", 10, "vanishes then returns");
+        let persisting = semgrep_finding("demo.persist", 30, "still present");
+        completed_run(
+            &store,
+            "run-a",
+            &[returning.clone(), persisting.clone(), semgrep_finding("demo.gone", 40, "fixed later")],
+        );
+        completed_run(&store, "run-b", std::slice::from_ref(&persisting));
+        completed_run(
+            &store,
+            "run-c",
+            &[
+                returning,
+                persisting,
+                semgrep_finding("demo.fresh", 50, "brand new"),
+            ],
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-c").unwrap();
+
+        assert_eq!(comparison.base_status, "completed");
+        assert_eq!(comparison.compare_status, "completed");
+        assert_eq!(
+            comparison_class_of(&comparison, "brand new").0,
+            ScanComparisonClass::New
+        );
+        assert_eq!(
+            comparison_class_of(&comparison, "still present").0,
+            ScanComparisonClass::Persisting
+        );
+        assert_eq!(
+            comparison_class_of(&comparison, "vanishes then returns").0,
+            ScanComparisonClass::Reopened,
+            "a finding the reconciler staled and run-c re-observed is reopened"
+        );
+        let (class, reason) = comparison_class_of(&comparison, "fixed later");
+        assert_eq!(
+            class,
+            ScanComparisonClass::Resolved,
+            "same-target completed deterministic re-scan proves absence ({reason:?})"
+        );
+    }
+
+    /// The reopen key set belongs to the compare run, not to the pair. A
+    /// finding the base run never observed must read as `New` there, otherwise
+    /// the diff implies the base run had already seen (and lost) it.
+    #[test]
+    fn comparison_reports_new_not_reopened_when_the_base_run_never_observed_the_finding() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let exercised = semgrep_finding("demo.other", 20, "keeps semgrep exercised");
+        let late = semgrep_finding("demo.late", 10, "first seen after the base run");
+        completed_run(&store, "run-a", std::slice::from_ref(&exercised));
+        completed_run(&store, "run-b1", &[late.clone(), exercised.clone()]);
+        // run-b2 re-runs semgrep without `late` → the reconciler stales it.
+        completed_run(&store, "run-b2", std::slice::from_ref(&exercised));
+        completed_run(&store, "run-c", &[late, exercised]);
+        assert_eq!(
+            store.reopened_stable_fps_for_run("run-c").unwrap().len(),
+            1,
+            "run-c must emit the durable FindingReopened this test hinges on"
+        );
+
+        let from_blind_base = compare_scan_runs(&store, "run-a", "run-c").unwrap();
+        assert_eq!(
+            comparison_class_of(&from_blind_base, "first seen after the base run").0,
+            ScanComparisonClass::New,
+            "run-a never observed this finding, so it cannot have reopened"
+        );
+
+        let from_observing_base = compare_scan_runs(&store, "run-b1", "run-c").unwrap();
+        assert_eq!(
+            comparison_class_of(&from_observing_base, "first seen after the base run").0,
+            ScanComparisonClass::Reopened,
+            "run-b1 observed it before the stale, so the pair is a real reopen"
+        );
+    }
+
+    #[test]
+    fn comparison_refuses_run_ids_with_no_recorded_history() {
+        let store = FindingStore::open_in_memory().unwrap();
+        completed_run(
+            &store,
+            "run-a",
+            &[semgrep_finding("demo.only", 10, "the one recorded run")],
+        );
+
+        let error = compare_scan_runs(&store, "run-a", "run-ghost").unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains("run-ghost"), "{message}");
+        assert!(message.contains("kuzushi runs list"), "{message}");
+        assert!(
+            compare_scan_runs(&store, "run-ghost", "run-a").is_err(),
+            "an unrecorded base id must fail just as loudly"
+        );
+    }
+
+    #[test]
+    fn comparison_never_resolves_findings_from_agentic_engines() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let agentic = Finding::new_tool(
+            "taint-iris",
+            "flow.sqli",
+            "src/app.ts",
+            10,
+            Some(10),
+            Severity::High,
+            "agent-hunted flow",
+        );
+        completed_run(&store, "run-a", &[agentic]);
+        completed_run(
+            &store,
+            "run-b",
+            &[semgrep_finding("demo.other", 20, "unrelated")],
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "agent-hunted flow");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert!(
+            reason.unwrap().contains("not a deterministic engine"),
+            "reason must name the missing proof"
+        );
+    }
+
+    #[test]
+    fn comparison_never_resolves_against_an_uncompleted_compare_run() {
+        let store = FindingStore::open_in_memory().unwrap();
+        completed_run(
+            &store,
+            "run-a",
+            &[semgrep_finding("demo.gone", 10, "was here")],
+        );
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding("run-b", &semgrep_finding("demo.other", 20, "unrelated"))
+            .unwrap();
+        store.record_run_finished("run-b", "failed", 1).unwrap();
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "was here");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(reason.as_deref(), Some("compare run status is failed"));
+    }
+
+    #[test]
+    fn comparison_never_resolves_when_the_engine_did_not_rerun() {
+        let store = FindingStore::open_in_memory().unwrap();
+        completed_run(
+            &store,
+            "run-a",
+            &[semgrep_finding("demo.gone", 10, "semgrep saw this")],
+        );
+        let codeql = Finding::new_tool(
+            "codeql",
+            "cql.rule",
+            "src/other.rs",
+            5,
+            Some(5),
+            Severity::Medium,
+            "codeql-only rescan",
+        );
+        completed_run(&store, "run-b", &[codeql]);
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "semgrep saw this");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(
+            reason.as_deref(),
+            Some("no run evidence for engine semgrep in the compare scan")
+        );
+    }
+
+    fn write_scan_scope_receipt(root: &Path, run_id: &str, paths: &[&str]) {
+        write_scan_receipt(root, run_id, paths, &[]);
+    }
+
+    /// The durable Scan stage receipt a real scan leaves behind: the paths it
+    /// examined plus each engine's outcome, which is the only evidence a clean
+    /// engine re-run produces.
+    fn write_scan_receipt(
+        root: &Path,
+        run_id: &str,
+        paths: &[&str],
+        engines: &[(&str, ScanEngineStageOutcome)],
+    ) {
+        use crate::run_artifacts::{
+            PhaseStageOutcome, PhaseStageReceipt, ScanFindingDelta, ScanStageData, ScanStageEngine,
+            ScanStagePlan, ScanStageScope,
+        };
+        let engine_stages = engines
+            .iter()
+            .map(|(engine, outcome)| ScanStageEngine {
+                engine: (*engine).to_string(),
+                outcome: *outcome,
+                run_ref: None,
+                detail: None,
+            })
+            .collect();
+        let receipt = PhaseStageReceipt {
+            phase: crate::WorkflowPhase::Scan,
+            outcome: PhaseStageOutcome::Completed,
+            run_refs: vec![run_id.to_string()],
+            scan: Some(ScanStageData {
+                scope: ScanStageScope {
+                    target: "/tmp/repo".to_string(),
+                    paths: paths.iter().map(|path| path.to_string()).collect(),
+                },
+                plan: ScanStagePlan {
+                    selection: "explicit".to_string(),
+                    engines: vec!["semgrep".to_string()],
+                },
+                engines: engine_stages,
+                finding_delta: ScanFindingDelta::default(),
+                severity_counts: Vec::new(),
+                artifact_delta: Vec::new(),
+                duration_ms: 0,
+                cost: None,
+                target_snapshot: crate::workflow_attempts::PhaseTargetSnapshot {
+                    target: "/tmp/repo".to_string(),
+                    revision: None,
+                    dirty: false,
+                },
+            }),
+        };
+        let run_dir = root.join(".kuzushi/v3/runs").join(run_id);
+        std::fs::create_dir_all(&run_dir).unwrap();
+        std::fs::write(
+            run_dir.join("phase-stages.jsonl"),
+            format!("{}\n", serde_json::to_string(&receipt).unwrap()),
+        )
+        .unwrap();
+    }
+
+    /// A real on-disk workspace store: the reconciler and the comparison reach
+    /// run artifacts (run directories, Scan stage receipts) only through this
+    /// root, so scope proof can be exercised end to end.
+    fn workspace_store(root: &Path) -> FindingStore {
+        let v3 = root.join(".kuzushi/v3");
+        std::fs::create_dir_all(&v3).unwrap();
+        FindingStore::open(v3.join("index.sqlite3")).unwrap()
+    }
+
+    fn canonical_root(workspace: &tempfile::TempDir) -> std::path::PathBuf {
+        std::fs::canonicalize(workspace.path()).unwrap()
+    }
+
+    fn semgrep_finding_at(rule: &str, path: &str, title: &str) -> Finding {
+        Finding::new_tool("semgrep", rule, path, 10, Some(10), Severity::High, title)
+    }
+
+    /// The honesty fix for path-restricted re-scans: a re-run recording
+    /// `paths=["lib"]` in its Scan stage receipt re-examined only `lib/`, so
+    /// it may retire a vanished finding in `lib/` but never one in `src/`.
+    #[test]
+    fn path_restricted_rescan_cannot_retire_findings_outside_its_paths() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+
+        let in_src = semgrep_finding_at("demo.src", "src/app.ts", "outside the rescan paths");
+        let in_lib = semgrep_finding_at("demo.lib", "lib/util.ts", "inside the rescan paths");
+        completed_run(&store, "run-a", &[in_src, in_lib]);
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-b",
+                &semgrep_finding_at("demo.other", "lib/other.ts", "keeps semgrep exercised"),
+            )
+            .unwrap();
+        write_scan_scope_receipt(&root, "run-b", &["lib"]);
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:removed"),
+            1,
+            "only the lib/ finding may be retired"
+        );
+        assert_eq!(
+            state_filter_count(&store, "state:open"),
+            2,
+            "src/ finding stays open: the rescan never re-examined src/"
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+        let (class, reason) = comparison_class_of(&comparison, "outside the rescan paths");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(
+            reason.as_deref(),
+            Some("finding path is outside the compare scan's paths")
+        );
+        let (class, _) = comparison_class_of(&comparison, "inside the rescan paths");
+        assert_eq!(class, ScanComparisonClass::Resolved);
+    }
+
+    const SCOPE_UNKNOWN_REASON: &str =
+        "compare run scope is unknown (run artifacts missing or unreadable)";
+
+    /// A scoped re-run stays scoped even after `kz runs prune` deletes its
+    /// artifacts: the observations survive the prune, so reading a missing run
+    /// directory as "whole target" would fabricate a Resolved.
+    #[test]
+    fn pruning_the_compare_runs_artifacts_never_upgrades_a_scoped_rescan_to_whole_target() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        let in_src = semgrep_finding_at("demo.src", "src/app.ts", "outside the rescan paths");
+        completed_run(&store, "run-a", &[in_src]);
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-b",
+                &semgrep_finding_at("demo.other", "lib/other.ts", "keeps semgrep exercised"),
+            )
+            .unwrap();
+        write_scan_scope_receipt(&root, "run-b", &["lib"]);
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+        std::fs::remove_dir_all(crate::run_artifacts::run_dir(&root, "run-b")).unwrap();
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "outside the rescan paths");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(reason.as_deref(), Some(SCOPE_UNKNOWN_REASON));
+    }
+
+    #[test]
+    fn a_completed_run_directory_without_a_scan_receipt_still_means_whole_target() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        completed_run(
+            &store,
+            "run-a",
+            &[semgrep_finding_at("demo.gone", "src/app.ts", "vanished")],
+        );
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-b",
+                &semgrep_finding_at("demo.other", "lib/other.ts", "keeps semgrep exercised"),
+            )
+            .unwrap();
+        // A single-tool run materializes its directory but writes no Scan receipt.
+        std::fs::create_dir_all(crate::run_artifacts::run_dir(&root, "run-b")).unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "vanished");
+        assert_eq!(
+            class,
+            ScanComparisonClass::Resolved,
+            "a receipt-less run directory means the whole target ({reason:?})"
+        );
+    }
+
+    #[test]
+    fn a_rescan_whose_run_artifacts_are_missing_retires_nothing() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        completed_run(
+            &store,
+            "run-a",
+            &[semgrep_finding_at("demo.gone", "src/app.ts", "vanished")],
+        );
+
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-b",
+                &semgrep_finding_at("demo.other", "lib/other.ts", "keeps semgrep exercised"),
+            )
+            .unwrap();
+        write_scan_scope_receipt(&root, "run-b", &[]);
+        std::fs::remove_dir_all(crate::run_artifacts::run_dir(&root, "run-b")).unwrap();
+        store.record_run_finished("run-b", "completed", 1).unwrap();
+
+        assert_eq!(
+            state_filter_count(&store, "state:removed"),
+            0,
+            "a re-run with no surviving artifacts proves no absence"
+        );
+        assert_eq!(state_filter_count(&store, "state:open"), 2);
+    }
+
+    /// A re-run that finds nothing leaves no observation, so the Scan receipt's
+    /// engine outcomes are the only evidence the engine ran at all. Without them
+    /// the flagship clean re-scan would read as "the engine never ran".
+    fn clean_semgrep_rerun(root: &Path, store: &FindingStore, outcome: ScanEngineStageOutcome) {
+        completed_run(
+            store,
+            "run-a",
+            &[semgrep_finding_at("demo.gone", "src/app.ts", "vanished in a clean rerun")],
+        );
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        write_scan_receipt(root, "run-b", &[], &[("semgrep", outcome)]);
+        store.record_run_finished("run-b", "completed", 0).unwrap();
+    }
+
+    #[test]
+    fn a_clean_engine_rerun_recorded_in_the_scan_receipt_resolves_its_vanished_findings() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        clean_semgrep_rerun(&root, &store, ScanEngineStageOutcome::Complete);
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "vanished in a clean rerun");
+        assert_eq!(
+            class,
+            ScanComparisonClass::Resolved,
+            "a completed engine stage is evidence it ran ({reason:?})"
+        );
+    }
+
+    #[test]
+    fn a_clean_engine_rerun_recorded_in_the_scan_receipt_retires_vanished_findings() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        clean_semgrep_rerun(&root, &store, ScanEngineStageOutcome::Complete);
+
+        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+        assert_eq!(state_filter_count(&store, "state:open"), 0);
+    }
+
+    #[test]
+    fn a_failed_engine_outcome_in_the_receipt_is_not_proof_the_engine_ran() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        clean_semgrep_rerun(&root, &store, ScanEngineStageOutcome::Failed);
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "vanished in a clean rerun");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(
+            reason.as_deref(),
+            Some("no run evidence for engine semgrep in the compare scan")
+        );
+        assert_eq!(
+            state_filter_count(&store, "state:open"),
+            1,
+            "a failed engine stage retires nothing"
+        );
+    }
+
+    /// Deduplication merges the tools of coalesced observations into one
+    /// comma-joined string, so absence is only proven when every component
+    /// engine is deterministic AND re-ran.
+    fn merged_tool_rescan(
+        root: &Path,
+        store: &FindingStore,
+        tool: &str,
+        engines: &[(&str, ScanEngineStageOutcome)],
+    ) {
+        let mut finding = semgrep_finding_at("demo.merged", "src/app.ts", "merged tool finding");
+        finding.tool = tool.to_string();
+        completed_run(store, "run-a", &[finding]);
+        store
+            .record_run_started("run-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        write_scan_receipt(root, "run-b", &[], engines);
+        store.record_run_finished("run-b", "completed", 0).unwrap();
+    }
+
+    #[test]
+    fn merged_tool_findings_resolve_only_when_every_component_engine_reran() {
+        let complete = tempfile::tempdir().unwrap();
+        let root = canonical_root(&complete);
+        let store = workspace_store(&root);
+        merged_tool_rescan(
+            &root,
+            &store,
+            "codeql,semgrep",
+            &[
+                ("codeql", ScanEngineStageOutcome::Complete),
+                ("semgrep", ScanEngineStageOutcome::Complete),
+            ],
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+        let (class, reason) = comparison_class_of(&comparison, "merged tool finding");
+        assert_eq!(class, ScanComparisonClass::Resolved, "{reason:?}");
+        assert_eq!(state_filter_count(&store, "state:removed"), 1);
+
+        let partial = tempfile::tempdir().unwrap();
+        let root = canonical_root(&partial);
+        let store = workspace_store(&root);
+        merged_tool_rescan(
+            &root,
+            &store,
+            "codeql,semgrep",
+            &[("semgrep", ScanEngineStageOutcome::Complete)],
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+        let (class, reason) = comparison_class_of(&comparison, "merged tool finding");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(
+            reason.as_deref(),
+            Some("no run evidence for engine codeql in the compare scan")
+        );
+        assert_eq!(state_filter_count(&store, "state:open"), 1);
+    }
+
+    #[test]
+    fn a_merged_tool_with_an_agentic_component_never_retires_a_finding() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = canonical_root(&workspace);
+        let store = workspace_store(&root);
+        merged_tool_rescan(
+            &root,
+            &store,
+            "semgrep,taint-iris",
+            &[
+                ("semgrep", ScanEngineStageOutcome::Complete),
+                ("taint-iris", ScanEngineStageOutcome::Complete),
+            ],
+        );
+
+        let comparison = compare_scan_runs(&store, "run-a", "run-b").unwrap();
+
+        let (class, reason) = comparison_class_of(&comparison, "merged tool finding");
+        assert_eq!(class, ScanComparisonClass::NotRescanned);
+        assert_eq!(
+            reason.as_deref(),
+            Some("taint-iris is not a deterministic engine; absence is not proof")
+        );
+        assert_eq!(
+            state_filter_count(&store, "state:open"),
+            1,
+            "one agentic component keeps the merged finding open"
+        );
     }
 }

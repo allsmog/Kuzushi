@@ -77,6 +77,18 @@ impl FindingStore {
         self.record_run_finished(id, status, findings_count)
     }
 
+    /// The recorded lifecycle status of a run, if the run is known.
+    pub(crate) fn run_status(&self, run_id: &str) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "select status from run_states where run_id = ?1",
+                params![run_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .context("Could not load run status")
+    }
+
     pub fn latest_run_id(&self) -> Result<Option<String>> {
         let mut stmt = self.conn.prepare(
             r#"

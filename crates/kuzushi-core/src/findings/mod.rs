@@ -11,9 +11,10 @@ pub(crate) mod test_support;
 mod tests;
 
 pub use application::{
-    finding_confidence_label, finding_cwe_label, finding_evidence_preview, finding_location,
-    finding_remediation_hint, finding_source_label, finding_verdict_label, project_finding,
-    severity_badge, severity_icon, FindingProjection,
+    compare_scan_runs, finding_confidence_label, finding_cwe_label, finding_evidence_preview,
+    finding_location, finding_remediation_hint, finding_source_label, finding_verdict_label,
+    project_finding, severity_badge, severity_icon, ComparedFinding, FindingProjection,
+    ScanComparisonClass, ScanFindingSignature, ScanRunComparison, ScanUncertainMatch,
 };
 pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
@@ -35,7 +36,10 @@ pub use domain::{
     StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VerificationProvenance,
     VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
 };
-pub(crate) use domain::{is_runtime_proof_state, now_isoish, safe_target_path};
+pub(crate) use domain::{
+    all_components_deterministic, is_deterministic_scanner, is_runtime_proof_state, now_isoish,
+    safe_target_path, tool_components,
+};
 pub use persistence::{
     threat_model_document_sha256, FindingStore, ModelRekeyRequest, ObservationSourceRef,
     SuppressionLifecycleEvent, ThreatModelVersionRecord,

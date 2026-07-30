@@ -1,9 +1,10 @@
 use super::*;
 use crate::content_store::ContentStore;
+use crate::event_log::EventKind;
 use crate::identity::{compute_observation_hash_v3, hash_parts, ObservationHashInput};
 use crate::storage_v3::writer_actor::{
-    FileFactWrite, ObservationWrite, SnapshotWrite, StorageWriterSession, WatcherCommand,
-    WriteReceipt, WriterCommand,
+    DecisionCommand, FileFactWrite, FindingLifecycleWrite, ObservationWrite, SnapshotWrite,
+    StorageWriterSession, WatcherCommand, WriteReceipt, WriterCommand,
 };
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -233,7 +234,34 @@ impl FindingStore {
         writer: &mut StorageWriterSession,
     ) -> Result<i64> {
         let commit = self.v3_observation_commit(scan_id, finding, outcome)?;
-        self.commit_v3_observation(commit, writer)
+        let reopen = self.reopen_write_for(scan_id, &commit.observation)?;
+        self.commit_v3_observation(commit, reopen, writer)
+    }
+
+    /// Re-observing a finding the reconciler had marked stale is a reopen, and
+    /// the transition must be durable: the observation projection alone would
+    /// flip `current_status` back to `open` silently, erasing the story that
+    /// the finding had disappeared and came back.
+    fn reopen_write_for(
+        &self,
+        scan_id: &str,
+        observation: &ObservationWrite,
+    ) -> Result<Option<FindingLifecycleWrite>> {
+        let statuses = self.current_statuses_for(&[observation.stable_fp.clone()])?;
+        if statuses.get(&observation.stable_fp).map(String::as_str) != Some("stale") {
+            return Ok(None);
+        }
+        Ok(Some(FindingLifecycleWrite {
+            event_kind: EventKind::FindingReopened,
+            stable_fp: observation.stable_fp.clone(),
+            reason: Some("rescan-reobserved".to_string()),
+            actor: "finding-store".to_string(),
+            run_id: Some(scan_id.to_string()),
+            suppression: None,
+            tool: Some(observation.tool.clone()),
+            last_seen_run_id: None,
+            reconciled_against_run_id: Some(scan_id.to_string()),
+        }))
     }
 
     fn v3_observation_commit(
@@ -277,9 +305,10 @@ impl FindingStore {
     fn commit_v3_observation(
         &self,
         commit: ObservationCommit,
+        reopen: Option<FindingLifecycleWrite>,
         writer: &mut StorageWriterSession,
     ) -> Result<i64> {
-        let receipts = writer.commit_many(observation_commands(commit))?;
+        let receipts = writer.commit_many(observation_commands(commit, reopen))?;
         projected_finding_id_from_receipts(receipts)
     }
 
@@ -315,7 +344,7 @@ impl FindingStore {
         )))
     }
 
-    fn v3_workspace_root(&self) -> Option<PathBuf> {
+    pub(in crate::findings::persistence::open) fn v3_workspace_root(&self) -> Option<PathBuf> {
         let v3_dir = self.db_path.as_ref()?.parent()?;
         let state_root = v3_dir.parent()?;
         if state_root.file_name()? != ".kuzushi" {
@@ -472,7 +501,10 @@ fn run_snapshot_hash(scan_id: &str) -> String {
     )
 }
 
-fn observation_commands(commit: ObservationCommit) -> Vec<WriterCommand> {
+fn observation_commands(
+    commit: ObservationCommit,
+    reopen: Option<FindingLifecycleWrite>,
+) -> Vec<WriterCommand> {
     let mut commands = Vec::new();
     if let Some(provenance) = commit.provenance {
         commands.push(WriterCommand::Watcher(WatcherCommand::SnapshotIndexed(
@@ -485,6 +517,9 @@ fn observation_commands(commit: ObservationCommit) -> Vec<WriterCommand> {
     commands.push(WriterCommand::Watcher(WatcherCommand::FindingObservation(
         commit.observation,
     )));
+    commands.extend(
+        reopen.map(|write| WriterCommand::Decision(DecisionCommand::RecordFindingLifecycle(write))),
+    );
     commands
 }
 

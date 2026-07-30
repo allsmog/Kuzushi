@@ -40,6 +40,8 @@ fn prepare_triage_run<'a>(
     apply_threat_model_triage_context(&mut input, workspace.root());
     emit_triage_start(ctx, &input);
     let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
+    input.suppression_feedback =
+        suppression_feedback::suppression_feedback_notes(workspace, &findings)?;
     emit_triage_loaded(ctx, findings.len(), missing_fingerprints.len());
     Ok(PreparedTriageRun {
         workspace,

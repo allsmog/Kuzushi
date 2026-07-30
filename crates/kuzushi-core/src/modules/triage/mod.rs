@@ -23,6 +23,7 @@ mod dedupe;
 mod from_tool_input;
 mod parse_triage_prompt_template;
 mod run_triage;
+pub(in crate::modules) mod suppression_feedback;
 #[cfg(test)]
 mod tests;
 mod triage_cost_cap_reached;
