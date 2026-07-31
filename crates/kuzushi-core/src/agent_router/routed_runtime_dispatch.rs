@@ -70,6 +70,16 @@ impl<'a> RoutedRuntime<'a> {
             .or_else(|| self.router.default_model().map(str::to_string))
     }
 
+    /// Resolve a role's model ONLY from explicitly configured sources — the
+    /// `MODEL_<ROLE>` option override and the models.toml route. It never falls
+    /// through to the operator default or the router default, so a tie-break
+    /// escalation is refused (returns `None`) unless the operator named a model
+    /// for that role. This is the no-silent-fallback guarantee for escalation.
+    pub fn explicit_role_model(&self, role: AgentRole) -> Option<String> {
+        self.option_override_model(role, 0)
+            .or_else(|| self.router_pick_model(role, 0))
+    }
+
     pub fn resolve_model_for_role(
         &self,
         role: AgentRole,

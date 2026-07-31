@@ -22,9 +22,14 @@ pub(crate) fn stamp_provenance(document: &mut Value, target: &Path, pipeline: &s
 /// `seeded_from` is the live model at build time (None for fresh or first
 /// builds); the caller reads it before the new document overwrites it, so
 /// this stays pure.
+/// `seed_mode` is the OBSERVED mode — what actually reached the prompt.
+/// `seed_mode_requested` is stamped only when the request differed, so a run
+/// whose request could not be honored (a first build asking to seed, an
+/// explicit sources list excluding the model) stays auditable in both terms.
 pub(crate) fn stamp_seed_lineage(
     document: &mut Value,
     seed_mode: &str,
+    seed_mode_requested: Option<&str>,
     seeded_from: Option<&Value>,
 ) {
     let summary = seeded_from.map(seeded_from_summary);
@@ -32,6 +37,9 @@ pub(crate) fn stamp_seed_lineage(
         return;
     };
     provenance.insert("seedMode".to_string(), json!(seed_mode));
+    if let Some(requested) = seed_mode_requested {
+        provenance.insert("seedModeRequested".to_string(), json!(requested));
+    }
     if let Some(summary) = summary {
         provenance.insert("seededFrom".to_string(), summary);
     }
@@ -45,6 +53,33 @@ fn seeded_from_summary(previous: &Value) -> Value {
             .unwrap_or("unknown"),
         "sha256": crate::findings::threat_model_document_sha256(previous),
     })
+}
+
+/// Overwrite `provenance.sources` with the loader's system-attested record of
+/// what the build consumed.
+///
+/// The model is asked to describe its own inputs and cannot be trusted to: an
+/// observed build echoed the untrusted-content fence delimiter
+/// (`UNTRUSTED_REPO_BEGIN`) into this field. When `record_model_claim` is set
+/// and the model claimed something different, the claim is preserved verbatim
+/// under `modelClaimedSources` so it stays inspectable without being fact.
+/// Refine passes `false`: the value it inherits is a previous build's system
+/// stamp, not a fresh model claim.
+pub(crate) fn stamp_source_provenance(
+    document: &mut Value,
+    sources: Value,
+    record_model_claim: bool,
+) {
+    let Some(provenance) = provenance_object(document) else {
+        return;
+    };
+    let claimed = provenance.get("sources").cloned();
+    if record_model_claim {
+        if let Some(claimed) = claimed.filter(|claimed| *claimed != sources) {
+            provenance.insert("modelClaimedSources".to_string(), claimed);
+        }
+    }
+    provenance.insert("sources".to_string(), sources);
 }
 
 fn provenance_object(document: &mut Value) -> Option<&mut Map<String, Value>> {
@@ -90,7 +125,7 @@ mod tests {
     fn seed_lineage_records_mode_and_seeded_from_identity() {
         let previous = json!({"methodology": "pasta", "threats": []});
         let mut document = json!({});
-        stamp_seed_lineage(&mut document, "seeded", Some(&previous));
+        stamp_seed_lineage(&mut document, "seeded", None, Some(&previous));
         assert_eq!(document["provenance"]["seedMode"], json!("seeded"));
         assert_eq!(
             document["provenance"]["seededFrom"]["methodology"],
@@ -105,9 +140,18 @@ mod tests {
     #[test]
     fn fresh_seed_lineage_records_mode_without_seeded_from() {
         let mut document = json!({});
-        stamp_seed_lineage(&mut document, "fresh", None);
+        stamp_seed_lineage(&mut document, "fresh", None, None);
         assert_eq!(document["provenance"]["seedMode"], json!("fresh"));
         assert!(document["provenance"].get("seededFrom").is_none());
+        assert!(document["provenance"].get("seedModeRequested").is_none());
+    }
+
+    #[test]
+    fn a_request_that_could_not_be_honored_is_recorded_alongside_the_observed_mode() {
+        let mut document = json!({});
+        stamp_seed_lineage(&mut document, "fresh", Some("seeded"), None);
+        assert_eq!(document["provenance"]["seedMode"], json!("fresh"));
+        assert_eq!(document["provenance"]["seedModeRequested"], json!("seeded"));
     }
 
     #[test]
@@ -116,5 +160,47 @@ mod tests {
         let mut document = json!([]);
         stamp_provenance(&mut document, temp.path(), "single");
         assert_eq!(document, json!([]));
+    }
+
+    fn system_sources() -> Value {
+        json!([{"kind": "artifact", "label": "context", "status": "loaded"}])
+    }
+
+    #[test]
+    fn model_claimed_sources_are_demoted_not_trusted() {
+        // The observed forgery: the model echoed the untrusted-content fence
+        // delimiter into the field meant to record what the build consumed.
+        let mut document = json!({
+            "provenance": {"sources": ["UNTRUSTED_REPO_BEGIN", "attack-surface map"]},
+        });
+        stamp_source_provenance(&mut document, system_sources(), true);
+        assert_eq!(document["provenance"]["sources"], system_sources());
+        assert_eq!(
+            document["provenance"]["modelClaimedSources"],
+            json!(["UNTRUSTED_REPO_BEGIN", "attack-surface map"])
+        );
+    }
+
+    #[test]
+    fn refine_does_not_demote_an_inherited_system_stamp() {
+        let mut document = json!({"provenance": {"sources": ["stale system row"]}});
+        stamp_source_provenance(&mut document, system_sources(), false);
+        assert_eq!(document["provenance"]["sources"], system_sources());
+        assert!(document["provenance"].get("modelClaimedSources").is_none());
+    }
+
+    #[test]
+    fn matching_claim_is_not_recorded_as_a_separate_row() {
+        let mut document = json!({"provenance": {"sources": system_sources()}});
+        stamp_source_provenance(&mut document, system_sources(), true);
+        assert!(document["provenance"].get("modelClaimedSources").is_none());
+    }
+
+    #[test]
+    fn absent_provenance_is_created_with_system_sources() {
+        let mut document = json!({});
+        stamp_source_provenance(&mut document, system_sources(), true);
+        assert_eq!(document["provenance"]["sources"], system_sources());
+        assert!(document["provenance"].get("modelClaimedSources").is_none());
     }
 }

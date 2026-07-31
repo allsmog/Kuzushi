@@ -1,4 +1,5 @@
 use crate::app::line_editor::{command_completion_head, subsequence_score};
+use crate::app::ShellEffect;
 use crate::commands::shell_command_specs;
 use crate::{ShellApp, ShellView};
 
@@ -25,12 +26,24 @@ pub(crate) struct PaletteEntry {
     pub(crate) description: String,
     pub(crate) insert_text: String,
     pub(crate) kind: PaletteEntryKind,
+    /// Section heading the entry groups under while browsing (empty query).
+    pub(crate) category: &'static str,
+    /// Shortest invocation form, shown as the row's discoverability hint
+    /// (`?` for help, `m` for modules). Empty when the label is the shortest.
+    pub(crate) hint: String,
+    /// Whether Enter dispatches immediately. True for commands with no
+    /// argument grammar and for module navigation; tools insert `run <tool> `
+    /// so the operator confirms or extends the dispatch.
+    pub(crate) executes: bool,
     aliases: Vec<String>,
 }
 
 impl ShellApp {
     pub(crate) fn open_command_palette(&mut self) {
-        self.router.command_palette_mut().reset();
+        let entries = self.build_palette_entries();
+        let palette = self.router.command_palette_mut();
+        palette.reset();
+        palette.set_entries(entries);
         self.set_shell_view(ShellView::CommandPalette);
     }
 
@@ -47,16 +60,21 @@ impl ShellApp {
         self.router.command_palette_mut().move_cursor(delta, len);
     }
 
-    pub(crate) fn accept_palette(&mut self) {
+    /// Enter on a zero-argument command or module dispatches it directly —
+    /// the palette is a command surface, not a typing aid. Arg-taking entries
+    /// load the prompt so the operator finishes the invocation.
+    pub(crate) fn accept_palette(&mut self) -> Vec<ShellEffect> {
         let cursor = self.router.command_palette().cursor();
-        let insert_text = self
-            .palette_matches()
-            .get(cursor)
-            .map(|entry| entry.insert_text.clone());
-        if let Some(insert_text) = insert_text {
-            self.set_input(insert_text);
-        }
+        let Some(entry) = self.palette_matches().get(cursor).cloned() else {
+            self.close_palette();
+            return Vec::new();
+        };
         self.close_palette();
+        if entry.executes {
+            return self.reduce_submitted_line(&entry.insert_text).effects;
+        }
+        self.set_input(entry.insert_text);
+        Vec::new()
     }
 
     pub(crate) fn close_palette(&mut self) {
@@ -64,13 +82,14 @@ impl ShellApp {
     }
 
     pub(crate) fn palette_matches(&self) -> Vec<PaletteEntry> {
-        let query = self.router.command_palette().query();
-        let mut scored = self
-            .palette_entries()
-            .into_iter()
+        let palette = self.router.command_palette();
+        let query = palette.query();
+        let mut scored = palette
+            .entries()
+            .iter()
             .enumerate()
             .filter_map(|(index, entry)| {
-                palette_score(&entry, query).map(|score| (score, index, entry))
+                palette_score(entry, query).map(|score| (score, index, entry.clone()))
             })
             .collect::<Vec<_>>();
         scored.sort_by(|left, right| right.0.cmp(&left.0).then(left.1.cmp(&right.1)));
@@ -78,10 +97,11 @@ impl ShellApp {
     }
 
     pub(crate) fn palette_entry_count(&self) -> usize {
-        self.palette_entries().len()
+        self.router.command_palette().entries().len()
     }
 
-    fn palette_entries(&self) -> Vec<PaletteEntry> {
+    /// Snapshot taken once at palette open — never rebuilt per keystroke.
+    fn build_palette_entries(&self) -> Vec<PaletteEntry> {
         let mut entries = command_entries();
         entries.extend(self.registry().tools().map(tool_entry));
         entries.extend(self.registry().modules().map(module_entry));
@@ -91,15 +111,33 @@ impl ShellApp {
 
 fn command_entries() -> Vec<PaletteEntry> {
     shell_command_specs()
-        .map(|spec| PaletteEntry {
-            label: spec.command.to_string(),
-            description: spec.description.to_string(),
-            insert_text: command_completion_head(spec.command)
-                .unwrap_or_else(|| spec.command.to_string()),
-            kind: PaletteEntryKind::Command,
-            aliases: spec.aliases.iter().map(|alias| alias.to_string()).collect(),
+        .map(|spec| {
+            let head =
+                command_completion_head(spec.command).unwrap_or_else(|| spec.command.to_string());
+            PaletteEntry {
+                label: spec.command.to_string(),
+                description: spec.description.to_string(),
+                executes: spec.command == head,
+                insert_text: head,
+                kind: PaletteEntryKind::Command,
+                category: spec.category.label(),
+                hint: shortest_alias(spec.command, spec.aliases),
+                aliases: spec.aliases.iter().map(|alias| alias.to_string()).collect(),
+            }
         })
         .collect()
+}
+
+/// The shortest way to invoke the command, when shorter than the command
+/// itself — the palette doubles as alias discovery.
+fn shortest_alias(command: &str, aliases: &[&str]) -> String {
+    aliases
+        .iter()
+        .filter(|alias| !alias.starts_with('/'))
+        .min_by_key(|alias| alias.len())
+        .filter(|alias| alias.len() < command.len())
+        .map(|alias| alias.to_string())
+        .unwrap_or_default()
 }
 
 fn tool_entry(tool: &kuzushi_core::ToolDescriptor) -> PaletteEntry {
@@ -108,6 +146,9 @@ fn tool_entry(tool: &kuzushi_core::ToolDescriptor) -> PaletteEntry {
         description: tool.description.clone(),
         insert_text: format!("run {} ", tool.name),
         kind: PaletteEntryKind::Tool,
+        category: "TOOLS",
+        hint: String::new(),
+        executes: false,
         aliases: Vec::new(),
     }
 }
@@ -118,6 +159,9 @@ fn module_entry(module: &kuzushi_core::BuiltinModule) -> PaletteEntry {
         description: module.metadata().description.clone(),
         insert_text: format!("use {}", module.metadata().id),
         kind: PaletteEntryKind::Module,
+        category: "MODULES",
+        hint: String::new(),
+        executes: true,
         aliases: vec![module.metadata().name.clone()],
     }
 }

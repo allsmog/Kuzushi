@@ -7,7 +7,6 @@ impl ShellApp {
 
     pub(crate) fn tick_at(&mut self, now: Instant) -> bool {
         let mut changed = false;
-        changed |= self.expire_ctrl_c_arm(now);
         changed |= self.expire_stale_advisory(AdvisoryKind::Throttle, now);
         changed |= self.expire_stale_advisory(AdvisoryKind::Notice, now);
         changed |= self.advance_spinner(now);
@@ -74,17 +73,6 @@ impl ShellApp {
         true
     }
 
-    fn expire_ctrl_c_arm(&mut self, now: Instant) -> bool {
-        let Some(armed_at) = self.ctrl_c_armed_at() else {
-            return false;
-        };
-        if now.duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
-            return false;
-        }
-        self.set_ctrl_c_armed_at(None);
-        true
-    }
-
     fn expire_stale_advisory(&mut self, kind: AdvisoryKind, now: Instant) -> bool {
         let Some(since) = kind.since(self) else {
             return false;
@@ -142,12 +130,6 @@ impl ShellApp {
     pub fn spinner_glyph(&self) -> &'static str {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
         FRAMES[(self.ui().spinner_phase() as usize) % FRAMES.len()]
-    }
-
-    pub fn ctrl_c_armed(&self) -> bool {
-        self.ctrl_c_armed_at()
-            .map(|armed_at| Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW)
-            .unwrap_or(false)
     }
 
     pub fn set_throttle(&mut self, source: impl Into<String>, message: impl Into<String>) {

@@ -1,0 +1,42 @@
+# J46 — worklist verb + origin restore (keyless)  ⭐ release-blocking
+#
+# Keyless, deterministic. The `worklist` verb is a contextual-utility full-frame
+# deck: opening it captures the launch origin, and Esc restores that exact origin
+# (the non-nesting contract). Origin is pinned deterministically with `/setup`
+# (which always reopens Setup). The scene deck reads the run-artifact attack
+# surface, not the seeded context snapshot (see J43), so with no hydrated run the
+# deck honestly shows the `no risk worklist` guidance panel — the verb still lands
+# on the worklist page (exempt from the empty-page DFD redirect), never a fabricated
+# row. The seeded snapshot is included verbatim from J43 to prove a context snapshot
+# alone does not forge deck rows.
+#
+# Caveat: macOS keychain / OAuth-cached credentials cannot be masked by env-unset;
+# this journey needs no credential.
+name: the worklist verb opens the deck and Esc restores the exact origin
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Seed a context snapshot with an attack-surface map (verbatim from J43). The scene
+# deck reads the run-artifact surface, not this snapshot, so the deck stays empty.
+shell: mkdir -p @TMP_TARGET/.kuzushi && printf '{"attackSurfaceMap":{"rootName":"demo","surfaces":[{"id":"s1","kind":"http_route","path":"a.py","line":3,"language":"python","title":"t1","evidence":"e","risk":{"rank":1,"score":92,"tier":"critical","reasons":["cmd exec"]}},{"id":"s2","kind":"http_route","path":"b.py","line":5,"language":"python","title":"t2","evidence":"e","risk":{"rank":2,"score":70,"tier":"high","reasons":["authz"]}},{"id":"s3","kind":"http_route","path":"c.py","line":9,"language":"python","title":"t3","evidence":"e","risk":{"rank":3,"score":40,"tier":"medium","reasons":[]}}],"summary":{"total":3,"byKind":{},"byFile":{"a.py":1,"b.py":1,"c.py":1},"highRisk":2,"maxRiskScore":92,"byRiskTier":{}}}}' > @TMP_TARGET/.kuzushi/context-snapshot.json
+launch: --target @TMP_TARGET
+wait: 6
+# Pin a deterministic origin: /setup always reopens Setup explicitly.
+submit: setup
+wait-for: 15 READY THE MAP RUN
+snap: origin-setup
+expect: READY THE MAP RUN
+# The verb opens the full-frame worklist deck (rank rows, or the honest empty
+# guidance panel when no run-artifact surface is hydrated).
+submit: worklist
+wait-for: 15 no risk worklist
+snap: worklist-deck
+expect: no risk worklist
+expect: worklist:rank
+# Non-nesting contract: Esc restores the exact origin chrome, no cancellation.
+keys: Escape
+wait-for: 15 READY THE MAP RUN
+snap: origin-restored
+expect: READY THE MAP RUN
+ask: Opening the worklist deck captured the origin and Esc restored it exactly (Setup's READY THE MAP RUN chrome) — does the contextual-utility non-nesting contract hold, with no nested utility stack and no cancellation of engagement state?

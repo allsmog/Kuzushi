@@ -108,6 +108,7 @@ const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     cache_recon_snapshot,
     cache_exploit_chain_snapshot,
     cache_taint_flow_snapshot,
+    cache_worklist_snapshot,
     cache_trace_expansion_snapshot,
     cache_threat_hunt_snapshot,
     cache_agentic_sast_snapshot,
@@ -227,6 +228,27 @@ fn cache_taint_flow_snapshot(
     }
     app.domain_mut()
         .set_taint_flows(taint_flows_from_data(data));
+    true
+}
+
+/// Capture the `worklist:rank` tool output into app state so the auto-opened
+/// deck renders the tool's actual worklist — including the `deep`/systems `S`
+/// rows the Read-safe shell fold intentionally omits — instead of a fold that
+/// contradicts the run receipt. The tool serializes its `Worklist` directly as
+/// the result `data`.
+fn cache_worklist_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
+    if tool_name != "worklist:rank" {
+        return false;
+    }
+    // Bind the capture to the engagement it was computed for: its target root
+    // and the attack-surface artifact version at capture time. Without a target
+    // there is no engagement to render under, so the capture is dropped.
+    let Some(target) = app.target_owned() else {
+        return true;
+    };
+    let artifact_version = crate::ui_view_models::attack_surface_artifact_version(app);
+    app.domain_mut()
+        .set_worklist_snapshot(target, artifact_version, Some(data.clone()));
     true
 }
 

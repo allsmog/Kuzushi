@@ -15,22 +15,111 @@ pub(crate) fn threat_model_document_schema() -> Value {
                 "required": ["nodes", "flows", "trustBoundaries"],
                 "additionalProperties": true,
                 "properties": {
-                    "nodes": {"type": "array", "items": {"type": "object"}},
-                    "flows": {"type": "array", "items": {"type": "object"}},
-                    "trustBoundaries": {"type": "array", "items": {"type": "object"}}
+                    "nodes": object_array(dfd_node_schema()),
+                    "flows": object_array(dfd_flow_schema()),
+                    "trustBoundaries": object_array(dfd_boundary_schema())
                 }
             },
-            "threats": {"type": "array", "items": {"type": "object"}},
-            "assets": {"type": "array", "items": {"type": "object"}},
+            "threats": object_array(linked_row_schema(&["title"])),
+            "assets": object_array(linked_row_schema(&["asset"])),
             "deprioritized": {"type": "array", "items": {"type": "object"}},
             "openQuestions": {"type": "array", "items": {"type": "object"}},
             "recommendedMitigations": {"type": "array", "items": {"type": "object"}},
             "coverage": {"type": "object"},
             "provenance": {"type": "object"},
-            "attackSurface": {"type": "object"},
+            "attackSurface": attack_surface_schema(),
             "summary": {"type": "object"}
         }
     })
+}
+
+fn object_array(items: Value) -> Value {
+    json!({"type": "array", "items": items})
+}
+
+fn dfd_node_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "name", "type", "trustZone"],
+        "additionalProperties": true,
+        "properties": {
+            "id": nonempty_string_schema(),
+            "name": nonempty_string_schema(),
+            "type": nonempty_string_schema(),
+            "trustZone": nonempty_string_schema()
+        }
+    })
+}
+
+fn dfd_flow_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "sourceId", "targetId", "trustBoundaryIds"],
+        "additionalProperties": true,
+        "properties": {
+            "id": nonempty_string_schema(),
+            "sourceId": nonempty_string_schema(),
+            "targetId": nonempty_string_schema(),
+            "trustBoundaryIds": string_id_array_schema(false)
+        }
+    })
+}
+
+fn dfd_boundary_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["id", "name", "innerZone", "outerZone", "crossingFlowIds"],
+        "additionalProperties": true,
+        "properties": {
+            "id": nonempty_string_schema(),
+            "name": nonempty_string_schema(),
+            "innerZone": nonempty_string_schema(),
+            "outerZone": nonempty_string_schema(),
+            "crossingFlowIds": string_id_array_schema(false)
+        }
+    })
+}
+
+fn attack_surface_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+            "entryPoints": object_array(linked_row_schema(&["name"])),
+            "roleGates": object_array(linked_row_schema(&["check"])),
+            "externalSinks": object_array(linked_row_schema(&["name"])),
+            "trustedCallers": object_array(linked_row_schema(&["role"]))
+        }
+    })
+}
+
+fn linked_row_schema(extra_required: &[&str]) -> Value {
+    let mut required = vec!["id", "targetElementIds"];
+    required.extend_from_slice(extra_required);
+    json!({
+        "type": "object",
+        "required": required,
+        "additionalProperties": true,
+        "properties": {
+            "id": nonempty_string_schema(),
+            "targetElementIds": string_id_array_schema(true)
+        }
+    })
+}
+
+fn nonempty_string_schema() -> Value {
+    json!({"type": "string", "minLength": 1})
+}
+
+fn string_id_array_schema(required: bool) -> Value {
+    let mut schema = serde_json::Map::from_iter([
+        ("type".to_string(), json!("array")),
+        ("items".to_string(), nonempty_string_schema()),
+    ]);
+    if required {
+        schema.insert("minItems".to_string(), json!(1));
+    }
+    Value::Object(schema)
 }
 
 pub(crate) fn build_agent_prompt(
@@ -160,23 +249,26 @@ fn output_contract_section() -> &'static str {
 - dfd.nodes with id, type, name, description, trustZone
 - dfd.flows with id, description, sourceId, targetId, trustBoundaryIds
 - dfd.trustBoundaries with id, name, innerZone, outerZone, crossingFlowIds
+- Every id across dfd.nodes, dfd.flows, and dfd.trustBoundaries must be globally unique. Every sourceId, targetId, trustBoundaryIds item, and crossingFlowIds item must resolve to an emitted DFD element of the expected type.
 - threats with id, targetElementIds, category, title, description, actor, surface, asset, attackVector, preconditions, impact, likelihood, status, existingMitigations, missingMitigations, recommendedMitigation, relatedCwe, affectedFiles, evidence
   - actor is your judgment from the closed set: remote_unauth | remote_auth | adjacent_network | local_user | local_admin | supply_chain | insider
   - impact from: low | medium | high | critical | existential
   - likelihood from: very_rare | rare | possible | likely | almost_certain — score the residual likelihood after existing controls; evidence raises likelihood, it is not the threat
   - status from: unmitigated | partially_mitigated | mitigated | risk_accepted
   - do not emit displayId; display ids are assigned deterministically and persist across refines
-- assets with asset, description, sensitivity (low | medium | high | critical) for the data and capabilities an attacker would target
+- assets with id (A-*), targetElementIds, asset, description, sensitivity (low | medium | high | critical) for the data and capabilities an attacker would target
 - deprioritized with entryPoint or boundary, reason, and evidence when a covered surface has no material threat
 - openQuestions for uncertain architecture/security facts
 - provenance with source labels used and any source confidence notes
 - recommendedMitigations as structured rows {mitigation, threatIds, closesClass: yes|partial, effort: S|M|L} for class-level controls across related threats
 - coverage with entryPointsConsidered, entryPointsCovered, and gapFillMethod
 - attackSurface with the structured handoff to the taint-hunting pipeline (taint-iris-next consumes this directly):
-    - entryPoints: [{name (concrete function/handler symbol), trustZone, evidence (file:line or filename), description}]
-    - roleGates:   [{check (the privilege predicate, e.g. has_privs_of_role / superuser()), guarded (the API name behind the gate)}]
-    - externalSinks: [{name (concrete sink call e.g. dlopen / load_external_function / system / exec), category (dlopen|exec|filesystem|network|privesc), context}]
-    - trustedCallers: [{role, purpose}]
+- Every threat, asset, and attackSurface row must have a non-empty targetElementIds array containing only ids from dfd.nodes, dfd.flows, or dfd.trustBoundaries. A missing or dangling link invalidates the whole document.
+- Preserve each grounded attack-surface id (AS-*) verbatim. Give model-added rows stable type-prefixed ids: EP-* for added entry points, RG-* for role gates, ES-* for external sinks, and TC-* for trusted callers.
+    - entryPoints: [{id, targetElementIds, name (concrete function/handler symbol), kind, trustZone, evidence (file:line or filename), description, path, line, method, route}]
+    - roleGates:   [{id, targetElementIds, check (the privilege predicate, e.g. has_privs_of_role / superuser()), guarded (the API name behind the gate), evidence}]
+    - externalSinks: [{id, targetElementIds, name (concrete sink call e.g. dlopen / load_external_function / system / exec), category (dlopen|exec|filesystem|network|privesc), context, evidence}]
+    - trustedCallers: [{id, targetElementIds, role, purpose, evidence}]
   Use real symbols mined from the file inventory above; do not invent placeholder names."#
 }
 

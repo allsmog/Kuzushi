@@ -25,18 +25,21 @@ impl ShellApp {
         option: ResolvedToolOption,
         value: serde_json::Value,
     ) -> Vec<ShellEffect> {
-        let ToolOptionWriteTarget {
+        let SetToolOptionWriteTarget {
             scope,
             target,
             prefix,
-        } = tool_option_write_target(global, &option.tool_name, "set", "setg");
+            is_role_model,
+        } = set_tool_option_write_target(global, &option);
         self.option_store_mut().set_value(
             scope,
             target,
             option.canonical_name.clone(),
             value.clone(),
         );
-        self.clear_legacy_global_tool_option(global, &option.canonical_name);
+        if !is_role_model {
+            self.clear_legacy_global_tool_option(global, &option.canonical_name);
+        }
         self.router.set_options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
@@ -70,10 +73,23 @@ impl ShellApp {
             target,
             prefix,
         } = tool_option_write_target(global, &option.tool_name, "unset", "unsetg");
+        // Mirror the set path: `MODEL_<ROLE>` always writes to (Global, All), so
+        // the unset must target (Global, All) too — otherwise a plain `unset
+        // MODEL_<ROLE>` clears (Session, All), where nothing exists, and reports
+        // "was not set" while the live router binding the operator just created
+        // with plain `set` remains.
+        let is_role_model = role_model_option(&option.canonical_name).is_some();
+        let scope = if is_role_model {
+            OptionScope::Global
+        } else {
+            scope
+        };
+        let target = role_model_write_target(target, is_role_model);
         let removed = self
             .option_store_mut()
             .unset_value(scope, &target, &option.canonical_name);
-        let legacy_removed = self.clear_legacy_global_tool_option(global, &option.canonical_name);
+        let legacy_removed =
+            !is_role_model && self.clear_legacy_global_tool_option(global, &option.canonical_name);
         self.router.set_options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
@@ -153,7 +169,7 @@ impl ShellApp {
             canonical_name,
             serde_json::Value::Bool(value),
         );
-        refresh_auto_open_prefs_from_store(self);
+        refresh_ui_prefs_from_store(self);
         self.log(
             if global { "setg" } else { "set" },
             format!("{canonical_name} = {value}"),
@@ -173,7 +189,7 @@ impl ShellApp {
         let removed =
             self.option_store_mut()
                 .unset_value(scope, &OptionTarget::All, canonical_name);
-        refresh_auto_open_prefs_from_store(self);
+        refresh_ui_prefs_from_store(self);
         self.log(
             if global { "unsetg" } else { "unset" },
             if removed {
@@ -219,10 +235,27 @@ impl ShellApp {
     }
 }
 
+/// A `MODEL_<ROLE>` option maps to an agent-router role. These are cross-tool
+/// policy, not per-tool knobs, so they bind at `OptionTarget::All`.
+fn role_model_option(name: &str) -> Option<kuzushi_core::agent_router::AgentRole> {
+    let key = name.strip_prefix("MODEL_")?;
+    kuzushi_core::agent_router::AgentRole::from_key(&key.to_lowercase())
+}
+
+fn role_model_write_target(target: OptionTarget, is_role_model: bool) -> OptionTarget {
+    if is_role_model {
+        OptionTarget::All
+    } else {
+        target
+    }
+}
+
 fn canonical_shell_option(name: &str) -> Option<&'static str> {
     match name.trim() {
         UI_AUTO_OPEN_ACTIVITY_OPTION | "auto_open_activity" => Some(UI_AUTO_OPEN_ACTIVITY_OPTION),
         UI_AUTO_OPEN_VIZ_OPTION | "auto_open_viz" => Some(UI_AUTO_OPEN_VIZ_OPTION),
+        UI_RAIL_OPTION => Some(UI_RAIL_OPTION),
+        UI_NOTIFY_OPTION => Some(UI_NOTIFY_OPTION),
         _ => None,
     }
 }
@@ -237,6 +270,38 @@ struct ToolOptionWriteTarget {
     scope: OptionScope,
     target: OptionTarget,
     prefix: &'static str,
+}
+
+struct SetToolOptionWriteTarget {
+    scope: OptionScope,
+    target: OptionTarget,
+    prefix: &'static str,
+    is_role_model: bool,
+}
+
+/// `MODEL_<ROLE>` is cross-tool router policy, so a plain `set` is promoted to
+/// the durable `(Global, All)` binding the router actually reads. Ordinary
+/// options retain the requested session/global tool scope.
+fn set_tool_option_write_target(
+    global: bool,
+    option: &ResolvedToolOption,
+) -> SetToolOptionWriteTarget {
+    let write = tool_option_write_target(global, &option.tool_name, "set", "setg");
+    let is_role_model = role_model_option(&option.canonical_name).is_some();
+    if is_role_model {
+        return SetToolOptionWriteTarget {
+            scope: OptionScope::Global,
+            target: OptionTarget::All,
+            prefix: "setg",
+            is_role_model,
+        };
+    }
+    SetToolOptionWriteTarget {
+        scope: write.scope,
+        target: write.target,
+        prefix: write.prefix,
+        is_role_model,
+    }
 }
 
 fn tool_option_write_target(

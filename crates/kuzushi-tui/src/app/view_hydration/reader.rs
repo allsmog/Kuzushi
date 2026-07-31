@@ -99,6 +99,15 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         ViewHydrationKey::PromptMutations => Some(ViewHydrationValue::PromptMutations(
             prompt_mutations(target),
         )),
+        _ => read_project_analysis_value(target, key),
+    }
+}
+
+fn read_project_analysis_value(
+    target: &Path,
+    key: &ViewHydrationKey,
+) -> Option<ViewHydrationValue> {
+    match key {
         ViewHydrationKey::FindingPatchTruth {
             fingerprint,
             finding_scan_id,
@@ -108,6 +117,9 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
             fingerprint,
             finding_scan_id.as_deref(),
         )),
+        ViewHydrationKey::FindingAuditDataflow { fingerprint } => {
+            Some(read_finding_audit_dataflow(target, fingerprint))
+        }
         ViewHydrationKey::ScannedSnippet {
             stable_fp,
             scan_id,
@@ -118,11 +130,20 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
             scan_id.as_deref(),
             *focus_line,
         )),
+        _ => read_target_analysis_value(target, key),
+    }
+}
+
+fn read_target_analysis_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydrationValue> {
+    match key {
         ViewHydrationKey::TargetProfile => Some(ViewHydrationValue::TargetProfile(
             TargetProfile::detect(target),
         )),
         ViewHydrationKey::MapArtifacts => Some(ViewHydrationValue::MapArtifacts(
             map_evidence_is_adequate(target),
+        )),
+        ViewHydrationKey::CpgArtifacts => Some(ViewHydrationValue::CpgArtifacts(
+            kuzushi_core::cpg_has_artifacts(target),
         )),
         ViewHydrationKey::ScanRecommendations => Some(ViewHydrationValue::ScanRecommendations(
             scan_recommendations(target),
@@ -154,6 +175,15 @@ fn read_finding_patch_truth(
         Err(error) => FindingPatchTruthState::Failed(error.to_string()),
     };
     ViewHydrationValue::FindingPatchTruth(state)
+}
+
+fn read_finding_audit_dataflow(target: &Path, fingerprint: &str) -> ViewHydrationValue {
+    let state = match finding_audit_dataflow_for_target(target, fingerprint) {
+        Ok(Some(rows)) => FindingAuditDataflowState::Ready(rows),
+        Ok(None) => FindingAuditDataflowState::Missing,
+        Err(error) => FindingAuditDataflowState::Failed(error.to_string()),
+    };
+    ViewHydrationValue::FindingAuditDataflow(state)
 }
 
 fn read_scanned_snippet(

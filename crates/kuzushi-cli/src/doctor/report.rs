@@ -1,7 +1,7 @@
 use super::{
     check_auth_env, check_container_runtime, check_cpg_engine, check_findings_db,
     check_model_config, check_offense_sandbox, check_revng_image, check_scanner_binary,
-    deterministic_capability_checks, DoctorCheck, DoctorReport,
+    check_treesitter_grammars, deterministic_capability_checks, DoctorCheck, DoctorReport,
 };
 use kuzushi_core::WorkspaceTarget;
 use std::fs;
@@ -16,6 +16,7 @@ pub(crate) fn build_doctor_report(target: PathBuf) -> DoctorReport {
     checks.push(check_scanner_binary("semgrep"));
     checks.push(check_scanner_binary("codeql"));
     checks.push(check_cpg_engine());
+    checks.push(check_treesitter_grammars());
     // M2 §2.2: optional recon-intake binaries. Doctor warns if they
     // are absent so operators know which bounty workflows they can
     // feed via `recon:import` without leaving the cockpit.

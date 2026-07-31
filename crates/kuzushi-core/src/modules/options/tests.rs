@@ -203,6 +203,35 @@ mod tests {
         }
     }
 
+    /// Regression guard for P1: `gateModel` (and its `gate_model` alias) is a
+    /// declared option on `verify:finding`, so the cheap-gate → escalate
+    /// pipeline already implemented in the verify adapter is reachable from the
+    /// canonical dispatch boundary. Before the descriptor row was added this
+    /// failed with "unknown option", making the behavior dead code.
+    #[test]
+    fn verify_finding_accepts_the_gate_model_option() {
+        let descriptor = every_registered_descriptor()
+            .into_iter()
+            .find(|tool| tool.name == "verify:finding")
+            .expect("verify:finding is registered");
+
+        let validated = validate_tool_input_options(
+            &descriptor,
+            json!({"fingerprint": "fp3_demo", "gateModel": "anthropic:claude-haiku-4-5"}),
+        )
+        .expect("gateModel is a declared option");
+        assert_eq!(validated["gateModel"], json!("anthropic:claude-haiku-4-5"));
+
+        // The snake_case alias canonicalizes to gateModel.
+        let aliased = validate_tool_input_options(
+            &descriptor,
+            json!({"fingerprint": "fp3_demo", "gate_model": "anthropic:claude-haiku-4-5"}),
+        )
+        .expect("gate_model alias is accepted");
+        assert_eq!(aliased["gateModel"], json!("anthropic:claude-haiku-4-5"));
+        assert_eq!(aliased.get("gate_model"), None);
+    }
+
     /// Declared defaults must already be canonical for their option type:
     /// they are injected when the caller omits the option, so a mistyped
     /// default would hand every executor an invalid value.

@@ -1,0 +1,80 @@
+# J30 — verify:finding model-ladder options are discoverable and stored (P1)
+#
+# Keyless, deterministic. Enters the offline demo fixture (KUZUSHI_DEVEX_PHASE_
+# FIXTURE), leaves Run Focus with `b`, then audits the verify:finding option
+# surface: the P1 gateModel/escalationModel knobs are `.advanced()`, so Standard
+# hides them and `show advanced` reveals them; a stored value sorts first; a
+# malformed spec is accepted at setg (single-owner validation) but rejected
+# legibly at dispatch. Ends with a non-TTY plain-parity probe of the same rows.
+#
+# macOS-keychain caveat: env-unset cannot mask OAuth-cached creds; this journey
+# needs none — every step here is keyless.
+name: verify:finding model-ladder options are discoverable and stored
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+# The settled fixture lands foreground in Run Focus (which owns input); leave it
+# with `b`, then wait on the persistent findings-ledger footer to confirm the
+# workbench origin is restored before submitting verbs.
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: options verify:finding
+wait: 2
+snap: options-standard
+expect: verify:finding
+expect-not: gateModel
+expect-not: escalationModel
+submit: show advanced
+wait: 2
+snap: options-advanced
+expect: gateModel
+expect: escalationModel
+expect: provider:modelId
+ask: Advanced rows — can an operator tell from the description alone what the gate trusts (rejection only) and that escalation fires only on a split? No docs allowed.
+submit: setg gateModel openai:gpt-cheap
+wait: 1
+submit: setg escalationModel openai:gpt-strong
+wait: 1
+# gateModel/escalationModel are advanced rows, so the stored value is only shown
+# under the advanced filter — a fresh `options` reopens in Standard.
+submit: options verify:finding
+wait: 1
+submit: show advanced
+wait: 2
+snap: options-stored-first
+# The advanced view lists gateModel/escalationModel FIRST, each with a stored
+# openai: value (the value column truncates the full id; the full id is shown
+# in the Prove MODEL LADDER card, J31).
+expect: gateModel
+expect: escalationModel
+expect: openai:
+ask: Stored rows sort first — does the stored value read as "this WILL apply to the next verify", with global-vs-session scope legible? (Full model id is legible in the Prove card, J31.)
+# malformed spec: accepted at setg (single-owner validation), must fail legibly at dispatch
+submit: setg gateModel nonsense
+wait: 1
+submit: run verify:finding {"fingerprint":"escalated-split-fixture"}
+wait-snap: 20 not a valid model spec | malformed-dispatch-error
+expect: gateModel
+expect: not a valid model spec
+ask: The error names the option AND the expected provider:modelId shape — is the fix obvious from the message, given setg accepted the bad value silently?
+ask: gateModel/escalationModel are Prove-time verify knobs, not Setup readiness rows — nothing in Setup implies gateModel gates Start Map (L24).
+# Dismiss the failed-run receipt notice, then exit with Ctrl+C (idle exit) —
+# robust across the post-run transitional view where a typed `quit` draft races.
+keys: Escape
+wait: 2
+keys: C-c
+wait: 3
+launch-raw: printf 'options verify:finding\nshow advanced\nquit\n' | @KUZUSHI --target @TMP_TARGET --no-session-persistence 2>&1 | head -60
+wait: 6
+snap: plain-options
+# Plain narrows the name column (escalationModel -> "escalationM..."); assert the
+# rows are present by their legible prefix.
+expect: gateModel
+expect: escalation
+ask: Same rows, same descriptions, no ANSI, no box-drawing dependency?

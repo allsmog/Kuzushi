@@ -16,14 +16,9 @@ pub(crate) fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &Shel
     );
     // Prefer the right segment when widths are tight: the top status strip
     // already shows mode + target + ctx, so on narrow terminals truncating
-    // the duplicated left side keeps findings count + ctrl-c hint visible.
+    // the duplicated left side keeps the findings count visible.
     let text = justify_prefer_right(left, right, area.width as usize);
-    let style = if model.warning {
-        theme::warn()
-    } else {
-        theme::primary()
-    };
-    frame.render_widget(Paragraph::new(Line::styled(text, style)), area);
+    frame.render_widget(Paragraph::new(Line::styled(text, theme::primary())), area);
 }
 
 fn footer_segments(wide: &[String], compact: &[String], use_compact: bool) -> String {

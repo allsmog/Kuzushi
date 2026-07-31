@@ -1,7 +1,7 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{
-    help_model, quickstart_model, transcript_model_from_log_index, HelpCommandRow,
+    help_model, logs_model, quickstart_model, transcript_model_from_log_index, HelpCommandRow,
 };
 
 const HELP_COMMAND_COLUMN: usize = 0;
@@ -184,15 +184,26 @@ fn quickstart_step_lines(
 /// 2-row transcript strip at the bottom of every other view, this paints
 /// the entire log buffer; `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through it.
 pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let model = logs_model(app);
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("LOGS", area.width));
-    let total = app.log_len();
-    let hint =
-        format!("{total} log lines · j/k scroll · g/G jump · PgUp/PgDn page · back to return");
+    let follow = if app.router.logs().is_following() {
+        "following"
+    } else {
+        "paused — G follows"
+    };
+    let hint = format!(
+        "{} · {follow} · / filter · j/k scroll · g/G jump · back to return",
+        model.summary
+    );
     lines.push(muted(&fit(&hint, area.width as usize)));
-    lines.push(blank());
-    let model = transcript_model_from_log_index(app, 0);
+    if let Some(notice) = model.notice.as_deref() {
+        lines.push(Line::styled(
+            fit(&format!(" {notice}"), area.width as usize),
+            theme::warn(),
+        ));
+    }
     for row in model.rows {
         lines.extend(wrapped_log_lines(
             &row.prefix,
@@ -203,6 +214,13 @@ pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines
+}
+
+/// Rows the Logs view pins above the scrolling body: the context strip, the
+/// blank, the `LOGS` divider, the summary hint, and any notice.
+pub(crate) fn logs_pinned_rows(app: &ShellApp, area: Rect) -> usize {
+    let notice = usize::from(logs_model(app).notice.is_some());
+    context_strip(app, area).len() + 3 + notice
 }
 
 fn wrapped_log_lines(

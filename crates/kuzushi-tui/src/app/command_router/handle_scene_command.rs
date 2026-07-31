@@ -14,6 +14,7 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
     match tool_name {
         "taint-iris:hunt" => Some(VizPage::AttackPath),
         "exploit-chain:scan" => Some(VizPage::ExploitChain),
+        "worklist:rank" => Some(VizPage::Worklist),
         _ => None,
     }
 }
@@ -21,21 +22,25 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
 impl ShellApp {
     /// Open the gallery, keeping whatever page was last shown.
     pub fn open_scene(&mut self) {
-        self.open_scene_to_page(self.router.scene().page());
+        let page = self.available_viz_page(self.router.scene().page());
+        self.open_scene_to_page(page);
     }
 
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
+        let page = self.available_viz_page(page);
         if !matches!(self.shell_view(), ShellView::Scene) {
             self.push_nav_history(self.shell_view());
         }
         self.router.scene_mut().set_page(page);
         self.set_shell_view(ShellView::Scene);
+        let page_cycle = (self.available_viz_pages().len() > 1).then_some(" · Tab cycles pages");
         self.log(
             "scene",
             format!(
-                "security-viz — {} · Tab cycles pages · Esc/q returns",
-                page.label()
+                "security-viz — {}{} · Esc/q returns",
+                page.label(),
+                page_cycle.unwrap_or_default()
             ),
         );
     }
@@ -160,12 +165,69 @@ impl ShellApp {
             VizPage::AttackPath => self.domain().taint_flow().is_some(),
             VizPage::ExploitChain => self.domain().has_exploit_chains(),
             VizPage::Dfd => crate::ui_view_models::dfd_model(self).empty_hint.is_none(),
+            VizPage::EntryPoints => !crate::ui_view_models::entry_point_breakdown(self)
+                .entries
+                .is_empty(),
+            VizPage::Components => {
+                let stack = crate::ui_view_models::component_stack(self);
+                !stack.sources.is_empty()
+                    || !stack.languages.is_empty()
+                    || !stack.build_systems.is_empty()
+            }
             VizPage::Heatmap | VizPage::AttackSurface => !self.findings().is_empty(),
+            VizPage::Worklist => !crate::ui_view_models::worklist_model(self).rows.is_empty(),
+        }
+    }
+
+    /// Tabs that have real backing data, plus the permanent DFD generation
+    /// surface. Unavailable artifacts do not appear or consume Tab stops.
+    pub(crate) fn available_viz_pages(&self) -> Vec<VizPage> {
+        VizPage::ALL
+            .into_iter()
+            .filter(|page| *page == VizPage::Dfd || self.viz_page_has_content(*page))
+            .collect()
+    }
+
+    pub(crate) fn cycle_scene_page(&mut self, direction: i32) -> VizPage {
+        let pages = self.available_viz_pages();
+        let next = cycle_available_page(&pages, self.router.scene().page(), direction);
+        self.router.scene_mut().set_page(next);
+        next
+    }
+
+    /// Resolve a requested landing page, redirecting empty pages to the always-
+    /// available DFD. `Dfd` (the permanent generation surface) and `Worklist`
+    /// (whose empty state is its own `context:build → worklist:rank` guidance
+    /// panel) are exempt, so the explicit `worklist` verb lands on the worklist
+    /// even before any artifact exists instead of dumping a first-timer on the
+    /// DFD with no explanation. The tab still stays hidden from the rail while
+    /// empty (see `available_viz_pages`).
+    fn available_viz_page(&self, requested: VizPage) -> VizPage {
+        if requested == VizPage::Dfd
+            || requested == VizPage::Worklist
+            || self.viz_page_has_content(requested)
+        {
+            requested
+        } else {
+            VizPage::Dfd
         }
     }
 
     /// Switch to a specific gallery page and reflect it in the open view.
     pub fn set_scene_page(&mut self, page: VizPage) {
+        let page = self.available_viz_page(page);
         self.router.scene_mut().set_page(page);
     }
+}
+
+fn cycle_available_page(pages: &[VizPage], current: VizPage, direction: i32) -> VizPage {
+    let Some(index) = pages.iter().position(|page| *page == current) else {
+        return VizPage::Dfd;
+    };
+    let offset = if direction >= 0 {
+        1
+    } else {
+        pages.len().saturating_sub(1)
+    };
+    pages[(index + offset) % pages.len()]
 }

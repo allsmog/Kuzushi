@@ -128,6 +128,52 @@ fn threat_model_options_keep_low_level_source_controls_advanced() {
 }
 
 #[test]
+fn advanced_filter_lists_verify_escalation_model() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = options_model(
+        &app,
+        &options_view("verify:finding", OptionsFilter::Advanced),
+    );
+    let OptionsBody::Table(table) = &model.body else {
+        panic!("expected ready advanced options table");
+    };
+    let names = table
+        .rows
+        .iter()
+        .map(|row| row.cells[0].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        names.contains(&"escalationModel"),
+        "escalationModel missing from advanced verify options: {names:?}"
+    );
+}
+
+#[test]
+fn standard_filter_hides_escalation_model() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = options_model(
+        &app,
+        &options_view("verify:finding", OptionsFilter::Standard),
+    );
+    let OptionsBody::Table(table) = &model.body else {
+        panic!("expected ready options table");
+    };
+    let names = table
+        .rows
+        .iter()
+        .map(|row| row.cells[0].as_str())
+        .collect::<Vec<_>>();
+
+    assert!(
+        !names.contains(&"escalationModel"),
+        "escalationModel is advanced and must not appear in the standard view: {names:?}"
+    );
+}
+
+#[test]
 fn plain_options_model_projects_ready_table() {
     let app = ShellApp::new(V2Config::default(), None);
 

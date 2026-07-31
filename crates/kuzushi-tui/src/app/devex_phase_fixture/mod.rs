@@ -44,6 +44,14 @@ fn hydrate_reference_security_artifacts(app: &mut ShellApp, target: &Path) {
                 run_id: "verify-phase-run".to_string(),
                 leaf: "items.jsonl".to_string(),
             },
+            ViewHydrationKey::RunArtifactText {
+                run_id: findings::ESCALATED_RUN_ID.to_string(),
+                leaf: "items.jsonl".to_string(),
+            },
+            ViewHydrationKey::RunArtifactText {
+                run_id: findings::REFUSED_RUN_ID.to_string(),
+                leaf: "items.jsonl".to_string(),
+            },
         ],
     );
 }

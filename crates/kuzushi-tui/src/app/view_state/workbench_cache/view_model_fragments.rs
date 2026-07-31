@@ -1,4 +1,6 @@
-use crate::ui_view_models::{DfdModel, ReviewFacetGroup, ReviewQueueRow, RiskByModule};
+use crate::ui_view_models::{
+    DfdModel, ReviewFacetGroup, ReviewQueueRow, RiskByModule, WorklistViewModel,
+};
 use kuzushi_core::Finding;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -10,6 +12,7 @@ pub(super) struct ViewModelFragmentCache {
     review_queue: Option<CachedReviewQueue>,
     risk_by_module: Option<CachedRiskByModule>,
     dfd_model: Option<CachedDfdModel>,
+    worklist: Option<CachedWorklist>,
 }
 
 impl ViewModelFragmentCache {
@@ -106,6 +109,17 @@ impl ViewModelFragmentCache {
     pub(super) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
         self.dfd_model = Some(CachedDfdModel { key, model });
     }
+
+    pub(super) fn worklist(&self, key: &WorklistCacheKey) -> Option<WorklistViewModel> {
+        self.worklist
+            .as_ref()
+            .filter(|cache| &cache.key == key)
+            .map(|cache| cache.model.clone())
+    }
+
+    pub(super) fn cache_worklist(&mut self, key: WorklistCacheKey, model: WorklistViewModel) {
+        self.worklist = Some(CachedWorklist { key, model });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -185,6 +199,44 @@ impl DfdModelCacheKey {
     }
 }
 
+/// The worklist view model is folded from the hydrated attack-surface artifact
+/// *and* the cached scan recommendations. Keying by both reuses the fold every
+/// frame until `context:build` rewrites the map or recommendations hydrate — no
+/// per-frame disk read or re-fold.
+///
+/// The attack-surface component is the artifact's hydration version — a `u64`
+/// content stamp computed once at hydration (see
+/// `WorkbenchCache::cached_run_artifact_version`), not a per-frame hash of the
+/// artifact body. So building this key is O(1): the always-visible Map page
+/// never re-clones or re-parses the multi-megabyte surface array to memo the
+/// fold. `None` while the artifact has not hydrated. Because the stamp is a
+/// content hash of the whole artifact text, a re-hydration that only moved a
+/// line — leaving summary counts identical — still yields a fresh key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorklistCacheKey {
+    attack_surface: Option<u64>,
+    recommendations: ViewModelVersion,
+    /// The captured `worklist:rank` snapshot identity, or `None` when no snapshot
+    /// backs this engagement. Keying off it lets the render path project the
+    /// (large) snapshot body only on a cache miss instead of re-cloning and
+    /// re-parsing it every frame (C-4).
+    snapshot_generation: Option<u64>,
+}
+
+impl WorklistCacheKey {
+    pub(crate) fn from_parts(
+        attack_surface_version: Option<u64>,
+        recommendations: u64,
+        snapshot_generation: Option<u64>,
+    ) -> Self {
+        Self {
+            attack_surface: attack_surface_version,
+            recommendations: ViewModelVersion(recommendations),
+            snapshot_generation,
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CachedVisibleFindings {
     key: VisibleFindingsCacheKey,
@@ -211,6 +263,12 @@ struct CachedRiskByModule {
 struct CachedDfdModel {
     key: DfdModelCacheKey,
     model: DfdModel,
+}
+
+#[derive(Debug)]
+struct CachedWorklist {
+    key: WorklistCacheKey,
+    model: WorklistViewModel,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -290,6 +348,52 @@ mod tests {
 
         assert_ne!(original, edited);
         assert_ne!(edited, cleared);
+    }
+
+    #[test]
+    fn worklist_cache_key_tracks_recommendations_arrival() {
+        // F1: recommendations hydrating after the first fill must bust the memo,
+        // so coverage citations are no longer permanently missing.
+        let before = WorklistCacheKey::from_parts(Some(7), 1, None);
+        let after = WorklistCacheKey::from_parts(Some(7), 2, None);
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn worklist_cache_key_tracks_snapshot_generation() {
+        // C-4: a fresh `worklist:rank` capture bumps the snapshot generation, so
+        // the memo busts even at the same artifact version and recommendations.
+        assert_ne!(
+            WorklistCacheKey::from_parts(Some(7), 1, Some(1)),
+            WorklistCacheKey::from_parts(Some(7), 1, Some(2))
+        );
+        // A snapshot-backed key is distinct from the fold path (no snapshot).
+        assert_ne!(
+            WorklistCacheKey::from_parts(Some(7), 1, Some(1)),
+            WorklistCacheKey::from_parts(Some(7), 1, None)
+        );
+    }
+
+    #[test]
+    fn worklist_cache_key_tracks_artifact_hydration_version() {
+        // New-2/New-3: the key is the O(1) hydration version, not a per-frame
+        // hash of the artifact body. Same version reuses the fold; a
+        // re-hydration (new version) — including one that only moved a line
+        // while summary counts stayed equal — busts it. `None` (unhydrated) is
+        // distinct from any hydrated version.
+        assert_eq!(
+            WorklistCacheKey::from_parts(Some(11), 0, None),
+            WorklistCacheKey::from_parts(Some(11), 0, None)
+        );
+        assert_ne!(
+            WorklistCacheKey::from_parts(Some(11), 0, None),
+            WorklistCacheKey::from_parts(Some(12), 0, None)
+        );
+        assert_ne!(
+            WorklistCacheKey::from_parts(None, 0, None),
+            WorklistCacheKey::from_parts(Some(11), 0, None)
+        );
     }
 
     #[test]

@@ -32,7 +32,7 @@ mod tests {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             let system_prompt = request.system_prompt.clone();
             self.queries.lock().unwrap().push(request);
-            if system_prompt == SYSTEMS_INVARIANT_SYSTEM_PROMPT {
+            if system_prompt == systems_invariant_system_prompt() {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
                     structured: Some(json!({
@@ -53,7 +53,7 @@ mod tests {
                     ..Default::default()
                 });
             }
-            if system_prompt == SYSTEMS_TRIGGER_SYSTEM_PROMPT {
+            if system_prompt == systems_trigger_system_prompt() {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
                     structured: Some(json!({
@@ -74,7 +74,7 @@ mod tests {
                     ..Default::default()
                 });
             }
-            if system_prompt == SYSTEMS_HUNT_SYSTEM_PROMPT {
+            if system_prompt == systems_hunt_system_prompt() {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
                     structured: Some(json!({
@@ -99,7 +99,7 @@ mod tests {
                     ..Default::default()
                 });
             }
-            if system_prompt == DEEP_SEMANTIC_CWE_SYSTEM_PROMPT {
+            if system_prompt == deep_semantic_cwe_system_prompt() {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
                     structured: Some(json!({
@@ -112,7 +112,7 @@ mod tests {
                     ..Default::default()
                 });
             }
-            if system_prompt == DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT {
+            if system_prompt == deep_semantic_hunt_system_prompt() {
                 return Ok(AgentQueryResponse {
                     text: String::new(),
                     structured: Some(json!({
@@ -1061,6 +1061,50 @@ mod tests {
         assert_eq!(parsed.hunt_system_prompt, "custom hunt");
         assert_eq!(parsed.deep_semantic_cwe_system_prompt, "custom deep cwe");
         assert_eq!(parsed.deep_semantic_hunt_system_prompt, "custom deep hunt");
+    }
+
+    #[test]
+    fn operator_override_wins_over_the_assembled_default() {
+        let parsed = SystemsHuntInput::from_tool_input(&serde_json::json!({
+            "SYSTEMS_HUNT_PROMPT": "CUSTOM",
+        }))
+        .unwrap();
+        assert_eq!(parsed.hunt_system_prompt, "CUSTOM");
+    }
+
+    #[test]
+    fn hunt_user_prompt_carries_language_hints_for_the_selected_surfaces() {
+        let options = SystemsHuntInput::from_tool_input(&json!({})).unwrap();
+        let invariants = SystemsInvariantOutput {
+            invariants: Vec::new(),
+        };
+        let triggers = SystemsTriggerOutput {
+            triggers: Vec::new(),
+        };
+
+        let c_context = ctx_with(vec![surface("src/parser.c", "unsafe-region")]);
+        let c_prompt = build_systems_hunt_prompt(
+            std::path::Path::new("/repo"),
+            &c_context,
+            &invariants,
+            &triggers,
+            &options,
+        )
+        .unwrap();
+        assert!(c_prompt.contains("unsigned subtraction wrap"));
+        assert!(!c_prompt.contains("text/template"));
+
+        let go_context = ctx_with(vec![surface("src/server.go", "unsafe-region")]);
+        let go_prompt = build_systems_hunt_prompt(
+            std::path::Path::new("/repo"),
+            &go_context,
+            &invariants,
+            &triggers,
+            &options,
+        )
+        .unwrap();
+        assert!(go_prompt.contains("text/template"));
+        assert!(!go_prompt.contains("unsigned subtraction wrap"));
     }
 
     // ----- score_with_index degradation contract --------------------

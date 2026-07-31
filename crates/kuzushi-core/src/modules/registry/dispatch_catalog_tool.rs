@@ -52,11 +52,8 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "coverage:sweep" => Some(run_coverage_sweep(input, ctx)),
         "coverage:baselines" => Some(run_coverage_baselines(ctx)),
         "coverage:recommend" => Some(run_coverage_recommend(input, ctx)),
-        "fleet:register" => Some(run_fleet_register(input)),
-        "fleet:ingest" => Some(run_fleet_ingest()),
-        "fleet:status" => Some(run_fleet_status()),
-        "fleet:findings" => Some(run_fleet_findings(input)),
-        "fleet:diff-findings" => Some(run_fleet_diff_findings(input)),
+        "worklist:rank" => Some(run_worklist_rank(input, ctx)),
+        name if name.starts_with("fleet:") => dispatch_fleet_tool(name, input),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "workspace:import-findings" => Some(workspace_import_findings_tool(input, ctx)),
         "campaign:plan" | "campaign:status" | "campaign:coverage" => {
@@ -75,6 +72,17 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "report:sarif" => Some(execute_report_sarif_tool(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => dispatch_finding_ledger_tool(name, input, ctx),
+    }
+}
+
+fn dispatch_fleet_tool(name: &str, input: &Value) -> ToolDispatchResult {
+    match name {
+        "fleet:register" => Some(run_fleet_register(input)),
+        "fleet:ingest" => Some(run_fleet_ingest()),
+        "fleet:status" => Some(run_fleet_status()),
+        "fleet:findings" => Some(run_fleet_findings(input)),
+        "fleet:diff-findings" => Some(run_fleet_diff_findings(input)),
+        _ => None,
     }
 }
 

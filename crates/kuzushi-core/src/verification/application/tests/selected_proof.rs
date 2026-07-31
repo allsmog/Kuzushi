@@ -249,6 +249,66 @@ fn record_model_proof_run_at_level(
     .unwrap();
 }
 
+#[test]
+fn stage_blocks_are_carried_outside_the_compared_candidate_fields() {
+    // The real invariant: `ModelProofCandidate` deserializes only the eight
+    // verdict/identity fields, so the gate/escalation stage blocks are NOT part
+    // of the 4-way equality (data == verification == proof-snapshot). The stage
+    // note is likewise carried separately as `data.stageNote` and read by
+    // `append_stage_note`. Therefore a stage-block disagreement across the four
+    // copies can never fire the 4-way trap — this test pins that fact so the
+    // "mirror the stage blocks" comment cannot silently start claiming
+    // otherwise.
+    let finding = Finding::new_tool(
+        "proof-test",
+        "proof-test/rule",
+        "src/main.rs",
+        1,
+        None,
+        Severity::High,
+        "proof candidate",
+    );
+    let mut result = model_proof_result(&finding, "scan-current", 3);
+    // Deliberately DISAGREEING escalation blocks + a stageNote on only one copy.
+    result
+        .pointer_mut("/data")
+        .and_then(serde_json::Value::as_object_mut)
+        .unwrap()
+        .insert(
+            "escalation".to_string(),
+            json!({"stage": "tie-break", "model": "openai:bigger", "attempted": true, "panelPasses": 2}),
+        );
+    result
+        .pointer_mut("/data")
+        .and_then(serde_json::Value::as_object_mut)
+        .unwrap()
+        .insert("stageNote".to_string(), json!("stages: panel(2) split · tie-break openai:bigger"));
+    result
+        .pointer_mut("/proof")
+        .and_then(serde_json::Value::as_object_mut)
+        .unwrap()
+        .insert(
+            "escalation".to_string(),
+            json!({"stage": "tie-break", "attempted": false, "refusedToken": "invalid-spec"}),
+        );
+
+    ModelProofCandidate::from_result(&result).expect(
+        "stage blocks live outside the 4-way-compared fields, so a disagreement there never traps",
+    );
+
+    // A genuine candidate-field disagreement DOES break binding — proving the
+    // 4-way trap still guards the fields that actually matter.
+    result
+        .pointer_mut("/proof")
+        .and_then(serde_json::Value::as_object_mut)
+        .unwrap()
+        .insert("exploitable".to_string(), json!(false));
+    let error = ModelProofCandidate::from_result(&result)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("conflicting candidate identities"), "{error}");
+}
+
 fn model_proof_result(finding: &Finding, verified_scan_id: &str, proof_level: u8) -> Value {
     model_proof_result_with_identity(
         finding,

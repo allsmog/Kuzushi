@@ -21,11 +21,12 @@ pub(crate) fn run_deep_audit_tool(
         ),
     );
     let _agent_scope = begin_deep_audit_agent_scope(ctx, parent_step);
-    let outcome = crate::capabilities::deep_auditor::run_deep_auditor(
+    let outcome = crate::capabilities::deep_auditor::run_deep_auditor_traced(
         &routed,
         Some(&spend),
         &cfg,
         &run.finding,
+        ctx.trace,
     )?;
     drop(_agent_scope);
     emit_deep_audit_progress(ctx, parent_step, "persist · triage outcome and evidence");
@@ -47,6 +48,7 @@ struct DeepAuditOptions {
     deposit_usd: f64,
     temperature: f32,
     passes: u32,
+    taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy,
 }
 
 fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>) -> Option<crate::run_lifecycle::RunItemId> {
@@ -121,7 +123,7 @@ fn prepare_deep_audit<'a>(
         workspace,
         store,
         finding,
-        options: deep_audit_options(input),
+        options: deep_audit_options(input)?,
     })
 }
 
@@ -153,8 +155,8 @@ fn deep_audit_finding(input: &Value, store: &FindingStore) -> Result<crate::find
         .ok_or_else(|| anyhow::anyhow!("deep-audit:run: no finding for {fingerprint:?}"))
 }
 
-fn deep_audit_options(input: &Value) -> DeepAuditOptions {
-    DeepAuditOptions {
+fn deep_audit_options(input: &Value) -> Result<DeepAuditOptions> {
+    Ok(DeepAuditOptions {
         max_steps: read_deep_audit_u32(input, "maxSteps", 24),
         deposit_usd: input
             .get("depositUsd")
@@ -167,6 +169,20 @@ fn deep_audit_options(input: &Value) -> DeepAuditOptions {
             crate::capabilities::deep_auditor::DEFAULT_PASSES,
         )
         .clamp(1, MAX_DEEP_AUDIT_PASSES),
+        taint_tools: deep_audit_taint_tools(input)?,
+    })
+}
+
+/// Propagate an invalid `taintTools` value as an explicit error rather than
+/// silently defaulting to `Available` — the descriptor enum guards the shared
+/// dispatch path, but direct/internal callers must get the honest rejection,
+/// matching triage's `parse_triage_taint_tools`.
+fn deep_audit_taint_tools(
+    input: &Value,
+) -> Result<crate::capabilities::deep_auditor::TaintToolPolicy> {
+    match input.get("taintTools").and_then(Value::as_str) {
+        Some(value) => crate::capabilities::deep_auditor::TaintToolPolicy::parse(value),
+        None => Ok(crate::capabilities::deep_auditor::TaintToolPolicy::default()),
     }
 }
 
@@ -222,6 +238,7 @@ fn deep_audit_config(
         include_static_evidence: true,
         temperature: options.temperature,
         passes: options.passes,
+        taint_tools: options.taint_tools,
     }
 }
 
@@ -275,17 +292,35 @@ mod deep_audit_option_tests {
     #[test]
     fn passes_saturate_and_clamp_instead_of_truncating() {
         // 2^32 + 1 used to truncate to 1 via `as u32`.
-        let wrapped = deep_audit_options(&json!({ "passes": 4_294_967_297u64 }));
+        let wrapped = deep_audit_options(&json!({ "passes": 4_294_967_297u64 })).unwrap();
         assert_eq!(wrapped.passes, MAX_DEEP_AUDIT_PASSES);
 
-        let huge = deep_audit_options(&json!({ "passes": u64::MAX }));
+        let huge = deep_audit_options(&json!({ "passes": u64::MAX })).unwrap();
         assert_eq!(huge.passes, MAX_DEEP_AUDIT_PASSES);
 
-        let zero = deep_audit_options(&json!({ "passes": 0 }));
+        let zero = deep_audit_options(&json!({ "passes": 0 })).unwrap();
         assert_eq!(zero.passes, 1);
 
-        let normal = deep_audit_options(&json!({ "passes": 3 }));
+        let normal = deep_audit_options(&json!({ "passes": 3 })).unwrap();
         assert_eq!(normal.passes, 3);
+    }
+
+    #[test]
+    fn invalid_taint_tools_value_is_an_explicit_error_not_a_silent_default() {
+        let error = match deep_audit_options(&json!({ "taintTools": "sometimes" })) {
+            Ok(_) => panic!("an unknown taintTools value must be rejected, not defaulted"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("taintTools"), "{error}");
+    }
+
+    #[test]
+    fn absent_taint_tools_defaults_without_error() {
+        let options = deep_audit_options(&json!({})).unwrap();
+        assert_eq!(
+            options.taint_tools,
+            crate::capabilities::deep_auditor::TaintToolPolicy::default()
+        );
     }
 }
 

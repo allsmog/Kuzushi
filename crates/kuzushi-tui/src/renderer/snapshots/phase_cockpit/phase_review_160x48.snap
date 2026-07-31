@@ -4,51 +4,51 @@ contract: cockpit-spine-v1
 phase: review
 size: 160x48
 ---
-KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · model configured openai:gpt-5.4 [auth missing] · module context
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- B review decision backlog · Enter open in Prove · findings show full queue · z open heatmap · report open Report
-│▸ FINDINGS · 6                                             │SELECTED FINDING · Enter prove · z heatmap
-│6 of 6 · [completeness:all]                                │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven
-│facets before search · severity high:2 medium:2...         │claim · runtime-verified
-│  source semgrep:6                                         │SQL injection reaches query
-│  file src/api/orders.rs:1 src/api/upload.rs:1...          │
-│  actor:0                                                  │── STATUS ──
-│  confidence unverified:5 confirmed:1                      │severity: critical
-│  status open:5 verified:1                                 │  confidence: RUNTIME VERIFIED
-│● proof · s sources · @ author                             │lifecycle status: runtime_verified
-│▸F-0001  C [●●●] s1 @? runtime open       SQL injectio...  │evidence state: evidence:1
-│  SQL injection reaches query                              │  proof summary: ✓ verified L4
-│  src/auth/login.rs:17                                     │
-│  ▸ next:patch · Enter open                                │── DECISION ──
-│ F-0002  H [●○○] s1 @? signal open       Order identif...  │  current decision: needs_review
-│ F-0003  H [●○○] s1 @? signal open       Template inpu...  │  decision source: none
-│ F-0004  M [●○○] s1 @? signal open       Upload type...    │  decision history: no decision history loaded
-│ F-0005  M [●○○] s1 @? signal open       Session cooki...  │  decide: `decision <true-positive|false-positive> <reason>`
-│ F-0006  L [●○○] s1 @? signal open       Debug endpoin...  │  dismiss: `dismiss <reason> <note>`
-│                                                           │  suppress: `suppress <id> --reason <text> --days 90`
-│                                                           │
-│                                                           │── NEXT ──
-│                                                           │  patch: `patch F-0001`
-│                                                           │  runtime proof is recorded; generate remediation
-│                                                           │
-│                                                           │── SOURCE · observation (on-disk excerpt) ──
-│                                                           │  src/auth/login.rs:17
-│                                                           │    14 │ }
-│                                                           │    15 │
-│                                                           │    16 │ pub fn login(attempt: &LoginAttempt) -> Response {
-│                                                           │  ▶ 17 │     let rows = query(&format!("SELECT * FROM users WHERE name = '{}'"...
-│                                                           │    18 │     match rows.first() {
-│                                                           │    19 │         Some(user) => Response::session_for(user),
-│                                                           │    20 │         None => Response::unauthorized(),
-│                                                           │    21 │     }
-│                                                           │
-│                                                           │── EVIDENCE ──
-│                                                           │  origin: observed code evidence
-│                                                           │  source-sink · conf 94 · src/auth/login.rs:17
-│                                                           │    request_input -> database_query
-│                                                           │    attacker-controlled input reaches a security boundary
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4                                   6 findings / 1 crit / 2 high / 2 med
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   Esc prompt
-▣ REVIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context                       │ ENGAGEMENT
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○                                                                                │ phase-target
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates                                                           │ scope: F-0001 · Review
+ B review decision backlog · Enter open in Prove · findings show full queue · z open heatmap · report open Report           │
+│▸ FINDINGS · 6                                │SELECTED FINDING · Enter prove · z heatmap                                  │ JOURNEY
+│6 of 6 · [completeness:all]                   │● candidate ─ ● corroborated ─ ● reproduced ─ ○ proven                      │ Review 3/5
+│facets before search · severity high:2...     │claim · runtime-verified                                                    │ ⛭ fix
+│  source semgrep:6                            │SQL injection reaches query                                                 │
+│  file src/api/orders.rs:1 src/api/upload...  │                                                                            │ IN FLIGHT
+│  actor:0                                     │── STATUS ──                                                                │ ⠋ context:build
+│  confidence unverified:5 confirmed:1         │severity: critical                                                          │
+│  status open:5 verified:1                    │  confidence: RUNTIME VERIFIED                                              │ FINDINGS
+│● proof · s sources · @ author                │lifecycle status: runtime_verified                                          │ 6 findings · 1 C · 2 H · 2 M
+│▸F-0001  C [●●●] s1 @? runtime open SQL...    │evidence state: evidence:1                                                  │ 0/6 reviewed · 0 proven
+│  SQL injection reaches query                 │  proof summary: ✓ verified L4                                              │
+│  src/auth/login.rs:17                        │                                                                            │ COST
+│  ▸ next:patch · Enter open                   │── DECISION ──                                                              │ $0.37 of $2.00
+│ F-0002  H [●○○] s1 @? signal open Templa...  │  current decision: needs_review                                            │ 19% of budget
+│ F-0003  H [●○○] s1 @? signal open Order...   │  decision source: none                                                     │
+│ F-0004  M [●○○] s1 @? signal open Upload...  │  decision history: no decision history loaded                              │
+│ F-0005  M [●○○] s1 @? signal open Sessio...  │  decide: `decision <true-positive|false-positive> <reason>`                │
+│ F-0006  L [●○○] s1 @? signal open Debug...   │  dismiss: `dismiss <reason> <note>`                                        │
+│                                              │  suppress: `suppress <id> --reason <text> --days 90`                       │
+│                                              │                                                                            │
+│                                              │── NEXT ──                                                                  │
+│                                              │  patch: `patch F-0001`                                                     │
+│                                              │  runtime proof is recorded; generate remediation                           │
+│                                              │                                                                            │
+│                                              │── SOURCE · observation (on-disk excerpt) ──                                │
+│                                              │  src/auth/login.rs:17                                                      │
+│                                              │    14 │ }                                                                  │
+│                                              │    15 │                                                                    │
+│                                              │    16 │ pub fn login(attempt: &LoginAttempt) -> Response {                 │
+│                                              │  ▶ 17 │     let rows = query(&format!("SELECT * FROM users WHERE...        │
+│                                              │    18 │     match rows.first() {                                           │
+│                                              │    19 │         Some(user) => Response::session_for(user),                 │
+│                                              │    20 │         None => Response::unauthorized(),                          │
+│                                              │    21 │     }                                                              │
+│                                              │                                                                            │
+│                                              │── EVIDENCE ──                                                              │
+│                                              │  origin: observed code evidence                                            │
+│                                              │  source-sink · conf 94 · src/auth/login.rs:17                              │
+│                                              │    request_input -> database_query                                         │
+│                                              │    attacker-controlled input reaches a security boundary                   │
+run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+ Ctrl+C request abort   Esc prompt                                                                                          │
+▣ REVIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                            │

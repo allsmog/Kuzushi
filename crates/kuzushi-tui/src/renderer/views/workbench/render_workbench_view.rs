@@ -103,8 +103,10 @@ fn render_hosted_guided_question(
     let Some(question) = app.guided_scan_question_model() else {
         return;
     };
-    let full = frame.area();
-    if !super::guided_question_hosted_in_body(full.width, full.height) {
+    // Must agree with `render_input_surface`'s hosting decision, which
+    // measures the rail-reduced body — not the full terminal.
+    let (content, _) = crate::renderer::split_context_rail(app, frame.area());
+    if !super::guided_question_hosted_in_body(content.width, content.height) {
         return;
     }
     let strip_bottom = plan

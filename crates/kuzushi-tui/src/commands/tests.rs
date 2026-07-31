@@ -842,6 +842,7 @@ mod tests {
             "queue-command",
             "quickstart",
             "keymap",
+            "rail",
             "recommend",
             "report",
             "quit",
@@ -882,6 +883,7 @@ mod tests {
             "update-available",
             "use",
             "workbench",
+            "worklist",
             "workspace",
         ]);
 
@@ -1082,6 +1084,8 @@ mod tests {
             ShellCommand::Cancel => "cancel",
             ShellCommand::Story => "story",
             ShellCommand::Scene => "scene",
+            ShellCommand::Worklist => "worklist",
+            ShellCommand::Rail => "rail",
             ShellCommand::RunTool { .. } => "run-tool",
             ShellCommand::Quit => "quit",
             ShellCommand::Empty => "empty",

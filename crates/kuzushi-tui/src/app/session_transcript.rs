@@ -102,6 +102,10 @@ impl ShellSessionTranscript {
         self.recorder.status().last_error
     }
 
+    pub(crate) fn path(&self) -> &std::path::Path {
+        self.recorder.path()
+    }
+
     pub(crate) fn status_line(&self) -> String {
         let status = self.recorder.status();
         let error = status

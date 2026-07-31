@@ -1,0 +1,37 @@
+# J36 — `taintTools` discoverability: Standard, not Advanced (P2)  ⭐ release-blocking
+#
+# Keyless, deterministic. `taintTools` changes what the deep auditor can do, so it
+# is a STANDARD option on `triage:run` (visible without `show advanced`), default
+# `available`, enum. The three choices (off|available|build) and the grep-only
+# degradation semantics are proven at the canonical rejection boundary — the
+# compact options table truncates the long description, so the enum-rejection error
+# is the load-bearing proof of the choice set. R3 arm: `deep-audit:run` now declares
+# `passes`/`temperature`. Plain-parity via the non-TTY stdin script throughout.
+name: taintTools is a standard triage:run option with a legible choice set
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Standard (no `show advanced`): taintTools is present with default `available`,
+# type enum — proving it is not an `.advanced()` row.
+launch-raw: printf 'options triage:run\nquit\n' | @KUZUSHI --target @TMP_TARGET 2>&1 | grep -iE 'taintTools|available' | head
+wait: 6
+snap: triage-taint-standard
+expect: taintTools
+expect: available
+ask: taintTools is visible WITHOUT `show advanced` (a standard row) with default `available` legible; the descriptor description states unavailable graphs degrade to grep-only navigation (truncated in the compact table — full text in triage_module.rs)?
+# The three choices + grep-only degradation are proven at the canonical boundary:
+# an out-of-enum value is rejected naming off|available|build, not silently defaulted.
+launch-raw: @KUZUSHI --target @TMP_TARGET run triage:run --input '{"taintTools":"nope"}' 2>&1 | grep -iE 'taintTools|off|available|build' | head
+wait: 4
+snap: triage-taint-reject
+expect: taintTools
+expect: must be one of off|available|build
+ask: The enum rejection is a canonical-boundary error naming all three choices (off|available|build) — not an executor-time surprise and not a silent default?
+# R3 arm: deep-audit:run declares passes/temperature (and taintTools) as options.
+launch-raw: printf 'options deep-audit:run\nquit\n' | @KUZUSHI --target @TMP_TARGET 2>&1 | grep -iE 'passes|temperature|taintTools' | head
+wait: 6
+snap: deep-audit-passes
+expect: passes
+expect: temperature
+expect: taintTools
+ask: R3 — deep-audit:run declares passes/temperature so `run deep-audit:run {"passes":2}` is accepted at the boundary (no unknown-key rejection), matching triage:run's deep knobs?

@@ -63,10 +63,11 @@ fn split_keybindings_for_wrap(app: &ShellApp) -> (Vec<(String, String)>, Vec<(St
 }
 
 fn wrapped_binding_priority(binding: (&str, &str)) -> u8 {
-    match binding.0 {
-        "Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q" => 0,
-        "Enter" | "PgUp/PgDn" | "Tab" | "Shift+Tab" => 1,
-        key if looks_like_typed_command(key) => 3,
+    match binding {
+        ("j/k", "select") => 0,
+        ("Ctrl+C" | "Ctrl+G" | "Esc" | "Esc/q" | "q", _) => 0,
+        ("Enter" | "PgUp/PgDn" | "Tab" | "Shift+Tab", _) => 1,
+        (key, _) if looks_like_typed_command(key) => 3,
         _ => 2,
     }
 }

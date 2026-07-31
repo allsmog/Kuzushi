@@ -13,5 +13,10 @@ mod tests;
 mod triage_prompt;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
-pub use langgraph_runtime::{default_langgraph_bridge_command, LangGraphRuntime};
-pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
+pub use langgraph_runtime::{
+    default_langgraph_bridge_command, LangGraphRuntime, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
+pub use oauth::{
+    probe as probe_anthropic_oauth, probe_openai_path as probe_openai_oauth_path,
+    resolve_credentials_path as resolve_oauth_credentials_path, OauthReadiness,
+};

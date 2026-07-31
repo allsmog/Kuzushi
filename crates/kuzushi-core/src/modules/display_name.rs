@@ -201,6 +201,7 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("verify:finding", "Verify finding"),
     ("vuln-scout:audit", "Run vulnerability scout audit"),
     ("wasm-plugin:analyze", "Analyze WASM plugin"),
+    ("worklist:rank", "Rank risk worklist"),
     ("workspace:export-findings", "Export findings"),
     ("workspace:import-findings", "Import findings"),
     ("workspace:status", "Show workspace status"),

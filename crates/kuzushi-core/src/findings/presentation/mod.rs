@@ -9,10 +9,11 @@ mod reporting;
 pub(crate) use finding_lines::top_finding_lines;
 
 pub use detail::{
-    finding_lifecycle_status, finding_next_action, proof_ladder_state, proof_state_label,
-    runtime_validation_label, runtime_validation_summary, static_proof_summary,
-    FindingDetailReport, FindingNextAction, ProofLadderState, RuntimeValidationSummary,
-    StaticProofSummary,
+    dataflow_evidence_rows, finding_lifecycle_status, finding_next_action, format_stage_note,
+    parse_stage_note, proof_ladder_state, proof_state_label, runtime_validation_label,
+    runtime_validation_summary, static_proof_summary, DataflowEvidenceRow, FindingDetailReport,
+    FindingNextAction, ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
+    VerificationStageDisclosure, DATAFLOW_EVIDENCE_SUBJECT, STAGE_NOTE_SENTINEL,
 };
 pub use reporting::{
     compare_findings_by_confidence, format_finding_alias, parse_finding_alias,

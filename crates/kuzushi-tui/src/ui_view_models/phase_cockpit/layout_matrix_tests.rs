@@ -406,6 +406,7 @@ fn investigation_card_composes_a_centered_form_over_the_prove_page() {
         why: "evidence message-only".to_string(),
         evidence_goals: vec!["Recover structured evidence anchors".to_string()],
         empirical: false,
+        model_ladder: vec!["gate: not set (rejection only)".to_string()],
         command: "run verify:finding {}".to_string(),
     });
     let wide = Rect::new(0, 0, 160, 48);

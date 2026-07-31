@@ -22,6 +22,23 @@ pub(crate) fn gather_systems_context(
     })
 }
 
+/// Read-safe systems surface ranking: walk the production inventory and score
+/// surfaces with the deterministic classifier only. Unlike
+/// [`ranked_system_surfaces`], it never calls `score_with_index_blocking`,
+/// which would spawn the cpg MCP server and implicitly build `.kuzushi/cpg-rs`.
+/// This is the only systems ranker a `ToolEffect::Read` tool may fold.
+pub(crate) fn rank_systems_surfaces_lite(
+    target: &Path,
+    max: usize,
+) -> Result<Vec<RankedSystemsSurface>> {
+    let options = SystemsHuntInput::from_tool_input(&json!({ "maxSurfaces": max }))?;
+    let inventory = collect_production_inventory(target, &options)?;
+    let mut surfaces = collect_system_surfaces(&inventory);
+    sort_system_surfaces(&mut surfaces);
+    surfaces.truncate(max);
+    Ok(surfaces)
+}
+
 fn ranked_system_surfaces(
     inventory: &[(String, String)],
     max_surfaces: usize,

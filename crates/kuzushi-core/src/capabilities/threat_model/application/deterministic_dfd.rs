@@ -67,7 +67,8 @@ fn public_http_flow(surfaces: &[AttackSurface]) -> Option<Value> {
 
 fn deterministic_trust_boundaries(surfaces: &[AttackSurface]) -> Vec<Value> {
     let mut boundaries = Vec::new();
-    if has_public_http_surface(surfaces) {
+    if has_surface_kind(surfaces, AttackSurfaceKind::HttpRoute) || has_public_http_surface(surfaces)
+    {
         boundaries.push(trust_boundary(
             "tb-public-http",
             "Public HTTP boundary",

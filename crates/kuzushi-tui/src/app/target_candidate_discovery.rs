@@ -22,6 +22,8 @@ pub(crate) struct TargetCandidateFacts {
     pub(crate) file_count_capped: bool,
     pub(crate) prior_artifact_count: usize,
     pub(crate) prior_artifacts: Vec<String>,
+    pub(crate) component_inventory: Option<kuzushi_core::SbomScanReport>,
+    pub(crate) component_inventory_error: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +126,11 @@ fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
     let git = kuzushi_core::workspace::target_git_metadata(&path);
     let profile = kuzushi_core::repository_inventory::TargetProfile::detect(&path);
     let inventory = kuzushi_core::repository_inventory::build_repository_inventory(&path).ok();
+    let (component_inventory, component_inventory_error) =
+        match kuzushi_core::scan_sbom(&path, &kuzushi_core::ScanCancellation::default()) {
+            Ok(report) => (Some(report), None),
+            Err(error) => (None, Some(error.to_string())),
+        };
     let languages = detected_languages(inventory.as_ref(), &profile);
     let build_systems = detected_build_systems(&path, inventory.as_ref());
     let (file_count, file_count_capped) = bounded_file_count(&path, TARGET_FACT_FILE_BUDGET);
@@ -142,6 +149,8 @@ fn inspect_target_candidate(path: PathBuf) -> TargetCandidateFacts {
         file_count_capped,
         prior_artifact_count,
         prior_artifacts,
+        component_inventory,
+        component_inventory_error,
         path,
     }
 }

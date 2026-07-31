@@ -12,3 +12,4 @@ mod tests;
 pub use domain::{ReasonTag, ScanRecommendation};
 pub use fold::{recommend, RecommenderInputs};
 pub use gather::recommend_scans_for_target;
+pub(crate) use gather::scope_paths;

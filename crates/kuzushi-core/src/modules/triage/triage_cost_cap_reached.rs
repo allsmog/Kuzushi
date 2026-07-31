@@ -17,6 +17,10 @@ pub(in crate::modules) struct TriageRuntimeOutcome {
     pub(in crate::modules) outcome: TriageOutcome,
     pub(in crate::modules) cached: bool,
     pub(in crate::modules) failed_vote_summaries: Vec<String>,
+    /// Deep-auditor evidence citations for the representative finding. Empty
+    /// for the standard single-shot path and for inherited duplicates.
+    pub(in crate::modules) evidence:
+        Vec<crate::capabilities::deep_auditor::EvidenceCitation>,
 }
 
 #[derive(Default)]
@@ -77,6 +81,7 @@ pub(in crate::modules) fn call_triage_runtime(
                 outcome,
                 cached: true,
                 failed_vote_summaries: Vec::new(),
+                evidence: Vec::new(),
             });
         }
     }
@@ -86,6 +91,7 @@ pub(in crate::modules) fn call_triage_runtime(
         outcome,
         cached: false,
         failed_vote_summaries: Vec::new(),
+        evidence: Vec::new(),
     })
 }
 
@@ -188,13 +194,15 @@ pub(in crate::modules) fn persist_triage_outcome(
         outcome,
         cached,
         failed_vote_summaries: _,
+        evidence,
     } = runtime_outcome;
-    let Some(_finding_id) = finding.id else {
+    let Some(finding_id) = finding.id else {
         stats.record_unpersisted_outcome(finding, outcome)?;
         return Ok(());
     };
     match store.record_auto_triage_for_fingerprint(&finding.fingerprint, &outcome) {
         Ok(updated) if updated > 0 => {
+            crate::capabilities::deep_auditor::record_evidence(store, finding_id, &evidence)?;
             if cached {
                 stats.record_cached_outcome(finding, outcome);
             } else {

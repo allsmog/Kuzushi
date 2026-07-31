@@ -14,7 +14,9 @@ The cutover preserves:
 - existing `.kuzushi` paths and legacy run/finding/proof/patch artifacts;
 - the run trace schema and chain -> plan -> steer queue order;
 - shared `prepare_tool_input` and `dispatch_prepared_tool_with_runtime` policy;
-- explicit target consent and two-stage `Ctrl+C` cancellation;
+- explicit target consent and context-sensitive `Ctrl+C`/`Ctrl+D`: immediate
+  idle exit, active-work cancellation without exit, and safe waiting while
+  cancellation is pending;
 - existing export formats and no-silent-fallback semantics.
 
 The canonical domain is `WorkflowPhase::{Map,Scan,Review,Prove,Fix}` and

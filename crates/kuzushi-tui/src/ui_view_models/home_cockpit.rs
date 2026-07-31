@@ -134,6 +134,53 @@ fn attack_surface_model_for_run(
     }
 }
 
+/// The three deck-relevant dispositions of the already-hydrated
+/// `attack-surface.json` artifact. Distinguishing a present-but-corrupt file
+/// (`Malformed`/`Unreadable`/`NonFile`) from a genuinely absent one lets the
+/// worklist fold degrade the former and leave the latter `Unavailable`,
+/// matching the headless `worklist:rank` honesty instead of collapsing every
+/// non-`Present` disposition into "no map". Read-free like
+/// `attack_surface_artifact_value`: it reads the same in-memory cache entry, so
+/// there is no new per-frame IO and no re-stat.
+pub(crate) enum AttackSurfaceArtifactState {
+    /// The artifact hydrated to a JSON value. It may still be the wrong shape;
+    /// the fold decides whether it parses into a surface map.
+    Present(serde_json::Value),
+    /// A file backs the artifact but its bytes did not parse as JSON, could not
+    /// be read, or is not a regular file. A map WAS persisted, so this is a
+    /// `context:build` recovery hint, never the absent "no map" state.
+    CorruptOrUnreadable,
+    /// No artifact backs this engagement (absent, or not yet hydrated).
+    Absent,
+}
+
+pub(crate) fn attack_surface_artifact_state(app: &ShellApp) -> AttackSurfaceArtifactState {
+    match run_artifact_json(app, &HomeRunModel::from_app(app), "attack-surface.json") {
+        ViewDataState::Ready(JsonFileState::Present(value)) => {
+            AttackSurfaceArtifactState::Present(value)
+        }
+        ViewDataState::Ready(
+            JsonFileState::Malformed | JsonFileState::Unreadable | JsonFileState::NonFile,
+        ) => AttackSurfaceArtifactState::CorruptOrUnreadable,
+        ViewDataState::Ready(JsonFileState::Missing)
+        | ViewDataState::NotRequested
+        | ViewDataState::Loading => AttackSurfaceArtifactState::Absent,
+    }
+}
+
+/// The O(1) hydration version of the already-loaded `attack-surface.json`, or
+/// `None` when it has not hydrated. Read-path memo keys (the worklist fold) key
+/// on this instead of re-cloning and re-parsing the full artifact every frame.
+pub(crate) fn attack_surface_artifact_version(app: &ShellApp) -> Option<u64> {
+    let run = HomeRunModel::from_app(app);
+    let (target, run_id) = (run.target.as_deref()?, run.run_id.as_deref()?);
+    app.workbench_cache().borrow().cached_run_artifact_version(
+        target,
+        run_id,
+        "attack-surface.json",
+    )
+}
+
 fn home_command_labels(journey: Option<&JourneyModel>) -> [&'static str; 6] {
     if journey.is_some() {
         HOME_JOURNEY_COMMANDS

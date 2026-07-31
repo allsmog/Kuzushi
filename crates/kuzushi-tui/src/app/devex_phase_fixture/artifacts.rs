@@ -5,6 +5,7 @@ pub(super) fn seed_files(target: &Path) -> Result<(), String> {
     seed_project_files(target)?;
     seed_threat_model(target)?;
     seed_replay_trace(target)?;
+    seed_verify_stage_runs(target)?;
     seed_scan_receipt(target)?;
     seed_attack_surface(target)
 }
@@ -190,6 +191,110 @@ fn seed_replay_trace(target: &Path) -> Result<(), String> {
         ))
         .map(|_| ())
         .map_err(|error| format!("write lifecycle fixture: {error}"))
+}
+
+/// F4: two keyless run dirs whose `items.jsonl` carry the verify:finding stage
+/// ladder exactly as the real executor emits it (`gate · plausibility (…) ·
+/// rejection only`, `panel · N pass(es) (…)`, `escalation · tie-break (…)`),
+/// plus a refusal variant with a `refused`-kind danger notice. `replay <runId>`
+/// and `trace <runId>` then render the ordered stage story deterministically.
+fn seed_verify_stage_runs(target: &Path) -> Result<(), String> {
+    write_stage_run(
+        target,
+        super::findings::ESCALATED_RUN_ID,
+        escalated_stage_items(),
+    )?;
+    write_stage_run(
+        target,
+        super::findings::REFUSED_RUN_ID,
+        refused_stage_items(),
+    )
+}
+
+fn write_stage_run(
+    target: &Path,
+    run_id: &str,
+    items: Vec<kuzushi_core::run_lifecycle::RunItemV1>,
+) -> Result<(), String> {
+    write_stage_run_summary(target, run_id)?;
+    let writer = kuzushi_core::run_lifecycle::RunItemWriter::open(target, run_id, None)
+        .map_err(|error| format!("open stage run fixture {run_id}: {error}"))?;
+    for item in items {
+        writer
+            .emit_and_flush(kuzushi_core::run_lifecycle::RunItemRecord::new(
+                kuzushi_core::run_lifecycle::RunItemId::new(),
+                kuzushi_core::run_lifecycle::RunItemSource::Workflow,
+                item,
+            ))
+            .map_err(|error| format!("write stage run fixture {run_id}: {error}"))?;
+    }
+    Ok(())
+}
+
+/// `replay`/`trace`/`show runs` resolve a run through its `RunSummary`
+/// (`run.json`), so a stage run needs one even though the fixture only cares
+/// about its `items.jsonl` timeline.
+fn write_stage_run_summary(target: &Path, run_id: &str) -> Result<(), String> {
+    let mut summary = kuzushi_core::RunSummary::running(
+        run_id,
+        "verify",
+        Some("verify:finding".to_string()),
+        target.display().to_string(),
+    )
+    .complete()
+    .with_cost(Some(0.03));
+    // Backdate so these never win the "latest run" hydration that projects the
+    // Map attack-surface artifact from the map-phase-run receipt.
+    summary.started_at_unix = summary.started_at_unix.saturating_sub(100);
+    summary.completed_at_unix = Some(summary.started_at_unix + 5);
+    kuzushi_core::write_run_summary(target, &summary)
+        .map(|_| ())
+        .map_err(|error| format!("write stage run summary {run_id}: {error}"))
+}
+
+fn gate_stage_item() -> kuzushi_core::run_lifecycle::RunItemV1 {
+    stage_reasoning(&format!(
+        "gate · plausibility ({}) · rejection only",
+        super::findings::GATE_MODEL
+    ))
+}
+
+fn panel_stage_item() -> kuzushi_core::run_lifecycle::RunItemV1 {
+    stage_reasoning(&format!(
+        "panel · 2 pass(es) ({})",
+        super::findings::PANEL_MODEL
+    ))
+}
+
+fn escalated_stage_items() -> Vec<kuzushi_core::run_lifecycle::RunItemV1> {
+    vec![
+        gate_stage_item(),
+        panel_stage_item(),
+        stage_reasoning(&format!(
+            "escalation · tie-break ({})",
+            super::findings::ESCALATION_MODEL
+        )),
+    ]
+}
+
+fn refused_stage_items() -> Vec<kuzushi_core::run_lifecycle::RunItemV1> {
+    vec![
+        gate_stage_item(),
+        panel_stage_item(),
+        kuzushi_core::run_lifecycle::RunItemV1::DiagnosticNotice {
+            level: kuzushi_core::run_lifecycle::DiagnosticLevel::Error,
+            message: kuzushi_core::run_lifecycle::SafeText::operator_visible(
+                "tie-break escalation model equals the primary model; a same-model escalation cannot break the tie and was refused (verdict unchanged)",
+            ),
+        },
+    ]
+}
+
+fn stage_reasoning(label: &str) -> kuzushi_core::run_lifecycle::RunItemV1 {
+    kuzushi_core::run_lifecycle::RunItemV1::SafeReasoningSummary {
+        text: kuzushi_core::run_lifecycle::SafeText::operator_visible(label),
+        redaction_policy_version: 1,
+    }
 }
 
 fn io_error(action: &str, path: &Path, error: std::io::Error) -> String {

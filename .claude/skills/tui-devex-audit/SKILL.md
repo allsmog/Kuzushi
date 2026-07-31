@@ -1,6 +1,6 @@
 ---
 name: tui-devex-audit
-description: Run the tmux-driven TUI DevEx audit journeys (J1-J16) and judge the captured screens against the signifier-state-intent invariant. Use when asked to audit the Kuzushi TUI's developer experience, re-run a DevEx journey, or verify a TUI fix didn't regress an audited journey. Args: journey ids (e.g. "J1 J8"), "all", or empty for the priority set.
+description: Run the tmux-driven TUI DevEx audit journeys (J1-J17) and judge the captured screens against the signifier-state-intent invariant. Use when asked to audit the Kuzushi TUI's developer experience, re-run a DevEx journey, or verify a TUI fix didn't regress an audited journey. Args: journey ids (e.g. "J1 J8"), "all", or empty for J1 only.
 ---
 
 # TUI DevEx audit
@@ -18,8 +18,10 @@ cargo build -p kuzushi-cli   # only if target/debug/kuzushi is stale/missing
 ```
 
 - Args given to the skill are journey ids (`J1 J8`, `all`, `--size 60x20 J14`).
-- No args → run the doc's priority order: `J1 J8`, then `J4 J5 J6 J7` (J4
-  skips honestly without a model key).
+- No args → run only `J1`, the highest-priority first-contact journey.
+- Run journeys sequentially by default. Multiple journey IDs or `all` must come
+  from the operator explicitly; do not delegate one journey per subagent unless
+  the operator approves that parallelism.
 - The harness bounds every wait and kills its tmux sessions on exit; never
   bypass it with ad-hoc long-lived tmux sessions.
 

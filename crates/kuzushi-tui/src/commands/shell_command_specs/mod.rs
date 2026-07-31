@@ -148,6 +148,8 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "background" | "bg" => Some(ShellCommand::Background),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         "scene" | "viz" => Some(ShellCommand::Scene),
+        "worklist" => Some(ShellCommand::Worklist),
+        "rail" | "sidebar" => Some(ShellCommand::Rail),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
     }

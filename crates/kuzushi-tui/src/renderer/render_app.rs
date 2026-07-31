@@ -47,11 +47,15 @@ fn current_primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
 }
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
-    let area = frame.area();
-    if area.height == 0 || area.width == 0 {
+    let full = frame.area();
+    if full.height == 0 || full.width == 0 {
         return;
     }
 
+    let (area, rail) = split_context_rail(app, full);
+    if let Some(rail_area) = rail {
+        super::chrome::rail::render_context_rail(frame, rail_area, app);
+    }
     let prompt_height = prompt_height(app, area);
     let sections = fit_sections_to_height(render_sections(app, area), area.height, prompt_height);
     let fixed_height = fixed_chrome_height(&sections, prompt_height);
@@ -62,10 +66,33 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .constraints(render_constraints(primary.height, &sections, prompt_height))
         .split(area);
     render_primary_layer(frame, chunks[0], app, primary);
-    render_lower_chrome(frame, app, &chunks, sections);
+    render_lower_chrome(frame, app, area, &chunks, sections);
 }
 
-pub(crate) fn workbench_primary_area(app: &ShellApp, area: Rect) -> Rect {
+/// Splits the full frame into (body, rail): the context rail takes a
+/// fixed-width right column when visible, and every other chrome decision —
+/// vertical sections, breakpoints, hit-testing, guided-question hosting —
+/// measures against the body, never the full terminal.
+pub(crate) fn split_context_rail(app: &ShellApp, full: Rect) -> (Rect, Option<Rect>) {
+    let rail_width = crate::ui_view_models::rail_width(app, full.width);
+    if rail_width == 0 {
+        return (full, None);
+    }
+    let body_width = full.width.saturating_sub(rail_width);
+    let body = Rect {
+        width: body_width,
+        ..full
+    };
+    let rail = Rect {
+        x: full.x + body_width,
+        width: rail_width,
+        ..full
+    };
+    (body, Some(rail))
+}
+
+pub(crate) fn workbench_primary_area(app: &ShellApp, full: Rect) -> Rect {
+    let (area, _) = split_context_rail(app, full);
     let prompt_height = prompt_height(app, area);
     let sections = fit_sections_to_height(render_sections(app, area), area.height, prompt_height);
     Rect {
@@ -107,6 +134,7 @@ fn primary_layer(app: &ShellApp, area: Rect, max_height: u16) -> PrimaryLayer {
 fn render_lower_chrome(
     frame: &mut Frame<'_>,
     app: &ShellApp,
+    body: Rect,
     chunks: &[Rect],
     sections: Vec<RenderSectionSlot>,
 ) {
@@ -115,13 +143,12 @@ fn render_lower_chrome(
         section.kind.render(frame, chunks[index], app);
         index += 1;
     }
-    render_input_surface(frame, chunks[index], app);
+    render_input_surface(frame, chunks[index], app, body);
 }
 
-fn render_input_surface(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+fn render_input_surface(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, body: Rect) {
     if let Some(question) = app.guided_scan_question_model() {
-        let full = frame.area();
-        if !crate::renderer::guided_question_hosted_in_body(full.width, full.height) {
+        if !crate::renderer::guided_question_hosted_in_body(body.width, body.height) {
             let page = crate::ui_view_models::active_workbench_page(app);
             crate::renderer::render_guided_question(frame, area, page, &question);
             return;

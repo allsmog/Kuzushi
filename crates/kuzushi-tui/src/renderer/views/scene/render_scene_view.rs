@@ -4,6 +4,7 @@
 //! is just the ratatui glue: header, framebuffer→cells, label stamping.
 
 use super::diagram::{DfdDiagram, TreeDiagram};
+use super::entry_points::EntryPointBrowser;
 use super::gallery::gallery_header_lines;
 use super::scene_color::to_color;
 use super::*;
@@ -11,7 +12,7 @@ use crate::scene3d::{
     active_palette, attack_surface_scene, brighten, render_to_framebuffer, Camera, Projector,
     SceneLabel, VizPage, BACKGROUND,
 };
-use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model};
+use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model, entry_point_breakdown};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
@@ -27,13 +28,18 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
-    frame.render_widget(Paragraph::new(gallery_header_lines(app)), outer[0]);
+    frame.render_widget(
+        Paragraph::new(gallery_header_lines(app, area.width as usize)),
+        outer[0],
+    );
     match app.router.scene().page() {
         VizPage::Dfd => frame.render_widget(
             DfdDiagram {
                 model: dfd_model(app),
                 selection: Some(app.router.scene().dfd_selection()),
                 detail_scroll: app.router.scene().dfd_detail_scroll(),
+                focused: app.router.scene().dfd_focused(),
+                context_selection: app.router.scene().dfd_context_selection(),
             },
             outer[1],
         ),
@@ -43,11 +49,19 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
             },
             outer[1],
         ),
+        VizPage::EntryPoints => frame.render_widget(
+            EntryPointBrowser {
+                model: entry_point_breakdown(app),
+                selection: app.router.scene().entry_point_selection(),
+                detail_scroll: app.router.scene().entry_point_detail_scroll(),
+            },
+            outer[1],
+        ),
         VizPage::AttackSurface => render_terrain_body(frame, outer[1], app),
         // Line-rendered pages never reach the frame path (guarded by
         // `uses_scene_frame`); draw nothing rather than the wrong page. Exhaustive
         // so a future frame-rendered variant forces an explicit decision here.
-        VizPage::AttackPath | VizPage::Heatmap => {}
+        VizPage::AttackPath | VizPage::Components | VizPage::Heatmap | VizPage::Worklist => {}
     }
 }
 

@@ -69,7 +69,7 @@ impl PlanningTaskRow {
         let cli_available = !cli_blocked && blocker.is_none();
         let (artifact_path, artifact_state, artifact_modified) = match task.artifact_path(target) {
             Some(path) => {
-                let state = artifact_state(target, &path);
+                let state = cpg_aware_artifact_state(task, target, &path);
                 let modified = artifact_modified(target, &path, state);
                 (path, state, modified)
             }
@@ -349,6 +349,22 @@ pub fn artifact_state(target: &Path, path: &Path) -> ArtifactState {
     }
 }
 
+/// The CPG-build row's cache truth is whole-graph artifacts for the current
+/// shape version (`has_artifacts`), not a populated `.kuzushi/cpg-rs` dir: a
+/// dir holding only scoped/ graphs, only stale-shape graphs, or a failed
+/// build's debris is NOT a usable graph and every cpg_taint_paths call would
+/// error, so it must read as not-Cached rather than a false "Cached".
+fn cpg_aware_artifact_state(task: PlanningTaskId, target: &Path, path: &Path) -> ArtifactState {
+    if task == PlanningTaskId::BuildCodePropertyGraph {
+        return if kuzushi_core::cpg_has_artifacts(target) {
+            ArtifactState::Cached
+        } else {
+            ArtifactState::Missing
+        };
+    }
+    artifact_state(target, path)
+}
+
 pub fn cli_is_on_path(name: &str) -> bool {
     if let Some(env_var) = cli_env_override(name) {
         if let Some(value) = std::env::var_os(env_var) {
@@ -442,6 +458,46 @@ mod tests {
         let row = PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, tmp.path());
         assert!(row.artifact_path.ends_with(".kuzushi/threat-model.json"));
         assert_eq!(row.artifact_state, ArtifactState::Missing);
+    }
+
+    fn write_cpg_dir(target: &Path) -> PathBuf {
+        let dir = target.join(".kuzushi").join("cpg-rs");
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn cpg_row_not_cached_with_only_scoped_or_stale_graphs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_cpg_dir(tmp.path());
+        // Stale-shape flat graph plus a current-shape scoped graph: the dir is
+        // populated (a bare is_dir()/read_dir would say "Cached"), but neither
+        // is a usable whole-graph artifact for the current shape version.
+        std::fs::write(dir.join("go.v1.cpg"), b"x").unwrap();
+        let scoped = dir.join("scoped").join("svc");
+        std::fs::create_dir_all(&scoped).unwrap();
+        std::fs::write(
+            scoped.join(format!("go.v{}.cpg", kuzushi_core::CPG_GRAPH_SHAPE_VERSION)),
+            b"x",
+        )
+        .unwrap();
+
+        let row = PlanningTaskRow::for_task(PlanningTaskId::BuildCodePropertyGraph, tmp.path());
+        assert_eq!(row.artifact_state, ArtifactState::Missing);
+    }
+
+    #[test]
+    fn cpg_row_cached_with_a_current_shape_whole_graph() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = write_cpg_dir(tmp.path());
+        std::fs::write(
+            dir.join(format!("go.v{}.cpg", kuzushi_core::CPG_GRAPH_SHAPE_VERSION)),
+            b"x",
+        )
+        .unwrap();
+
+        let row = PlanningTaskRow::for_task(PlanningTaskId::BuildCodePropertyGraph, tmp.path());
+        assert_eq!(row.artifact_state, ArtifactState::Cached);
     }
 
     #[test]

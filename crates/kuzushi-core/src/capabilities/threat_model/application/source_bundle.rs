@@ -41,6 +41,20 @@ impl ThreatModelSourceBundle {
             .filter(|record| record.content.is_some())
             .count()
     }
+
+    /// System-attested provenance rows for the persisted document: what the
+    /// build actually consumed, recorded by the loader rather than claimed by
+    /// the model. Skipped records are kept — a source that was *not* in the
+    /// prompt is provenance too. Local paths and byte counts are omitted
+    /// because the document travels beyond this machine.
+    pub(crate) fn provenance_json(&self) -> Value {
+        Value::Array(
+            self.records
+                .iter()
+                .map(ThreatModelSourceRecord::provenance_json)
+                .collect(),
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +121,16 @@ impl ThreatModelSourceRecord {
         })
     }
 
+    fn provenance_json(&self) -> Value {
+        json!({
+            "kind": self.kind,
+            "label": self.label,
+            "status": self.status,
+            "sha256": self.sha256,
+            "truncated": self.truncated,
+        })
+    }
+
     fn prompt_block(&self) -> Option<String> {
         let content = self.content.as_ref()?;
         let path = self
@@ -158,7 +182,7 @@ fn load_parent_artifacts(
     for source in &input.sources {
         match source.as_str() {
             "context" => records.push(load_context_source(ctx, input)?),
-            "threat-model" => records.push(load_prior_threat_model_source(input)?),
+            "threat-model" => records.push(prior_threat_model_source(input)?),
             "x-ray" => records.push(load_x_ray_source(input)?),
             "entry-points" => records.push(load_entry_points_source(input)?),
             "none" => {}
@@ -225,6 +249,22 @@ fn build_context_source_content(input: &BuildInput) -> Result<String> {
     )
     .with_context(|| "Could not build context snapshot for threat-model:build")?;
     serde_json::to_string_pretty(&built.snapshot).context("Could not render context snapshot JSON")
+}
+
+/// The prior model is the one source whose loading is a *lineage* decision,
+/// not an evidence decision. `sources` records what the caller asked for;
+/// `embeds_prior_model()` decides whether it reaches the prompt, so a fresh
+/// build attests the exclusion instead of silently dropping the row.
+fn prior_threat_model_source(input: &BuildInput) -> Result<ThreatModelSourceRecord> {
+    if !input.embeds_prior_model() {
+        return Ok(ThreatModelSourceRecord::skipped(
+            "artifact",
+            "threat-model",
+            persistent_threat_model_path(&input.target),
+            "seedMode=fresh: persisted model excluded from the prompt",
+        ));
+    }
+    load_prior_threat_model_source(input)
 }
 
 fn load_prior_threat_model_source(input: &BuildInput) -> Result<ThreatModelSourceRecord> {

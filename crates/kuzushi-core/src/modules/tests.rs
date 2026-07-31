@@ -75,6 +75,88 @@ mod tests {
         }
     }
 
+    #[test]
+    fn worklist_rank_is_registered_read_only_and_runtime_free() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let descriptor = registry.resolve_tool("worklist:rank").unwrap();
+
+        assert_eq!(descriptor.runtime_requirement, RuntimeRequirement::Never);
+        assert_eq!(descriptor.effect, ToolEffect::Read);
+        assert_eq!(descriptor.phase, ToolPhase::Map);
+        assert_eq!(
+            descriptor.workspace_requirement,
+            WorkspaceRequirement::Required
+        );
+        assert!(descriptor.headless);
+        assert!(!descriptor.hidden);
+    }
+
+    #[test]
+    fn worklist_rank_rejects_unknown_option_keys() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let error = registry
+            .prepare_tool_input("worklist:rank", json!({ "bogus": 1 }), None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unknown option"), "{error}");
+    }
+
+    #[test]
+    fn worklist_rank_without_a_workspace_fails_explicitly() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = execute_authorized_tool(&registry, "worklist:rank", json!({}), &ctx)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("worklist:rank"), "{error}");
+        assert!(error.contains("workspace"), "{error}");
+    }
+
+    #[test]
+    fn worklist_rank_headless_run_emits_json_parity() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = execute_authorized_tool(&registry, "worklist:rank", json!({}), &ctx).unwrap();
+
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        // No snapshot in a bare workspace: the attack-surface ranker is
+        // honestly unavailable and no rows are fabricated.
+        assert!(result
+            .pointer("/data/contributors/attackSurface")
+            .is_some());
+        assert!(result
+            .pointer("/data/rows")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty());
+    }
+
     struct MockRuntime {
         requests: Mutex<Vec<TriageRequest>>,
         queries: Mutex<Vec<AgentQueryRequest>>,
@@ -1305,6 +1387,33 @@ OUT
                 && !source.first_seen_at.is_empty()
                 && !source.last_seen_at.is_empty()
         }));
+    }
+
+    #[test]
+    fn systems_hunt_descriptor_prompt_defaults_are_real_prompts() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        for tool in [
+            "systems-hunt:systems-invariant-extract",
+            "systems-hunt:systems-trigger-synth",
+            "systems-hunt:systems-hunt",
+            "systems-hunt:deep-semantic-cwe-select",
+            "systems-hunt:deep-semantic-hunt",
+        ] {
+            let descriptor = registry.resolve_tool(tool).unwrap();
+            assert!(!descriptor.prompts.is_empty(), "{tool} has no prompt spec");
+            for prompt in &descriptor.prompts {
+                assert!(
+                    prompt.default_content.len() > 1200,
+                    "{tool} prompt {} too short",
+                    prompt.option_key
+                );
+                assert!(
+                    prompt.default_content.contains('\n'),
+                    "{tool} prompt {} lacks newlines",
+                    prompt.option_key
+                );
+            }
+        }
     }
 
     #[test]

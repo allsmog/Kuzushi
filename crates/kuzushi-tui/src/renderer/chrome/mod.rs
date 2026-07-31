@@ -10,5 +10,6 @@ mod cards;
 mod completion_popup;
 mod footer;
 mod prompt;
+pub(in crate::renderer) mod rail;
 mod status;
 mod transcript;

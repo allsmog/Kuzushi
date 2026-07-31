@@ -133,7 +133,11 @@ fn threat_model_build_options() -> Vec<OptionSpec> {
     let mut options = vec![
         target_option(),
         threat_model_methodology_option("stride"),
-        opt("sources", OptionType::StringList, "Parent artifacts for the model.")
+        opt(
+            "sources",
+            OptionType::StringList,
+            "Parent artifacts for the model. The \"threat-model\" value embeds the persisted model and is governed by seedMode: fresh drops it from the default list, and rejects it when both are explicit.",
+        )
             .aliases(&["sourceArtifacts", "source_artifacts"])
             .default(json!(["context", "threat-model"])),
         opt("seed", OptionType::StringList, "Inline or workspace-file seed context.")
@@ -187,7 +191,7 @@ fn threat_model_pipeline_options() -> Vec<OptionSpec> {
         opt(
             "seedMode",
             OptionType::Enum,
-            "seeded = embed the persisted threat model as seed context for the rebuild; fresh = build from repository evidence only, ignoring the previous model (document identity still carries forward).",
+            "seeded = embed the persisted threat model (full document plus summary) as seed context for the rebuild; fresh = exclude it from the prompt entirely, building from repository evidence only (document identity still carries forward). Rejected with mode=refine, with pipeline=deterministic, and against an explicit sources list that disagrees. Provenance records the observed mode.",
         )
         .aliases(&["seed_mode"])
         .choices(&["seeded", "fresh"])

@@ -267,6 +267,10 @@ fn language_kind_table() -> &'static [(&'static [&'static str], &'static str)] {
         (&["go"], "go"),
         (&["rs"], "rust"),
         (&["scala", "sc"], "scala"),
+        // Known limitation: `.h` is treated as C. `.h` is genuinely ambiguous
+        // (C and C++ both use it), and forcing it to `cpp` would misparse real
+        // C headers, so C++ headers that use the `.h` extension narrow under
+        // the C grammar — a bounded precision gap, not a correctness gate.
         (&["c", "h"], "c"),
         (&["cc", "cpp", "cxx", "hpp", "hh"], "cpp"),
         (&["cs"], "csharp"),

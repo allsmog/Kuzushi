@@ -121,7 +121,7 @@ fn global_keymap_section() -> KeymapSection {
         &[
             ("help", "open help"),
             ("Tab", "complete prompt input"),
-            ("Ctrl-C  ·  Ctrl-D", "quit (with confirm if dirty)"),
+            ("Ctrl-C  ·  Ctrl-D", "exit idle shell · cancel active work"),
             (
                 "Ctrl-L",
                 "clear console (keeps state · audit log untouched)",

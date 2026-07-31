@@ -53,7 +53,7 @@ impl ShellApp {
                     .scroll_mut()
                     .set(focus, u16::MAX);
             }
-            ScrollTarget::Logs => self.router.logs_mut().set_scroll(usize::MAX),
+            ScrollTarget::Logs => self.router.logs_mut().follow_tail(),
             ScrollTarget::Default => self.router.default_scroll_mut().tail(),
         }
     }

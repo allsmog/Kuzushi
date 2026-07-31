@@ -266,7 +266,10 @@ impl PlanningTaskId {
                 ".kuzushi/threat-model.json"
             }
             DecomposeModules => ".kuzushi/v3/project-model/scopes.json",
-            BuildCodePropertyGraph => ".kuzushi/cpg.bin",
+            // cpg-rs writes shape-versioned graphs under this directory; the
+            // pre-cutover `.kuzushi/cpg.bin` joern path was never written, so
+            // the row showed Missing forever even after a successful build.
+            BuildCodePropertyGraph => ".kuzushi/cpg-rs",
             BuildCodeQlDatabase => ".kuzushi/v3/codeql-db",
             ThreatIntelCves => ".kuzushi/threat-intel/candidates.json",
             _ => return None,
@@ -277,6 +280,9 @@ impl PlanningTaskId {
     pub fn artifact_path(self, target: &Path) -> Option<PathBuf> {
         if self == Self::DecomposeModules {
             return Some(kuzushi_core::workspace::project_model_scopes_path(target));
+        }
+        if self == Self::BuildCodePropertyGraph {
+            return Some(kuzushi_core::cpg_artifact_dir(target));
         }
         self.artifact_relative_path().map(|path| target.join(path))
     }

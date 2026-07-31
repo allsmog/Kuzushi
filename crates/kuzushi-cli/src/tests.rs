@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use crate::adapters::auth_bridge::{
-        bridge_ping_error, bridge_ping_summary, parse_bridge_stdout, run_auth_ping_bridge,
+        auth_ping_envelope, bridge_ping_error, bridge_ping_summary, parse_bridge_stdout,
+        run_auth_ping_bridge,
     };
     use crate::adapters::auth_oauth::{
         anthropic_missing_credential_message, anthropic_oauth_readiness_message, auth_ping_model,
@@ -26,7 +27,8 @@ mod tests {
         Command, ConfigCommand, McpBackend, ScanModeArg, SessionExportFormat, SessionsCommand,
     };
     use crate::doctor::{
-        check_auth_env, check_model_config, deterministic_capability_checks, DoctorStatus,
+        check_auth_env, check_model_config, check_treesitter_grammars,
+        deterministic_capability_checks, DoctorStatus,
     };
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
@@ -941,6 +943,38 @@ mod tests {
     }
 
     #[test]
+    fn treesitter_doctor_check_probes_the_sidecar_and_lists_languages() {
+        let prior = std::env::var_os("KUZUSHI_MCP_TREESITTER_BIN");
+
+        // A real sidecar path (any existing file works for the probe) → green,
+        // and the compiled language list still appears in the detail.
+        let sidecar = tempfile::NamedTempFile::new().unwrap();
+        std::env::set_var("KUZUSHI_MCP_TREESITTER_BIN", sidecar.path());
+        let present = check_treesitter_grammars();
+        assert_eq!(present.status, DoctorStatus::Ok);
+        assert_eq!(present.name, "treesitter");
+        assert!(present.detail.contains("cpp"), "{}", present.detail);
+        assert!(present.detail.contains("rust"), "{}", present.detail);
+        assert!(present.next.is_none());
+
+        // A missing sidecar path → honest warn with an actionable next step.
+        std::env::set_var(
+            "KUZUSHI_MCP_TREESITTER_BIN",
+            sidecar.path().join("does-not-exist"),
+        );
+        let absent = check_treesitter_grammars();
+        assert_eq!(absent.status, DoctorStatus::Warn);
+        assert_eq!(absent.name, "treesitter");
+        assert!(absent.detail.contains("cpp"), "{}", absent.detail);
+        assert!(absent.next.is_some());
+
+        match prior {
+            Some(value) => std::env::set_var("KUZUSHI_MCP_TREESITTER_BIN", value),
+            None => std::env::remove_var("KUZUSHI_MCP_TREESITTER_BIN"),
+        }
+    }
+
+    #[test]
     fn run_summary_plain_includes_optional_fields_and_artifacts() {
         let artifact_path = run_dir(Path::new("/repo"), "run-123").join("analysis.json");
         let summary =
@@ -1412,6 +1446,25 @@ mod tests {
         assert_eq!(changed.len(), 1);
         assert_eq!(changed[0].before.severity.as_deref(), Some("medium"));
         assert_eq!(changed[0].after.severity.as_deref(), Some("high"));
+    }
+
+    #[test]
+    fn runs_diff_warns_about_a_malformed_result_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        diff_run_with_findings(&store, workspace.root(), "run-a", &[]);
+        diff_run_with_findings(&store, workspace.root(), "run-b", &[]);
+        std::fs::write(
+            run_dir(workspace.root(), "run-b").join("result.json"),
+            "{bad",
+        )
+        .unwrap();
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert_eq!(diff.warnings.len(), 1);
+        assert!(diff.warnings[0].contains("run-b result artifact is malformed JSON"));
     }
 
     #[test]
@@ -2212,6 +2265,29 @@ mod tests {
             bridge_ping_error(&failed),
             Some("bad credentials".to_string())
         );
+    }
+
+    #[test]
+    fn auth_ping_envelope_uses_the_runtime_oauth_contract() {
+        let temp = tempfile::tempdir().unwrap();
+        let credentials_path = temp.path().join("oauth.json");
+        let mut config = kuzushi_core::V2Config::default();
+        config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+            credentials_path: Some(credentials_path.clone()),
+            allow_env_token: false,
+        });
+
+        let envelope = auth_ping_envelope(&config, "openai-codex:gpt-5.5".to_string()).unwrap();
+
+        assert_eq!(
+            envelope["protocolVersion"],
+            kuzushi_openai::LANGGRAPH_BRIDGE_PROTOCOL_VERSION
+        );
+        assert_eq!(
+            envelope["oauthCredentialsPath"],
+            credentials_path.display().to_string()
+        );
+        assert_eq!(envelope["oauthAllowEnvToken"], false);
     }
 
     #[test]

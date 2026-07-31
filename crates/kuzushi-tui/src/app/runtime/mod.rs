@@ -6,8 +6,8 @@ use crate::renderer::{render_app, render_plain_app, render_plain_command_result}
 use anyhow::{Context, Result};
 use crossterm::cursor::MoveTo;
 use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event,
+    self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+    EnableFocusChange, EnableMouseCapture, Event,
 };
 use crossterm::execute;
 use crossterm::terminal::{

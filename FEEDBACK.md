@@ -124,3 +124,333 @@ The feedback implementation pass is complete for the TUI behavior covered by the
 - `cargo test --workspace --locked` passes across all crates, TUI integration suites, and doc tests.
 - `pnpm verify:quick` passes its complete eight-step plan: Node tests, Rust formatting, workspace/all-target compilation, architecture, model safety, docs, CRAP risk, and Biome.
 - `pnpm quality:architecture` passes 17 boundaries and 74 rules; `pnpm quality:crap-risk` passes for 365 changed code files.
+
+---
+
+## Audit 3 — FIRA reproduction / threat-model walkthrough (OAuth + gpt-5.3-codex-spark)
+
+Date: 2026-07-30
+Build: `0.24.0-alpha.8 · debug`, branch `feat/scan-comparison-honesty` @ 900d185389 (+ local uncommitted WIP)
+Target: `~/academic/OMSCS/fira-reproduction` — 2292 files, Python, no build system detected, non-git
+Model: `openai-oauth:gpt-5.3-codex-spark` (OpenAI OAuth, LangGraph backend), methodology `stride`
+Session: interactive shell driven via tmux at 220x55.
+Task: generate a DFD, entry points, and a STRIDE threat model, entirely through the TUI.
+
+Outcome: **it worked.** `run threat-model:build` → prereq `context:build` approved → 2 runs / 92s →
+`.kuzushi/threat-model.json` with 15 DFD nodes, 15 flows, 4 trust boundaries, 41 entry points,
+5 assets, and 6 STRIDE threats (2 critical, 2 high, 2 medium). Evidence is file:line-anchored and the
+provenance block honestly records "No source code execution, installs, or external network calls".
+The items below are what got in the way.
+
+### Feedback
+
+14. **Auth picker claims credentials are missing when OAuth is already stored.** `auth` opened
+    "CHOOSE AUTH METHOD" with the banner *"Provider openai needs credentials. Paste a key, sign in, or
+    try the demo."* and defaulted the cursor to the API-key row. Selecting "OpenAI OAuth login"
+    immediately returned `DONE onboarding · openai OAuth already stored; credentials hidden` — no
+    browser flow, because nothing was needed. The `config` view confirms the state was knowable all
+    along (`oauth openai=✓ stored`). The picker should lead with stored credential state and offer
+    re-login as the secondary action, not present a first-run gate to an already-authenticated
+    operator. Signifier↔state break: "needs credentials" was false when rendered.
+
+15. **Esc-into-Navigate silently swallows a typed command — and fires real side effects.** After
+    dismissing a notice with Esc, typing `model openai-codex:gpt-5.3-codex-spark` + Enter produced
+    *nothing*: no prompt text, no error, no receipt, no model change. Esc had entered Navigate mode, so
+    every character was consumed as a keybinding. Retyping the identical string without the preceding
+    Esc worked on the first attempt. This is item 3's mode-flip papercut, still live, but now with an
+    observable consequence: the swallowed keystrokes emitted
+    `NOTICE keymap · operator keybindings reloaded` — navigate-mode bindings executed a real action
+    from what the operator believed was command text. Typed printable input that lands in Navigate mode
+    should either be rejected visibly or routed to the prompt; silently reinterpreting a command as
+    hotkeys is the worst of the three options.
+
+16. **Prereq card renders `recommendedapprove` with no separator.** In the PREREQUISITE PLAN card the
+    label/value gap is lost on exactly one row:
+    ```
+      final tool threat-model:build
+      missing via context:build
+      recommendedapprove          <-- should be "recommended  approve"
+      artifact   context snapshot
+    ```
+    Every other row pads correctly. Cosmetic, but it is on the one card that gates an approval decision.
+
+17. **The derived phase chip oscillates Map → Scan → Map across a single tool run.** Before dispatch the
+    rail read `Map 1/5` / `scope: … · Map`. While `threat-model:build` was in flight it read `Scan 2/5`
+    / `scope: … · Scan`. On completion it reverted to `Map 1/5`. One run of one Map-phase tool should
+    not transiently advance the journey spine — reality did not move to Scan and then back. Related to
+    item 9's contradictory phase labels, but this is a *temporal* flip within one run rather than a
+    disagreement between simultaneous indicators.
+
+18. **`threats summary` reports `actors 0` for a model whose every threat names an actor.**
+    `.kuzushi/threat-model.json` has no top-level `actors` array, yet all 6 threats carry an `actor`
+    field (`adjacent_network`, etc.). Rendering a measured `0` states the model found no actors, when
+    the truth is the concept is not modeled as a top-level collection. Either derive the distinct set
+    from `threats[].actor` or render `—` / `not modeled` the way the ASSUMPTIONS block already does.
+    (Same screen, same run: `assets 5`, `dfd nodes 15`, `data flows 15`, `trust boundaries 4` all
+    match the artifact exactly — so `actors 0` reads as equally authoritative.)
+
+19. **Cost is never metered for OAuth-backed models, so the budget rail is decorative.** Across a 92s
+    run with a large synthesis call the header cycled `cost:$0.00 (no model calls)` →
+    `cost:>=$0.00 (metering incomplete)`, Run Focus said `cost unavailable`, and the rail held
+    `$0.00 spent · budget not enforced` throughout. For `openai-oauth:*` there is no per-call price to
+    report, which is fine — but then the budget row should say so ("not metered for OAuth models")
+    rather than implying a $0.00 measurement. A budget ceiling that can never be approached is worse
+    than an absent one. (Item 2 flagged the repeated "cost unavailable" wording; this is the
+    provider-specific root cause.)
+
+20. **Grounding silently drops 43% of discovered attack surface.** Run Focus reported
+    `grounding: 40 surfaces · 0 confirmed findings`. The context snapshot for the same target holds
+    **70** surfaces (`attackSurfaceMap.surfaces`). The binding cap is the `maxElements` option,
+    default **40** (`adapters/build_input.rs:19`), applied as
+    `stratified_top_surfaces(map.surfaces, max_elements)` in
+    `application/grounding.rs:186`, with `MAX_GROUNDING_ROWS_PER_FILE = 2` (`grounding.rs:191`) shaping
+    the round-robin selection underneath it. Two problems compound: the cap is never disclosed, and
+    `maxElements` does not appear in `options threat-model:build` at all — it is behind
+    `show advanced`, so the default options view lists 7 knobs and hides the one that decides how much
+    of the repository the model actually sees. The operator sees "40 surfaces" and reasonably reads it
+    as *the* attack surface. This violates the repo's own standing
+    rule: *"No silent caps: if a workflow bounds coverage (top-N, no-retry, sampling), log() what was
+    dropped — silent truncation reads as 'covered everything' when it didn't."* Emit the denominator
+    (`grounding: 40 of 70 surfaces · capped at 2 rows/file`) and carry it into the artifact's coverage
+    block. Compare `provenance.notes`, which *does* honestly disclose its own limits — the grounding
+    step should meet that bar.
+
+21. **Minor: entry-point list clips its last group with no "+N more".** The ENTRY POINTS browser header
+    reads `41 found · 4 kinds · 3 zones`; the visible groups are PROCESS EXECUTION 26, PUBLIC HTTP 12,
+    SERVICE RUNTIME 3 (= 41), but only 2 of the 3 SERVICE RUNTIME rows fit before the panel border and
+    nothing marks the truncation. The DFD page on the same screen does this correctly
+    (`page 1/3 · +5 more`). The list does scroll with `j/k`, so this is a missing signifier rather than
+    unreachable content — but the operator has no way to know a row is hidden.
+
+### Verified fixed since Audit 1/2
+
+Re-ran the surfaces that previous items called broken; these are genuinely better on this build:
+
+- **Item 8, number-key tab footgun — fixed.** Pressing `4` on the threats view navigated to SUMMARY.
+  It no longer drafts `model 4` into the prompt, so the accidental model-switch hazard is gone.
+- **Item 8, UI/artifact threat-ID disagreement — fixed properly.** The TUI shows `T1…T6`, and the
+  artifact now carries `displayId: "T1"` alongside `id: "T-MODEL-PICKLE-RCE"` and
+  `stableId: "tm-e491895b7e81"`. TUI and JSON agree because the display identity is *in* the record
+  rather than recomputed positionally. (Cross-referencing an export still requires the displayId→id
+  hop; surfacing `id` in the detail pane would close it.)
+- **Item 8, STRIDE rollup was "6 rows + 18 blank lines" — fixed.** The rollup now expands each category
+  into its member threats with severity and title, and shows empty categories honestly as `0 issues`.
+- **Item 7, DFD scene was display-only and lossy — largely fixed.** The scene now has a real selection
+  model (`node 1/34`), a DETAIL pane (name/context/type/zone), per-zone pagination
+  (`page 1/3 · +5 more`), `j/k follows selection`, `Enter DFD target`, and `g/G` ends. Node labels
+  still truncate mid-word ("Mission/adjacent…", "AE forensics web…"), but the content is now reachable
+  instead of unreachable.
+- **Item 2, watchdog escalated during healthy long model calls — fixed.** The in-flight call rendered
+  `◐ query in flight 1m04s · model call awaiting response` and the HEALTH pane stayed `Stream: healthy`
+  for the full 92s. No false "NO PROGRESS SIGNAL" escalation. The lossy-progress disclosure
+  (`healthy but lossy · 1 update(s) omitted` + `Disclosure · progress updates were coalesced at
+  persistence · omitted=1`) is exactly the honesty this file has been asking for.
+- **Run-focus origin restore works.** Completion returned to the exact pre-launch view
+  (`options[threat-model:build]`) with one receipt — `run receipt · completed · 2 runs · 92s` — and did
+  *not* force-open the DFD scene, which item 9 complained about. Opening `scene` explicitly worked.
+
+### Re-run on the current release build (same day, 12:26)
+
+The Audit 3 items above were collected on a `target/debug` binary built at 09:48 that reported its
+revision as `unknown`. The npm-installed `kuzushi` on PATH was dead (its
+`native/darwin-arm64/kuzushi` had been renamed to `kuzushi.npm-orig`, so the wrapper fell through every
+resolution candidate and exited with "Could not find the Kuzushi native binary"). Rebuilt
+`cargo build --release -p kuzushi-cli` (1m32s), re-pointed the alias
+(`native/darwin-arm64/kuzushi` → repo `target/release/kuzushi`, `kuzushi.npm-orig` retained as
+rollback), and re-ran the same task end to end on `kuzushi 0.24.0-alpha.8 (900d18538+dirty · release)`.
+
+Items 14–21 were re-checked on the release build. **16 reproduces verbatim** (the prereq card rendered
+`recommendedreuse` this time — the missing separator is not value-specific). **20 reproduces**
+(`grounding: 40 surfaces` against 70 discovered). **19 got worse — see 22.** **17 did not reproduce**
+on this path: launched from Workbench Map on a hydrated engagement, the phase chip held `Map 1/5` for
+the whole run. The Audit 3 observation stands as recorded (fresh engagement, dispatched from the
+`options` view), but the flip is path-dependent, not universal.
+
+22. **A run with a 96,259-token model call is labelled `$0.00 (no model calls)`.** The release-build
+    receipt read `completed · 1 run(s) · $0.00 (no model calls)`. The durable ledger for the same run
+    (`.kuzushi/v3/runs/tool-1785439671340-9de9bfd27702/items.jsonl`, seq 12) records:
+    ```json
+    {"type":"model_call_finished","provider":"openai-codex",
+     "model":"openai-codex:gpt-5.3-codex-spark","status":"completed","latency_ms":90617,
+     "usage":{"inputTokens":56523,"outputTokens":39736},
+     "cost":{"observedUsd":0.0,"completeness":"exact"}}
+    ```
+    Two separate defects:
+    - `cost_label` (`crates/kuzushi-core/src/run_lifecycle/application/presentation/display/health.rs:93-104`)
+      returns `"$0.00 (no model calls)"` whenever the report is complete and `observed_usd == 0.0`. It
+      infers a **call count** from a **price**. A zero-priced call is not an absent call. The label
+      should come from the model-call count in the ledger, which is right there.
+    - `completeness: "exact"` asserts a measurement that never happened. The OAuth provider returns
+      token usage but no price; classifying that as `Exact` (rather than `IncompleteObserved`, which
+      the type already models and documents as "a provider call may have spent money but…") is what
+      lets the false label render at all.
+
+    Not a regression from the rebuild: every file on this path (`runtime_cost.rs` 2026-07-21,
+    `health.rs` 2026-07-23, `langgraph_runtime/` 2026-07-28) predates **both** binaries, so the two
+    builds ran identical cost code. Which makes it worse — the *same code* classified the *same
+    provider and model* two different ways two hours apart: the 10:42 run recorded
+    `completeness: "incomplete_observed"` (rendering the honest `>=$0.0000 (metering incomplete)`),
+    the 12:29 run recorded `"exact"`. Cost completeness for an unmetered OAuth call is
+    nondeterministic. This is the concrete mechanism behind item 19: budget enforcement cannot be
+    trusted when a 96k-token call can settle as an exact $0.00.
+
+23. **`seedMode=fresh` is inert — the previous model is loaded into the prompt anyway, and the run is
+    stamped `fresh` while it happens.** The option is documented as *"fresh = build from repository
+    evidence only, ignoring the previous model (document identity still carries forward)"*
+    (`modules/threat_model_module.rs:190`). That promise is false in the default configuration.
+
+    Traced end to end:
+    - `default_source_artifacts(BuildFlavor::ThreatModel)` returns
+      `["context", "threat-model"]` (`adapters/build_input.rs:314-319`), so `sources` includes the
+      prior model unless the operator overrides it.
+    - `load_parent_artifacts` (`application/source_bundle.rs:153-169`) dispatches
+      `"threat-model" => load_prior_threat_model_source(input)` with **no `seedMode` check anywhere in
+      the path**.
+    - `load_prior_threat_model_source` (`source_bundle.rs:230-248`) reads the entire persisted
+      document. `maxSourceBytes` is 200,000 and the file is 56,490 bytes, so nothing is trimmed.
+    - `is_fresh()` has exactly one consumer: `stamp_build_seed_lineage`
+      (`application/build_threat_model.rs:170-180`), where it decides the **provenance label** and
+      whether to load `previous` for the lineage stamp. It never touches the prompt.
+
+    Confirmed in the run's own artifacts. `input.json` records `"seedMode":"fresh"` alongside
+    `"sources":["context","threat-model"]`; Run Focus reported `source:parent artifacts · 2 loaded`;
+    and the persisted source-bundle record is unambiguous:
+    ```json
+    {"kind":"artifact","label":"threat-model","status":"loaded",
+     "path":".../.kuzushi/threat-model.json","truncated":false}
+    ```
+
+    The output shows exactly what that produces. Across the two runs, **7 of 8 threat fields are
+    byte-identical for all six threats** — the LLM-authored `id` slugs (`T-MODEL-PICKLE-RCE`,
+    `T-CMD-EXEC-CONTROL`, …), `category`, `surface`, `asset`, `impact`, `likelihood`, and
+    `relatedCwe`. Only `affectedFiles` changed, and it *shrank* (5 files → 3 on T1). `stableId` is
+    hashed from `category|surface|asset` (`staged/evidence.rs:78-97`), so all six stableIds collide
+    exactly. This is a paraphrase of a document the model was shown, not an independent re-derivation
+    from repository evidence — which is precisely what `fresh` was supposed to prevent.
+
+    (Separately, `finalize_document_identity` at `build_threat_model.rs:188-194` loads the previous
+    model unconditionally to carry `T1..Tn` displayIds forward. That one is documented and intended —
+    "document identity still carries forward" — so it is not a defect, but it does mean even the
+    numbering is inherited.)
+
+    Fix: either `fresh` must drop `threat-model` from `sources` before the bundle is built, or the
+    descriptor must stop claiming the previous model is ignored. Today `seedMode` gates the *seed*
+    channel while `sources` is a second, independent channel for the same document, and nothing
+    reconciles them — so the one knob an operator would reach for to get an uncontaminated rebuild
+    does nothing, and the artifact's own provenance says `seedMode: fresh` to confirm it worked.
+
+    **Confirmed by controlled re-run (R3).** Dispatched
+    `run threat-model:build {"seedMode":"fresh","sources":["context"]}` — same target, same cached
+    70-surface context snapshot, same 40 grounded rows, same model — bypassing the broken knob by
+    hand. Result: a **completely disjoint** threat set. R1∩R2 share **6 of 6** stableIds; R1∩R3 share
+    **0 of 6**. R3 produced 8 threats (`T-01`…`T-08`) with no field overlap at all. Removing the prior
+    model from `sources` is what `seedMode: fresh` was supposed to do, and doing it by hand changes
+    the output completely — which is the proof that `seedMode` itself does nothing.
+
+    Operator-visible side effect worth its own look: R3's eight new threats were numbered `T7`…`T14`
+    by the displayId carry-forward, while the previous `T1`…`T6` are simply absent from the rebuilt
+    document. A rebuild silently retired six threats and introduced eight more, with no diff, no
+    retirement record, and no disclosure on the receipt.
+
+24. **Entry points swung 41 → 17 on an unchanged target — root cause: the default pipeline persists a
+    threat model that fails its own coverage invariant and reports it as a clean success.**
+
+    `attackSurface.entryPoints` is **not** a deterministic projection of the attack-surface map. It is
+    LLM output, partitioned by a prompt instruction in
+    `application/grounding.rs:319`: *"Deterministic attack-surface map (ground truth: every row below
+    must appear in attackSurface.entryPoints or in deprioritized with a reason)"*. Whether a given
+    surface lands in `entryPoints` or in `deprioritized` is a model judgement call, re-made every run.
+
+    The accounting shows what actually changed. The context snapshot holds **70** surfaces:
+
+    The accounting across three controlled runs — same target, same cached 70-surface context
+    snapshot, same 40 grounded rows, same model — with only the prior-model contamination varying:
+
+    | run | prior model in prompt | entryPoints | deprioritized | accounted | coverage | invariant |
+    |---|---|---|---|---|---|---|
+    | R1 10:42 | yes (`seedMode: seeded`) | **41** | 29 | **70** (all discovered) | 40/40 | `true` · `none-needed` |
+    | R2 12:29 | yes (labelled `fresh`, see 23) | **17** | 23 | **40** (grounded only) | 38/40 | `false` · `unresolved` |
+    | R3 20:11 | **no** (`sources:["context"]`) | **6** | **0** | **6** (9% of discovered) | 21/40 | `false` · `unresolved` |
+
+    **A hypothesis recorded here earlier — that item 23's seeding caused the entry-point collapse —
+    is refuted.** The controlled run proves the opposite: removing the prior model made enumeration
+    dramatically *worse*, not better. The prior threat model was doing most of the entry-point work.
+    A genuinely cold build on this target yields **6 entry points out of 70 discovered surfaces**.
+
+    **R3's six entry points are not entry points.** They carry `path: null`, `line: null`,
+    `kind: null` and read as abstract buckets — `"AE forensics HTTP handlers"`,
+    `"whitebox pixel_check_* os.system paths"`. Measured against the 33 distinct file paths in the
+    discovered surface map: R1 represents **33/33**, R2 **27/33**, R3 **0/33**. So the cold run did not
+    merely enumerate fewer surfaces; it collapsed 70 concrete file:line surfaces into 6 categories with
+    no provenance at all, destroying the property that makes the deliverable useful (R1/R2 rows carry
+    `source/FIRA_AE/AE/run_all.py:24` plus evidence arrays). `document_schema.rs:268` requires
+    `path`/`line`/`method`/`route` on these rows; they are null and the document still validated and
+    persisted as `completed`, because `require_complete_security_context_links` checks DFD reference
+    integrity only, not evidence fields.
+
+    R3 is the clearest failure of the ground-truth contract. `grounding.rs:319` instructs that every
+    grounded row must appear in `entryPoints` **or** in `deprioritized` with a reason. R3 emitted 6
+    entryPoints and an **empty** `deprioritized` array — so 34 of the 40 ground-truth rows the model
+    was explicitly handed simply vanished, with no entry, no reason, and no record. The instruction is
+    a prompt-level request with no post-validation that enforces it.
+
+    Nothing enforces the invariant on the default path. All three runs used `pipeline: "single"` —
+    the default (`adapters/build_input.rs:181-183` returns `"single"` when unspecified) — and
+    `single_pipeline_gap_fill_method` (`application/build_threat_model.rs:421-427`) does nothing but
+    **relabel** the failure:
+    ```rust
+    if coverage.invariant_satisfied() { "none-needed" } else { "unresolved" }
+    ```
+    The real remediation — the bounded STRIDE gap-fill pass over uncovered entry points
+    (`staged/gap_fill.rs`, gated at `staged/pipeline.rs:120` and `staged/refine.rs:241`) — exists only
+    in the *staged* pipeline. `single` computes the coverage report, discovers the invariant is
+    violated, writes `"unresolved"` into the document, and completes successfully.
+
+    And the failure never reaches the operator. Verified across every output surface of the failing
+    run (`.kuzushi/v3/runs/tool-1785439671340-9de9bfd27702/`):
+    - **Receipt:** `completed · 1 run(s)` — no warning, no degraded state.
+    - **`report.md`:** zero occurrences of "coverage", "invariant", or "gap". The human-readable
+      report omits the failure entirely.
+    - **`result.json`:** `status: completed`; `invariantSatisfied: false` is present only nested inside
+      the persisted document.
+    - **Run Focus:** exactly one unstyled `tool-progress` line, `coverage: 38/40 entry points covered`
+      (`build_threat_model.rs:405-419`) — no severity, no `⚠`, emitted into the same output stream
+      that reported `1 update(s) omitted at source`.
+
+    Suggested fix, in priority order: (a) a violated coverage invariant must not report `completed`
+    unqualified — surface it on the receipt and in `report.md` as a partial/degraded outcome, since
+    "21/40 entry points" is precisely the kind of bounded-coverage fact the repo's no-silent-caps rule
+    already requires disclosing; (b) enforce the ground-truth contract in code rather than in the
+    prompt — every grounded surface must land in `entryPoints` or `deprioritized`, and a run that
+    drops 34 of 40 should fail validation, not persist; (c) give the `single` pipeline either a
+    gap-fill pass or an explicit "gap fill unavailable on this pipeline" disclosure, rather than a
+    silent relabel; (d) treat cold-start quality as the headline problem — 6 entry points from 70
+    discovered surfaces is the *uncontaminated* result on this target, so a first-ever build against a
+    new repository is the weakest case, exactly when the operator has nothing to compare it against.
+
+    (The six identical STRIDE threats in R1/R2 are fully explained by item 23 — the prior model was in
+    the prompt — and are *not* explained by this item. R3, with the prior model removed, produced a
+    disjoint 8-threat set sharing 0 of 6 stableIds.)
+
+25. **`provenance.sources` is LLM-authored free text, and it leaked a prompt fence delimiter into a
+    persisted artifact.** The R3 build wrote:
+    ```json
+    "provenance": {
+      "seedMode": "fresh", "pipeline": "single",
+      "sources": ["UNTRUSTED_REPO_BEGIN", "attack-surface map",
+                  "manual static traversal of referenced files"]
+    }
+    ```
+    `UNTRUSTED_REPO_BEGIN` is the untrusted-content fence marker from the prompt, echoed by the model
+    into the field that is supposed to record what the build consumed. Two consequences:
+    - **`provenance.sources` is not evidence.** `seedMode` and `pipeline` are system-stamped by
+      `stamp_seed_lineage`, but `sources` is model output, so it cannot be used to audit what actually
+      entered a build. The trustworthy record is the source-bundle in `result.json`
+      (`{"kind":"artifact","label":"threat-model","status":"loaded","truncated":false}`), which is
+      system-written — that is what proved item 23. The two disagree freely: R1 claimed
+      `repository-inventory`, R2 claimed `untrusted-source threat-model`, R3 claimed a delimiter.
+      Either stamp `sources` from the actual bundle or rename the model-authored field so it cannot be
+      mistaken for provenance.
+    - **The model is attending to and reproducing the untrusted-content fence markers.** Benign here,
+      but the fence is the prompt-injection boundary for repository content; a model that echoes the
+      delimiter into structured output is worth a look before that boundary is relied on.

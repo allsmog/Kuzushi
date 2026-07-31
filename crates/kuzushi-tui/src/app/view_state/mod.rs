@@ -124,6 +124,7 @@ pub(crate) use workbench_cache::{
     harness_file_path, DfdModelCacheKey, DirectoryListingState, JsonFileState, PathState,
     ProjectScopeTreeState, PromptMutationsState, ReviewQueueCacheKey, RiskByModuleCacheKey,
     StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey, WorkbenchCache,
+    WorklistCacheKey,
 };
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;

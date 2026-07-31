@@ -24,6 +24,7 @@ mod v3_commit_target;
 mod v3_finding_reads;
 
 pub(in crate::findings::persistence::open) use finding_identities::FindingIdentityAssignment;
+pub use audit_events::FindingAuditEvent;
 pub use finding_rekeys::ModelRekeyRequest;
 pub(crate) use rescan_reconciliation::CompletedScanScope;
 pub(crate) use v3_finding_reads::finding_stable_fp;

@@ -12,7 +12,7 @@ use crate::{
     ScannedSnippetWindow, ShellApp, ViewDataState, VisibleFindingProjection,
     VisibleFindingsCacheKey,
 };
-use kuzushi_core::findings::{FindingSource, ReviewDecision, VulnSource};
+use kuzushi_core::findings::{DataflowEvidenceRow, FindingSource, ReviewDecision, VulnSource};
 use kuzushi_core::{
     compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
     finding_source_label, project_finding, runtime_validation_summary, static_proof_summary,
@@ -153,6 +153,10 @@ pub(crate) struct FindingDetailModel {
     pub(crate) message_lines: Vec<String>,
     pub(crate) message_overflow: usize,
     pub(crate) evidence_overflow: usize,
+    /// Deep-auditor cited dataflow evidence (source/sink/guard/context rows),
+    /// hydrated off-frame from the `deep-audit:evidence` audit events.
+    pub(crate) dataflow_evidence: Vec<DataflowEvidenceRow>,
+    pub(crate) dataflow_overflow: usize,
     pub(crate) triage: Option<TriageSummaryModel>,
     pub(crate) source_snippet: Option<SourceSnippetModel>,
 }
@@ -417,7 +421,36 @@ pub(crate) fn finding_detail_model_for_projection(
         provenance,
     );
     detail.source_snippet = source_snippet_model(app, finding);
+    let (dataflow, dataflow_overflow) = dataflow_evidence_for_detail(app, finding);
+    detail.dataflow_evidence = dataflow;
+    detail.dataflow_overflow = dataflow_overflow;
     detail
+}
+
+/// Project the finding's hydrated deep-audit dataflow rows from the workbench
+/// cache, capped by the shared detail-section limit with an overflow count.
+/// Empty when the target is unset or the auditor recorded no citations.
+fn dataflow_evidence_for_detail(
+    app: &ShellApp,
+    finding: &Finding,
+) -> (Vec<DataflowEvidenceRow>, usize) {
+    let Some(target) = app.target() else {
+        return (Vec::new(), 0);
+    };
+    let state = app
+        .workbench_cache()
+        .borrow()
+        .cached_finding_audit_dataflow(target, &finding.fingerprint);
+    let ViewDataState::Ready(crate::FindingAuditDataflowState::Ready(rows)) = state else {
+        return (Vec::new(), 0);
+    };
+    let overflow = rows.len().saturating_sub(FINDING_DETAIL_SECTION_LIMIT);
+    (
+        rows.into_iter()
+            .take(FINDING_DETAIL_SECTION_LIMIT)
+            .collect(),
+        overflow,
+    )
 }
 
 pub(crate) const SNIPPET_CONTEXT_BEFORE: usize = 3;
@@ -1857,6 +1890,18 @@ fn next_action_display(action: FindingNextAction, alias: Option<&str>) -> NextAc
 }
 
 impl FindingEvidenceRow {
+    /// Present a deep-audit dataflow citation as an evidence row so the
+    /// AUDITED DATAFLOW section can reuse the shared evidence-row renderer.
+    pub(crate) fn from_dataflow(row: &DataflowEvidenceRow) -> Self {
+        Self {
+            origin: row.origin.clone(),
+            header: format!("{} · {}", row.kind, row.location),
+            snippet: String::new(),
+            rationale: row.note.clone(),
+            capture: None,
+        }
+    }
+
     fn from_evidence(evidence: &kuzushi_core::FindingEvidence) -> Self {
         Self {
             origin: evidence_origin_label(evidence).to_string(),

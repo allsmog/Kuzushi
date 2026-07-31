@@ -17,17 +17,23 @@ mod tests {
     struct ScriptedRuntime {
         steps: Mutex<Vec<AgentLoopStep>>,
         captured_prompts: Mutex<Vec<String>>,
+        captured_models: Mutex<Vec<String>>,
     }
     impl ScriptedRuntime {
         fn new(steps: Vec<AgentLoopStep>) -> Arc<Self> {
             Arc::new(Self {
                 steps: Mutex::new(steps),
                 captured_prompts: Mutex::new(Vec::new()),
+                captured_models: Mutex::new(Vec::new()),
             })
         }
 
         fn last_prompt(&self) -> Option<String> {
             self.captured_prompts.lock().unwrap().last().cloned()
+        }
+
+        fn captured_models(&self) -> Vec<String> {
+            self.captured_models.lock().unwrap().clone()
         }
     }
     impl AgentRuntime for ScriptedRuntime {
@@ -49,6 +55,10 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(request.prompt.clone());
+            self.captured_models
+                .lock()
+                .unwrap()
+                .push(request.model.clone());
             let mut s = self.steps.lock().unwrap();
             anyhow::ensure!(!s.is_empty(), "scripted runtime exhausted");
             Ok(s.remove(0))
@@ -386,6 +396,180 @@ mod tests {
         );
     }
 
+    fn verdict_final(triggerable: bool) -> AgentLoopStep {
+        AgentLoopStep::Final {
+            text: String::new(),
+            structured: Some(serde_json::json!({
+                "triggerable": triggerable,
+                "rationale": if triggerable { "reachable path" } else { "guarded upstream" },
+                "confidence": 0.8,
+                "evidence": []
+            })),
+            cost_usd: Some(0.01),
+        }
+    }
+
+    fn needs_review_final() -> AgentLoopStep {
+        AgentLoopStep::Final {
+            text: "I cannot determine triggerability".to_string(),
+            structured: None,
+            cost_usd: Some(0.01),
+        }
+    }
+
+    /// Router with the deep_auditor primary plus an optional, operator-named
+    /// tie-break model for the `triage_escalation` role.
+    fn routed_runtime_with_escalation(
+        steps: Vec<AgentLoopStep>,
+        escalation_primary: Option<&str>,
+    ) -> (RoutedRuntime<'static>, Arc<ScriptedRuntime>) {
+        use std::fs;
+        let scripted = ScriptedRuntime::new(steps);
+        let runtime: Arc<dyn AgentRuntime> = scripted.clone();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join(".kuzushi");
+        fs::create_dir_all(&dir).unwrap();
+        let mut body =
+            String::from("[roles.deep_auditor]\nprimary = \"anthropic:claude-opus-4-7\"\n");
+        if let Some(escalation) = escalation_primary {
+            body.push_str(&format!(
+                "\n[roles.triage_escalation]\nprimary = \"{escalation}\"\n"
+            ));
+        }
+        fs::write(dir.join("models.toml"), body).unwrap();
+        let loaded = AgentRouter::load(&crate::config::ConfigPaths {
+            home_dir: tmp.path().to_path_buf(),
+            target_dir: None,
+        })
+        .unwrap();
+        (RoutedRuntime::new(runtime, Arc::new(loaded), None), scripted)
+    }
+
+    fn split_panel_config(workspace: &std::path::Path) -> DeepAuditConfig {
+        DeepAuditConfig {
+            passes: 2,
+            include_static_evidence: false,
+            ..DeepAuditConfig::new(workspace)
+        }
+    }
+
+    #[test]
+    fn tie_without_role_model_stays_needs_review() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        let (runtime, _scripted) =
+            routed_runtime_with_escalation(vec![verdict_final(true), verdict_final(false)], None);
+
+        let outcome =
+            run_deep_auditor(&runtime, None, &split_panel_config(tmp.path()), &finding()).unwrap();
+
+        assert_eq!(outcome.triage.verdict, TriageVerdict::NeedsReview);
+        assert!(!outcome.triage.rationale.contains("tie-break"));
+    }
+
+    #[test]
+    fn tie_refuses_same_model_and_says_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        let (runtime, _scripted) = routed_runtime_with_escalation(
+            vec![verdict_final(true), verdict_final(false)],
+            Some("anthropic:claude-opus-4-7"),
+        );
+
+        let outcome =
+            run_deep_auditor(&runtime, None, &split_panel_config(tmp.path()), &finding()).unwrap();
+
+        assert_eq!(outcome.triage.verdict, TriageVerdict::NeedsReview);
+        assert!(
+            outcome.triage.rationale.contains("tie-break refused"),
+            "refusal must be disclosed: {}",
+            outcome.triage.rationale
+        );
+    }
+
+    #[test]
+    fn tie_adopts_distinct_escalation_verdict() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        // 2 split passes + 1 escalation pass that returns a true positive.
+        let (runtime, scripted) = routed_runtime_with_escalation(
+            vec![verdict_final(true), verdict_final(false), verdict_final(true)],
+            Some("openai:escalation-model"),
+        );
+
+        let outcome =
+            run_deep_auditor(&runtime, None, &split_panel_config(tmp.path()), &finding()).unwrap();
+
+        assert_eq!(outcome.triage.verdict, TriageVerdict::TruePositive);
+        assert!(
+            outcome
+                .triage
+                .rationale
+                .contains("tie-break via openai:escalation-model"),
+            "escalation provenance must be visible: {}",
+            outcome.triage.rationale
+        );
+        // The extra pass's REQUEST actually carried the escalation model — not
+        // the primary. A regression where run_deep_audit_pass ignored its model
+        // argument (leaving the rationale string, which the code fabricates from
+        // its own arg, correct while the request stayed on the primary) is
+        // caught here.
+        let models = scripted.captured_models();
+        assert_eq!(models.len(), 3, "two panel passes plus one escalation pass");
+        assert_eq!(models[0], "anthropic:claude-opus-4-7");
+        assert_eq!(models[1], "anthropic:claude-opus-4-7");
+        assert_eq!(models[2], "openai:escalation-model");
+    }
+
+    #[test]
+    fn escalation_that_needs_review_does_not_forge() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        // The escalation pass itself is inconclusive — the verdict must stay
+        // NeedsReview, never a manufactured TP/FP.
+        let (runtime, _scripted) = routed_runtime_with_escalation(
+            vec![verdict_final(true), verdict_final(false), needs_review_final()],
+            Some("openai:escalation-model"),
+        );
+
+        let outcome =
+            run_deep_auditor(&runtime, None, &split_panel_config(tmp.path()), &finding()).unwrap();
+
+        assert_eq!(outcome.triage.verdict, TriageVerdict::NeedsReview);
+    }
+
+    #[test]
+    fn escalation_pass_failure_keeps_needs_review_and_discloses_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("foo.c"), "void foo() {}\n").unwrap();
+        // Only the two panel passes are scripted; the escalation pass exhausts
+        // the runtime and errors. The truthful NeedsReview consensus, already
+        // computed and paid for, must survive with a disclosed failure note
+        // rather than nuking the whole audit into a top-level error.
+        let (runtime, _scripted) = routed_runtime_with_escalation(
+            vec![verdict_final(true), verdict_final(false)],
+            Some("openai:escalation-model"),
+        );
+
+        let outcome =
+            run_deep_auditor(&runtime, None, &split_panel_config(tmp.path()), &finding()).unwrap();
+
+        assert_eq!(outcome.triage.verdict, TriageVerdict::NeedsReview);
+        assert!(
+            outcome
+                .triage
+                .rationale
+                .contains("tie-break via openai:escalation-model failed"),
+            "the escalation failure must be disclosed: {}",
+            outcome.triage.rationale
+        );
+        assert!(
+            outcome.triage.rationale.contains("needs_review stands"),
+            "the consensus must be preserved: {}",
+            outcome.triage.rationale
+        );
+    }
+
     #[test]
     fn record_evidence_persists_v3_audit_event() {
         let tmp = tempfile::tempdir().unwrap();
@@ -401,6 +585,7 @@ mod tests {
             end_line: 20,
             note: "OOB sink".to_string(),
             kind: "sink".to_string(),
+            origin: EvidenceOrigin::CodeRead,
         }];
         record_evidence(&store, finding_id, &evidence).unwrap();
 

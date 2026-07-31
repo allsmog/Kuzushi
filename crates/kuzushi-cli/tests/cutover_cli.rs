@@ -1278,6 +1278,7 @@ fn doctor_json_reports_named_preflight_checks() {
         "semgrep",
         "codeql",
         "cpg",
+        "treesitter",
         "nmap",
         "model",
         "auth-env",

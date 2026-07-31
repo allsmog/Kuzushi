@@ -46,13 +46,12 @@ pub(crate) fn run_auth_ping_checks(
 ) -> Result<()> {
     let provider = auth_ping_provider_kind(provider)?;
     eprintln!("[auth ping] provider = {}", provider.label());
-    probe_auth_credentials(provider, config, log)?;
-
     let model = auth_ping_model(model_override, config)?;
     log.record(true, format!("ping model = {model}"));
+    probe_auth_credentials(provider, &model, config, log)?;
 
     let bridge_command = required_auth_ping_bridge_command(config, log);
-    let envelope = auth_ping_envelope(config, model);
+    let envelope = auth_ping_envelope(config, model)?;
     let parsed = run_auth_ping_bridge(&bridge_command, &envelope, log)?;
     record_auth_ping_result(&parsed, log);
     log.exit_if_failed();
@@ -110,20 +109,42 @@ impl AuthPingLog {
 
 pub(crate) fn probe_auth_credentials(
     provider: AuthProviderKind,
+    model: &str,
     config: &kuzushi_core::V2Config,
     log: &mut AuthPingLog,
 ) -> Result<()> {
     if matches!(provider, AuthProviderKind::Anthropic) {
         return probe_anthropic_credentials(config, log);
     }
-    record_openai_auth_if_needed(provider, log);
+    record_openai_auth_if_needed(provider, model, config, log)?;
     Ok(())
 }
 
-fn record_openai_auth_if_needed(provider: AuthProviderKind, log: &mut AuthPingLog) {
-    if matches!(provider, AuthProviderKind::OpenAi) {
-        record_openai_runtime_auth_presence(log);
+fn record_openai_auth_if_needed(
+    provider: AuthProviderKind,
+    model: &str,
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    if !matches!(provider, AuthProviderKind::OpenAi) {
+        return Ok(());
     }
+    if model.trim().starts_with("openai-codex:") {
+        return probe_openai_oauth_credentials(config, log);
+    }
+    record_openai_runtime_auth_presence(log);
+    Ok(())
+}
+
+fn probe_openai_oauth_credentials(
+    config: &kuzushi_core::V2Config,
+    log: &mut AuthPingLog,
+) -> Result<()> {
+    let oauth = config.runtime.anthropic_oauth.clone().unwrap_or_default();
+    let path = kuzushi_openai::resolve_oauth_credentials_path(&oauth)?;
+    let readiness = kuzushi_openai::probe_openai_oauth_path(&path)?;
+    record_anthropic_oauth_readiness(readiness, log);
+    Ok(())
 }
 
 #[derive(Clone, Copy)]

@@ -1,6 +1,5 @@
 use super::*;
 
-
 fn fixture_target() -> tempfile::TempDir {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("src")).unwrap();
@@ -11,14 +10,25 @@ fn fixture_target() -> tempfile::TempDir {
 fn document(files: &[&str]) -> Value {
     json!({
         "methodology": "stride",
+        "dfd": {
+            "nodes": [{"id": "download-handler"}],
+            "flows": [],
+            "trustBoundaries": []
+        },
         "threats": [{
             "id": "T-001",
+            "targetElementIds": ["download-handler"],
             "title": "traversal",
             "affectedFiles": files,
             "evidenceAnchors": [{"filePath": files[0], "startLine": 2, "description": "join"}],
         }],
         "attackSurface": {
-            "entryPoints": [{"name": "download", "evidence": format!("{}:1", files[0])}],
+            "entryPoints": [{
+                "id": "AS-download",
+                "targetElementIds": ["download-handler"],
+                "name": "download",
+                "evidence": format!("{}:1", files[0])
+            }],
         },
     })
 }
@@ -26,9 +36,15 @@ fn document(files: &[&str]) -> Value {
 #[test]
 fn path_refs_cover_affected_files_evidence_strings_and_anchors() {
     let refs = cited_path_refs(&document(&["src/app.py"]));
-    assert!(refs.iter().any(|r| r.path == "src/app.py" && r.line == Some(2)));
-    assert!(refs.iter().any(|r| r.path == "src/app.py" && r.line == Some(1)));
-    assert!(refs.iter().any(|r| r.path == "src/app.py" && r.line.is_none()));
+    assert!(refs
+        .iter()
+        .any(|r| r.path == "src/app.py" && r.line == Some(2)));
+    assert!(refs
+        .iter()
+        .any(|r| r.path == "src/app.py" && r.line == Some(1)));
+    assert!(refs
+        .iter()
+        .any(|r| r.path == "src/app.py" && r.line.is_none()));
 }
 
 #[test]
@@ -45,7 +61,23 @@ fn existing_citations_verify_and_missing_citations_fail() {
     let bad = verify_threat_model_document(&document(&["src/gone.py"]), target.path()).unwrap();
     assert_eq!(bad.verdict, "failed");
     assert!(bad.missing_count >= 1);
-    assert!(bad.missing.iter().any(|entry| entry.contains("src/gone.py")));
+    assert!(bad
+        .missing
+        .iter()
+        .any(|entry| entry.contains("src/gone.py")));
+}
+
+#[test]
+fn dangling_security_context_links_fail_verification() {
+    let target = fixture_target();
+    let mut doc = document(&["src/app.py"]);
+    doc["attackSurface"]["entryPoints"][0]["targetElementIds"] = json!(["missing"]);
+
+    let verification = verify_threat_model_document(&doc, target.path()).unwrap();
+
+    assert_eq!(verification.verdict, "failed");
+    assert_eq!(verification.link_error_count, 1);
+    assert!(verification.link_errors[0].contains("unknown DFD id `missing`"));
 }
 
 #[test]
@@ -55,7 +87,10 @@ fn out_of_range_lines_and_escaping_paths_are_flagged() {
     doc["threats"][0]["evidenceAnchors"][0]["startLine"] = json!(999);
     let verification = verify_threat_model_document(&doc, target.path()).unwrap();
     assert_eq!(verification.verdict, "failed");
-    assert!(verification.missing.iter().any(|entry| entry.contains("999")));
+    assert!(verification
+        .missing
+        .iter()
+        .any(|entry| entry.contains("999")));
 
     let hostile = document(&["../outside.py"]);
     let verification = verify_threat_model_document(&hostile, target.path()).unwrap();

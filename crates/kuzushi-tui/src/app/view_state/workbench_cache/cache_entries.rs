@@ -218,4 +218,11 @@ pub(super) struct DirectoryListingCache {
 pub(super) struct RunArtifactTextCache {
     pub(super) state: kuzushi_core::RunArtifactTextRead,
     pub(super) bytes: usize,
+    /// A content identity computed once at hydration (never per frame), so a
+    /// render-path caller can key a memo on "which revision of this artifact is
+    /// loaded" with an O(1) `u64` read instead of re-cloning and re-parsing the
+    /// full artifact text every frame. Re-hydration recomputes it, so it changes
+    /// whenever the on-disk artifact changes — including a moved line that leaves
+    /// summary counts identical.
+    pub(super) version: u64,
 }

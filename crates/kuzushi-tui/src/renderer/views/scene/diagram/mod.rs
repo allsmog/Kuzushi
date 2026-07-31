@@ -288,6 +288,7 @@ mod tests {
                 sample_flow("api", "db", "sql", "tb-data"),
             ],
             empty_hint: None,
+            ..Default::default()
         }
     }
 
@@ -302,6 +303,7 @@ mod tests {
 
     fn sample_flow(from: &str, to: &str, label: &str, boundary: &str) -> DfdFlowModel {
         DfdFlowModel {
+            key: format!("{from}->{to}"),
             from_id: from.into(),
             to_id: to.into(),
             from: from.into(),
@@ -351,6 +353,8 @@ mod tests {
                         model: sample_dfd(),
                         selection: Some(0),
                         detail_scroll: 0,
+                        focused: false,
+                        context_selection: 0,
                     },
                     w,
                     24
@@ -385,6 +389,8 @@ mod tests {
                 model: dfd,
                 selection: None,
                 detail_scroll: 0,
+                focused: false,
+                context_selection: 0,
             },
             72,
             24,

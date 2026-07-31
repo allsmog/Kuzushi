@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { validatePnpmPlanScripts, verificationPlan } from "./verify-repository.mjs";
+import { parseArguments, validatePnpmPlanScripts, verificationPlan } from "./verify-repository.mjs";
 
 const verifier = path.join(path.dirname(fileURLToPath(import.meta.url)), "verify-repository.mjs");
 const packageJson = JSON.parse(
@@ -74,6 +74,12 @@ test("unknown verification modes fail closed", () => {
   assert.throws(() => verificationPlan("fast-ish"), /quick or ci/);
 });
 
+test("verification arguments enable summary output explicitly", () => {
+  assert.deepEqual(parseArguments([]), { mode: "quick", summary: false });
+  assert.deepEqual(parseArguments(["ci", "--summary"]), { mode: "ci", summary: true });
+  assert.throws(() => parseArguments(["--verbose"]), /unknown verification option/);
+});
+
 test("process receipt owns stdout and records successful completion", {
   skip: process.platform === "win32",
 }, () => {
@@ -90,11 +96,25 @@ test("process receipt owns stdout and records successful completion", {
   });
 });
 
+test("summary output suppresses successful child output", {
+  skip: process.platform === "win32",
+}, () => {
+  withFakeTools("success", (environment) => {
+    const result = runVerifier(environment, ["quick", "--summary"]);
+    const receipt = JSON.parse(result.stdout);
+
+    assert.equal(result.status, 0);
+    assert.equal(receipt.ok, true);
+    assert.doesNotMatch(result.stderr, /fake child output/);
+    assert.match(result.stderr, /verify: tests/);
+  });
+});
+
 test("process receipt preserves command failure status", {
   skip: process.platform === "win32",
 }, () => {
   withFakeTools("failure", (environment) => {
-    const result = runVerifier(environment);
+    const result = runVerifier(environment, ["quick", "--summary"]);
     const receipt = JSON.parse(result.stdout);
 
     assert.equal(result.status, 7);
@@ -105,7 +125,7 @@ test("process receipt preserves command failure status", {
 
 test("process receipt preserves terminating signal", { skip: process.platform === "win32" }, () => {
   withFakeTools("signal", (environment) => {
-    const result = runVerifier(environment);
+    const result = runVerifier(environment, ["quick", "--summary"]);
     const receipt = JSON.parse(result.stdout);
 
     assert.equal(result.status, 1);
@@ -114,8 +134,8 @@ test("process receipt preserves terminating signal", { skip: process.platform ==
   });
 });
 
-function runVerifier(environment) {
-  return spawnSync(process.execPath, [verifier, "quick"], {
+function runVerifier(environment, args = ["quick"]) {
+  return spawnSync(process.execPath, [verifier, ...args], {
     encoding: "utf8",
     env: environment,
   });

@@ -312,10 +312,7 @@ fn compact_idle_workbench_does_not_offer_an_abort_for_absent_work() {
 
     let bindings = footer_keybindings(&app);
 
-    assert!(
-        bindings.contains(&bind("Ctrl+C", "arm exit")),
-        "{bindings:?}"
-    );
+    assert!(bindings.contains(&bind("Ctrl+C", "exit")), "{bindings:?}");
     assert!(!bindings.contains(&bind("Ctrl+C", "request abort")));
 }
 
@@ -535,16 +532,26 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
 
     let dfd_bindings = footer_keybindings(&app);
     // The DFD selects topology separately from its wrapped detail viewport.
-    assert!(dfd_bindings.contains(&bind("j/k/↑/↓", "select node/flow")));
-    assert!(dfd_bindings.contains(&bind("PgUp/PgDn", "scroll details")));
+    assert!(dfd_bindings.contains(&bind("j/k/↑/↓", "select")));
+    assert!(dfd_bindings.contains(&bind("Enter", "generate DFD")));
+    assert!(dfd_bindings.contains(&bind("PgUp/PgDn", "detail")));
     assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(!dfd_bindings.contains(&bind("g/G", "ends")));
-    assert!(dfd_bindings.contains(&bind("Tab", "next page")));
-    assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
+    assert!(!dfd_bindings.contains(&bind("Tab", "next page")));
+    assert!(!dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
     assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
     assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
+
+    app.router.scene_mut().toggle_dfd_focus();
+    let focused_bindings = footer_keybindings(&app);
+    assert!(focused_bindings.contains(&bind("j/k/↑/↓", "context")));
+    assert!(focused_bindings.contains(&bind("Enter", "topology")));
+    assert!(focused_bindings.contains(&bind("Esc", "collapse")));
+    assert!(focused_bindings.contains(&bind("q", "leave")));
+    assert!(!focused_bindings.contains(&bind("Esc/q", "leave")));
+    app.router.scene_mut().toggle_dfd_focus();
 
     app.router.scene_mut().set_page(VizPage::AttackSurface);
     app.set_shell_view(ShellView::Scene);
@@ -559,11 +566,27 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     let path_bindings = footer_keybindings(&app);
     assert!(path_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(path_bindings.contains(&bind("g/G", "ends")));
+
+    app.router.scene_mut().set_page(VizPage::EntryPoints);
+    let entry_bindings = footer_keybindings(&app);
+    assert!(entry_bindings.contains(&bind("j/k", "select")));
+    assert!(entry_bindings.contains(&bind("g/G", "ends")));
+    assert!(entry_bindings.contains(&bind("PgUp/PgDn", "detail")));
+    assert!(entry_bindings.contains(&bind("Enter", "DFD target")));
+    assert!(!entry_bindings.contains(&bind("j/k/↑/↓", "scroll")));
 }
 
 #[test]
 fn scene_footer_never_advertises_prompt_completion_for_page_cycle_tab() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
+        "rule.high",
+        "src/auth/login.rs",
+        10,
+        Some(10),
+        kuzushi_core::Severity::High,
+        "auth bug",
+    )];
     app.router.scene_mut().set_page(VizPage::Dfd);
     app.set_shell_view(ShellView::Scene);
     app.set_input_mode(crate::InputMode::Prompt);

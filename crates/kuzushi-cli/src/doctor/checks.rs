@@ -86,6 +86,65 @@ pub(crate) fn check_cpg_engine() -> DoctorCheck {
     )
 }
 
+/// The tree-sitter grammars are compiled into the separate
+/// `kuzushi-mcp-treesitter` sidecar binary, not the CLI. The runtime resolves
+/// that sidecar via `KUZUSHI_MCP_TREESITTER_BIN`, then a sibling of the running
+/// executable, then `PATH` (see `bridge_process::mcp_binary_env_defaults` and
+/// `mcp::sibling_mcp_binary`). A missing sidecar therefore fails with ENOENT at
+/// runtime, so the check probes for it the same way instead of reporting a
+/// hardcoded green.
+pub(crate) fn check_treesitter_grammars() -> DoctorCheck {
+    let languages = kuzushi_mcp_treesitter::supported_language_list();
+    match resolve_treesitter_sidecar() {
+        Some(path) => DoctorCheck::ok(
+            "treesitter",
+            format!(
+                "kuzushi-mcp-treesitter found at {} (languages: {languages})",
+                path.display()
+            ),
+        ),
+        None => DoctorCheck::warn(
+            "treesitter",
+            format!(
+                "kuzushi-mcp-treesitter sidecar was not found; tree-sitter MCP tools (languages: {languages}) degrade to a no-MCP run when requested"
+            ),
+            "Build the workspace (`cargo build --workspace` or `pnpm build:native`) so the sidecar sits next to `kuzushi`, or set KUZUSHI_MCP_TREESITTER_BIN to its path.",
+        ),
+    }
+}
+
+/// Mirror the runtime's treesitter-sidecar resolution: explicit
+/// `KUZUSHI_MCP_TREESITTER_BIN` override, then a sibling of the running
+/// executable, then `PATH`.
+fn resolve_treesitter_sidecar() -> Option<PathBuf> {
+    if let Some(explicit) = env::var_os("KUZUSHI_MCP_TREESITTER_BIN") {
+        let path = PathBuf::from(explicit);
+        return path.is_file().then_some(path);
+    }
+    let binary = "kuzushi-mcp-treesitter";
+    if let Some(sibling) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| sibling_sidecar_binary(&exe, binary))
+    {
+        return Some(sibling);
+    }
+    resolve_executable(
+        binary,
+        env::var_os("PATH").as_deref(),
+        &current_dir_for_doctor(),
+    )
+}
+
+fn sibling_sidecar_binary(executable: &Path, binary_name: &str) -> Option<PathBuf> {
+    let file_name = if cfg!(windows) {
+        format!("{binary_name}.exe")
+    } else {
+        binary_name.to_string()
+    };
+    let candidate = executable.parent()?.join(file_name);
+    candidate.is_file().then_some(candidate)
+}
+
 pub(crate) fn deterministic_capability_checks() -> Vec<DoctorCheck> {
     vec![
         built_in_capability_check("secret-scan", "built-in secret scanner is available"),

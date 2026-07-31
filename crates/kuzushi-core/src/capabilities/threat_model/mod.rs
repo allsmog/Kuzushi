@@ -23,6 +23,7 @@ pub(crate) use domain::*;
 pub(crate) use persistence::*;
 
 pub use adapters::execute_threat_model_tool;
+pub use domain::{security_context_link_report, SecurityContextLinkReport};
 pub use persistence::{
     list_threat_model_versions, live_threat_model_sha256, load_persistent_threat_model,
     persistent_threat_model_path, record_threat_model_version, resolve_threat_model,

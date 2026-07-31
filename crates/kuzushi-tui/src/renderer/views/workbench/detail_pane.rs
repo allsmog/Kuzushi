@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::ui_view_models::{FindingDetailModel, FindingEvidenceRow, ProofTier};
+use kuzushi_core::findings::DataflowEvidenceRow;
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Style;
 
@@ -37,6 +38,12 @@ fn detail_lines_for_model(
         &mut lines,
         &detail.evidence,
         detail.evidence_overflow,
+        budget,
+    );
+    push_dataflow_section(
+        &mut lines,
+        &detail.dataflow_evidence,
+        detail.dataflow_overflow,
         budget,
     );
     push_verification_section(&mut lines, detail, budget);
@@ -366,6 +373,30 @@ fn push_evidence_section(
         push_evidence_row(lines, row, budget, index > 0);
     }
     push_overflow_notice(lines, overflow, "evidence row");
+}
+
+/// The deep-auditor's cited dataflow (source/sink/guard/context) rendered
+/// with the same evidence-row layout. Empty rows render nothing — no header —
+/// so a finding the auditor never inspected shows no phantom section.
+fn push_dataflow_section(
+    lines: &mut Vec<Line<'static>>,
+    dataflow: &[DataflowEvidenceRow],
+    overflow: usize,
+    budget: usize,
+) {
+    if dataflow.is_empty() {
+        return;
+    }
+    push_section_header(lines, "AUDITED DATAFLOW");
+    for (index, row) in dataflow.iter().enumerate() {
+        push_evidence_row(
+            lines,
+            &FindingEvidenceRow::from_dataflow(row),
+            budget,
+            index > 0,
+        );
+    }
+    push_overflow_notice(lines, overflow, "dataflow row");
 }
 
 fn push_overflow_notice(lines: &mut Vec<Line<'static>>, hidden: usize, noun: &'static str) {
@@ -755,6 +786,39 @@ mod tests {
                 "PROVENANCE",
             ],
         );
+    }
+
+    fn guard_dataflow_row() -> DataflowEvidenceRow {
+        DataflowEvidenceRow {
+            origin: "deep auditor (cpg-rs path)".to_string(),
+            location: "src/users.ts:91".to_string(),
+            kind: "guard".to_string(),
+            note: "falsifying evidence · authz gate".to_string(),
+        }
+    }
+
+    #[test]
+    fn dataflow_section_renders_after_evidence_when_rows_exist() {
+        let mut detail = detail();
+        detail.dataflow_evidence = vec![guard_dataflow_row()];
+        detail.dataflow_overflow = 2;
+        let text = detail_text_for_width(&detail, 120, None);
+
+        assert!(text.contains("AUDITED DATAFLOW"), "{text}");
+        assert!(text.contains("guard · src/users.ts:91"), "{text}");
+        assert!(text.contains("falsifying evidence · authz gate"), "{text}");
+        assert!(text.contains("… 2 more dataflow rows"), "{text}");
+        assert_sections_in_order(&text, &["EVIDENCE", "AUDITED DATAFLOW", "VERIFICATION"]);
+    }
+
+    #[test]
+    fn empty_dataflow_rows_render_no_header() {
+        let mut detail = detail();
+        detail.dataflow_evidence = Vec::new();
+        detail.dataflow_overflow = 0;
+        let text = detail_text_for_width(&detail, 120, None);
+
+        assert!(!text.contains("AUDITED DATAFLOW"), "{text}");
     }
 
     #[test]

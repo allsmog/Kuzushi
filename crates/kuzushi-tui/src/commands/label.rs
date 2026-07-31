@@ -155,6 +155,11 @@ pub enum ShellCommand {
     /// Open the security-visualization gallery (risk heatmap, attack path,
     /// DFD, attack tree, 3D attack-surface terrain). Fed real Kuzushi data.
     Scene,
+    /// Open the gallery focused on the risk-ranked file worklist page.
+    Worklist,
+    /// Toggle the context rail. Hiding persists (`ui.rail false`); showing
+    /// restores the auto policy and force-opens for this session.
+    Rail,
     RunTool {
         tool: Option<String>,
         input: Option<String>,

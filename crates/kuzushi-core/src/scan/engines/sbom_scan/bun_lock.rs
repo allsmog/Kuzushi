@@ -18,8 +18,8 @@ pub(super) fn is_bun_lock(path: &Path) -> bool {
 }
 
 pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDependencyEdge>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&strip_jsonc(&text)).context("sbom-scan: parse bun.lock")?;
     let source = relative_display(target, path);
@@ -29,8 +29,8 @@ pub(super) fn bun_lock_edges(target: &Path, path: &Path) -> Result<Vec<SbomDepen
 }
 
 pub(super) fn bun_lock_components(target: &Path, path: &Path) -> Result<Vec<SbomComponent>> {
-    let text =
-        fs::read_to_string(target, path).with_context(|| format!("sbom-scan: read {}", path.display()))?;
+    let text = fs::read_to_string(target, path)
+        .with_context(|| format!("sbom-scan: read {}", path.display()))?;
     let value: Value =
         serde_json::from_str(&strip_jsonc(&text)).context("sbom-scan: parse bun.lock")?;
     let source = relative_display(target, path);
@@ -38,8 +38,8 @@ pub(super) fn bun_lock_components(target: &Path, path: &Path) -> Result<Vec<Sbom
         .get("packages")
         .and_then(Value::as_object)
         .into_iter()
-        .flat_map(|packages| packages.keys())
-        .filter_map(|key| package_component(target, path, &source, key))
+        .flat_map(|packages| packages.iter())
+        .filter_map(|(key, package)| package_component(target, path, &source, key, package))
         .collect())
 }
 
@@ -63,8 +63,15 @@ fn package_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge> {
         .collect()
 }
 
-fn package_component(target: &Path, path: &Path, source: &str, key: &str) -> Option<SbomComponent> {
-    let (name, version) = package_parts(key)?;
+fn package_component(
+    target: &Path,
+    path: &Path,
+    source: &str,
+    key: &str,
+    package: &Value,
+) -> Option<SbomComponent> {
+    let identifier = package_identifier(key, package);
+    let (name, version) = package_parts(identifier)?;
     Some(component(
         target,
         path,
@@ -86,11 +93,21 @@ fn package_parts(key: &str) -> Option<(String, String)> {
 }
 
 fn package_dependency_edges(key: &str, package: &Value, source: &str) -> Vec<SbomDependencyEdge> {
-    let from = package_name(key);
+    let from = package_parts(package_identifier(key, package))
+        .map(|(name, _)| name)
+        .unwrap_or_else(|| package_name(key));
     package_dependency_blocks(package)
         .into_iter()
         .flat_map(|block| dependency_edges(&from, block, source))
         .collect()
+}
+
+fn package_identifier<'a>(key: &'a str, package: &'a Value) -> &'a str {
+    package
+        .as_array()
+        .and_then(|values| values.first())
+        .and_then(Value::as_str)
+        .unwrap_or(key)
 }
 
 fn package_dependency_blocks(package: &Value) -> Vec<&Value> {
@@ -209,4 +226,32 @@ where
         chars.next();
     }
     chars.peek().copied()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn nested_package_key_uses_the_resolved_identifier_from_the_value() {
+        let package = json!([
+            "@octokit/types@13.10.0",
+            "",
+            {"dependencies": {"@octokit/openapi-types": "^24.2.0"}}
+        ]);
+
+        assert_eq!(
+            package_identifier("@octokit/endpoint/@octokit/types", &package),
+            "@octokit/types@13.10.0"
+        );
+        assert_eq!(
+            package_parts(package_identifier("ignored", &package)),
+            Some(("@octokit/types".to_string(), "13.10.0".to_string()))
+        );
+        let edges =
+            package_dependency_edges("@octokit/endpoint/@octokit/types", &package, "bun.lock");
+        assert_eq!(edges[0].from, "@octokit/types");
+        assert_eq!(edges[0].to, "@octokit/openapi-types");
+    }
 }

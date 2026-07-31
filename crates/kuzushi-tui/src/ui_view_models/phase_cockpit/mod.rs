@@ -8,7 +8,7 @@ use super::{
     context_strip_model, journey_model, AttackSurfaceRiskModel, AttackTree, ContextSnapshotModel,
     DfdModel, FindingDetailModel, FindingsModel, JourneyModel, JourneyPhaseStatus,
     PatchReviewModel, ProjectModel, ReportPreviewModel, ReviewQueueModel, RiskByModule,
-    TaintFlowPath, ThreatPatchCardModel,
+    TaintFlowPath, ThreatPatchCardModel, WorklistViewModel,
 };
 #[cfg(test)]
 use crate::{phase_attempt_outcome_from_label, phase_result_policy};
@@ -28,6 +28,7 @@ pub(crate) use composition::{Composition, DrawerSize, DrawerSpec, SurfaceRole};
 mod chain_artifacts;
 mod identity;
 mod trace_evidence;
+pub(crate) use confirm::investigation_verify_command;
 use confirm::prove_phase_model;
 pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,
@@ -160,6 +161,7 @@ pub(crate) struct MapPhaseModel {
     pub(crate) project: ProjectModel,
     pub(crate) attack_surface: Option<AttackSurfaceRiskModel>,
     pub(crate) hot_modules: RiskByModule,
+    pub(crate) worklist: WorklistViewModel,
     pub(crate) next_scans: NextScansState,
     pub(crate) dfd: DfdModel,
     pub(crate) empty_hint: Option<String>,
@@ -289,6 +291,9 @@ pub(crate) struct InvestigationPlanModel {
     pub(crate) why: String,
     pub(crate) evidence_goals: Vec<String>,
     pub(crate) empirical: bool,
+    /// Which models the drafted verification will use, in execution order
+    /// (gate → panel). Kept consistent with `command` by construction.
+    pub(crate) model_ladder: Vec<String>,
     pub(crate) command: String,
 }
 
@@ -315,6 +320,10 @@ pub(crate) struct ProofReplayModel {
     pub(crate) duration_ms: u64,
     pub(crate) cost_usd: f64,
     pub(crate) notes: Vec<String>,
+    /// Parsed verification stage ladder (gate / panel / tie-break escalation),
+    /// when one of the notes is a durable stage note. Drives the Prove card's
+    /// tone-classified stage disclosure without discarding the raw notes.
+    pub(crate) stages: Option<kuzushi_core::VerificationStageDisclosure>,
     pub(crate) created_at: String,
     pub(crate) provenance_run_id: Option<String>,
     pub(crate) replay_run_id: Option<String>,

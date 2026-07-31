@@ -1,5 +1,6 @@
 use super::*;
-use crate::ui_view_models::{DfdModel, RiskByModule};
+use crate::ui_view_models::{DfdModel, RiskByModule, WorklistViewModel};
+use audit_dataflow::FindingAuditDataflowCache;
 use cache_entries::{
     project_scope_tree_for_target, run_summary_index_from_entries, CompletionValuesCache,
     DirectoryListingCache, FileCompletionValuesCache, GitMetadataCache, JsonFileCache,
@@ -9,6 +10,7 @@ use cache_entries::{
 };
 #[cfg(test)]
 use cache_entries::{read_json_file, RunSummaryCache, RunSummaryCacheKey};
+use cpg_artifacts_cache::CpgArtifactsCache;
 use finding_alias_cache::FindingAliasCache;
 use kuzushi_core::engagement::{ENGAGEMENT_DIR, HARNESS_FILE};
 #[cfg(test)]
@@ -33,8 +35,10 @@ const MAX_LARGE_RUN_CACHE_BYTES: usize = kuzushi_core::MAX_RUN_ARTIFACT_READ_BYT
 const MAX_FINDING_TRUTH_CACHE_ENTRIES: usize = 256;
 const MAX_STATUS_CACHE_ENTRIES: usize = 32;
 
+mod audit_dataflow;
 mod cache_entries;
 mod completion_values;
+mod cpg_artifacts_cache;
 mod finding_alias_cache;
 mod hydrated_reads;
 mod hydration_state;
@@ -51,7 +55,7 @@ pub(crate) use cache_entries::{
 };
 pub(crate) use view_model_fragments::{
     DfdModelCacheKey, ReviewQueueCacheKey, RiskByModuleCacheKey, VisibleFindingProjection,
-    VisibleFindingsCacheKey,
+    VisibleFindingsCacheKey, WorklistCacheKey,
 };
 
 #[derive(Debug, Default)]
@@ -83,11 +87,13 @@ pub(crate) struct WorkbenchCache {
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     map_artifacts: MapArtifactsCache,
+    cpg_artifacts: CpgArtifactsCache,
     scan_recommendations: Option<ScanRecommendationsCache>,
     prompt_overrides: PromptOverrideCache,
     health_checks: BTreeMap<String, ViewHealthChecks>,
     finding_aliases: FindingAliasCache,
     finding_patch_truth: FindingPatchTruthCache,
+    finding_audit_dataflow: FindingAuditDataflowCache,
     scanned_snippets: ScannedSnippetCache,
     view_models: ViewModelFragmentCache,
     hydrating_view_data: BTreeSet<(PathBuf, ViewHydrationKey)>,
@@ -128,6 +134,22 @@ impl WorkbenchCache {
                 leaf: leaf.to_string(),
             },
         )
+    }
+
+    /// The content-identity stamp of a hydrated run artifact, or `None` when the
+    /// artifact has not hydrated for this target/run/leaf. Read-path callers key
+    /// a memo on this `u64` instead of re-cloning and re-parsing the artifact
+    /// text every frame (the version was computed once at hydration).
+    pub(crate) fn cached_run_artifact_version(
+        &self,
+        target: &Path,
+        run_id: &str,
+        leaf: &str,
+    ) -> Option<u64> {
+        let map_key = (target.to_path_buf(), run_id.to_string(), leaf.to_string());
+        self.run_artifact_texts
+            .get(&map_key)
+            .map(|cache| cache.version)
     }
 
     pub(crate) fn cached_run_artifact_json(
@@ -201,6 +223,19 @@ impl WorkbenchCache {
             return ViewDataState::Ready(built);
         }
         self.loading_state(target, &ViewHydrationKey::MapArtifacts)
+    }
+
+    /// Whether the target has usable whole-graph cpg-rs artifacts, read from the
+    /// hydration cache so the health view never runs `read_dir` on the render
+    /// path. `NotRequested`/`Loading` until the hydration worker resolves it.
+    pub(crate) fn cached_cpg_artifacts_built(&self, target: Option<&Path>) -> ViewDataState<bool> {
+        let Some(target) = target else {
+            return ViewDataState::NotRequested;
+        };
+        if let Some(built) = self.cpg_artifacts.cached(target) {
+            return ViewDataState::Ready(built);
+        }
+        self.loading_state(target, &ViewHydrationKey::CpgArtifacts)
     }
 
     pub(crate) fn cached_scan_recommendations(
@@ -385,8 +420,10 @@ impl WorkbenchCache {
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
+        self.finding_audit_dataflow.invalidate(None);
         self.scanned_snippets.invalidate();
         self.map_artifacts.invalidate();
+        self.cpg_artifacts.invalidate();
         self.scan_recommendations = None;
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
@@ -456,6 +493,7 @@ impl WorkbenchCache {
         if findings_changed {
             self.finding_completion_values = None;
             self.finding_patch_truth.invalidate(None);
+            self.finding_audit_dataflow.invalidate(None);
             self.scanned_snippets.invalidate();
         }
         self.bump_completion_generation_when(findings_changed | run_summaries_changed);
@@ -498,6 +536,7 @@ impl WorkbenchCache {
         }
         if is_map_artifact_path(relative) {
             self.map_artifacts.invalidate();
+            self.cpg_artifacts.invalidate();
         }
     }
 
@@ -576,7 +615,9 @@ impl WorkbenchCache {
         self.directory_listings
             .retain(|cached, _| !cached.starts_with(state_root));
         self.map_artifacts.invalidate();
+        self.cpg_artifacts.invalidate();
         self.finding_patch_truth.invalidate(None);
+        self.finding_audit_dataflow.invalidate(None);
         self.scanned_snippets.invalidate();
     }
 
@@ -679,6 +720,7 @@ impl WorkbenchCache {
             key.clone(),
             RunArtifactTextCache {
                 bytes: run_artifact_text_bytes(&state),
+                version: run_artifact_version(&state),
                 state: state.clone(),
             },
             MAX_LARGE_RUN_CACHE_ENTRIES,
@@ -689,6 +731,7 @@ impl WorkbenchCache {
 
     pub(crate) fn invalidate_map_artifacts(&mut self) {
         self.map_artifacts.invalidate();
+        self.cpg_artifacts.invalidate();
         self.scan_recommendations = None;
     }
 
@@ -761,6 +804,14 @@ impl WorkbenchCache {
         self.view_models.dfd_model(key)
     }
 
+    pub(crate) fn worklist(&self, key: &WorklistCacheKey) -> Option<WorklistViewModel> {
+        self.view_models.worklist(key)
+    }
+
+    pub(crate) fn cache_worklist(&mut self, key: WorklistCacheKey, model: WorklistViewModel) {
+        self.view_models.cache_worklist(key, model);
+    }
+
     pub(crate) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
         self.view_models.cache_dfd_model(key, model);
     }
@@ -807,13 +858,13 @@ fn is_project_scope_tree_path(path: &Path) -> bool {
 
 fn is_map_artifact_path(path: &Path) -> bool {
     path.starts_with(".kuzushi/v3/codeql-db")
+        || path.starts_with(".kuzushi/cpg-rs")
         || matches!(
             path.to_str(),
             Some(
                 ".kuzushi/context-snapshot.json"
                     | ".kuzushi/entry-points.json"
                     | ".kuzushi/threat-model.json"
-                    | ".kuzushi/cpg.bin"
                     | ".kuzushi/threat-intel/candidates.json"
             )
         )
@@ -857,6 +908,33 @@ fn evict_run_projection_except(
     };
     let candidate = entries.keys().find(|key| Some(*key) != protected).cloned();
     candidate.is_some_and(|key| entries.remove(&key).is_some())
+}
+
+/// Hash the artifact's content once at hydration so render-path memo keys can
+/// track "which revision is loaded" without re-parsing the artifact. A `Ready`
+/// read hashes the raw text (so a moved line changes the version even when
+/// summary counts are unchanged); non-`Ready` reads hash a stable discriminant.
+fn run_artifact_version(state: &kuzushi_core::RunArtifactTextRead) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    match state {
+        kuzushi_core::RunArtifactRead::Ready { value, .. } => {
+            0u8.hash(&mut hasher);
+            value.hash(&mut hasher);
+        }
+        kuzushi_core::RunArtifactRead::Missing { .. } => 1u8.hash(&mut hasher),
+        kuzushi_core::RunArtifactRead::NonFile { .. } => 2u8.hash(&mut hasher),
+        kuzushi_core::RunArtifactRead::Unsafe { error } => {
+            3u8.hash(&mut hasher);
+            error.hash(&mut hasher);
+        }
+        kuzushi_core::RunArtifactRead::Unreadable { error, .. } => {
+            4u8.hash(&mut hasher);
+            error.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
 }
 
 fn run_artifact_text_bytes(state: &kuzushi_core::RunArtifactTextRead) -> usize {

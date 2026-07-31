@@ -1,0 +1,25 @@
+# J42 — fresh target: empty worklist is empty (P5)  ⭐ release-blocking
+#
+# Keyless, deterministic. On a target with no context snapshot the `worklist` verb
+# lands on the `no risk worklist` guidance panel (one hint line + context:build /
+# worklist:rank CTAs) with ZERO fabricated rows — the explicit verb is exempt from
+# the empty-page redirect so a first-timer sees the guidance, not the DFD. The
+# scene page rail still hides the worklist tab while empty (gate-on-non-empty).
+name: fresh target — the worklist verb lands on empty guidance, no fabricated rows
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Guarantee no attack-surface snapshot exists for this target.
+shell: rm -rf @TMP_TARGET/.kuzushi
+launch: --target @TMP_TARGET
+wait: 6
+submit: worklist
+wait-for: 15 no risk worklist
+snap: worklist-empty
+expect: no risk worklist
+expect: context:build
+expect: worklist:rank
+expect-not: #1
+ask: Exactly ONE empty-state guidance panel ("no risk worklist" + the context:build → worklist:rank CTAs), zero fabricated rows, zero dummy content? The explicit verb lands on the panel rather than dumping a first-timer on the DFD.
+ask: The scene page rail does NOT carry a worklist tab while the worklist is empty (gate-on-non-empty, the EntryPoints precedent) — Tab does not stop on an empty worklist page.

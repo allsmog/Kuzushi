@@ -134,7 +134,66 @@ pub(super) fn proof_ladder_lines(
             theme::warn(),
         ));
     }
+    append_stage_disclosure_line(&mut lines, proof, width);
     lines
+}
+
+/// One additive line disclosing how a split panel was handled. It never
+/// promotes the finding: an escalation-resolved finding stays ModelAssessed,
+/// so the meter/rungs above are untouched.
+fn append_stage_disclosure_line(
+    lines: &mut Vec<Line<'static>>,
+    proof: Option<&ProofReplayModel>,
+    width: usize,
+) {
+    let Some(stages) = proof.and_then(|proof| proof.stages.as_ref()) else {
+        return;
+    };
+    if let Some(line) = proof_stage_disclosure_line(stages, width) {
+        lines.push(line);
+    }
+}
+
+fn proof_stage_disclosure_line(
+    stages: &kuzushi_core::VerificationStageDisclosure,
+    width: usize,
+) -> Option<Line<'static>> {
+    if let Some(reason) = &stages.refused {
+        return Some(Line::styled(
+            fit(
+                &format!("⚠ split panel · tie-break refused ({reason}) · verdict unchanged"),
+                width,
+            ),
+            theme::danger(),
+        ));
+    }
+    if let Some(model) = &stages.escalation {
+        return Some(Line::styled(
+            fit(
+                &format!("⚖ split panel · resolved by {model} (tie-break)"),
+                width,
+            ),
+            theme::warn(),
+        ));
+    }
+    gate_only_stage_line(stages, width)
+}
+
+fn gate_only_stage_line(
+    stages: &kuzushi_core::VerificationStageDisclosure,
+    width: usize,
+) -> Option<Line<'static>> {
+    let gate = stages
+        .gate
+        .as_deref()
+        .filter(|_| stages.panel_passes == 0)?;
+    Some(Line::styled(
+        fit(
+            &format!("◐ gate {gate} rejected before the panel ran"),
+            width,
+        ),
+        theme::muted(),
+    ))
 }
 
 fn proof_rungs(tier: ProofTier) -> (bool, bool) {
@@ -281,8 +340,21 @@ fn append_proof_notes(lines: &mut Vec<Line<'static>>, proof: &ProofReplayModel, 
             .notes
             .iter()
             .take(4)
-            .map(|note| Line::styled(fit(&format!("✓ {note}"), width), theme::success())),
+            .map(|note| proof_note_line(note, width)),
     );
+}
+
+/// A stage note is not a corroboration: a refusal reads as a warning (danger,
+/// ⚠), any other stage line as a caution (warn, ⚖), and only genuine
+/// corroborating notes keep the affirming ✓/success tone.
+fn proof_note_line(note: &str, width: usize) -> Line<'static> {
+    match kuzushi_core::parse_stage_note(note) {
+        Some(stage) if stage.refused.is_some() => {
+            Line::styled(fit(&format!("⚠ {note}"), width), theme::danger())
+        }
+        Some(_) => Line::styled(fit(&format!("⚖ {note}"), width), theme::warn()),
+        None => Line::styled(fit(&format!("✓ {note}"), width), theme::success()),
+    }
 }
 
 fn append_replay_provenance(
@@ -335,5 +407,106 @@ fn proof_verdict_style(proof: &ProofReplayModel) -> ratatui::style::Style {
         "exploited" => theme::success(),
         "not_reproduced" => theme::warn(),
         _ => theme::danger(),
+    }
+}
+
+#[cfg(test)]
+mod stage_disclosure_tests {
+    use super::*;
+    use kuzushi_core::VerificationStageDisclosure;
+
+    fn line_text(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    fn escalated_stages() -> VerificationStageDisclosure {
+        VerificationStageDisclosure {
+            gate: None,
+            panel_passes: 2,
+            split: true,
+            escalation: Some("openai:bigger".to_string()),
+            refused: None,
+        }
+    }
+
+    fn refused_stages() -> VerificationStageDisclosure {
+        VerificationStageDisclosure {
+            gate: None,
+            panel_passes: 2,
+            split: true,
+            escalation: None,
+            refused: Some("same-model".to_string()),
+        }
+    }
+
+    fn proof_with_stages(stages: VerificationStageDisclosure) -> ProofReplayModel {
+        ProofReplayModel {
+            finding_alias: Some("F-1".to_string()),
+            proof_level: 2,
+            verdict: "not_reproduced".to_string(),
+            backend: "model".to_string(),
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 5,
+            cost_usd: 0.01,
+            notes: vec![kuzushi_core::format_stage_note(&stages)],
+            stages: Some(stages),
+            created_at: "now".to_string(),
+            provenance_run_id: None,
+            replay_run_id: None,
+            requires_revalidation: false,
+        }
+    }
+
+    #[test]
+    fn prove_discloses_escalation_after_a_split_panel() {
+        let proof = proof_with_stages(escalated_stages());
+        let lines = proof_ladder_lines(&FindingDetailModel::default(), Some(&proof), 80);
+
+        let disclosure = lines
+            .iter()
+            .find(|line| line_text(line).contains("resolved by openai:bigger (tie-break)"))
+            .expect("split-panel escalation must be disclosed");
+        assert_eq!(disclosure.style, theme::warn());
+        assert!(line_text(disclosure).starts_with('⚖'));
+    }
+
+    #[test]
+    fn escalated_proof_is_not_promoted_to_confirmed() {
+        // The escalation line is additive: the meter/tier line above it still
+        // reflects the finding's own proof confidence, never a runtime verdict.
+        let mut finding = FindingDetailModel::default();
+        finding.proof_meter = "▓▓░░░".to_string();
+        finding.proof_label = "model-assessed".to_string();
+        let proof = proof_with_stages(escalated_stages());
+
+        let lines = proof_ladder_lines(&finding, Some(&proof), 80);
+        let meter = lines
+            .iter()
+            .find(|line| line_text(line).contains("model-assessed"))
+            .expect("meter line survives escalation");
+        assert_eq!(
+            meter.style,
+            theme::proof_confidence_tone(finding.proof_confidence)
+        );
+    }
+
+    #[test]
+    fn refused_escalation_surfaces_as_a_warning_not_a_success_note() {
+        let proof = proof_with_stages(refused_stages());
+        let mut lines = Vec::new();
+        append_proof_notes(&mut lines, &proof, 80);
+
+        let note = lines.first().expect("stage note rendered");
+        assert_eq!(note.style, theme::danger());
+        assert!(line_text(note).starts_with('⚠'));
+        assert!(
+            !line_text(note).contains('✓'),
+            "a refusal is never a success note"
+        );
     }
 }

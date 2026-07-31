@@ -929,15 +929,73 @@ fn tool_run_record_effect(
     })
 }
 
+/// Lines of a tool result kept inline in the transcript. A structured artifact
+/// can pretty-print to hundreds of rows; spending the whole scrollback on one
+/// payload buries the run it belongs to.
+const MAX_RESULT_LOG_LINES: usize = 12;
+/// Byte ceiling for the same body, so one enormous single line cannot slip past
+/// the line cap.
+const MAX_RESULT_LOG_BYTES: usize = 2_000;
+
+/// Renders a tool result for the transcript.
+///
+/// A tool that wrote an `output` string chose what the operator should read, so
+/// that text is passed through whole however long it runs. The clip applies
+/// only to the last-resort JSON dump of a structured artifact, which is a
+/// machine payload nobody composed for reading and which can otherwise expand
+/// into hundreds of rows and bury the run it belongs to.
 fn rendered_tool_result(result: &serde_json::Value) -> String {
-    result
-        .get("output")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string)
-        .or_else(|| generic_count_receipt(result))
-        .unwrap_or_else(|| {
-            serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
-        })
+    if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
+        return output.to_string();
+    }
+    if let Some(receipt) = generic_count_receipt(result) {
+        return receipt;
+    }
+    let dumped = serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string());
+    if result_carries_a_remedy(result) {
+        return dumped;
+    }
+    clip_result_body(&dumped)
+}
+
+/// Failed and partial results carry the operator's remedy — failed stage,
+/// cause, and fallback context. That narrative is the whole value of the line,
+/// so it is never clipped no matter how long it runs.
+fn result_carries_a_remedy(result: &serde_json::Value) -> bool {
+    matches!(
+        kuzushi_core::tool_result_status(result),
+        kuzushi_core::ToolResultStatus::Failed | kuzushi_core::ToolResultStatus::Partial
+    )
+}
+
+/// Clips on line count and byte length, disclosing what was left out and where
+/// the complete payload is. The full result is already persisted to the run's
+/// `result.json`, so this elides a copy rather than losing anything.
+fn clip_result_body(body: &str) -> String {
+    let lines = body.lines().collect::<Vec<_>>();
+    let line_clipped = lines.len() > MAX_RESULT_LOG_LINES;
+    let mut clipped = lines
+        .iter()
+        .take(MAX_RESULT_LOG_LINES)
+        .copied()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let byte_clipped = clipped.len() > MAX_RESULT_LOG_BYTES;
+    if byte_clipped {
+        clipped.truncate(floor_char_boundary(&clipped, MAX_RESULT_LOG_BYTES));
+    }
+    if !line_clipped && !byte_clipped {
+        return clipped;
+    }
+    let omitted = lines.len().saturating_sub(MAX_RESULT_LOG_LINES);
+    format!("{clipped}\n… {omitted} more lines · full result in the run's result.json")
+}
+
+fn floor_char_boundary(text: &str, limit: usize) -> usize {
+    (0..=limit)
+        .rev()
+        .find(|at| text.is_char_boundary(*at))
+        .unwrap_or_default()
 }
 
 fn generic_count_receipt(result: &serde_json::Value) -> Option<String> {
@@ -984,6 +1042,85 @@ mod tests {
         load_run_summary, try_record_tool_run_canceled,
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
+
+    #[test]
+    fn short_tool_output_reaches_the_transcript_unchanged() {
+        let result = serde_json::json!({"output": "completed · 3 findings"});
+
+        assert_eq!(rendered_tool_result(&result), "completed · 3 findings");
+    }
+
+    #[test]
+    fn a_long_structured_artifact_is_clipped_with_a_pointer_to_the_full_record() {
+        // A pretty-printed artifact used to expand into hundreds of transcript
+        // rows and evict the run it belonged to.
+        let records = (0..200)
+            .map(|index| serde_json::json!({"id": index}))
+            .collect::<Vec<_>>();
+        let result = serde_json::json!({"data": {"records": records}});
+
+        let rendered = rendered_tool_result(&result);
+
+        assert!(
+            rendered.lines().count() <= MAX_RESULT_LOG_LINES + 1,
+            "rendered {} lines",
+            rendered.lines().count()
+        );
+        assert!(rendered.contains("more lines · full result in the run's result.json"));
+    }
+
+    #[test]
+    fn a_curated_tool_report_is_never_clipped_however_long_it_runs() {
+        // A tool that writes `output` chose what the operator should read;
+        // clipping it would cut the report off mid-narrative.
+        let report = (0..40)
+            .map(|index| format!("line-{index}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = serde_json::json!({ "output": report });
+
+        let rendered = rendered_tool_result(&result);
+
+        assert!(rendered.contains("line-39"));
+        assert!(!rendered.contains("full result in the run's result.json"));
+    }
+
+    #[test]
+    fn one_enormous_dumped_line_is_clipped_by_bytes_even_though_it_is_a_single_line() {
+        let result = serde_json::json!({"data": {"blob": "x".repeat(50_000)}});
+
+        let rendered = rendered_tool_result(&result);
+
+        assert!(rendered.len() < 50_000, "rendered {} bytes", rendered.len());
+        assert!(rendered.contains("full result in the run's result.json"));
+    }
+
+    #[test]
+    fn a_failed_result_keeps_its_whole_remedy_narrative() {
+        // Stage, cause, and fallback context are what the operator acts on.
+        let result = serde_json::json!({
+            "status": "failed",
+            "fallback_context": {
+                "failedStage": "semgrep:scan",
+                "cause": "semgrep binary missing",
+                "detail": "x".repeat(40_000),
+            }
+        });
+
+        let rendered = rendered_tool_result(&result);
+
+        assert!(rendered.contains("\"failedStage\": \"semgrep:scan\""));
+        assert!(rendered.contains("semgrep binary missing"));
+        assert!(!rendered.contains("full result in the run's result.json"));
+    }
+
+    #[test]
+    fn clipping_never_splits_a_multibyte_character() {
+        let result = serde_json::json!({"data": {"blob": "é".repeat(MAX_RESULT_LOG_BYTES)}});
+
+        // Panics on a bad boundary; reaching the assert is the real check.
+        assert!(rendered_tool_result(&result).len() <= MAX_RESULT_LOG_BYTES + 128);
+    }
 
     fn app_with_tool_session(tool_name: &str, run_id: &str) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);

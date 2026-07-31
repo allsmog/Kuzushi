@@ -14,17 +14,14 @@ pub(crate) struct StatusFooterModel {
     pub(crate) right_segments: Vec<String>,
     pub(crate) compact_left_segments: Vec<String>,
     pub(crate) compact_right_segments: Vec<String>,
-    pub(crate) warning: bool,
 }
 
 pub(crate) fn status_footer_model(app: &ShellApp) -> StatusFooterModel {
-    let warning = app.ctrl_c_armed();
     StatusFooterModel {
         left_segments: status_footer_left_segments(app),
-        right_segments: status_footer_right_segments(app, warning),
+        right_segments: status_footer_right_segments(app),
         compact_left_segments: compact_status_footer_left_segments(app),
-        compact_right_segments: compact_status_footer_right_segments(app, warning),
-        warning,
+        compact_right_segments: compact_status_footer_right_segments(app),
     }
 }
 
@@ -138,20 +135,12 @@ fn review_conflict_footer_segment(app: &ShellApp) -> Option<String> {
     .then(|| "review:conflict".to_string())
 }
 
-fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
-    let mut segments = vec![status_footer_findings_segment(app)];
-    if warning {
-        segments.insert(0, "Ctrl+C again to exit".to_string());
-    }
-    segments
+fn status_footer_right_segments(app: &ShellApp) -> Vec<String> {
+    vec![status_footer_findings_segment(app)]
 }
 
-fn compact_status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
-    let mut segments = vec![compact_status_footer_findings_segment(app)];
-    if warning {
-        segments.insert(0, "Ctrl+C again".to_string());
-    }
-    segments
+fn compact_status_footer_right_segments(app: &ShellApp) -> Vec<String> {
+    vec![compact_status_footer_findings_segment(app)]
 }
 
 fn status_footer_findings_segment(app: &ShellApp) -> String {

@@ -333,6 +333,8 @@ The cockpit keeps every existing analysis visualization. It changes ownership:
 | Jobs | full-frame deck | live job hub plus run summaries |
 | Replay, Trace | full-frame deck | `.kuzushi/v3/runs/<id>/` |
 | DFD | full-frame visualization deck | persisted threat model |
+| Entry points | responsive master-detail browser | persisted threat-model attack surface and DFD links |
+| Components | full-frame stack tree | asynchronously cached SBOM manifest/lockfile inventory |
 | Terrain, heatmap | full-frame visualization deck | module risk/findings |
 | Attack tree | full-frame visualization deck | exploit chains |
 | Attack path | full-frame visualization deck | source-to-sink flows |

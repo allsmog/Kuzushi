@@ -1,0 +1,41 @@
+# J49 — Setup target-facts honesty (keyless)  ⭐ release-blocking
+#
+# Keyless, deterministic. Setup's target-facts disclosure is filesystem/git-derived,
+# so it needs no model key. Launch `--target <repo>` at a freshly-seeded git repo
+# carrying one committed file plus one uncommitted (dirty) edit. Setup discloses the
+# operator-designated path (never cwd), the `dirty` working-tree state, the
+# `branch@revision`, and a detected-`languages:` row. With a dirty tree the facts
+# must read `dirty`, never `clean`, and nothing is dressed up as a verified fact
+# beyond the target binding the operator explicitly gave via `--target`.
+#
+# Caveat: macOS keychain / OAuth-cached credentials cannot be masked by env-unset,
+# but this journey needs no credential — the facts are git/FS-derived.
+name: Setup discloses honest git-derived target facts (dirty tree, path, languages)
+size: 120x36
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Seed a git repo with one committed file and then a dirty (uncommitted) edit so
+# the working tree is genuinely dirty when Setup inspects it.
+shell: R="@ART/j49-worktree-repo"; rm -rf "$R"; mkdir -p "$R"; git -C "$R" init -q -b main; printf 'import os\nos.system("ls")\n' > "$R/main.py"; git -C "$R" add -A; git -C "$R" -c user.email=devex@kuzushi -c user.name=kz-devex commit -qm seed >/dev/null 2>&1; printf 'print("uncommitted edit")\n' >> "$R/main.py"
+launch: --target @ART/j49-worktree-repo
+wait-for: 30 READY THE MAP RUN
+# The candidate facts hydrate asynchronously with a generation stamp. The whole
+# facts line renders only once the git/FS inspection resolves, so anchoring on
+# the `dirty` working-tree token (a real disclosure word, no longer present in
+# the fixture dir name) waits on the actual hydration instead of racing it.
+wait-for: 20 dirty
+snap: setup-target-facts
+# The disclosed path is the operator-designated repo (the selected Target row
+# wraps its full path), never a silent cwd substitution.
+expect: j49-worktree-repo
+# Honest working-tree state: a dirty tree reads `dirty`, never `clean`. This is
+# the real target-facts token, not a substring of the fixture dir name.
+expect: dirty
+expect-not: clean
+# Git revision line: `branch@revision`, derived and disclosed. Anchoring the
+# revision proves the facts line hydrated, not a placeholder.
+expect: main@
+# Detected language is real, not the `detecting` placeholder: the seed file is
+# Python, so the disclosure must name it.
+expect: languages: python
+ask: Setup discloses the target path, the `dirty` working-tree state, the branch@revision, and a detected-`languages:` row — are these the git/FS facts, with nothing claimed "confirmed" beyond the explicit `--target` binding, and no language/build guess dressed up as a verified fact?

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "snapshot": false,
+  "permission": {
+    "task": "ask"
+  },
+  "tool_output": {
+    "max_lines": 300,
+    "max_bytes": 12288
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true,
+    "tail_turns": 1
+  },
+  "watcher": {
+    "ignore": ["target/**", "coverage/**", ".kuzushi/**", "scripts/devex/artifacts/**"]
+  }
+}

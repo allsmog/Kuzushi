@@ -252,10 +252,10 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     ) {
         return;
     }
-    // The phase Workbench is the default landing surface (both the
-    // interactive shell and the plain front door route through here). The
-    // onboarding/target/model pickers above still take precedence — nothing
-    // here clobbers a first-run gate.
+    // Establish the phase Workbench as the workflow origin (both the
+    // interactive shell and the plain front door route through here).
+    // Contextual decks open only from explicit navigation or a foreground tool
+    // completion, never merely because a persisted artifact exists.
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
@@ -287,6 +287,10 @@ pub(crate) struct TerminalLoopState {
     /// `MIN_FRAME_INTERVAL` so event floods cannot monopolize the loop.
     pub(crate) last_draw: Option<Instant>,
     pub(crate) last_title: Option<String>,
+    /// Attention ids active on the previous broker snapshot. This suppresses
+    /// redraw/refocus replays without conflating later approvals that reuse a
+    /// stable id after the earlier item was resolved.
+    pub(crate) active_attention_ids: std::collections::BTreeSet<String>,
     run_focus_hold: RunFocusVisibilityHold,
 }
 
@@ -296,6 +300,7 @@ impl Default for TerminalLoopState {
             needs_redraw: true,
             last_draw: None,
             last_title: None,
+            active_attention_ids: std::collections::BTreeSet::new(),
             run_focus_hold: RunFocusVisibilityHold::default(),
         }
     }

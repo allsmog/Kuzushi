@@ -1,0 +1,37 @@
+# J32 — escalated split: Prove discloses, never promotes (P3)  ⭐ release-blocking
+#
+# Keyless, deterministic. Uses the F4 seeded `escalated-split-fixture` finding
+# (gate + panel x2 + escalated=openai:gpt-strong, split). `open <fingerprint>`
+# selects it and routes to Review; keys 4 shows it on Prove.
+#
+# The P3 invariant: an escalation-resolved split is still a STATIC model
+# assessment. It must gain no `Confirmed`, must not reach the RuntimeVerified
+# rung, must not look empirically proven. The ⚖ line is an ADDITIVE disclosure.
+name: escalated split discloses the tie-break but never promotes
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: open escalated-split-fixture
+wait-for: 15 Template input reaches renderer
+nav-mode:
+keys: 4
+wait-live-snap: 12 Viewing Prove | prove-escalated
+# The Prove proof pane is narrow at 120 cols, so the ⚖ split disclosure shows
+# but its `resolved by <model>` tail is width-clipped; assert the visible split
+# facts here and verify the full escalation-model disclosure in J34's replay.
+expect: Template input reaches renderer
+expect: ⚖
+expect: split
+expect: model_assessed
+expect-not: Confirmed
+expect-not: runtime_verified
+ask: Identity strip — does the finding still read model-assessed/unverified with the ladder rung UNMOVED (`? [●○○]`), the escalation reading as an additional ⚖ disclosure line rather than a promotion? The escalation model (openai:gpt-strong) is disclosed in full in J34's replay.
+ask: Is the ⚖ glyph explained (legend or inline words)? A bare glyph with color-only meaning fails the plain contract by construction.

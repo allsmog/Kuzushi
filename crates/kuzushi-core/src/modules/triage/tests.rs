@@ -1104,6 +1104,7 @@ mod tests {
             outcome,
             cached: false,
             failed_vote_summaries: Vec::new(),
+            evidence: Vec::new(),
         }
     }
 

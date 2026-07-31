@@ -108,6 +108,7 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     append_selected_source_key(app, keys);
     append_scanned_snippet_key(app, keys);
     append_selected_proof_key(app, keys);
+    append_finding_audit_dataflow_key(app, keys);
     append_finding_patch_truth_key(app, keys);
     keys.extend([
         ViewHydrationKey::StrategyQueue,
@@ -118,9 +119,6 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
-    keys.push(ViewHydrationKey::PathState {
-        path: target.join(".kuzushi/cpg.bin"),
-    });
     keys.push(ViewHydrationKey::PathState {
         path: kuzushi_core::workspace_codeql_db_path(target),
     });
@@ -133,6 +131,18 @@ fn append_scan_recommendation_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKe
         return;
     }
     keys.push(ViewHydrationKey::ScanRecommendations);
+}
+
+/// The deep-auditor's cited dataflow evidence for the selected finding, shown
+/// in the Review detail pane and the Prove page. One cached sqlite read per
+/// finding; requested for the current finding only, never the whole ledger.
+fn append_finding_audit_dataflow_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
+        return;
+    };
+    keys.push(ViewHydrationKey::FindingAuditDataflow {
+        fingerprint: finding.fingerprint,
+    });
 }
 
 fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
@@ -279,11 +289,14 @@ fn append_health_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     let Some(target) = app.target() else {
         return;
     };
+    // Route the cpg has_artifacts truth through the hydration cache so
+    // `cpg_graph_row` reads a memoized flag instead of running `read_dir` on
+    // the render path (mirrors the codeql-db PathState probe below).
+    keys.push(ViewHydrationKey::CpgArtifacts);
     let paths = vec![
         kuzushi_core::workspace_codeql_db_path(target),
         kuzushi_core::legacy_workspace_codeql_db_path(target),
         kuzushi_core::legacy_codeql_db_path(target),
-        kuzushi_core::cpg_artifact_dir(target),
     ];
     keys.extend(
         paths

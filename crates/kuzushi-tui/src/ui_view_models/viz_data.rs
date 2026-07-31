@@ -8,11 +8,23 @@ use crate::{ChainSeverity, ExploitChainStep, RiskByModuleCacheKey, ShellApp, Tai
 use kuzushi_core::{Finding, Severity};
 use std::collections::BTreeMap;
 
+mod components;
 mod dfd;
-pub(crate) use dfd::{
-    dfd_model, dfd_selectable_count, dfd_selected_item, DfdFlowModel, DfdKind, DfdModel,
-    DfdNodeModel, DfdSelected,
+mod entry_points;
+mod worklist;
+pub(crate) use components::{
+    component_stack, ComponentItem, ComponentScope, ComponentSource, ComponentSourceKind,
+    ComponentStack,
 };
+pub(crate) use dfd::{
+    dfd_model, dfd_security_items_for_selection, dfd_selectable_count, dfd_selected_item,
+    dfd_selection_for_key, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState, DfdModel,
+    DfdNodeModel, DfdSecurityItem, DfdSecurityKind, DfdSelected,
+};
+pub(crate) use entry_points::{
+    entry_point_breakdown, EntryPointBreakdown, EntryPointGroup, EntryPointItem, EntryPointTarget,
+};
+pub(crate) use worklist::{worklist_model, LegendEntry, WorklistRowModel, WorklistViewModel};
 
 // ── Risk by module (shared by heatmap + terrain) ──────────────────────────
 

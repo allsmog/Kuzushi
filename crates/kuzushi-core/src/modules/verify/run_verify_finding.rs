@@ -46,6 +46,7 @@ fn run_scoped_verify_finding(
             store,
             runtime,
             configured_model: ctx.config.model.as_deref(),
+            trace: ctx.trace,
         },
     );
     drop(_verify_scope);

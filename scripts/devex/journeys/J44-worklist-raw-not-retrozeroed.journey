@@ -1,0 +1,36 @@
+# J44 — worklist: raw display never laundered, prior ranks never retro-zeroed (P5)  ⭐ release-blocking
+#
+# Keyless, deterministic. Building a cpg graph must not rewrite the worklist's
+# already-shown A-scores — the earlier ranking was honest about what it had, so it
+# must not be retroactively rewritten as "wrong". Asserted at the machine-readable
+# `worklist:rank` layer (same fold as the TUI deck). Phase-B note: the F (call-graph
+# fan-in) citation appearing after `cpg:build` is unimplemented — the fold passes
+# `fan_in: None` — so cpg:build correctly leaves the fold UNCHANGED here; the
+# not-retro-zeroed invariant holds trivially and is the honest shipped behavior.
+name: cpg:build leaves prior worklist ranks unchanged and the display stays raw
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+shell: mkdir -p @TMP_TARGET/.kuzushi && printf '{"attackSurfaceMap":{"rootName":"demo","surfaces":[{"id":"s1","kind":"http_route","path":"a.py","line":3,"language":"python","title":"t1","evidence":"e","risk":{"rank":1,"score":92,"tier":"critical","reasons":["cmd exec"]}},{"id":"s2","kind":"http_route","path":"b.py","line":5,"language":"python","title":"t2","evidence":"e","risk":{"rank":2,"score":40,"tier":"medium","reasons":[]}}],"summary":{"total":2,"byKind":{},"byFile":{"a.py":1,"b.py":1},"highRisk":1,"maxRiskScore":92,"byRiskTier":{}}}}' > @TMP_TARGET/.kuzushi/context-snapshot.json
+# Capture the ranked rows BEFORE any graph exists.
+shell: rm -rf @TMP_TARGET/.kuzushi/cpg-rs
+shell: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"limit":10}' 2>&1 | grep -E '"rank"|"path"|rawDisplay' > @ART/wl-before.txt
+# Build the graph, then re-rank.
+shell: @KUZUSHI --target @TMP_TARGET run cpg:build > @ART/cpg-build.log 2>&1
+shell: test -d @TMP_TARGET/.kuzushi/cpg-rs
+shell: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"limit":10}' 2>&1 | grep -E '"rank"|"path"|rawDisplay' > @ART/wl-after.txt
+# Write the verdict to a file so the assertion reads the OUTPUT, not the command
+# line (which would carry both branch literals).
+shell: diff -q @ART/wl-before.txt @ART/wl-after.txt > /dev/null 2>&1 && printf 'RANKS_IDENTICAL\n' > @ART/wl-verdict.txt || printf 'RANKS_REWRITTEN\n' > @ART/wl-verdict.txt
+launch-raw: cat @ART/wl-verdict.txt
+wait: 3
+snap: worklist-diff
+expect: RANKS_IDENTICAL
+expect-not: RANKS_REWRITTEN
+ask: cpg:build does NOT retro-zero or rewrite the prior A-scores — the earlier ranking stays byte-identical (F/call-graph fan-in is Phase B, so no F citation is added yet; documented). Nothing about the previously-shown scores is rewritten as having been "wrong".
+# Raw-display honesty: the rows keep the RAW `92/100`, never a laundered float.
+launch-raw: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"limit":10}' 2>&1 | grep -E 'rawDisplay'
+wait: 3
+snap: worklist-raw
+expect: 92/100
+ask: Every row's display slot is the RAW value (`92/100`), never a laundered normalized `0.71` — the unfalsifiable variant this journey catches.

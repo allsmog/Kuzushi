@@ -132,6 +132,7 @@ fn rollback_terminal_mode() {
         io::stdout(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        DisableFocusChange,
         crossterm::terminal::SetTitle("Kuzushi"),
         LeaveAlternateScreen,
         crossterm::cursor::Show
@@ -144,6 +145,7 @@ fn leave_terminal_for_external_process() -> Result<()> {
         io::stdout(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        DisableFocusChange,
         LeaveAlternateScreen,
         crossterm::cursor::Show
     )
@@ -162,7 +164,8 @@ pub(crate) fn reset_terminal_viewport() -> Result<Stdout> {
         stdout,
         Clear(ClearType::All),
         MoveTo(0, 0),
-        EnableBracketedPaste
+        EnableBracketedPaste,
+        EnableFocusChange
     )
     .context("Could not reset terminal viewport")?;
     Ok(stdout)
@@ -197,6 +200,7 @@ pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>
         terminal.backend_mut(),
         DisableMouseCapture,
         DisableBracketedPaste,
+        DisableFocusChange,
         crossterm::terminal::SetTitle("Kuzushi"),
         LeaveAlternateScreen
     );

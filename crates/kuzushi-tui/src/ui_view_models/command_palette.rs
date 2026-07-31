@@ -17,6 +17,7 @@ pub(crate) enum PaletteRow {
         label: String,
         kind: &'static str,
         description: String,
+        hint: String,
         selected: bool,
     },
     Empty(String),
@@ -63,8 +64,9 @@ fn default_rows(app: &ShellApp) -> Vec<PaletteRow> {
         .cursor()
         .min(matches.len().saturating_sub(1));
     let window_start = cursor.saturating_sub(6);
-    let mut rows = palette_header_rows(query, matches.len());
-    rows.extend(palette_entry_rows(&matches, cursor, window_start));
+    let browsing = query.is_empty();
+    let mut rows = palette_header_rows(query, matches.len(), browsing);
+    rows.extend(palette_entry_rows(&matches, cursor, window_start, browsing));
     if matches.is_empty() {
         rows.push(PaletteRow::Empty("no matching commands".to_string()));
     }
@@ -72,39 +74,49 @@ fn default_rows(app: &ShellApp) -> Vec<PaletteRow> {
     rows
 }
 
-fn palette_header_rows(query: &str, match_count: usize) -> Vec<PaletteRow> {
-    vec![
+fn palette_header_rows(query: &str, match_count: usize, browsing: bool) -> Vec<PaletteRow> {
+    let mut rows = vec![
         PaletteRow::Query(query.to_string()),
         PaletteRow::Summary(palette_match_count_row(match_count)),
         PaletteRow::Blank,
-        PaletteRow::Section("MATCHES"),
-    ]
+    ];
+    if !browsing {
+        // Filtered results are rank-ordered, so a single flat section is
+        // honest; browsing gets per-category sections instead.
+        rows.push(PaletteRow::Section("MATCHES"));
+    }
+    rows
 }
 
 fn palette_entry_rows(
     matches: &[crate::app::PaletteEntry],
     cursor: usize,
     window_start: usize,
+    browsing: bool,
 ) -> Vec<PaletteRow> {
-    matches
-        .iter()
-        .enumerate()
-        .skip(window_start)
-        .take(7)
-        .map(|(index, entry)| PaletteRow::Match {
+    let mut rows = Vec::new();
+    let mut current_section: Option<&'static str> = None;
+    for (index, entry) in matches.iter().enumerate().skip(window_start).take(7) {
+        if browsing && current_section != Some(entry.category) {
+            current_section = Some(entry.category);
+            rows.push(PaletteRow::Section(entry.category));
+        }
+        rows.push(PaletteRow::Match {
             label: entry.label.clone(),
             kind: entry.kind.label(),
             description: entry.description.clone(),
+            hint: entry.hint.clone(),
             selected: index == cursor,
-        })
-        .collect()
+        });
+    }
+    rows
 }
 
 fn palette_guidance_rows() -> Vec<PaletteRow> {
     vec![
         PaletteRow::Blank,
         PaletteRow::Guidance(
-            "Enter load · ↑/↓ move · Esc close · commands, tools, and modules".to_string(),
+            "Enter run/load · ↑/↓ move · Esc close · commands, tools, and modules".to_string(),
         ),
     ]
 }
@@ -195,5 +207,90 @@ mod tests {
             .filter(|row| matches!(row, PaletteRow::Match { selected: true, .. }))
             .collect::<Vec<_>>();
         assert_eq!(selected.len(), 1, "{:?}", model.rows);
+    }
+
+    #[test]
+    fn accepting_a_zero_arg_command_executes_it_directly() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+        for ch in "help".chars() {
+            app.palette_input(ch);
+        }
+
+        app.accept_palette();
+
+        assert_eq!(app.shell_view(), crate::ShellView::Help);
+        assert!(app.input().is_empty(), "execute must not load the prompt");
+    }
+
+    #[test]
+    fn accepting_an_arg_taking_entry_loads_the_prompt_instead() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+        for ch in "recon:import".chars() {
+            app.palette_input(ch);
+        }
+        let selected = app.palette_matches()[0].clone();
+        assert!(selected.label.starts_with("recon:import"));
+        assert!(!selected.executes, "arg-taking entries must not execute");
+
+        app.accept_palette();
+
+        assert_ne!(app.shell_view(), crate::ShellView::CommandPalette);
+        assert!(app.input().starts_with("recon:import"));
+    }
+
+    #[test]
+    fn browsing_groups_matches_under_category_sections() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+
+        let model = command_palette_model(&app);
+        assert!(
+            model
+                .rows
+                .iter()
+                .any(|row| matches!(row, PaletteRow::Section("NAVIGATION"))),
+            "{:?}",
+            model.rows
+        );
+    }
+
+    #[test]
+    fn filtered_matches_stay_flat_and_rank_ordered() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+        app.palette_input('h');
+
+        let model = command_palette_model(&app);
+        assert!(model
+            .rows
+            .iter()
+            .all(|row| !matches!(row, PaletteRow::Section("NAVIGATION"))));
+    }
+
+    #[test]
+    fn help_row_advertises_its_shortest_alias() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+        for ch in "help".chars() {
+            app.palette_input(ch);
+        }
+
+        let matches = app.palette_matches();
+        let help = matches
+            .iter()
+            .find(|entry| entry.label == "help")
+            .expect("help entry");
+        assert_eq!(help.hint, "h");
+    }
+
+    #[test]
+    fn palette_entries_snapshot_once_at_open() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert_eq!(app.palette_entry_count(), 0, "no snapshot before open");
+
+        app.open_command_palette();
+        assert!(app.palette_entry_count() > 0);
     }
 }

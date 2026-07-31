@@ -87,6 +87,9 @@ fn kind_base_score(kind: AttackSurfaceKind) -> u16 {
         AttackSurfaceKind::BackgroundJob => 35,
         AttackSurfaceKind::SupplyChain => 30,
         AttackSurfaceKind::InfraConfig => 25,
+        // A surface kind from a newer Kuzushi carries no local scoring table;
+        // give it the lowest base so it is retained without inflating risk.
+        AttackSurfaceKind::Unknown => 20,
     }
 }
 

@@ -18,6 +18,10 @@ pub(in crate::verification::adapters) struct VerifyFindingInput {
     /// for a fraction of the cost, but an exploitable verdict always
     /// escalates to the configured full-strength passes.
     pub(in crate::verification::adapters) gate_model: Option<String>,
+    /// Optional DIFFERENT tie-break model, consulted only when the panel
+    /// splits evenly. A same-model or invalid spec is refused (disclosed, not
+    /// substituted) and the split verdict stands. Unset means no escalation.
+    pub(in crate::verification::adapters) escalation_model: Option<String>,
 }
 
 /// Upper bound on independent verifier passes. Beyond this the marginal
@@ -50,6 +54,7 @@ impl VerifyFindingInput {
         let mcps = parse_verify_mcps(input)?;
         let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
         let gate_model = parse_gate_model(input)?;
+        let escalation_model = parse_escalation_model(input)?;
 
         Ok(Self {
             fingerprint,
@@ -58,7 +63,27 @@ impl VerifyFindingInput {
             mcps,
             mcp_tool_timeout_ms,
             gate_model,
+            escalation_model,
         })
+    }
+}
+
+/// The escalation model is stored raw (only trimmed), never validated here.
+/// Validity is a disclosed tie-break decision, not a parse error: an invalid
+/// spec is only ever consulted on a SPLIT panel, where `decide_tie_break`
+/// returns `Refused(InvalidModelSpec)` and the split verdict stands with a
+/// warning. Validating (and bailing) at parse time would instead hard-fail
+/// EVERY verify:finding run — including single-pass, unanimous, and
+/// gate-rejected runs that never escalate — which contradicts that contract.
+fn parse_escalation_model(input: &Value) -> Result<Option<String>> {
+    match input.get("escalationModel") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) if !value.trim().is_empty() => {
+            Ok(Some(value.trim().to_string()))
+        }
+        Some(_) => {
+            anyhow::bail!("verify:finding escalationModel must be a non-empty model spec string")
+        }
     }
 }
 

@@ -69,18 +69,43 @@ pub(crate) fn build_systems_hunt_prompt(
     triggers: &SystemsTriggerOutput,
     options: &SystemsHuntInput,
 ) -> Result<String> {
-    Ok(format!(
+    let mut sections = vec![systems_hunt_task_header(context, options)];
+    push_systems_hunt_hints(&mut sections, context);
+    sections.push(systems_hunt_payload_block(context, invariants, triggers)?);
+    Ok(sections.join("\n\n"))
+}
+
+fn systems_hunt_task_header(context: &SystemsContextOutput, options: &SystemsHuntInput) -> String {
+    format!(
         "Hunt for concrete memory-safety, integer-boundary, parser-state, resource-provenance, or hardening-bypass vulnerabilities. Return JSON with findings[]. Limit to {max_findings} findings.\n\n\
         Process:\n\
         1. Skim the {surface_count} surfaces below and pick at most the {investigate_cap} that look most exploitable.\n\
         2. For each chosen surface, Read the cited file once at the relevant line span.\n\
         3. Decide go/no-go quickly per surface and move on.\n\
         4. Emit final `{{\"findings\":[...]}}` JSON in one shot at the end of your turn.\n\n\
-        For each surface in the context below you have its file_path, start_line, and one or more line_number markers in `evidence[]`. Use the Read tool to fetch surrounding source for any line you actually need to reason about; the prompt deliberately does not embed source text. Use Glob/Grep only when broadening outside the listed surfaces.\n\n\
-        Context:\n{context}\n\nInvariants:\n{invariants}\n\nTriggers:\n{triggers}",
+        For each surface in the context below you have its file_path, start_line, and one or more line_number markers in `evidence[]`. Use the Read tool to fetch surrounding source for any line you actually need to reason about; the prompt deliberately does not embed source text. Use Glob/Grep only when broadening outside the listed surfaces.",
         max_findings = options.max_findings,
         surface_count = context.surfaces.len(),
         investigate_cap = options.max_findings.saturating_mul(2).min(context.surfaces.len()),
+    )
+}
+
+fn push_systems_hunt_hints(sections: &mut Vec<String>, context: &SystemsContextOutput) {
+    let Some(hints) =
+        crate::prompts::hunt_hints_for_paths(context.surfaces.iter().map(|s| s.file_path.as_str()))
+    else {
+        return;
+    };
+    sections.push(hints);
+}
+
+fn systems_hunt_payload_block(
+    context: &SystemsContextOutput,
+    invariants: &SystemsInvariantOutput,
+    triggers: &SystemsTriggerOutput,
+) -> Result<String> {
+    Ok(format!(
+        "Context:\n{context}\n\nInvariants:\n{invariants}\n\nTriggers:\n{triggers}",
         context = lean_prompt_payload(context)?,
         invariants = lean_prompt_payload(invariants)?,
         triggers = lean_prompt_payload(triggers)?,

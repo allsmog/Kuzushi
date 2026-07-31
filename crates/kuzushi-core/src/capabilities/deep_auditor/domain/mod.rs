@@ -1,8 +1,11 @@
 mod contract;
+mod taint_tool_policy;
 
 pub use contract::DeepAuditConfig;
+pub use taint_tool_policy::TaintToolPolicy;
 pub use contract::DeepAuditOutcome;
 pub use contract::EvidenceCitation;
+pub use contract::EvidenceOrigin;
 pub use contract::VulnAnalysis;
 pub use contract::DEFAULT_DEPOSIT_USD;
 pub use contract::DEFAULT_MAX_STEPS;

@@ -10,6 +10,8 @@ import { BridgePublicError } from "./errors.mjs";
 import { oauthModelForRequest } from "./oauth-models.mjs";
 
 export const DEFAULT_MAX_MODEL_TURNS = 12;
+const OPENAI_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OPENAI_OAUTH_TOKEN_URL = "https://auth.openai.com/oauth/token";
 
 export function parseModelSpec(spec) {
   const value = String(spec ?? "");
@@ -108,8 +110,12 @@ function requiredOauthModel(request, provider, modelName) {
 }
 
 function optionalOauthModel(request, provider, modelName) {
-  const token = oauthAccessToken(request, provider);
-  return token ? oauthModelForRequest(provider, modelName, token, request) : undefined;
+  const credential = oauthCredentialForRequest(request, provider);
+  if (!credential) return undefined;
+  return oauthModelForRequest(provider, modelName, credential.access, {
+    ...request,
+    oauthAccountId: credential.accountId,
+  });
 }
 
 export function credentialForRequest(request, provider, defaultEnv) {
@@ -121,8 +127,17 @@ function apiKeyCredential(request, defaultEnv) {
 }
 
 export function oauthAccessToken(request, provider) {
+  return oauthCredentialForRequest(request, provider)?.access;
+}
+
+function oauthCredentialForRequest(request, provider) {
   const entry = freshOauthCredentialBag(request, provider)[oauthCredentialProvider(provider)];
-  return nonEmpty(entry?.access) ?? allowedOauthEnvToken(request, provider);
+  const access = nonEmpty(entry?.access) ?? allowedOauthEnvToken(request, provider);
+  if (!access) return undefined;
+  return {
+    access,
+    accountId: nonEmpty(entry?.accountId) ?? openAiAccountIdFromJwt(access),
+  };
 }
 
 function oauthCredentialProvider(provider) {
@@ -140,9 +155,13 @@ export function oauthCredentialBag(credentialsPath = oauthCredentialsPath()) {
 function freshOauthCredentialBag(request, provider) {
   const credentialsPath = requestOauthCredentialsPath(request);
   const bag = credentialsPath ? oauthCredentialBag(credentialsPath) : {};
-  return provider === "anthropic"
-    ? refreshExpiredAnthropicCredential(bag, credentialsPath)
-    : bag;
+  if (provider === "anthropic") {
+    return refreshExpiredAnthropicCredential(bag, credentialsPath);
+  }
+  if (oauthCredentialProvider(provider) === "openai-codex") {
+    return refreshExpiredOpenAiCredential(bag, credentialsPath);
+  }
+  return bag;
 }
 
 function refreshExpiredAnthropicCredential(bag, credentialsPath) {
@@ -151,6 +170,16 @@ function refreshExpiredAnthropicCredential(bag, credentialsPath) {
   const refreshed = refreshAnthropicCredentialSync(credential.refresh);
   if (!refreshed) return bag;
   const nextBag = { ...bag, anthropic: refreshed };
+  if (credentialsPath) writeOauthCredentialBag(nextBag, credentialsPath);
+  return nextBag;
+}
+
+function refreshExpiredOpenAiCredential(bag, credentialsPath) {
+  const credential = bag["openai-codex"];
+  if (!expiredOAuthCredential(credential)) return bag;
+  const refreshed = refreshOpenAiCredentialSync(credential.refresh);
+  if (!refreshed) return bag;
+  const nextBag = { ...bag, "openai-codex": refreshed };
   if (credentialsPath) writeOauthCredentialBag(nextBag, credentialsPath);
   return nextBag;
 }
@@ -194,6 +223,35 @@ process.exitCode = response.ok ? 0 : 1;
   return anthropicCredentialFromRefreshResponse(result.stdout, refreshToken);
 }
 
+function refreshOpenAiCredentialSync(refreshToken) {
+  const script = `
+const body = new URLSearchParams({
+  grant_type: "refresh_token",
+  refresh_token: process.env.KUZUSHI_OPENAI_REFRESH_TOKEN,
+  client_id: process.env.KUZUSHI_OPENAI_CLIENT_ID,
+});
+const response = await fetch(process.env.KUZUSHI_OPENAI_TOKEN_URL, {
+  method: "POST",
+  headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+  body: body.toString(),
+});
+process.stdout.write(await response.text());
+process.exitCode = response.ok ? 0 : 1;
+`;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      KUZUSHI_OPENAI_REFRESH_TOKEN: refreshToken,
+      KUZUSHI_OPENAI_CLIENT_ID: OPENAI_OAUTH_CLIENT_ID,
+      KUZUSHI_OPENAI_TOKEN_URL: OPENAI_OAUTH_TOKEN_URL,
+    },
+    timeout: 120_000,
+  });
+  if (result.status !== 0) return undefined;
+  return openAiCredentialFromRefreshResponse(result.stdout, refreshToken);
+}
+
 function anthropicCredentialFromRefreshResponse(raw, priorRefresh) {
   try {
     const parsed = JSON.parse(raw);
@@ -204,6 +262,40 @@ function anthropicCredentialFromRefreshResponse(raw, priorRefresh) {
       refresh: nonEmpty(parsed.refresh_token) ?? priorRefresh,
       expires: Date.now() + Math.max(1, Number(parsed.expires_in ?? 3600)) * 1000,
     };
+  } catch {
+    return undefined;
+  }
+}
+
+export function openAiCredentialFromRefreshResponse(raw, priorRefresh, now = Date.now()) {
+  try {
+    const parsed = JSON.parse(raw);
+    const access = nonEmpty(parsed.access_token);
+    if (!access) return undefined;
+    const accountId =
+      openAiAccountIdFromJwt(parsed.id_token) ?? openAiAccountIdFromJwt(access);
+    return {
+      access,
+      refresh: nonEmpty(parsed.refresh_token) ?? priorRefresh,
+      expires: now + Math.max(1, Number(parsed.expires_in ?? 3600)) * 1000,
+      ...(accountId ? { accountId } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+export function openAiAccountIdFromJwt(token) {
+  if (!nonEmpty(token)) return undefined;
+  const parts = token.split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    const claims = JSON.parse(Buffer.from(parts[1], "base64url").toString());
+    return (
+      nonEmpty(claims.chatgpt_account_id) ??
+      nonEmpty(claims["https://api.openai.com/auth"]?.chatgpt_account_id) ??
+      nonEmpty(claims.organizations?.[0]?.id)
+    );
   } catch {
     return undefined;
   }

@@ -5,6 +5,8 @@ mod initial_state;
 
 pub(crate) const UI_AUTO_OPEN_ACTIVITY_OPTION: &str = "ui.auto_open_activity";
 pub(crate) const UI_AUTO_OPEN_VIZ_OPTION: &str = "ui.auto_open_viz";
+pub(crate) const UI_RAIL_OPTION: &str = "ui.rail";
+pub(crate) const UI_NOTIFY_OPTION: &str = "ui.notify";
 
 /// Operator preference for the Activity view's auto-open behaviour at
 /// scan/tool start. Default ON. `setg ui.auto_open_activity false` wins over
@@ -28,11 +30,16 @@ fn read_auto_open_viz_pref(option_store: &ToolOptionStore) -> bool {
     )
 }
 
-pub(crate) fn refresh_auto_open_prefs_from_store(app: &mut ShellApp) {
+pub(crate) fn refresh_ui_prefs_from_store(app: &mut ShellApp) {
     let auto_open_activity = read_auto_open_activity_pref(app.option_store());
     let auto_open_viz = read_auto_open_viz_pref(app.option_store());
+    // Default ON; no env compat — rail and notify are options-first from birth.
+    let rail_enabled = stored_bool_pref(app.option_store(), UI_RAIL_OPTION).unwrap_or(true);
+    let notify_enabled = stored_bool_pref(app.option_store(), UI_NOTIFY_OPTION).unwrap_or(true);
     app.ui_mut().set_auto_open_activity(auto_open_activity);
     app.ui_mut().set_auto_open_viz(auto_open_viz);
+    app.ui_mut().set_rail_enabled(rail_enabled);
+    app.ui_mut().set_notify_enabled(notify_enabled);
 }
 
 fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
@@ -129,7 +136,7 @@ impl ShellApp {
     }
 
     fn hydrate_initial_workspace(app: &mut Self, target: Option<&WorkspaceTarget>) {
-        refresh_auto_open_prefs_from_store(app);
+        refresh_ui_prefs_from_store(app);
         app.refresh_phase_attempt_projection();
         if let Some(target) = target {
             app.start_active_target_facts(target.root().to_path_buf());

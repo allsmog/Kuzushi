@@ -15,13 +15,19 @@ pub(crate) fn auth_ping_bridge_command(config: &kuzushi_core::V2Config) -> Vec<S
 pub(crate) fn auth_ping_envelope(
     config: &kuzushi_core::V2Config,
     model: String,
-) -> serde_json::Value {
-    serde_json::json!({
+) -> Result<serde_json::Value> {
+    let oauth = config.runtime.anthropic_oauth.clone().unwrap_or_default();
+    let oauth_credentials_path = kuzushi_openai::resolve_oauth_credentials_path(&oauth)?;
+    Ok(serde_json::json!({
+        "protocolVersion": kuzushi_openai::LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         "type": "ping",
         "model": model,
         "apiKeyEnv": config.runtime.api_key_env,
         "apiKey": std::env::var(&config.runtime.api_key_env).ok(),
-    })
+        "oauthCredentialsPath": oauth_credentials_path,
+        "oauthAllowEnvToken": oauth.allow_env_token,
+        "baseUrl": config.runtime.base_url,
+    }))
 }
 
 pub(crate) fn run_auth_ping_bridge(

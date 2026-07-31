@@ -1,5 +1,9 @@
 # Interaction-safety audit — approval gate & cancellation
 
+> Historical audit. Its two-stage idle Ctrl+C assessment is superseded:
+> Ctrl+C/Ctrl+D now exit immediately when idle, cancel without exiting while
+> work is active, and wait when cancellation is already pending.
+
 Read-only audit of the Rust Ratatui shell (`crates/kuzushi-tui`). Scope: reflexive
 keystrokes that can authorize a sensitive run or destroy in-flight work. No files were
 edited.

@@ -430,13 +430,15 @@ impl ShellApp {
             self.router.workbench_mut().close_investigation_draft();
             return;
         };
-        let input = serde_json::json!({
-            "fingerprint": finding.fingerprint,
-            "mode": boundary.mode_value(),
-        })
-        .to_string();
+        // Draft the exact command the Prove card previews — one builder feeds
+        // both, so the previewed model ladder can never diverge from what runs.
+        let command = crate::ui_view_models::investigation_verify_command(
+            self,
+            &finding.fingerprint,
+            boundary,
+        );
         self.router.workbench_mut().close_investigation_draft();
-        self.set_input(format!("run verify:finding {input}"));
+        self.set_input(command);
         self.set_input_mode(InputMode::Prompt);
         self.log(
             "verify",
@@ -651,6 +653,15 @@ impl ShellApp {
         self.log(
             "review",
             "search: type to filter · severity/source/path/actor/confidence/status facets · Enter keep · Esc clear",
+        );
+    }
+
+    /// `/` opens the incremental filter over the whole session transcript.
+    fn open_logs_filter(&mut self) {
+        self.router.logs_mut().open_filter_capture();
+        self.log(
+            "logs",
+            "filter: type to narrow the transcript · Enter keep · Esc clear",
         );
     }
 
@@ -1122,6 +1133,10 @@ impl ShellApp {
             ViewHotkeyAction::ThreatView(view) => {
                 self.router.threat_mut().open(view);
                 self.set_shell_view(ShellView::Threat);
+                InputUpdate::handled()
+            }
+            ViewHotkeyAction::LogsFilter => {
+                self.open_logs_filter();
                 InputUpdate::handled()
             }
             ViewHotkeyAction::PauseScan => self.reduce_hotkey_command(ShellCommand::Pause),

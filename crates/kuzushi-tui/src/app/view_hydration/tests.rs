@@ -66,6 +66,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::FindingPatchTruth { .. } => {
             ViewHydrationValue::FindingPatchTruth(FindingPatchTruthState::Missing)
         }
+        ViewHydrationKey::FindingAuditDataflow { .. } => {
+            ViewHydrationValue::FindingAuditDataflow(FindingAuditDataflowState::Missing)
+        }
         ViewHydrationKey::ScannedSnippet { .. } => {
             ViewHydrationValue::ScannedSnippet(ScannedSnippetState::Missing)
         }
@@ -105,6 +108,7 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::TargetProfile(TargetProfile::conservative())
         }
         ViewHydrationKey::MapArtifacts => ViewHydrationValue::MapArtifacts(false),
+        ViewHydrationKey::CpgArtifacts => ViewHydrationValue::CpgArtifacts(false),
         ViewHydrationKey::ScanRecommendations => {
             ViewHydrationValue::ScanRecommendations(ScanRecommendationsState::Ready(Vec::new()))
         }
@@ -247,6 +251,31 @@ fn fix_requests_generation_bound_finding_patch_truth() {
         finding_scan_id: Some("scan-generation".to_string()),
         target_revision: Some("revision-1".to_string()),
     }));
+}
+
+#[test]
+fn workbench_requests_audit_dataflow_for_the_selected_finding() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    let finding = Finding::new_semgrep(
+        "fixture.rule",
+        "src/lib.rs",
+        7,
+        None,
+        kuzushi_core::Severity::High,
+        "fixture finding",
+    );
+    let fingerprint = finding.fingerprint.clone();
+    app.set_findings(vec![finding]);
+
+    let keys = active_view_hydration_keys(&app);
+
+    assert!(keys.contains(&ViewHydrationKey::FindingAuditDataflow { fingerprint }));
 }
 
 #[test]

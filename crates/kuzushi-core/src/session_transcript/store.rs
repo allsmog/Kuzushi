@@ -53,6 +53,22 @@ impl SessionTranscriptStore {
         Ok(summaries)
     }
 
+    /// Read one transcript by path. The live shell already knows its own
+    /// recorder path, so it reads back without rescanning the whole store.
+    pub fn read_file(path: impl Into<PathBuf>) -> Result<SessionReadResult> {
+        let path = path.into();
+        let raw_jsonl = read_safe_session_file(&path)?;
+        let (records, warnings) = parse_records(&raw_jsonl);
+        let summary = summarize(&path, &records, warnings.len())?;
+        Ok(SessionReadResult {
+            path,
+            raw_jsonl,
+            summary,
+            records,
+            warnings,
+        })
+    }
+
     pub fn read(&self, session_id: &str) -> Result<SessionReadResult> {
         validate_session_id(session_id)?;
         let path = self
@@ -95,16 +111,7 @@ impl SessionTranscriptStore {
     }
 
     fn read_path(&self, path: PathBuf) -> Result<SessionReadResult> {
-        let raw_jsonl = read_safe_session_file(&path)?;
-        let (records, warnings) = parse_records(&raw_jsonl);
-        let summary = summarize(&path, &records, warnings.len())?;
-        Ok(SessionReadResult {
-            path,
-            raw_jsonl,
-            summary,
-            records,
-            warnings,
-        })
+        Self::read_file(path)
     }
 
     fn prune_file(

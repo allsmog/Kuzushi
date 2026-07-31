@@ -39,10 +39,11 @@ pub(in crate::modules) struct DeepTriageTuning {
     pub(in crate::modules) max_steps: Option<u32>,
     pub(in crate::modules) deposit_usd: Option<f64>,
     pub(in crate::modules) temperature: Option<f32>,
+    pub(in crate::modules) taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy,
 }
 
-fn parse_deep_triage_tuning(input: &Value) -> DeepTriageTuning {
-    DeepTriageTuning {
+fn parse_deep_triage_tuning(input: &Value) -> Result<DeepTriageTuning> {
+    Ok(DeepTriageTuning {
         max_steps: input
             .get("maxSteps")
             .and_then(Value::as_u64)
@@ -52,6 +53,16 @@ fn parse_deep_triage_tuning(input: &Value) -> DeepTriageTuning {
             .get("temperature")
             .and_then(Value::as_f64)
             .map(|value| value.clamp(0.0, 2.0) as f32),
+        taint_tools: parse_triage_taint_tools(input)?,
+    })
+}
+
+fn parse_triage_taint_tools(
+    input: &Value,
+) -> Result<crate::capabilities::deep_auditor::TaintToolPolicy> {
+    match input.get("taintTools").and_then(Value::as_str) {
+        Some(value) => crate::capabilities::deep_auditor::TaintToolPolicy::parse(value),
+        None => Ok(crate::capabilities::deep_auditor::TaintToolPolicy::default()),
     }
 }
 
@@ -76,7 +87,7 @@ impl TriageRunInput {
             model: optional_nonempty_string(input, "model")?,
             retriage: parse_triage_retriage(input),
             votes: parse_triage_votes(input)?,
-            deep_tuning: parse_deep_triage_tuning(input),
+            deep_tuning: parse_deep_triage_tuning(input)?,
             suppression_feedback: std::collections::BTreeMap::new(),
         })
     }

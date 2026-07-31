@@ -1,3 +1,4 @@
+use super::TaintToolPolicy;
 use crate::findings::TriageOutcome;
 use serde::{Deserialize, Serialize};
 
@@ -37,6 +38,21 @@ pub struct VulnAnalysis {
     pub refute_reason: Option<crate::findings::RefuteReason>,
 }
 
+/// Where an evidence citation actually came from. This is tracked at the point
+/// of creation — it is NOT inferred from `kind`, because the prompt asks the
+/// MODEL to emit `kind="guard"` citations, so a guard tag alone does not mean
+/// the row was mined from the dataflow engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceOrigin {
+    /// Read or cited from source by the model (default for model-emitted
+    /// citations and hand-read regions).
+    #[default]
+    CodeRead,
+    /// Mined from the in-process cpg-rs dataflow engine (a witnessed flow).
+    CpgPath,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvidenceCitation {
     pub file: String,
@@ -48,6 +64,12 @@ pub struct EvidenceCitation {
     /// Optional kind tag: "source" | "sink" | "guard" | "context".
     #[serde(default)]
     pub kind: String,
+    /// Real provenance of the citation. `skip_deserializing` so a model cannot
+    /// forge cpg-rs provenance through its structured output — only kuzushi's
+    /// own mining code sets `CpgPath`. Persisted (serialized) so the finding
+    /// detail projection can label origin from tracked truth, not `kind`.
+    #[serde(default, skip_deserializing)]
+    pub origin: EvidenceOrigin,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +82,11 @@ pub struct DeepAuditOutcome {
     pub cost_usd_exact: bool,
     pub steps_used: u32,
     pub truncated: bool,
+    /// True when this outcome came from a consensus vote that split into a tie.
+    /// A tie is the one verdict a different, operator-named tie-break model may
+    /// legitimately revisit; single-pass outcomes are never splits.
+    #[serde(default)]
+    pub consensus_split: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +104,8 @@ pub struct DeepAuditConfig {
     /// Independent audit passes to run; majority verdict is reported
     /// when this is > 1. See domain::consensus for semantics. Default 1.
     pub passes: u32,
+    /// Dataflow-tool policy offered to the auditor (off / available / build).
+    pub taint_tools: TaintToolPolicy,
 }
 
 impl DeepAuditConfig {
@@ -89,6 +118,7 @@ impl DeepAuditConfig {
             include_static_evidence: true,
             temperature: DEFAULT_TEMPERATURE,
             passes: DEFAULT_PASSES,
+            taint_tools: TaintToolPolicy::default(),
         }
     }
 }
@@ -124,6 +154,14 @@ const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schem
   ]
 }";
 
+/// Extra method step advertised only when the auditor is offered the
+/// `cpg_taint_paths` dataflow tool. A returned guard/authz annotation is
+/// falsification evidence; an empty flow count is never proof of safety.
+const DEEP_AUDITOR_TAINT_STEP: &str = "2b. When the alleged flow crosses functions, call cpg_taint_paths with regex \
+source/sink patterns before reading callers by hand. A returned `guard` or `authz` annotation is \
+falsification evidence: cite it as kind=\"guard\" and prefer triggerable=false. An empty flowCount \
+is NOT evidence of safety — fall back to read_definition/find_references.";
+
 #[cfg(test)]
 mod system_prompt_tests {
     use super::deep_auditor_system_prompt;
@@ -131,8 +169,8 @@ mod system_prompt_tests {
 
     #[test]
     fn validator_catalog_varies_by_detected_language() {
-        let c = deep_auditor_system_prompt(PromptLanguage::CorCpp);
-        let py = deep_auditor_system_prompt(PromptLanguage::Python);
+        let c = deep_auditor_system_prompt(PromptLanguage::CorCpp, false);
+        let py = deep_auditor_system_prompt(PromptLanguage::Python, false);
         assert!(c.contains("netlink, ioctl"));
         assert!(!c.contains("Django/Flask/FastAPI"));
         assert!(py.contains("Django/Flask/FastAPI"));
@@ -140,23 +178,61 @@ mod system_prompt_tests {
         assert!(c.contains("false-DISMISSAL traps"));
         assert!(py.contains("Assign confidence by evidence"));
     }
+
+    #[test]
+    fn taint_step_appears_only_when_tools_available() {
+        let without = deep_auditor_system_prompt(PromptLanguage::CorCpp, false);
+        let with = deep_auditor_system_prompt(PromptLanguage::CorCpp, true);
+        assert!(!without.contains("cpg_taint_paths"));
+        assert!(with.contains("cpg_taint_paths"));
+    }
+
+    #[test]
+    fn deep_auditor_prompt_never_carries_hunt_hints() {
+        for language in [
+            PromptLanguage::CorCpp,
+            PromptLanguage::Rust,
+            PromptLanguage::Go,
+            PromptLanguage::TypeScript,
+            PromptLanguage::Python,
+            PromptLanguage::JavaSpring,
+            PromptLanguage::Other,
+        ] {
+            for taint_tools in [false, true] {
+                assert!(!deep_auditor_system_prompt(language, taint_tools)
+                    .contains("investigation starting points"));
+            }
+        }
+    }
 }
 
 /// Assemble the deep-auditor system prompt, injecting the validator catalog for
-/// the detected language/ecosystem.
-pub(crate) fn deep_auditor_system_prompt(language: crate::prompts::PromptLanguage) -> String {
+/// the detected language/ecosystem and the taint-tool method step when the
+/// auditor is offered `cpg_taint_paths`.
+pub(crate) fn deep_auditor_system_prompt(
+    language: crate::prompts::PromptLanguage,
+    taint_tools_available: bool,
+) -> String {
     let catalog = format!(
         "Language/ecosystem validator catalog:\n{}",
         crate::prompts::centralized_validator_catalog(language)
     );
     crate::prompts::assemble_system_prompt(
         DEEP_AUDITOR_HEADER,
-        &[
-            DEEP_AUDITOR_METHOD,
-            crate::prompts::FALSE_POSITIVE_TAXONOMY,
-            crate::prompts::CONFIDENCE_CALIBRATION,
-            &catalog,
-            DEEP_AUDITOR_OUTPUT,
-        ],
+        &deep_auditor_blocks(&catalog, taint_tools_available),
     )
+}
+
+fn deep_auditor_blocks<'a>(catalog: &'a str, taint_tools_available: bool) -> Vec<&'a str> {
+    let mut blocks = vec![DEEP_AUDITOR_METHOD];
+    if taint_tools_available {
+        blocks.push(DEEP_AUDITOR_TAINT_STEP);
+    }
+    blocks.extend_from_slice(&[
+        crate::prompts::FALSE_POSITIVE_TAXONOMY,
+        crate::prompts::CONFIDENCE_CALIBRATION,
+        catalog,
+        DEEP_AUDITOR_OUTPUT,
+    ]);
+    blocks
 }

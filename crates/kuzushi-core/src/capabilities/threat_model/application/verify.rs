@@ -21,12 +21,15 @@ const VERIFY_COVERAGE_MAX_ELEMENTS: usize = 40;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreatModelVerification {
-    /// `verified` | `stale` (revision drift) | `failed` (missing citations).
+    /// `verified` | `stale` (revision drift) | `failed` (invalid evidence or links).
     pub verdict: String,
     pub checked_paths: usize,
     pub missing_count: usize,
     /// Capped listing of missing/out-of-range citations for the operator.
     pub missing: Vec<String>,
+    pub link_error_count: usize,
+    /// Capped listing of missing, duplicate, or dangling DFD/context links.
+    pub link_errors: Vec<String>,
     pub revision: RevisionCheck,
     pub coverage_considered: usize,
     pub coverage_gaps: usize,
@@ -49,9 +52,10 @@ pub fn verify_threat_model_document(
 ) -> Result<ThreatModelVerification> {
     let refs = cited_path_refs(document);
     let missing = missing_citations(target, &refs);
+    let links = security_context_link_report(document);
     let revision = revision_check(document, target);
     let coverage = coverage_check(document, target)?;
-    let verdict = if !missing.is_empty() {
+    let verdict = if !missing.is_empty() || !links.is_complete() {
         "failed"
     } else if revision.matches == Some(false) {
         "stale"
@@ -63,6 +67,8 @@ pub fn verify_threat_model_document(
         checked_paths: refs.len(),
         missing_count: missing.len(),
         missing: missing.into_iter().take(MAX_LISTED_MISSING).collect(),
+        link_error_count: links.errors.len(),
+        link_errors: links.errors.into_iter().take(MAX_LISTED_MISSING).collect(),
         revision,
         coverage_considered: coverage.considered,
         coverage_gaps: coverage.gaps.len(),
@@ -166,7 +172,9 @@ fn collect_keyed_refs(key: &str, child: &Value, refs: &mut Vec<PathRef>) {
 
 fn push_evidence_ref(refs: &mut Vec<PathRef>, text: &str) {
     let (path, line) = match text.rsplit_once(':') {
-        Some((path, digits)) if digits.chars().all(|c| c.is_ascii_digit()) && !digits.is_empty() => {
+        Some((path, digits))
+            if digits.chars().all(|c| c.is_ascii_digit()) && !digits.is_empty() =>
+        {
             (path, digits.parse().ok())
         }
         _ => (text, None),

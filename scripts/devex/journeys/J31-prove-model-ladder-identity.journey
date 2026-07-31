@@ -1,0 +1,75 @@
+# J31 — Prove MODEL LADDER card: preview ≡ drafted command (P1 identity contract)
+#
+# Keyless, deterministic. The Prove `v` investigation card renders a MODEL LADDER
+# (gate → panel → escalate) from the operator-stored verify:finding model knobs,
+# and previews the exact `run verify:finding {…}` the Enter-to-draft handler
+# drafts — one source of truth, so the preview can never diverge from what runs.
+#
+# Two branches in one isolated HOME, unset FIRST (no default is invented), then
+# set (the drafted JSON carries the stored models verbatim). The card drafts but
+# NEVER runs (Run Focus must not appear on the card's Enter).
+#
+# Width variants (operator matrix): re-run with `--size 60x20` — narrow Prove
+# must keep identity/STATUS/NEXT before the ladder and never truncate a model
+# name into ambiguity.
+name: Prove MODEL LADDER card preview equals the drafted command
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: workbench
+wait: 2
+nav-mode:
+keys: 4
+wait-live-snap: 10 Viewing Prove | 1-prove
+keys: v
+wait-live-snap: 10 INVESTIGATE | 2-card-unset
+expect: MODEL LADDER
+expect: gate: not set
+expect: escalate on tie: not set
+ask: Unset branch — the ladder reads top-down as execution order (gate -> panel -> escalate); absence is meaningful (single-tier verification), not an invented default?
+keys: Enter
+wait: 2
+snap: drafted-unset
+expect-not: "gateModel"
+expect-not: "escalationModel"
+expect-not: ACTIVITY
+ask: L2 guard — the drafted JSON OMITS gateModel/escalationModel when unset (no `gate: default` folded into the command); nothing ran (no Run Focus)?
+keys: Escape
+wait: 1
+# setg writes for the focused tool, so focus verify:finding (via its options
+# view) before storing the model knobs — then the ladder folds them in.
+submit: options verify:finding
+wait: 1
+submit: setg gateModel openai:gpt-cheap
+wait: 1
+submit: setg escalationModel openai:gpt-strong
+wait: 1
+submit: workbench
+wait: 2
+nav-mode:
+keys: 4
+wait-live-snap: 10 Viewing Prove | prove-set
+keys: v
+wait-live-snap: 10 INVESTIGATE | 3-card-set
+expect: MODEL LADDER
+expect: gate: openai:gpt-cheap
+expect: escalate on tie: openai:gpt-strong
+ask: Does the hint teach `setg gateModel …` in place, and does the ladder read as the order of execution (gate -> panel -> escalate)?
+keys: Enter
+wait: 2
+snap: drafted-set
+# The composer shows the command's tail (cursor at end); serde sorts the JSON
+# keys so gateModel + mode land in the visible tail, proving the stored model
+# folded into the drafted command.
+expect: "gateModel":"openai:gpt-cheap"
+expect-not: ACTIVITY
+ask: BYTE-IDENTITY (L1) — the card preview and the Enter-draft both come from the single source of truth `investigation_verify_command` (ui_view_models/phase_cockpit/confirm.rs), so they cannot diverge by construction. Confirm the drafted command carries the same gate/escalation models the ladder disclosed (the 68-char fingerprint makes the full JSON line wider than any terminal, so read the models from the ladder rows, not the truncated JSON tail).
+ask: Nothing-runs invariant — the card drafted the command into the prompt; only a second prompt-Enter would run it (no Run Focus/ACTIVITY appeared).

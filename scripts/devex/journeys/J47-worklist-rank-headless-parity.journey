@@ -1,0 +1,43 @@
+# J47 — headless parity: `run worklist:rank` (P5)  ⭐ release-blocking
+#
+# Keyless, deterministic, headless. `kuzushi run worklist:rank` emits the same
+# ranked truth the TUI worklist deck renders, machine-readable on stdout. A
+# context-snapshot with an attackSurfaceMap is seeded via `shell:` (context:build
+# is not cleanly keyless on the real target), so the fold produces real rows whose
+# citations carry the raw evidence. Negatives: an unknown key is rejected at the
+# canonical boundary, and a run without --target errors without substituting cwd.
+name: run worklist:rank emits the same ranked truth headless
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Seed a context snapshot with an attack-surface map so the fold yields rows with
+# per-ranker raw citations (the same shape context:build would persist).
+shell: mkdir -p @TMP_TARGET/.kuzushi && printf '{"attackSurfaceMap":{"rootName":"demo","surfaces":[{"id":"s1","kind":"http_route","path":"app.py","line":3,"language":"python","title":"run endpoint","evidence":"os.system","risk":{"rank":1,"score":92,"tier":"critical","reasons":["command execution"]}},{"id":"s2","kind":"http_route","path":"app.py","line":2,"language":"python","title":"helper","evidence":"e","risk":{"rank":2,"score":40,"tier":"medium","reasons":[]}}],"summary":{"total":2,"byKind":{},"byFile":{"app.py":2},"highRisk":1,"maxRiskScore":92,"byRiskTier":{}}}}' > @TMP_TARGET/.kuzushi/context-snapshot.json
+# The full result JSON is longer than the pane; grep to the load-bearing keys so
+# every asserted field stays on-screen (a scrolling pane only retains its tail).
+launch-raw: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"limit":5}' 2>&1 | grep -iE 'contributors|unranked|rankedTotal|citations|rawDisplay|"raw"|normalization|92/100|notRequested|"live"'
+wait: 6
+snap: worklist-json
+expect: contributors
+expect: unranked
+expect: rankedTotal
+expect: citations
+expect: rawDisplay
+expect: normalization
+expect: 92/100
+expect: notRequested
+ask: JSON carries rows with rank/score/citations{raw,rawDisplay,normalized,normalization}, contributor STATES (live/unavailable{reason}/notRequested), and the unranked list — the same truth the TUI renders, machine-readable, no TUI-only fields missing?
+# Negative 1: unknown key rejected at the canonical boundary, naming the options.
+launch-raw: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"bogus":1}' 2>&1 | head -20
+wait: 4
+snap: worklist-unknown-key
+expect: unknown option
+expect: bogus
+ask: The unknown-key rejection is a canonical-boundary error (not an executor-time surprise) and names the reachable options?
+# Negative 2: no --target errors and never substitutes cwd.
+launch-raw: cd @TMP_TARGET && @KUZUSHI run worklist:rank --input '{"limit":5}' 2>&1 | head -20
+wait: 4
+snap: worklist-no-target
+expect: requires an explicit workspace target
+expect: --target
+ask: Without --target the tool errors and names itself; cwd is never silently substituted (the explicit-target invariant)?

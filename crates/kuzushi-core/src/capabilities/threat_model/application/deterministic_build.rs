@@ -19,21 +19,11 @@ pub(crate) fn build_deterministic_threat_model(
     // headers) name the target revision this model was built against instead
     // of degrading to count-only provenance.
     stamp_provenance(&mut document, &input.target, "deterministic");
+    require_complete_security_context_links(&document)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&document);
-    let normalized_artifact =
-        write_normalized_artifact(&input.target, &input.output_dir, &document)?;
-    let markdown = render_schema_markdown(
-        &document,
-        &input.repo_name,
-        &input.target.display().to_string(),
-    );
-    let markdown_artifact = write_markdown_artifact(
-        &input.target,
-        &input.output_dir,
-        "THREAT_MODEL.md",
-        &markdown,
-    )?;
+    let (normalized_artifact, markdown_artifact) =
+        write_deterministic_artifacts(&input, &document)?;
     let persisted =
         persist_deterministic_document(flavor, &input, &document, has_concrete_content)?;
     if let Some(warning) =
@@ -52,6 +42,25 @@ pub(crate) fn build_deterministic_threat_model(
         persisted,
         has_concrete_content,
     ))
+}
+
+fn write_deterministic_artifacts(
+    input: &DeterministicBuildInput,
+    document: &Value,
+) -> Result<(PathBuf, PathBuf)> {
+    let normalized = write_normalized_artifact(&input.target, &input.output_dir, document)?;
+    let markdown = render_schema_markdown(
+        document,
+        &input.repo_name,
+        &input.target.display().to_string(),
+    );
+    let rendered = write_markdown_artifact(
+        &input.target,
+        &input.output_dir,
+        "THREAT_MODEL.md",
+        &markdown,
+    )?;
+    Ok((normalized, rendered))
 }
 
 fn deterministic_document(input: &DeterministicBuildInput, surfaces: &[AttackSurface]) -> Result<Value> {
@@ -80,6 +89,16 @@ fn deterministic_threat_surfaces(
 }
 
 fn emits_deterministic_threat(surface: &AttackSurface) -> bool {
+    // New-4: an `Unknown`-kind surface has no target element id
+    // (`target_element_ids_for` returns `&[]`), so emitting a deterministic
+    // threat for it would produce an empty `targetElementIds` and fail
+    // `require_complete_security_context_links`. The fresh builder never emits
+    // `Unknown` today, but a future refactor that folds LOADED surfaces could —
+    // this guard keeps such surfaces out of deterministic threats rather than
+    // letting them break the security-context-link invariant.
+    if surface.kind == AttackSurfaceKind::Unknown {
+        return false;
+    }
     surface.risk.score >= 50 || surface.kind == AttackSurfaceKind::BackgroundJob
 }
 
@@ -143,6 +162,7 @@ fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
         AttackSurfaceKind::TenantIsolationBoundary => &["tenant-isolation-control"],
         AttackSurfaceKind::InfraConfig => &["infra-config"],
         AttackSurfaceKind::SupplyChain => &["supply-chain"],
+        AttackSurfaceKind::Unknown => &[],
     }
 }
 

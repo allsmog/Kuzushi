@@ -35,6 +35,7 @@ pub(crate) use application::*;
 pub(crate) use domain::*;
 
 pub use adapters::{execute_systems_hunt_tool, gather_surfaces};
+pub(crate) use application::rank_systems_surfaces_lite;
 #[cfg(test)]
 pub(crate) use application::score_with_index;
 pub use application::{run_systems_hunt_report, try_augment_with_index};

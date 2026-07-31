@@ -282,6 +282,7 @@ fn dispatch_result(result: ToolDispatchResult, name: &str) -> Result<Value> {
 fn register_workspace_catalog_modules(registry: &mut ModuleRegistry) {
     registry.register(workspace_module().with_executor(execute_context_workspace_tool));
     registry.register(coverage_module().with_executor(execute_context_workspace_tool));
+    registry.register(worklist_module().with_executor(execute_context_workspace_tool));
     registry.register(fleet_module().with_executor(execute_context_workspace_tool));
     registry.register(campaign_module().with_executor(execute_context_workspace_tool));
     registry.register(engagement_module().with_executor(execute_context_workspace_tool));

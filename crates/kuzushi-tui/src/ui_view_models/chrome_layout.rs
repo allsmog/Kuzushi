@@ -59,6 +59,35 @@ pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) 
     1
 }
 
+/// The context rail auto-appears only above this width. 120 is already spoken
+/// for — it unlocks the Workbench Dense composition and the Fix reference
+/// layout — so the rail must not steal columns there and silently demote them.
+pub(crate) const RAIL_AUTO_MIN_WIDTH: u16 = 140;
+/// An explicit `rail` toggle may force the rail down to this width; below it
+/// the body would drop under the 78/50 multi-region breakpoints.
+pub(crate) const RAIL_FORCE_MIN_WIDTH: u16 = 100;
+/// Total rail columns, including its 2-column separator gutter.
+pub(crate) const RAIL_WIDTH: u16 = 36;
+
+/// Columns the context rail occupies at `terminal_width` — 0 when hidden.
+///
+/// Three-state visibility: the persisted `ui.rail` policy (`Hidden` wins
+/// everywhere), the ephemeral force-open (an explicit `rail` this session,
+/// honored down to `RAIL_FORCE_MIN_WIDTH`), then the automatic width test.
+/// Onboarding views own their whole frame and stay rail-free.
+pub(crate) fn rail_width(app: &ShellApp, terminal_width: u16) -> u16 {
+    if !app.ui().rail_enabled() || onboarding_supplies_own_guidance(app) {
+        return 0;
+    }
+    let wide_enough = terminal_width >= RAIL_AUTO_MIN_WIDTH
+        || (app.ui().rail_force_open() && terminal_width >= RAIL_FORCE_MIN_WIDTH);
+    if wide_enough {
+        RAIL_WIDTH
+    } else {
+        0
+    }
+}
+
 fn hides_transcript_chrome(view: &ShellView) -> bool {
     matches!(
         view,
@@ -163,5 +192,45 @@ mod tests {
 
         assert_eq!(status_footer_chrome_height(&app, 5), 0);
         assert_eq!(status_footer_chrome_height(&app, 6), 1);
+    }
+
+    #[test]
+    fn rail_auto_appears_only_at_140_columns() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert_eq!(rail_width(&app, 139), 0);
+        assert_eq!(rail_width(&app, 140), RAIL_WIDTH);
+    }
+
+    #[test]
+    fn rail_never_steals_the_workbench_dense_breakpoint() {
+        // 120 unlocks Dense/Fix-reference layouts; the rail must leave it alone.
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert_eq!(rail_width(&app, 120), 0);
+    }
+
+    #[test]
+    fn rail_hidden_policy_wins_at_any_width() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.ui_mut().set_rail_enabled(false);
+
+        assert_eq!(rail_width(&app, 200), 0);
+    }
+
+    #[test]
+    fn rail_force_open_reaches_down_to_100_columns() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.ui_mut().set_rail_force_open(true);
+
+        assert_eq!(rail_width(&app, 99), 0);
+        assert_eq!(rail_width(&app, 100), RAIL_WIDTH);
+    }
+
+    #[test]
+    fn onboarding_views_stay_rail_free() {
+        let app = app_in_view(ShellView::TargetPicker);
+
+        assert_eq!(rail_width(&app, 200), 0);
     }
 }

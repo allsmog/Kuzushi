@@ -112,6 +112,8 @@ impl ModelProofCandidate {
         result: &Value,
     ) -> Result<PersistedVerification> {
         let cost = tool_run_output_cost_report(result)?;
+        let mut notes = verification_notes(self.exploitable, self.confidence, cost);
+        append_stage_note(&mut notes, result);
         Ok(PersistedVerification {
             proof_level: self.proof_level,
             proof_verdict: PersistedProofVerdict::NotAttempted,
@@ -121,7 +123,7 @@ impl ModelProofCandidate {
             crash_evidence: None,
             duration_ms: run_duration_ms(summary),
             cost_usd: persisted_cost_usd(cost),
-            notes: verification_notes(self.exploitable, self.confidence, cost),
+            notes,
             verification_run_id: Some(summary.run_id.clone()),
             verified_scan_id: Some(self.verified_scan_id.clone()),
             provenance: Some(VerificationProvenance {
@@ -152,6 +154,14 @@ fn run_duration_ms(summary: &RunSummary) -> u64 {
 
 fn persisted_cost_usd(cost: RuntimeCostReport) -> f64 {
     cost.observed_usd_if_available().unwrap_or_default()
+}
+
+/// Surface the verify tool's durable stage note (gate / panel / tie-break
+/// escalation ladder) verbatim so the Prove card can disclose it.
+fn append_stage_note(notes: &mut Vec<String>, result: &Value) {
+    if let Some(note) = result.pointer("/data/stageNote").and_then(Value::as_str) {
+        notes.push(note.to_string());
+    }
 }
 
 fn verification_notes(exploitable: bool, confidence: f64, cost: RuntimeCostReport) -> Vec<String> {

@@ -62,6 +62,7 @@ mod prompt;
 mod prompt_tuning;
 mod pwn;
 mod quit_confirm;
+mod rail;
 mod recent_module_activity;
 mod recommendation;
 mod report_preview;
@@ -133,7 +134,8 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::{
-    keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
+    keybind_footer_chrome_height, rail_width, status_footer_chrome_height,
+    transcript_chrome_height, RAIL_AUTO_MIN_WIDTH, RAIL_FORCE_MIN_WIDTH, RAIL_WIDTH,
 };
 pub(crate) use command_palette::{command_palette_model, CommandPaletteModel, PaletteRow};
 pub(crate) use config::{
@@ -144,7 +146,8 @@ pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use confirm_dialog::{confirm_dialog_model, ConfirmDialogModel};
 pub(crate) use context_snapshot::{
     context_snapshot_model, context_snapshot_relative_path, context_snapshot_state,
-    plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, PlainContextModel,
+    plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, ContextSnapshotRunning,
+    PlainContextModel,
 };
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
@@ -179,8 +182,9 @@ pub(crate) use help::{
     PlainHelpModel, QuickstartStep,
 };
 pub(crate) use home_cockpit::{
-    attack_surface_model, home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard,
-    HomeNextCard, HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
+    attack_surface_artifact_state, attack_surface_artifact_version, attack_surface_model,
+    home_cockpit_model, AttackSurfaceArtifactState, HomeArtifactRow, HomeCockpitModel,
+    HomeFindingsCard, HomeNextCard, HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
 };
 pub(crate) use jobs_registry::{
     jobs_registry_model, JobHistoryState, JobRow, JobRunStatus, JobSource, JobsRegistryModel,
@@ -223,6 +227,7 @@ pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewT
 pub(crate) use permission_policy::{
     permission_policy_model, PermissionPolicyModel, PermissionPolicyRow,
 };
+pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
@@ -260,6 +265,7 @@ pub(crate) use pwn::{
     pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
 };
 pub(crate) use quit_confirm::{quit_confirm_model, QuitConfirmModel};
+pub(crate) use rail::{rail_sections, RailSection};
 pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
     ModuleActivityTone,
@@ -336,8 +342,8 @@ pub(crate) use threat_stride::{
 };
 pub(crate) use tools::{tools_model, ToolGroup, ToolRow};
 pub(crate) use transcript::{
-    plain_command_result_model, transcript_model, transcript_model_from_log_index,
-    PlainCommandResultModel,
+    logs_model, plain_command_result_model, transcript_model, transcript_model_from_log_index,
+    LogsModel, PlainCommandResultModel,
 };
 pub(crate) use update_available::{update_available_model, UpdateAvailableModel};
 pub(crate) use view_status::view_status_segment;
@@ -345,10 +351,14 @@ pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::selected_taint_flow_path;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
-    cached_risk_by_module, dfd_model, dfd_selectable_count, dfd_selected_item, risk_by_module,
-    taint_flow_path, taint_flow_path_for_finding, AttackChain, AttackTree, DfdFlowModel, DfdKind,
-    DfdModel, DfdNodeModel, DfdSelected, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
-    TaintStageModel,
+    cached_risk_by_module, component_stack, dfd_model, dfd_security_items_for_selection,
+    dfd_selectable_count, dfd_selected_item, dfd_selection_for_key, entry_point_breakdown,
+    risk_by_module, taint_flow_path, taint_flow_path_for_finding, worklist_model, AttackChain,
+    AttackTree, ComponentItem, ComponentScope, ComponentSource, ComponentSourceKind,
+    ComponentStack, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState, DfdModel, DfdNodeModel,
+    DfdSecurityItem, DfdSecurityKind, DfdSelected, EntryPointBreakdown, EntryPointGroup,
+    EntryPointItem, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule,
+    TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, work_liveness,

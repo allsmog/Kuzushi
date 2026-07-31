@@ -241,7 +241,9 @@ impl ShellApp {
             return None;
         }
         let session = self.activity()?;
-        let viewport = self.viewport();
+        // Hit-testing must mirror render geometry: Activity draws into the
+        // rail-reduced body, so its pane layout derives from content columns.
+        let viewport = self.content_viewport();
         let crate::ui_view_models::ActivityViewModel::Active(model) =
             crate::ui_view_models::activity_view_model(self)
         else {

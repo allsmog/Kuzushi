@@ -2,12 +2,17 @@ use super::*;
 pub(crate) use super::*;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub(crate) mod session_history;
+
+/// Live render cache size. Older lines are not lost: they stay in the durable
+/// session transcript, and the Logs view pages into that file behind them.
 pub(crate) const LOG_LINE_CAPACITY: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LogState {
     lines: Vec<LogLine>,
     capacity: usize,
+    evicted: usize,
 }
 
 impl Default for LogState {
@@ -15,6 +20,7 @@ impl Default for LogState {
         Self {
             lines: Vec::new(),
             capacity: LOG_LINE_CAPACITY,
+            evicted: 0,
         }
     }
 }
@@ -27,6 +33,7 @@ impl LogState {
 
     pub(crate) fn clear(&mut self) {
         self.lines.clear();
+        self.evicted = 0;
     }
 
     pub(crate) fn lines(&self) -> &[LogLine] {
@@ -37,12 +44,19 @@ impl LogState {
         self.lines.len()
     }
 
+    /// Lines dropped from the live cache. They remain in the durable session
+    /// transcript, so the count is a paging offset rather than a loss report.
+    pub(crate) fn evicted(&self) -> usize {
+        self.evicted
+    }
+
     fn evict_overflow(&mut self) {
         if self.lines.len() <= self.capacity {
             return;
         }
         let overflow = self.lines.len() - self.capacity;
         self.lines.drain(0..overflow);
+        self.evicted += overflow;
     }
 
     #[doc(hidden)]

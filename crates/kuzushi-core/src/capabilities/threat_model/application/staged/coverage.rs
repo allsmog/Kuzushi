@@ -67,20 +67,34 @@ fn surface_is_covered(haystacks: &[String], surface: &AttackSurface) -> bool {
         .any(|haystack| haystack.contains(&surface.path) || haystack.contains(&surface.title))
 }
 
-pub(crate) fn apply_coverage(document: &mut Value, report: &CoverageReport, method: &str) {
+pub(crate) fn apply_coverage(
+    document: &mut Value,
+    report: &CoverageReport,
+    method: &str,
+    parked_by_system: usize,
+) {
     if !document.is_object() {
         return;
     }
-    document["coverage"] = coverage_json(report, method);
+    document["coverage"] = coverage_json(report, method, parked_by_system);
 }
 
-pub(crate) fn coverage_json(report: &CoverageReport, gap_fill_method: &str) -> Value {
+/// `entryPointsCovered` and `invariantSatisfied` are the pre-park measurement
+/// of what the model itself accounted for. `parkedBySystem` records how many
+/// gaps the system subsequently made visible in `deprioritized`; it is
+/// deliberately a separate field so parking never reads as coverage.
+pub(crate) fn coverage_json(
+    report: &CoverageReport,
+    gap_fill_method: &str,
+    parked_by_system: usize,
+) -> Value {
     json!({
         "entryPointsConsidered": report.considered,
         "entryPointsCovered": report.covered(),
         "invariantSatisfied": report.invariant_satisfied(),
         "gapFillMethod": gap_fill_method,
         "gaps": report.gaps.iter().map(gap_json).collect::<Vec<_>>(),
+        "parkedBySystem": parked_by_system,
     })
 }
 
@@ -149,11 +163,26 @@ mod tests {
         });
         let surfaces = vec![surface("src/admin.ts", "GET /admin/debug")];
         let report = check_coverage(&document, &surfaces);
-        apply_coverage(&mut document, &report, "unresolved");
+        apply_coverage(&mut document, &report, "unresolved", 1);
         assert_eq!(document["coverage"]["entryPointsConsidered"], json!(1));
         assert_eq!(document["coverage"]["entryPointsCovered"], json!(0));
         assert_eq!(document["coverage"]["invariantSatisfied"], json!(false));
         assert_eq!(document["coverage"]["gapFillMethod"], json!("unresolved"));
         assert_eq!(document["coverage"]["gaps"][0]["path"], json!("src/admin.ts"));
+        assert_eq!(document["coverage"]["parkedBySystem"], json!(1));
+    }
+
+    #[test]
+    fn parking_never_promotes_measured_coverage() {
+        let mut document = json!({"threats": []});
+        let surfaces = vec![surface("src/admin.ts", "GET /admin/debug")];
+        let report = check_coverage(&document, &surfaces);
+        apply_coverage(&mut document, &report, "unresolved", 1);
+        assert_eq!(
+            document["coverage"]["invariantSatisfied"],
+            json!(false),
+            "a system-parked gap is bookkeeping, never model coverage"
+        );
+        assert_eq!(document["coverage"]["entryPointsCovered"], json!(0));
     }
 }

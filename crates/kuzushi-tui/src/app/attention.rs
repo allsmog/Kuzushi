@@ -47,6 +47,12 @@ impl AttentionBroker {
         self.items.first()
     }
 
+    /// Full priority-ordered item list — the context rail renders every item
+    /// where the footer collapses them into one segment.
+    pub(crate) fn items(&self) -> &[AttentionItem] {
+        &self.items
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.items.len()
     }
@@ -85,7 +91,7 @@ impl AttentionKind {
 }
 
 impl AttentionRoute {
-    const fn hint(self) -> &'static str {
+    pub(crate) const fn hint(self) -> &'static str {
         match self {
             Self::Confirmation => "confirm",
             Self::Activity => "/a",

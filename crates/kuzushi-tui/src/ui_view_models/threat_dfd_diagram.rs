@@ -19,6 +19,7 @@ pub(crate) struct DfdNode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdFlow {
+    pub(crate) id: String,
     pub(crate) source_id: String,
     pub(crate) target_id: String,
     pub(crate) source: String,
@@ -73,6 +74,7 @@ fn flow_from_value(value: &serde_json::Value, nodes: &[DfdNode]) -> Option<DfdFl
     let target_id = string_field(value, "targetId")?;
     let boundary_ids = trust_boundary_ids(value);
     Some(DfdFlow {
+        id: string_field(value, "id").unwrap_or_else(|| format!("{source_id}->{target_id}")),
         source_id: source_id.clone(),
         target_id: target_id.clone(),
         source: display_name(nodes, &source_id),

@@ -110,6 +110,35 @@ pub fn ensure_project(target: &Path, lang: &str) -> Result<(Project, CpgBuildRep
     ensure_project_in(&BuildScope::whole(target), lang, &BuildLimits::default())
 }
 
+/// Load the scope's persisted graph for `lang` WITHOUT building or rebuilding.
+/// Returns `None` when no artifact is on disk (or it fails to decode).
+///
+/// Unlike [`ensure_project_in`], a STALE graph (sources newer than the
+/// artifact) is still served as-is — staleness is the caller's policy
+/// decision. Callers that must never trigger an implicit from-source build
+/// during bulk work (e.g. the deep auditor's `Available` taint policy) use
+/// this load-only path so serving an existing graph as a hint can never turn
+/// into a whole-repo rebuild.
+pub fn open_project_in(scope: &BuildScope, lang: &str) -> Option<Project> {
+    load_project(&scope.artifact_path(lang), lang)
+}
+
+/// Decode a persisted graph and reopen it as a per-language project. Shared by
+/// the freshness-gated [`load_fresh`] and the load-only [`open_project_in`].
+///
+/// `Cpg::load` can PANIC on a corrupt or truncated artifact, so the decode is
+/// wrapped in the same panic guard [`validate_graph_artifact`] uses. A bad
+/// graph degrades to `None` — the caller's `Failed`/`Missing` readiness — and
+/// never aborts the (audit) thread. Both entry points share this guard, so the
+/// `Available` policy's unvetted on-disk load is safe too.
+fn load_project(cpg_path: &Path, lang: &str) -> Option<Project> {
+    let path = cpg_path.to_string_lossy().into_owned();
+    let cpg = std::panic::catch_unwind(|| Cpg::load(&path)).ok()?.ok()?;
+    let (mut project, _) = cpg_cli::make_project(lang);
+    project.reopen(cpg);
+    Some(project)
+}
+
 /// Load the scope's graph for `lang` when fresh, else build it from source
 /// and persist it. Freshness = the artifact is newer than every in-scope
 /// source file. A stale/missing graph whose corpus exceeds the limits is an
@@ -196,10 +225,7 @@ fn load_fresh(census: &SourceCensus, lang: &str, cpg_path: &Path) -> Option<Proj
     {
         return None;
     }
-    let cpg = Cpg::load(&cpg_path.to_string_lossy()).ok()?;
-    let (mut project, _) = cpg_cli::make_project(lang);
-    project.reopen(cpg);
-    Some(project)
+    load_project(cpg_path, lang)
 }
 
 fn build_and_save(
@@ -258,6 +284,69 @@ mod tests {
         let (_, second) = ensure_project(temp.path(), "go").unwrap();
         assert!(second.reused_cache);
         assert_eq!(second.methods, first.methods);
+    }
+
+    #[test]
+    fn open_project_in_loads_a_stale_graph_without_rebuilding() {
+        let temp = tempfile::tempdir().unwrap();
+        write_go_fixture(temp.path());
+        let scope = BuildScope::whole(temp.path());
+        let (_, built) = ensure_project_in(&scope, "go", &BuildLimits::default()).unwrap();
+        assert!(!built.reused_cache);
+        let mtime = std::fs::metadata(&built.cpg_path)
+            .and_then(|m| m.modified())
+            .unwrap();
+
+        // Make the source newer than the artifact.
+        let future = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        let file = std::fs::File::options()
+            .append(true)
+            .open(temp.path().join("main.go"))
+            .unwrap();
+        file.set_modified(future).unwrap();
+        drop(file);
+
+        // Load-only: the stale graph is served as-is; the artifact is not
+        // rebuilt (mtime unchanged), unlike `ensure_project_in`.
+        let project = open_project_in(&scope, "go").expect("stale graph must still load");
+        assert!(project.cpg.methods().len() >= 2);
+        let mtime2 = std::fs::metadata(&built.cpg_path)
+            .and_then(|m| m.modified())
+            .unwrap();
+        assert_eq!(mtime, mtime2, "open_project_in must not rebuild");
+    }
+
+    #[test]
+    fn open_project_in_returns_none_without_an_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        write_go_fixture(temp.path());
+        assert!(open_project_in(&BuildScope::whole(temp.path()), "go").is_none());
+    }
+
+    #[test]
+    fn open_project_in_returns_none_on_a_corrupt_artifact_without_panicking() {
+        // A truncated/garbage graph must degrade to `None` (the caller's Failed
+        // readiness), never PANIC and abort the audit thread. `Cpg::load` can
+        // panic on a malformed artifact; the decode guard turns that into `None`.
+        let temp = tempfile::tempdir().unwrap();
+        write_go_fixture(temp.path());
+        let scope = BuildScope::whole(temp.path());
+        let artifact = scope.artifact_path("go");
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(&artifact, b"not a real cpg-rs graph \x00\x01\x02 truncated").unwrap();
+
+        // Silence the caught-panic backtrace noise this deliberately triggers.
+        let prior = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let loaded = open_project_in(&scope, "go");
+        std::panic::set_hook(prior);
+
+        assert!(
+            loaded.is_none(),
+            "a corrupt artifact must not load a project"
+        );
+        // `validate_graph_artifact` (the reference guard) agrees it is invalid.
+        assert!(validate_graph_artifact(&artifact).is_err());
     }
 
     #[test]

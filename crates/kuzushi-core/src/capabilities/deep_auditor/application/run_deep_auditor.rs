@@ -6,9 +6,27 @@ pub fn run_deep_auditor(
     cfg: &DeepAuditConfig,
     finding: &Finding,
 ) -> Result<DeepAuditOutcome> {
+    run_deep_auditor_traced(runtime, spend, cfg, finding, None)
+}
+
+/// As [`run_deep_auditor`], but threads a [`TraceHandle`] so the dataflow tool
+/// can emit Run Focus progress. The CPG-taint readiness is resolved exactly
+/// once here, before the passes loop, so a bulk run warms the graph per thread
+/// rather than per pass.
+pub fn run_deep_auditor_traced(
+    runtime: &RoutedRuntime<'_>,
+    spend: Option<&SpendLimiter>,
+    cfg: &DeepAuditConfig,
+    finding: &Finding,
+    trace: Option<&TraceHandle>,
+) -> Result<DeepAuditOutcome> {
+    let readiness = open_cpg_taint_engine(&cfg.workspace_root, cfg.taint_tools, trace);
+    // Resolve the primary model once, before any pass, so every consensus pass
+    // and the tie-break comparison share one authoritative primary spec.
+    let model = resolve_deep_audit_model(runtime)?;
     let passes = cfg.passes.max(1);
     if passes == 1 {
-        return run_deep_audit_pass(runtime, spend, cfg, finding);
+        return run_deep_audit_pass(runtime, spend, cfg, finding, &model, &readiness, trace);
     }
     // Multi-pass consensus voting. We run the single-pass auditor N times
     // — each pass is independent (separate spend ticket, separate tool
@@ -19,9 +37,14 @@ pub fn run_deep_auditor(
     // attached so the human reviewer can see what each pass found.
     let mut outcomes = Vec::with_capacity(passes as usize);
     for _ in 0..passes {
-        outcomes.push(run_deep_audit_pass(runtime, spend, cfg, finding)?);
+        outcomes.push(run_deep_audit_pass(
+            runtime, spend, cfg, finding, &model, &readiness, trace,
+        )?);
     }
-    consensus_outcome(outcomes)
+    let outcome = consensus_outcome(outcomes)?;
+    escalate_tied_consensus(
+        runtime, spend, cfg, finding, &model, &readiness, trace, outcome,
+    )
 }
 
 fn run_deep_audit_pass(
@@ -29,17 +52,17 @@ fn run_deep_audit_pass(
     spend: Option<&SpendLimiter>,
     cfg: &DeepAuditConfig,
     finding: &Finding,
+    model: &str,
+    readiness: &CpgTaintReadiness,
+    trace: Option<&TraceHandle>,
 ) -> Result<DeepAuditOutcome> {
-    // 1. Resolve model via router.
-    let model = resolve_deep_audit_model(runtime)?;
-
-    // 2. Open spend ticket.
+    // 1. Open spend ticket (the primary model is resolved by the caller).
     let ticket = open_deep_audit_spend_ticket(spend, cfg)?;
 
-    // 3. Build request + toolbox.
-    let request = build_deep_audit_request(model, cfg, finding);
+    // 2. Build request + toolbox.
+    let request = build_deep_audit_request(model.to_string(), cfg, finding, readiness);
 
-    let mut toolbox = code_nav_toolbox(CodeNavConfig::new(&cfg.workspace_root));
+    let mut toolbox = deep_audit_toolbox(cfg, readiness, trace);
 
     // 4. Drive the loop.
     let mut outcome: AgentLoopOutcome =
@@ -74,6 +97,131 @@ fn run_deep_audit_pass(
         cost_usd_exact: outcome.cost_usd_exact,
         steps_used: outcome.steps_used,
         truncated: outcome.truncated,
+        consensus_split: false,
+    })
+}
+
+/// When a consensus vote split into a tie, an operator-named DIFFERENT model
+/// (the `triage_escalation` role) may break it. Absence keeps the honest
+/// needs_review; a same-model or invalid escalation is refused and disclosed in
+/// the rationale; a distinct escalation runs one extra pass whose verdict is
+/// adopted — including a NeedsReview, which is never forged into TP/FP.
+#[allow(clippy::too_many_arguments)]
+fn escalate_tied_consensus(
+    runtime: &RoutedRuntime<'_>,
+    spend: Option<&SpendLimiter>,
+    cfg: &DeepAuditConfig,
+    finding: &Finding,
+    primary: &str,
+    readiness: &CpgTaintReadiness,
+    trace: Option<&TraceHandle>,
+    outcome: DeepAuditOutcome,
+) -> Result<DeepAuditOutcome> {
+    if !outcome.consensus_split {
+        return Ok(outcome);
+    }
+    let named = runtime.explicit_role_model(AgentRole::TriageEscalation);
+    match crate::runtime::decide_tie_break(primary, named.as_deref()) {
+        crate::runtime::TieBreakEscalation::NotRequested => Ok(outcome),
+        crate::runtime::TieBreakEscalation::Refused(reason) => {
+            Ok(refused_tie_break_outcome(outcome, reason))
+        }
+        crate::runtime::TieBreakEscalation::Escalate(escalation_model) => {
+            // A best-effort tie-breaker's failure (a capped SpendLimiter, an
+            // overloaded escalation model) must never discard the already
+            // computed, truthful NeedsReview consensus. Degrade to a disclosed
+            // note and keep the tie standing.
+            match run_deep_audit_pass(
+                runtime,
+                spend,
+                cfg,
+                finding,
+                &escalation_model,
+                readiness,
+                trace,
+            ) {
+                Ok(escalation) => {
+                    Ok(finalize_adopted_tie_break(outcome, escalation, &escalation_model))
+                }
+                Err(error) => Ok(failed_tie_break_outcome(outcome, &escalation_model, &error)),
+            }
+        }
+    }
+}
+
+/// Fold the escalation verdict over the tie, but never let a cost-report error
+/// (e.g. a non-finite provider cost surfaced by `consensus_cost_reports`) nuke
+/// the already-computed, paid NeedsReview consensus. On such an error the tie
+/// stands with a disclosed note, mirroring [`failed_tie_break_outcome`] — the
+/// escalation pass and panel both succeeded, so their result must not be lost.
+fn finalize_adopted_tie_break(
+    tied: DeepAuditOutcome,
+    escalation: DeepAuditOutcome,
+    escalation_model: &str,
+) -> DeepAuditOutcome {
+    let fallback = tied.clone();
+    match adopt_tie_break_verdict(tied, escalation, escalation_model) {
+        Ok(outcome) => outcome,
+        Err(error) => failed_tie_break_outcome(fallback, escalation_model, &error),
+    }
+}
+
+/// The escalation pass errored: the NeedsReview consensus stands and the failure
+/// is disclosed in the rationale, never swallowed into a top-level error.
+fn failed_tie_break_outcome(
+    mut outcome: DeepAuditOutcome,
+    escalation_model: &str,
+    error: &anyhow::Error,
+) -> DeepAuditOutcome {
+    outcome.triage.rationale = format!(
+        "{} [tie-break via {escalation_model} failed: {error}; needs_review stands]",
+        outcome.triage.rationale
+    );
+    outcome
+}
+
+fn refused_tie_break_outcome(
+    mut outcome: DeepAuditOutcome,
+    reason: crate::runtime::TieBreakRefusal,
+) -> DeepAuditOutcome {
+    // The tie stands as needs_review; the refusal is disclosed, never hidden.
+    outcome.triage.rationale = format!(
+        "{} [tie-break refused: {}]",
+        outcome.triage.rationale,
+        reason.operator_message()
+    );
+    outcome
+}
+
+/// Adopt the escalation pass's verdict over the tie, prefixing its provenance
+/// and folding both passes' cost/evidence. A NeedsReview escalation keeps
+/// NeedsReview — the tie-break never manufactures a decision it did not reach.
+fn adopt_tie_break_verdict(
+    tied: DeepAuditOutcome,
+    escalation: DeepAuditOutcome,
+    escalation_model: &str,
+) -> Result<DeepAuditOutcome> {
+    let (triage_cost, total_cost) = consensus_cost_reports(&[tied.clone(), escalation.clone()])?;
+    let evidence = consensus_evidence(&[tied.clone(), escalation.clone()]);
+    Ok(DeepAuditOutcome {
+        triage: crate::findings::TriageOutcome {
+            verdict: escalation.triage.verdict,
+            confidence: escalation.triage.confidence,
+            rationale: format!(
+                "[deep-audit tie-break via {escalation_model}] {}",
+                escalation.triage.rationale
+            ),
+            refute_reason: escalation.triage.refute_reason,
+            first_link: escalation.triage.first_link,
+            cost_usd: triage_cost.observed_usd(),
+            cost_usd_exact: triage_cost.is_complete(),
+        },
+        evidence,
+        cost_usd: total_cost.observed_usd(),
+        cost_usd_exact: total_cost.is_complete(),
+        steps_used: tied.steps_used.max(escalation.steps_used),
+        truncated: tied.truncated || escalation.truncated,
+        consensus_split: true,
     })
 }
 
@@ -105,21 +253,62 @@ fn build_deep_audit_request(
     model: String,
     cfg: &DeepAuditConfig,
     finding: &Finding,
+    readiness: &CpgTaintReadiness,
 ) -> AgentToolLoopRequest {
     AgentToolLoopRequest {
         model,
         cwd: cfg.workspace_root.clone(),
-        system_prompt: cfg.system_prompt.clone().unwrap_or_else(|| {
-            deep_auditor_system_prompt(crate::prompts::PromptLanguage::from_path(
-                &finding.file_path,
-            ))
-        }),
+        system_prompt: deep_audit_system_prompt(cfg, finding, readiness),
         prompt: deep_audit_user_prompt(cfg, finding),
-        tools: code_nav_tool_specs(),
+        tools: deep_audit_tool_specs(readiness),
         max_steps: cfg.max_steps.max(1),
         runtime_options: None,
         temperature: Some(cfg.temperature),
     }
+}
+
+fn deep_audit_system_prompt(
+    cfg: &DeepAuditConfig,
+    finding: &Finding,
+    readiness: &CpgTaintReadiness,
+) -> String {
+    cfg.system_prompt.clone().unwrap_or_else(|| {
+        deep_auditor_system_prompt(
+            crate::prompts::PromptLanguage::from_path(&finding.file_path),
+            taint_tools_ready(readiness),
+        )
+    })
+}
+
+fn taint_tools_ready(readiness: &CpgTaintReadiness) -> bool {
+    matches!(readiness, CpgTaintReadiness::Ready { .. })
+}
+
+/// The tools advertised to the model. The `cpg_taint_paths` spec is added iff
+/// the graph is ready; registration in [`deep_audit_toolbox`] uses the same
+/// predicate, so advertisement and dispatch can never disagree.
+fn deep_audit_tool_specs(readiness: &CpgTaintReadiness) -> Vec<AgentTool> {
+    let mut specs = code_nav_tool_specs();
+    if taint_tools_ready(readiness) {
+        specs.push(cpg_taint_paths_tool());
+    }
+    specs
+}
+
+fn deep_audit_toolbox(
+    cfg: &DeepAuditConfig,
+    readiness: &CpgTaintReadiness,
+    trace: Option<&TraceHandle>,
+) -> ToolBox {
+    let mut toolbox = code_nav_toolbox(CodeNavConfig::new(&cfg.workspace_root));
+    if taint_tools_ready(readiness) {
+        let root = cfg.workspace_root.clone();
+        let trace = trace.cloned();
+        toolbox.register("cpg_taint_paths", move |call| {
+            handle_cpg_taint_paths(&root, trace.as_ref(), call)
+        });
+    }
+    toolbox
 }
 
 fn deep_audit_user_prompt(cfg: &DeepAuditConfig, finding: &Finding) -> String {
@@ -251,6 +440,7 @@ fn consensus_outcome(outcomes: Vec<DeepAuditOutcome>) -> Result<DeepAuditOutcome
         cost_usd_exact: total_cost.is_complete(),
         steps_used: outcomes.iter().map(|o| o.steps_used).max().unwrap_or(0),
         truncated: outcomes.iter().any(|o| o.truncated),
+        consensus_split: vote.is_tie,
     })
 }
 
@@ -609,6 +799,48 @@ pub(crate) fn render_user_prompt(finding: &Finding) -> String {
 }
 
 #[cfg(test)]
+mod readiness_tests {
+    use super::*;
+
+    fn readiness_variants() -> Vec<CpgTaintReadiness> {
+        vec![
+            CpgTaintReadiness::Disabled,
+            CpgTaintReadiness::Missing {
+                hint: "no cpg graph".to_string(),
+            },
+            CpgTaintReadiness::Failed {
+                reason: "build failed".to_string(),
+            },
+            CpgTaintReadiness::Ready {
+                languages: vec!["typescript".to_string()],
+            },
+        ]
+    }
+
+    #[test]
+    fn prompt_advertises_cpg_taint_paths_only_when_the_spec_is_registered() {
+        for readiness in readiness_variants() {
+            let tools_has = deep_audit_tool_specs(&readiness)
+                .iter()
+                .any(|tool| tool.name == "cpg_taint_paths");
+            let prompt = deep_auditor_system_prompt(
+                crate::prompts::PromptLanguage::CorCpp,
+                taint_tools_ready(&readiness),
+            );
+            let prompt_has = prompt.contains("cpg_taint_paths");
+            // Registration and advertisement share one predicate: they can
+            // never disagree, and both track `Ready`.
+            assert_eq!(tools_has, prompt_has, "{readiness:?}");
+            assert_eq!(
+                tools_has,
+                matches!(readiness, CpgTaintReadiness::Ready { .. }),
+                "{readiness:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod consensus_tests {
     use super::*;
     use crate::findings::{TriageOutcome, TriageVerdict};
@@ -628,6 +860,7 @@ mod consensus_tests {
             cost_usd_exact: true,
             steps_used: 8,
             truncated: false,
+            consensus_split: false,
         }
     }
 
@@ -681,6 +914,7 @@ mod consensus_tests {
                 end_line: 20,
                 note: "x".into(),
                 kind: "sink".into(),
+                origin: EvidenceOrigin::CodeRead,
             },
             EvidenceCitation {
                 file: "b.c".into(),
@@ -688,6 +922,7 @@ mod consensus_tests {
                 end_line: 7,
                 note: "y".into(),
                 kind: "source".into(),
+                origin: EvidenceOrigin::CodeRead,
             },
         ];
         let mut o2 = outcome(TriageVerdict::TruePositive, 0.7, "real");
@@ -699,6 +934,7 @@ mod consensus_tests {
                 end_line: 20,
                 note: "different note".into(),
                 kind: "sink".into(),
+                origin: EvidenceOrigin::CodeRead,
             },
             // new one
             EvidenceCitation {
@@ -707,10 +943,38 @@ mod consensus_tests {
                 end_line: 2,
                 note: "z".into(),
                 kind: "guard".into(),
+                origin: EvidenceOrigin::CpgPath,
             },
         ];
         let c = consensus_outcome(vec![o1, o2]).unwrap();
         assert_eq!(c.evidence.len(), 3);
+    }
+
+    #[test]
+    fn adopted_tie_break_with_nonfinite_escalation_cost_keeps_consensus() {
+        // The panel tied to needs_review and a distinct escalation model ran and
+        // returned a paid verdict — but its provider cost came back non-finite,
+        // so folding the costs errors. That error must NOT propagate and discard
+        // both passes' paid work: the tie stands with a disclosed note.
+        let mut tied = outcome(TriageVerdict::NeedsReview, 0.5, "passes disagree");
+        tied.consensus_split = true;
+        let mut escalation = outcome(TriageVerdict::TruePositive, 0.9, "escalated: real bug");
+        escalation.cost_usd = f64::INFINITY;
+
+        let finalized = finalize_adopted_tie_break(tied, escalation, "openai:escalation-model");
+
+        // No proof-rung promotion: the verdict is not forged into TruePositive.
+        assert_eq!(finalized.triage.verdict, TriageVerdict::NeedsReview);
+        assert!(
+            finalized
+                .triage
+                .rationale
+                .contains("tie-break via openai:escalation-model failed"),
+            "{}",
+            finalized.triage.rationale
+        );
+        assert!(finalized.triage.rationale.contains("needs_review stands"));
+        assert!(finalized.consensus_split);
     }
 
     #[test]

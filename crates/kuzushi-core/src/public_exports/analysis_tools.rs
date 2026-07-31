@@ -1,6 +1,7 @@
 pub use kuzushi_cpg::{
     artifact_dir as cpg_artifact_dir, artifact_langs as cpg_artifact_langs,
-    supported_languages as cpg_supported_languages, GRAPH_SHAPE_VERSION as CPG_GRAPH_SHAPE_VERSION,
+    has_artifacts as cpg_has_artifacts, supported_languages as cpg_supported_languages,
+    GRAPH_SHAPE_VERSION as CPG_GRAPH_SHAPE_VERSION,
 };
 
 pub use crate::attack_surface::{
@@ -11,8 +12,8 @@ pub use crate::capabilities::classifier_gate::{
     ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
 };
 pub use crate::capabilities::deep_auditor::{
-    record_evidence, run_deep_auditor, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
-    VulnAnalysis,
+    record_evidence, run_deep_auditor, run_deep_auditor_traced, DeepAuditConfig, DeepAuditOutcome,
+    EvidenceCitation, TaintToolPolicy, VulnAnalysis,
 };
 pub use crate::capabilities::full_mode_multi::{
     cost_summary as full_mode_cost_summary, plan as full_mode_plan, report_to_tool_json,

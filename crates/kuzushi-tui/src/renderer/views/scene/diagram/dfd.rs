@@ -11,7 +11,8 @@
 use super::*;
 use crate::theme;
 use crate::ui_view_models::{
-    dfd_selected_item, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, DfdSelected,
+    dfd_selectable_count, dfd_selected_item, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState,
+    DfdModel, DfdNodeModel, DfdSecurityKind, DfdSelected,
 };
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -20,11 +21,16 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use std::collections::HashMap;
 
+mod focus;
+mod responsive;
+
 const GAP: u16 = 2;
+const PREFERRED_ZONE_W: u16 = 30;
+const MIN_ZONE_W: u16 = 22;
+const MAX_NODE_W: u16 = 40;
 const NODE_H: u16 = 3;
 const NODE_VGAP: u16 = 1;
 const DETAIL_GAP: u16 = 1;
-const WIDE_DETAIL_MIN: u16 = 96;
 /// Nodes shown per zone page; denser zones page (anchored to the selection)
 /// instead of silently dropping topology.
 const ZONE_PAGE_SIZE: usize = 4;
@@ -36,6 +42,10 @@ pub(crate) struct DfdDiagram {
     pub selection: Option<usize>,
     /// Requested first row in the wrapped inspector panel.
     pub detail_scroll: usize,
+    /// Replace the topology with the selected element's local security graph.
+    pub focused: bool,
+    /// Cursor over the security annotations in the focused graph.
+    pub context_selection: usize,
 }
 
 struct Anchor {
@@ -78,8 +88,23 @@ struct DetailContent {
     lines: Vec<Line<'static>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct DfdRegions {
+    graph: Option<Rect>,
+    detail: Option<Rect>,
+}
+
 impl Widget for DfdDiagram {
     fn render(self, area: Rect, buf: &mut Buffer) {
+        if self.render_special_state(area, buf) {
+            return;
+        }
+        self.render_topology(area, buf);
+    }
+}
+
+impl DfdDiagram {
+    fn render_special_state(&self, area: Rect, buf: &mut Buffer) -> bool {
         if let Some(hint) = &self.model.empty_hint {
             let (hint, guidance) = dfd_empty_copy(area.width, hint);
             render_empty_state_panel(
@@ -89,31 +114,99 @@ impl Widget for DfdDiagram {
                 hint,
                 &[("threat-model:build", guidance)],
             );
-            return;
+            return true;
         }
+        if self.focused {
+            focus::render(
+                buf,
+                area,
+                &self.model,
+                self.selection.unwrap_or_default(),
+                self.context_selection,
+            );
+            return true;
+        }
+        false
+    }
+
+    fn render_topology(&self, area: Rect, buf: &mut Buffer) {
+        let layout = responsive::topology_layout(area);
         if self.selection.is_none() {
-            self.draw_graph(buf, area);
+            self.draw_topology_graph(buf, area, layout);
             return;
         }
-        let (graph_area, detail_area) = dfd_regions(area);
-        if let Some(graph_area) = graph_area {
-            self.draw_graph(buf, graph_area);
+        let regions = dfd_regions(area, layout);
+        self.render_topology_regions(area, buf, layout, regions);
+    }
+
+    fn render_topology_regions(
+        &self,
+        area: Rect,
+        buf: &mut Buffer,
+        layout: responsive::DfdTopologyLayout,
+        regions: DfdRegions,
+    ) {
+        if let Some(graph_area) = regions.graph {
+            self.draw_topology_graph(buf, graph_area, layout);
         }
-        self.draw_detail_panel(buf, detail_area);
+        if let Some(detail_area) = positioned_detail_area(self, area, layout, regions) {
+            self.draw_detail_panel(
+                buf,
+                detail_area,
+                layout == responsive::DfdTopologyLayout::DetailOnly,
+            );
+        }
+    }
+
+    fn draw_topology_graph(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        layout: responsive::DfdTopologyLayout,
+    ) {
+        match layout {
+            responsive::DfdTopologyLayout::WideLanes => self.draw_graph(buf, area),
+            responsive::DfdTopologyLayout::StackedZones => {
+                responsive::render_stacked(self, buf, area)
+            }
+            responsive::DfdTopologyLayout::CausalPath => responsive::render_causal(self, buf, area),
+            responsive::DfdTopologyLayout::DetailOnly => {}
+        }
     }
 }
 
-fn dfd_regions(area: Rect) -> (Option<Rect>, Rect) {
-    if area.width < 24 || area.height < 12 {
-        return (None, area);
-    }
-    if area.width >= WIDE_DETAIL_MIN {
-        return wide_dfd_regions(area);
-    }
-    stacked_dfd_regions(area)
+fn positioned_detail_area(
+    diagram: &DfdDiagram,
+    area: Rect,
+    layout: responsive::DfdTopologyLayout,
+    regions: DfdRegions,
+) -> Option<Rect> {
+    let mut detail = regions.detail?;
+    let Some(graph) = regions.graph else {
+        return Some(detail);
+    };
+    let Some(content_height) = responsive::compact_content_height(diagram, layout, graph) else {
+        return Some(detail);
+    };
+    detail.y = detail
+        .y
+        .min(area.y + content_height.saturating_add(DETAIL_GAP));
+    Some(detail)
 }
 
-fn wide_dfd_regions(area: Rect) -> (Option<Rect>, Rect) {
+fn dfd_regions(area: Rect, layout: responsive::DfdTopologyLayout) -> DfdRegions {
+    match layout {
+        responsive::DfdTopologyLayout::WideLanes => wide_dfd_regions(area),
+        responsive::DfdTopologyLayout::StackedZones => stacked_dfd_regions(area),
+        responsive::DfdTopologyLayout::CausalPath => causal_dfd_regions(area),
+        responsive::DfdTopologyLayout::DetailOnly => DfdRegions {
+            graph: None,
+            detail: Some(area),
+        },
+    }
+}
+
+fn wide_dfd_regions(area: Rect) -> DfdRegions {
     let detail_w = (area.width / 3).clamp(34, 46);
     let graph_w = area.width.saturating_sub(detail_w + DETAIL_GAP);
     let graph = Rect {
@@ -125,10 +218,13 @@ fn wide_dfd_regions(area: Rect) -> (Option<Rect>, Rect) {
         width: detail_w,
         ..area
     };
-    (Some(graph), detail)
+    DfdRegions {
+        graph: Some(graph),
+        detail: Some(detail),
+    }
 }
 
-fn stacked_dfd_regions(area: Rect) -> (Option<Rect>, Rect) {
+fn stacked_dfd_regions(area: Rect) -> DfdRegions {
     let detail_h = (area.height / 4).clamp(5, 8);
     let graph_h = area.height.saturating_sub(detail_h + DETAIL_GAP);
     let graph = Rect {
@@ -140,14 +236,40 @@ fn stacked_dfd_regions(area: Rect) -> (Option<Rect>, Rect) {
         height: detail_h,
         ..area
     };
-    (Some(graph), detail)
+    DfdRegions {
+        graph: Some(graph),
+        detail: Some(detail),
+    }
+}
+
+fn causal_dfd_regions(area: Rect) -> DfdRegions {
+    if area.height < 14 {
+        return DfdRegions {
+            graph: Some(area),
+            detail: None,
+        };
+    }
+    let detail_h = (area.height / 4).clamp(5, 7);
+    let graph_h = area.height.saturating_sub(detail_h + DETAIL_GAP);
+    DfdRegions {
+        graph: Some(Rect {
+            height: graph_h,
+            ..area
+        }),
+        detail: Some(Rect {
+            y: area.y + graph_h + DETAIL_GAP,
+            height: detail_h,
+            ..area
+        }),
+    }
 }
 
 impl DfdDiagram {
     fn draw_graph(&self, buf: &mut Buffer, area: Rect) {
-        let zone_count = self.model.zones.len().max(1) as u16;
+        let visible_zones = visible_zone_indices(&self.model, self.selection, area.width);
+        let zone_count = visible_zones.len().max(1) as u16;
         let zone_w = (area.width.saturating_sub((zone_count - 1) * GAP)) / zone_count;
-        if zone_w < 8 || area.height < 10 {
+        if zone_w < 8 || area.height < 7 {
             text(
                 buf,
                 area,
@@ -158,18 +280,36 @@ impl DfdDiagram {
             );
             return;
         }
-        let zone_h = area.height.saturating_sub(2);
+        let zone_h = self.content_zone_height(&visible_zones, area.height.saturating_sub(2));
         let zx = |i: u16| i * (zone_w + GAP);
 
-        self.draw_zone_panels(buf, area, zone_w, zone_h, &zx);
-        let nbw = zone_w.saturating_sub(2).clamp(8, 24);
-        let (placements, notes) = self.layout_nodes(zone_w, zone_h, nbw, &zx);
+        draw_zone_page_label(buf, area, &visible_zones, self.model.zones.len());
+        self.draw_zone_panels(buf, area, zone_w, zone_h, &visible_zones, &zx);
+        let nbw = zone_w.saturating_sub(2).clamp(8, MAX_NODE_W);
+        let (placements, notes) = self.layout_nodes(zone_w, zone_h, nbw, &visible_zones, &zx);
         let anchors = anchor_map(&self.model, &placements, nbw);
         self.draw_flows(buf, area, &anchors);
         self.draw_node_boxes(buf, area, &placements, nbw);
         draw_page_notes(buf, area, &notes);
         self.draw_legend(buf, area, zone_h + 1);
     }
+
+    fn content_zone_height(&self, zones: &[usize], maximum: u16) -> u16 {
+        zones
+            .iter()
+            .map(|zone_index| {
+                let indices = zone_node_indices(&self.model.nodes, &self.model.zones[*zone_index]);
+                compact_zone_height(&self.zone_slice(&indices))
+            })
+            .max()
+            .unwrap_or(5)
+            .clamp(5, maximum.max(5))
+    }
+}
+
+fn compact_zone_height(slice: &ZoneSlice) -> u16 {
+    let gap = u16::from(slice.node_indices.len() > 1) * NODE_VGAP;
+    2 + node_span(slice.node_indices.len(), gap) + u16::from(slice.note.is_some())
 }
 
 fn dfd_empty_copy<'a>(width: u16, hint: &'a str) -> (&'a str, &'static str) {
@@ -190,17 +330,20 @@ impl DfdDiagram {
         area: Rect,
         zone_w: u16,
         zone_h: u16,
+        visible_zones: &[usize],
         zx: &impl Fn(u16) -> u16,
     ) {
-        for (i, zone) in self.model.zones.iter().enumerate() {
+        for (column, &zone_index) in visible_zones.iter().enumerate() {
+            let zone = &self.model.zones[zone_index];
+            let title = zone_panel_title(zone, zone_w);
             panel(
                 buf,
                 area,
-                zx(i as u16),
+                zx(column as u16),
                 1,
                 zone_w,
                 zone_h,
-                &zone.to_uppercase(),
+                &title,
                 diagram_subtle(),
             );
         }
@@ -213,12 +356,14 @@ impl DfdDiagram {
         zone_w: u16,
         zone_h: u16,
         nbw: u16,
+        visible_zones: &[usize],
         zx: &impl Fn(u16) -> u16,
     ) -> (Vec<NodePlacement>, Vec<PageNote>) {
         let mut placements = Vec::new();
         let mut notes = Vec::new();
-        for (zi, zone) in self.model.zones.iter().enumerate() {
-            let cx = zx(zi as u16) + zone_w / 2;
+        for (column, &zi) in visible_zones.iter().enumerate() {
+            let zone = &self.model.zones[zi];
+            let cx = zx(column as u16) + zone_w / 2;
             let left = cx.saturating_sub(nbw / 2);
             self.layout_zone(zi, zone, cx, left, zone_h, &mut placements, &mut notes);
         }
@@ -239,9 +384,13 @@ impl DfdDiagram {
         let visible = self.zone_slice(&indices);
         let note_rows = u16::from(visible.note.is_some());
         let available = zone_h.saturating_sub(2 + note_rows);
-        let gap = node_vertical_gap(available, visible.node_indices.len());
-        let span = node_span(visible.node_indices.len(), gap);
-        let mut y = 2 + available.saturating_sub(span) / 2;
+        let preferred_span = node_span(visible.node_indices.len(), NODE_VGAP);
+        let gap = if preferred_span <= available {
+            NODE_VGAP
+        } else {
+            node_vertical_gap(available, visible.node_indices.len())
+        };
+        let mut y = 2;
         for &node_index in &visible.node_indices {
             placements.push(NodePlacement {
                 node_index,
@@ -332,25 +481,35 @@ impl DfdDiagram {
         for placement in placements {
             let node = &self.model.nodes[placement.node_index];
             let selected = self.selection == Some(placement.node_index);
-            draw_node_box(buf, area, node, placement, nbw, selected);
+            let context_count = security_context_count(&self.model, &node.key);
+            draw_node_box(buf, area, node, placement, nbw, context_count, selected);
         }
     }
 
     /// Node/flow/crossing and selection counts below the zone panels.
     fn draw_legend(&self, buf: &mut Buffer, area: Rect, legend_y: u16) {
-        let crossings = self.model.flows.iter().filter(|f| f.crosses).count();
-        let total = self.model.nodes.len() + self.model.flows.len();
-        let legend = legend_text(&self.model, self.selection, crossings, total);
-        text(buf, area, 2, legend_y, &legend, diagram_primary());
+        let total = dfd_selectable_count(&self.model);
+        let legend = legend_text(&self.model, self.selection, total, area.width);
+        text(
+            buf,
+            area,
+            legend_indent(area.width),
+            legend_y,
+            &legend,
+            diagram_primary(),
+        );
     }
 
-    fn draw_detail_panel(&self, buf: &mut Buffer, area: Rect) {
+    fn draw_detail_panel(&self, buf: &mut Buffer, area: Rect, show_resize_hint: bool) {
         let width = area.width.saturating_sub(2) as usize;
-        let detail = selected_detail_content(&self.model, self.selection, width);
-        let viewport = area.height.saturating_sub(2) as usize;
+        let mut detail = selected_detail_content(&self.model, self.selection, width);
+        prepend_resize_hint(&mut detail.lines, width, show_resize_hint);
+        append_legacy_rebuild_detail(&mut detail.lines, &self.model, width);
+        let render_area = compact_detail_area(area, detail.lines.len());
+        let viewport = render_area.height.saturating_sub(2) as usize;
         let max_scroll = detail.lines.len().saturating_sub(viewport);
         let scroll = self.detail_scroll.min(max_scroll);
-        let total = self.model.nodes.len() + self.model.flows.len();
+        let total = dfd_selectable_count(&self.model);
         let selected = selected_position(self.selection, total);
         let title = detail_panel_title(detail.kind, selected, total, scroll, max_scroll);
         let block = Block::default()
@@ -360,27 +519,123 @@ impl DfdDiagram {
         Paragraph::new(detail.lines)
             .block(block)
             .scroll((scroll.min(u16::MAX as usize) as u16, 0))
-            .render(area, buf);
+            .render(render_area, buf);
     }
 }
 
-fn legend_text(
-    model: &DfdModel,
-    selection: Option<usize>,
-    crossings: usize,
-    total: usize,
-) -> String {
-    let counts = format!(
-        "{} nodes · {} flows · {crossings} boundary crossings",
+fn prepend_resize_hint(lines: &mut Vec<Line<'static>>, width: usize, show: bool) {
+    if !show {
+        return;
+    }
+    let hint_lines =
+        crate::renderer::shared::text::wrap_text("resize to see topology", width.max(1));
+    for hint in hint_lines.into_iter().rev() {
+        lines.insert(0, Line::styled(hint, diagram_muted()));
+    }
+}
+
+fn compact_detail_area(area: Rect, line_count: usize) -> Rect {
+    if area.height == 0 {
+        return area;
+    }
+    let desired = line_count.saturating_add(2).min(u16::MAX as usize) as u16;
+    Rect {
+        height: desired.max(3).min(area.height),
+        ..area
+    }
+}
+
+fn legend_text(model: &DfdModel, selection: Option<usize>, total: usize, width: u16) -> String {
+    if width < 24 {
+        return minimal_legend_text(model, selection, total);
+    }
+    if width < 40 {
+        return tiny_legend_text(model, selection, total);
+    }
+    if width < 70 {
+        return compact_legend_text(model, selection, total);
+    }
+    full_legend_text(model, selection, total)
+}
+
+fn full_legend_text(model: &DfdModel, selection: Option<usize>, total: usize) -> String {
+    let base = format!(
+        "{} nodes · {} flows · {} boundaries",
         model.nodes.len(),
-        model.flows.len()
+        model.flows.len(),
+        model.boundaries.len(),
     );
-    selection.map_or(counts.clone(), |index| {
+    let selected = selection.map_or(base.clone(), |index| {
         format!(
-            "{counts} · selected {}/{total} · j/k select",
+            "{base} · selected {}/{total}",
             selected_position(Some(index), total)
         )
-    })
+    });
+    let context = if model.link_state == DfdLinkState::LegacyNeedsRebuild {
+        "context unlinked · Enter rebuild".to_string()
+    } else {
+        format!("ctx {}", model.security_context.len())
+    };
+    format!("{selected} · {context}")
+}
+
+fn compact_legend_text(model: &DfdModel, selection: Option<usize>, total: usize) -> String {
+    format!(
+        "{}N · {}F · {}B · {}/{} · {}",
+        model.nodes.len(),
+        model.flows.len(),
+        model.boundaries.len(),
+        selected_position(selection, total),
+        total,
+        compact_context_label(model),
+    )
+}
+
+fn tiny_legend_text(model: &DfdModel, selection: Option<usize>, total: usize) -> String {
+    format!(
+        "{}/{} {}N {}F {}B {}",
+        selected_position(selection, total),
+        total,
+        model.nodes.len(),
+        model.flows.len(),
+        model.boundaries.len(),
+        tiny_context_label(model),
+    )
+}
+
+fn minimal_legend_text(model: &DfdModel, selection: Option<usize>, total: usize) -> String {
+    format!(
+        "{}/{} N{}F{}B{}",
+        selected_position(selection, total),
+        total,
+        model.nodes.len(),
+        model.flows.len(),
+        model.boundaries.len(),
+    )
+}
+
+fn compact_context_label(model: &DfdModel) -> String {
+    if model.link_state == DfdLinkState::LegacyNeedsRebuild {
+        "unlinked".to_string()
+    } else {
+        format!("ctx{}", model.security_context.len())
+    }
+}
+
+fn tiny_context_label(model: &DfdModel) -> String {
+    if model.link_state == DfdLinkState::LegacyNeedsRebuild {
+        "U".to_string()
+    } else {
+        format!("C{}", model.security_context.len())
+    }
+}
+
+fn legend_indent(width: u16) -> u16 {
+    if width < 24 {
+        1
+    } else {
+        2
+    }
 }
 
 fn selected_position(selection: Option<usize>, total: usize) -> usize {
@@ -388,6 +643,120 @@ fn selected_position(selection: Option<usize>, total: usize) -> usize {
         return 0;
     }
     selection.map_or(0, |index| index.min(total - 1) + 1)
+}
+
+fn visible_zone_indices(model: &DfdModel, selection: Option<usize>, width: u16) -> Vec<usize> {
+    let total = model.zones.len();
+    let priority = selected_context_zones(model, selection);
+    let preferred = zone_capacity(width, total, PREFERRED_ZONE_W);
+    let compact = zone_capacity(width, total, MIN_ZONE_W);
+    let count = preferred.max(priority.len().min(compact)).min(total);
+    let mut visible = priority.iter().copied().take(count).collect::<Vec<_>>();
+    fill_visible_zones(&mut visible, total, count, priority.first().copied());
+    visible.sort_unstable();
+    visible
+}
+
+fn zone_capacity(width: u16, total: usize, zone_width: u16) -> usize {
+    if total == 0 {
+        return 0;
+    }
+    let capacity = width
+        .saturating_add(GAP)
+        .checked_div(zone_width + GAP)
+        .unwrap_or(1)
+        .max(1) as usize;
+    capacity.min(total)
+}
+
+fn selected_context_zones(model: &DfdModel, selection: Option<usize>) -> Vec<usize> {
+    match selection.and_then(|index| dfd_selected_item(model, index)) {
+        Some(DfdSelected::Node(node)) => node_context_zones(model, &node.key),
+        Some(DfdSelected::Flow(flow)) => [&flow.from_id, &flow.to_id]
+            .into_iter()
+            .filter_map(|id| zone_index_for_node(model, id))
+            .fold(Vec::new(), push_unique),
+        Some(DfdSelected::Boundary(boundary)) => boundary_context_zones(model, boundary),
+        None => Vec::new(),
+    }
+}
+
+fn boundary_context_zones(model: &DfdModel, boundary: &DfdBoundaryModel) -> Vec<usize> {
+    let declared = [&boundary.outer_zone, &boundary.inner_zone]
+        .into_iter()
+        .filter_map(|zone| model.zones.iter().position(|candidate| candidate == zone))
+        .fold(Vec::new(), push_unique);
+    model
+        .flows
+        .iter()
+        .filter(|flow| flow_crosses_boundary(flow, boundary))
+        .flat_map(|flow| [&flow.from_id, &flow.to_id])
+        .filter_map(|node_id| zone_index_for_node(model, node_id))
+        .fold(declared, push_unique)
+}
+
+fn flow_crosses_boundary(flow: &DfdFlowModel, boundary: &DfdBoundaryModel) -> bool {
+    boundary.crossing_flow_ids.contains(&flow.key) || flow.boundary_ids.contains(&boundary.key)
+}
+
+fn node_context_zones(model: &DfdModel, node_id: &str) -> Vec<usize> {
+    let mut zones = zone_index_for_node(model, node_id)
+        .into_iter()
+        .collect::<Vec<_>>();
+    for flow in &model.flows {
+        let Some(neighbor_id) = connected_node_id(flow, node_id) else {
+            continue;
+        };
+        if let Some(zone) = zone_index_for_node(model, neighbor_id) {
+            zones = push_unique(zones, zone);
+        }
+    }
+    zones
+}
+
+fn connected_node_id<'a>(flow: &'a DfdFlowModel, node_id: &str) -> Option<&'a str> {
+    if flow.from_id == node_id {
+        return Some(&flow.to_id);
+    }
+    (flow.to_id == node_id).then_some(flow.from_id.as_str())
+}
+
+fn push_unique(mut values: Vec<usize>, value: usize) -> Vec<usize> {
+    if !values.contains(&value) {
+        values.push(value);
+    }
+    values
+}
+
+fn zone_index_for_node(model: &DfdModel, node_id: &str) -> Option<usize> {
+    let zone = model
+        .nodes
+        .iter()
+        .find(|node| node.key == node_id)
+        .map(|node| node.zone.as_str())?;
+    model.zones.iter().position(|candidate| candidate == zone)
+}
+
+fn fill_visible_zones(visible: &mut Vec<usize>, total: usize, count: usize, anchor: Option<usize>) {
+    let start = zone_window_start(total, count, anchor);
+    for zone in (start..total).chain(0..start) {
+        if visible.len() == count {
+            return;
+        }
+        if !visible.contains(&zone) {
+            visible.push(zone);
+        }
+    }
+}
+
+fn zone_window_start(total: usize, visible: usize, anchor: Option<usize>) -> usize {
+    if total <= visible || visible == 0 {
+        return 0;
+    }
+    anchor
+        .map(|zone| zone.saturating_sub(visible / 2))
+        .unwrap_or(0)
+        .min(total - visible)
 }
 
 fn zone_node_indices(nodes: &[DfdNodeModel], zone: &str) -> Vec<usize> {
@@ -475,6 +844,47 @@ fn node_index_by_id(nodes: &[DfdNodeModel], id: &str) -> Option<usize> {
     nodes.iter().position(|node| node.key == id)
 }
 
+fn draw_zone_page_label(buf: &mut Buffer, area: Rect, visible_zones: &[usize], total: usize) {
+    if visible_zones.len() >= total {
+        return;
+    }
+    let label = zone_page_label(visible_zones, total, area.width.saturating_sub(1) as usize);
+    text(buf, area, 1, 0, &label, diagram_muted());
+}
+
+fn zone_page_label(visible_zones: &[usize], total: usize, width: usize) -> String {
+    let stem = if visible_zones.len() == 1 {
+        format!("zone {}/{}", visible_zones[0] + 1, total)
+    } else if zones_are_contiguous(visible_zones) {
+        format!(
+            "zones {}-{}/{}",
+            visible_zones[0] + 1,
+            visible_zones.last().copied().unwrap_or_default() + 1,
+            total
+        )
+    } else {
+        let positions = visible_zones
+            .iter()
+            .map(|zone| (zone + 1).to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        format!("zones {positions}/{total}")
+    };
+    let full = format!("{stem} · j/k follows selection");
+    if full.chars().count() <= width {
+        return full;
+    }
+    crate::renderer::shared::text::fit(&format!("{stem} · j/k"), width)
+}
+
+fn zones_are_contiguous(visible_zones: &[usize]) -> bool {
+    visible_zones.windows(2).all(|pair| pair[1] == pair[0] + 1)
+}
+
+fn zone_panel_title(zone: &str, zone_w: u16) -> String {
+    crate::renderer::shared::text::fit(&zone.to_uppercase(), zone_w.saturating_sub(2) as usize)
+}
+
 fn draw_page_notes(buf: &mut Buffer, area: Rect, notes: &[PageNote]) {
     for note in notes {
         text(buf, area, note.x, note.y, &note.text, diagram_muted());
@@ -510,10 +920,12 @@ fn draw_node_box(
     node: &DfdNodeModel,
     placement: &NodePlacement,
     nbw: u16,
+    context_count: usize,
     selected: bool,
 ) {
     let color = node_color(node.kind);
     let border = if selected { selection_color() } else { color };
+    let label = node_box_context_label(node, nbw, context_count);
     clear_rect(buf, area, placement.left, placement.y, nbw, NODE_H);
     boxed(
         buf,
@@ -522,10 +934,30 @@ fn draw_node_box(
         placement.y,
         nbw,
         NODE_H,
-        &node_label(node),
+        &label,
         border,
         color,
     );
+}
+
+fn node_box_label(node: &DfdNodeModel, box_width: u16) -> String {
+    crate::renderer::shared::text::fit(&node_label(node), box_width.saturating_sub(3) as usize)
+}
+
+fn node_box_context_label(node: &DfdNodeModel, box_width: u16, context_count: usize) -> String {
+    if context_count == 0 {
+        return node_box_label(node, box_width);
+    }
+    let label = format!("{} +{context_count}", node_label(node));
+    crate::renderer::shared::text::fit(&label, box_width.saturating_sub(3) as usize)
+}
+
+fn security_context_count(model: &DfdModel, element_id: &str) -> usize {
+    model
+        .security_context
+        .iter()
+        .filter(|item| item.target_element_ids.iter().any(|id| id == element_id))
+        .count()
 }
 
 fn draw_one_flow(
@@ -560,8 +992,9 @@ fn selected_detail_content(
     width: usize,
 ) -> DetailContent {
     match selection.and_then(|index| dfd_selected_item(model, index)) {
-        Some(DfdSelected::Node(node)) => node_detail_content(node, width),
-        Some(DfdSelected::Flow(flow)) => flow_detail_content(flow, width),
+        Some(DfdSelected::Node(node)) => node_detail_content(model, node, width),
+        Some(DfdSelected::Flow(flow)) => flow_detail_content(model, flow, width),
+        Some(DfdSelected::Boundary(boundary)) => boundary_detail_content(model, boundary, width),
         None => DetailContent {
             kind: "item",
             lines: vec![Line::styled(
@@ -572,9 +1005,58 @@ fn selected_detail_content(
     }
 }
 
-fn node_detail_content(node: &DfdNodeModel, width: usize) -> DetailContent {
+fn boundary_detail_content(
+    model: &DfdModel,
+    boundary: &DfdBoundaryModel,
+    width: usize,
+) -> DetailContent {
+    let mut lines = Vec::new();
+    append_detail_lines(&mut lines, "name", &boundary.name, width);
+    append_linked_context_detail(&mut lines, model, &boundary.key, width);
+    append_detail_lines(&mut lines, "outer zone", &boundary.outer_zone, width);
+    append_detail_lines(&mut lines, "inner zone", &boundary.inner_zone, width);
+    append_detail_lines(
+        &mut lines,
+        "flows",
+        &nonempty_list(&boundary.crossing_flow_ids),
+        width,
+    );
+    DetailContent {
+        kind: "boundary",
+        lines,
+    }
+}
+
+fn append_legacy_rebuild_detail(lines: &mut Vec<Line<'static>>, model: &DfdModel, width: usize) {
+    if model.link_state != DfdLinkState::LegacyNeedsRebuild {
+        return;
+    }
+    append_detail_lines(
+        lines,
+        "context",
+        "legacy model has no valid DFD links; overlay suppressed",
+        width,
+    );
+    append_detail_lines(
+        lines,
+        "action",
+        "Enter rebuilds with threat-model:build",
+        width,
+    );
+}
+
+fn nonempty_list(values: &[String]) -> String {
+    if values.is_empty() {
+        "none recorded".to_string()
+    } else {
+        values.join(", ")
+    }
+}
+
+fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "name", &node.name, width);
+    append_linked_context_detail(&mut lines, model, &node.key, width);
     append_detail_lines(&mut lines, "type", kind_label(node.kind), width);
     append_detail_lines(&mut lines, "zone", &node.zone, width);
     DetailContent {
@@ -583,9 +1065,10 @@ fn node_detail_content(node: &DfdNodeModel, width: usize) -> DetailContent {
     }
 }
 
-fn flow_detail_content(flow: &DfdFlowModel, width: usize) -> DetailContent {
+fn flow_detail_content(model: &DfdModel, flow: &DfdFlowModel, width: usize) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "from", &flow.from, width);
+    append_linked_context_detail(&mut lines, model, &flow.key, width);
     append_detail_lines(&mut lines, "to", &flow.to, width);
     append_detail_lines(&mut lines, "description", nonempty(&flow.label), width);
     append_detail_lines(&mut lines, "boundaries", &boundary_detail(flow), width);
@@ -594,6 +1077,49 @@ fn flow_detail_content(flow: &DfdFlowModel, width: usize) -> DetailContent {
         kind: "flow",
         lines,
     }
+}
+
+fn append_linked_context_detail(
+    lines: &mut Vec<Line<'static>>,
+    model: &DfdModel,
+    element_id: &str,
+    width: usize,
+) {
+    if model.link_state != DfdLinkState::Complete {
+        return;
+    }
+    let summary = format!("linked · {}", linked_context_summary(model, element_id));
+    append_detail_lines(lines, "context", &summary, width);
+}
+
+fn linked_context_summary(model: &DfdModel, element_id: &str) -> String {
+    let linked = model
+        .security_context
+        .iter()
+        .filter(|item| item.target_element_ids.iter().any(|id| id == element_id))
+        .collect::<Vec<_>>();
+    if linked.is_empty() {
+        return "none linked".to_string();
+    }
+    let mut parts = vec![linked.len().to_string()];
+    for kind in security_context_kinds() {
+        let count = linked.iter().filter(|item| item.kind == kind).count();
+        if count > 0 {
+            parts.push(format!("{count} {}", responsive::security_kind_name(kind)));
+        }
+    }
+    parts.join(" · ")
+}
+
+fn security_context_kinds() -> [DfdSecurityKind; 6] {
+    [
+        DfdSecurityKind::EntryPoint,
+        DfdSecurityKind::RoleGate,
+        DfdSecurityKind::ExternalSink,
+        DfdSecurityKind::TrustedCaller,
+        DfdSecurityKind::Asset,
+        DfdSecurityKind::Threat,
+    ]
 }
 
 fn append_detail_lines(lines: &mut Vec<Line<'static>>, key: &str, value: &str, width: usize) {
@@ -706,6 +1232,7 @@ fn selection_color() -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_view_models::{DfdSecurityItem, DfdSecurityKind};
 
     #[test]
     fn selected_position_is_one_based_and_clamped_to_the_available_items() {
@@ -715,21 +1242,378 @@ mod tests {
     }
 
     #[test]
-    fn compact_layout_boundary_preserves_the_graph_when_space_is_sufficient() {
-        let compact = Rect::new(0, 0, 23, 12);
-        let available = Rect::new(0, 0, 24, 12);
+    fn legend_keeps_every_count_visible_at_medium_and_narrow_widths() {
+        let model = portrait_model();
+        let total = dfd_selectable_count(&model);
 
-        assert_eq!(dfd_regions(compact), (None, compact));
-        assert!(dfd_regions(available).0.is_some());
+        assert_eq!(
+            legend_text(&model, Some(0), total, 60),
+            "5N · 4F · 1B · 1/10 · ctx1"
+        );
+        assert_eq!(legend_text(&model, Some(0), total, 39), "1/10 5N 4F 1B C1");
+        assert_eq!(legend_text(&model, Some(0), total, 16), "1/10 N5F4B1");
+    }
+
+    #[test]
+    fn detail_only_fallback_does_not_paint_resize_hint_over_inspector_rows() {
+        let rendered = render_selection(&portrait_model(), 0, 0, 80, 7);
+
+        assert!(rendered.contains("resize to see topology"), "{rendered}");
+        assert!(
+            rendered.contains("name         Local developer user"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("context      linked"), "{rendered}");
+        assert!(!rendered.contains("cresize"), "{rendered}");
+    }
+
+    #[test]
+    fn compact_layout_boundary_preserves_the_graph_when_space_is_sufficient() {
+        let compact = Rect::new(0, 0, 15, 12);
+        let available = Rect::new(0, 0, 16, 12);
+        let compact_layout = responsive::topology_layout(compact);
+        let available_layout = responsive::topology_layout(available);
+
+        assert_eq!(compact_layout, responsive::DfdTopologyLayout::DetailOnly);
+        assert_eq!(
+            dfd_regions(compact, compact_layout),
+            DfdRegions {
+                graph: None,
+                detail: Some(compact)
+            }
+        );
+        assert!(dfd_regions(available, available_layout).graph.is_some());
+    }
+
+    #[test]
+    fn responsive_layout_resolves_width_and_height_boundaries() {
+        use responsive::DfdTopologyLayout::{CausalPath, DetailOnly, StackedZones, WideLanes};
+
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 15, 30)),
+            DetailOnly
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 16, 30)),
+            CausalPath
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 59, 30)),
+            CausalPath
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 60, 30)),
+            StackedZones
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 109, 30)),
+            StackedZones
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 110, 30)),
+            WideLanes
+        );
+        assert_eq!(
+            responsive::topology_layout(Rect::new(0, 0, 110, 15)),
+            CausalPath
+        );
+    }
+
+    #[test]
+    fn portrait_layout_stacks_connected_zones_without_unrelated_columns() {
+        let rendered = render_selection(&portrait_model(), 0, 0, 80, 40);
+        let user_row = line_index(&rendered, "USER_DEVICE");
+        let local_row = line_index(&rendered, "LOCAL_PROCESS");
+
+        assert!(user_row < local_row, "{rendered}");
+        assert!(rendered.contains("Local developer user +1"), "{rendered}");
+        assert!(rendered.contains("Provider/plugin subsystem"), "{rendered}");
+        assert!(!rendered.contains("INTERNET"), "{rendered}");
+        assert!(rendered.contains("context      linked"), "{rendered}");
+        assert!(rendered.contains("1 · 1 callers"), "{rendered}");
+    }
+
+    #[test]
+    fn narrow_layout_shows_selected_causal_neighborhood_and_hidden_count() {
+        let rendered = render_selection(&portrait_model(), 0, 0, 40, 30);
+
+        assert!(rendered.contains("causal diagram"), "{rendered}");
+        assert!(rendered.contains("◆ Local developer user +1"), "{rendered}");
+        assert!(rendered.contains("Local developer user +1"), "{rendered}");
+        assert!(rendered.contains("opencode CLI/TUI"), "{rendered}");
+        assert!(rendered.contains("+2 adjacent flows"), "{rendered}");
+        assert!(rendered.contains('▼'), "{rendered}");
+        assert!(rendered.contains('╭'), "{rendered}");
+    }
+
+    #[test]
+    fn wide_layout_shrink_wraps_topology_instead_of_centering_it_in_empty_space() {
+        let rendered = render_selection(&portrait_model(), 0, 0, 160, 48);
+        let selected_row = line_index(&rendered, "Local developer user +1");
+        let legend_row = line_index(&rendered, "5 nodes · 4 flows");
+
+        assert!(selected_row < 8, "{rendered}");
+        assert!(legend_row < 20, "{rendered}");
+    }
+
+    #[test]
+    fn narrow_flow_and_boundary_selections_keep_their_causal_identity() {
+        let model = portrait_model();
+        let flow_selection = model.nodes.len();
+        let flow = render_selection(&model, flow_selection, 0, 40, 30);
+        let boundary_selection = model.nodes.len() + model.flows.len();
+        let boundary = render_selection(&model, boundary_selection, 0, 40, 30);
+
+        assert!(flow.contains("selected flow"), "{flow}");
+        assert!(flow.contains("Local developer"), "{flow}");
+        assert!(flow.contains("opencode CLI/TUI"), "{flow}");
+        assert!(flow.contains('▼'), "{flow}");
+        assert!(boundary.contains("boundary flow"), "{boundary}");
+        assert!(boundary.contains("invokes"), "{boundary}");
+        assert!(boundary.contains('▼'), "{boundary}");
+    }
+
+    fn line_index(rendered: &str, needle: &str) -> usize {
+        rendered
+            .lines()
+            .position(|line| line.contains(needle))
+            .unwrap_or_else(|| panic!("missing {needle:?}: {rendered}"))
+    }
+
+    #[test]
+    fn empty_dfd_prompts_generation() {
+        let rendered = render_to_text(
+            DfdDiagram {
+                model: DfdModel {
+                    empty_hint: Some("no persisted threat model".into()),
+                    ..Default::default()
+                },
+                selection: Some(0),
+                detail_scroll: 0,
+                focused: false,
+                context_selection: 0,
+            },
+            75,
+            24,
+        );
+
+        assert!(rendered.contains("no data-flow diagram"), "{rendered}");
+        assert!(rendered.contains("threat-model:build"), "{rendered}");
+    }
+
+    #[test]
+    fn focused_security_graph_is_readable_across_width_classes() {
+        let model = focused_model();
+
+        for width in [24, 60, 96, 160] {
+            let rendered = render_to_text(
+                DfdDiagram {
+                    model: model.clone(),
+                    selection: Some(0),
+                    detail_scroll: 0,
+                    focused: true,
+                    context_selection: 0,
+                },
+                width,
+                28,
+            );
+            assert!(rendered.contains("OAuth"), "width {width}: {rendered}");
+            assert!(
+                rendered.contains("oauth_callback") || rendered.contains("oauth_cal"),
+                "width {width}: {rendered}"
+            );
+            assert!(
+                rendered.contains("Enter topology"),
+                "width {width}: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn topology_node_chip_discloses_linked_context_count() {
+        let rendered = render_selection(&focused_model(), 0, 0, 75, 28);
+
+        assert!(rendered.contains("◇ OAuth callback +2"), "{rendered}");
+    }
+
+    #[test]
+    fn focused_annotation_selection_updates_the_link_detail() {
+        let rendered = render_to_text(
+            DfdDiagram {
+                model: focused_model(),
+                selection: Some(0),
+                detail_scroll: 0,
+                focused: true,
+                context_selection: 1,
+            },
+            60,
+            20,
+        );
+
+        assert!(rendered.contains("THREAT · T-state"), "{rendered}");
+        assert!(
+            rendered.contains("callback state can cross sessions"),
+            "{rendered}"
+        );
+    }
+
+    fn focused_model() -> DfdModel {
+        DfdModel {
+            zones: vec!["app".into()],
+            nodes: vec![DfdNodeModel {
+                key: "oauth".into(),
+                name: "OAuth callback".into(),
+                zone: "app".into(),
+                kind: DfdKind::Process,
+            }],
+            security_context: vec![
+                DfdSecurityItem {
+                    key: "AS-oauth".into(),
+                    kind: DfdSecurityKind::EntryPoint,
+                    label: "oauth_callback".into(),
+                    detail: "GET /oauth/callback".into(),
+                    evidence: "src/oauth.rs:42".into(),
+                    target_element_ids: vec!["oauth".into()],
+                },
+                DfdSecurityItem {
+                    key: "T-state".into(),
+                    kind: DfdSecurityKind::Threat,
+                    label: "OAuth state confusion".into(),
+                    detail: "callback state can cross sessions".into(),
+                    evidence: "src/oauth.rs:51".into(),
+                    target_element_ids: vec!["oauth".into()],
+                },
+            ],
+            link_state: DfdLinkState::Complete,
+            ..Default::default()
+        }
+    }
+
+    fn portrait_model() -> DfdModel {
+        let zones = vec![
+            "user_device".into(),
+            "internet".into(),
+            "local_process".into(),
+        ];
+        let nodes = vec![
+            node("Local developer user", "user_device"),
+            node("Remote web/API client", "internet"),
+            node("opencode CLI/TUI", "local_process"),
+            node("opencode local HTTP API server", "local_process"),
+            node("Provider/plugin subsystem", "local_process"),
+        ];
+        let flows = vec![
+            flow("Local developer user", "opencode CLI/TUI", "invokes"),
+            flow(
+                "Local developer user",
+                "Provider/plugin subsystem",
+                "configures",
+            ),
+            flow(
+                "Local developer user",
+                "opencode local HTTP API server",
+                "starts server",
+            ),
+            flow(
+                "Remote web/API client",
+                "opencode local HTTP API server",
+                "sends request",
+            ),
+        ];
+        DfdModel {
+            zones,
+            nodes,
+            flows,
+            boundaries: vec![DfdBoundaryModel {
+                key: "tb-local".into(),
+                name: "User to local process".into(),
+                inner_zone: "local_process".into(),
+                outer_zone: "user_device".into(),
+                crossing_flow_ids: vec!["Local developer user->opencode CLI/TUI".into()],
+            }],
+            security_context: vec![DfdSecurityItem {
+                key: "TC-local".into(),
+                kind: DfdSecurityKind::TrustedCaller,
+                label: "local developer".into(),
+                detail: "authorized operator".into(),
+                evidence: "src/main.rs:1".into(),
+                target_element_ids: vec!["Local developer user".into()],
+            }],
+            link_state: DfdLinkState::Complete,
+            empty_hint: None,
+        }
+    }
+
+    #[test]
+    fn aggregate_boundary_uses_concrete_crossing_flow_zones() {
+        let model = aggregate_boundary_model();
+        let zones = boundary_context_zones(&model, &model.boundaries[0]);
+
+        assert_eq!(zones, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn medium_boundary_selection_renders_a_directional_fan_out() {
+        let model = aggregate_boundary_model();
+        let selection = model.nodes.len() + model.flows.len();
+        let rendered = render_selection(&model, selection, 0, 80, 30);
+
+        assert_contains_all(
+            &rendered,
+            &[
+                "selected boundary · 3 crossing flows",
+                "◇ Remote web/API client · INTERNET",
+                "F12 · ◇ Serverless function API · CLOUD_FUNCTION",
+                "F14 · ◇ Stats app · WEB_APP",
+                "F16 · ◇ Console web app · WEB_APP",
+                "├────▶",
+            ],
+        );
+    }
+
+    fn aggregate_boundary_model() -> DfdModel {
+        let mut flows = vec![
+            flow(
+                "Remote web/API client",
+                "Serverless function API",
+                "calls functions",
+            ),
+            flow("Remote web/API client", "Stats app", "submits request"),
+            flow("Remote web/API client", "Console web app", "opens console"),
+        ];
+        for (flow, key) in flows.iter_mut().zip(["F12", "F14", "F16"]) {
+            flow.key = key.into();
+            flow.boundary_ids = vec!["TB9".into()];
+        }
+        DfdModel {
+            zones: vec!["internet".into(), "cloud_function".into(), "web_app".into()],
+            nodes: vec![
+                node("Remote web/API client", "internet"),
+                node("Serverless function API", "cloud_function"),
+                node("Stats app", "web_app"),
+                node("Console web app", "web_app"),
+            ],
+            flows,
+            boundaries: vec![DfdBoundaryModel {
+                key: "TB9".into(),
+                name: "Internet request to web/serverless app".into(),
+                inner_zone: "web_or_function_runtime".into(),
+                outer_zone: "internet".into(),
+                crossing_flow_ids: vec!["F12".into(), "F14".into(), "F16".into()],
+            }],
+            link_state: DfdLinkState::Complete,
+            empty_hint: None,
+            ..Default::default()
+        }
     }
 
     #[test]
     fn mutation_survivor_stacked_layout_reserves_detail_height_below_graph() {
         let area = Rect::new(3, 4, 80, 20);
-        let (graph, detail) = stacked_dfd_regions(area);
+        let regions = stacked_dfd_regions(area);
 
-        assert_eq!(graph, Some(Rect::new(3, 4, 80, 14)));
-        assert_eq!(detail, Rect::new(3, 19, 80, 5));
+        assert_eq!(regions.graph, Some(Rect::new(3, 4, 80, 14)));
+        assert_eq!(regions.detail, Some(Rect::new(3, 19, 80, 5)));
     }
 
     fn render_to_text(diagram: DfdDiagram, w: u16, h: u16) -> String {
@@ -753,6 +1637,7 @@ mod tests {
 
     fn flow(from: &str, to: &str, label: &str) -> DfdFlowModel {
         DfdFlowModel {
+            key: format!("{from}->{to}"),
             from_id: from.into(),
             to_id: to.into(),
             from: from.into(),
@@ -772,14 +1657,17 @@ mod tests {
             nodes: vec![node("src", "a"), node("mid", "b"), node("dst", "c")],
             flows: vec![flow("src", "dst", "long haul")],
             empty_hint: None,
+            ..Default::default()
         };
         let rendered = render_to_text(
             DfdDiagram {
                 model,
                 selection: None,
                 detail_scroll: 0,
+                focused: false,
+                context_selection: 0,
             },
-            72,
+            160,
             24,
         );
 
@@ -811,14 +1699,17 @@ mod tests {
             nodes: names.iter().map(|name| node(name, "app")).collect(),
             flows: Vec::new(),
             empty_hint: None,
+            ..Default::default()
         };
         let first_page = render_to_text(
             DfdDiagram {
                 model: model.clone(),
                 selection: None,
                 detail_scroll: 0,
+                focused: false,
+                context_selection: 0,
             },
-            40,
+            80,
             30,
         );
         assert!(first_page.contains("page 1/2 · +2 more"), "{first_page}");
@@ -831,13 +1722,121 @@ mod tests {
                 model,
                 selection: Some(4),
                 detail_scroll: 0,
+                focused: false,
+                context_selection: 0,
             },
-            40,
+            80,
             30,
         );
         assert!(second_page.contains("page 2/2 · +4 more"), "{second_page}");
         assert!(second_page.contains("◇ n5"));
         assert!(!second_page.contains("◇ n1"));
+    }
+
+    #[test]
+    fn many_zone_diagram_pages_instead_of_abandoning_the_graph() {
+        let model = many_zone_model();
+
+        for width in [16, 20, 24, 32, 40, 60, 75, 80, 120, 160] {
+            let rendered = render_selection(&model, 12, 0, width, 36);
+            assert!(
+                !rendered.contains("diagram compacted"),
+                "width {width} abandoned the graph: {rendered}"
+            );
+            assert_selected_node_label_is_readable(width, &rendered);
+            assert_layout_context_is_visible(width, &rendered);
+        }
+    }
+
+    fn assert_selected_node_label_is_readable(width: u16, rendered: &str) {
+        if width >= 32 {
+            assert!(
+                rendered.contains("service-thirteen"),
+                "width {width} hid the selected node: {rendered}"
+            );
+            return;
+        }
+        assert!(rendered.contains('◆'), "{width}: {rendered}");
+        assert!(rendered.contains("..."), "{width}: {rendered}");
+    }
+
+    fn assert_layout_context_is_visible(width: u16, rendered: &str) {
+        if width < responsive::STACKED_LAYOUT_MIN {
+            assert!(rendered.contains("causal diagr"), "{width}: {rendered}");
+        } else {
+            assert!(rendered.contains("zone"), "{width}: {rendered}");
+        }
+    }
+
+    #[test]
+    fn narrow_node_boxes_mark_truncation_instead_of_silently_clipping() {
+        let long = node("Cloud share/stats/tenant data stores", "cloud");
+        let label = node_box_label(&long, MIN_ZONE_W);
+
+        assert!(label.starts_with("◇ Cloud"), "{label}");
+        assert!(label.ends_with("..."), "{label}");
+        assert!(label.chars().count() <= (MIN_ZONE_W - 3) as usize);
+    }
+
+    #[test]
+    fn narrow_zone_page_label_keeps_position_and_navigation_visible() {
+        assert_eq!(zone_page_label(&[12], 13, 23), "zone 13/13 · j/k");
+    }
+
+    #[test]
+    fn selected_flow_keeps_both_endpoint_zones_visible_when_they_fit() {
+        let model = many_zone_model();
+        let selection = model.nodes.len();
+        let rendered = render_selection(&model, selection, 0, 75, 36);
+
+        assert!(rendered.contains("showing zones 11,13 of 13"), "{rendered}");
+        assert!(rendered.contains("service-eleven"), "{rendered}");
+        assert!(rendered.contains("service-thirteen"), "{rendered}");
+        assert!(rendered.contains('▼'), "{rendered}");
+    }
+
+    #[test]
+    fn selected_node_shows_its_connected_zone_instead_of_an_unrelated_neighbor() {
+        let model = DfdModel {
+            zones: vec![
+                "user_device".into(),
+                "internet".into(),
+                "local_process".into(),
+            ],
+            nodes: vec![
+                node("Local developer user", "user_device"),
+                node("Remote web/API client", "internet"),
+                node("opencode CLI/TUI", "local_process"),
+            ],
+            flows: vec![flow("Local developer user", "opencode CLI/TUI", "invokes")],
+            empty_hint: None,
+            ..Default::default()
+        };
+        let rendered = render_selection(&model, 0, 0, 75, 36);
+
+        assert!(rendered.contains("showing zones 1,3 of 3"), "{rendered}");
+        assert!(rendered.contains("◇ Local developer user"), "{rendered}");
+        assert!(rendered.contains("◇ opencode CLI/TUI"), "{rendered}");
+        assert!(!rendered.contains("◇ Remote web/API client"), "{rendered}");
+        assert!(rendered.contains('▼'), "{rendered}");
+    }
+
+    fn many_zone_model() -> DfdModel {
+        let zones = (1..=13)
+            .map(|index| format!("trust-zone-{index:02}"))
+            .collect::<Vec<_>>();
+        let mut nodes = (1..=13)
+            .map(|index| node(&format!("service-{index:02}"), &zones[index - 1]))
+            .collect::<Vec<_>>();
+        nodes[10].name = "service-eleven".into();
+        nodes[12].name = "service-thirteen".into();
+        DfdModel {
+            zones,
+            flows: vec![flow("service-11", "service-13", "selected route")],
+            nodes,
+            empty_hint: None,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -847,6 +1846,7 @@ mod tests {
             nodes: vec![node("web", "a"), node("db", "b")],
             flows: vec![flow("web", "db", "sql")],
             empty_hint: None,
+            ..Default::default()
         };
         let node_selected = render_selection(&model, 0, 0, 60, 24);
         assert_contains_all(
@@ -898,7 +1898,7 @@ mod tests {
             same_zone.contains("flow endpoints · 4/9 shown"),
             "same-zone endpoint page must be explicit: {same_zone}"
         );
-        assert!(same_zone.contains("8 boundary crossings"), "{same_zone}");
+        assert!(same_zone.contains("11 flows · 0 boundaries"), "{same_zone}");
     }
 
     #[test]
@@ -959,6 +1959,8 @@ mod tests {
                 model: model.clone(),
                 selection: Some(selection),
                 detail_scroll,
+                focused: false,
+                context_selection: 0,
             },
             width,
             height,
@@ -982,6 +1984,9 @@ mod tests {
                     );
                 }
             }
+            DfdSelected::Boundary(boundary) => {
+                assert!(rendered.contains(&boundary.name), "{rendered}");
+            }
         }
     }
 
@@ -999,6 +2004,7 @@ mod tests {
             nodes: audit_nodes(),
             flows: audit_flows(),
             empty_hint: None,
+            ..Default::default()
         }
     }
 
@@ -1050,6 +2056,7 @@ mod tests {
 
     fn audit_flow(index: usize, from: &str, to: &str) -> DfdFlowModel {
         DfdFlowModel {
+            key: format!("flow-{}", index + 1),
             from_id: from.into(),
             to_id: to.into(),
             from: from.into(),

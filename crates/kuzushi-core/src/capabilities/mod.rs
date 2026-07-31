@@ -30,6 +30,7 @@ pub mod trace_expansion;
 pub mod uaf_hunt;
 pub mod variant_ndiff;
 pub mod vendor_assessment;
+pub mod worklist;
 pub mod x_ray;
 
 pub use agentic_sast::*;

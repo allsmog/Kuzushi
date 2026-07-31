@@ -49,23 +49,23 @@ impl SystemsPromptInput {
             invariant: prompt_or_default(
                 input,
                 "SYSTEMS_INVARIANT_PROMPT",
-                SYSTEMS_INVARIANT_SYSTEM_PROMPT,
+                systems_invariant_system_prompt(),
             )?,
             trigger: prompt_or_default(
                 input,
                 "SYSTEMS_TRIGGER_PROMPT",
-                SYSTEMS_TRIGGER_SYSTEM_PROMPT,
+                systems_trigger_system_prompt(),
             )?,
-            hunt: prompt_or_default(input, "SYSTEMS_HUNT_PROMPT", SYSTEMS_HUNT_SYSTEM_PROMPT)?,
+            hunt: prompt_or_default(input, "SYSTEMS_HUNT_PROMPT", systems_hunt_system_prompt())?,
             deep_cwe: prompt_or_default(
                 input,
                 "SYSTEMS_DEEP_CWE_PROMPT",
-                DEEP_SEMANTIC_CWE_SYSTEM_PROMPT,
+                deep_semantic_cwe_system_prompt(),
             )?,
             deep_hunt: prompt_or_default(
                 input,
                 "SYSTEMS_DEEP_HUNT_PROMPT",
-                DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT,
+                deep_semantic_hunt_system_prompt(),
             )?,
         })
     }

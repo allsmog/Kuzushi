@@ -305,10 +305,12 @@ fn update_and_execute_effects_runs_returned_effects() {
 fn update_routes_tick_messages() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let now = Instant::now();
-    app.set_ctrl_c_armed_at(Some(now - CTRL_C_ARM_WINDOW - Duration::from_millis(1)));
+    app.set_throttle("test", "stale");
+    app.advisory_mut().throttle.as_mut().unwrap().since =
+        now - THROTTLE_STALE_AFTER - Duration::from_millis(1);
 
     let result = update(&mut app, Msg::Tick(now));
 
     assert!(result.changed);
-    assert_eq!(app.ctrl_c_armed_at(), None);
+    assert!(app.advisory().throttle.is_none());
 }

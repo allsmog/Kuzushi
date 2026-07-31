@@ -66,7 +66,10 @@ fn surface_reachability_score(surface: &AttackSurface) -> i32 {
         AttackSurfaceKind::BackgroundJob => 10,
         // Config/dependency surfaces are grounding rows for the threat
         // model, not runtime-reachable code paths for finding ranking.
-        AttackSurfaceKind::InfraConfig | AttackSurfaceKind::SupplyChain => 0,
+        // An unknown (newer) kind is treated the same: no reachability boost.
+        AttackSurfaceKind::InfraConfig
+        | AttackSurfaceKind::SupplyChain
+        | AttackSurfaceKind::Unknown => 0,
     }
 }
 

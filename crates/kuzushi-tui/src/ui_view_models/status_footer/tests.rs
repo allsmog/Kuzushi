@@ -6,7 +6,6 @@ use kuzushi_core::{
     Finding, Severity, V2Config,
 };
 use std::path::PathBuf;
-use std::time::Instant;
 
 #[test]
 fn status_footer_model_reports_idle_shell_segments() {
@@ -18,7 +17,6 @@ fn status_footer_model_reports_idle_shell_segments() {
     // so each session fact is stated once per screen.
     assert_eq!(model.left_segments, ["shell route", "capabilities"]);
     assert_eq!(model.right_segments, ["0 findings"]);
-    assert!(!model.warning);
 }
 
 #[test]
@@ -49,17 +47,6 @@ fn status_footer_uses_projected_findings_count_on_workbench() {
     let model = status_footer_model(&app);
 
     assert_eq!(model.right_segments, ["1 finding / 1 high"]);
-}
-
-#[test]
-fn status_footer_model_surfaces_ctrl_c_warning() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_ctrl_c_armed_at(Some(Instant::now()));
-
-    let model = status_footer_model(&app);
-
-    assert!(model.warning);
-    assert_eq!(model.right_segments[0], "Ctrl+C again to exit");
 }
 
 #[test]

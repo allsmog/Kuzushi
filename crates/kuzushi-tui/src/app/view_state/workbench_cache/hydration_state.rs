@@ -86,6 +86,9 @@ impl WorkbenchCache {
                     target_revision.as_deref(),
                 )
                 .is_not_requested(),
+            ViewHydrationKey::FindingAuditDataflow { fingerprint } => self
+                .cached_finding_audit_dataflow(target, fingerprint)
+                .is_not_requested(),
             ViewHydrationKey::ScannedSnippet {
                 stable_fp,
                 scan_id,
@@ -131,6 +134,9 @@ impl WorkbenchCache {
             }
             ViewHydrationKey::MapArtifacts => self
                 .cached_map_artifacts_built(Some(target))
+                .is_not_requested(),
+            ViewHydrationKey::CpgArtifacts => self
+                .cached_cpg_artifacts_built(Some(target))
                 .is_not_requested(),
             ViewHydrationKey::ScanRecommendations => self
                 .cached_scan_recommendations(Some(target))
@@ -193,10 +199,15 @@ impl WorkbenchCache {
     ) {
         let key = (target, run_id, leaf);
         let bytes = run_artifact_text_bytes(&state);
+        let version = run_artifact_version(&state);
         insert_bounded(
             &mut self.run_artifact_texts,
             key.clone(),
-            RunArtifactTextCache { state, bytes },
+            RunArtifactTextCache {
+                state,
+                bytes,
+                version,
+            },
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
         self.trim_large_run_caches(&LargeRunCacheKey::Artifact(key));
@@ -260,6 +271,17 @@ impl WorkbenchCache {
             (ViewHydrationKey::PromptMutations, ViewHydrationValue::PromptMutations(state)) => {
                 self.prompt_mutations = Some(PromptMutationsCache { target, state });
             }
+            (key, value) => self.apply_finding_hydration(target, key, value),
+        }
+    }
+
+    fn apply_finding_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
             (
                 ViewHydrationKey::FindingPatchTruth {
                     fingerprint,
@@ -274,6 +296,21 @@ impl WorkbenchCache {
                 target_revision,
                 state,
             ),
+            (key, value) => self.apply_finding_evidence_hydration(target, key, value),
+        }
+    }
+
+    fn apply_finding_evidence_hydration(
+        &mut self,
+        target: PathBuf,
+        key: ViewHydrationKey,
+        value: ViewHydrationValue,
+    ) {
+        match (key, value) {
+            (
+                ViewHydrationKey::FindingAuditDataflow { fingerprint },
+                ViewHydrationValue::FindingAuditDataflow(state),
+            ) => self.store_finding_audit_dataflow(&target, &fingerprint, state),
             (
                 ViewHydrationKey::ScannedSnippet {
                     stable_fp,
@@ -405,6 +442,9 @@ impl WorkbenchCache {
             (ViewHydrationKey::MapArtifacts, ViewHydrationValue::MapArtifacts(built)) => {
                 self.map_artifacts.store(target, built);
             }
+            (ViewHydrationKey::CpgArtifacts, ViewHydrationValue::CpgArtifacts(built)) => {
+                self.cpg_artifacts.store(target, built);
+            }
             (
                 ViewHydrationKey::ScanRecommendations,
                 ViewHydrationValue::ScanRecommendations(state),
@@ -447,6 +487,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::StrategyQueue
         | ViewHydrationKey::PromptMutations
         | ViewHydrationKey::FindingPatchTruth { .. }
+        | ViewHydrationKey::FindingAuditDataflow { .. }
         | ViewHydrationKey::ScannedSnippet { .. } => HydrationGroup::Project,
         ViewHydrationKey::SourceFile { .. }
         | ViewHydrationKey::HarnessFile
@@ -457,6 +498,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         ViewHydrationKey::HealthChecks { .. }
         | ViewHydrationKey::TargetProfile
         | ViewHydrationKey::MapArtifacts
+        | ViewHydrationKey::CpgArtifacts
         | ViewHydrationKey::ScanRecommendations
         | ViewHydrationKey::TargetBase => HydrationGroup::Status,
     }

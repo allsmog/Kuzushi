@@ -62,6 +62,7 @@ Legend: ✓ = present, ◐ = partial or tool-dependent, N/A = not applicable.
 | Shard auto-suggest (`pack:suggest-shards`) | N/A | ✓ | ✓ | Deterministic workspace-write tool (no runtime): proposes trust-boundary shard candidates from directory file counts, language mix, entry-point identifier density, and test-vs-shipped heuristics; writes a commented draft to `.kuzushi/v3/reports/suggested-shards.toml` (never installs `.kuzushi/shards.toml`). Bounded walk (content-scan budget), stable density-then-path ordering. |
 | Threat-intel research (`threat-intel:research`) | N/A | ✓ | ✓ | Descriptor-backed external action over an explicit workspace: bounded target-local package discovery → OSV queries → persisted CVE candidates → existing catalog harvest. The invocation discloses network use, bounds package/CVE counts, and never scans outside the selected target. `threat-intel:discover` remains its deterministic offline inventory-only counterpart. |
 | Pipeline gate (`kuzushi ci`) | N/A | N/A | N/A | Headless-only CLI verb (like `kuzushi campaign run`, not a registry tool): read-only fold over persisted findings + review decisions + campaign artifacts. Gates on NEW confirmed findings (latest-decision confirmed/to-fix, shared `latest_confirmed_finding_ids` fold) vs the committed `.kuzushi/ci-baseline.json`, prints a plain summary, writes `.kuzushi/v3/reports/ci-summary.json`, and exits 0 clean / 1 gate tripped at `--fail-on` / 2 error. `--update-baseline` accepts the current confirmed set. Distinct from `scan --fail-on` (exit 3), which gates a single scan run's raw findings regardless of review state. |
+| Split-verdict tie-break escalation (`verify:finding` `escalationModel`; deep-auditor `MODEL_TRIAGE_ESCALATION`) | ✓ | ✓ | ✓ | Shared pure policy (`runtime::decide_tie_break`): a split consensus escalates only to a DIFFERENT, operator-named model, never inherited. `verify:finding` reads the `escalationModel` option through the registry boundary in all three modes; the deep auditor resolves the `triage_escalation` router role from explicit sources only (`MODEL_TRIAGE_ESCALATION` / models.toml), never the operator/router default. Same-model or invalid escalations are refused and disclosed (verify: completed-with-warning + stage note; deep-audit: rationale suffix), and an inconclusive escalation keeps the verdict rather than forging one. Shell-only additions are presentation: the Prove card's escalate-on-tie ladder row and the tone-classified stage disclosure line. |
 
 Patch application truth is shared durable state, not a shell-only inference.
 `PatchResult` remains synthesis/worktree validation; the append-only
@@ -118,6 +119,18 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   never running. `background`/`bg` (and Run Focus `b`) restores the captured
   workflow origin without cancelling. The CLI `runs list/show/trace` is the
   headless analogue over the same shared artefacts.
+- **The context rail is shell-only presentation.** A 36-column right rail of
+  ambient engagement facts (target/scope, attention items, journey chips,
+  in-flight work, findings ledger, cost vs budget), auto-appearing at ≥140
+  columns — above the 120 that unlocks Dense/Fix-reference layouts so it never
+  demotes them. `rail` toggles with asymmetric persistence (`ui.rail`); every
+  section projects existing shared view-model truth; plain output never
+  renders it.
+- **Focus-gated attention notifications are shell-only.** New attention items
+  ring BEL + OSC 9 only while the terminal is provably blurred (crossterm
+  focus events; fails closed when focus is unreported). `setg ui.notify false`
+  opts out. Headless modes emit nothing; the underlying `AttentionBroker` and
+  its priorities remain shared truth.
 - **`--ci` is scan-only.** Headless `kuzushi run` always emits JSON on stdout
   and writes run artifacts for machine consumers; it does not have a `--json`
   flag.
@@ -190,9 +203,11 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   modal; Jobs, Replay, Trace, and visualizations are scrollable full-frame
   decks. Replacing one utility retains the original workflow origin; Esc
   restores its exact view and input mode. Background visualization completion
-  emits a notice and never steals focus. Threat-model completion is always
-  notification-only: the persisted DFD remains available through explicit
-  `scene` access but never force-opens. Other content-bearing tool mappings keep
+  emits a notice and never steals focus. An interactive launch against a target
+  with a persisted concrete DFD opens that DFD as the default deck (unless
+  `ui.auto_open_viz=false`), with the reality-derived Workbench as its Esc
+  origin. Threat-model *completion* remains notification-only and never
+  force-opens a newly generated DFD. Other content-bearing tool mappings keep
   their contextual auto-open behavior.
 - **Durable session transcripts are shell-only.** Interactive, plain, and
   scripted shell launches append a redacted semantic timeline under the
@@ -218,6 +233,49 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   cycles All/Open/Complete; and retains success/error receipts. Export records
   add remediation metadata in every format. Reveal Destination is an explicit
   operator action and has no headless side effect.
+
+- **Deep-auditor dataflow degraded signifiers are shell-only presentation
+  over a shared gate.** The `cpg_taint_paths` tool, the `taintTools` option, the
+  readiness/query trace items, the `deep-audit:evidence` read API, and the
+  `dataflow_evidence_rows` projection are all shared core; plain output inherits
+  the Run Focus rows and the options table. Three surfaces are shell-only: the
+  Health page `cpg graphs` row turning `Warn` with a "deep-audit runs grep-only;
+  run cpg:build" disclosure when no graph exists, the transient run notice on a
+  `Missing`-readiness deep audit, and the optional Review chip disclosing a
+  degraded run from durable provenance.
+- **The `AUDITED DATAFLOW` finding-detail / Prove section is shell-only
+  presentation** over the shared `deep-audit:evidence` audit events. It renders
+  after `EVIDENCE`, never displaces the P1 `MODEL LADDER`, and is empty (no
+  header) when the auditor cited no dataflow evidence. Plain/scripted output
+  reads the same projected rows.
+- **Deep-auditor taint trace rows are shell-only Run Focus presentation** of the
+  shared `ToolCallProgress`/`DiagnosticNotice` items the adapter emits (readiness
+  once per audit, one coalesced query line per call, a `warn` degraded notice).
+  `kuzushi run` and `triage:run` headless behave identically over the same items.
+- **The Prove `MODEL LADDER` card and the Run Focus verify stage labels are
+  shell-only presentation** over shared `verify:finding` data. The card
+  (`ui_view_models/phase_cockpit/confirm.rs::investigation_model_ladder`) renders
+  the drafted verification's `gate: <m> (rejection only)` / `panel: <m> x <N>
+  pass(es)` / `escalate on tie: <m>` rows from the operator-stored `gateModel` /
+  `model` / `escalationModel` / `VERIFY_PASSES` knobs, and previews the exact
+  `run verify:finding {…}` the Enter-to-draft handler drafts (single source of
+  truth — the preview can never diverge from what runs). Unset knobs read `not
+  set` and are omitted from the drafted JSON. The tie-break stage labels (`gate ·
+  plausibility (…) · rejection only`, `panel · N pass(es) (…)`, `escalation ·
+  tie-break (…)`, plus a `refused` danger step) are the shared verify executor's
+  own trace items; `replay`/`trace` and `kuzushi run` render the same ordered
+  labels. An escalation-resolved split stays `ModelAssessed`/`Unverified` — the
+  ladder rung never advances and no `Confirmed`/`runtime_verified` is forged.
+- **The risk-worklist scene page, the Map `WORKLIST` section, and the `worklist`
+  verb are shell-only presentation** over the shared `worklist:rank` projection.
+  The scene Worklist page and the top-5 Map section both project the same ranked
+  rows (raw `A92`/`F17` citations, contributor states, `unranked` count, and the
+  `⚠ degraded — no cpg graph` banner/chip); the page appears in the scene rail
+  only when a `context-snapshot.json` exists (the EntryPoints gate-on-non-empty
+  precedent), and `worklist` auto-opens it with contextual origin restore.
+  Headless parity is `run worklist:rank`, which emits the same rows, citation
+  raw/normalized pair, contributor states, and unranked list as machine-readable
+  JSON.
 
 ## Current Parity Risks
 

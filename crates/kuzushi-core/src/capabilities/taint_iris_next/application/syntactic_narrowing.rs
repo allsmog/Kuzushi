@@ -15,10 +15,11 @@ use tree_sitter::{Language, Node, Parser, Tree};
 /// kinds. If any ancestor is a comment/string/template node, drop the
 /// candidate.
 ///
-/// Behavior on languages without a grammar (C, C++, Rust, C#, …): pass
-/// candidates through unchanged. Narrowing is a precision improver, not a
-/// correctness gate, so absence of a grammar should never lose true
-/// positives.
+/// Behavior on languages the extension table tags without a registered
+/// grammar — the `rust`, `scala`, and `csharp` tags, plus the `unknown` tag
+/// that every other extension (Kotlin, Swift, …) falls into: pass candidates
+/// through unchanged. Narrowing is a precision improver, not a correctness
+/// gate, so absence of a grammar should never lose true positives.
 pub(crate) fn narrow_taint_iris_next_candidates_syntactically(
     scan_root: &Path,
     candidates: Vec<TaintIrisNextCandidate>,
@@ -125,11 +126,12 @@ fn grammar_id_for(language: &str) -> Option<&'static str> {
         "ruby" => Some("ruby"),
         "php" => Some("php"),
         "go" => Some("go"),
-        // tree-sitter-c parses both C (.c/.h) and is a reasonable fallback
-        // for C++ here — we don't pull tree-sitter-cpp because the C
-        // grammar already covers comments and string literals correctly,
-        // which is all the narrowing pass uses to filter noise.
-        "c" | "cpp" => Some("c"),
+        "c" => Some("c"),
+        // C++ needs its own grammar — raw strings R"(...)" and templates
+        // don't parse under the C grammar, and this pass DROPS candidates it
+        // believes are inside a string/comment, so a misparse is a silent
+        // false negative.
+        "cpp" => Some("cpp"),
         _ => None,
     }
 }
@@ -144,6 +146,7 @@ fn language_for(grammar_id: &'static str) -> Language {
         "php" => tree_sitter_php::LANGUAGE_PHP.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
         "c" => tree_sitter_c::LANGUAGE.into(),
+        "cpp" => tree_sitter_cpp::LANGUAGE.into(),
         other => panic!("grammar_id_for/language_for drift: unsupported grammar {other:?}"),
     }
 }
@@ -424,5 +427,33 @@ int main(void) { palloc(8); return 0; }\n",
             1,
             "alias-derived candidates pass through narrowing"
         );
+    }
+
+    #[test]
+    fn cpp_raw_string_literals_are_narrowed_out() {
+        // The C grammar can't parse a C++ raw string literal, so under the
+        // old c-fallback this line misparsed and the candidate slipped
+        // through. With tree-sitter-cpp the R"(...)" body is a string node.
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("noise.cc"),
+            "const char* q = R\"(db.query is inside a raw string)\";\n",
+        )
+        .unwrap();
+        let candidates = vec![candidate_at("noise.cc", 1, "cpp", "db.query")];
+        let kept = narrow_taint_iris_next_candidates_syntactically(temp.path(), candidates);
+        assert!(
+            kept.is_empty(),
+            "candidate inside a C++ raw string should be dropped, got {kept:?}"
+        );
+    }
+
+    #[test]
+    fn cpp_real_call_sites_survive_narrowing() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("real.cc"), "void f(){ db.query(id); }\n").unwrap();
+        let candidates = vec![candidate_at("real.cc", 1, "cpp", "db.query")];
+        let kept = narrow_taint_iris_next_candidates_syntactically(temp.path(), candidates);
+        assert_eq!(kept.len(), 1, "real C++ call expression should be kept");
     }
 }

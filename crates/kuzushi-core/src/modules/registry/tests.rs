@@ -161,6 +161,40 @@ mod tests {
     }
 
     #[test]
+    fn taint_tools_option_round_trips() {
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        // triage:run accepts the enum and its snake_case alias.
+        let prepared = registry
+            .prepare_tool_input("triage:run", json!({"taintTools": "build"}), None)
+            .unwrap();
+        assert_eq!(prepared["taintTools"], json!("build"));
+        let aliased = registry
+            .prepare_tool_input("triage:run", json!({"taint_tools": "off"}), None)
+            .unwrap();
+        assert_eq!(aliased["taintTools"], json!("off"));
+
+        // deep-audit:run declares taintTools plus R3 passes/temperature.
+        let deep = registry
+            .prepare_tool_input(
+                "deep-audit:run",
+                json!({"findingFingerprint": "abc", "taintTools": "available", "passes": 3, "temperature": 0.2}),
+                None,
+            )
+            .unwrap();
+        assert_eq!(deep["taintTools"], json!("available"));
+        assert_eq!(deep["passes"], json!(3));
+        assert_eq!(deep["temperature"], json!(0.2));
+
+        // Unknown enum value is rejected at the shared boundary.
+        let error = registry
+            .prepare_tool_input("triage:run", json!({"taintTools": "nope"}), None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("taintTools"), "{error}");
+    }
+
+    #[test]
     fn stored_required_options_satisfy_tool_validation_without_model_fallback() {
         let registry = ModuleRegistry::with_v2_builtins();
         let mut store = ToolOptionStore::new();
@@ -2962,7 +2996,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "b6022ab1ae64f1493e071e1e8b0fb3121085d8677511274bf20cb0a6086b59c1",
+            "a29eb2520ee5984cd40fa5b9c75dabe070370e33d44d51f09e086fb396bf55d1",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }

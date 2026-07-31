@@ -10,7 +10,10 @@ use kuzushi_core::findings::{
     compare_scan_runs, ReviewDecisionVerdict, ScanComparisonClass, ScanFindingSignature,
     ScanRunComparison, ScanUncertainMatch, TriageVerdict,
 };
-use kuzushi_core::{FindingStore, RunId, WorkspaceTarget};
+use kuzushi_core::{
+    read_run_artifact_text, tool_result_artifact_spec, FindingStore, RunArtifactRead, RunId,
+    WorkspaceTarget,
+};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -122,12 +125,41 @@ pub(crate) fn runs_diff(
     let store = FindingStore::open(&db_path)?;
     let comparison = compare_scan_runs(&store, base_run_id, compare_run_id)?;
     let mut warnings = Vec::new();
+    append_result_artifact_warning(target, base_run_id, &mut warnings);
+    append_result_artifact_warning(target, compare_run_id, &mut warnings);
     let decision_summary = decision_summary_from_store(&store, &comparison, &mut warnings);
     Ok(RunsDiff {
         comparison,
         warnings,
         decision_summary,
     })
+}
+
+fn append_result_artifact_warning(target: &Path, run_id: &str, warnings: &mut Vec<String>) {
+    if let Some(warning) = result_artifact_warning(target, run_id) {
+        warnings.push(warning);
+    }
+}
+
+fn result_artifact_warning(target: &Path, run_id: &str) -> Option<String> {
+    match read_run_artifact_text(target, run_id, run_result_artifact_leaf()) {
+        RunArtifactRead::Ready { value, .. } => serde_json::from_str::<Value>(&value)
+            .err()
+            .map(|error| format!("run {run_id} result artifact is malformed JSON: {error}")),
+        RunArtifactRead::Missing { .. } => None,
+        RunArtifactRead::NonFile { .. } => Some(format!(
+            "run {run_id} result artifact is not a regular file"
+        )),
+        RunArtifactRead::Unsafe { error } | RunArtifactRead::Unreadable { error, .. } => Some(
+            format!("run {run_id} result artifact is unreadable: {error}"),
+        ),
+    }
+}
+
+fn run_result_artifact_leaf() -> &'static str {
+    tool_result_artifact_spec("result.json")
+        .expect("tool result artifact must be in shared spec")
+        .leaf
 }
 
 fn decision_summary_from_store(

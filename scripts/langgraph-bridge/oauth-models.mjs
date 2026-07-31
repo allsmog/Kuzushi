@@ -76,10 +76,7 @@ class OpenAiCodexOAuthChatModel {
   async invoke(messages) {
     const response = await fetch("https://chatgpt.com/backend-api/codex/responses", {
       method: "POST",
-      headers: {
-        authorization: `Bearer ${this.token}`,
-        "content-type": "application/json",
-      },
+      headers: openAiOauthHeaders(this.token, this.request.oauthAccountId),
       body: JSON.stringify(this.body(messages)),
     });
     if (!response.ok) throw providerHttpError(response.status);
@@ -115,6 +112,14 @@ class OpenAiCodexOAuthChatModel {
   originalToSafeToolNameMap() {
     return this.openAiToolBindings().originalToSafe;
   }
+}
+
+export function openAiOauthHeaders(token, accountId) {
+  return {
+    authorization: `Bearer ${token}`,
+    "content-type": "application/json",
+    ...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+  };
 }
 
 async function providerJson(response) {

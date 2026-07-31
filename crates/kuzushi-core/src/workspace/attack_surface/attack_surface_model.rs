@@ -40,6 +40,11 @@ pub enum AttackSurfaceKind {
     CommandExecutionBoundary,
     InfraConfig,
     SupplyChain,
+    /// A surface kind emitted by a newer Kuzushi than this one. Tolerating it
+    /// keeps one unrecognized surface from failing the whole map's
+    /// deserialization — it degrades a single surface, not the density.
+    #[serde(other)]
+    Unknown,
 }
 
 impl AttackSurfaceKind {
@@ -60,6 +65,7 @@ impl AttackSurfaceKind {
             Self::CommandExecutionBoundary => "command_execution_boundary",
             Self::InfraConfig => "infra_config",
             Self::SupplyChain => "supply_chain",
+            Self::Unknown => "unknown",
         }
     }
 }

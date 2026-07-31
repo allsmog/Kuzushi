@@ -62,6 +62,13 @@ pub(crate) enum FindingPatchTruthState {
     Failed(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum FindingAuditDataflowState {
+    Ready(Vec<kuzushi_core::findings::DataflowEvidenceRow>),
+    Missing,
+    Failed(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ScannedSnippetState {
     Ready(ScannedSnippetWindow),
@@ -143,6 +150,9 @@ pub(crate) enum ViewHydrationKey {
         finding_scan_id: Option<String>,
         target_revision: Option<String>,
     },
+    FindingAuditDataflow {
+        fingerprint: String,
+    },
     ScannedSnippet {
         stable_fp: String,
         scan_id: Option<String>,
@@ -177,6 +187,7 @@ pub(crate) enum ViewHydrationKey {
     },
     TargetProfile,
     MapArtifacts,
+    CpgArtifacts,
     ScanRecommendations,
     TargetBase,
 }
@@ -192,6 +203,7 @@ pub(crate) enum ViewHydrationValue {
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),
+    FindingAuditDataflow(FindingAuditDataflowState),
     ScannedSnippet(ScannedSnippetState),
     SourceFile(Result<String, String>),
     GitMetadata(Option<RunTargetGitMetadata>),
@@ -207,6 +219,7 @@ pub(crate) enum ViewHydrationValue {
     HealthChecks(ViewHealthChecks),
     TargetProfile(TargetProfile),
     MapArtifacts(bool),
+    CpgArtifacts(bool),
     ScanRecommendations(ScanRecommendationsState),
     TargetBase(String),
 }

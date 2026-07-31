@@ -1,0 +1,40 @@
+# J38 — cpg lifecycle: build → planning row Cached → health Pass (P2)  ⭐ release-blocking (steps 1–3)
+#
+# Keyless, deterministic. Step 1 builds the graph headless. Step 2 opens the
+# planning picker: the Build-code-property-graph row reads `cached` — regression R1
+# (pre-fix the probe looked for the never-written `.kuzushi/cpg.bin`, so the row
+# showed Missing/not-built forever even right after a successful build). Step 3:
+# `health` tones the cpg-graph row Pass, the cache-backed R1 consumer surface. The
+# key-gated deep-triage arm (steps 4–5) is advisory and not encoded here.
+name: cpg:build makes the planning row Cached and the health cpg row Pass
+size: 120x40
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Step 1: build the graph headless (deterministic, no model calls).
+shell: rm -rf @TMP_TARGET/.kuzushi/cpg-rs
+shell: @KUZUSHI --target @TMP_TARGET run cpg:build > @ART/cpg-build.log 2>&1
+shell: test -d @TMP_TARGET/.kuzushi/cpg-rs
+launch: --target @TMP_TARGET
+wait: 6
+# Step 2: the planning picker's cpg row reads cached (R1). `next` from the Map
+# phase opens the picker.
+submit: next
+wait-for: 20 property graph
+snap: planning-cached
+expect: property graph
+expect: cached
+ask: R1 — the Build-code-property-graph / cpg:build row reads `cached` right after a successful build, NOT `not built yet`/Missing (the stale `.kuzushi/cpg.bin` probe is fixed). Confirm the cpg row specifically (context may also be cached).
+keys: Escape
+wait: 2
+# Step 3: health cpg-graph row now Pass — the cache-backed consumer surface. The
+# CpgArtifacts probe resolves asynchronously and the row flips on the redraw, so
+# poll for the Pass state (the artifact-dir path) before snapping.
+submit: health
+# The CpgArtifacts probe resolves asynchronously and the row flips on the redraw;
+# the artifact-dir path is truncated off-screen so wait a fixed interval instead.
+wait: 10
+snap: health-pass
+expect: backend=cpg-rs
+expect-not: no graph — deep-audit runs grep-only
+ask: The cpg-graph row is Pass (names the artifact dir, backend=cpg-rs) and the Warn "no graph — deep-audit runs grep-only" state is gone — the artifact probe reflects the real build, not a stale bin path (R1 at the health surface).

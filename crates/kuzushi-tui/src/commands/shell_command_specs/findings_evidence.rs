@@ -224,4 +224,10 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::FindingsEvidence,
         description: "make a stored threat-model version the live model",
     },
+    ShellCommandSpec {
+        command: "worklist",
+        aliases: &["/worklist"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "risk-ranked file worklist — highest-risk files first, with ranker citations",
+    },
 ];

@@ -369,8 +369,9 @@ support becomes an inline error. Exports include additive remediation metadata.
 ## 8. Contextual surfaces and visualizations
 
 Help, Controls, and Capabilities are modal contextual surfaces. Jobs, Replay,
-Trace, DFD, terrain, heatmap, attack tree, and attack-path visualizations are
-scrollable full-frame decks. These screens do not replace the workflow route.
+Trace, DFD, entry-point inventory, terrain, heatmap, attack tree, and
+attack-path visualizations are scrollable full-frame decks. These screens do
+not replace the workflow route.
 
 One non-nesting contextual route captures the original workflow view and its
 input mode. Opening a second contextual surface replaces the first while
@@ -381,6 +382,10 @@ The visualization gallery remains real-data only:
 
 - terrain: severity-weighted risk by hot module;
 - DFD: persisted threat-model data-flow graph;
+- entry points: every persisted ingress in a trust-zone-grouped selectable list
+  with a selected detail pane and Enter-to-DFD navigation;
+- components: detected languages/build systems plus an SBOM tree that keeps
+  declared manifest constraints distinct from resolved lockfile versions;
 - heatmap: per-module finding risk;
 - attack tree: persisted exploit chains;
 - attack path: source-to-sink taint stages;

@@ -45,8 +45,9 @@ fn palette_row_line(row: PaletteRow, width: usize) -> Line<'static> {
             label,
             kind,
             description,
+            hint,
             selected,
-        } => palette_match_line(label, kind, description, selected, width),
+        } => palette_match_line(label, kind, description, hint, selected, width),
         PaletteRow::Empty(value) => {
             Line::styled(fit(&format!(" ∅ {value}"), width), theme::muted())
         }
@@ -60,10 +61,18 @@ fn palette_match_line(
     label: String,
     kind: &'static str,
     description: String,
+    hint: String,
     selected: bool,
     width: usize,
 ) -> Line<'static> {
     let marker = if selected { "▸" } else { " " };
+    // The shortest alias rides the label column — the palette doubles as
+    // alias discovery ("help · h", "modules · m").
+    let label = if hint.is_empty() {
+        label
+    } else {
+        format!("{label} · {hint}")
+    };
     let kind_width = usize::from(width >= 32) * 7;
     let label_ceiling = width.saturating_sub(kind_width + 6);
     let label_width = (width * 3 / 10).clamp(8, 25).min(label_ceiling);

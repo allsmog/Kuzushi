@@ -33,6 +33,7 @@ fn map_fixture(state: SemanticFixture) -> MapPhaseModel {
             hot_surfaces: Vec::new(),
         }),
         hot_modules: fixture_hot_modules(richness),
+        worklist: crate::ui_view_models::WorklistViewModel::default(),
         next_scans: super::super::NextScansState::Pending,
         dfd: fixture_dfd(richness >= 3),
         empty_hint: (richness == 0).then_some("fixture empty".to_string()),

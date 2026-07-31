@@ -11,12 +11,13 @@ pub(crate) fn staged_synthesis_prompt(
     source_bundle: &ThreatModelSourceBundle,
     dossier: &ResearchDossier,
 ) -> Result<String> {
-    // seedMode=fresh builds from repository evidence only; the persisted
-    // model is deliberately not embedded as seed context.
-    let previous_model = if input.is_fresh() {
-        None
-    } else {
+    // The seeding decision resolved at the adapter: fresh — or a sources list
+    // that excludes the persisted model — embeds nothing from the previous
+    // generation, full document and count summary alike.
+    let previous_model = if input.embeds_prior_model() {
         try_load_persistent_threat_model(&input.target)?
+    } else {
+        None
     };
     let base = build_agent_prompt(
         input,

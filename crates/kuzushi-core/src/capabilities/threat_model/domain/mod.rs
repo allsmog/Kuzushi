@@ -6,6 +6,8 @@ pub(crate) use document_schema::*;
 pub(crate) use dread::*;
 pub(crate) use evidence_anchors::*;
 pub(in crate::capabilities::threat_model) use normalization::*;
+pub(crate) use security_context_links::require_complete_security_context_links;
+pub use security_context_links::{security_context_link_report, SecurityContextLinkReport};
 pub(crate) use stage_selection::*;
 pub(crate) use tool_contract::*;
 
@@ -15,5 +17,6 @@ mod document_schema;
 mod dread;
 mod evidence_anchors;
 mod normalization;
+mod security_context_links;
 mod stage_selection;
 mod tool_contract;

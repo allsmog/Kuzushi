@@ -45,7 +45,7 @@ fn guided_workbench_keybindings(
         let label = if app.has_running_work() {
             "request abort"
         } else {
-            "arm exit"
+            "exit"
         };
         vec![bind("Ctrl+C", label)]
     })

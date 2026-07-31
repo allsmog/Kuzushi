@@ -33,6 +33,64 @@ pub(crate) fn transcript_model_from_log_index(app: &ShellApp, log_start: usize) 
     }
 }
 
+/// The full-screen Logs document: everything durably recorded for this session
+/// ahead of everything still in the live cache, narrowed by the active filter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LogsModel {
+    pub(crate) rows: Vec<TranscriptRow>,
+    pub(crate) summary: String,
+    pub(crate) notice: Option<String>,
+}
+
+pub(crate) fn logs_model(app: &ShellApp) -> LogsModel {
+    let route = app.router.logs();
+    let history = route.history();
+    let live = app.log_lines();
+    let earlier = history.lines_before_live(live.len());
+    let total = earlier.len() + live.len();
+    let lines = earlier
+        .iter()
+        .chain(live.iter())
+        .filter(|line| matches_query(line, route.query()))
+        .cloned()
+        .collect::<Vec<_>>();
+    LogsModel {
+        summary: logs_summary(total, earlier.len(), lines.len(), route.query()),
+        notice: logs_notice(history.error(), lines.is_empty(), route.query()),
+        rows: transcript_rows_all(&lines),
+    }
+}
+
+fn matches_query(line: &LogLine, query: Option<&str>) -> bool {
+    let Some(query) = query else {
+        return true;
+    };
+    let query = query.to_lowercase();
+    line.body.to_lowercase().contains(&query) || line.prefix.to_lowercase().contains(&query)
+}
+
+fn logs_summary(total: usize, earlier: usize, shown: usize, query: Option<&str>) -> String {
+    let recovered = if earlier > 0 {
+        format!(" · {earlier} from the session file")
+    } else {
+        String::new()
+    };
+    match query {
+        Some(query) => format!("{shown}/{total} log lines match \"{query}\"{recovered}"),
+        None => format!("{total} log lines{recovered}"),
+    }
+}
+
+fn logs_notice(error: Option<&str>, empty: bool, query: Option<&str>) -> Option<String> {
+    if let Some(error) = error {
+        return Some(format!("earlier lines unavailable: {error}"));
+    }
+    match (empty, query) {
+        (true, Some(query)) => Some(format!("no log lines match \"{query}\" — Esc clears it")),
+        _ => None,
+    }
+}
+
 fn transcript_rows(log: &[LogLine], visible_count: usize) -> Vec<TranscriptRow> {
     if visible_count == 0 {
         return Vec::new();

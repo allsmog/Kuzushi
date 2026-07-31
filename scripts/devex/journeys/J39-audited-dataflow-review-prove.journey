@@ -1,0 +1,42 @@
+# J39 — AUDITED DATAFLOW reaches Review/Prove (P2)  ⭐ release-blocking
+#
+# Keyless, deterministic. Uses the F4 fixture extension: the sixth finding carries
+# a stable fingerprint `audited-dataflow-fixture` plus seeded `deep-audit:evidence`
+# audit events (source + sink + a falsifying `guard` witness mined off a cpg-rs
+# path), written through the real record_finding_audit_event path. `open` routes to
+# Review; the detail pane renders AUDITED DATAFLOW after EVIDENCE, and the Prove
+# page shows the same cited witness. The finding's proof rung is UNCHANGED by the
+# presence of dataflow evidence (deferred-promotion guard).
+name: audited dataflow renders on Review and Prove with a falsifying guard
+# Tall terminal: the detail pane renders AUDITED DATAFLOW after EVIDENCE, so the
+# section needs enough rows to sit above the fold.
+size: 120x64
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: open audited-dataflow-fixture
+wait-for: 15 Upload type is trusted
+# The audit-event dataflow hydrates asynchronously after selection; give the
+# worker time to resolve the FindingAuditDataflow key before asserting.
+wait-for: 30 AUDITED DATAFLOW
+snap: review-dataflow
+expect: AUDITED DATAFLOW
+expect: deep auditor
+expect: falsifying evidence
+expect: guard
+ask: Section ordering — AUDITED DATAFLOW sits after EVIDENCE; is the guard row visibly a FALSIFIER (labelled `falsifying evidence · …`), not just another evidence line? The rows read `deep auditor (cpg-rs path)` because the witnesses were mined off a cpg path.
+ask: Deferred-promotion guard — the finding's proof chip/rung is UNCHANGED by the presence of dataflow evidence (tool availability must never move a rung this release).
+nav-mode:
+keys: 4
+wait-live-snap: 15 Viewing Prove | prove-dataflow
+expect: F-0004
+expect: AUDITED DATAFLOW
+expect: falsifying evidence
+ask: The audited finding reaches Prove with its identity and EVIDENCE, and the interactive Prove FRAME now draws the AUDITED DATAFLOW section (evidence_and_dataflow_lines) beneath EVIDENCE — so the cpg-rs `guard` witness labelled `falsifying evidence · …` is visible on the frame, matching the Review detail frame and the Prove plain projection. Confirm the falsifier reads as a falsifier here, not just another evidence line.

@@ -67,9 +67,18 @@ fn primary_shell_view_lines(
             area.height,
             default_scroll_offset(app),
         ),
-        ShellView::Scene => scene_page_lines(app, area, app.router.scene().page()),
+        ShellView::Scene => scene_view_lines(app, area),
         _ => return None,
     })
+}
+
+fn scene_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    pinned_document_viewport_lines(
+        scene_page_lines(app, area, app.router.scene().page()),
+        area.height,
+        default_scroll_offset(app),
+        3,
+    )
 }
 
 fn threat_run_shell_view_lines(
@@ -146,10 +155,11 @@ fn system_document_shell_view_lines(
             area.height,
             app.router.help().scroll(),
         ),
-        ShellView::Logs => viewport_lines(
+        ShellView::Logs => pinned_document_viewport_lines(
             logs_lines(app, area),
             area.height,
             app.router.logs().scroll(),
+            logs_pinned_rows(app, area),
         ),
         ShellView::Config => default_scrolled_lines(app, area, config_lines(app, area)),
         ShellView::Permissions => permission_policy_view_lines(app, area),

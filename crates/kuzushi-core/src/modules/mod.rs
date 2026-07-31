@@ -51,6 +51,7 @@ pub(in crate::modules) use trace_module::*;
 pub(in crate::modules) use verify::*;
 pub(in crate::modules) use verify_module::*;
 pub(in crate::modules) use workspace_module::*;
+pub(in crate::modules) use worklist_module::*;
 mod agentic_sast;
 mod application;
 pub mod autonomy;
@@ -121,6 +122,7 @@ mod triage_module;
 mod uaf_hunt_module;
 mod verify_module;
 mod workspace_module;
+mod worklist_module;
 
 pub use agentic_sast::{AgenticSastPersistedRun, AgenticSastReport};
 pub use autonomy::{

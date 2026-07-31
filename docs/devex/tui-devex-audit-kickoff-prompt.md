@@ -3,8 +3,8 @@
 Domain-neutral. Encodes no product facts, so the auditor stays in a real
 operator's shoes and judges from the screen. Pair it with the journey catalog at
 `docs/devex/tui-devex-audit-journeys.md`, which supplies the product-specific
-steps. To fan out, append one line per agent: *"Run only J1 and J8; write
-findings to the scratchpad."*
+steps. Run one journey at a time by default. Parallel journey execution requires
+explicit operator approval; do not create one subagent per journey implicitly.
 
 The Craft rubric below is fixed (distilled from the `frontend-design` skill,
 adapted to a terminal) so every auditor judges visual quality against the same

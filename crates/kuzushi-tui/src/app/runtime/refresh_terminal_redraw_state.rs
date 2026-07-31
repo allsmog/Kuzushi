@@ -9,10 +9,46 @@ pub(crate) fn refresh_terminal_redraw_state(
     let background = apply_runtime_messages_and_sync_view(app, Instant::now(), watcher);
     state.needs_redraw |= background.changed;
     sync_terminal_title(terminal, app, state)?;
+    sync_attention_signals(terminal, app, state)?;
     state.needs_redraw |= clear_terminal_after_external_output(terminal, app)?;
     state.needs_redraw |= app.schedule_active_view_hydration();
     draw_terminal_if_needed(terminal, app, state)?;
     Ok(background.work_tail_may_remain)
+}
+
+/// Out-of-frame attention: a newly appeared attention item rings the terminal
+/// bell and posts an OSC 9 desktop notification, but only when the operator
+/// is provably away (`should_notify_blurred` fails closed on unknown focus).
+/// Active ids are recorded unconditionally so a suppressed item never replays
+/// once focus is lost later. Resolved ids leave the active set, allowing a
+/// later, distinct gate with the same stable id to notify.
+fn sync_attention_signals(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &ShellApp,
+    state: &mut TerminalLoopState,
+) -> Result<()> {
+    let broker = crate::app::AttentionBroker::from_app(app);
+    let new_items =
+        crate::app::newly_appeared_attention(&mut state.active_attention_ids, broker.items());
+    let message = crate::app::notification_message(&new_items);
+    let Some(message) = message else {
+        return Ok(());
+    };
+    if crate::app::should_notify_blurred(app.ui().notify_enabled(), app.ui().terminal_focus())
+        .is_err()
+    {
+        return Ok(());
+    }
+    // BEL rings the terminal's bell; OSC 9 raises a desktop notification on
+    // terminals that support it (iTerm2, kitty, WezTerm) and is ignored
+    // elsewhere. The message is static kind text — no operator data leaves
+    // the frame.
+    execute!(
+        terminal.backend_mut(),
+        crossterm::style::Print(format!("\x07\x1b]9;Kuzushi · {message}\x07"))
+    )
+    .context("Could not emit attention notification")?;
+    Ok(())
 }
 
 fn sync_terminal_title(

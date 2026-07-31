@@ -630,7 +630,7 @@ struct SystemsPromptBinding {
     role: &'static str,
     verb: &'static str,
     option_key: &'static str,
-    content: &'static str,
+    content: fn() -> &'static str,
     include_in_main: bool,
 }
 
@@ -641,7 +641,7 @@ impl SystemsPromptBinding {
     }
 
     fn prompt(&self) -> PromptSpec {
-        systems_prompt(self.role, self.verb, self.option_key, self.content)
+        systems_prompt(self.role, self.verb, self.option_key, (self.content)())
     }
 }
 
@@ -651,7 +651,7 @@ const SYSTEMS_PROMPT_BINDINGS: [SystemsPromptBinding; 5] = [
         role: "invariant extraction",
         verb: "invariants",
         option_key: "SYSTEMS_INVARIANT_PROMPT",
-        content: crate::capabilities::systems_hunt::SYSTEMS_INVARIANT_SYSTEM_PROMPT,
+        content: crate::capabilities::systems_hunt::systems_invariant_system_prompt,
         include_in_main: true,
     },
     SystemsPromptBinding {
@@ -659,7 +659,7 @@ const SYSTEMS_PROMPT_BINDINGS: [SystemsPromptBinding; 5] = [
         role: "trigger synthesis",
         verb: "triggers",
         option_key: "SYSTEMS_TRIGGER_PROMPT",
-        content: crate::capabilities::systems_hunt::SYSTEMS_TRIGGER_SYSTEM_PROMPT,
+        content: crate::capabilities::systems_hunt::systems_trigger_system_prompt,
         include_in_main: true,
     },
     SystemsPromptBinding {
@@ -667,7 +667,7 @@ const SYSTEMS_PROMPT_BINDINGS: [SystemsPromptBinding; 5] = [
         role: "vulnerability hunt",
         verb: "hunt",
         option_key: "SYSTEMS_HUNT_PROMPT",
-        content: crate::capabilities::systems_hunt::SYSTEMS_HUNT_SYSTEM_PROMPT,
+        content: crate::capabilities::systems_hunt::systems_hunt_system_prompt,
         include_in_main: true,
     },
     SystemsPromptBinding {
@@ -675,7 +675,7 @@ const SYSTEMS_PROMPT_BINDINGS: [SystemsPromptBinding; 5] = [
         role: "deep semantic CWE selection",
         verb: "deep-semantic-cwe-select",
         option_key: "SYSTEMS_DEEP_CWE_PROMPT",
-        content: crate::capabilities::systems_hunt::DEEP_SEMANTIC_CWE_SYSTEM_PROMPT,
+        content: crate::capabilities::systems_hunt::deep_semantic_cwe_system_prompt,
         include_in_main: false,
     },
     SystemsPromptBinding {
@@ -683,7 +683,7 @@ const SYSTEMS_PROMPT_BINDINGS: [SystemsPromptBinding; 5] = [
         role: "deep semantic hunt",
         verb: "deep-semantic-hunt",
         option_key: "SYSTEMS_DEEP_HUNT_PROMPT",
-        content: crate::capabilities::systems_hunt::DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT,
+        content: crate::capabilities::systems_hunt::deep_semantic_hunt_system_prompt,
         include_in_main: false,
     },
 ];

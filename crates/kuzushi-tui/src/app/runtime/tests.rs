@@ -157,6 +157,22 @@ mod tests {
     }
 
     #[test]
+    fn focus_events_track_state_without_dirtying_the_frame() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert_eq!(
+            app.ui().terminal_focus(),
+            crate::app::FocusState::Unknown,
+            "focus starts unreported so notifications fail closed"
+        );
+
+        assert!(!apply_terminal_event(&mut app, Event::FocusLost));
+        assert_eq!(app.ui().terminal_focus(), crate::app::FocusState::Blurred);
+
+        assert!(!apply_terminal_event(&mut app, Event::FocusGained));
+        assert_eq!(app.ui().terminal_focus(), crate::app::FocusState::Focused);
+    }
+
+    #[test]
     fn initial_terminal_size_is_applied_through_msg_update() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -188,6 +204,16 @@ mod tests {
     }
 
     #[test]
+    fn launch_start_view_keeps_a_persisted_dfd_contextual() {
+        let (target, mut app) = app_with_persisted_dfd();
+
+        assert!(apply_launch_start_view(&mut app));
+
+        assert_eq!(app.shell_view(), ShellView::Workbench);
+        drop(target);
+    }
+
+    #[test]
     fn launch_target_picker_is_applied_through_command_update() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
@@ -195,6 +221,39 @@ mod tests {
 
         assert_eq!(app.shell_view(), ShellView::TargetPicker);
         assert!(!app.router.target_picker().candidates().is_empty());
+    }
+
+    fn app_with_persisted_dfd() -> (tempfile::TempDir, ShellApp) {
+        let target = tempfile::tempdir().expect("temporary target");
+        let document = serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {
+                        "id": "browser",
+                        "name": "Browser",
+                        "type": "external entity",
+                        "trustZone": "internet"
+                    },
+                    {
+                        "id": "api",
+                        "name": "API",
+                        "type": "process",
+                        "trustZone": "application"
+                    }
+                ],
+                "flows": [{
+                    "id": "request",
+                    "sourceId": "browser",
+                    "targetId": "api",
+                    "description": "HTTPS request"
+                }]
+            }
+        });
+        kuzushi_core::save_persistent_threat_model(target.path(), &document, true)
+            .expect("persist DFD");
+        let workspace = WorkspaceTarget::new(target.path()).expect("workspace target");
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        (target, app)
     }
 
     #[test]
@@ -229,9 +288,6 @@ mod tests {
         let now = std::time::Instant::now();
         let mut app = ShellApp::new(V2Config::default(), None);
         let ticket = app.jobs_mut().start(JobKind::Run, "scan");
-        app.set_ctrl_c_armed_at(Some(
-            now - CTRL_C_ARM_WINDOW - std::time::Duration::from_millis(1),
-        ));
         app.set_scan_panel(Some(ScanPanelState {
             run_id: None,
             target: std::path::PathBuf::from("."),
@@ -247,7 +303,6 @@ mod tests {
 
         assert!(apply_runtime_messages_with_outcome(&mut app, now, None).changed);
 
-        assert_eq!(app.ctrl_c_armed_at(), None);
         assert_eq!(app.scan().unwrap().stage, "running semgrep");
     }
 

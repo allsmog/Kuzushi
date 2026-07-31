@@ -14,7 +14,15 @@ pub(crate) enum TermEvent {
     Key(KeyEvent),
     Paste(String),
     Mouse(MouseEvent),
-    Resize { columns: u16, rows: u16 },
+    Resize {
+        columns: u16,
+        rows: u16,
+    },
+    /// Terminal window gained/lost keyboard focus. Tracked so out-of-frame
+    /// attention signals (bell, OSC 9) fire only while the operator is away.
+    Focus {
+        focused: bool,
+    },
 }
 
 #[derive(Default)]
@@ -80,7 +88,8 @@ impl TermEvent {
             Event::Paste(text) => Some(Self::Paste(text)),
             Event::Mouse(mouse) => Some(Self::Mouse(mouse)),
             Event::Resize(columns, rows) => Some(Self::Resize { columns, rows }),
-            _ => None,
+            Event::FocusGained => Some(Self::Focus { focused: true }),
+            Event::FocusLost => Some(Self::Focus { focused: false }),
         }
     }
 }
@@ -92,6 +101,16 @@ fn update_terminal(app: &mut ShellApp, event: TermEvent) -> UpdateResult {
         TermEvent::Mouse(mouse) => UpdateResult::from_input(app.reduce_mouse(mouse)),
         TermEvent::Resize { columns, rows } => {
             UpdateResult::from_input(app.reduce_resize(columns, rows))
+        }
+        TermEvent::Focus { focused } => {
+            // State-only: no repaint, no effects — focus feeds the
+            // notification gate, not the frame.
+            app.ui_mut().set_terminal_focus(if focused {
+                crate::app::FocusState::Focused
+            } else {
+                crate::app::FocusState::Blurred
+            });
+            UpdateResult::changed(false)
         }
     }
 }

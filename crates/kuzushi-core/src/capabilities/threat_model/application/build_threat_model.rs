@@ -50,6 +50,7 @@ fn build_agentic_threat_model(
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let grounding = load_prompt_grounding(&input, ctx)?;
     emit_grounding_loaded(ctx, verb, &grounding);
+    emit_seed_disclosure(ctx, verb, &input);
     let generated = generate_threat_model_document(
         runtime,
         ctx,
@@ -73,13 +74,29 @@ fn finish_agentic_threat_model(
 ) -> Result<Value> {
     stamp_provenance(&mut generated.document, &input.target, "single");
     let coverage = check_coverage(&generated.document, &grounding.surfaces);
+    let parked = park_unaccounted(&mut generated.document, &coverage.gaps);
     apply_coverage(
         &mut generated.document,
         &coverage,
         single_pipeline_gap_fill_method(&coverage),
+        parked,
     );
     emit_coverage_checked(ctx, verb, &coverage);
-    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
+    let reconciliation = BuildReconciliation::from_report(
+        &coverage,
+        parked,
+        "grounded surfaces",
+        &generated.document,
+    );
+    complete_threat_model_build(
+        ctx,
+        flavor,
+        verb,
+        input,
+        generated,
+        source_bundle,
+        reconciliation,
+    )
 }
 
 /// Shared tail of every agentic build pipeline: artifact writes, persistence,
@@ -92,9 +109,9 @@ pub(crate) fn complete_threat_model_build(
     input: BuildInput,
     mut generated: GeneratedThreatModel,
     source_bundle: ThreatModelSourceBundle,
+    reconciliation: BuildReconciliation,
 ) -> Result<Value> {
-    stamp_build_seed_lineage(&mut generated.document, &input)?;
-    finalize_document_identity(&mut generated.document, &input.target)?;
+    seal_build_document(&mut generated.document, &input, &source_bundle)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
     let cost = generated_threat_model_cost(&generated)?;
@@ -119,6 +136,7 @@ pub(crate) fn complete_threat_model_build(
         has_concrete_content,
         cost,
         version_warning,
+        reconciliation,
     )
 }
 
@@ -136,6 +154,7 @@ fn finish_threat_model_build(
     has_concrete_content: bool,
     cost: crate::runtime::RuntimeCostReport,
     version_warning: Option<String>,
+    reconciliation: BuildReconciliation,
 ) -> Result<Value> {
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
@@ -149,32 +168,62 @@ fn finish_threat_model_build(
         cost,
     );
     lines.extend(version_warning);
+    let warnings = reconciliation.warning_lines();
+    append_honesty_warnings(&mut lines, &warnings);
     emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
-    threat_model_response(
-        input,
-        flavor,
-        generated,
-        artifacts,
-        findings,
+    let honesty = ResultHonesty {
         has_concrete_content,
-        cost,
-        lines,
-        source_bundle,
+        warnings,
+    };
+    threat_model_response(
+        input, flavor, generated, artifacts, findings, honesty, cost, lines, source_bundle,
     )
 }
 
+fn append_honesty_warnings(lines: &mut Vec<String>, warnings: &[String]) {
+    lines.extend(
+        warnings
+            .iter()
+            .map(|warning| format!("  Warning:  {warning}")),
+    );
+}
+
+/// Final passes over the model's proposal before it may be persisted: seed
+/// lineage and source attestation (system-owned provenance), display/stable
+/// identity, then the hard DFD-reference gate. Ordering matters — provenance
+/// is stamped while the previous model on disk is still the one that seeded
+/// this build.
+fn seal_build_document(
+    document: &mut Value,
+    input: &BuildInput,
+    source_bundle: &ThreatModelSourceBundle,
+) -> Result<()> {
+    stamp_build_seed_lineage(document, input)?;
+    stamp_source_provenance(document, source_bundle.provenance_json(), !input.is_refine());
+    finalize_document_identity(document, &input.target)?;
+    require_complete_security_context_links(document)
+}
+
 /// Seed lineage runs before persistence, while the live model on disk is
-/// still the exact document that seeded the prompt. Refine always derives
-/// from the persisted model, so it records as seeded.
+/// still the exact document that seeded the prompt. The stamped mode is
+/// OBSERVED truth — "seeded" only if a prior model actually entered the
+/// prompt — because a label that disagrees with the prompt is the defect this
+/// replaces. The requested mode is recorded only when it differs, which
+/// covers first builds and explicit sources lists that excluded the model.
 fn stamp_build_seed_lineage(document: &mut Value, input: &BuildInput) -> Result<()> {
-    let used_seed = input.is_refine() || !input.is_fresh();
-    let seed_mode = if used_seed { "seeded" } else { "fresh" };
-    let previous = if used_seed {
+    let wants_seed = input.is_refine() || input.embeds_prior_model();
+    let previous = if wants_seed {
         try_load_persistent_threat_model(&input.target)?
     } else {
         None
     };
-    stamp_seed_lineage(document, seed_mode, previous.as_ref());
+    let observed = if input.is_refine() || previous.is_some() {
+        "seeded"
+    } else {
+        "fresh"
+    };
+    let requested = (observed != input.seed_mode).then_some(input.seed_mode.as_str());
+    stamp_seed_lineage(document, observed, requested, previous.as_ref());
     Ok(())
 }
 
@@ -237,7 +286,7 @@ fn reject_model_only_options_for_deterministic_pipeline(
 ) -> Result<()> {
     if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
-            "threat-model:build seed/design/source/prompt/staged-pipeline options require the model-backed pipeline; the explicitly requested pipeline=deterministic fold cannot consume them"
+            "threat-model:build seed/seedMode/design/source/prompt/staged-pipeline options require the model-backed pipeline; the explicitly requested pipeline=deterministic fold cannot consume them"
         );
     }
     Ok(())
@@ -251,6 +300,14 @@ fn has_runtime_only_source_option(input: &Value, ctx: &ToolExecutionContext<'_>)
         || explicit_prompt_override_requested(input, ctx)
         || nondefault_sources_requested(input)
         || nondefault_context_controls_requested(input)
+        || nondefault_seed_mode_requested(input)
+}
+
+/// `seedMode` steers prompt composition, so it is meaningless on the
+/// runtime-free pipeline. Reject rather than silently ignore it.
+fn nondefault_seed_mode_requested(input: &Value) -> bool {
+    read_string(input, &["seedMode", "seed_mode"])
+        .is_some_and(|mode| !mode.eq_ignore_ascii_case("seeded"))
 }
 
 fn has_nonempty_list(input: &Value, key: &str) -> bool {
@@ -401,6 +458,28 @@ pub(crate) fn emit_grounding_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, 
     }
 }
 
+/// A fresh run that leaves a real persisted model on the table says so before
+/// the model call. Emitted pre-persist, so the existence check reflects the
+/// disk state the operator would be comparing against.
+pub(crate) fn emit_seed_disclosure(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+) {
+    if input.embeds_prior_model() || !persistent_threat_model_path(&input.target).exists() {
+        return;
+    }
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                verb,
+                "seed: fresh · persisted threat model excluded from prompt",
+            )
+            .emit();
+    }
+}
+
 pub(crate) fn emit_coverage_checked(ctx: &ToolExecutionContext<'_>, verb: &str, coverage: &CoverageReport) {
     if let Some(trace) = ctx.trace {
         let _ = trace
@@ -483,12 +562,13 @@ fn threat_model_prompt(
     source_bundle: &ThreatModelSourceBundle,
     grounding: &PromptGrounding,
 ) -> Result<String> {
-    // seedMode=fresh builds from repository evidence only; the persisted
-    // model is deliberately not embedded as seed context.
-    let previous_model = if input.is_fresh() {
-        None
-    } else {
+    // The seeding decision resolved at the adapter: fresh — or a sources list
+    // that excludes the persisted model — embeds nothing from the previous
+    // generation, full document and count summary alike.
+    let previous_model = if input.embeds_prior_model() {
         try_load_persistent_threat_model(&input.target)?
+    } else {
+        None
     };
     build_agent_prompt(input, previous_model.as_ref(), source_bundle, grounding)
 }
@@ -545,7 +625,8 @@ fn begin_threat_model_llm_scope(
 
 fn validate_threat_model_raw(raw: Value, methodology: &str) -> Result<Value> {
     let (document_candidate, _) = extract_document_and_findings(raw.clone())?;
-    normalize_document(document_candidate, methodology)?;
+    let document = normalize_document(document_candidate, methodology)?;
+    require_complete_security_context_links(&document)?;
     Ok(raw)
 }
 
@@ -618,13 +699,21 @@ fn threat_model_findings(
     }
 }
 
+/// What the result envelope is permitted to claim about a finished build:
+/// whether it produced real content, and which measured honesty axes it
+/// failed. Empty warnings plus concrete content is the only `completed` state.
+pub(crate) struct ResultHonesty {
+    pub(crate) has_concrete_content: bool,
+    pub(crate) warnings: Vec<String>,
+}
+
 fn threat_model_response(
     input: BuildInput,
     flavor: BuildFlavor,
     generated: GeneratedThreatModel,
     artifacts: ThreatModelArtifacts,
     findings: Vec<Value>,
-    has_concrete_content: bool,
+    honesty: ResultHonesty,
     cost: crate::runtime::RuntimeCostReport,
     mut lines: Vec<String>,
     source_bundle: ThreatModelSourceBundle,
@@ -647,8 +736,7 @@ fn threat_model_response(
         source_bundle,
         persistent_artifact,
     );
-    let mut result =
-        threat_model_result_envelope(flavor, &target, has_concrete_content, lines, data);
+    let mut result = threat_model_result_envelope(flavor, &target, lines, data, honesty);
     result["artifacts"] = json!(artifact_items);
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     Ok(result)
@@ -657,25 +745,44 @@ fn threat_model_response(
 fn threat_model_result_envelope(
     flavor: BuildFlavor,
     target: &Path,
-    has_concrete_content: bool,
     mut lines: Vec<String>,
     data: Value,
+    honesty: ResultHonesty,
 ) -> Value {
-    if has_concrete_content {
+    if honesty.has_concrete_content && honesty.warnings.is_empty() {
         let output = lines.join("\n");
         return crate::module_result::completed_output_result(output.clone(), output, data);
     }
+    if honesty.has_concrete_content {
+        return honesty_partial_envelope(flavor, lines, data, honesty.warnings);
+    }
     let guidance = crate::workflow_attempts::insufficient_map_evidence_message(target);
     lines.push(guidance.clone());
+    let mut warnings = vec![json!(guidance)];
+    warnings.extend(honesty.warnings.into_iter().map(Value::String));
     crate::module_result::partial_output_result(
         format!(
             "{} produced no concrete threat-model evidence",
             flavor.tool_name()
         ),
         lines.join("\n"),
-        vec![json!(guidance)],
+        warnings,
         data,
     )
+}
+
+/// A build that produced real content but failed a measured honesty axis.
+/// The document is still useful Map evidence, so it persists and the run
+/// stays `ok` — but `completed` would overstate what was accounted for.
+fn honesty_partial_envelope(
+    flavor: BuildFlavor,
+    lines: Vec<String>,
+    data: Value,
+    honesty_warnings: Vec<String>,
+) -> Value {
+    let summary = format!("{}: {}", flavor.tool_name(), honesty_warnings.join("; "));
+    let warnings = honesty_warnings.into_iter().map(Value::String).collect();
+    crate::module_result::partial_output_result(summary, lines.join("\n"), warnings, data)
 }
 
 fn generated_threat_model_cost(

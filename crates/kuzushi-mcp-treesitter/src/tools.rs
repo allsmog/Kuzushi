@@ -13,14 +13,17 @@
 //! * `tree_sitter:callers`  — find every call site of a named function
 //!   inside a file (cheap intra-file call graph, no resolver needed).
 //!
-//! Languages supported: c, cpp, javascript, typescript, python, java,
-//! ruby, php, go. (Same set as `kuzushi-core::syntactic_narrowing`.)
+//! Languages supported: see `kuzushi_mcp_treesitter::SUPPORTED_LANGUAGES`
+//! (c, cpp, go, java, javascript, php, python, ruby, rust, typescript).
+//! There is no permissive fallback — an unsupported language id is a hard
+//! error, not a best-effort parse.
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_mcp_common::{
     BoundedReadFile, ReadFileIdentity, ReadRootCapability, Tool, ToolHandler, ToolRegistry,
 };
+use kuzushi_mcp_treesitter::supported_language_list;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io;
@@ -68,6 +71,10 @@ fn build_registry_with_capability(read_capability: ReadRootCapability) -> ToolRe
         .register(callers_descriptor(), CallersHandler(context))
 }
 
+fn language_schema_description() -> String {
+    format!("Language id, one of: {}.", supported_language_list())
+}
+
 fn node_at_descriptor() -> Tool {
     Tool {
         name: "tree_sitter:node_at".to_string(),
@@ -78,7 +85,7 @@ fn node_at_descriptor() -> Tool {
             "additionalProperties": false,
             "properties": {
                 "file": {"type": "string", "minLength": 1, "maxLength": MAX_FILE_PATH_BYTES, "description": "Absolute or workspace-relative path to a source file."},
-                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES, "description": "Language id: c, cpp, javascript, typescript, python, java, ruby, php, or go."},
+                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES, "description": language_schema_description()},
                 "line": {"type": "integer", "minimum": 1, "maximum": MAX_POSITION_INPUT, "description": "1-based line number."},
                 "column": {"type": "integer", "minimum": 1, "maximum": MAX_POSITION_INPUT, "description": "Optional 1-based byte column. Defaults to the first non-whitespace column on the line."}
             }
@@ -96,7 +103,7 @@ fn query_descriptor() -> Tool {
             "additionalProperties": false,
             "properties": {
                 "file": {"type": "string", "minLength": 1, "maxLength": MAX_FILE_PATH_BYTES},
-                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES},
+                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES, "description": language_schema_description()},
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_BYTES, "description": "Tree-sitter S-expression query."},
                 "limit": {"type": "integer", "minimum": 1, "maximum": MAX_QUERY_RESULT_LIMIT, "default": DEFAULT_QUERY_RESULT_LIMIT, "description": "Cap matches returned (default 100). The agent should narrow its query rather than raise this."}
             }
@@ -114,7 +121,7 @@ fn callers_descriptor() -> Tool {
             "additionalProperties": false,
             "properties": {
                 "file": {"type": "string", "minLength": 1, "maxLength": MAX_FILE_PATH_BYTES},
-                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES},
+                "language": {"type": "string", "minLength": 1, "maxLength": MAX_LANGUAGE_BYTES, "description": language_schema_description()},
                 "function": {"type": "string", "minLength": 1, "maxLength": MAX_FUNCTION_BYTES, "description": "Exact function/identifier name to match in callee position (e.g. `palloc`, `strcpy`, `req.query`)."}
             }
         }),
@@ -223,8 +230,8 @@ impl ToolHandler for CallersHandler {
     async fn call(&self, args: Value) -> Result<Value> {
         let request = CallersRequest::from_json(&args)?;
         let parsed = parse_source_file(&self.0, &request.file, &request.language)?;
-        let pattern = callers_pattern(&request.language);
-        let query = Query::new(&parsed.language, &pattern)
+        let pattern = callers_pattern(&request.language)?;
+        let query = Query::new(&parsed.language, pattern)
             .with_context(|| format!("could not build callers query for {}", request.language))?;
         let outcome = collect_call_sites(&query, &parsed, &request.function);
         let response = json!({
@@ -882,7 +889,8 @@ fn validate_query_text_budget(query: &str) -> Result<()> {
 
 fn grammar_for(language: &str) -> Result<Language> {
     Ok(match language {
-        "c" | "cpp" => tree_sitter_c::LANGUAGE.into(),
+        "c" => tree_sitter_c::LANGUAGE.into(),
+        "cpp" => tree_sitter_cpp::LANGUAGE.into(),
         "javascript" => tree_sitter_javascript::LANGUAGE.into(),
         "typescript" => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
         "python" => tree_sitter_python::LANGUAGE.into(),
@@ -890,22 +898,28 @@ fn grammar_for(language: &str) -> Result<Language> {
         "ruby" => tree_sitter_ruby::LANGUAGE.into(),
         "php" => tree_sitter_php::LANGUAGE_PHP.into(),
         "go" => tree_sitter_go::LANGUAGE.into(),
+        "rust" => tree_sitter_rust::LANGUAGE.into(),
         other => anyhow::bail!(
-            "unsupported language `{other}`; supported: c, cpp, javascript, typescript, python, java, ruby, php, go"
+            "unsupported language `{other}`; supported: {}",
+            supported_language_list()
         ),
     })
 }
 
-fn callers_pattern(language: &str) -> String {
-    // Capture the callee identifier of every call expression. The
-    // grammar names differ a bit per language; this covers the usual
-    // ones. Languages we don't have a precise pattern for fall back to
-    // a permissive `(call _) @callee` shape.
+fn callers_pattern(language: &str) -> Result<&'static str> {
+    // Capture the callee identifier of every call expression. The grammar
+    // names differ a bit per language; the table covers each one exactly.
+    // There is no permissive fallback — an unsupported language is a hard
+    // error so a misparse can't silently masquerade as "no callers".
     callers_pattern_table()
         .iter()
         .find_map(|(languages, pattern)| languages.contains(&language).then_some(*pattern))
-        .unwrap_or("(_) @callee")
-        .to_string()
+        .with_context(|| {
+            format!(
+                "no callers query pattern for language `{language}`; supported: {}",
+                supported_language_list()
+            )
+        })
 }
 
 fn callers_pattern_table() -> &'static [(&'static [&'static str], &'static str)] {
@@ -915,11 +929,19 @@ fn callers_pattern_table() -> &'static [(&'static [&'static str], &'static str)]
             "(call_expression function: (_) @callee)",
         ),
         (&["python"], "(call function: (_) @callee)"),
-        (&["c", "cpp"], "(call_expression function: (_) @callee)"),
+        (&["c"], "(call_expression function: (_) @callee)"),
+        (
+            &["cpp"],
+            "(call_expression function: (_) @callee) (new_expression type: (_) @callee)",
+        ),
         (&["java"], "(method_invocation name: (identifier) @callee)"),
         (&["ruby"], "(call method: (identifier) @callee)"),
         (&["php"], "(function_call_expression function: (_) @callee)"),
         (&["go"], "(call_expression function: (_) @callee)"),
+        (
+            &["rust"],
+            "(call_expression function: (_) @callee) (macro_invocation macro: (_) @callee)",
+        ),
     ]
 }
 
@@ -1105,6 +1127,7 @@ fn first_non_whitespace_column(bytes: &[u8], line_start: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_mcp_treesitter::SUPPORTED_LANGUAGES;
     use tempfile::NamedTempFile;
 
     fn write_temp(content: &str, suffix: &str) -> NamedTempFile {
@@ -1191,11 +1214,11 @@ mod tests {
 
     #[tokio::test]
     async fn unsupported_language_returns_a_clear_error() {
-        let file = write_temp("x = 1", ".rs");
+        let file = write_temp("IDENTIFICATION DIVISION.", ".cbl");
         let err = NodeAtHandler(context_for(&file))
             .call(json!({
                 "file": file.path().display().to_string(),
-                "language": "rust",
+                "language": "cobol",
                 "line": 1
             }))
             .await
@@ -1593,5 +1616,155 @@ mod tests {
 
         assert_eq!(target.column, 4);
         assert_eq!(target.byte, line_start + 4);
+    }
+
+    fn parent_chain_kinds(response: &Value) -> Vec<String> {
+        std::iter::once(&response["node"])
+            .chain(response["parents"].as_array().unwrap().iter())
+            .filter_map(|node| node["kind"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    async fn callers_count(file: &NamedTempFile, language: &str, function: &str) -> usize {
+        let response = CallersHandler(context_for(file))
+            .call(json!({
+                "file": file.path().display().to_string(),
+                "language": language,
+                "function": function,
+            }))
+            .await
+            .unwrap();
+        response["hits"].as_array().unwrap().len()
+    }
+
+    #[tokio::test]
+    async fn cpp_parses_with_the_cpp_grammar_not_the_c_grammar() {
+        let src = "namespace ns {\ntemplate <typename T>\nclass Repo {\n  void run() {\n    db_->query(id);\n  }\n  T* db_;\n};\n}\n";
+        let file = write_temp(src, ".cc");
+        let response = NodeAtHandler(context_for(&file))
+            .call(json!({
+                "file": file.path().display().to_string(),
+                "language": "cpp",
+                "line": 5,
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(response["found"], json!(true));
+        let kinds = parent_chain_kinds(&response);
+        assert!(
+            kinds.iter().any(|kind| kind == "template_declaration"),
+            "{kinds:?}"
+        );
+        assert!(
+            kinds.iter().any(|kind| kind == "class_specifier"),
+            "{kinds:?}"
+        );
+        assert!(!kinds.iter().any(|kind| kind == "ERROR"), "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn known_caller_set_per_language() {
+        let cpp = "void f(){ q(1); o.q(2); p->q(3); Ns::q(4); new Q(5); }\n";
+        let fixtures = [
+            ("c", ".c", "void f(void){ q(); q(); other(); }\n", "q", 2),
+            ("cpp", ".cc", cpp, "q", 4),
+            ("cpp", ".cc", cpp, "Q", 1),
+            (
+                "go",
+                ".go",
+                "package main\nfunc f() { q(); o.q(); other() }\n",
+                "q",
+                2,
+            ),
+            (
+                "java",
+                ".java",
+                "class C { void f(){ q(); o.q(); other(); } }\n",
+                "q",
+                2,
+            ),
+            (
+                "javascript",
+                ".js",
+                "function f(){ q(); o.q(); other(); }\n",
+                "q",
+                2,
+            ),
+            ("php", ".php", "<?php q(); q(); other(); ?>\n", "q", 2),
+            ("python", ".py", "q()\no.q()\nother()\n", "q", 2),
+            ("ruby", ".rb", "q(1)\no.q(2)\nother(3)\n", "q", 2),
+            (
+                "rust",
+                ".rs",
+                "fn m(){ foo(); x.foo(); Ty::foo(); foofoo(); }\n",
+                "foo",
+                3,
+            ),
+            (
+                "typescript",
+                ".ts",
+                "function f(){ q(); o.q(); other(); }\n",
+                "q",
+                2,
+            ),
+        ];
+        for (language, suffix, source, function, expected) in fixtures {
+            let file = write_temp(source, suffix);
+            let hits = callers_count(&file, language, function).await;
+            assert_eq!(hits, expected, "{language} callers({function})");
+        }
+    }
+
+    #[tokio::test]
+    async fn rust_macro_call_sites_are_found() {
+        let src = "fn m(){ let s = format!(\"{}\", x); write!(f, \"{}\", y).unwrap(); }\n";
+        let file = write_temp(src, ".rs");
+        assert_eq!(callers_count(&file, "rust", "format").await, 1);
+        assert_eq!(callers_count(&file, "rust", "write").await, 1);
+    }
+
+    #[test]
+    fn every_supported_language_has_a_compiling_grammar_and_caller_pattern() {
+        for &language in SUPPORTED_LANGUAGES {
+            let grammar = grammar_for(language).expect("grammar compiles in");
+            let pattern = callers_pattern(language).expect("callers pattern exists");
+            Query::new(&grammar, pattern).expect("callers query compiles");
+        }
+    }
+
+    #[test]
+    fn callers_pattern_has_no_permissive_fallback() {
+        let message = callers_pattern("cobol").unwrap_err().to_string();
+        assert!(message.contains("cpp"), "{message}");
+        assert!(message.contains("rust"), "{message}");
+    }
+
+    #[test]
+    fn schema_language_descriptions_match_the_supported_set() {
+        let expected = language_schema_description();
+        for descriptor in [
+            node_at_descriptor(),
+            query_descriptor(),
+            callers_descriptor(),
+        ] {
+            let description = descriptor.input_schema["properties"]["language"]["description"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            assert_eq!(description, expected);
+            for &language in SUPPORTED_LANGUAGES {
+                assert!(
+                    description.contains(language),
+                    "{language} in {description}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_language_error_names_the_supported_set() {
+        let message = grammar_for("cobol").unwrap_err().to_string();
+        assert!(message.contains(&supported_language_list()), "{message}");
     }
 }

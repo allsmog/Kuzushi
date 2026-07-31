@@ -82,6 +82,8 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchBacklogToggle,
     /// `/` on Review: open the incremental findings search capture.
     WorkbenchReviewSearch,
+    /// `/` on Logs: open the incremental transcript filter capture.
+    LogsFilter,
     /// One-key backlog decision; payload is the review verdict keyword fed
     /// through the ordinary `decision <verdict> <reason>` path.
     WorkbenchBacklogDecide(&'static str),

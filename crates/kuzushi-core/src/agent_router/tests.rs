@@ -740,6 +740,71 @@ primary = "gpt-5.5"
     }
 
     #[test]
+    fn triage_escalation_role_round_trips_key() {
+        assert_eq!(AgentRole::TriageEscalation.as_key(), "triage_escalation");
+        assert_eq!(
+            AgentRole::from_key("triage_escalation"),
+            Some(AgentRole::TriageEscalation)
+        );
+        assert!(AgentRole::all().contains(&AgentRole::TriageEscalation));
+    }
+
+    #[test]
+    fn explicit_role_model_never_falls_back_to_the_operator_default() {
+        let inner = RecorderRuntime::new();
+        // Operator default and router default are both set, but neither is a
+        // per-role escalation source, so explicit_role_model must return None.
+        let mut router = AgentRouter::empty();
+        router.default_model = Some("openai:router-default".to_string());
+        let routed = RoutedRuntime::new(
+            inner.clone(),
+            Arc::new(router),
+            Some("openai:operator-default".to_string()),
+        );
+        assert_eq!(
+            routed.explicit_role_model(AgentRole::TriageEscalation),
+            None,
+            "escalation must be operator-named, never inherited"
+        );
+
+        // Once the operator names a model for the role, it is honored.
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::All,
+            "MODEL_TRIAGE_ESCALATION",
+            serde_json::Value::String("openai:named-escalation".to_string()),
+        );
+        let routed = routed.with_option_store(&store);
+        assert_eq!(
+            routed.explicit_role_model(AgentRole::TriageEscalation),
+            Some("openai:named-escalation".to_string())
+        );
+    }
+
+    #[test]
+    fn models_toml_accepts_triage_escalation_role() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+[roles.triage_escalation]
+primary = "openai:escalation-model"
+"#,
+        );
+        let r = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(
+            r.pick(AgentRole::TriageEscalation, 0),
+            Some("openai:escalation-model")
+        );
+    }
+
+    #[test]
     fn triage_routing_works_too() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();

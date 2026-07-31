@@ -44,6 +44,7 @@ fn apply_target_build_input(
     ctx: &ToolExecutionContext<'_>,
     flavor: BuildFlavor,
 ) -> Result<()> {
+    reject_refine_with_fresh_seed(&build.mode, &build.seed_mode)?;
     let target = resolve_target(input, ctx)?;
     let context_mode = read_context_mode(input);
     let run_id = Uuid::new_v4().to_string();
@@ -303,6 +304,15 @@ fn read_source_artifacts(
     Ok(source_artifacts_for_context_mode(normalized, context_mode))
 }
 
+/// Refine derives from the persisted document by definition.
+fn reject_refine_with_fresh_seed(mode: &str, seed_mode: &str) -> Result<()> {
+    anyhow::ensure!(
+        !(mode == "refine" && seed_mode == "fresh"),
+        "threat-model:build mode=refine derives from the persisted model and cannot run with seedMode=fresh; run a full build to produce a fresh model"
+    );
+    Ok(())
+}
+
 fn source_artifact_values(input: &Value, flavor: BuildFlavor) -> Vec<String> {
     let sources = read_string_list(input, &["sources", "sourceArtifacts", "source_artifacts"]);
     if sources.is_empty() {
@@ -423,6 +433,21 @@ mod seed_mode_tests {
     fn unknown_seed_mode_is_rejected() {
         let error = read_seed_mode(&json!({"seedMode": "recursive"})).unwrap_err();
         assert!(error.to_string().contains("seedMode"));
+    }
+}
+
+#[cfg(test)]
+mod seed_source_resolution_tests {
+    use super::*;
+
+    #[test]
+    fn refine_with_fresh_seed_is_rejected() {
+        let error = reject_refine_with_fresh_seed("refine", "fresh")
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("mode=refine"), "unexpected error: {error}");
+        assert!(reject_refine_with_fresh_seed("build", "fresh").is_ok());
+        assert!(reject_refine_with_fresh_seed("refine", "seeded").is_ok());
     }
 }
 

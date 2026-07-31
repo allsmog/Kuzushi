@@ -2,7 +2,7 @@ use kuzushi_core::{AgentRuntimeOptions, AgentStructuredOutput, AgentToolPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-pub(crate) const LANGGRAPH_BRIDGE_PROTOCOL_VERSION: u32 = 1;
+pub const LANGGRAPH_BRIDGE_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

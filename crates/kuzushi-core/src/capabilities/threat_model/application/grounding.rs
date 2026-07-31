@@ -40,10 +40,26 @@ pub(crate) fn grounding_surfaces(target: &Path, max_elements: usize) -> Result<V
 
 const MAX_INFRA_SURFACE_ROWS: usize = 24;
 const MAX_ROWS_PER_MANIFEST_DIR: usize = 8;
-const MANIFEST_DIRS: &[&str] = &["k8s", "deploy", "deployment", "manifests", "helm", "infra", "terraform"];
+const MANIFEST_DIRS: &[&str] = &[
+    "k8s",
+    "deploy",
+    "deployment",
+    "manifests",
+    "helm",
+    "infra",
+    "terraform",
+];
 const LOCKFILES: &[&str] = &[
-    "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "go.sum",
-    "poetry.lock", "Pipfile.lock", "Gemfile.lock", "composer.lock", "packages.lock.json",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "yarn.lock",
+    "Cargo.lock",
+    "go.sum",
+    "poetry.lock",
+    "Pipfile.lock",
+    "Gemfile.lock",
+    "composer.lock",
+    "packages.lock.json",
 ];
 
 /// Deterministic infra/IAM and supply-chain grounding rows: container
@@ -63,15 +79,35 @@ pub(crate) fn infra_surface_rows(target: &Path) -> Vec<AttackSurface> {
 fn scan_root_entries(target: &Path, rows: &mut Vec<AttackSurface>) {
     for name in sorted_dir_names(target) {
         if name.starts_with("Dockerfile") {
-            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Container build: {name}")));
+            rows.push(infra_row(
+                AttackSurfaceKind::InfraConfig,
+                &name,
+                format!("Container build: {name}"),
+            ));
         } else if name.starts_with("docker-compose") && has_yaml_extension(&name) {
-            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Container orchestration: {name}")));
+            rows.push(infra_row(
+                AttackSurfaceKind::InfraConfig,
+                &name,
+                format!("Container orchestration: {name}"),
+            ));
         } else if name.ends_with(".tf") {
-            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &name, format!("Infrastructure as code: {name}")));
+            rows.push(infra_row(
+                AttackSurfaceKind::InfraConfig,
+                &name,
+                format!("Infrastructure as code: {name}"),
+            ));
         } else if LOCKFILES.contains(&name.as_str()) {
-            rows.push(infra_row(AttackSurfaceKind::SupplyChain, &name, format!("Dependency lockfile: {name}")));
+            rows.push(infra_row(
+                AttackSurfaceKind::SupplyChain,
+                &name,
+                format!("Dependency lockfile: {name}"),
+            ));
         } else if (name == "vendor" || name == "third_party") && target.join(&name).is_dir() {
-            rows.push(infra_row(AttackSurfaceKind::SupplyChain, &name, format!("Vendored dependencies: {name}/")));
+            rows.push(infra_row(
+                AttackSurfaceKind::SupplyChain,
+                &name,
+                format!("Vendored dependencies: {name}/"),
+            ));
         }
     }
 }
@@ -85,7 +121,11 @@ fn scan_manifest_dirs(target: &Path, rows: &mut Vec<AttackSurface>) {
             .take(MAX_ROWS_PER_MANIFEST_DIR)
         {
             let path = format!("{dir}/{name}");
-            rows.push(infra_row(AttackSurfaceKind::InfraConfig, &path, format!("Deployment manifest: {path}")));
+            rows.push(infra_row(
+                AttackSurfaceKind::InfraConfig,
+                &path,
+                format!("Deployment manifest: {path}"),
+            ));
         }
     }
 }
@@ -98,7 +138,11 @@ fn scan_ci_workflows(target: &Path, rows: &mut Vec<AttackSurface>) {
         .take(MAX_ROWS_PER_MANIFEST_DIR)
     {
         let path = format!(".github/workflows/{name}");
-        rows.push(infra_row(AttackSurfaceKind::SupplyChain, &path, format!("CI workflow: {path}")));
+        rows.push(infra_row(
+            AttackSurfaceKind::SupplyChain,
+            &path,
+            format!("CI workflow: {path}"),
+        ));
     }
 }
 
@@ -190,7 +234,12 @@ fn round_robin_by_kind(
     let mut rows_per_file = std::collections::BTreeMap::new();
     loop {
         let before = selected.len();
-        take_one_round(&mut buckets, max_elements, &mut selected, &mut rows_per_file);
+        take_one_round(
+            &mut buckets,
+            max_elements,
+            &mut selected,
+            &mut rows_per_file,
+        );
         if selected.len() >= max_elements || selected.len() == before {
             return selected;
         }
@@ -290,25 +339,44 @@ fn surface_line(surface: &AttackSurface) -> String {
         .line
         .map(|line| format!(":{line}"))
         .unwrap_or_default();
+    let context = surface_context_fields(surface);
     format!(
-        "- {path}{line} · {kind} · {title} · risk={score} ({tier})",
+        "- id={id} · {path}{line} · {kind} · {title} · {context}evidence={evidence} · risk={score} ({tier})",
+        id = surface.id,
         path = surface.path,
         kind = surface.kind.as_str(),
         title = surface.title,
+        evidence = surface.evidence,
         score = surface.risk.score,
         tier = surface.risk.tier,
     )
+}
+
+fn surface_context_fields(surface: &AttackSurface) -> String {
+    [
+        surface
+            .method
+            .as_deref()
+            .map(|value| format!("method={value} · ")),
+        surface
+            .route
+            .as_deref()
+            .map(|value| format!("route={value} · ")),
+        surface
+            .boundary
+            .as_deref()
+            .map(|value| format!("boundary={value} · ")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 pub(crate) fn confirmed_findings_section(rows: &[ConfirmedFindingRow]) -> String {
     if rows.is_empty() {
         return "Corroborated prior findings: none".to_string();
     }
-    let body = rows
-        .iter()
-        .map(finding_line)
-        .collect::<Vec<_>>()
-        .join("\n");
+    let body = rows.iter().map(finding_line).collect::<Vec<_>>().join("\n");
     format!(
         "Corroborated prior findings (confirmed or statically-supported; cite fingerprints in threat evidence — evidence raises likelihood, it is not the threat):\n{}",
         untrusted_derived_source_block("confirmed-findings", &body)
@@ -476,7 +544,10 @@ mod tests {
             by_path(".github/workflows/ci.yml").kind,
             AttackSurfaceKind::SupplyChain
         );
-        assert_eq!(by_path("k8s/deploy.yaml").kind, AttackSurfaceKind::InfraConfig);
+        assert_eq!(
+            by_path("k8s/deploy.yaml").kind,
+            AttackSurfaceKind::InfraConfig
+        );
         assert_eq!(by_path("vendor").title, "Vendored dependencies: vendor/");
         assert!(rows.len() <= 24);
         assert!(

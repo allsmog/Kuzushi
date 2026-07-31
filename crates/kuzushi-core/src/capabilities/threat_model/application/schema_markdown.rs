@@ -225,7 +225,13 @@ fn provenance_target(provenance: &Value, target: &str) -> String {
     }
 }
 
+/// Prefer the system-attested `sources` record; fall back to the legacy
+/// model-authored `sourceLabels` so documents persisted before source
+/// provenance became system-owned still render.
 fn provenance_inputs(provenance: &Value) -> String {
+    if let Some(labels) = system_source_labels(provenance) {
+        return labels;
+    }
     let labels = provenance
         .get("sourceLabels")
         .and_then(Value::as_array)
@@ -241,6 +247,25 @@ fn provenance_inputs(provenance: &Value) -> String {
         "none".to_string()
     } else {
         labels
+    }
+}
+
+fn system_source_labels(provenance: &Value) -> Option<String> {
+    let rows = provenance.get("sources")?.as_array()?;
+    let labels = rows
+        .iter()
+        .filter_map(source_row_label)
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!labels.is_empty()).then_some(labels)
+}
+
+fn source_row_label(row: &Value) -> Option<String> {
+    let label = row.get("label")?.as_str()?;
+    match row.get("status").and_then(Value::as_str) {
+        Some("loaded") => Some(label.to_string()),
+        Some(status) => Some(format!("{label} ({status})")),
+        None => Some(label.to_string()),
     }
 }
 

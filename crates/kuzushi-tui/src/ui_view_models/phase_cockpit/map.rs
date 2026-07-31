@@ -2,6 +2,7 @@ use super::{MapPhaseModel, NextScanRow, NextScansState};
 use crate::app::ViewDataState;
 use crate::ui_view_models::{
     attack_surface_model, cached_risk_by_module, context_snapshot_model, dfd_model, project_model,
+    worklist_model,
 };
 use crate::ShellApp;
 
@@ -15,6 +16,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     let project = project_model(app);
     let attack_surface = attack_surface_model(app);
     let hot_modules = cached_risk_by_module(app);
+    let worklist = worklist_model(app);
     let next_scans = next_scans_state(app);
     let dfd = dfd_model(app);
     let empty_hint = map_empty_hint(app, &context, attack_surface.is_some(), &dfd);
@@ -23,6 +25,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
         project,
         attack_surface,
         hot_modules,
+        worklist,
         next_scans,
         dfd,
         empty_hint,

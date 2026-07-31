@@ -153,6 +153,10 @@ impl JobHub {
             .is_some_and(|slot| slot.cancel.is_cancelled())
     }
 
+    pub(crate) fn has_cancel_requested(&self) -> bool {
+        self.slots.values().any(|slot| slot.cancel.is_cancelled())
+    }
+
     #[cfg(test)]
     pub(crate) fn is_quarantined(&self, kind: JobKind) -> bool {
         self.slots.get(&kind).is_some_and(|slot| slot.quarantined)

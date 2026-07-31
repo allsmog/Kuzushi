@@ -1,5 +1,8 @@
 use super::*;
 use anyhow::Result;
+use kuzushi_core::findings::{
+    dataflow_evidence_rows, DataflowEvidenceRow, DATAFLOW_EVIDENCE_SUBJECT,
+};
 use kuzushi_core::{
     sorted_finding_alias_indices, FindingStore, PatchAttemptSummary, PatchLifecycleRecord,
 };
@@ -51,6 +54,27 @@ pub(crate) fn finding_patch_truth_for_target(
         lifecycle,
         lifecycle_matches_finding_generation,
     }))
+}
+
+/// The deep-auditor's cited dataflow evidence for a finding, projected from
+/// its `deep-audit:evidence` audit events. `None` means no findings store or
+/// no matching finding; an empty vec means the finding exists but the auditor
+/// recorded no citations.
+pub(crate) fn finding_audit_dataflow_for_target(
+    target: &Path,
+    fingerprint: &str,
+) -> Result<Option<Vec<DataflowEvidenceRow>>> {
+    let Some(store) = open_existing_finding_store_read_only(target)? else {
+        return Ok(None);
+    };
+    let Some(finding) = store.get_finding_by_operator_reference(fingerprint)? else {
+        return Ok(None);
+    };
+    let Some(finding_id) = finding.id else {
+        return Ok(None);
+    };
+    let events = store.list_finding_audit_events(finding_id, DATAFLOW_EVIDENCE_SUBJECT)?;
+    Ok(Some(dataflow_evidence_rows(&events)))
 }
 
 fn open_existing_finding_store_read_only(target: &Path) -> Result<Option<FindingStore>> {

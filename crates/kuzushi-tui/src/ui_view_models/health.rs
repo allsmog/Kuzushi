@@ -314,20 +314,28 @@ fn cpg_graph_row(app: &ShellApp) -> HealthRow {
             "target <path>",
         );
     };
-    let dir = kuzushi_core::cpg_artifact_dir(target);
-    if matches!(cached_path_state(app, &dir), PathState::Directory) {
+    // Pass reflects the auditor's real truth — whole-graph artifacts for the
+    // current shape version (`has_artifacts`), not mere directory existence. A
+    // `.kuzushi/cpg-rs` dir holding only scoped/ graphs, only stale-shape
+    // graphs, or a failed build's debris would pass a bare is_dir() check yet
+    // still error "no cpg graph" on every cpg_taint_paths call. The truth is
+    // computed off-frame by the hydration worker and read here from the cache,
+    // never via a synchronous `read_dir` on the render path.
+    if cached_cpg_artifacts(app, target) {
         return health_row(
             HealthTone::Pass,
             "cpg graphs",
-            dir.display(),
+            kuzushi_core::cpg_artifact_dir(target).display(),
             "backend=cpg-rs",
         );
     }
+    // No usable whole-graph artifact: the deep auditor refuses to build
+    // implicitly and runs grep-only, so this is a degraded state, not a Pass.
     health_row(
-        HealthTone::Pass,
+        HealthTone::Warn,
         "cpg graphs",
-        "none prebuilt; graphs build implicitly on first hunt",
-        "run cpg:build to prebuild",
+        "no graph — deep-audit runs grep-only",
+        "run cpg:build (or taintTools=build)",
     )
 }
 
@@ -351,6 +359,19 @@ fn cached_health_checks(app: &ShellApp) -> Option<ViewHealthChecks> {
         ViewDataState::Ready(checks) => Some(checks),
         ViewDataState::NotRequested | ViewDataState::Loading => None,
     }
+}
+
+/// Reads the memoized cpg has_artifacts flag from the hydration cache. While
+/// the probe is `NotRequested`/`Loading` (or resolves to `false`) the row shows
+/// the degraded Warn state, mirroring how `codeql_db_row` treats a not-yet-read
+/// PathState — never a synchronous filesystem read on the render path.
+fn cached_cpg_artifacts(app: &ShellApp, target: &Path) -> bool {
+    matches!(
+        app.workbench_cache()
+            .borrow()
+            .cached_cpg_artifacts_built(Some(target)),
+        ViewDataState::Ready(true)
+    )
 }
 
 fn cached_path_state(app: &ShellApp, path: &Path) -> PathState {

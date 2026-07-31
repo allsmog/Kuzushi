@@ -71,14 +71,43 @@ fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<
         Line::styled(fit(&plan.why, width), theme::muted()),
         Line::styled(fit("EVIDENCE GOALS", width), theme::label()),
     ];
+    append_evidence_goals(&mut lines, plan, width);
+    lines.push(Line::styled(fit("SAFETY BOUNDARY", width), theme::label()));
+    lines.extend(boundary_lines(plan.empirical, width));
+    append_model_ladder(&mut lines, plan, width);
+    append_investigation_stop_conditions(&mut lines, width);
+    lines.push(Line::styled(fit(&plan.command, width), theme::accent()));
+    lines
+}
+
+fn append_evidence_goals(
+    lines: &mut Vec<Line<'static>>,
+    plan: &InvestigationPlanModel,
+    width: usize,
+) {
     for goal in &plan.evidence_goals {
         lines.push(Line::styled(
             fit(&format!("  ▸ {goal}"), width),
             theme::primary(),
         ));
     }
-    lines.push(Line::styled(fit("SAFETY BOUNDARY", width), theme::label()));
-    lines.extend(boundary_lines(plan.empirical, width));
+}
+
+fn append_model_ladder(
+    lines: &mut Vec<Line<'static>>,
+    plan: &InvestigationPlanModel,
+    width: usize,
+) {
+    lines.push(Line::styled(fit("MODEL LADDER", width), theme::label()));
+    for rung in &plan.model_ladder {
+        lines.push(Line::styled(
+            fit(&format!("  · {rung}"), width),
+            theme::muted(),
+        ));
+    }
+}
+
+fn append_investigation_stop_conditions(lines: &mut Vec<Line<'static>>, width: usize) {
     lines.push(Line::styled(fit("STOP CONDITIONS", width), theme::label()));
     lines.push(Line::styled(
         fit(
@@ -94,8 +123,6 @@ fn investigation_lines(plan: &InvestigationPlanModel, width: usize) -> Vec<Line<
         ),
         theme::muted(),
     ));
-    lines.push(Line::styled(fit(&plan.command, width), theme::accent()));
-    lines
 }
 
 /// The Trace screen: the recorded path beside the operator-requested
@@ -451,6 +478,7 @@ pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'st
         evidence_lines(finding, width),
         width,
     ));
+    append_plain_dataflow(&mut lines, finding, width);
     lines.extend(divider_lines(
         "PROOF LADDER",
         proof_ladder_lines(finding, model.proof.as_ref(), width),
@@ -462,6 +490,21 @@ pub(super) fn plain_lines(model: &ProvePhaseModel, width: usize) -> Vec<Line<'st
         width,
     ));
     lines
+}
+
+fn append_plain_dataflow(
+    lines: &mut Vec<Line<'static>>,
+    finding: &FindingDetailModel,
+    width: usize,
+) {
+    if finding.dataflow_evidence.is_empty() {
+        return;
+    }
+    lines.extend(divider_lines(
+        "AUDITED DATAFLOW",
+        dataflow_lines(finding, width),
+        width,
+    ));
 }
 
 fn render_empty(
@@ -568,7 +611,7 @@ fn render_compact_body(
     state: PhaseRenderState,
 ) {
     let width = area.width.saturating_sub(2) as usize;
-    let mut lines = evidence_lines(finding, width);
+    let mut lines = evidence_and_dataflow_lines(finding, area.width.saturating_sub(2));
     lines.push(divider("PROOF LADDER", area.width.saturating_sub(2)));
     lines.extend(proof_ladder_lines(finding, model.proof.as_ref(), width));
     lines.push(divider(
@@ -626,7 +669,7 @@ fn render_evidence(
         frame,
         area,
         "EVIDENCE · z attack path",
-        evidence_lines(finding, area.width.saturating_sub(2) as usize),
+        evidence_and_dataflow_lines(finding, area.width.saturating_sub(2)),
         PhaseSurfaceId::ProveEvidence,
         state,
     );
@@ -642,6 +685,34 @@ fn evidence_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<'stati
     }
     if finding.evidence_overflow > 0 {
         lines.push(evidence_overflow_line(finding.evidence_overflow));
+    }
+    lines
+}
+
+/// EVIDENCE followed by the deep-auditor's AUDITED DATAFLOW section when the
+/// finding carries dataflow rows. This is the frame-side parallel to the plain
+/// projection's `append_plain_dataflow`, so the interactive Prove EVIDENCE pane
+/// discloses the same falsifying dataflow the Review frame and plain output do.
+fn evidence_and_dataflow_lines(finding: &FindingDetailModel, pane_width: u16) -> Vec<Line<'static>> {
+    let width = pane_width as usize;
+    let mut lines = evidence_lines(finding, width);
+    if !finding.dataflow_evidence.is_empty() {
+        lines.push(divider("AUDITED DATAFLOW", pane_width));
+        lines.extend(dataflow_lines(finding, width));
+    }
+    lines
+}
+
+/// The deep-auditor's cited dataflow, rendered with the same anchor layout as
+/// EVIDENCE. Only reached when at least one row exists, so no empty line.
+fn dataflow_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (index, row) in finding.dataflow_evidence.iter().enumerate() {
+        let anchor = FindingEvidenceRow::from_dataflow(row);
+        lines.extend(evidence_anchor_lines(index, &anchor, width));
+    }
+    if finding.dataflow_overflow > 0 {
+        lines.push(evidence_overflow_line(finding.dataflow_overflow));
     }
     lines
 }
@@ -743,6 +814,10 @@ mod investigation_card_tests {
                 "Attempt safe reproduction and record a runtime witness".to_string(),
             ],
             empirical,
+            model_ladder: vec![
+                "gate: not set (rejection only)".to_string(),
+                "panel: workspace model x 1 pass(es)".to_string(),
+            ],
             command: "run verify:finding {\"fingerprint\":\"abc\",\"mode\":\"model\"}".to_string(),
         }
     }
@@ -784,6 +859,156 @@ mod investigation_card_tests {
             "{body}"
         );
         assert!(body.contains("( ) Static-only (mode=model)"), "{body}");
+    }
+
+    #[test]
+    fn card_discloses_the_model_ladder_in_execution_order() {
+        let body = text(&investigation_lines(&plan(false), 100));
+        assert!(body.contains("MODEL LADDER"), "{body}");
+        assert!(body.contains("gate: not set (rejection only)"), "{body}");
+        assert!(
+            body.contains("panel: workspace model x 1 pass(es)"),
+            "{body}"
+        );
+        // The ladder sits above the drafted command it summarizes.
+        let ladder_at = body.find("MODEL LADDER").unwrap();
+        let command_at = body.find("run verify:finding {").unwrap();
+        assert!(ladder_at < command_at, "{body}");
+    }
+}
+
+#[cfg(test)]
+mod dataflow_prove_tests {
+    use super::*;
+    use crate::ui_view_models::TaintFlowPath;
+    use kuzushi_core::findings::DataflowEvidenceRow;
+
+    fn investigation() -> InvestigationPlanModel {
+        InvestigationPlanModel {
+            reference: "F-7".to_string(),
+            severity: "HIGH".to_string(),
+            why: "evidence message-only".to_string(),
+            evidence_goals: vec!["Recover structured evidence anchors".to_string()],
+            empirical: false,
+            model_ladder: vec!["panel: workspace model x 1 pass(es)".to_string()],
+            command: "run verify:finding {\"fingerprint\":\"abc\"}".to_string(),
+        }
+    }
+
+    fn finding_with_dataflow() -> FindingDetailModel {
+        FindingDetailModel {
+            evidence_state: "evidence:0".to_string(),
+            corroboration: "1".to_string(),
+            dataflow_evidence: vec![DataflowEvidenceRow {
+                origin: "deep auditor (cpg-rs path)".to_string(),
+                location: "src/users.ts:91".to_string(),
+                kind: "guard".to_string(),
+                note: "falsifying evidence · authz gate".to_string(),
+            }],
+            dataflow_overflow: 0,
+            ..FindingDetailModel::default()
+        }
+    }
+
+    fn prove_model() -> ProvePhaseModel {
+        ProvePhaseModel {
+            finding: Some(finding_with_dataflow()),
+            attack_path: TaintFlowPath::default(),
+            proof: None,
+            selection_disclosure: None,
+            empty_hint: None,
+            investigation: Some(investigation()),
+            trace: None,
+        }
+    }
+
+    fn body(model: &ProvePhaseModel) -> String {
+        plain_lines(model, 100)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The AUDITED DATAFLOW section is additive: it renders after EVIDENCE
+    /// without displacing the P1 MODEL LADDER block.
+    #[test]
+    fn prove_renders_audited_dataflow_and_keeps_the_model_ladder() {
+        let text = body(&prove_model());
+
+        assert!(text.contains("MODEL LADDER"), "{text}");
+        assert!(text.contains("AUDITED DATAFLOW"), "{text}");
+        assert!(text.contains("guard · src/users.ts:91"), "{text}");
+        let evidence_at = text.find("EVIDENCE").unwrap();
+        let dataflow_at = text.find("AUDITED DATAFLOW").unwrap();
+        assert!(evidence_at < dataflow_at, "{text}");
+    }
+
+    #[test]
+    fn prove_without_dataflow_rows_renders_no_dataflow_header() {
+        let mut model = prove_model();
+        model.finding = Some(FindingDetailModel::default());
+        let text = body(&model);
+
+        assert!(!text.contains("AUDITED DATAFLOW"), "{text}");
+        assert!(text.contains("MODEL LADDER"), "{text}");
+    }
+
+    fn helper_text(finding: &FindingDetailModel) -> String {
+        evidence_and_dataflow_lines(finding, 100)
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The frame-side EVIDENCE pane helper appends AUDITED DATAFLOW after the
+    /// evidence summary, so the interactive frame discloses the same falsifying
+    /// dataflow row the plain projection does.
+    #[test]
+    fn evidence_and_dataflow_helper_appends_audited_dataflow_after_evidence() {
+        let text = helper_text(&finding_with_dataflow());
+
+        let summary_at = text.find("evidence:0").expect("evidence summary present");
+        let dataflow_at = text.find("AUDITED DATAFLOW").expect("dataflow header present");
+        assert!(summary_at < dataflow_at, "{text}");
+        assert!(text.contains("guard · src/users.ts:91"), "{text}");
+        assert!(text.contains("falsifying evidence"), "{text}");
+    }
+
+    #[test]
+    fn evidence_and_dataflow_helper_omits_header_without_rows() {
+        let text = helper_text(&FindingDetailModel::default());
+        assert!(!text.contains("AUDITED DATAFLOW"), "{text}");
+    }
+
+    /// End-to-end frame smoke: rendering the Prove page at a side-by-side width
+    /// paints AUDITED DATAFLOW into the EVIDENCE pane, not just the plain path.
+    #[test]
+    fn prove_frame_shows_audited_dataflow_in_evidence_pane() {
+        use crate::app::WorkbenchSurfaceScroll;
+        use ratatui::{backend::TestBackend, Terminal};
+
+        let scroll = WorkbenchSurfaceScroll::default();
+        let state = PhaseRenderState {
+            focus: None,
+            surface: None,
+            role: SurfaceRole::Standard,
+            scroll: &scroll,
+            density: LayoutDensity::Dense,
+        };
+        let model = prove_model();
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                let area = frame.area();
+                render(frame, area, &model, state);
+            })
+            .unwrap();
+
+        let rendered = format!("{:?}", terminal.backend().buffer());
+        assert!(rendered.contains("AUDITED DATAFLOW"), "{rendered}");
     }
 }
 

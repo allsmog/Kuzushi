@@ -165,11 +165,38 @@ impl BuildInput {
     pub(crate) fn is_fresh(&self) -> bool {
         self.seed_mode == "fresh"
     }
+
+    /// The one seeding decision. The persisted model reaches the prompt — the
+    /// full document through the source bundle *and* the count summary in the
+    /// prompt header — if and only if this is true. Every channel keys off
+    /// this rather than re-deriving it, which is what let the full document
+    /// ride an ungated `sources` entry while `seedMode` gated only the
+    /// summary. Refine is separate: it derives from the persisted document
+    /// by definition.
+    pub(crate) fn embeds_prior_model(&self) -> bool {
+        !self.is_fresh() && self.sources.iter().any(|source| source == "threat-model")
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seeding_input(seed_mode: &str, sources: &[&str]) -> BuildInput {
+        BuildInput {
+            seed_mode: seed_mode.to_string(),
+            sources: sources.iter().map(|source| source.to_string()).collect(),
+            ..BuildInput::default()
+        }
+    }
+
+    #[test]
+    fn prior_model_is_embedded_only_when_both_knobs_agree() {
+        assert!(seeding_input("seeded", &["context", "threat-model"]).embeds_prior_model());
+        assert!(!seeding_input("fresh", &["context", "threat-model"]).embeds_prior_model());
+        assert!(!seeding_input("seeded", &["context"]).embeds_prior_model());
+        assert!(!seeding_input("fresh", &["context"]).embeds_prior_model());
+    }
 
     #[test]
     fn default_output_dir_uses_shared_run_dir() {

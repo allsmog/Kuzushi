@@ -52,10 +52,6 @@ fn investigation_plan_model(
     let boundary = app.router.workbench().investigation_draft()?;
     let (alias, raw) = selected?;
     let detail = detail?;
-    let command = format!(
-        "run verify:finding {}",
-        serde_json::json!({ "fingerprint": raw.fingerprint, "mode": boundary.mode_value() })
-    );
     Some(InvestigationPlanModel {
         reference: alias
             .clone()
@@ -67,8 +63,80 @@ fn investigation_plan_model(
         ),
         evidence_goals: investigation_evidence_goals(raw, proof),
         empirical: boundary == crate::app::InvestigationBoundary::LocalReproduction,
-        command,
+        model_ladder: investigation_model_ladder(app),
+        command: investigation_verify_command(app, &raw.fingerprint, boundary),
     })
+}
+
+/// Builds the exact `run verify:finding {…}` command the investigation card
+/// previews. This is the single source of truth for that command: the Prove
+/// card renders it and the Enter-to-draft key handler drafts it, so the
+/// preview can never diverge from what actually runs. Operator-stored model
+/// knobs (`model`, `gateModel`, verifier `passes`) are folded in so the
+/// drafted command carries the same models the card's ladder discloses.
+pub(crate) fn investigation_verify_command(
+    app: &ShellApp,
+    fingerprint: &str,
+    boundary: crate::app::InvestigationBoundary,
+) -> String {
+    let mut input = serde_json::Map::new();
+    input.insert("fingerprint".to_string(), serde_json::json!(fingerprint));
+    input.insert("mode".to_string(), serde_json::json!(boundary.mode_value()));
+    for (key, value) in stored_verify_model_knobs(app) {
+        input.insert(key, value);
+    }
+    format!("run verify:finding {}", serde_json::Value::Object(input))
+}
+
+/// The operator-stored verify:finding model knobs, keyed canonically, that
+/// belong in a drafted verification. Only knobs the operator actually set are
+/// present, so an unconfigured engagement drafts just `fingerprint`/`mode`.
+fn stored_verify_model_knobs(app: &ShellApp) -> serde_json::Map<String, serde_json::Value> {
+    let stored = app.option_store().effective_stored_values("verify:finding");
+    let mut knobs = serde_json::Map::new();
+    for (canonical, aliases) in [
+        ("model", &[] as &[&str]),
+        ("gateModel", &["gate_model"]),
+        ("escalationModel", &["escalation_model"]),
+        ("VERIFY_PASSES", &["passes"]),
+    ] {
+        let value = stored
+            .get(canonical)
+            .or_else(|| aliases.iter().find_map(|alias| stored.get(*alias)));
+        if let Some(value) = value {
+            knobs.insert(canonical.to_string(), value.clone());
+        }
+    }
+    knobs
+}
+
+/// A human-readable summary of which models the drafted verification will use,
+/// in execution order: the cheap plausibility gate (rejection only), then the
+/// full-strength panel. Both rows report exactly the models
+/// `investigation_verify_command` folds into the drafted command.
+fn investigation_model_ladder(app: &ShellApp) -> Vec<String> {
+    let knobs = stored_verify_model_knobs(app);
+    let gate = knobs
+        .get("gateModel")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("not set");
+    let panel = knobs
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("workspace model");
+    let passes = knobs
+        .get("VERIFY_PASSES")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(1);
+    let escalation = knobs
+        .get("escalationModel")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("not set");
+    vec![
+        format!("gate: {gate} (rejection only)"),
+        format!("panel: {panel} x {passes} pass(es)"),
+        format!("escalate on tie: {escalation}"),
+    ]
 }
 
 /// Evidence goals derive from the finding's recorded gaps, so the card only
@@ -126,6 +194,10 @@ fn proof_replay_model(
         crash_evidence: verification.crash_evidence.clone(),
         duration_ms: verification.duration_ms,
         cost_usd: verification.cost_usd,
+        stages: verification
+            .notes
+            .iter()
+            .find_map(|note| kuzushi_core::parse_stage_note(note)),
         notes: verification.notes.clone(),
         created_at: verification.created_at.clone(),
         provenance_run_id,
@@ -176,6 +248,7 @@ mod investigation_goal_tests {
             duration_ms: 10,
             cost_usd: 0.0,
             notes: Vec::new(),
+            stages: None,
             created_at: "now".to_string(),
             provenance_run_id: None,
             replay_run_id: None,

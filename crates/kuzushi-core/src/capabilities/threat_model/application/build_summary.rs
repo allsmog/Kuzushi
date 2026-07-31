@@ -119,6 +119,16 @@ fn threat_model_header_lines(
     }
 }
 
+/// States plainly whether the previous generation influenced this build, so
+/// the operator never has to infer it from options that used to disagree.
+fn seed_status_label(input: &BuildInput) -> &'static str {
+    if input.is_refine() || input.embeds_prior_model() {
+        "seeded"
+    } else {
+        "fresh (persisted model not embedded)"
+    }
+}
+
 fn threat_model_build_header_lines(
     input: &BuildInput,
     persisted: bool,
@@ -133,6 +143,7 @@ fn threat_model_build_header_lines(
         ),
         format!("  Method:   {}", methodology_label(&input.methodology)),
         format!("  Slice:    {}", input.slice),
+        format!("  Seed:     {}", seed_status_label(input)),
     ];
     append_pasta_stages(&mut lines, input);
     lines.extend([

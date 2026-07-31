@@ -98,6 +98,12 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "security-viz gallery — risk heatmap, attack path/tree, DFD",
     },
     ShellCommandSpec {
+        command: "rail",
+        aliases: &["/rail", "sidebar", "/sidebar"],
+        category: ShellCommandCategory::Session,
+        description: "toggle the context rail (auto-shows at ≥140 columns)",
+    },
+    ShellCommandSpec {
         command: "keys",
         aliases: &["/keys", "keymap", "/keymap"],
         category: ShellCommandCategory::Session,

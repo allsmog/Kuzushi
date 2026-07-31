@@ -21,8 +21,8 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 │  SQL injection reaches query               │  proof summary: ✓ verified L4
 │  src/auth/login.rs:17                      │
 │  ▸ next:patch · Enter open                 │── DECISION ──
-│ F-0002  H [●○○] s1 @? signal open Orde...  │  current decision: needs_review
-│ F-0003  H [●○○] s1 @? signal open Temp...  │  decision source: none
+│ F-0002  H [●○○] s1 @? signal open Temp...  │  current decision: needs_review
+│ F-0003  H [●○○] s1 @? signal open Orde...  │  decision source: none
 │ F-0004  M [●○○] s1 @? signal open Uplo...  │  decision history: no decision history loaded
 │ F-0005  M [●○○] s1 @? signal open Sess...  │  decide: `decision <true-positive|false-positive> <reason>`
 │ F-0006  L [●○○] s1 @? signal open Debu...  │  dismiss: `dismiss <reason> <note>`

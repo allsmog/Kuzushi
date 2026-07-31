@@ -67,27 +67,50 @@ fn collect_entry_points(snapshot: &Value) -> Vec<Value> {
     let Some(surface) = attack_surface else {
         return Vec::new();
     };
-    surface
-        .get("nodes")
-        .and_then(Value::as_array)
+    attack_surface_rows(surface)
         .map(|nodes| nodes.iter().filter_map(normalize_entry_point).collect())
         .unwrap_or_default()
 }
 
+fn attack_surface_rows(surface: &serde_json::Map<String, Value>) -> Option<&[Value]> {
+    surface
+        .get("surfaces")
+        .and_then(Value::as_array)
+        .or_else(|| surface.get("nodes").and_then(Value::as_array))
+        .map(Vec::as_slice)
+}
+
 fn normalize_entry_point(node: &Value) -> Option<Value> {
-    let kind = node.get("kind").and_then(Value::as_str)?;
+    let fields = node.as_object()?;
+    let kind = fields.get("kind").and_then(Value::as_str)?;
     if !is_entry_point_kind(kind) {
         return None;
     }
-    Some(json!({
-        "kind": kind,
-        "method": node.get("method").cloned().unwrap_or(Value::Null),
-        "path": node.get("path").cloned().unwrap_or(Value::Null),
-        "handler": node.get("handler").cloned().unwrap_or(Value::Null),
-        "framework": node.get("framework").cloned().unwrap_or(Value::Null),
-        "language": node.get("language").cloned().unwrap_or(Value::Null),
-        "location": node.get("location").cloned().unwrap_or(Value::Null),
-    }))
+    let mut normalized = fields.clone();
+    normalized
+        .entry("name".to_string())
+        .or_insert_with(|| entry_point_name(fields));
+    normalized
+        .entry("location".to_string())
+        .or_insert_with(|| entry_point_location(fields));
+    Some(Value::Object(normalized))
+}
+
+fn entry_point_name(fields: &serde_json::Map<String, Value>) -> Value {
+    ["title", "handler", "route", "path"]
+        .into_iter()
+        .find_map(|key| fields.get(key).and_then(Value::as_str))
+        .map_or(Value::Null, |name| json!(name))
+}
+
+fn entry_point_location(fields: &serde_json::Map<String, Value>) -> Value {
+    let Some(path) = fields.get("path").and_then(Value::as_str) else {
+        return Value::Null;
+    };
+    fields
+        .get("line")
+        .and_then(Value::as_u64)
+        .map_or_else(|| json!(path), |line| json!(format!("{path}:{line}")))
 }
 
 fn is_entry_point_kind(kind: &str) -> bool {
@@ -97,14 +120,22 @@ fn is_entry_point_kind(kind: &str) -> bool {
             | "http_route"
             | "rpc-endpoint"
             | "rpc_endpoint"
+            | "rpc-handler"
+            | "rpc_handler"
             | "websocket"
             | "graphql-resolver"
             | "cli-entrypoint"
             | "cli_entrypoint"
             | "scheduled-job"
             | "background-job"
+            | "background_job"
             | "message-consumer"
             | "external-service-client"
+            | "external_service_client"
+            | "deserialization-point"
+            | "deserialization_point"
+            | "file-upload-parse-path"
+            | "file_upload_parse_path"
     )
 }
 
@@ -163,8 +194,56 @@ fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use super::*;
+    use std::fs;
+
+    #[test]
+    fn extractor_reads_canonical_surfaces_and_preserves_grounding_fields() {
+        let snapshot = json!({
+            "attackSurfaceMap": {
+                "surfaces": [{
+                    "id": "AS-route",
+                    "kind": "http_route",
+                    "path": "src/api.rs",
+                    "line": 42,
+                    "title": "POST /oauth/callback",
+                    "evidence": "router.post",
+                    "method": "POST",
+                    "route": "/oauth/callback",
+                    "boundary": "public_http",
+                    "risk": {"score": 80},
+                    "metadata": {"handler": "oauth_callback"}
+                }]
+            }
+        });
+
+        let rows = collect_entry_points(&snapshot);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], json!("AS-route"));
+        assert_eq!(rows[0]["name"], json!("POST /oauth/callback"));
+        assert_eq!(rows[0]["location"], json!("src/api.rs:42"));
+        assert_eq!(rows[0]["evidence"], json!("router.post"));
+        assert_eq!(rows[0]["metadata"]["handler"], json!("oauth_callback"));
+    }
+
+    #[test]
+    fn extractor_keeps_legacy_nodes_as_a_compatibility_fallback() {
+        let snapshot = json!({
+            "attackSurfaceMap": {
+                "nodes": [{
+                    "kind": "rpc-endpoint",
+                    "handler": "legacy_handler",
+                    "path": "src/rpc.rs"
+                }]
+            }
+        });
+
+        let rows = collect_entry_points(&snapshot);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["name"], json!("legacy_handler"));
+    }
 
     #[cfg(unix)]
     #[test]

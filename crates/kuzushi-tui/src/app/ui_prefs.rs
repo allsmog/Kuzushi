@@ -9,13 +9,22 @@ pub(crate) struct UiPrefs {
     advisory: AdvisoryState,
     auto_open_activity: bool,
     auto_open_viz: bool,
+    /// Persisted `ui.rail` policy: false = the operator hid the context rail.
+    rail_enabled: bool,
+    /// Ephemeral this-session override: an explicit `rail` show survives on
+    /// terminals narrower than the automatic breakpoint.
+    rail_force_open: bool,
+    /// Persisted `ui.notify` policy for out-of-frame attention signals.
+    notify_enabled: bool,
+    /// Live terminal focus, from crossterm focus events; `Unknown` until the
+    /// terminal reports (notifications fail closed on `Unknown`).
+    terminal_focus: crate::app::FocusState,
     last_operator_interaction: Option<Instant>,
     spinner_phase: u8,
     last_spinner_advance: Option<Instant>,
     last_liveness_redraw: Option<Instant>,
     force_full_redraw: bool,
     should_quit: bool,
-    ctrl_c_armed_at: Option<Instant>,
     viewport: TerminalViewport,
     runtime_keymap: RuntimeKeymap,
     pending_key_chord: Option<PendingKeyChord>,
@@ -57,13 +66,16 @@ impl UiPrefs {
             advisory: AdvisoryState::default(),
             auto_open_activity,
             auto_open_viz,
+            rail_enabled: true,
+            rail_force_open: false,
+            notify_enabled: true,
+            terminal_focus: crate::app::FocusState::default(),
             last_operator_interaction: None,
             spinner_phase: 0,
             last_spinner_advance: None,
             last_liveness_redraw: None,
             force_full_redraw: false,
             should_quit: false,
-            ctrl_c_armed_at: None,
             viewport: TerminalViewport::default(),
             runtime_keymap,
             pending_key_chord: None,
@@ -248,6 +260,38 @@ impl UiPrefs {
         self.auto_open_viz = enabled;
     }
 
+    pub(crate) fn rail_enabled(&self) -> bool {
+        self.rail_enabled
+    }
+
+    pub(crate) fn set_rail_enabled(&mut self, enabled: bool) {
+        self.rail_enabled = enabled;
+    }
+
+    pub(crate) fn rail_force_open(&self) -> bool {
+        self.rail_force_open
+    }
+
+    pub(crate) fn set_rail_force_open(&mut self, force: bool) {
+        self.rail_force_open = force;
+    }
+
+    pub(crate) fn notify_enabled(&self) -> bool {
+        self.notify_enabled
+    }
+
+    pub(crate) fn set_notify_enabled(&mut self, enabled: bool) {
+        self.notify_enabled = enabled;
+    }
+
+    pub(crate) fn terminal_focus(&self) -> crate::app::FocusState {
+        self.terminal_focus
+    }
+
+    pub(crate) fn set_terminal_focus(&mut self, focus: crate::app::FocusState) {
+        self.terminal_focus = focus;
+    }
+
     pub(crate) fn record_operator_interaction(&mut self, now: Instant) {
         self.last_operator_interaction = Some(now);
     }
@@ -339,14 +383,6 @@ impl UiPrefs {
 
     pub(crate) fn request_quit(&mut self) {
         self.should_quit = true;
-    }
-
-    pub(crate) fn ctrl_c_armed_at(&self) -> Option<Instant> {
-        self.ctrl_c_armed_at
-    }
-
-    pub(crate) fn set_ctrl_c_armed_at(&mut self, armed_at: Option<Instant>) {
-        self.ctrl_c_armed_at = armed_at;
     }
 
     pub(crate) fn viewport(&self) -> TerminalViewport {

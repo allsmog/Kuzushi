@@ -209,6 +209,8 @@ fn render_dfd(frame: &mut Frame<'_>, area: Rect, model: &FixPhaseModel, state: P
             // The Fix pane embeds the diagram without an inspector cursor.
             selection: None,
             detail_scroll: 0,
+            focused: false,
+            context_selection: 0,
         },
     );
 }

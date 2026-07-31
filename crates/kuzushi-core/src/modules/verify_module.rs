@@ -46,9 +46,31 @@ fn verify_finding_options() -> Vec<OptionSpec> {
         verify_prompt_option(),
         verification_passes_option(),
         model_option(),
+        gate_model_option(),
+        escalation_model_option(),
         mcps_option(),
         mcp_tool_timeout_ms_option(),
     ]
+}
+
+fn gate_model_option() -> OptionSpec {
+    opt(
+        "gateModel",
+        OptionType::String,
+        "Cheap-tier plausibility gate model (provider:modelId). Only its NOT-exploitable verdict is trusted; an exploitable gate verdict escalates to the full-strength panel on `model`. Unset means no gate.",
+    )
+    .aliases(&["gate_model"])
+    .advanced()
+}
+
+fn escalation_model_option() -> OptionSpec {
+    opt(
+        "escalationModel",
+        OptionType::String,
+        "Different tie-break model (provider:modelId) consulted only when the panel splits evenly. Must differ from `model`; a same-model or invalid spec is refused and the split verdict stands. Unset means splits are not escalated.",
+    )
+    .aliases(&["escalation_model"])
+    .advanced()
 }
 
 fn verification_mode_option() -> OptionSpec {

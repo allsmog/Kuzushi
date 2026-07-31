@@ -51,6 +51,42 @@ authority. Use inline one-shot input, shell `set`, or home-scoped `setg` when a
 full prompt replacement is intentional. This rule applies identically to
 scan, shell, and run because all three use canonical registry preparation.
 
+### Deep-auditor dataflow tools (`taintTools`)
+
+`triage:run` and `deep-audit:run` expose a non-advanced `taintTools` enum
+(alias `taint_tools`, default `available`) that governs the in-process
+CPG-taint dataflow tool offered to the deep auditor:
+
+- `off` — never touches the code property graph on disk; the auditor stays
+  grep-only.
+- `available` — offers `cpg_taint_paths` backed by an existing
+  `<target>/.kuzushi/cpg-rs/` graph. No graph on disk degrades to grep-only
+  (surfaced on the Health page and a run notice); it never builds implicitly.
+- `build` — builds the graph first, then offers the tool.
+
+The auditor's `cpg_taint_paths` tool and its method-step prompt are advertised
+from a single readiness predicate, so a registered tool and the system prompt
+can never disagree, and tool *availability* alone never moves a proof rung or
+confidence chip. Because `triage:run` forwards its whole prepared input into the
+`deep-audit` path, setting `taintTools` once flows to every deep audit in the
+run. This is a Review-phase knob, not a Setup row.
+
+### Risk worklist (`worklist:rank`)
+
+`worklist:rank` ranks the target's files by aggregated risk contributors
+(attack-surface, findings, and — when a `<target>/.kuzushi/cpg-rs/` graph
+exists — CPG flow reach). It reads the durable `context-snapshot.json`; with no
+snapshot the worklist is empty and names the two commands that create it
+(`context:build`, then `worklist:rank`). It is deterministic and takes no model
+knobs; `limit` (default 5 in the Map section, all on the scene page) caps the
+returned rows. Each row carries a raw citation (`A92`, `F17`) and its normalized
+pair, contributor states (`Live` / `Unavailable{reason}` / `Degraded{reason}` /
+`NotRequested`), and an `unranked` count for files with zero signal — the same
+truth the shell `worklist` verb, the Map `WORKLIST` section, and the scene
+Worklist page render. Missing signals degrade visibly (`⚠ degraded — no cpg
+graph`); ranks stay contiguous and are never zero-filled to hide a dropped
+contributor.
+
 Within each stored scope there is also a target axis. Values are merged in
 specificity order: `all` first, then `module:<id>`, then `tool:<module:verb>`.
 That means a tool-specific value beats a module value, and a module value beats
@@ -356,6 +392,38 @@ If a request model is exactly the operator default, the router treats it as the
 default placeholder so role-specific routes and `MODEL_<ROLE>` overrides still
 apply. This is intentional: callers pass the default model to preserve
 no-silent-fallback validation, while the router owns role selection.
+
+### Tie-break escalation to a different model
+
+A split consensus verdict — an even panel vote in `verify:finding`, or a tied
+deep-audit consensus — can be handed to a **different, operator-named** model
+to break the tie. Escalation is never inherited: absence leaves the split
+verdict standing, and a same-model or invalid escalation is refused and
+disclosed, never silently substituted.
+
+- `verify:finding` reads the `escalationModel` option (alias
+  `escalation_model`, advanced): a `provider:modelId` spec that must differ
+  from `model`. It runs one extra pass only when the panel splits evenly, adopts
+  that pass's verdict, and keeps the `consensus` block visible (unanimity is
+  never forged). A refusal surfaces as a completed-with-warning, and the durable
+  verification note records the gate/panel/tie-break stage ladder.
+- `verify:finding` also reads the `gateModel` option (alias `gate_model`,
+  advanced): a cheap-tier `provider:modelId` plausibility gate that runs before
+  the full panel. Only its NOT-exploitable verdict is trusted (rejection-only) —
+  an exploitable gate verdict escalates to the full-strength `model` panel; unset
+  means no gate. A malformed spec is accepted at `setg` but rejected legibly at
+  dispatch (`verify:finding gateModel is not a valid model spec`), never silently
+  dropped or defaulted. The Prove `MODEL LADDER` card discloses the gate, panel,
+  and escalate-on-tie rows in execution order and drafts the same models into the
+  verification command.
+- The deep auditor uses the `triage_escalation` router role. Set it with
+  `setg MODEL_TRIAGE_ESCALATION provider:modelId` or
+  `~/.kuzushi/models.toml [roles.triage_escalation] primary`. The escalation
+  model resolves from **explicit sources only** — the `MODEL_TRIAGE_ESCALATION`
+  option override and the models.toml route — and never falls through to the
+  operator default or the router default. A tie with no named escalation stays
+  `needs_review`; an escalation that is itself inconclusive keeps `needs_review`
+  rather than forging a decision.
 
 Target-local model control is rejected. `<target>/.kuzushi/v3/config.toml` must
 not set `model`, and `<target>/.kuzushi/models.toml` is not loaded. Put durable

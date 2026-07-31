@@ -1,6 +1,10 @@
 use super::page_scroll::{page_scroll_kind, PageScrollKind};
 use super::*;
 
+/// Rows the Logs view spends on chrome above the scrolling body: the context
+/// strip, blank, `LOGS` divider, summary hint, and the position row.
+const LOGS_CHROME_ROWS: usize = 8;
+
 impl ShellApp {
     pub(super) fn handle_generic_scroll_hotkey(&mut self, key: KeyEvent) -> bool {
         if self.handle_catalog_row_hotkey(key) {
@@ -10,8 +14,8 @@ impl ShellApp {
             return false;
         }
         match key.code {
-            KeyCode::Char('j') => self.scroll_current_view_down(1),
-            KeyCode::Char('k') => self.scroll_current_view_up(1),
+            KeyCode::Down | KeyCode::Char('j') => self.scroll_current_view_down(1),
+            KeyCode::Up | KeyCode::Char('k') => self.scroll_current_view_up(1),
             KeyCode::Char('g') => self.scroll_current_view_to_top(),
             KeyCode::Char('G') => self.scroll_current_view_to_bottom(),
             _ => return false,
@@ -28,6 +32,9 @@ impl ShellApp {
     }
 
     pub(super) fn scroll_current_view_up(&mut self, amount: usize) {
+        if self.scroll_logs_up(amount) {
+            return;
+        }
         if let Some(kind) = self.current_page_scroll_kind() {
             self.subtract_page_scroll(kind, amount);
         } else {
@@ -35,7 +42,34 @@ impl ShellApp {
         }
     }
 
+    /// Scrolling back from the tail must land one line above the last row, not
+    /// one below the `usize::MAX` tail sentinel — otherwise the viewport stays
+    /// clamped to the bottom and keeps following new output. Resolving the
+    /// real row count here is what makes the released tail actually hold.
+    fn scroll_logs_up(&mut self, amount: usize) -> bool {
+        if !matches!(self.shell_view(), ShellView::Logs) {
+            return false;
+        }
+        let anchor = self.logs_bottom_scroll().min(self.router.logs().scroll());
+        self.router.logs_mut().set_scroll(anchor);
+        self.router.logs_mut().scroll_up(amount);
+        true
+    }
+
+    /// The scroll offset that shows the final row of the Logs document.
+    fn logs_bottom_scroll(&self) -> usize {
+        let rows = crate::ui_view_models::logs_model(self).rows.len();
+        let visible = usize::from(self.viewport().rows).saturating_sub(LOGS_CHROME_ROWS);
+        rows.saturating_sub(visible.max(1))
+    }
+
     pub(super) fn scroll_current_view_to_top(&mut self) {
+        if matches!(self.shell_view(), ShellView::Logs) {
+            // Jumping to the start of the transcript is leaving the tail; the
+            // footer must not keep claiming the view is following new output.
+            self.router.logs_mut().jump_to_start();
+            return;
+        }
         if let Some(kind) = self.current_page_scroll_kind() {
             *self.page_scroll_mut(kind) = 0;
         } else {
@@ -44,6 +78,12 @@ impl ShellApp {
     }
 
     pub(super) fn scroll_current_view_to_bottom(&mut self) {
+        if matches!(self.shell_view(), ShellView::Logs) {
+            // Jumping to the end of the transcript is also how the operator
+            // asks to follow new output again.
+            self.router.logs_mut().follow_tail();
+            return;
+        }
         if let Some(kind) = self.current_page_scroll_kind() {
             *self.page_scroll_mut(kind) = usize::MAX;
         } else {
@@ -209,7 +249,7 @@ impl ShellApp {
             | ShellView::ActorDetail
             | ShellView::ModuleRun
             | ShellView::Workbench => true,
-            ShellView::Scene => !self.router.scene().page().is_3d(),
+            ShellView::Scene => !self.router.scene().page().is_frame_rendered(),
             _ => false,
         }
     }

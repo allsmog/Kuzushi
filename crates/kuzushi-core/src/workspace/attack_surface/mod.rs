@@ -39,12 +39,15 @@ mod inspect_ruby_line;
 mod inspect_rust_line;
 mod inspect_source_file;
 mod inspect_thrift_line;
+mod load;
 mod node_route_from_line;
 mod summarize_surfaces;
 #[cfg(test)]
 mod tests;
 
 pub use add::build_attack_surface_map;
+pub use load::load_attack_surface_map;
+pub use load::{load_attack_surface_map_detailed, AttackSurfaceMapLoad};
 pub use add::build_attack_surface_map_from_inventory;
 pub use attack_surface_model::AttackSurface;
 pub use attack_surface_model::AttackSurfaceKind;

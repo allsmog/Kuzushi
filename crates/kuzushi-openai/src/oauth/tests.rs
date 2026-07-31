@@ -59,6 +59,26 @@ mod tests {
     }
 
     #[test]
+    fn openai_probe_reads_the_shared_oauth_bag_entry() {
+        let tmp = tempdir().unwrap();
+        let far_future_ms = current_unix_ms() + 30 * 24 * 3600 * 1000;
+        let path = write_file(
+            tmp.path(),
+            "creds.json",
+            &format!(
+                r#"{{"openai-codex":{{"refresh":"r","access":"a","expires":{far_future_ms}}}}}"#
+            ),
+        );
+
+        assert_eq!(
+            probe_openai_path(&path).unwrap(),
+            OauthReadiness::Ready {
+                expires_at_ms: far_future_ms
+            }
+        );
+    }
+
+    #[test]
     fn probe_reports_invalid_when_required_fields_missing() {
         let tmp = tempdir().unwrap();
         let path = write_file(

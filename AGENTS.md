@@ -139,6 +139,22 @@ paths through the real `ModuleRegistry` boundary before documenting behavior.
   or execution-ordering input. Do not document `depends_on` as ordering unless
   the Rust executor consumes it.
 
+### Resource discipline for agents
+
+- Search first, then read only the ranges needed to make a decision. Avoid
+  repeatedly loading an entire large test or generated file into one session.
+- Start with the narrowest relevant test. Use `pnpm verify:quick:summary` when a
+  broad repository gate is necessary so child output does not flood agent
+  history.
+- If summary verification fails, rerun only the failing command to collect
+  focused diagnostics before changing code.
+- Treat subagent launches and multi-journey TUI audits as explicit operator
+  decisions. Do not fan out one agent per journey unless the operator approves
+  that parallelism.
+- Run TUI DevEx journeys sequentially by default and name the requested journey
+  IDs explicitly. An empty skill invocation runs only the highest-priority
+  journey.
+
 ### Clean Code / Uncle Bob baseline
 
 Every code addition, refactor, merge, and conflict resolution should leave the
@@ -340,9 +356,12 @@ is expected to behave identically and should be filed as a parity bug.
   task. KWP descriptors may carry inert phase metadata, but dynamic DAG
   scheduling remains future scan-orchestrator work.
 
-- **Two-stage Ctrl+C, NL planner (`/plan`), Setup editors, Run Focus, durable
-  phase pages, Report, replay/trace, contextual visualizations, prompt tuning,
-  actor detail, and cost-cap halt cards** are interactive shell presentation.
+- **Context-sensitive Ctrl+C/Ctrl+D exit and cancellation, NL planner
+  (`/plan`), Setup editors, Run Focus, durable phase pages, Report,
+  replay/trace, contextual visualizations, prompt tuning, actor detail, and
+  cost-cap halt cards** are interactive shell presentation. Ctrl+C/Ctrl+D exit
+  immediately when idle, request cancellation without exiting while work is
+  active, and wait safely when cancellation is already pending.
   Plain/scripted output belongs in `crates/kuzushi-tui/src/renderer/plain/`
   and must serialize the same view models without inventing another workflow.
 - **Cockpit Spine (`ShellView::{Setup,Workbench,Activity,Report}`)** is the
@@ -410,12 +429,14 @@ is expected to behave identically and should be filed as a parity bug.
   phase — raising the dial never forges phase progress.
 - **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
-  `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
+  `Tab`-cycled gallery of eight pages (`scene3d::VizPage`). Pure view-model
   builders in `ui_view_models/viz_data.rs` turn `ShellApp` state into each
   page's model (`risk_by_module(&app.findings)`, `dfd_model(app)`,
+  `entry_point_breakdown(app)`, `component_stack(app)`, `worklist_model(app)`,
   `attack_tree(app)`, `taint_flow_path(app)`); each model carries an
-  `empty_hint` so a page with no backing artifact draws one guidance line, never
-  dummy content. Rendered three ways:
+  `empty_hint` so a page with no
+  backing artifact draws one guidance line, never dummy content. Rendered five
+  ways:
   - **3D attack-surface terrain** — half-block truecolor framebuffer with a
     z-buffer + Lambert shading (`scene3d::render`); one Gaussian bump per hot
     module, height = normalized severity-weighted risk score. The only page that
@@ -426,6 +447,19 @@ is expected to behave identically and should be filed as a parity bug.
     boxes + orthogonal connectors (`─ │ ╭ ╮ ╰ ╯` + `▶`/`▼` arrowheads) in
     `renderer/views/scene/diagram`. Crisp full-cell strokes — deliberately *not*
     the braille `Canvas` (which read grainy).
+  - **Entry-point browser** — every real `attackSurface.entryPoints[]` record in
+    a trust-zone-grouped master-detail browser. `j/k` selects an ingress,
+    `PgUp/PgDn` scrolls only its evidence, and `Enter` jumps to its first resolved
+    DFD node/flow/boundary. Wide terminals render list + detail side by side;
+    narrow terminals stack a bounded list above the selected detail. Plain output
+    remains exhaustive and grouped by trust zone. The page appears in the rail
+    only when entry points exist.
+  - **Component stack** — an asynchronously collected SBOM projection grouped
+    as a tree by ecosystem, manifest/lockfile, scope, and component. Manifest
+    constraints are labeled `declared`; lockfile values are labeled `resolved`,
+    and matching resolved versions are shown beside direct dependencies. The
+    page also names detected languages and build systems, appears only when real
+    target facts exist, and uses the shared line-view scroll path.
   - **Line diagrams** — attack path (real source→sink stages from
     `app.taint_flow`) + findings heatmap (per-module risk) as styled box-drawing
     `Line`s in `renderer/views/scene/diagrams`.
@@ -440,18 +474,21 @@ is expected to behave identically and should be filed as a parity bug.
   to Heatmap when findings exist, and
   `viz_page_for_tool(tool_name)` maps artifact-emitting verbs exactly —
   `taint-iris:hunt`→AttackPath and `exploit-chain:scan`→ExploitChain. DFDs,
-  terrain, heatmaps, attack trees, and trace content therefore remain available
-  without reviving the legacy Workbench layout. Prereq/read verbs
+  entry-point inventories, component stacks, terrain, heatmaps, attack trees,
+  and trace content therefore remain available without reviving the legacy
+  Workbench layout.
+  Prereq/read verbs
   (`taint-iris-next:catalog`, `threat-model:read`) and
   `taint-iris-next:hunt` (which flattens its path into finding text, emitting no
   `flows[]`) are intentionally unmapped. The snapshot caches
   in `app/tool_runner/run_tool/snapshots.rs` populate `app.exploit_chains` /
   `app.taint_flow` from the tool JSON `data` first; `taint-iris` emits structured
   `data.flows[]` for this (see `taint_iris` `extract_taint_flows`, parallel to
-  the text findings). `VizPage::is_frame_rendered` (terrain + the two box-drawing
-  pages) drives `uses_scene_frame` ⇔ the frame-level path (`render_scene_view`);
-  the line pages and all plain/non-TTY output go through `scene_page_lines`
-  (frame pages show a "renders in a TTY" note there). All geometry and view
+  the text findings). `VizPage::is_frame_rendered` (terrain, the two box-drawing
+  pages, and the entry-point browser) drives `uses_scene_frame` ⇔ the frame-level
+  path (`render_scene_view`); remaining line pages and all plain/non-TTY output
+  go through `scene_page_lines` (frame pages show a "renders in a TTY" note
+  there). All geometry and view
   models are pure and testable off-screen — `scene3d` rasterizer math, the
   `viz_data` builders, the diagram `Line` builders, and the box-drawing widgets
   (rendered into a `Buffer` in unit tests).
@@ -516,6 +553,26 @@ is expected to behave identically and should be filed as a parity bug.
   scrollable full-frame decks. They share one non-nesting origin: replacing one
   utility retains the original workflow view and input mode, and Esc restores
   both exactly.
+- **The context rail (`rail`, `ui.rail`) is shell-only presentation.** A
+  36-column right rail of ambient engagement facts (target/scope, attention
+  items, journey chips, in-flight work, findings ledger, cost vs budget) that
+  auto-appears at ≥140 columns — deliberately above the 120 that unlocks the
+  Workbench Dense/Fix-reference layouts, so it never demotes them. Every rail
+  section projects existing view-model truth; empty sections render nothing and
+  the in-flight section self-erases. Body layout, breakpoints, hit-testing, and
+  guided-question hosting all measure against the rail-reduced content area
+  (`split_context_rail` in `renderer/render_app.rs`). `rail` toggles it with
+  asymmetric persistence: hiding writes durable `ui.rail false`, showing
+  restores auto policy plus a this-session force-open (floor 100 columns).
+  Plain output never renders the rail.
+- **Focus-gated attention notifications (`ui.notify`) are shell-only.** The
+  interactive shell tracks terminal focus (crossterm focus events, enabled with
+  bracketed paste) and, when a new `AttentionBroker` item appears while the
+  terminal is blurred, rings BEL and posts an OSC 9 desktop notification. The
+  policy (`app/attention_notify.rs`) fails closed while focus is unreported and
+  returns structured skip reasons, never a silent bool; only static kind text
+  leaves the frame. `setg ui.notify false` opts out; headless modes emit
+  nothing.
 - **Durable session transcripts are shell-only.** Interactive, plain, and
   scripted shells append a redacted semantic timeline under the operator-owned
   `~/.kuzushi/v3/sessions/` store. Headless `scan` and `run` keep their existing

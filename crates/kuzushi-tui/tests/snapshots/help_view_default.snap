@@ -210,6 +210,8 @@ threats versions - list stored threat-model versions from the index ledger
   aliases / examples: /threats versions, threats history
 threats use <n> - make a stored threat-model version the live model
   aliases / examples: /threats use <n>, threats select <n>
+worklist - risk-ranked file worklist — highest-risk files first, with ranker citations
+  aliases / examples: /worklist
 
 AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
@@ -266,6 +268,8 @@ no - discard pending plan
   aliases / examples: /no, n
 scene - security-viz gallery — risk heatmap, attack path/tree, DFD
   aliases / examples: /scene, /viz, viz
+rail - toggle the context rail (auto-shows at ≥140 columns)
+  aliases / examples: /rail, sidebar, /sidebar
 keys - show global and current-view keybindings
   aliases / examples: /keys, keymap, /keymap
 theme - preview active theme and accessibility knobs

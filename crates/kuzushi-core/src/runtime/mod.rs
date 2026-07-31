@@ -33,8 +33,9 @@ pub use mcp_probe::{
     McpArtifactSpec, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,
 };
 pub use policy::{
-    bridge_api_key_env_for_model, canonical_model_spec, require_configured_model,
-    resolve_explicit_model, validate_model_api_key_env, validate_model_spec,
+    bridge_api_key_env_for_model, canonical_model_spec, decide_tie_break, require_configured_model,
+    resolve_explicit_model, validate_model_api_key_env, validate_model_spec, TieBreakEscalation,
+    TieBreakRefusal,
 };
 pub use traced_runtime::{
     model_error_class_from_message, model_provider, prompt_pair_hash, safe_model_failure_message,

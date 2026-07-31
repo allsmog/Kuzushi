@@ -17,6 +17,7 @@ pub(crate) struct VerifyFindingToolRequest<'a> {
     pub(crate) store: &'a FindingStore,
     pub(crate) runtime: Option<&'a dyn AgentRuntime>,
     pub(crate) configured_model: Option<&'a str>,
+    pub(crate) trace: Option<&'a crate::run_artifacts::TraceHandle>,
 }
 
 pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
@@ -31,6 +32,25 @@ fn bind_prompt_to_source_identity(
     Ok(format!(
         "{prompt}\n\nVerification source identity (canonical JSON):\n{canonical}\nBase every source claim on this exact captured identity."
     ))
+}
+
+/// A gate model identical to the primary verifier is not a cheaper first
+/// opinion: it doubles model spend and makes the gate/panel stage ladder claim
+/// a two-tier structure that does not exist. Refuse it explicitly rather than
+/// silently running the same model twice.
+fn require_distinct_gate_model(gate_model: Option<&str>, primary_model: &str) -> Result<()> {
+    let Some(gate_model) = gate_model else {
+        return Ok(());
+    };
+    let gate = crate::runtime::canonical_model_spec(gate_model)?;
+    let primary = crate::runtime::canonical_model_spec(primary_model)?;
+    if gate == primary {
+        anyhow::bail!(
+            "verify:finding gateModel must differ from the verifier model ({primary}); \
+             a same-model gate doubles spend without a cheaper first opinion"
+        );
+    }
+    Ok(())
 }
 
 /// The gate's involvement must stay visible in the result: a rejection that
@@ -49,11 +69,187 @@ fn annotate_gate_stage(result: &mut Value, gate_model: &str, escalated: bool) {
     }
 }
 
+/// A split panel that was broken by a different, operator-named model must stay
+/// visible: the operator can see which model resolved the tie and that it ran
+/// only because the panel deadlocked. The `consensus` block is deliberately
+/// untouched, so unanimity is never forged.
+fn annotate_escalation_stage(
+    result: &mut Value,
+    escalation_model: &str,
+    resolved_exploitable: bool,
+    panel_passes: u64,
+) {
+    if let Some(object) = result.as_object_mut() {
+        object.insert(
+            "escalation".to_string(),
+            json!({
+                "stage": "tie-break",
+                "model": escalation_model,
+                "attempted": true,
+                "resolvedExploitable": resolved_exploitable,
+                // The full panel size that deadlocked, not the tie count — a
+                // 4-pass 2-2 split reports panelPasses=4.
+                "panelPasses": panel_passes,
+            }),
+        );
+    }
+}
+
+/// A refused escalation (same model as the primary, or an invalid spec) is a
+/// disclosed non-event: the split verdict stands and the operator sees why the
+/// escalation did not run.
+fn annotate_escalation_refused(result: &mut Value, reason: crate::runtime::TieBreakRefusal) {
+    if let Some(object) = result.as_object_mut() {
+        object.insert(
+            "escalation".to_string(),
+            json!({
+                "stage": "tie-break",
+                "attempted": false,
+                "refusedReason": reason.operator_message(),
+                "refusedToken": reason.token(),
+            }),
+        );
+    }
+}
+
+/// An escalation pass that ERRORED (an overloaded/401 escalation model, a cost
+/// overflow) must not destroy the already-computed, already-paid split verdict.
+/// Escalation is a best-effort tie-breaker: its failure degrades to a disclosed
+/// non-event exactly like a refusal — the split verdict stands and the operator
+/// sees why the tie-break did not resolve. `attempted:false` routes the message
+/// through the same `warnings[]`/stage-note refusal-disclosure path.
+fn annotate_escalation_failed(result: &mut Value, escalation_model: &str, error: &anyhow::Error) {
+    if let Some(object) = result.as_object_mut() {
+        object.insert(
+            "escalation".to_string(),
+            json!({
+                "stage": "tie-break",
+                "model": escalation_model,
+                "attempted": false,
+                "refusedReason": format!(
+                    "tie-break escalation attempt failed: {error}; split verdict unchanged"
+                ),
+                "refusedToken": "attempt-failed",
+            }),
+        );
+    }
+}
+
+/// Adopt the escalation pass's verdict into the split panel result while keeping
+/// the `consensus` block intact, then record the escalation stage.
+fn apply_escalation_verdict(result: &mut Value, pass: &Value, escalation_model: &str) {
+    let panel_passes = panel_pass_count(result);
+    let resolved_exploitable = pass
+        .get("exploitable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    adopt_escalation_representative(result, pass);
+    annotate_escalation_stage(result, escalation_model, resolved_exploitable, panel_passes);
+}
+
+fn panel_pass_count(result: &Value) -> u64 {
+    result
+        .get("consensus")
+        .and_then(|consensus| consensus.get("passes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+}
+
+/// Make the escalation pass the representative result, then re-attach the panel
+/// `consensus` block (and any gate annotation) untouched. Field-by-field merging
+/// could mix an `exploitable=true` verdict with a `proofVerdict`/`pocPayload`
+/// inherited from the not-exploitable representative — a self-contradictory
+/// result the proof candidate later rejects. Adopting the whole normalized pass
+/// guarantees exploitable, proofVerdict, pocPayload, and citations are coherent
+/// because they all come from the SAME pass. The consensus block is preserved
+/// verbatim, so the split stays visible and unanimity is never forged.
+fn adopt_escalation_representative(result: &mut Value, pass: &Value) {
+    let consensus = result.get("consensus").cloned();
+    let gate = result.get("gate").cloned();
+    *result = pass.clone();
+    let Some(object) = result.as_object_mut() else {
+        return;
+    };
+    if let Some(consensus) = consensus {
+        object.insert("consensus".to_string(), consensus);
+    }
+    if let Some(gate) = gate {
+        object.insert("gate".to_string(), gate);
+    }
+}
+
+/// Fold the gate/panel/escalation blocks into one durable, round-trippable
+/// `stages: …` note stored on the result. Absent structure produces no note.
+fn annotate_stage_note(result: &mut Value) {
+    let Some(disclosure) = build_stage_disclosure(result) else {
+        return;
+    };
+    let note = crate::findings::format_stage_note(&disclosure);
+    if let Some(object) = result.as_object_mut() {
+        object.insert("stageNote".to_string(), json!(note));
+    }
+}
+
+fn build_stage_disclosure(
+    result: &Value,
+) -> Option<crate::findings::VerificationStageDisclosure> {
+    let gate = stage_block_model(result.get("gate"));
+    let panel_passes = consensus_pass_count(result);
+    let split = super::verify_consensus::panel_verdict_is_split(result);
+    let escalation = attempted_escalation_model(result);
+    let refused = refused_escalation_token(result);
+    if gate.is_none() && !split && escalation.is_none() && refused.is_none() {
+        return None;
+    }
+    Some(crate::findings::VerificationStageDisclosure {
+        gate,
+        panel_passes,
+        split,
+        escalation,
+        refused,
+    })
+}
+
+fn stage_block_model(block: Option<&Value>) -> Option<String> {
+    block?
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn consensus_pass_count(result: &Value) -> u32 {
+    result
+        .get("consensus")
+        .and_then(|consensus| consensus.get("passes"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32
+}
+
+fn attempted_escalation_model(result: &Value) -> Option<String> {
+    let escalation = result.get("escalation")?;
+    (escalation.get("attempted").and_then(Value::as_bool) == Some(true))
+        .then(|| stage_block_model(Some(escalation)))
+        .flatten()
+}
+
+fn refused_escalation_token(result: &Value) -> Option<String> {
+    let escalation = result.get("escalation")?;
+    (escalation.get("attempted").and_then(Value::as_bool) == Some(false))
+        .then(|| {
+            escalation
+                .get("refusedToken")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .flatten()
+}
+
 fn bind_verification_result(
     mut result: Value,
     finding: &crate::findings::Finding,
     source_identity: &crate::workflow_attempts::TargetContentIdentity,
 ) -> Result<Value> {
+    annotate_stage_note(&mut result);
     let scan_id = finding
         .scan_id
         .as_deref()
@@ -175,6 +371,25 @@ fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Val
         "[+] verify:finding complete".to_string(),
         format!("      {verdict}"),
     ];
+    append_vector_line(&mut lines, &result);
+    if let Some(ladder) = stage_ladder_line(&result) {
+        lines.push(ladder);
+    }
+    append_cost_line(&mut lines, &cost);
+    let summary = format!("verify:finding complete ({verdict})");
+    let proof = verification_proof_snapshot(&result)?;
+    let refusal_warning = escalation_refusal_warning(&result);
+    let data = verification_response_data(result, &proof, &summary)?;
+    let mut response =
+        crate::module_result::completed_output_result(summary, lines.join("\n"), data);
+    add_verification_response_metadata(&mut response, proof, cost);
+    if let Some(message) = refusal_warning {
+        push_verification_warning(&mut response, message);
+    }
+    Ok(response)
+}
+
+fn append_vector_line(lines: &mut Vec<String>, result: &Value) {
     if let Some(vector) = result
         .get("attackVector")
         .and_then(Value::as_str)
@@ -182,23 +397,69 @@ fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Val
     {
         lines.push(format!("      vector: {vector}"));
     }
+}
+
+fn append_cost_line(lines: &mut Vec<String>, cost: &RuntimeCostReport) {
     if cost.is_unavailable() {
         lines.push("      cost unavailable".to_string());
-    } else {
-        let cost_label = if cost.is_complete() {
-            "cost"
-        } else {
-            "observed cost"
-        };
-        lines.push(format!("      {cost_label}=${:.4}", cost.observed_usd()));
+        return;
     }
-    let summary = format!("verify:finding complete ({verdict})");
-    let proof = verification_proof_snapshot(&result)?;
-    let data = verification_response_data(result, &proof, &summary)?;
-    let mut response =
-        crate::module_result::completed_output_result(summary, lines.join("\n"), data);
-    add_verification_response_metadata(&mut response, proof, cost);
-    Ok(response)
+    let cost_label = if cost.is_complete() {
+        "cost"
+    } else {
+        "observed cost"
+    };
+    lines.push(format!("      {cost_label}=${:.4}", cost.observed_usd()));
+}
+
+/// One line naming every extra-tier model that ran beside the panel: the cheap
+/// gate and/or the tie-break escalation. The panel's own model runs on every
+/// call, so it stays implicit; `None` keeps a plain single-tier response quiet.
+fn stage_ladder_line(result: &Value) -> Option<String> {
+    let mut stages = Vec::new();
+    if let Some(model) = result
+        .get("gate")
+        .and_then(|gate| gate.get("model"))
+        .and_then(Value::as_str)
+    {
+        stages.push(format!("gate {model}"));
+    }
+    if let Some(model) = escalation_stage_model(result) {
+        stages.push(format!("tie-break {model}"));
+    }
+    (!stages.is_empty()).then(|| format!("      stages: {}", stages.join(" · ")))
+}
+
+fn escalation_stage_model(result: &Value) -> Option<&str> {
+    let escalation = result.get("escalation")?;
+    (escalation.get("attempted").and_then(Value::as_bool) == Some(true))
+        .then(|| escalation.get("model").and_then(Value::as_str))
+        .flatten()
+}
+
+fn escalation_refusal_warning(result: &Value) -> Option<String> {
+    let escalation = result.get("escalation")?;
+    if escalation.get("attempted").and_then(Value::as_bool) != Some(false) {
+        return None;
+    }
+    escalation
+        .get("refusedReason")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// A refusal is a completed-with-warning outcome, never a failure: the verdict
+/// stands and the reason rides in `warnings[]`.
+fn push_verification_warning(response: &mut Value, message: String) {
+    let Some(object) = response.as_object_mut() else {
+        return;
+    };
+    let warnings = object
+        .entry("warnings")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    if let Some(array) = warnings.as_array_mut() {
+        array.push(json!(message));
+    }
 }
 
 fn add_verification_response_metadata(response: &mut Value, proof: Value, cost: RuntimeCostReport) {
@@ -231,6 +492,13 @@ fn verification_proof_snapshot(result: &Value) -> Result<Value> {
         "verifiedScanId": required_result_field(result, "verifiedScanId")?,
         "identityId": required_result_field(result, "identityId")?,
         "sourceIdentity": required_result_field(result, "sourceIdentity")?,
+        // Mirror the stage blocks so the operator-facing `proof` snapshot stays
+        // consistent with the `data` copy. These blocks are display-only: the
+        // durable proof candidate deserializes only the verdict/identity fields,
+        // so they are not part of its 4-way equality check (see the test
+        // `stage_blocks_are_carried_outside_the_compared_candidate_fields`).
+        "gate": result.get("gate").cloned().unwrap_or(Value::Null),
+        "escalation": result.get("escalation").cloned().unwrap_or(Value::Null),
     }))
 }
 
@@ -412,6 +680,7 @@ mod tests {
             mcps: true,
             mcp_tool_timeout_ms: Some(12_345),
             gate_model: None,
+            escalation_model: None,
         };
 
         let request = verify_agent_query_request("model", temp.path(), "prompt", &input).unwrap();
@@ -448,6 +717,26 @@ mod tests {
     }
 
     #[test]
+    fn gate_model_equal_to_the_verifier_model_is_refused() {
+        // Same spec, different spelling (surrounding whitespace normalized away).
+        let error = require_distinct_gate_model(
+            Some("  anthropic : claude-haiku-4-5  "),
+            "anthropic:claude-haiku-4-5",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("must differ from the verifier model"), "{error}");
+
+        // A genuinely distinct gate model is allowed.
+        require_distinct_gate_model(Some("openai:gpt-cheap"), "anthropic:claude-haiku-4-5")
+            .expect("distinct gate model is allowed");
+
+        // No gate model is a no-op (single-tier verification).
+        require_distinct_gate_model(None, "anthropic:claude-haiku-4-5")
+            .expect("absent gate model is allowed");
+    }
+
+    #[test]
     fn gate_model_input_is_validated_and_optional() {
         let with_gate = VerifyFindingInput::from_tool_input(
             &json!({"fingerprint": "F-1", "gateModel": "anthropic:claude-haiku-4-5"}),
@@ -480,6 +769,7 @@ mod tests {
             mcps: false,
             mcp_tool_timeout_ms: None,
             gate_model: None,
+            escalation_model: None,
         };
 
         let request =
@@ -487,5 +777,369 @@ mod tests {
 
         assert!(request.tool_policy.is_default());
         assert!(request.runtime_options.is_none());
+    }
+
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use std::sync::Mutex;
+
+    /// Local scripted runtime keyed by the request's model: the primary panel
+    /// splits (first pass exploitable, second not), and the escalation model
+    /// resolves exploitable. Kept out of the shared MockRuntime on purpose.
+    struct ModelKeyedVerifyRuntime {
+        primary: String,
+        fingerprint: String,
+        models: Mutex<Vec<String>>,
+    }
+
+    impl AgentRuntime for ModelKeyedVerifyRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            let mut models = self.models.lock().unwrap();
+            models.push(request.model.clone());
+            let primary_calls = models.iter().filter(|m| **m == self.primary).count();
+            let exploitable = if request.model == self.primary {
+                primary_calls == 1
+            } else {
+                true
+            };
+            Ok(AgentQueryResponse {
+                structured: Some(verify_result_json(exploitable, &self.fingerprint)),
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
+            unreachable!("verify:finding does not use the triage path")
+        }
+    }
+
+    fn verify_result_json(exploitable: bool, fingerprint: &str) -> Value {
+        json!({
+            "fingerprint": fingerprint,
+            "exploitable": exploitable,
+            "confidence": if exploitable { 0.9 } else { 0.4 },
+            "proofLevel": 2,
+            "proofVerdict": if exploitable { "exploited" } else { "not_reproduced" },
+            "attackVector": if exploitable { json!("sqli") } else { Value::Null },
+        })
+    }
+
+    fn triaged_store(target: &Path) -> (crate::findings::FindingStore, crate::findings::Finding) {
+        let store = crate::findings::FindingStore::open_in_memory().unwrap();
+        store.record_run_started("scan-1", target, "running").unwrap();
+        let finding = crate::findings::Finding::new_tool(
+            "verify-e2e",
+            "verify-e2e/rule",
+            "src/db.ts",
+            1,
+            None,
+            crate::findings::Severity::High,
+            "user input reaches sql",
+        );
+        let id = store.insert_finding("scan-1", &finding).unwrap();
+        store
+            .record_auto_triage(id, &crate::findings::TriageOutcome::default())
+            .unwrap();
+        let stored = store
+            .get_finding_by_operator_reference(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        (store, stored)
+    }
+
+    #[test]
+    fn verify_finding_escalates_a_split_panel_to_the_named_model() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let _cache_off =
+            crate::test_env::ScopedEnv::set(crate::semantic_cache::SEMANTIC_CACHE_ENV, "off");
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding) = triaged_store(temp.path());
+        let primary = "anthropic:primary";
+        let runtime = ModelKeyedVerifyRuntime {
+            primary: primary.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            models: Mutex::new(Vec::new()),
+        };
+
+        let response = run_verify_finding_tool(VerifyFindingToolRequest {
+            input: json!({
+                "fingerprint": finding.fingerprint,
+                "VERIFY_PASSES": 2,
+                "escalationModel": "openai:escalation",
+                "mcps": false,
+            }),
+            workspace_root: temp.path(),
+            store: &store,
+            runtime: Some(&runtime),
+            configured_model: Some(primary),
+            trace: None,
+        })
+        .unwrap();
+
+        let models = runtime.models.lock().unwrap();
+        assert_eq!(models.len(), 3, "two panel passes plus one escalation pass");
+        // The 3rd request carried the escalation model, not the primary — a
+        // regression that escalated with the primary model would fail here.
+        assert_eq!(models[2], "openai:escalation");
+        assert_eq!(response["data"]["escalation"]["attempted"], json!(true));
+        assert_eq!(response["data"]["escalation"]["model"], json!("openai:escalation"));
+        // The ADOPTED verdict is the escalation pass's exploitable=true, not the
+        // split panel's not-exploitable default: the tie was actually resolved.
+        assert_eq!(
+            response["data"]["exploitable"],
+            json!(true),
+            "the escalation pass's verdict must be adopted"
+        );
+        assert_eq!(response["data"]["escalation"]["resolvedExploitable"], json!(true));
+        // The escalation resolves the tie but never forges panel unanimity.
+        assert_ne!(
+            response["data"]["verification"]["consensus"]["unanimous"],
+            json!(true)
+        );
+    }
+
+    #[test]
+    fn stored_invalid_escalation_model_on_a_split_stands_with_a_warning() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let _cache_off =
+            crate::test_env::ScopedEnv::set(crate::semantic_cache::SEMANTIC_CACHE_ENV, "off");
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding) = triaged_store(temp.path());
+        let primary = "anthropic:primary";
+        let runtime = ModelKeyedVerifyRuntime {
+            primary: primary.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            models: Mutex::new(Vec::new()),
+        };
+
+        // `claude-big` has no provider prefix — an invalid spec. It parses fine
+        // (F1) and is only refused when the split panel actually consults it.
+        let response = run_verify_finding_tool(VerifyFindingToolRequest {
+            input: json!({
+                "fingerprint": finding.fingerprint,
+                "VERIFY_PASSES": 2,
+                "escalationModel": "claude-big",
+                "mcps": false,
+            }),
+            workspace_root: temp.path(),
+            store: &store,
+            runtime: Some(&runtime),
+            configured_model: Some(primary),
+            trace: None,
+        })
+        .unwrap();
+
+        let models = runtime.models.lock().unwrap();
+        assert_eq!(models.len(), 2, "an invalid escalation never runs an extra pass");
+        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
+        assert_eq!(response["data"]["escalation"]["refusedToken"], json!("invalid-spec"));
+        // The split verdict stands unchanged (splits resolve to not-exploitable).
+        assert_eq!(response["data"]["exploitable"], json!(false));
+        assert!(
+            !response["warnings"].as_array().unwrap().is_empty(),
+            "the invalid-spec refusal reads as completed-with-warning"
+        );
+    }
+
+    #[test]
+    fn stored_invalid_escalation_model_on_a_non_split_run_is_a_normal_result() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let _cache_off =
+            crate::test_env::ScopedEnv::set(crate::semantic_cache::SEMANTIC_CACHE_ENV, "off");
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding) = triaged_store(temp.path());
+        let primary = "anthropic:primary";
+        let runtime = ModelKeyedVerifyRuntime {
+            primary: primary.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            models: Mutex::new(Vec::new()),
+        };
+
+        // A single-pass run never splits, so the invalid escalation spec is
+        // stored but never consulted: no error, no escalation annotation.
+        let response = run_verify_finding_tool(VerifyFindingToolRequest {
+            input: json!({
+                "fingerprint": finding.fingerprint,
+                "VERIFY_PASSES": 1,
+                "escalationModel": "claude-big",
+                "mcps": false,
+            }),
+            workspace_root: temp.path(),
+            store: &store,
+            runtime: Some(&runtime),
+            configured_model: Some(primary),
+            trace: None,
+        })
+        .unwrap();
+
+        assert_eq!(response["status"], json!("completed"));
+        assert!(
+            response["data"].get("escalation").is_none(),
+            "a non-split run never annotates an escalation"
+        );
+        assert!(response["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn verify_finding_discloses_a_refused_same_model_escalation() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let _cache_off =
+            crate::test_env::ScopedEnv::set(crate::semantic_cache::SEMANTIC_CACHE_ENV, "off");
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding) = triaged_store(temp.path());
+        let primary = "anthropic:primary";
+        let runtime = ModelKeyedVerifyRuntime {
+            primary: primary.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            models: Mutex::new(Vec::new()),
+        };
+
+        let response = run_verify_finding_tool(VerifyFindingToolRequest {
+            input: json!({
+                "fingerprint": finding.fingerprint,
+                "VERIFY_PASSES": 2,
+                "escalationModel": primary,
+                "mcps": false,
+            }),
+            workspace_root: temp.path(),
+            store: &store,
+            runtime: Some(&runtime),
+            configured_model: Some(primary),
+            trace: None,
+        })
+        .unwrap();
+
+        let models = runtime.models.lock().unwrap();
+        assert_eq!(models.len(), 2, "a same-model escalation never runs an extra pass");
+        assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
+        assert!(
+            !response["warnings"].as_array().unwrap().is_empty(),
+            "a refusal reads as completed-with-warning"
+        );
+        // The split verdict stands unchanged (splits resolve to not-exploitable).
+        assert_eq!(response["data"]["exploitable"], json!(false));
+    }
+
+    /// Splits the primary panel (first exploitable, second not) and then FAILS
+    /// the escalation model's pass, so the tie-breaker's error can be observed
+    /// without discarding the paid split verdict.
+    struct SplitThenFailEscalationRuntime {
+        primary: String,
+        fingerprint: String,
+        calls: Mutex<u32>,
+    }
+
+    impl AgentRuntime for SplitThenFailEscalationRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            if request.model != self.primary {
+                anyhow::bail!("escalation model overloaded (503)");
+            }
+            let mut calls = self.calls.lock().unwrap();
+            *calls += 1;
+            let exploitable = *calls == 1;
+            Ok(AgentQueryResponse {
+                structured: Some(verify_result_json(exploitable, &self.fingerprint)),
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<crate::findings::TriageOutcome> {
+            unreachable!("verify:finding does not use the triage path")
+        }
+    }
+
+    #[test]
+    fn verify_keeps_the_split_verdict_when_the_escalation_pass_errors() {
+        let _lock = crate::test_env::semantic_cache_env_lock();
+        let _cache_off =
+            crate::test_env::ScopedEnv::set(crate::semantic_cache::SEMANTIC_CACHE_ENV, "off");
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding) = triaged_store(temp.path());
+        let primary = "anthropic:primary";
+        let runtime = SplitThenFailEscalationRuntime {
+            primary: primary.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            calls: Mutex::new(0),
+        };
+
+        let response = run_verify_finding_tool(VerifyFindingToolRequest {
+            input: json!({
+                "fingerprint": finding.fingerprint,
+                "VERIFY_PASSES": 2,
+                "escalationModel": "openai:escalation",
+                "mcps": false,
+            }),
+            workspace_root: temp.path(),
+            store: &store,
+            runtime: Some(&runtime),
+            configured_model: Some(primary),
+            trace: None,
+        })
+        .unwrap();
+
+        // No top-level failure: the paid split verdict survives.
+        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["data"]["exploitable"], json!(false));
+        assert_eq!(response["data"]["escalation"]["attempted"], json!(false));
+        assert_eq!(
+            response["data"]["escalation"]["refusedToken"],
+            json!("attempt-failed")
+        );
+        let warning = response["warnings"][0].as_str().unwrap();
+        assert!(
+            warning.contains("escalation attempt failed"),
+            "the failure is disclosed as a warning: {warning}"
+        );
+    }
+
+    #[test]
+    fn adopting_an_escalation_verdict_is_coherent_across_exploitability_and_proof() {
+        // The split panel's representative is a NOT-exploitable pass
+        // (proofVerdict not_reproduced, no PoC). The escalation pass is
+        // exploitable with its own proofVerdict/PoC.
+        let mut result = json!({
+            "fingerprint": "fp",
+            "exploitable": false,
+            "confidence": 0.4,
+            "proofLevel": 2,
+            "proofVerdict": "not_reproduced",
+            "pocPayload": Value::Null,
+            "consensus": {
+                "passes": 2,
+                "exploitableVotes": 1,
+                "notExploitableVotes": 1,
+                "verdict": "not-exploitable",
+                "unanimous": false
+            }
+        });
+        let escalation_pass = json!({
+            "fingerprint": "fp",
+            "exploitable": true,
+            "confidence": 0.9,
+            "proofLevel": 3,
+            "proofVerdict": "exploited",
+            "pocPayload": "X"
+        });
+
+        apply_escalation_verdict(&mut result, &escalation_pass, "openai:escalation");
+
+        // All three fields come from the SAME (escalation) pass.
+        assert_eq!(result["exploitable"], json!(true));
+        assert_eq!(result["proofVerdict"], json!("exploited"));
+        assert_eq!(result["pocPayload"], json!("X"));
+        // This is exactly ModelProofCandidate::validate's contract: an
+        // `exploited` verdict iff exploitable. Field-by-field merging used to
+        // leave exploitable=true beside proofVerdict=not_reproduced, which the
+        // proof candidate rejected.
+        assert_eq!(
+            result["proofVerdict"] == json!("exploited"),
+            result["exploitable"] == json!(true)
+        );
+        // The consensus block is preserved verbatim: the split stays visible and
+        // unanimity is never forged.
+        assert_eq!(result["consensus"]["unanimous"], json!(false));
+        assert_eq!(result["consensus"]["passes"], json!(2));
+        // The escalation stage records the full panel size, not the tie count.
+        assert_eq!(result["escalation"]["panelPasses"], json!(2));
     }
 }

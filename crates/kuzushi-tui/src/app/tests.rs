@@ -1519,8 +1519,6 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
     );
     assert_eq!(app.router.logs().scroll(), 12);
-    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
-    assert_eq!(app.router.logs().scroll(), 11);
 
     press_key(
         &mut app,
@@ -1533,6 +1531,50 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
         KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
     );
     assert_eq!(app.router.logs().scroll(), usize::MAX);
+}
+
+#[test]
+fn jumping_to_the_start_of_the_logs_stops_claiming_the_view_follows_output() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.logs_mut().follow_tail();
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.logs().scroll(), 0);
+    assert!(!app.router.logs().is_following());
+}
+
+#[test]
+fn scrolling_logs_up_lands_inside_the_document_instead_of_below_the_tail() {
+    // `G` parks the offset on the `usize::MAX` tail sentinel. Scrolling back
+    // from there must land one line above the last row — subtracting from the
+    // sentinel would leave the viewport clamped to the bottom, so the operator
+    // would press Up and see nothing move.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input_mode(crate::InputMode::Navigate);
+    for index in 0..120 {
+        app.log("test", format!("line-{index}"));
+    }
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
+    );
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+
+    let scroll = app.router.logs().scroll();
+    assert!(
+        scroll < app.log_len(),
+        "scroll {scroll} should be inside a {}-row document",
+        app.log_len()
+    );
+    assert!(!app.router.logs().is_following());
 }
 
 #[test]
@@ -1549,6 +1591,116 @@ fn shell_log_retention_is_bounded_to_recent_lines() {
         app.log_lines().last().unwrap().body,
         format!("line-{}", LOG_LINE_CAPACITY + 24)
     );
+}
+
+#[test]
+fn shell_log_counts_the_lines_it_aged_out_of_the_live_cache() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let already_emitted = app.log_len();
+    let pushed = LOG_LINE_CAPACITY + 25;
+
+    for index in 0..pushed {
+        app.log("test", format!("line-{index}"));
+    }
+
+    // Every line ever emitted is either still cached or counted as evicted.
+    // That total is what lets the Logs view page into the durable transcript
+    // instead of presenting the remaining window as the whole session.
+    assert_eq!(
+        app.log_evicted() + app.log_len(),
+        already_emitted + pushed,
+        "evicted {} + cached {} should account for every emitted line",
+        app.log_evicted(),
+        app.log_len()
+    );
+    assert_eq!(
+        app.log_evicted(),
+        already_emitted + pushed - LOG_LINE_CAPACITY
+    );
+}
+
+#[test]
+fn clearing_the_log_also_clears_the_eviction_count() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    for index in 0..(LOG_LINE_CAPACITY + 5) {
+        app.log("test", format!("line-{index}"));
+    }
+
+    app.clear_log();
+
+    assert_eq!(app.log_evicted(), 0);
+}
+
+#[test]
+fn scrolling_logs_back_releases_the_tail_and_g_reattaches_it() {
+    // Arriving output must not yank the viewport away from what the operator
+    // scrolled back to read; `G` is the explicit way to start following again.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.logs_mut().follow_tail();
+    assert!(app.router.logs().is_following());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert!(!app.router.logs().is_following());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
+    );
+    assert!(app.router.logs().is_following());
+}
+
+#[test]
+fn logs_filter_capture_owns_typing_and_esc_clears_the_filter() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
+    );
+    assert!(app.router.logs().filter_capture());
+
+    for character in "err".chars() {
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(character), KeyModifiers::empty()),
+        );
+    }
+    assert_eq!(app.router.logs().query(), Some("err"));
+    // Filter keys must never leak into the composer.
+    assert!(app.input().is_empty(), "input: {:?}", app.input());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(!app.router.logs().filter_capture());
+    assert_eq!(app.router.logs().query(), None);
+}
+
+#[test]
+fn logs_filter_enter_keeps_the_query_it_captured() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Logs);
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('/'), KeyModifiers::empty()),
+    );
+    for character in "scan".chars() {
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(character), KeyModifiers::empty()),
+        );
+    }
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert!(!app.router.logs().filter_capture());
+    assert_eq!(app.router.logs().query(), Some("scan"));
 }
 
 #[test]
@@ -3274,6 +3426,29 @@ fn terminal_edge_commands_enter_the_command_reducer() {
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("workspace sync is not supported")
     }));
+}
+
+#[test]
+fn worklist_verb_opens_the_gallery_and_the_tab_is_absent_without_a_snapshot() {
+    let mut app = effect_routed_handler_test_app();
+    let origin = app.shell_view();
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::Worklist)
+        .expect("worklist command should be reducer-routed");
+    assert!(effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Scene);
+
+    // No hydrated attack-surface artifact: the worklist has no rows, so its tab
+    // never appears (like EntryPoints) and can't be Tab-reached.
+    assert!(!app
+        .available_viz_pages()
+        .contains(&crate::scene3d::VizPage::Worklist));
+
+    // The gallery captured the launch origin, so leaving restores it exactly.
+    let _ = origin;
+    app.reduce_command_effects(&ShellCommand::Back);
+    assert_eq!(app.shell_view(), origin);
 }
 
 #[test]
@@ -6496,6 +6671,162 @@ fn setg_and_unsetg_apply_tool_scoped_persistent_options() {
 }
 
 #[test]
+fn setg_model_triage_escalation_is_stored_as_cross_tool_policy() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(
+        &mut app,
+        ShellCommand::Options {
+            tool: Some("router:show".to_string()),
+            filter: OptionsFilter::Advanced,
+        },
+    );
+    run_command(
+        &mut app,
+        ShellCommand::SetOption {
+            global: true,
+            name: "MODEL_TRIAGE_ESCALATION".to_string(),
+            value: "openai:escalation-model".to_string(),
+        },
+    );
+
+    // R2 regression: the router reads MODEL_<ROLE> at (Global, All). A
+    // per-tool binding (or a legacy clear of the All binding) would hide it.
+    assert_eq!(
+        app.option_store()
+            .values_for(OptionScope::Global, &OptionTarget::All)
+            .and_then(|values| values.get("MODEL_TRIAGE_ESCALATION")),
+        Some(&serde_json::json!("openai:escalation-model"))
+    );
+    assert!(app
+        .option_store()
+        .values_for(
+            OptionScope::Global,
+            &OptionTarget::Tool("router:show".to_string())
+        )
+        .and_then(|values| values.get("MODEL_TRIAGE_ESCALATION"))
+        .is_none());
+
+    // role_option_overrides reads exactly this (Global, All) binding — see the
+    // core test `explicit_role_model_never_falls_back_to_the_operator_default`,
+    // which proves the router consumes MODEL_TRIAGE_ESCALATION from here.
+}
+
+#[test]
+fn session_set_model_triage_escalation_still_lands_at_global_all() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(
+        &mut app,
+        ShellCommand::Options {
+            tool: Some("router:show".to_string()),
+            filter: OptionsFilter::Advanced,
+        },
+    );
+    // Plain `set` (global: false). The router reads a role model ONLY at
+    // (Global, All); a session-scoped landing would silently no-op, so a
+    // role-model write must be forced Global regardless of set-vs-setg.
+    run_command(
+        &mut app,
+        ShellCommand::SetOption {
+            global: false,
+            name: "MODEL_TRIAGE_ESCALATION".to_string(),
+            value: "openai:x".to_string(),
+        },
+    );
+
+    assert_eq!(
+        app.option_store()
+            .values_for(OptionScope::Global, &OptionTarget::All)
+            .and_then(|values| values.get("MODEL_TRIAGE_ESCALATION")),
+        Some(&serde_json::json!("openai:x")),
+        "a session-scoped role-model write must be forced to (Global, All)"
+    );
+    // It must NOT be stranded at the session scope the router never reads.
+    assert!(app
+        .option_store()
+        .values_for(OptionScope::Session, &OptionTarget::All)
+        .and_then(|values| values.get("MODEL_TRIAGE_ESCALATION"))
+        .is_none());
+
+    // Signifier truth: the write durably persisted the global options file, so
+    // the receipt must read "setg", not the session "set" the operator typed.
+    assert!(
+        app.log_lines()
+            .iter()
+            .any(|line| line.prefix == "setg" && line.body.contains("MODEL_TRIAGE_ESCALATION")),
+        "a session `set MODEL_<ROLE>` promoted to Global must log under setg"
+    );
+    assert!(
+        !app.log_lines()
+            .iter()
+            .any(|line| line.prefix == "set" && line.body.contains("MODEL_TRIAGE_ESCALATION")),
+        "the promoted role-model write must not report a session `set`"
+    );
+}
+
+#[test]
+fn session_unset_model_triage_escalation_clears_the_global_binding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(
+        &mut app,
+        ShellCommand::Options {
+            tool: Some("router:show".to_string()),
+            filter: OptionsFilter::Advanced,
+        },
+    );
+    // Plain `set` lands the role model at (Global, All) (forced Global).
+    run_command(
+        &mut app,
+        ShellCommand::SetOption {
+            global: false,
+            name: "MODEL_TRIAGE_ESCALATION".to_string(),
+            value: "openai:x".to_string(),
+        },
+    );
+    // Plain `unset` (global: false) must mirror the set path and clear the
+    // (Global, All) binding — not no-op against the empty session scope.
+    run_command(
+        &mut app,
+        ShellCommand::UnsetOption {
+            global: false,
+            name: "MODEL_TRIAGE_ESCALATION".to_string(),
+        },
+    );
+    assert!(
+        app.option_store()
+            .values_for(OptionScope::Global, &OptionTarget::All)
+            .and_then(|values| values.get("MODEL_TRIAGE_ESCALATION"))
+            .is_none(),
+        "a plain unset must clear the (Global, All) role-model binding set created"
+    );
+}
+
+#[test]
+fn setg_escalation_model_stores_it_for_verify_finding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(
+        &mut app,
+        ShellCommand::Options {
+            tool: Some("verify:finding".to_string()),
+            filter: OptionsFilter::Advanced,
+        },
+    );
+    run_command(
+        &mut app,
+        ShellCommand::SetOption {
+            global: true,
+            name: "escalationModel".to_string(),
+            value: "openai:escalation-model".to_string(),
+        },
+    );
+
+    let stored = app.option_store().effective_stored_values("verify:finding");
+    assert_eq!(
+        stored.get("escalationModel"),
+        Some(&serde_json::json!("openai:escalation-model"))
+    );
+}
+
+#[test]
 fn auto_open_prefs_respect_shell_options() {
     let mut app = ShellApp::new(V2Config::default(), None);
     assert!(app.ui().auto_open_activity());
@@ -7570,7 +7901,7 @@ fn credential_list_preserves_explicit_global_chords() {
             &mut app,
             KeyEvent::new(KeyCode::Char(ch), KeyModifiers::CONTROL),
         );
-        assert!(app.ctrl_c_armed(), "Ctrl+{ch} must reach quit handling");
+        assert!(app.should_quit(), "Ctrl+{ch} must reach quit handling");
     }
 }
 
@@ -9860,14 +10191,25 @@ fn threat_digit_hotkeys_switch_views_without_entering_input() {
 }
 
 #[test]
-fn first_ctrl_c_at_idle_arms_without_quitting() {
+fn ctrl_c_at_idle_returns_shell_quit_effect_without_quitting_inline() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    press_key(
+    let result = update(
         &mut app,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))),
     );
+
+    assert!(result.changed);
+    assert!(matches!(
+        result.effects.as_slice(),
+        [ShellEffect::RequestShellQuit]
+    ));
     assert!(!app.should_quit());
-    assert!(app.ctrl_c_armed());
+
+    EffectRuntime::execute(&mut app, result.effects);
+    assert!(app.should_quit());
 }
 
 #[test]
@@ -9899,7 +10241,6 @@ fn ctrl_c_with_active_scan_returns_cancel_effect_without_aborting_inline() {
         [ShellEffect::CancelActiveJobs]
     ));
     assert!(!app.should_quit());
-    assert!(!app.ctrl_c_armed());
     assert!(!cancel.is_cancelled());
     assert!(!app.scan().is_some_and(|scan| scan.abort_requested));
 
@@ -9909,97 +10250,34 @@ fn ctrl_c_with_active_scan_returns_cancel_effect_without_aborting_inline() {
 }
 
 #[test]
-fn second_ctrl_c_returns_shell_quit_effect_without_quitting_inline() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let first = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        ))),
-    );
-    assert!(first.changed);
-    assert!(first.effects.is_empty());
-    assert!(app.ctrl_c_armed());
-
-    let second = update(
-        &mut app,
-        Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        ))),
-    );
-
-    assert!(second.changed);
-    assert!(matches!(
-        second.effects.as_slice(),
-        [ShellEffect::RequestShellQuit]
-    ));
-    assert!(!app.should_quit());
-
-    EffectRuntime::execute(&mut app, second.effects);
-    assert!(app.should_quit());
-}
-
-#[test]
-fn second_ctrl_c_within_window_quits() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-    );
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-    );
-    assert!(app.should_quit());
-}
-
-#[test]
-fn ctrl_d_also_arms_and_quits() {
+fn ctrl_d_also_exits_idle_shell_immediately() {
     let mut app = ShellApp::new(V2Config::default(), None);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
     );
-    assert!(app.ctrl_c_armed());
-    assert!(!app.should_quit());
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL),
-    );
     assert!(app.should_quit());
 }
 
 #[test]
-fn any_other_key_disarms() {
+fn next_ctrl_c_exits_after_worker_cleanup_finishes() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-    );
-    assert!(app.ctrl_c_armed());
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()),
-    );
-    assert!(!app.ctrl_c_armed());
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
-    );
-    assert!(!app.should_quit());
-}
+    let ticket = app.jobs_mut().start(JobKind::Run, "starting worker");
+    let cancel = ticket.cancel.clone();
 
-#[test]
-fn arm_window_expires_via_tick() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_ctrl_c_armed_at(Some(
-        Instant::now() - (CTRL_C_ARM_WINDOW + Duration::from_secs(1)),
-    ));
-    assert!(!app.ctrl_c_armed());
-    app.tick();
-    assert!(app.ctrl_c_armed_at().is_none());
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+    assert!(cancel.is_cancelled());
+    assert!(!app.should_quit());
+
+    app.jobs_mut().finish(JobKind::Run);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+    assert!(app.should_quit());
 }
 
 #[test]
@@ -10595,7 +10873,6 @@ fn ctrl_c_in_reverse_search_still_cancels_running_tool() {
     assert!(app.history_search().is_none());
     assert!(app.tool_abort_requested());
     assert!(cancel.is_cancelled());
-    assert!(!app.ctrl_c_armed());
     assert!(!app.should_quit());
 }
 
@@ -11638,6 +11915,77 @@ fn scene_view_is_never_a_trap() {
 }
 
 #[test]
+fn empty_dfd_enter_requests_the_normal_model_backed_build_without_pipeline_override() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.open_scene_to_page(crate::scene3d::VizPage::Dfd);
+
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let prepare = run_tool_prepare(&update.effects).expect("DFD Enter prepares a tool");
+
+    assert_eq!(prepare.tool_name, "threat-model:build");
+    assert!(
+        prepare.input.is_none(),
+        "normal descriptor defaults and runtime gates must own the build"
+    );
+}
+
+#[test]
+fn linked_dfd_enter_toggles_local_graph_and_escape_collapses_before_leaving() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    kuzushi_core::capabilities::save_persistent_threat_model(
+        workspace.root(),
+        &serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {
+                        "id": "browser",
+                        "name": "Browser",
+                        "trustZone": "internet"
+                    },
+                    {
+                        "id": "oauth",
+                        "name": "OAuth callback",
+                        "trustZone": "app"
+                    }
+                ],
+                "flows": [{
+                    "id": "callback",
+                    "sourceId": "browser",
+                    "targetId": "oauth"
+                }],
+                "trustBoundaries": []
+            },
+            "attackSurface": {
+                "entryPoints": [{
+                    "id": "AS-oauth",
+                    "targetElementIds": ["oauth"],
+                    "name": "oauth_callback"
+                }]
+            },
+            "assets": [],
+            "threats": []
+        }),
+        true,
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
+    app.open_scene_to_page(crate::scene3d::VizPage::Dfd);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let opened = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(opened.effects.is_empty());
+    assert!(app.router.scene().dfd_focused());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(!app.router.scene().dfd_focused());
+    assert!(matches!(app.shell_view(), ShellView::Scene));
+}
+
+#[test]
 fn static_scene_pages_do_not_consume_3d_only_controls() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router
@@ -11656,6 +12004,32 @@ fn static_scene_pages_do_not_consume_3d_only_controls() {
 
     assert_eq!(app.input(), "pr");
     assert!(!app.router.scene().paused());
+}
+
+#[test]
+fn line_scene_pages_own_the_scroll_keys_while_the_prompt_is_empty() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::AttackPath);
+    app.set_shell_view(ShellView::Scene);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.default_scroll().offset(), 1);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
+    );
+    assert_eq!(app.router.default_scroll().offset(), u16::MAX);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.default_scroll().offset(), 0);
+    assert_eq!(app.input(), "", "scroll keys must not enter the composer");
 }
 
 #[test]
@@ -14241,6 +14615,19 @@ fn lowercase_z_maps_prove_flow_and_fix_diagrams() {
     });
     prove.findings_mut()[0] = selected.clone();
     prove.set_selected_finding(Some(selected));
+    prove.cache_tool_snapshot(
+        "taint-iris:hunt",
+        &serde_json::json!({
+            "data": {"flows": [{
+                "cwe": "CWE-89",
+                "severity": "high",
+                "stages": [
+                    {"message": "source", "filePath": "src/x.rs", "line": 1},
+                    {"message": "sink", "filePath": "src/x.rs", "line": 8}
+                ]
+            }]}
+        }),
+    );
     prove.set_input_mode(crate::InputMode::Navigate);
     open_workbench_page_for_test(&mut prove, WorkbenchPage::Prove);
     press_key(
@@ -15350,7 +15737,7 @@ fn budget_abort_key_returns_effect_without_cancelling_inline() {
 }
 
 #[test]
-fn ctrl_c_during_active_scan_requests_abort_without_arming_exit() {
+fn ctrl_c_during_active_scan_requests_abort_without_exiting() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("run-x".to_string()),
@@ -15366,7 +15753,6 @@ fn ctrl_c_during_active_scan_requests_abort_without_arming_exit() {
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
     );
     assert!(!app.should_quit());
-    assert!(!app.ctrl_c_armed());
     assert!(app.scan().is_some_and(|scan| scan.abort_requested));
 }
 
@@ -15394,6 +15780,36 @@ fn ctrl_c_during_active_scan_marks_run_job_cancel_requested() {
     assert!(cancel.is_cancelled());
     assert!(app.jobs().cancel_requested(JobKind::Run));
     assert!(app.scan().is_some_and(|scan| scan.abort_requested));
+}
+
+#[test]
+fn ctrl_c_cancels_registered_worker_before_view_state_hydrates() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let ticket = app.jobs_mut().start(JobKind::Run, "starting worker");
+    let cancel = ticket.cancel.clone();
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+
+    assert!(cancel.is_cancelled());
+    assert!(app.jobs().cancel_requested(JobKind::Run));
+    assert!(!app.should_quit());
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "system" && line.body.contains("abort requested for active worker")
+    }));
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+    );
+
+    assert!(!app.should_quit());
+    assert!(app
+        .log_lines()
+        .iter()
+        .any(|line| line.body.contains("abort already requested")));
 }
 
 #[test]
@@ -15453,7 +15869,6 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     );
 
     assert!(!app.should_quit());
-    assert!(!app.ctrl_c_armed());
     assert!(app.agent_chat().is_some_and(|agent| agent.abort_requested));
     assert!(cancel.is_cancelled());
     assert!(app.jobs().cancel_requested(JobKind::Agent));
@@ -15899,7 +16314,6 @@ fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
     assert!(threat_cancel.is_cancelled());
     assert!(app.jobs().cancel_requested(JobKind::Threat));
     assert!(!app.should_quit());
-    assert!(!app.ctrl_c_armed());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "plan"
             && line.body.contains("abort requested")
@@ -15926,7 +16340,6 @@ fn ctrl_c_during_background_tool_requests_honest_abort_without_exiting() {
 
     assert!(app.tool_abort_requested());
     assert!(cancel.is_cancelled());
-    assert!(!app.ctrl_c_armed());
     assert!(!app.should_quit());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "tool"
@@ -16005,6 +16418,23 @@ fn exit_abort_effect_keeps_legacy_token_fallback() {
 }
 
 #[test]
+fn active_abort_cancels_registered_and_legacy_tokens_together() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let registered = app
+        .jobs_mut()
+        .start(JobKind::Run, "starting worker")
+        .cancel
+        .clone();
+    let legacy = ScanCancellation::default();
+    app.set_tool_cancel_for_test(legacy.clone());
+
+    assert!(app.request_active_abort());
+
+    assert!(registered.is_cancelled());
+    assert!(legacy.is_cancelled());
+}
+
+#[test]
 fn second_ctrl_c_during_background_tool_keeps_waiting_for_worker() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let cancel = ScanCancellation::default();
@@ -16066,7 +16496,6 @@ fn activity_ctrl_c_cancels_scan_and_background_tool_without_leaving_tui() {
     assert!(tool_cancel.is_cancelled());
     assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(!app.should_quit());
-    assert!(!app.ctrl_c_armed());
 }
 
 #[test]
@@ -17953,6 +18382,36 @@ fn scene_command_opens_gallery_without_a_flag() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Scene);
     assert_eq!(app.shell_view(), ShellView::Scene);
+    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "scene"
+            && line.body.contains("data-flow diagram · Esc/q returns")
+            && !line.body.contains("Tab cycles")
+    }));
+}
+
+#[test]
+fn gallery_cycle_skips_pages_without_backing_artifacts() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.cache_tool_snapshot(
+        "taint-iris:hunt",
+        &serde_json::json!({
+            "data": {"flows": [{"cwe": "CWE-89", "severity": "high", "stages": [
+                {"message": "source", "filePath": "a.ts", "line": 1}
+            ]}]}
+        }),
+    );
+
+    assert_eq!(
+        app.available_viz_pages(),
+        vec![VizPage::AttackPath, VizPage::Dfd]
+    );
+    app.open_scene_to_page(VizPage::Dfd);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::AttackPath);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::Dfd);
 }
 
 #[test]
@@ -17987,6 +18446,8 @@ fn viz_page_has_content_tracks_backing_artifacts() {
     // Fresh app: nothing generated yet — every artifact-backed page is empty.
     assert!(!app.viz_page_has_content(VizPage::AttackPath));
     assert!(!app.viz_page_has_content(VizPage::ExploitChain));
+    assert!(!app.viz_page_has_content(VizPage::EntryPoints));
+    assert!(!app.viz_page_has_content(VizPage::Components));
     assert!(!app.viz_page_has_content(VizPage::Heatmap));
     assert!(!app.viz_page_has_content(VizPage::Dfd));
 
@@ -18208,6 +18669,10 @@ fn scan_completion_auto_opens_the_findings_heatmap() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.path().to_path_buf()));
     app.ui_mut().set_auto_open_viz(true);
+    app.set_findings(vec![
+        make_finding(Severity::High, "fp-viz-1", "x"),
+        make_finding(Severity::High, "fp-viz-2", "x"),
+    ]);
     seed_scan_run_artifacts(target.path(), "run-viz");
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
@@ -20098,6 +20563,80 @@ fn investigation_card_boundary_toggles_and_enter_drafts_the_bounded_command() {
 }
 
 #[test]
+fn investigation_card_folds_stored_gate_model_and_drafts_the_previewed_command() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "demo.investigate",
+        "src/lib.rs",
+        7,
+        Some(3),
+        Severity::High,
+        "investigate me",
+    )];
+
+    // Store a cheap gate model exactly as `use verify` + `setg gateModel` would.
+    // (These commands navigate to the Options view, so do them before framing
+    // the Prove page.)
+    run_command(
+        &mut app,
+        ShellCommand::Options {
+            tool: Some("verify:finding".to_string()),
+            filter: OptionsFilter::Standard,
+        },
+    );
+    run_command(
+        &mut app,
+        ShellCommand::SetOption {
+            global: true,
+            name: "gateModel".to_string(),
+            value: "openai:gpt-cheap".to_string(),
+        },
+    );
+
+    // Frame the Prove page, then open the investigation card.
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Prove));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(crate::InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('v'), KeyModifiers::empty()),
+    );
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+        &app,
+        kuzushi_core::WorkflowPhase::Prove,
+    );
+    let crate::ui_view_models::PhaseCockpitBody::Prove(prove) = model.body else {
+        panic!("prove body");
+    };
+    let plan = prove.investigation.expect("investigation card open");
+    assert!(
+        plan.command.contains("\"gateModel\":\"openai:gpt-cheap\""),
+        "{}",
+        plan.command
+    );
+    assert!(
+        plan.model_ladder
+            .iter()
+            .any(|rung| rung == "gate: openai:gpt-cheap (rejection only)"),
+        "{:?}",
+        plan.model_ladder
+    );
+    let previewed = plan.command.clone();
+
+    // Enter drafts EXACTLY what the card previewed — one builder feeds both,
+    // so the ladder can never disagree with what runs.
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert_eq!(app.input(), previewed);
+}
+
+#[test]
 fn advance_steer_queue_waits_while_work_runs_then_drains_when_idle() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.steer_queue_mut().enqueue(QueuedCommand {
@@ -20191,9 +20730,8 @@ fn ctrl_c_abort_drops_queued_steer_items_so_stop_does_not_start_new_work() {
     );
     assert_eq!(app.steer_queue().len(), 1);
 
-    // Ctrl+C with abortable work runs the CancelActiveJobs stage (the same
-    // stage that cancels the live jobs — two-stage semantics preserved: the
-    // shell does not quit here).
+    // Ctrl+C with active work runs the CancelActiveJobs stage; the shell
+    // remains open while the worker cleans up.
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
@@ -21262,4 +21800,147 @@ fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
     assert_eq!(app.router.scene().dfd_selection(), 0);
     assert_eq!(app.router.scene().dfd_detail_scroll(), 0);
     assert_eq!(app.input(), "", "selection keys never land in the composer");
+}
+
+#[test]
+fn entry_points_page_selects_entries_and_pages_only_the_detail() {
+    let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().entry_point_selection(), 1);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
+    );
+    assert!(app.router.scene().entry_point_detail_scroll() > 0);
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().entry_point_selection(), 0);
+    assert_eq!(app.router.scene().entry_point_detail_scroll(), 0);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
+    );
+    assert_eq!(app.router.scene().entry_point_selection(), 2);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().entry_point_selection(), 0);
+    press_key(&mut app, KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().entry_point_selection(), 2);
+    assert_eq!(app.input(), "", "navigation never enters the composer");
+}
+
+#[test]
+fn entry_point_enter_jumps_to_its_first_resolved_dfd_target() {
+    let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
+    assert_eq!(app.router.scene().dfd_selection(), 0);
+}
+
+#[test]
+fn unresolved_entry_point_enter_stays_put_with_rebuild_guidance() {
+    let entries = serde_json::json!([{
+        "id": "EP-missing",
+        "name": "unlinked route",
+        "kind": "http_route",
+        "trustZone": "internet",
+        "targetElementIds": ["missing"]
+    }]);
+    let (_temp, mut app) = entry_point_browser_app(entries);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(
+        app.router.scene().page(),
+        crate::scene3d::VizPage::EntryPoints
+    );
+    let notice = app.advisory().notice.as_ref().expect("warning notice");
+    assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+    assert!(notice.message.contains("threat-model:build"));
+}
+
+fn entry_point_browser_app(entries: serde_json::Value) -> (tempfile::TempDir, ShellApp) {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(
+        path,
+        serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "N1", "name": "API", "trustZone": "app", "type": "process"},
+                    {"id": "N2", "name": "Worker", "trustZone": "app", "type": "process"}
+                ],
+                "flows": [{
+                    "id": "F1",
+                    "sourceId": "N1",
+                    "targetId": "N2",
+                    "description": "dispatch",
+                    "trustBoundaryIds": ["TB1"]
+                }],
+                "trustBoundaries": [{
+                    "id": "TB1",
+                    "name": "Internet edge",
+                    "innerZone": "app",
+                    "outerZone": "internet",
+                    "crossingFlowIds": ["F1"]
+                }]
+            },
+            "attackSurface": {"entryPoints": entries}
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::EntryPoints);
+    app.set_shell_view(ShellView::Scene);
+    app.set_input_mode(crate::InputMode::Prompt);
+    (temp, app)
+}
+
+fn entry_point_rows() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "id": "EP-http",
+            "name": "POST /login",
+            "kind": "http_route",
+            "trustZone": "internet",
+            "targetElementIds": ["N1"]
+        },
+        {
+            "id": "EP-rpc",
+            "name": "worker dispatch",
+            "kind": "rpc_handler",
+            "trustZone": "internet",
+            "targetElementIds": ["F1"]
+        },
+        {
+            "id": "EP-cli",
+            "name": "admin command",
+            "kind": "cli_entrypoint",
+            "trustZone": "operator_cli",
+            "targetElementIds": ["TB1"]
+        }
+    ])
 }

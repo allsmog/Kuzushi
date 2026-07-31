@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     AttackSurfaceRiskModel, DfdFlowModel, DfdModel, EngagementHeaderModel, MapPhaseModel,
-    ModuleRisk, NextScansState, ProjectModelOrigin,
+    ModuleRisk, NextScansState, ProjectModelOrigin, WorklistRowModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 
@@ -61,6 +61,11 @@ pub(super) fn plain_lines(
         width,
     ));
     lines.extend(divider_lines(
+        "WORKLIST",
+        worklist_pane_lines(model, width),
+        width,
+    ));
+    lines.extend(divider_lines(
         "THREAT MODEL / DFD",
         dfd_readiness_lines(&model.dfd, width),
         width,
@@ -90,6 +95,8 @@ fn render_compact(
     lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
     lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
     lines.extend(hot_modules_pane_lines(model, width));
+    lines.push(divider("WORKLIST", area.width.saturating_sub(2)));
+    lines.extend(worklist_pane_lines(model, width));
     lines.push(divider("THREAT MODEL / DFD", area.width.saturating_sub(2)));
     lines.extend(dfd_readiness_lines(&model.dfd, width));
     render_lines_pane(
@@ -123,6 +130,8 @@ fn render_map_canvas(
     lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
     lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
     lines.extend(hot_module_lines(&model.hot_modules.modules, width));
+    lines.push(divider("WORKLIST", area.width.saturating_sub(2)));
+    lines.extend(worklist_pane_lines(model, width));
     render_lines_pane(
         frame,
         area,
@@ -397,11 +406,15 @@ fn render_hot_modules(
     model: &MapPhaseModel,
     state: PhaseRenderState,
 ) {
+    let width = area.width.saturating_sub(2) as usize;
+    let mut lines = hot_modules_pane_lines(model, width);
+    lines.push(divider("WORKLIST", area.width.saturating_sub(2)));
+    lines.extend(worklist_pane_lines(model, width));
     render_lines_pane(
         frame,
         area,
         "HOT MODULES · z heatmap",
-        hot_modules_pane_lines(model, area.width.saturating_sub(2) as usize),
+        lines,
         PhaseSurfaceId::MapHotModules,
         state,
     );
@@ -482,6 +495,85 @@ fn hot_module_metadata(module: &ModuleRisk) -> String {
         "{:>4.1} · {critical}C {high}H {medium}M {low}L {info}I",
         module.score
     )
+}
+
+/// Top-5 risk-ranked files with a degraded chip and a "run the full worklist"
+/// affordance. Shared by the grid pane, the compact stack, the canvas, and
+/// plain output so every Map surface shows the same worklist summary.
+const WORKLIST_PANE_ROWS: usize = 5;
+
+fn worklist_pane_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let worklist = &model.worklist;
+    if worklist.rows.is_empty() {
+        return empty_worklist_pane_lines(model, width);
+    }
+    let mut lines = Vec::new();
+    for reason in &worklist.degraded {
+        lines.push(Line::styled(
+            fit(&format!("⚠ degraded — {reason}"), width),
+            theme::warn(),
+        ));
+    }
+    lines.extend(
+        worklist
+            .rows
+            .iter()
+            .take(WORKLIST_PANE_ROWS)
+            .map(|row| worklist_row_line(row, width)),
+    );
+    // Report the true ranked population, not the capped row list.
+    if worklist.ranked_total > WORKLIST_PANE_ROWS {
+        lines.push(Line::styled(
+            fit(
+                &format!("run `worklist` for all {}", worklist.ranked_total),
+                width,
+            ),
+            theme::muted(),
+        ));
+    }
+    lines
+}
+
+/// Honest empty-worklist copy: never claim "run context:build" while the
+/// snapshot is mid-build, and never claim it when the surface map is present
+/// but simply carried no threshold-crossing file.
+fn empty_worklist_pane_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
+    let worklist = &model.worklist;
+    // (b) The context snapshot is still building; asserting "run context:build"
+    // over an artifact that is mid-hydration would be a lie.
+    if model.context.running.is_some() {
+        return vec![Line::styled(fit("ranking files…", width), theme::muted())];
+    }
+    // No artifact at all: the build → rank call-to-action is honest here.
+    if let Some(hint) = worklist.empty_hint.as_deref() {
+        return vec![Line::styled(fit(hint, width), theme::muted())];
+    }
+    // (a) The surface map is present but no file crossed the signal threshold;
+    // "run context:build" would be wrong — it already ran.
+    let below = (worklist.unranked_count > 0)
+        .then(|| format!(" · {} files below threshold", worklist.unranked_count))
+        .unwrap_or_default();
+    vec![Line::styled(
+        fit(
+            &format!("no file crossed the signal threshold{below}"),
+            width,
+        ),
+        theme::muted(),
+    )]
+}
+
+fn worklist_row_line(row: &WorklistRowModel, width: usize) -> Line<'static> {
+    let label = format!("#{} {}", row.rank, row.location);
+    Line::from(vec![
+        Span::styled(fit(&label, width.min(30)), theme::primary()),
+        Span::styled(
+            fit(
+                &format!("  {} {}", row.glyphs, row.summary),
+                width.saturating_sub(32),
+            ),
+            theme::muted(),
+        ),
+    ])
 }
 
 fn render_dfd_readiness(
@@ -680,6 +772,81 @@ mod next_scan_tests {
         .to_string();
         assert!(long.contains("scope:services/identity/authorization"));
         assert!(long.contains("rev:feature/long-lived-security-branch"));
+    }
+
+    fn map_fixture() -> MapPhaseModel {
+        let app = crate::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let model = crate::ui_view_models::phase_cockpit_model_for_phase(
+            &app,
+            kuzushi_core::WorkflowPhase::Map,
+        );
+        match model.body {
+            crate::ui_view_models::PhaseCockpitBody::Map(map) => map,
+            _ => panic!("map body expected"),
+        }
+    }
+
+    #[test]
+    fn empty_worklist_while_context_builds_avoids_context_build_cta() {
+        let mut map = map_fixture();
+        map.worklist = crate::ui_view_models::WorklistViewModel::default();
+        map.context.running = Some(crate::ui_view_models::ContextSnapshotRunning {
+            tool: "context:build".to_string(),
+            glyph: "⏵",
+            message: "building snapshot",
+        });
+
+        let rendered = text(&worklist_pane_lines(&map, 100));
+
+        assert!(rendered.contains("ranking files"), "{rendered}");
+        assert!(
+            !rendered.contains("context:build"),
+            "must not claim context:build while it is mid-build: {rendered}"
+        );
+    }
+
+    #[test]
+    fn empty_worklist_with_surfaces_reports_threshold_not_context_build() {
+        let mut map = map_fixture();
+        map.context.running = None;
+        map.worklist = crate::ui_view_models::WorklistViewModel {
+            unranked_count: 3,
+            ..Default::default()
+        };
+
+        let rendered = text(&worklist_pane_lines(&map, 100));
+
+        assert!(
+            rendered.contains("no file crossed the signal threshold"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("3 files below threshold"), "{rendered}");
+        assert!(!rendered.contains("context:build"), "{rendered}");
+    }
+
+    #[test]
+    fn worklist_pane_reports_true_ranked_population_not_capped_rows() {
+        let mut map = map_fixture();
+        map.worklist = crate::ui_view_models::WorklistViewModel {
+            rows: (1..=6)
+                .map(|rank| crate::ui_view_models::WorklistRowModel {
+                    rank,
+                    glyphs: "A".to_string(),
+                    location: format!("src/f{rank}.rs"),
+                    summary: "A 90/100".to_string(),
+                })
+                .collect(),
+            ranked_total: 120,
+            ..Default::default()
+        };
+
+        let rendered = text(&worklist_pane_lines(&map, 120));
+
+        assert!(
+            rendered.contains("run `worklist` for all 120"),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("for all 6"), "{rendered}");
     }
 
     #[test]

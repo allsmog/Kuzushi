@@ -50,6 +50,7 @@ impl ShellApp {
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
             ShellView::Activity => self.activity_view_keybindings(),
+            ShellView::Logs => logs_keybindings(),
             _ => Vec::new(),
         }
     }

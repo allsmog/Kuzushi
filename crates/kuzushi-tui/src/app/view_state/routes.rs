@@ -53,7 +53,7 @@ pub struct RouterState {
     history: ScrollRouteState,
     kb: ScrollRouteState,
     modules: ScrollRouteState,
-    logs: ScrollRouteState,
+    logs: LogsRouteState,
     scene: SceneRouteState,
     threat: ThreatRouteState,
     tune: TuneRouteState,
@@ -461,11 +461,11 @@ impl RouterState {
         &mut self.modules
     }
 
-    pub(crate) fn logs(&self) -> &ScrollRouteState {
+    pub(crate) fn logs(&self) -> &LogsRouteState {
         &self.logs
     }
 
-    pub(crate) fn logs_mut(&mut self) -> &mut ScrollRouteState {
+    pub(crate) fn logs_mut(&mut self) -> &mut LogsRouteState {
         &mut self.logs
     }
 
@@ -910,12 +910,23 @@ impl AuthRouteState {
 pub struct CommandPaletteRouteState {
     query: String,
     cursor: usize,
+    /// Entry snapshot taken at open — commands, visible tools, and modules
+    /// don't change while the palette is up, so matching never rebuilds them.
+    entries: Vec<crate::app::PaletteEntry>,
 }
 
 impl CommandPaletteRouteState {
     pub(crate) fn reset(&mut self) {
         self.query.clear();
         self.cursor = 0;
+    }
+
+    pub(crate) fn entries(&self) -> &[crate::app::PaletteEntry] {
+        &self.entries
+    }
+
+    pub(crate) fn set_entries(&mut self, entries: Vec<crate::app::PaletteEntry>) {
+        self.entries = entries;
     }
 
     pub(crate) fn query(&self) -> &str {
@@ -1065,6 +1076,14 @@ pub struct SceneRouteState {
     dfd_selection: usize,
     /// Requested first row in the wrapped DFD detail panel.
     dfd_detail_scroll: usize,
+    /// Focused local security-context graph replaces the topology area.
+    dfd_focused: bool,
+    /// Cursor over annotations attached to the selected DFD element.
+    dfd_context_selection: usize,
+    /// Cursor over the trust-zone-grouped entry-point list.
+    entry_point_selection: usize,
+    /// Requested first row in the selected entry-point detail pane.
+    entry_point_detail_scroll: usize,
 }
 
 impl Default for SceneRouteState {
@@ -1077,6 +1096,10 @@ impl Default for SceneRouteState {
             last_advance: None,
             dfd_selection: 0,
             dfd_detail_scroll: 0,
+            dfd_focused: false,
+            dfd_context_selection: 0,
+            entry_point_selection: 0,
+            entry_point_detail_scroll: 0,
         }
     }
 }
@@ -1088,15 +1111,6 @@ impl SceneRouteState {
 
     pub(crate) fn set_page(&mut self, page: crate::scene3d::VizPage) {
         self.page = page;
-    }
-
-    pub(crate) fn next_page(&mut self, direction: i32) -> crate::scene3d::VizPage {
-        self.page = if direction >= 0 {
-            self.page.next()
-        } else {
-            self.page.prev()
-        };
-        self.page
     }
 
     pub(crate) fn yaw(&self) -> f32 {
@@ -1139,7 +1153,38 @@ impl SceneRouteState {
         self.dfd_detail_scroll
     }
 
-    /// Cycle the DFD selection with wrap over `len` items (nodes then flows).
+    pub(crate) fn dfd_focused(&self) -> bool {
+        self.dfd_focused
+    }
+
+    pub(crate) fn dfd_context_selection(&self) -> usize {
+        self.dfd_context_selection
+    }
+
+    pub(crate) fn entry_point_selection(&self) -> usize {
+        self.entry_point_selection
+    }
+
+    pub(crate) fn entry_point_detail_scroll(&self) -> usize {
+        self.entry_point_detail_scroll
+    }
+
+    pub(crate) fn toggle_dfd_focus(&mut self) {
+        self.dfd_focused = !self.dfd_focused;
+        self.dfd_context_selection = 0;
+        self.dfd_detail_scroll = 0;
+    }
+
+    pub(crate) fn collapse_dfd_focus(&mut self) -> bool {
+        if !self.dfd_focused {
+            return false;
+        }
+        self.dfd_focused = false;
+        self.dfd_context_selection = 0;
+        true
+    }
+
+    /// Cycle the DFD selection with wrap over nodes, flows, then boundaries.
     /// A shrunken model clamps the cursor instead of pointing past the end.
     pub(crate) fn cycle_dfd_selection(&mut self, direction: i32, len: usize) {
         if len == 0 {
@@ -1148,6 +1193,24 @@ impl SceneRouteState {
         }
         let current = self.dfd_selection.min(len - 1) as i32;
         self.dfd_selection = (current + direction).rem_euclid(len as i32) as usize;
+        self.dfd_context_selection = 0;
+        self.dfd_detail_scroll = 0;
+    }
+
+    pub(crate) fn set_dfd_selection(&mut self, selection: usize, len: usize) {
+        self.dfd_selection = selection.min(len.saturating_sub(1));
+        self.dfd_focused = false;
+        self.dfd_context_selection = 0;
+        self.dfd_detail_scroll = 0;
+    }
+
+    pub(crate) fn cycle_dfd_context_selection(&mut self, direction: i32, len: usize) {
+        if len == 0 {
+            self.dfd_context_selection = 0;
+            return;
+        }
+        let current = self.dfd_context_selection.min(len - 1) as i32;
+        self.dfd_context_selection = (current + direction).rem_euclid(len as i32) as usize;
         self.dfd_detail_scroll = 0;
     }
 
@@ -1156,6 +1219,29 @@ impl SceneRouteState {
             self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_add(amount);
         } else {
             self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_sub(amount);
+        }
+    }
+
+    pub(crate) fn cycle_entry_point_selection(&mut self, direction: i32, len: usize) {
+        if len == 0 {
+            self.entry_point_selection = 0;
+            return;
+        }
+        let current = self.entry_point_selection.min(len - 1) as i32;
+        self.entry_point_selection = (current + direction).rem_euclid(len as i32) as usize;
+        self.entry_point_detail_scroll = 0;
+    }
+
+    pub(crate) fn set_entry_point_selection(&mut self, selection: usize, len: usize) {
+        self.entry_point_selection = selection.min(len.saturating_sub(1));
+        self.entry_point_detail_scroll = 0;
+    }
+
+    pub(crate) fn scroll_entry_point_detail(&mut self, direction: i32, amount: usize) {
+        if direction >= 0 {
+            self.entry_point_detail_scroll = self.entry_point_detail_scroll.saturating_add(amount);
+        } else {
+            self.entry_point_detail_scroll = self.entry_point_detail_scroll.saturating_sub(amount);
         }
     }
 
@@ -1495,6 +1581,114 @@ impl ScrollRouteState {
 
     pub(crate) fn scroll_down(&mut self, amount: usize) {
         self.scroll = self.scroll.saturating_add(amount);
+    }
+}
+
+/// Logs route state. Scroll behaves like every other scrollable document; the
+/// route additionally owns the durable history it pages into, whether it is
+/// following new output, and the operator's active filter.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LogsRouteState {
+    scroll: ScrollRouteState,
+    history: crate::app::log::session_history::SessionHistory,
+    query: String,
+    filter_capture: bool,
+    following: bool,
+}
+
+impl LogsRouteState {
+    pub(crate) fn open(&mut self) {
+        self.scroll.open();
+    }
+
+    pub(crate) fn scroll(&self) -> usize {
+        self.scroll.scroll()
+    }
+
+    pub(crate) fn scroll_mut(&mut self) -> &mut usize {
+        self.scroll.scroll_mut()
+    }
+
+    pub(crate) fn set_scroll(&mut self, scroll: usize) {
+        self.scroll.set_scroll(scroll);
+    }
+
+    /// Scrolling back releases the tail so arriving output stops yanking the
+    /// viewport away from what the operator is reading.
+    pub(crate) fn scroll_up(&mut self, amount: usize) {
+        self.following = false;
+        self.scroll.scroll_up(amount);
+    }
+
+    pub(crate) fn scroll_down(&mut self, amount: usize) {
+        self.scroll.scroll_down(amount);
+    }
+
+    /// Jump to the oldest row, which also releases the tail.
+    pub(crate) fn jump_to_start(&mut self) {
+        self.following = false;
+        self.scroll.open();
+    }
+
+    /// Re-attach to the tail so new output follows again.
+    pub(crate) fn follow_tail(&mut self) {
+        self.following = true;
+        self.scroll.set_scroll(usize::MAX);
+    }
+
+    pub(crate) fn is_following(&self) -> bool {
+        self.following
+    }
+
+    pub(crate) fn history(&self) -> &crate::app::log::session_history::SessionHistory {
+        &self.history
+    }
+
+    pub(crate) fn set_history(
+        &mut self,
+        history: crate::app::log::session_history::SessionHistory,
+    ) {
+        self.history = history;
+    }
+
+    pub(crate) fn query(&self) -> Option<&str> {
+        let query = self.query.trim();
+        (!query.is_empty()).then_some(query)
+    }
+
+    /// True while `/` capture owns typing, so filter keys never leak into the
+    /// composer.
+    pub(crate) fn filter_capture(&self) -> bool {
+        self.filter_capture
+    }
+
+    pub(crate) fn open_filter_capture(&mut self) {
+        self.filter_capture = true;
+    }
+
+    pub(crate) fn close_filter_capture(&mut self, keep_query: bool) {
+        self.filter_capture = false;
+        if !keep_query {
+            self.query.clear();
+            self.reanchor();
+        }
+    }
+
+    pub(crate) fn push_filter_char(&mut self, character: char) {
+        self.query.push(character);
+        self.reanchor();
+    }
+
+    pub(crate) fn pop_filter_char(&mut self) {
+        self.query.pop();
+        self.reanchor();
+    }
+
+    /// Changing the filter re-anchors to the top: the first match is the one
+    /// the operator is looking for, and following a filtered tail is noise.
+    fn reanchor(&mut self) {
+        self.following = false;
+        self.scroll.set_scroll(0);
     }
 }
 

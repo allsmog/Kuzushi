@@ -51,6 +51,15 @@ pub(super) fn campaign_keybindings() -> Vec<ViewKeybinding> {
     bindings
 }
 
+pub(super) fn logs_keybindings() -> Vec<ViewKeybinding> {
+    vec![bind_char(
+        '/',
+        "/",
+        "filter transcript",
+        ViewHotkeyAction::LogsFilter,
+    )]
+}
+
 pub(super) fn catalog_keybindings() -> Vec<ViewKeybinding> {
     vec![
         bind(

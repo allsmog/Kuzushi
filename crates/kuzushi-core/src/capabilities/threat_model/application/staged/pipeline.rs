@@ -23,6 +23,7 @@ pub(crate) fn build_staged_threat_model(
     let checkpoints = ctx.stage_checkpoints();
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
+    emit_seed_disclosure(ctx, verb, &input);
     let research_stage = stage_scope(&checkpoints, "research");
     let dossier = run_research(&input, ctx)?;
     emit_research(ctx, verb, &dossier);
@@ -41,7 +42,7 @@ pub(crate) fn build_staged_threat_model(
     let gapfill_stage = stage_scope(&checkpoints, "gapfill");
     let gap_fill = resolve_coverage(runtime, ctx, verb, &input, &dossier, &mut generated, spend.as_ref())?;
     let variants = run_optional_variant_scan(ctx, verb, &input, &mut generated)?;
-    finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, variants, evidence_warnings)?;
+    let reconciliation = finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, variants, evidence_warnings)?;
     complete_stage(
         gapfill_stage,
         vec![
@@ -49,7 +50,7 @@ pub(crate) fn build_staged_threat_model(
             stage_artifact_rel(&input, "gapfill.json"),
         ],
     );
-    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
+    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle, reconciliation)
 }
 
 pub(crate) fn stage_scope<'a>(
@@ -215,9 +216,10 @@ fn finalize_staged_document(
     gap_fill: &GapFillResolution,
     variants: Option<VariantScanOutcome>,
     evidence_warnings: Vec<String>,
-) -> Result<()> {
+) -> Result<BuildReconciliation> {
     assign_stable_ids(&mut generated.document);
-    apply_coverage(&mut generated.document, &gap_fill.report, gap_fill.method);
+    let parked = park_unaccounted(&mut generated.document, &gap_fill.report.gaps);
+    apply_coverage(&mut generated.document, &gap_fill.report, gap_fill.method, parked);
     stamp_provenance(&mut generated.document, &input.target, "staged");
     if let Some(provenance) = generated.document["provenance"].as_object_mut() {
         provenance.insert("researchStats".to_string(), research_stats(dossier));
@@ -232,7 +234,7 @@ fn finalize_staged_document(
         &input.target,
         &input.output_dir,
         "coverage.json",
-        &coverage_json(&gap_fill.report, gap_fill.method),
+        &coverage_json(&gap_fill.report, gap_fill.method, parked),
     )?;
     write_stage_artifact(
         &input.target,
@@ -240,7 +242,12 @@ fn finalize_staged_document(
         "gapfill.json",
         &gap_fill.artifact,
     )?;
-    Ok(())
+    Ok(BuildReconciliation::from_report(
+        &gap_fill.report,
+        parked,
+        "grounded surfaces",
+        &generated.document,
+    ))
 }
 
 fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchDossier) {

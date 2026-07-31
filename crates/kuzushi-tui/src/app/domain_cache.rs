@@ -19,6 +19,27 @@ pub(crate) struct WorkspaceStaleSummary {
     pending_changes: Vec<WorkspaceChange>,
 }
 
+/// A captured `worklist:rank` output bound to the engagement it was computed
+/// for. The binding prevents two leaks: (1) rendering target A's rows after
+/// switching to target B, and (2) a stale capture masking a fresh `context:build`
+/// fold on the same target.
+#[derive(Debug)]
+struct WorklistSnapshot {
+    /// The target root the capture was computed under.
+    target: std::path::PathBuf,
+    /// The attack-surface artifact hydration version at capture time. When the
+    /// map is later rebuilt the live version diverges and the snapshot is
+    /// treated as stale, so the fresh Read-safe fold wins.
+    artifact_version: Option<u64>,
+    /// The serialized `Worklist` `data` the tool emitted.
+    data: serde_json::Value,
+    /// A monotonic stamp bumped on every capture, so a render-path memo can key
+    /// off snapshot identity in O(1) — without hashing or re-parsing the (large)
+    /// worklist `data` per frame. A re-run at the same target/artifact version
+    /// still yields a fresh stamp, invalidating the memo.
+    generation: u64,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct FindingLedgerCounts {
     pub(crate) total: usize,
@@ -124,6 +145,18 @@ pub struct DomainCache {
     chain_aliases: Vec<ExploitChain>,
     exploit_chains: Vec<ExploitChainDetail>,
     taint_flows: Vec<TaintFlowSnapshot>,
+    /// The last `worklist:rank` tool output (its serialized `Worklist` `data`),
+    /// captured so the deck renders the tool's actual worklist — including the
+    /// `deep`/systems `S` rows the Read-safe shell fold omits — instead of a
+    /// fold that contradicts the run receipt. Held as raw JSON because the
+    /// core `Worklist` is serialize-only (a `&'static str` field blocks
+    /// `Deserialize`); the view model projects it. Keyed to the target root and
+    /// attack-surface artifact version it was computed for, so it never renders
+    /// under a different target and a fresh `context:build` supersedes it.
+    worklist_snapshot: Option<WorklistSnapshot>,
+    /// Monotonic counter for `worklist_snapshot` captures, so the render-path
+    /// memo invalidates on every re-run without hashing the snapshot body.
+    worklist_snapshot_generation: u64,
     trace_expansion: Option<TraceExpansionSnapshot>,
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
@@ -166,6 +199,8 @@ impl DomainCache {
             chain_aliases: Vec::new(),
             exploit_chains: Vec::new(),
             taint_flows: Vec::new(),
+            worklist_snapshot: None,
+            worklist_snapshot_generation: 0,
             trace_expansion: None,
             program_scope: None,
             findings: Vec::new(),
@@ -216,6 +251,7 @@ impl DomainCache {
         self.chain_aliases.clear();
         self.exploit_chains.clear();
         self.taint_flows.clear();
+        self.worklist_snapshot = None;
         self.trace_expansion = None;
         self.program_scope = None;
     }
@@ -283,6 +319,10 @@ impl DomainCache {
 
     pub(crate) fn log_len(&self) -> usize {
         self.log.len()
+    }
+
+    pub(crate) fn log_evicted(&self) -> usize {
+        self.log.evicted()
     }
 
     pub(crate) fn clear_log(&mut self) {
@@ -449,6 +489,74 @@ impl DomainCache {
 
     pub(crate) fn set_taint_flows(&mut self, flows: Vec<TaintFlowSnapshot>) {
         self.taint_flows = flows;
+    }
+
+    /// The captured `worklist:rank` output for the *active engagement*: the raw
+    /// JSON only when the capture's target root and attack-surface artifact
+    /// version both match the caller's. A mismatch (different target, or a
+    /// `context:build` that rebuilt the map) yields `None`, so the deck falls
+    /// back to the Read-safe fold instead of rendering a foreign or stale
+    /// worklist.
+    pub(crate) fn worklist_snapshot_for(
+        &self,
+        target: &std::path::Path,
+        artifact_version: Option<u64>,
+    ) -> Option<&serde_json::Value> {
+        self.worklist_snapshot
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.target == target && snapshot.artifact_version == artifact_version
+            })
+            .map(|snapshot| &snapshot.data)
+    }
+
+    /// The O(1) identity of the captured `worklist:rank` snapshot for the given
+    /// engagement, or `None` when no snapshot matches. The render-path memo keys
+    /// off this so the (large) snapshot body is projected only on a cache miss —
+    /// never re-cloned and re-parsed per frame (C-4).
+    pub(crate) fn worklist_snapshot_generation_for(
+        &self,
+        target: &std::path::Path,
+        artifact_version: Option<u64>,
+    ) -> Option<u64> {
+        self.worklist_snapshot
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.target == target && snapshot.artifact_version == artifact_version
+            })
+            .map(|snapshot| snapshot.generation)
+    }
+
+    /// Capture a `worklist:rank` output bound to the engagement it was computed
+    /// for. Passing `None` for `data` clears any prior capture. Every capture
+    /// bumps the monotonic generation so the render-path memo invalidates.
+    pub(crate) fn set_worklist_snapshot(
+        &mut self,
+        target: std::path::PathBuf,
+        artifact_version: Option<u64>,
+        data: Option<serde_json::Value>,
+    ) {
+        self.worklist_snapshot_generation += 1;
+        let generation = self.worklist_snapshot_generation;
+        self.worklist_snapshot = data.map(|data| WorklistSnapshot {
+            target,
+            artifact_version,
+            data,
+            generation,
+        });
+    }
+
+    /// Test-only: replace the captured snapshot's JSON body WITHOUT bumping its
+    /// generation or changing its target/artifact-version identity. This lets a
+    /// memoization test poison the source data behind a stable memo key so a
+    /// pure cache hit returns the original projection, while a per-frame
+    /// re-parse would surface the poisoned rows and fail the assertion. No-op
+    /// when no snapshot is captured.
+    #[cfg(test)]
+    pub(crate) fn poison_worklist_snapshot_data_in_place(&mut self, data: serde_json::Value) {
+        if let Some(snapshot) = self.worklist_snapshot.as_mut() {
+            snapshot.data = data;
+        }
     }
 
     /// The operator-requested trace expansion, keyed by finding fingerprint;

@@ -1,10 +1,13 @@
 use super::*;
 
+mod components;
 pub(in crate::renderer::views) mod diagram;
 pub(in crate::renderer::views) mod diagrams;
+mod entry_points;
 mod gallery;
 mod render_scene_view;
 mod scene_color;
+mod worklist;
 
 pub(in crate::renderer) use diagram::{DfdDiagram, TreeDiagram};
 pub(crate) use gallery::scene_page_lines;

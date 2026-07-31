@@ -25,7 +25,6 @@ impl ShellApp {
             return update;
         }
 
-        self.update_quit_chord_arm(key);
         if self.handle_story_toggle_key(key) {
             return InputUpdate::handled();
         }
@@ -630,7 +629,11 @@ impl ShellApp {
     }
 
     fn reduce_prompt_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> InputUpdate {
-        if self.handle_cursor_key(key, modifiers) || self.handle_history_key(key, modifiers) {
+        let cursor_update = self.handle_cursor_key(key, modifiers);
+        if cursor_update.handled {
+            return cursor_update;
+        }
+        if self.handle_history_key(key, modifiers) {
             return InputUpdate::handled();
         }
         self.handle_text_key(key)
@@ -785,17 +788,45 @@ impl ShellApp {
     }
 
     fn handle_remaining_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let prereq_update = self.handle_prereq_prompt_key(key);
-        if prereq_update.handled {
-            return prereq_update;
+        if let Some(update) = self.handle_capture_modal_key(key) {
+            return update;
         }
-        if self.handle_review_search_key(key) {
-            return InputUpdate::handled();
-        }
-        if self.handle_overlay_key(key) {
-            return InputUpdate::handled();
+        if let Some(update) = self.handle_overlay_key(key) {
+            return update;
         }
         self.handle_shared_modal_key(key)
+    }
+
+    fn handle_capture_modal_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        let prereq_update = self.handle_prereq_prompt_key(key);
+        if prereq_update.handled {
+            return Some(prereq_update);
+        }
+        if self.handle_review_search_key(key) {
+            return Some(InputUpdate::handled());
+        }
+        self.handle_logs_filter_key(key).then(InputUpdate::handled)
+    }
+
+    /// `/` on the Logs page opens an incremental filter over the session
+    /// transcript. While open it owns every printable key, so typing never
+    /// leaks into the composer. Enter keeps the filter; Esc clears it.
+    fn handle_logs_filter_key(&mut self, key: KeyEvent) -> bool {
+        if !self.router.logs().filter_capture() {
+            return false;
+        }
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let logs = self.router.logs_mut();
+        match key.code {
+            KeyCode::Esc => logs.close_filter_capture(false),
+            KeyCode::Enter => logs.close_filter_capture(true),
+            KeyCode::Backspace => logs.pop_filter_char(),
+            KeyCode::Char('c') if ctrl => return false,
+            KeyCode::Char(character) if !ctrl && !alt => logs.push_filter_char(character),
+            _ => return false,
+        }
+        true
     }
 
     /// Item 13: `/` on the Review page opens a palette-style search capture
@@ -871,9 +902,16 @@ impl ShellApp {
             return false;
         }
         if key.code == KeyCode::Esc {
-            return self.restore_contextual_surface_origin();
+            return self.collapse_dfd_focus_or_restore_contextual_origin();
         }
         self.handle_catalog_expert_key(key)
+    }
+
+    fn collapse_dfd_focus_or_restore_contextual_origin(&mut self) -> bool {
+        if self.shell_view() == ShellView::Scene && self.router.scene_mut().collapse_dfd_focus() {
+            return true;
+        }
+        self.restore_contextual_surface_origin()
     }
 
     /// Catalog `e` toggles expert engines from BOTH input modes; a
@@ -971,14 +1009,16 @@ impl ShellApp {
 
     /// Command palette and Ctrl+R reverse search both fully capture input while
     /// active. Checked before the normal key chain; Ctrl+C still falls through.
-    fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         if matches!(self.shell_view(), ShellView::CommandPalette) {
             return self.handle_command_palette_key(key);
         }
         if self.history_search().is_some() {
-            return self.handle_history_search_key(key);
+            return self
+                .handle_history_search_key(key)
+                .then(InputUpdate::handled);
         }
-        false
+        None
     }
 
     /// Drive Ctrl+R reverse search. Enter accepts, Esc/Ctrl+C cancels, Ctrl+R
@@ -1011,24 +1051,30 @@ impl ShellApp {
 
     /// Drive the command palette while it is open. Ctrl+C falls through so the
     /// quit chord still works; everything else (typing, arrows, Enter, Esc) is
-    /// consumed here.
-    fn handle_command_palette_key(&mut self, key: KeyEvent) -> bool {
+    /// consumed here. Enter may dispatch a command, so its effects ride the
+    /// returned update.
+    fn handle_command_palette_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Esc => self.close_palette(),
-            KeyCode::Enter => self.accept_palette(),
+            KeyCode::Enter => {
+                return Some(InputUpdate {
+                    handled: true,
+                    effects: self.accept_palette(),
+                })
+            }
             KeyCode::Up => self.palette_move(-1),
             KeyCode::Down => self.palette_move(1),
             KeyCode::Char('p') if ctrl => self.palette_move(-1),
             KeyCode::Char('n') if ctrl => self.palette_move(1),
             KeyCode::Char('g') if ctrl => self.close_palette(),
-            KeyCode::Char('c') if ctrl => return false,
+            KeyCode::Char('c') if ctrl => return None,
             KeyCode::Backspace => self.palette_backspace(),
             KeyCode::Char(ch) if !ctrl && !alt => self.palette_input(ch),
-            _ => return false,
+            _ => return None,
         }
-        true
+        Some(InputUpdate::handled())
     }
 
     fn handle_shared_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -1210,12 +1256,6 @@ impl ShellApp {
         effect.map_or_else(InputUpdate::handled, |effect| {
             InputUpdate::handled_with_effects(vec![effect])
         })
-    }
-
-    pub(super) fn update_quit_chord_arm(&mut self, key: KeyEvent) {
-        if !is_quit_chord(key) {
-            self.set_ctrl_c_armed_at(None);
-        }
     }
 
     /// The always-available autonomy dial chord: `Ctrl+↑` raises the posture
@@ -2037,7 +2077,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_confirm_still_yields_ctrl_c_to_the_global_quit_chord() {
+    fn pending_confirm_still_yields_ctrl_c_to_immediate_idle_exit() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.advisory_mut().pending_confirm = Some(pending_network_confirm());
         app.set_input("existing draft");
@@ -2045,7 +2085,10 @@ mod tests {
         let update = app.reduce_key(ctrl_key(KeyCode::Char('c')));
 
         assert!(update.handled);
-        assert!(app.ctrl_c_armed());
+        assert!(matches!(
+            update.effects.as_slice(),
+            [ShellEffect::RequestShellQuit]
+        ));
         assert_eq!(app.input(), "existing draft");
         assert!(app.advisory().pending_confirm.is_some());
     }

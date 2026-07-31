@@ -298,6 +298,11 @@ impl ShellApp {
                 self.open_scene();
                 Some(Vec::new())
             }
+            ShellCommand::Worklist => {
+                self.open_scene_to_page(crate::scene3d::VizPage::Worklist);
+                Some(Vec::new())
+            }
+            ShellCommand::Rail => Some(self.reduce_rail_toggle()),
             ShellCommand::ShowRuns => {
                 self.open_runs_view();
                 Some(Vec::new())
@@ -1211,6 +1216,31 @@ impl ShellApp {
             format!("discarded pending patch for {}", patch.alias),
         );
         Vec::new()
+    }
+
+    /// `rail` toggle with asymmetric persistence: hiding writes the durable
+    /// `ui.rail false` policy (a wide terminal stays rail-free next session);
+    /// showing restores `ui.rail true` and force-opens for this session only,
+    /// so a narrow terminal is not permanently overridden.
+    fn reduce_rail_toggle(&mut self) -> Vec<ShellEffect> {
+        let columns = self.viewport().columns;
+        let visible = crate::ui_view_models::rail_width(self, columns) > 0;
+        if visible {
+            self.ui_mut().set_rail_force_open(false);
+            return self.reduce_set_option(true, crate::app::UI_RAIL_OPTION, "false");
+        }
+        self.ui_mut().set_rail_force_open(true);
+        let effects = self.reduce_set_option(true, crate::app::UI_RAIL_OPTION, "true");
+        if crate::ui_view_models::rail_width(self, columns) == 0 {
+            self.log(
+                "rail",
+                format!(
+                    "terminal too narrow for the rail ({columns} < {} columns)",
+                    crate::ui_view_models::RAIL_FORCE_MIN_WIDTH
+                ),
+            );
+        }
+        effects
     }
 }
 

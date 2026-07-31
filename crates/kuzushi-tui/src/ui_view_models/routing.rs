@@ -65,8 +65,9 @@ pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Workbench)
 }
 
-/// Frame-level gallery pages (3D terrain + the Canvas graph/tree diagrams) own
-/// the full body region. Attack-path and heatmap use the shared line path.
+/// Frame-level gallery pages (3D terrain, graph/tree diagrams, and interactive
+/// entry-point browser) own the full body region. Attack-path, Components, and
+/// heatmap use the shared line path.
 pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view(), ShellView::Scene) && app.router.scene().page().is_frame_rendered()
 }

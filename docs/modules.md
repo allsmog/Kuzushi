@@ -444,6 +444,19 @@ compatibility aliases, and quarantined exact-only surfaces such as
 but are filtered out of the right-pane feed unless the operator presses `V`
 (verbose).
 
+**Deep-auditor dataflow tool.** `deep-audit:run` (and the `strategy=deep`
+`triage:run` path it backs) offers the auditor an in-process `cpg_taint_paths`
+tool alongside the code-nav primitives, gated by the `taintTools` option
+(`off` | `available` | `build`, default `available`). The tool queries the
+cpg-rs code property graph for regex source→sink taint flows and returns any
+`guard`/`authz` annotation as falsification evidence. Registration and the
+matching prompt method-step come from one readiness predicate, so a
+`!Send`-safe thread-local warms the graph once per worker thread; a missing
+graph degrades to grep-only (never an implicit build under `available`) and the
+auditor's cited citations persist as a `deep-audit:evidence` audit event that
+the finding-detail / Prove `AUDITED DATAFLOW` section reads. Tool availability
+alone never moves a proof rung.
+
 Folded support facades (`catalog`, `module-recommender`, `bounty`, and
 `randori`) are exact-only during the capability migration. Canonical operator
 routes are direct registry queries, the phase capability projection,

@@ -110,9 +110,14 @@ fn run_triage_stage2_with_scope(
 ) -> Result<TriageRunStats> {
     let _llm_scope = begin_triage_llm_scope(ctx, evidence_phase);
     let stats = match &execution.routed {
-        Some(routed) => {
-            run_triage_stage2_deep(run.store, routed, &run.input, &execution.config, kept)?
-        }
+        Some(routed) => run_triage_stage2_deep(
+            run.store,
+            routed,
+            &run.input,
+            &execution.config,
+            kept,
+            ctx.trace,
+        )?,
         None => run_triage_stage2(
             run.store,
             execution.runtime,

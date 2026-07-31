@@ -39,7 +39,8 @@ Knobs:
 - `KUZUSHI_REDUCED_MOTION=1` — freeze the spinner for stable content captures
   (leave OFF when auditing motion itself, J15).
 - Generous `sleep` after each keystroke — background workers are async.
-- Unique session names — independent journeys fan out one-agent-per-journey.
+- Unique session names prevent collisions. Run journeys sequentially unless the
+  operator explicitly approves parallel execution.
 - `-e` capture is mandatory for J15 (palette): it is the only way to see the
   escape sequences and catch truecolor-only rendering.
 
@@ -85,6 +86,16 @@ contract. The current journey is
   (PR #64 promise).
 - **Judge:** is "you are about to scan THIS directory" unmistakable?
 
+### J49 — Setup target-facts honesty  ⭐ release-blocking (keyless)
+- **Journey (keyless, seeded git repo):** launch `--target <repo>` at a git repo
+  with one dirty file; Setup discloses the target path, the `dirty` working-tree
+  state, the `branch@revision`, and a detected-`languages:` row. The facts are
+  filesystem/git-derived, so no model key is needed.
+- **Verify:** with a dirty working tree the facts read `dirty`, never `clean`;
+  the disclosed path is the operator-designated repo, never cwd-substituted.
+- **Judge:** nothing claims "confirmed" beyond the target binding the operator
+  explicitly gave, and no language/build guess is dressed up as a verified fact.
+
 ## B. Core operator loop
 
 ### J4 — Bounty operator, scan to finding
@@ -128,13 +139,15 @@ These require captures mid-transition — exactly what static buffer snapshots
 cannot see.
 
 ### J8 — Interrupt mid-run  ⭐
-- **Journey:** start a scan, two-stage `Ctrl+C` mid-flight, immediately capture
-  Run Focus + contextual Jobs.
+- **Journey:** start a scan, press `Ctrl+C` once mid-flight, immediately capture
+  Run Focus + contextual Jobs, press it again while cleanup is pending, then
+  press it once after cleanup reaches terminal.
 - **Known risk:** canceled→✓done bug — a killed job rendering as successfully
   completed. Single most important honesty check.
 - **Verify:** final cancellation restores the exact launch origin with one
   receipt; manual Run Focus inspection and background-owned work do not
-  auto-return or steal focus.
+  auto-return or steal focus; the second press during cleanup does not exit,
+  the post-cleanup press does, and no Kuzushi worker/bridge process remains.
 
 ### J9 — Jobs / steer queue
 - **Journey:** launch work, press `s` in Run Focus and queue a valid
@@ -216,6 +229,202 @@ cannot see.
 
 ---
 
+## F. Model-ladder verification & split-verdict escalation (P1/P3)
+
+These journeys audit the shipped `verify:finding` model ladder (P1 `gateModel`,
+the Prove `MODEL LADDER` card) and split-verdict escalation (P3 tie-break
+disclosure). The deterministic arms rely on the F4 phase-fixture extension
+(`crates/kuzushi-tui/src/app/devex_phase_fixture/`): two seeded findings —
+`escalated-split-fixture` (gate + panel×2 + `escalated=openai:gpt-strong`,
+`split`) and `refused-split-fixture` (`refused=same-model`) — plus two seeded run
+dirs (`verify-escalated-run`, `verify-refused-run`) whose `items.jsonl` carry the
+gate → panel → escalation stage labels and a refusal danger notice. All keyless
+and deterministic; the one live arm (J34-L) SKIPs honestly without a key.
+
+### J30 — verify options: discoverability, storage, honesty  ⭐ release-blocking
+- **Journey:** open `options verify:finding`; confirm `gateModel`/`escalationModel`
+  are hidden under Standard and appear under `show advanced`; `setg` both; confirm
+  the stored rows sort first; store a malformed `gateModel` and dispatch.
+- **Judge:** the advanced rows describe what the gate trusts (rejection-only) and
+  that escalation fires only on a split; a malformed value is accepted at `setg`
+  but rejected legibly at dispatch (`gateModel is not a valid model spec`), never
+  silently dropped or defaulted; nothing implies `gateModel` gates `Start Map`.
+- **Plain parity:** the same rows serialize through the non-TTY stdin script with
+  no ANSI, no box-drawing dependency.
+
+### J31 — Prove MODEL LADDER card: preview ≡ drafted command  ⭐ release-blocking
+- **Journey:** with stored gate/escalation models, open the Prove `v`
+  investigation card; read the `MODEL LADDER` rows; press Enter to draft.
+- **Judge (identity contract):** the ladder reads top-down in execution order
+  (gate → panel → escalate); the drafted `run verify:finding {…}` JSON is
+  byte-identical to the card preview; the unset branch shows `gate: not set` and
+  OMITS the keys from the draft (no invented default); the card drafts but never
+  runs (`expect-not: ACTIVITY`).
+
+### J32 — escalated split: Prove discloses, never promotes  ⭐ release-blocking
+- **Journey:** `open escalated-split-fixture` → Prove.
+- **Judge (P3 invariant):** the split escalation renders `⚖ … resolved by
+  openai:gpt-strong (tie-break)` as an ADDITIVE disclosure; the finding stays
+  ModelAssessed/Unverified — no `Confirmed`, no `runtime_verified`, rung unmoved;
+  the `⚖` glyph is explained in words, not color alone.
+
+### J33 — refused escalation: warning, not success  ⭐ release-blocking
+- **Journey:** `open refused-split-fixture` → Prove.
+- **Judge:** the refusal renders in warn/danger tone (`⚠ … tie-break refused …
+  verdict unchanged`) with NO green `✓` on the row (the pre-P3
+  `append_proof_notes` hazard); the completion context reads completed-with-a-
+  warning, never a clean verification; the ≤90-char stage note fits the context
+  strip.
+
+### J34 — Run Focus / replay stage-label ordering
+- **Journey (deterministic):** `replay verify-escalated-run` renders the three
+  stage labels; `replay verify-refused-run` renders the refusal.
+- **Judge:** stages appear gate → panel → escalation with three DIFFERENT model
+  names, each explaining WHY it ran (the trust rule); the refusal run never shows
+  a completed `escalation · tie-break (` stage and tones the refusal Danger/Warn.
+- **Plain parity:** `runs trace <run-id>` prints the same three labels, same
+  order, no ANSI — the shared-core proof the stage story is not shell chrome.
+- **J34-L (advisory, live):** `require-any-env` a key, run a real split with
+  `VERIFY_PASSES 2` + a distinct `escalationModel`; accept SKIP and accept that a
+  real panel may not split — assert only that IF the escalation stage appears it
+  is labeled and ordered.
+
+### J35 — router role `MODEL_TRIAGE_ESCALATION` end-to-end (regression R2)
+- **Journey:** `setg MODEL_TRIAGE_ESCALATION openai:gpt-strong`; `run router:show`.
+- **Judge:** the `triage_escalation` row reports the value as `operatorOverride`
+  AND effective — proving the `setg` reached the router, not merely echoed the
+  stored key. **Negative arm:** on a fresh HOME the `triage_escalation` row must
+  NOT display the operator default as its effective escalation route (escalation
+  refuses inheritance; a row that shows the primary model as the tie-break route
+  is a lying screen).
+
+---
+
+## G. Deep-auditor taint tools, worklist & grammar honesty (P2/P5/P6)
+
+Batch 2 of the tmux/UX plan (§2 journeys J36–J48). These encode the deep-auditor
+taint-tool option surface, degraded-state signifiers, the risk worklist (Map
+section + scene page + verb/origin-restore + headless parity), and tree-sitter
+grammar honesty. The
+release-blocking keyless set is J36, J37a, J38 (steps 1–3, incl. regression R1),
+J39, J42, J43, J44, J45, J46, J47, J48. The live/model arms (J37b, J38 steps 4–5,
+J40, J41) are advisory and SKIP honestly. J39's deterministic arm relies on the
+F4 fixture extension: a sixth-finding stable fingerprint `audited-dataflow-fixture`
+carrying seeded `deep-audit:evidence` audit events (source + sink + a falsifying
+`guard` witness mined off a cpg-rs path, `origin: cpg_path`), written through the
+real `record_finding_audit_event` path.
+
+**Verified UI-string corrections against the current build** (the plan's captured
+strings were aspirational — these are what the code actually renders):
+- Health cpg-graph Warn row: `no graph — deep-audit runs grep-only` / remedy
+  `run cpg:build (or taintTools=build)`. The old "graphs build implicitly on
+  first hunt" sentence is gone (`ui_view_models/health.rs`).
+- AUDITED DATAFLOW rows render `<kind> · <file:line>` (e.g. `guard · …`), NOT
+  `guard@…`; the cpg-mined origin reads `deep auditor (cpg-rs path)`, NOT
+  "cpg-rs witness"; guard notes are prefixed `falsifying evidence · `
+  (`findings/presentation/detail/dataflow_evidence.rs`, `detail_pane.rs`).
+- Worklist legend words: fan-in → `not implemented (Phase B)`, prefilter →
+  `not tracked (Phase A)`, systems → `not requested`; empty panel title
+  `no risk worklist` with CTAs `context:build` / `worklist:rank`; rows carry the
+  RAW `92/100` display (`viz_data/worklist.rs`, `scene/worklist.rs`).
+- **Known gap (filed, not blocked):** the worklist `⚠ degraded — no cpg graph`
+  banner and the F (call-graph fan-in) citation appearing after `cpg:build` are
+  Phase-B wiring — the render-path fold passes `fan_in: None`, so the fan-in
+  contributor is `NotRequested` ("not implemented (Phase B)"), never `Degraded`,
+  and `cpg:build` does not yet feed the worklist. J43/J44 assert the shipped
+  honest representation (dim legend, contiguous ranks, raw display, unranked
+  footer) and do NOT assert the unwired banner/F-appears.
+
+### J36 — `taintTools` discoverability (Standard, not Advanced)  ⭐ release-blocking
+- **Journey:** `options triage:run` — `taintTools` is visible WITHOUT `show
+  advanced`, default `available`, choices `off`/`available`/`build`; the
+  description says unavailable graphs degrade to grep-only.
+- **Judge:** an operator can tell from the description alone what degradation
+  means. **R3 arm:** `options deep-audit:run` now declares `passes`/`temperature`.
+- **Negative (headless):** `run triage:run {"taintTools":"nope"}` rejects at the
+  canonical boundary naming the three choices (`must be one of off|available|build`).
+- **Plain parity:** the same rows serialize through the non-TTY stdin script.
+
+### J37 — degraded taint: amber where it claims  ⭐ release-blocking (37a keyless)
+- **J37a (keyless):** on a graph-absent target, `health` tones the cpg-graph row
+  Warn with `grep-only` and the `run cpg:build` remedy; the pre-P2 "graphs build
+  implicitly on first hunt" sentence is gone.
+- **J37b (advisory, key-gated):** a real `triage:run {"strategy":"deep"}` shows
+  the `taint tooling · unavailable` degraded line and proceeds grep-only.
+
+### J38 — cpg lifecycle: build → planning row → health  ⭐ release-blocking (1–3)
+- **Steps 1–3 (keyless):** headless `run cpg:build` writes `.kuzushi/cpg-rs`; the
+  planning picker's Build-code-property-graph row reads `cached` (regression R1 —
+  pre-fix it showed Missing/not-built forever because the probe looked for the
+  never-written `.kuzushi/cpg.bin`); `health` then tones the cpg-graph row Pass
+  (`backend=cpg-rs`), the cache-backed R1 consumer surface.
+- **Steps 4–5 (advisory, key-gated):** deep triage emits `queried taint:` progress
+  and `0 paths (sources N / sinks M)` honesty; latest-wins coalescing.
+
+### J39 — AUDITED DATAFLOW reaches Review/Prove  ⭐ release-blocking
+- **Journey (keyless):** `open audited-dataflow-fixture` → Review detail shows the
+  `AUDITED DATAFLOW` section after EVIDENCE with `deep auditor (cpg-rs path)`
+  rows and a `guard · …` row noted `falsifying evidence · …`; Prove shows the same
+  cited witness.
+- **Judge:** the guard row is visibly a FALSIFIER; the finding's proof rung is
+  UNCHANGED by the presence of dataflow evidence (deferred-promotion guard).
+
+### J42 — fresh target: empty is empty  ⭐ release-blocking
+- **Journey (keyless):** on a target with no context snapshot, `worklist` lands on
+  the `no risk worklist` guidance panel (one hint line + `context:build` /
+  `worklist:rank` CTAs), zero fabricated rows.
+- **Judge:** the scene page rail does NOT carry a worklist tab while empty
+  (gate-on-non-empty, the EntryPoints precedent); the explicit verb still lands
+  on the panel rather than dumping a first-timer on the DFD.
+
+### J43 — degraded worklist: honest states, contiguous ranks  ⭐ release-blocking
+- **Journey (keyless, seeded snapshot):** with an attack-surface snapshot but no
+  cpg graph, `worklist` shows contiguous `#1..#N` ranks, RAW `92/100` glyph rows
+  (never a laundered float), and the CONTRIBUTORS legend distinguishing three
+  states: `not requested` (systems), `not implemented (Phase B)` (fan-in),
+  `not tracked (Phase A)` (prefilter).
+- **Judge:** the three non-live states render distinctly (word, not color); the
+  unranked footer counts zero-signal files. (See Known gap re: the fan-in
+  degraded banner.)
+
+### J44 — signal-appears / raw-display honesty  ⭐ release-blocking
+- **Journey (keyless):** re-open `worklist` after `cpg:build`; diff the captures.
+- **Judge:** the previously-shown A-scores are not retro-zeroed (the earlier
+  ranking was honest about what it had); rows keep the RAW `A 92/100` display, not
+  a laundered `0.71`. (F-citation appearance is Phase-B — see Known gap.)
+
+### J45 — Map WORKLIST section: width + plain parity  ⭐ release-blocking
+- **Journey:** Workbench → Map renders the `WORKLIST` divider with top-5 rows and
+  the "run `worklist` for all N" affordance across width cells (150/120/80).
+- **Plain parity:** the Map plain projection (`map.rs plain_lines`, a SEPARATE
+  projection) also emits `WORKLIST`; glyphs (`A`, `#1`) survive style-stripping.
+
+### J46 — worklist verb + origin restore  ⭐ release-blocking (keyless)
+- **Journey (keyless, seeded snapshot):** from a stable origin view (`setup`),
+  the `worklist` verb opens the full-frame worklist deck (rank rows, or the
+  `no risk worklist` guidance panel when the shell has no hydrated run-artifact
+  attack surface — the deck reads the run artifact, not the seeded context
+  snapshot). `Esc` then restores the exact origin chrome.
+- **Judge:** the contextual-utility non-nesting contract holds — opening the
+  deck captured the origin, and leaving restores it without cancellation or a
+  nested utility stack.
+
+### J47 — headless parity: `run worklist:rank`  ⭐ release-blocking
+- **Journey:** `run worklist:rank` emits `data` with `rows` (carrying
+  `citations{raw,rawDisplay,normalized,normalization}`), `contributors` STATES,
+  `unranked`, and `rankedTotal` — the same truth the TUI renders, machine-readable.
+- **Negatives:** an unknown key is rejected at the canonical boundary; a run
+  without `--target` errors naming the tool and never substitutes cwd.
+
+### J48 — doctor / health disclose the grammar set  ⭐ release-blocking
+- **Journey:** headless `doctor` carries a `treesitter` row listing the shared
+  supported-language const (includes `cpp`, `rust`); per the G4 fix it PROBES the
+  sidecar — Ok when the binary resolves, Warn when `KUZUSHI_MCP_TREESITTER_BIN`
+  points at a missing path.
+- **Judge:** the language list is the shared const, not a hand-copied sixth copy.
+
+---
+
 ## Out of scope (manual only)
 
 **Real OAuth login** (`auth login openai` / `auth login anthropic`) is
@@ -226,7 +435,14 @@ check it by hand.
 ## Priority order
 
 1. **J1** keyless first launch, **J8** interrupt honesty — highest value re-runs.
+   **J49** Setup target-facts honesty rides with the Target/Setup set (keyless,
+   release-blocking).
 2. J4, J5, J7, J17 — the durable cockpit, reporting, and phase reference.
 3. J6, J9, J10, J11, J12 — control surfaces & discoverability.
 4. J14, J15, J16 — environment matrix.
 5. J13 — broad chrome sweep, last.
+6. J30–J35 — model-ladder / split-verdict escalation honesty (P1/P3),
+   release-blocking keyless set; J34-L is advisory/live.
+7. J36–J48 — deep-auditor taint tools, worklist, and grammar honesty (P2/P5/P6),
+   release-blocking keyless set (J36, J37a, J38 steps 1–3, J39, J42–J47, J48);
+   J37b, J38 steps 4–5, J40, J41 are advisory/live.

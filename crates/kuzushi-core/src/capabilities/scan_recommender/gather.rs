@@ -33,7 +33,7 @@ pub fn recommend_scans_for_target(
     }))
 }
 
-fn scope_paths(target: &Path) -> Result<BTreeMap<String, String>> {
+pub(crate) fn scope_paths(target: &Path) -> Result<BTreeMap<String, String>> {
     let mut paths = BTreeMap::from([(ROOT_SCOPE_ID.to_string(), ".".to_string())]);
     if let Some(tree) = load_nested_project_scopes(target)? {
         for scope in tree.scopes {
@@ -60,17 +60,10 @@ fn surface_files(target: &Path) -> BTreeMap<String, usize> {
 }
 
 fn snapshot_surface_files(target: &Path) -> Option<BTreeMap<String, usize>> {
-    let path = crate::context::context_snapshot_path(target);
-    let body = crate::bounded_file::read_utf8_text_within(
-        target,
-        &path,
-        crate::context::MAX_CONTEXT_SNAPSHOT_BYTES,
-    )
-    .ok()?;
-    let snapshot: serde_json::Value = serde_json::from_str(&body).ok()?;
-    let summary = snapshot.pointer("/attackSurfaceMap/summary")?.clone();
-    let summary: crate::workspace::AttackSurfaceSummary = serde_json::from_value(summary).ok()?;
-    Some(summary.by_file)
+    crate::workspace::load_attack_surface_map(target)
+        .ok()
+        .flatten()
+        .map(|map| map.summary.by_file)
 }
 
 fn finding_files(
@@ -101,13 +94,16 @@ mod surface_source_tests {
     /// Surface density must come from the persisted snapshot — never from a
     /// live repository walk, which blocks view refresh for minutes on
     /// monorepo targets.
+    /// Regression pin for the shared-loader refactor: surface density is read
+    /// back through `load_attack_surface_map`, so the fixture must be a
+    /// well-formed map, not a summary-only stub.
     #[test]
-    fn surface_files_read_the_persisted_snapshot() {
+    fn scan_recommender_reads_surfaces_through_the_shared_loader() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
         std::fs::write(
             crate::context::context_snapshot_path(temp.path()),
-            r#"{"attackSurfaceMap":{"summary":{"total":2,"byKind":{},"byFile":{"src/a.rs":2}}}}"#,
+            r#"{"attackSurfaceMap":{"rootName":"demo","surfaces":[],"summary":{"total":2,"byKind":{},"byFile":{"src/a.rs":2}}}}"#,
         )
         .unwrap();
 

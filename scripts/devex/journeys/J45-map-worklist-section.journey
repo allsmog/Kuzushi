@@ -1,0 +1,36 @@
+# J45 — Map WORKLIST section: frame + plain parity (P5)  ⭐ release-blocking
+#
+# Keyless, deterministic. The Map page carries a WORKLIST divider (top-5 risk-ranked
+# files + the "run worklist for all N" affordance). The divider is part of the Map
+# layout, so it renders whether or not a threshold-crossing file exists. Frame parity
+# uses the phase fixture (demo target); plain parity uses the SEPARATE map plain
+# projection (map.rs plain_lines — the plan warns Map plain parity is not automatic).
+name: the Map WORKLIST section renders in both the frame and the plain projection
+size: 120x40
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: workbench
+wait: 2
+nav-mode:
+keys: 1
+wait-live-snap: 12 Viewing Map | map-worklist
+expect: WORKLIST
+ask: The Map WORKLIST section is present as its own divider; when rows exist they are top-5, one line each, with the "run worklist for all N" affordance and no citation truncated into ambiguity.
+# Exit the TUI (Navigate mode on a workbench page — idle Ctrl+C exits).
+keys: C-c
+wait: 3
+# Plain parity: the map plain projection is a SEPARATE code path; assert the
+# WORKLIST divider survives style-stripping in non-TTY output.
+launch-raw: printf 'workbench\nquit\n' | @KUZUSHI --target @TMP_TARGET 2>&1 | grep -iE 'WORKLIST'
+wait: 5
+snap: map-worklist-plain
+expect: WORKLIST
+ask: The WORKLIST divider appears in the plain (non-TTY) Map projection with no ANSI / box-drawing dependency — provenance is not color-only.

@@ -1,0 +1,42 @@
+# J43 — worklist honest states + contiguous ranks + raw display (P5)  ⭐ release-blocking
+#
+# Keyless, deterministic. The worklist fold is asserted at the machine-readable
+# `worklist:rank` layer (the same fold the TUI deck renders), because the TUI scene
+# deck reads a run-artifact attack surface that is not cleanly keyless-seedable and
+# `context:build` needs a model — so a context-snapshot with an attackSurfaceMap is
+# seeded via `shell:`. Three files produce three CONTIGUOUS ranks; each row carries
+# RAW per-ranker citations (`92/100`), never a laundered normalized float; and the
+# contributors carry THREE distinct honest states.
+#
+# TUI-rendering coverage + Phase-B note: the scene deck's `⚠ degraded` banner, the
+# dim legend words (`not implemented (Phase B)`, `not tracked (Phase A)`,
+# `not requested`), and the "no fabricated rows" empty state are covered by the
+# renderer unit tests (`renderer/views/scene/worklist.rs`) and the view-model tests
+# (`ui_view_models/viz_data/worklist.rs`). The `⚠ degraded — no cpg graph` banner and
+# the F (call-graph fan-in) citation are Phase-B wiring: the render-path/gather fold
+# passes `fan_in: None`, so that contributor is `notRequested` ("not implemented
+# (Phase B)"), never `Degraded`. This journey asserts the shipped honest fold.
+name: worklist fold has contiguous ranks, raw citations, and distinct honest states
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# Seed a context snapshot with an attack-surface map spanning THREE files so the
+# fold produces three contiguously-ranked rows.
+shell: mkdir -p @TMP_TARGET/.kuzushi && printf '{"attackSurfaceMap":{"rootName":"demo","surfaces":[{"id":"s1","kind":"http_route","path":"a.py","line":3,"language":"python","title":"t1","evidence":"e","risk":{"rank":1,"score":92,"tier":"critical","reasons":["cmd exec"]}},{"id":"s2","kind":"http_route","path":"b.py","line":5,"language":"python","title":"t2","evidence":"e","risk":{"rank":2,"score":70,"tier":"high","reasons":["authz"]}},{"id":"s3","kind":"http_route","path":"c.py","line":9,"language":"python","title":"t3","evidence":"e","risk":{"rank":3,"score":40,"tier":"medium","reasons":[]}}],"summary":{"total":3,"byKind":{},"byFile":{"a.py":1,"b.py":1,"c.py":1},"highRisk":2,"maxRiskScore":92,"byRiskTier":{}}}}' > @TMP_TARGET/.kuzushi/context-snapshot.json
+launch-raw: @KUZUSHI --target @TMP_TARGET run worklist:rank --input '{"limit":10}' 2>&1 | grep -iE '"rank"|rawDisplay|"contributors"|callGraphFanIn|prefilterHistory|systemsHunt|notRequested|"live"|92/100|70/100|40/100'
+wait: 6
+snap: worklist-fold
+# Contiguous ranks 1..3 (no gap implying a missing signal was counted).
+expect: "rank": 1
+expect: "rank": 2
+expect: "rank": 3
+# RAW per-ranker display, never a laundered normalized float in the display slot.
+expect: 92/100
+expect: 40/100
+# Three distinct honest contributor states: live + notRequested (fan-in/prefilter
+# render distinctly in the TUI legend — see unit tests).
+expect: "live"
+expect: notRequested
+expect: callGraphFanIn
+expect: prefilterHistory
+ask: Ranks are #1..#3 contiguous (no gap forging a counted-but-missing signal); every row cites its ranker's RAW value (92/100), never a bare `0.71`; call-graph fan-in and prefilter carry distinct honest states that the TUI legend words as "not implemented (Phase B)" / "not tracked (Phase A)" (renderer unit-tested).

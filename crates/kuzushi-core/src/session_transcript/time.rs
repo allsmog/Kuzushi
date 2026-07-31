@@ -52,6 +52,35 @@ fn filename_timestamp(seconds: u64, millis: u64, year: i64, month: i64, day: i64
     )
 }
 
+/// Parse a recorded `YYYY-MM-DDTHH:MM:SS(.mmm)Z` stamp back into unix seconds
+/// so readers can render durable records on the same clock as live rows.
+pub fn unix_seconds_from_timestamp(timestamp: &str) -> Option<u64> {
+    let (date, rest) = timestamp.split_once('T')?;
+    let time = rest.split(['.', 'Z']).next()?;
+    let mut date_parts = date.split('-');
+    let year = date_parts.next()?.parse::<i64>().ok()?;
+    let month = date_parts.next()?.parse::<i64>().ok()?;
+    let day = date_parts.next()?.parse::<i64>().ok()?;
+    let mut time_parts = time.split(':');
+    let hour = time_parts.next()?.parse::<u64>().ok()?;
+    let minute = time_parts.next()?.parse::<u64>().ok()?;
+    let second = time_parts.next()?.parse::<u64>().ok()?;
+    let days = days_from_civil(year, month, day);
+    let seconds = days.checked_mul(86_400)? + (hour * 3_600 + minute * 60 + second) as i64;
+    u64::try_from(seconds).ok()
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month_prime = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era =
+        year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
 fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
     let days = days_since_epoch + 719_468;
     let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
@@ -78,5 +107,24 @@ mod tests {
             timestamp_from_millis(1_709_164_800_123),
             "2024-02-29T00:00:00.123Z"
         );
+    }
+
+    #[test]
+    fn parses_recorded_stamps_back_to_the_same_second() {
+        for millis in [0, 1_709_164_800_123, 1_753_660_827_583] {
+            let stamp = timestamp_from_millis(millis);
+            assert_eq!(
+                unix_seconds_from_timestamp(&stamp),
+                Some(millis / 1_000),
+                "{stamp}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_stamps_it_cannot_place_on_the_clock() {
+        for stamp in ["", "not-a-timestamp", "2026-07-28", "2026-07-28T00:00Z"] {
+            assert_eq!(unix_seconds_from_timestamp(stamp), None, "{stamp}");
+        }
     }
 }

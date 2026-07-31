@@ -60,6 +60,23 @@ pub(in crate::verification::adapters) fn combine_verify_passes(
     Ok(result)
 }
 
+/// True when the panel's vote was an even split (equal exploitable and
+/// not-exploitable votes over more than one pass). A split resolves to
+/// not-exploitable today; it is the one verdict a different-model tie-break
+/// can legitimately revisit. A single pass has no consensus block and is
+/// never a split.
+pub(in crate::verification::adapters) fn panel_verdict_is_split(result: &Value) -> bool {
+    let Some(consensus) = result.get("consensus") else {
+        return false;
+    };
+    let passes = consensus.get("passes").and_then(Value::as_u64);
+    let exploitable_votes = consensus.get("exploitableVotes").and_then(Value::as_u64);
+    match (passes, exploitable_votes) {
+        (Some(passes), Some(votes)) => passes > 1 && votes * 2 == passes,
+        _ => false,
+    }
+}
+
 fn consensus_block(total: usize, exploitable_votes: usize, exploitable: bool) -> Value {
     json!({
         "passes": total,
@@ -196,6 +213,19 @@ mod tests {
         assert_eq!(combined["exploitable"], json!(false));
         assert_eq!(combined["consensus"]["unanimous"], json!(true));
         assert_eq!(combined["consensus"]["exploitableVotes"], json!(0));
+    }
+
+    #[test]
+    fn panel_verdict_is_split_only_on_an_even_two_way_vote() {
+        let even = combine_verify_passes(vec![pass(true, 0.9), pass(false, 0.4)]).unwrap();
+        assert!(panel_verdict_is_split(&even));
+
+        let majority =
+            combine_verify_passes(vec![pass(true, 0.9), pass(true, 0.6), pass(false, 0.5)]).unwrap();
+        assert!(!panel_verdict_is_split(&majority));
+
+        let single = combine_verify_passes(vec![pass(true, 0.9)]).unwrap();
+        assert!(!panel_verdict_is_split(&single));
     }
 
     #[test]

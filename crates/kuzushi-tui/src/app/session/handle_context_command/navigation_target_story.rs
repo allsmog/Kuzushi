@@ -16,10 +16,28 @@ impl ShellApp {
 
     /// Switch to the full-screen transcript view (M1 §1.1). The embedded
     /// 2-row transcript strip only shows the latest lines; this view paints
-    /// the entire buffer and is scrollable via `j`/`k`/`g`/`G`/`PgUp`/`PgDn`.
+    /// the whole session and is scrollable via `j`/`k`/`g`/`G`/`PgUp`/`PgDn`.
+    ///
+    /// Opening reloads the durable transcript so rows that aged out of the
+    /// live cache are readable here instead of being lost with the session.
     pub fn show_logs(&mut self) {
         self.set_shell_view(ShellView::Logs);
-        self.router.logs_mut().set_scroll(usize::MAX); // start tailing
+        self.reload_logs_history();
+        self.router.logs_mut().follow_tail();
+    }
+
+    /// Reads the durable transcript once per open. This is deliberately not
+    /// per-frame work: the file only grows behind the live cache.
+    pub(crate) fn reload_logs_history(&mut self) {
+        let Some(path) = self
+            .session
+            .transcript()
+            .map(|transcript| transcript.path().to_path_buf())
+        else {
+            return;
+        };
+        let history = crate::app::log::session_history::SessionHistory::load(&path);
+        self.router.logs_mut().set_history(history);
     }
 
     /// Reload `.kuzushi/scope.toml` from the active target (M2 §2.1). Called
@@ -149,7 +167,7 @@ impl ShellApp {
         *self.router.activity_mut() = crate::app::ActivityRouteState::default();
         self.session.set_option_store(option_store);
         self.config_mut().phases = phases;
-        refresh_auto_open_prefs_from_store(self);
+        refresh_ui_prefs_from_store(self);
         self.set_target(Some(root.clone()));
         self.start_active_target_facts(root.clone());
         self.schedule_target_profile_hydration(&root);
@@ -256,7 +274,7 @@ impl ShellApp {
         }
         option_store.merge_store(session_options);
         self.session.set_option_store(option_store);
-        refresh_auto_open_prefs_from_store(self);
+        refresh_ui_prefs_from_store(self);
     }
 
     pub(crate) fn reload_external_project_scope_tree(&mut self, root: &Path) {

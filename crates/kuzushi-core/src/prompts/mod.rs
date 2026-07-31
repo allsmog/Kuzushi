@@ -34,4 +34,4 @@ pub use validator_catalogs::{centralized_validator_catalog, PromptLanguage};
 /// Version of the shared prompt spine. Bump whenever any spine block, boundary
 /// instruction, taxonomy, or validator catalog changes so run artifacts can
 /// record which prompt generation produced a finding.
-pub const PROMPT_SPINE_VERSION: &str = "2";
+pub const PROMPT_SPINE_VERSION: &str = "3";

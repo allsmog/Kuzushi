@@ -212,6 +212,12 @@ impl ShellApp {
         self.domain.log_len()
     }
 
+    /// Lines aged out of the live cache; they remain readable in the durable
+    /// session transcript that the Logs view pages into.
+    pub fn log_evicted(&self) -> usize {
+        self.domain.log_evicted()
+    }
+
     pub fn clear_log(&mut self) {
         self.domain.clear_log();
     }
@@ -871,16 +877,18 @@ impl ShellApp {
         self.ui.request_quit();
     }
 
-    pub(crate) fn ctrl_c_armed_at(&self) -> Option<Instant> {
-        self.ui.ctrl_c_armed_at()
-    }
-
-    pub(crate) fn set_ctrl_c_armed_at(&mut self, armed_at: Option<Instant>) {
-        self.ui.set_ctrl_c_armed_at(armed_at);
-    }
-
     pub(crate) fn viewport(&self) -> TerminalViewport {
         self.ui.viewport()
+    }
+
+    /// The terminal viewport minus the context rail's columns when it is
+    /// visible. Layout decisions about body content (wrap widths, breakpoint
+    /// checks) must use this, not `viewport()`, or they measure against
+    /// columns the rail occupies.
+    pub(crate) fn content_viewport(&self) -> TerminalViewport {
+        let viewport = self.ui.viewport();
+        let rail = crate::ui_view_models::rail_width(self, viewport.columns);
+        TerminalViewport::new(viewport.columns.saturating_sub(rail), viewport.rows)
     }
 
     pub(crate) fn set_viewport(&mut self, viewport: TerminalViewport) {

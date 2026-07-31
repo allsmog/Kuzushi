@@ -51,6 +51,7 @@ fn cwe_for_kind(kind: AttackSurfaceKind) -> Vec<&'static str> {
         AttackSurfaceKind::TenantIsolationBoundary => vec!["CWE-639"],
         AttackSurfaceKind::InfraConfig => vec!["CWE-16"],
         AttackSurfaceKind::SupplyChain => vec!["CWE-1357"],
+        AttackSurfaceKind::Unknown => vec![],
     }
 }
 

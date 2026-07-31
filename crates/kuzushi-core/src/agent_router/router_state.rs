@@ -125,7 +125,7 @@ fn unknown_agent_role_message(key: &str, path: &Path) -> String {
     format!(
         "unknown agent role {key:?} in {} — known: triage, classifier_gate, \
          deep_auditor, full_mode_multi, systems_hunt, carlini, variant_ndiff, \
-         threat_model, x_ray, patch",
+         threat_model, x_ray, patch, triage_escalation",
         path.display()
     )
 }

@@ -20,6 +20,10 @@ pub enum AgentRole {
     XRay,
     /// patch-finding module.
     Patch,
+    /// Different tie-break model consulted only when a consensus verdict splits
+    /// evenly (deep-audit and verify escalation). Never inherited — it must be
+    /// operator-named, or the split verdict stands.
+    TriageEscalation,
 }
 
 impl AgentRole {
@@ -35,6 +39,7 @@ impl AgentRole {
             Self::ThreatModel => "threat_model",
             Self::XRay => "x_ray",
             Self::Patch => "patch",
+            Self::TriageEscalation => "triage_escalation",
         }
     }
 
@@ -50,6 +55,7 @@ impl AgentRole {
             "threat_model" => Some(Self::ThreatModel),
             "x_ray" => Some(Self::XRay),
             "patch" => Some(Self::Patch),
+            "triage_escalation" => Some(Self::TriageEscalation),
             _ => None,
         }
     }
@@ -74,6 +80,7 @@ impl AgentRole {
             Self::ThreatModel,
             Self::XRay,
             Self::Patch,
+            Self::TriageEscalation,
         ]
     }
 }

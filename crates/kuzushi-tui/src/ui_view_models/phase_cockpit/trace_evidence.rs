@@ -9,6 +9,7 @@
 use super::{TraceEvidenceModel, TraceHopModel};
 use crate::ui_view_models::{FindingDetailModel, TaintFlowPath};
 use crate::ShellApp;
+use kuzushi_core::findings::DataflowEvidenceRow;
 use kuzushi_core::Finding;
 
 pub(super) fn trace_evidence_model(
@@ -37,7 +38,7 @@ pub(super) fn trace_evidence_model(
             .clone()
             .unwrap_or_else(|| detail.identity_label.clone()),
         severity: detail.severity_label.clone(),
-        original: original_hops(finding, attack_path),
+        original: original_hops(finding, attack_path, &detail.dataflow_evidence),
         next_hint: next_hint(&expanded, &open_questions),
         expanded,
         open_questions,
@@ -52,34 +53,57 @@ pub(super) fn trace_evidence_model(
 }
 
 /// The recorded path: the finding-keyed taint flow when discovery emitted
-/// one, else the finding's evidence anchors in recorded order. Both are
-/// observations, never synthesis.
-fn original_hops(finding: &Finding, attack_path: &TaintFlowPath) -> Vec<TraceHopModel> {
+/// one, else the finding's located evidence anchors, else the deep-auditor's
+/// cited dataflow rows. Every branch is an agent-cited observation, never
+/// synthesis — the third fallback stays honest to that promise.
+fn original_hops(
+    finding: &Finding,
+    attack_path: &TaintFlowPath,
+    dataflow: &[DataflowEvidenceRow],
+) -> Vec<TraceHopModel> {
     if !attack_path.stages.is_empty() {
-        return attack_path
-            .stages
-            .iter()
-            .map(|stage| TraceHopModel {
-                label: stage.title.clone(),
-                location: stage.location.clone(),
-                annotation: stage.snippet.clone().unwrap_or_default(),
-            })
-            .collect();
+        return attack_path.stages.iter().map(stage_hop).collect();
     }
-    finding
+    let anchors: Vec<TraceHopModel> = finding
         .evidence
         .iter()
         .filter(|evidence| !evidence.file_path.is_empty())
-        .map(|evidence| TraceHopModel {
-            label: evidence.kind.clone(),
-            location: format!("{}:{}", evidence.file_path, evidence.line),
-            annotation: if evidence.rationale.is_empty() {
-                evidence.snippet.clone()
-            } else {
-                evidence.rationale.clone()
-            },
-        })
-        .collect()
+        .map(evidence_anchor_hop)
+        .collect();
+    if !anchors.is_empty() {
+        return anchors;
+    }
+    dataflow.iter().map(dataflow_hop).collect()
+}
+
+fn stage_hop(stage: &crate::ui_view_models::TaintStageModel) -> TraceHopModel {
+    TraceHopModel {
+        label: stage.title.clone(),
+        location: stage.location.clone(),
+        annotation: stage.snippet.clone().unwrap_or_default(),
+    }
+}
+
+fn evidence_anchor_hop(evidence: &kuzushi_core::FindingEvidence) -> TraceHopModel {
+    TraceHopModel {
+        label: evidence.kind.clone(),
+        location: format!("{}:{}", evidence.file_path, evidence.line),
+        annotation: if evidence.rationale.is_empty() {
+            evidence.snippet.clone()
+        } else {
+            evidence.rationale.clone()
+        },
+    }
+}
+
+/// A guard row surfaces as `guard@file:line` (label `guard`, its location) so
+/// the operator sees exactly where the auditor found falsifying evidence.
+fn dataflow_hop(row: &DataflowEvidenceRow) -> TraceHopModel {
+    TraceHopModel {
+        label: row.kind.clone(),
+        location: row.location.clone(),
+        annotation: row.note.clone(),
+    }
 }
 
 fn expanded_hop(step: &crate::app::TraceExpansionStep) -> TraceHopModel {
@@ -148,7 +172,7 @@ mod tests {
             }],
             ..Default::default()
         };
-        let hops = original_hops(&finding_with_evidence(), &path);
+        let hops = original_hops(&finding_with_evidence(), &path, &[]);
         assert_eq!(hops.len(), 1);
         assert_eq!(hops[0].location, "src/input.rs:4");
         assert_eq!(hops[0].annotation, "read(buf)");
@@ -156,11 +180,64 @@ mod tests {
 
     #[test]
     fn original_path_falls_back_to_located_evidence_anchors() {
-        let hops = original_hops(&finding_with_evidence(), &TaintFlowPath::default());
+        let hops = original_hops(&finding_with_evidence(), &TaintFlowPath::default(), &[]);
         assert_eq!(hops.len(), 1, "anchor without a file path is dropped");
         assert_eq!(hops[0].label, "source");
         assert_eq!(hops[0].location, "src/input.rs:4");
         assert_eq!(hops[0].annotation, "attacker-controlled read");
+    }
+
+    fn guard_dataflow_row() -> DataflowEvidenceRow {
+        DataflowEvidenceRow {
+            origin: "deep auditor (cpg-rs path)".to_string(),
+            location: "src/users.ts:91".to_string(),
+            kind: "guard".to_string(),
+            note: "falsifying evidence · authz gate".to_string(),
+        }
+    }
+
+    fn finding_without_located_evidence() -> Finding {
+        Finding::new_semgrep(
+            "demo.trace",
+            "src/parse.rs",
+            10,
+            None,
+            Severity::High,
+            "length flows to memcpy",
+        )
+    }
+
+    #[test]
+    fn dataflow_rows_are_the_third_fallback_and_surface_the_guard() {
+        let dataflow = vec![guard_dataflow_row()];
+        let hops = original_hops(
+            &finding_without_located_evidence(),
+            &TaintFlowPath::default(),
+            &dataflow,
+        );
+        assert_eq!(hops.len(), 1);
+        assert_eq!(hops[0].label, "guard");
+        assert_eq!(hops[0].location, "src/users.ts:91");
+        // The hop identifies guard@file:line — where the auditor cited
+        // falsifying evidence.
+        assert_eq!(
+            format!("{}@{}", hops[0].label, hops[0].location),
+            "guard@src/users.ts:91"
+        );
+        assert_eq!(hops[0].annotation, "falsifying evidence · authz gate");
+    }
+
+    #[test]
+    fn located_finding_evidence_wins_over_dataflow_rows() {
+        let dataflow = vec![guard_dataflow_row()];
+        let hops = original_hops(
+            &finding_with_evidence(),
+            &TaintFlowPath::default(),
+            &dataflow,
+        );
+        assert_eq!(hops.len(), 1);
+        assert_eq!(hops[0].label, "source");
+        assert_eq!(hops[0].location, "src/input.rs:4");
     }
 
     #[test]

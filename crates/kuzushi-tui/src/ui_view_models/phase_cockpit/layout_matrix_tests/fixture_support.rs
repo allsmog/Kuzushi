@@ -41,6 +41,7 @@ pub(super) fn fixture_proof(stale: bool) -> ProofReplayModel {
         duration_ms: 1,
         cost_usd: 0.0,
         notes: Vec::new(),
+        stages: None,
         created_at: "2026-07-14T00:00:00Z".to_string(),
         provenance_run_id: Some("run-proof".to_string()),
         replay_run_id: Some("run-proof".to_string()),

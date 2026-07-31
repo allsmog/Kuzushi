@@ -4,51 +4,51 @@ contract: cockpit-spine-v1
 phase: prove
 size: 160x48
 ---
-KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · model configured openai:gpt-5.4 [auth missing]
- Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
- ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report
-│▸ STATUS / NEXT
-│PROOF SUBJECT · finding F-0001
-│F-0001  CRITICAL  ✓ [●●●] · RUNTIME VERIFIED · 1 source(s)  runtime_verified
-│SQL injection reaches query
-│src/auth/login.rs:17
-│STATUS runtime_verified · decision:needs_review · evidence:1
-│NEXT   patch F-0001
-│
-│EVIDENCE · z attack path                                                                    │PROOF LADDER
-│evidence:1 · 1 source(s) · 1                                                                │● 1 signal captured
-│1. observed code evidence · source-sink · conf 94 · src/auth/login.rs:17                    │● 2 path-linked
-│request_input -> database_query                                                             │● 3 exploited
-│attacker-controlled input reaches a security boundary                                       │current [●●●] verified L4 · 1 source(s)
-│                                                                                            │
-│                                                                                            │
-│                                                                                            │
-│                                                                                            │
-│                                                                                            │PROOF · REPLAY
-│                                                                                            │exploited  L4 · bwrap
-│                                                                                            │842ms · $0.0400
-│                                                                                            │▸ replay verify-phase-run  open trace
-│                                                                                            │▸ verify F-0001  recheck
-│                                                                                            │language: rust
-│                                                                                            │harness: .kuzushi/harness/sql-injection.rs
-│                                                                                            │evidence: boolean payload changed the result set
-│                                                                                            │✓ isolated database fixture
-│                                                                                            │
-│                                                                                            │
-│CHOOSE NEXT ACTION
-│ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt safe reproduction
-│ c  Generate attack chain model prerequisites, trust transitions, and impact over verified findings
-│ 5  Draft patch           open Fix with this finding to stage a remediation
-│ x  Mark false positive   draft suppress — records a durable review decision with a reason
-│D defer proof · Esc return to findings
-│
-│
-│
-│
-│
-│
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench · openai:gpt-5.4                                   6 findings / 1 crit / 2 high / 2 med
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Ctrl+C request abort   Esc prompt
-◎ PROVE › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready               │ ENGAGEMENT
+ Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○                                                                                │ phase-target
+ ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates                                                           │ scope: F-0001 · Review
+ v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report            │
+│▸ STATUS / NEXT                                                                                                            │ JOURNEY
+│PROOF SUBJECT · finding F-0001                                                                                             │ Review 3/5
+│F-0001  CRITICAL  ✓ [●●●] · RUNTIME VERIFIED · 1 source(s)  runtime_verified                                               │ ⛭ fix
+│SQL injection reaches query                                                                                                │
+│src/auth/login.rs:17                                                                                                       │ IN FLIGHT
+│STATUS runtime_verified · decision:needs_review · evidence:1                                                               │ ⠋ context:build
+│NEXT   patch F-0001                                                                                                        │
+│                                                                                                                           │ FINDINGS
+│EVIDENCE · z attack path                                               │PROOF LADDER                                       │ 6 findings · 1 C · 2 H · 2 M
+│evidence:1 · 1 source(s) · 1                                           │● 1 signal captured                                │ 0/6 reviewed · 0 proven
+│1. observed code evidence · source-sink · conf 94 ·...                 │● 2 path-linked                                    │
+│request_input -> database_query                                        │● 3 exploited                                      │ COST
+│attacker-controlled input reaches a security boundary                  │current [●●●] verified L4 · 1 source(s)            │ $0.37 of $2.00
+│                                                                       │                                                   │ 19% of budget
+│                                                                       │                                                   │
+│                                                                       │                                                   │
+│                                                                       │                                                   │
+│                                                                       │PROOF · REPLAY                                     │
+│                                                                       │exploited  L4 · bwrap                              │
+│                                                                       │842ms · $0.0400                                    │
+│                                                                       │▸ replay verify-phase-run  open trace              │
+│                                                                       │▸ verify F-0001  recheck                           │
+│                                                                       │language: rust                                     │
+│                                                                       │harness: .kuzushi/harness/sql-injection.rs         │
+│                                                                       │evidence: boolean payload changed the result set   │
+│                                                                       │✓ isolated database fixture                        │
+│                                                                       │                                                   │
+│                                                                       │                                                   │
+│CHOOSE NEXT ACTION                                                                                                         │
+│ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt safe reproduction                    │
+│ c  Generate attack chain model prerequisites, trust transitions, and impact over verified findings                        │
+│ 5  Draft patch           open Fix with this finding to stage a remediation                                                │
+│ x  Mark false positive   draft suppress — records a durable review decision with a reason                                 │
+│D defer proof · Esc return to findings                                                                                     │
+│                                                                                                                           │
+│                                                                                                                           │
+│                                                                                                                           │
+│                                                                                                                           │
+│                                                                                                                           │
+│                                                                                                                           │
+run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
+ Ctrl+C request abort   Esc prompt                                                                                          │
+◎ PROVE › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                             │

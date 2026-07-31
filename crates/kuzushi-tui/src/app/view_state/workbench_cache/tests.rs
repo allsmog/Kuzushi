@@ -261,6 +261,7 @@ fn large_run_caches_share_a_byte_budget() {
                 path: PathBuf::from("result.json"),
             },
             bytes: 6,
+            version: 0,
         },
     );
     cache.run_projections.insert(
@@ -379,6 +380,7 @@ fn seed_run_caches(cache: &mut WorkbenchCache, target: &Path, run_id: &str) {
                 path: PathBuf::from("result.json"),
             },
             bytes: 1,
+            version: 0,
         },
     );
     cache

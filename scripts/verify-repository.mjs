@@ -82,12 +82,29 @@ function validatePlans() {
   validatePnpmPlanScripts(ciPlan, scripts);
 }
 
-function runStep(item) {
+export function parseArguments(args) {
+  let mode;
+  let summary = false;
+  for (const arg of args) {
+    if (arg === "--summary") {
+      summary = true;
+    } else if (arg.startsWith("-")) {
+      throw new Error(`unknown verification option: ${arg}`);
+    } else if (mode) {
+      throw new Error(`unexpected verification argument: ${arg}`);
+    } else {
+      mode = arg;
+    }
+  }
+  return { mode: mode ?? "quick", summary };
+}
+
+function runStep(item, summary) {
   process.stderr.write(`verify: ${item.name} (${[item.command, ...item.args].join(" ")})\n`);
   const started = Date.now();
   const result = spawnSync(item.command, item.args, {
     cwd: process.cwd(),
-    stdio: ["inherit", 2, 2],
+    stdio: summary ? ["inherit", "ignore", "ignore"] : ["inherit", 2, 2],
   });
   return {
     name: item.name,
@@ -100,7 +117,7 @@ function runStep(item) {
 }
 
 function main() {
-  const mode = process.argv[2] ?? "quick";
+  const { mode, summary } = parseArguments(process.argv.slice(2));
   validatePlans();
   const plan = verificationPlan(mode);
   const receipt = {
@@ -111,7 +128,7 @@ function main() {
   };
   let exitCode = 0;
   for (const item of plan) {
-    const result = runStep(item);
+    const result = runStep(item, summary);
     receipt.steps.push(result);
     if (result.status !== 0 || result.signal) {
       exitCode = result.status ?? 1;

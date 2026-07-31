@@ -79,19 +79,31 @@ pub enum VizPage {
     AttackPath,
     /// 2D data-flow diagram: actors/processes/stores across trust zones.
     Dfd,
+    /// Inventory of every discovered ingress surface, grouped by kind and
+    /// trust zone with source evidence and DFD-link coverage.
+    EntryPoints,
+    /// Repository stack tree from dependency manifests and lockfiles, with
+    /// declared constraints kept distinct from resolved versions.
+    Components,
     /// 2D severity × module heatmap grid.
     Heatmap,
     /// 2D exploit chain / attack tree from entry to impact.
     ExploitChain,
+    /// Risk-ranked file worklist folded from deterministic rankers, with a
+    /// per-contributor legend. Line-based.
+    Worklist,
 }
 
 impl VizPage {
-    pub const ALL: [VizPage; 5] = [
+    pub const ALL: [VizPage; 8] = [
         VizPage::AttackSurface,
         VizPage::AttackPath,
         VizPage::Dfd,
+        VizPage::EntryPoints,
+        VizPage::Components,
         VizPage::Heatmap,
         VizPage::ExploitChain,
+        VizPage::Worklist,
     ];
 
     pub fn label(self) -> &'static str {
@@ -99,8 +111,11 @@ impl VizPage {
             VizPage::AttackSurface => "attack surface (3D terrain)",
             VizPage::AttackPath => "attack path",
             VizPage::Dfd => "data-flow diagram",
+            VizPage::EntryPoints => "entry points",
+            VizPage::Components => "components",
             VizPage::Heatmap => "findings heatmap",
             VizPage::ExploitChain => "exploit chain",
+            VizPage::Worklist => "risk worklist",
         }
     }
 
@@ -115,7 +130,7 @@ impl VizPage {
     pub fn is_frame_rendered(self) -> bool {
         matches!(
             self,
-            VizPage::AttackSurface | VizPage::Dfd | VizPage::ExploitChain
+            VizPage::AttackSurface | VizPage::Dfd | VizPage::EntryPoints | VizPage::ExploitChain
         )
     }
 
@@ -142,5 +157,19 @@ impl VizPage {
 impl Default for VizPage {
     fn default() -> Self {
         VizPage::AttackSurface
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gallery_has_eight_pages_including_the_line_based_worklist() {
+        assert_eq!(VizPage::ALL.len(), 8);
+        assert!(VizPage::ALL.contains(&VizPage::Worklist));
+        assert!(!VizPage::Worklist.is_frame_rendered());
+        assert!(!VizPage::Worklist.is_3d());
+        assert_eq!(VizPage::Worklist.label(), "risk worklist");
     }
 }

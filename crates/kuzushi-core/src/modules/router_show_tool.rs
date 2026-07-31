@@ -374,6 +374,7 @@ fn auto_triage_config(
         include_static_evidence: true,
         temperature: DEFAULT_TEMPERATURE,
         passes: DEFAULT_PASSES,
+        taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy::Available,
     }
 }
 
@@ -462,6 +463,7 @@ mod auto_triage_persistence_tests {
             cost_usd_exact: true,
             steps_used: 1,
             truncated: false,
+            consensus_split: false,
         };
 
         let error = persist_auto_triage_outcome(42, &store, &outcome)

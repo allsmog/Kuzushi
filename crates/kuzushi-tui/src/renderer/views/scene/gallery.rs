@@ -2,12 +2,16 @@
 //! attack-surface page is drawn frame-level (see `render_scene_view`); every
 //! other page is a 2D box-drawing diagram rendered here as styled lines.
 
+use super::components::component_tree_lines;
 use super::diagrams::{attack_path_lines, heatmap_lines};
+use super::entry_points::entry_point_lines;
+use super::worklist::worklist_lines;
 use super::*;
 use crate::scene3d::VizPage;
 use crate::theme;
 use crate::ui_view_models::{
-    attack_tree, cached_findings_heatmap, dfd_model, taint_flow_path, AttackTree, DfdKind, DfdModel,
+    attack_tree, cached_findings_heatmap, component_stack, dfd_model, entry_point_breakdown,
+    taint_flow_path, worklist_model, AttackTree, DfdKind, DfdModel,
 };
 use crate::ChainSeverity;
 use ratatui::layout::Rect;
@@ -15,25 +19,29 @@ use ratatui::prelude::{Line, Span};
 
 /// The 3-row header shown above every gallery page: title, tagline, page nav.
 /// Shared by the 3D frame renderer and the 2D line pages so they stay aligned.
-pub(crate) fn gallery_header_lines(app: &ShellApp) -> Vec<Line<'static>> {
+pub(crate) fn gallery_header_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     let page = app.router.scene().page();
     vec![
-        Line::from(vec![Span::styled(
-            format!("◆ KUZUSHI VIZ — {}", page.label().to_uppercase()),
+        responsive_header_line(
+            &format!("◆ KUZUSHI VIZ — {}", page.label().to_uppercase()),
+            &format!("◆ VIZ — {}", page.label().to_uppercase()),
+            width,
             theme::heading(),
-        )]),
-        Line::from(vec![Span::styled(
-            page_tagline(page).to_string(),
+        ),
+        responsive_header_line(
+            page_tagline(page),
+            compact_page_tagline(page),
+            width,
             theme::muted(),
-        )]),
-        Line::from(nav_spans(app, page)),
+        ),
+        responsive_nav_line(app, page, width),
     ]
 }
 
 /// Line-based entry for the gallery (2D pages always; the 3D page only in plain
 /// / non-TTY mode, where the framebuffer can't run).
 pub(crate) fn scene_page_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'static>> {
-    let mut lines = gallery_header_lines(app);
+    let mut lines = gallery_header_lines(app, area.width as usize);
     lines.push(Line::from(String::new()));
     lines.extend(page_body_lines(app, area, page));
     lines
@@ -43,7 +51,10 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
     let width = area.width as usize;
     match page {
         VizPage::AttackPath => attack_path_lines(width, &taint_flow_path(app)),
+        VizPage::EntryPoints => entry_point_lines(width, &entry_point_breakdown(app)),
+        VizPage::Components => component_tree_lines(width, &component_stack(app)),
         VizPage::Heatmap => heatmap_lines(width, &cached_findings_heatmap(app)),
+        VizPage::Worklist => worklist_lines(width, &worklist_model(app)),
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
         VizPage::AttackSurface => attack_surface_plain_lines(app, width),
@@ -275,61 +286,89 @@ fn page_tagline(page: VizPage) -> &'static str {
         VizPage::AttackSurface => "risk density as 3D relief — peaks are the hottest modules",
         VizPage::AttackPath => "how tainted input reaches a dangerous sink, stage by stage",
         VizPage::Dfd => "data flows across trust boundaries — crossings are where STRIDE lives",
+        VizPage::EntryPoints => "trust-zone browser — select an ingress to inspect its evidence",
+        VizPage::Components => {
+            "repository stack tree — declared constraints and resolved versions stay distinct"
+        }
         VizPage::Heatmap => "severity × module — where findings concentrate",
         VizPage::ExploitChain => "entry → impact as an attack tree with AND/OR steps",
+        VizPage::Worklist => "highest-risk files first — every row cites the rankers behind it",
     }
+}
+
+fn compact_page_tagline(page: VizPage) -> &'static str {
+    match page {
+        VizPage::AttackSurface => "module risk peaks",
+        VizPage::AttackPath => "source-to-sink path",
+        VizPage::Dfd => "trust-boundary flows",
+        VizPage::EntryPoints => "select an ingress",
+        VizPage::Components => "stack + versions",
+        VizPage::Heatmap => "findings by module",
+        VizPage::ExploitChain => "entry-to-impact tree",
+        VizPage::Worklist => "riskiest files first",
+    }
+}
+
+fn responsive_header_line(
+    full: &str,
+    compact: &str,
+    width: usize,
+    style: ratatui::style::Style,
+) -> Line<'static> {
+    let value = if full.chars().count() <= width {
+        full
+    } else {
+        compact
+    };
+    Line::styled(fit_plain(value, width), style)
+}
+
+fn responsive_nav_line(app: &ShellApp, page: VizPage, width: usize) -> Line<'static> {
+    let full = Line::from(nav_spans(app, page));
+    if full.width() <= width {
+        return full;
+    }
+    let available = app.available_viz_pages();
+    let position = available
+        .iter()
+        .position(|candidate| *candidate == page)
+        .map_or(1, |index| index + 1);
+    let label = page_nav_label(page);
+    let compact = format!("pages [{label}] · {position}/{} · Tab", available.len());
+    if compact.chars().count() <= width {
+        return Line::styled(compact, theme::muted());
+    }
+    Line::styled(
+        fit_plain(&format!("[{label}] {position}/{}", available.len()), width),
+        theme::muted(),
+    )
 }
 
 fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     let mut spans = vec![Span::styled("pages  ".to_string(), theme::muted())];
-    append_page_tabs(&mut spans, app, page);
-    spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
-    spans.push(Span::styled(
-        "  ·  Esc/q return".to_string(),
-        theme::muted(),
-    ));
-    if matches!(page, VizPage::Dfd) {
-        spans.push(Span::styled(
-            "  ·  j/k select · PgUp/PgDn details".to_string(),
-            theme::muted(),
-        ));
-    }
-    if page.is_3d() {
-        let motion = if app.router.scene().paused() {
-            "paused"
-        } else if app.scene_animating() {
-            "spinning"
-        } else {
-            "static"
-        };
-        spans.push(Span::styled(
-            format!("  ·  {motion} · space pause · hjkl rotate"),
-            theme::muted(),
-        ));
+    let available = app.available_viz_pages();
+    append_page_tabs(&mut spans, &available, page);
+    if available.len() > 1 {
+        spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
     }
     spans
 }
 
-fn append_page_tabs(spans: &mut Vec<Span<'static>>, app: &ShellApp, active: VizPage) {
-    for (index, page) in VizPage::ALL.iter().copied().enumerate() {
+fn append_page_tabs(spans: &mut Vec<Span<'static>>, pages: &[VizPage], active: VizPage) {
+    for (index, page) in pages.iter().copied().enumerate() {
         if index > 0 {
             spans.push(Span::styled(" · ".to_string(), theme::subtle()));
         }
-        spans.push(page_tab_span(app, page, active));
+        spans.push(page_tab_span(page, active));
     }
 }
 
-fn page_tab_span(app: &ShellApp, page: VizPage, active: VizPage) -> Span<'static> {
-    let mut label = page_nav_label(page).to_string();
-    if !page_has_content(app, page) {
-        // `∅` = page has no backing artifact yet; a `·` marker collides
-        // with the ` · ` tab separator and renders as `path· · dfd`.
-        label.push('∅');
-    }
+fn page_tab_span(page: VizPage, active: VizPage) -> Span<'static> {
+    let label = page_nav_label(page);
     if page == active {
         Span::styled(format!("[{label}]"), theme::accent())
     } else {
-        Span::styled(label, theme::muted())
+        Span::styled(label.to_string(), theme::muted())
     }
 }
 
@@ -338,17 +377,11 @@ fn page_nav_label(page: VizPage) -> &'static str {
         VizPage::AttackSurface => "terrain",
         VizPage::AttackPath => "path",
         VizPage::Dfd => "dfd",
+        VizPage::EntryPoints => "entry",
+        VizPage::Components => "components",
         VizPage::Heatmap => "heatmap",
         VizPage::ExploitChain => "chain",
-    }
-}
-
-fn page_has_content(app: &ShellApp, page: VizPage) -> bool {
-    match page {
-        VizPage::AttackSurface | VizPage::Heatmap => !app.findings().is_empty(),
-        VizPage::AttackPath => app.domain().taint_flow().is_some(),
-        VizPage::Dfd => dfd_model(app).empty_hint.is_none(),
-        VizPage::ExploitChain => app.domain().has_exploit_chains(),
+        VizPage::Worklist => "worklist",
     }
 }
 
@@ -396,15 +429,50 @@ mod tests {
     }
 
     #[test]
-    fn attack_surface_nav_reports_static_when_scene_is_not_animating() {
+    fn empty_gallery_header_only_shows_the_permanent_dfd_page() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let text = spans_text(nav_spans(&app, VizPage::Dfd));
+
+        assert!(text.contains("pages  [dfd]"), "{text}");
+        assert!(!text.contains("terrain"), "{text}");
+        assert!(!text.contains("path"), "{text}");
+        assert!(!text.contains("entry"), "{text}");
+        assert!(!text.contains("components"), "{text}");
+        assert!(!text.contains("heatmap"), "{text}");
+        assert!(!text.contains("chain"), "{text}");
+        assert!(!text.contains('∅'), "{text}");
+        assert!(!text.contains("Tab cycles"), "{text}");
+        assert!(!text.contains("Esc/q"), "{text}");
+        assert!(!text.contains("j/k"), "{text}");
+        assert!(!text.contains("PgUp"), "{text}");
+    }
+
+    #[test]
+    fn gallery_header_compacts_without_crossing_the_terminal_width() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_scene_page(VizPage::Dfd);
+
+        let lines = gallery_header_lines(&app, 20);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(lines.iter().all(|line| line.width() <= 20), "{text}");
+        assert!(text.contains("DATA-FLOW"), "{text}");
+        assert!(text.contains("trust-boundary flows"), "{text}");
+        assert!(text.contains("[dfd]"), "{text}");
+    }
+
+    #[test]
+    fn gallery_navigation_reserves_view_controls_for_the_footer() {
         let app = ShellApp::new(V2Config::default(), None);
 
         let text = spans_text(nav_spans(&app, VizPage::AttackSurface));
 
-        assert!(text.contains("static"), "{text}");
+        assert!(text.contains("pages"), "{text}");
+        assert!(!text.contains("static"), "{text}");
         assert!(!text.contains("spinning"), "{text}");
-        assert!(text.contains("Esc/q return"), "{text}");
-        assert!(!text.contains("o return"), "{text}");
+        assert!(!text.contains("Esc/q"), "{text}");
+        assert!(!text.contains("pause"), "{text}");
     }
 
     #[test]
@@ -425,6 +493,8 @@ mod tests {
             (VizPage::AttackSurface, "scan"),
             (VizPage::AttackPath, "taint-iris:hunt"),
             (VizPage::Dfd, "threat-model:build"),
+            (VizPage::EntryPoints, "threat-model:build"),
+            (VizPage::Components, "sbom-scan:scan"),
             (VizPage::Heatmap, "scan"),
             (VizPage::ExploitChain, "exploit-chain:scan"),
         ];
@@ -485,6 +555,30 @@ mod tests {
         assert!(!text.contains("renders only in an interactive"), "{text}");
     }
 
+    #[test]
+    fn entry_points_page_breaks_down_every_discovered_ingress_surface() {
+        let temp = tempfile::tempdir().expect("temp target");
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_persistent_threat_model(temp.path(), &sample_dfd_doc(), true).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 30), VizPage::EntryPoints);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+        let nav = spans_text(nav_spans(&app, VizPage::EntryPoints));
+
+        assert!(
+            text.contains("ENTRY POINTS · 1 found · 1 kinds · 1 zones · 2/2 DFD links"),
+            "{text}"
+        );
+        assert!(text.contains("INTERNET · 1"), "{text}");
+        assert!(text.contains("[http route]"), "{text}");
+        assert!(text.contains("POST /login"), "{text}");
+        assert!(text.contains("Browser"), "{text}");
+        assert!(text.contains("src/login.rs:42"), "{text}");
+        assert!(nav.contains("dfd · [entry]"), "{nav}");
+    }
+
     fn sample_dfd_doc() -> serde_json::Value {
         json!({
             "dfd": {
@@ -498,6 +592,22 @@ mod tests {
                      "trustBoundaryIds": ["tb-edge"]},
                     {"id": "f2", "sourceId": "api", "targetId": "db", "description": "sql",
                      "trustBoundaryIds": []}
+                ],
+                "trustBoundaries": [
+                    {"id": "tb-edge", "name": "Internet to app", "outerZone": "internet",
+                     "innerZone": "app-tier", "crossingFlowIds": ["f1"]}
+                ]
+            },
+            "attackSurface": {
+                "entryPoints": [
+                    {
+                        "id": "EP-1", "name": "POST /login", "kind": "http_route",
+                        "method": "POST", "route": "/login", "trustZone": "internet",
+                        "path": "src/login.rs", "line": 42,
+                        "description": "Accepts login credentials",
+                        "evidence": "src/login.rs:42 router.post",
+                        "targetElementIds": ["user", "tb-edge"]
+                    }
                 ]
             }
         })

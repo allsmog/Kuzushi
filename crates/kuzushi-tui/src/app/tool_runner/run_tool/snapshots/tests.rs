@@ -122,6 +122,102 @@ fn repeated_steps(count: usize) -> Vec<serde_json::Value> {
         .collect()
 }
 
+fn worklist_rank_result() -> serde_json::Value {
+    json!({
+        "data": {
+            "rows": [{
+                "path": "src/deep.rs", "line": 12, "score": 0.8, "rank": 1,
+                "citations": [{
+                    "contributor": "systemsHunt", "raw": 40.0, "rawDisplay": "score 40",
+                    "normalized": 0.5, "normalization": "rank", "reasons": []
+                }]
+            }],
+            "rankedTotal": 1,
+            "contributors": {"systemsHunt": "live"},
+            "unranked": [], "degraded": []
+        }
+    })
+}
+
+#[test]
+fn worklist_rank_result_is_captured_into_app_state() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    assert!(app
+        .domain()
+        .worklist_snapshot_for(temp.path(), None)
+        .is_none());
+
+    app.cache_tool_snapshot("worklist:rank", &worklist_rank_result());
+
+    let snapshot = app
+        .domain()
+        .worklist_snapshot_for(temp.path(), None)
+        .expect("worklist captured");
+    assert_eq!(snapshot["rows"][0]["path"], "src/deep.rs");
+}
+
+#[test]
+fn worklist_snapshot_is_dropped_without_a_target() {
+    // No engagement to render under: the capture is not stored, so no foreign
+    // worklist can leak into a later target.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.cache_tool_snapshot("worklist:rank", &worklist_rank_result());
+    assert!(app
+        .domain()
+        .worklist_snapshot_for(std::path::Path::new("/tmp/whatever"), None)
+        .is_none());
+}
+
+#[test]
+fn worklist_snapshot_does_not_render_under_a_different_target() {
+    // New-1: capture on target A, then activate target B ⇒ A's rows must not
+    // surface as B's worklist.
+    let temp_a = tempfile::tempdir().expect("tempdir a");
+    let temp_b = tempfile::tempdir().expect("tempdir b");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp_a.path().to_path_buf()));
+    app.cache_tool_snapshot("worklist:rank", &worklist_rank_result());
+    assert!(app
+        .domain()
+        .worklist_snapshot_for(temp_a.path(), None)
+        .is_some());
+
+    // The accessor is target-keyed, so B never sees A's capture even before a
+    // full engagement reset clears it.
+    app.set_target(Some(temp_b.path().to_path_buf()));
+    assert!(app
+        .domain()
+        .worklist_snapshot_for(temp_b.path(), None)
+        .is_none());
+}
+
+#[test]
+fn worklist_snapshot_is_stale_when_attack_surface_rebuilds() {
+    // New-1: a fresh context:build changes the attack-surface artifact version,
+    // so the earlier capture no longer matches and the Read-safe fold wins.
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.domain_mut().set_worklist_snapshot(
+        temp.path().to_path_buf(),
+        Some(7),
+        Some(worklist_rank_result()),
+    );
+
+    assert!(app
+        .domain()
+        .worklist_snapshot_for(temp.path(), Some(7))
+        .is_some());
+    assert!(
+        app.domain()
+            .worklist_snapshot_for(temp.path(), Some(9))
+            .is_none(),
+        "a rebuilt map (new artifact version) supersedes the capture"
+    );
+}
+
 fn repeated_stages(count: usize) -> Vec<serde_json::Value> {
     (0..count)
         .map(|index| {

@@ -1,0 +1,43 @@
+# J35 — router role MODEL_TRIAGE_ESCALATION end-to-end (P3 / regression R2)
+#
+# Keyless, deterministic, headless. `run router:show` emits machine-readable JSON
+# on stdout; interactively `run <tool>` only leaves a run receipt, so this journey
+# drives the shared-core `run`/scripted-`setg` paths directly.
+#
+# The load-bearing R2 assertion is NOT that `options` echoes the stored value
+# (it does even when the write never reaches the router — the trap) but that
+# `run router:show` reports the value as operatorOverride AND effective for the
+# triage_escalation role: proof the `setg` landed at (Global, OptionTarget::All)
+# where the router reads. The effective route shows the model only AFTER the
+# setg (before it, expect-not), so the change is causal, not an echo.
+#
+# `setg MODEL_<ROLE>` resolves against the focused tool's option spec, so the
+# scripted session focuses `router` (`use router`) before storing the override;
+# the store is global and persists to HOME for the following headless read.
+name: router triage_escalation role reflects the setg override
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+# Negative arm first: a fresh HOME has no override, and the escalation role must
+# NOT inherit the operator/router default as its effective tie-break route.
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch-raw: @KUZUSHI --target @TMP_TARGET --no-session-persistence run router:show 2>&1 | grep -iE 'triage_escalation|gpt-strong|effective'
+wait: 6
+snap: router-fresh
+expect: triage_escalation
+expect-not: openai:gpt-strong
+ask: R2 negative arm — the triage_escalation role's effective route is null (no override), and explicit_role_model refuses inheritance, so the operator/primary model is never shown as the tie-break route (a row that showed it would be a lying screen).
+# Store the role override through the shell (focus router first); it persists to
+# HOME's global option store at (Global, OptionTarget::All).
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch-raw: printf 'use router\nsetg MODEL_TRIAGE_ESCALATION openai:gpt-strong\nquit\n' | @KUZUSHI --target @TMP_TARGET 2>&1 | tail -12
+wait: 6
+snap: router-setg
+expect: MODEL_TRIAGE_ESCALATION
+# Effective route now reflects the setg — the causal R2 proof.
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch-raw: @KUZUSHI --target @TMP_TARGET --no-session-persistence run router:show 2>&1 | grep -iE -B4 'triage_escalation'
+wait: 6
+snap: router-effective
+expect: triage_escalation
+expect: openai:gpt-strong
+ask: Does the router table show the value as operatorOverride AND as the effective route for triage_escalation — proving the setg actually reached the router (latent bug #1), not merely echoing the stored key?

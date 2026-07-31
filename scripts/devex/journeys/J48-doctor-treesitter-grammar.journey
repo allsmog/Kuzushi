@@ -1,0 +1,32 @@
+# J48 — doctor / health disclose the tree-sitter grammar set (P6)  ⭐ release-blocking
+#
+# Keyless, deterministic, headless. `kuzushi --plain doctor` now carries a
+# `treesitter` row that lists the SHARED supported-language const (includes cpp and
+# rust) and — per the G4 fix — PROBES the sidecar rather than reporting a hardcoded
+# green: Ok when the binary resolves next to `kuzushi`, Warn when
+# KUZUSHI_MCP_TREESITTER_BIN points at a missing path.
+name: doctor treesitter row lists the shared grammar set and probes the sidecar
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# wait-for a needle that only the OUTPUT carries ("found at"), not the echoed
+# command line (which contains the word "treesitter" in its grep pattern).
+launch-raw: @KUZUSHI --plain --target @TMP_TARGET doctor 2>&1 | grep -iE 'treesitter'
+wait-for: 120 found at
+wait: 1
+snap: doctor-treesitter-ok
+expect: treesitter
+expect: cpp
+expect: rust
+ask: The treesitter language list matches the cpg row's shared const format (a hand-copied list would be the sixth drifting copy the plan forbids); the row reads OK because the sidecar resolved next to the binary?
+# Probe honesty: point the override at a missing path — the row must degrade to
+# Warn (ENOENT at runtime), not report a hardcoded green.
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_MCP_TREESITTER_BIN=@TMP_TARGET/no-such-treesitter-binary
+launch-raw: @KUZUSHI --plain --target @TMP_TARGET doctor 2>&1 | grep -iE 'treesitter'
+wait-for: 120 was not found
+wait: 1
+snap: doctor-treesitter-warn
+expect: treesitter
+expect: not found
+expect: KUZUSHI_MCP_TREESITTER_BIN
+ask: With the override at a missing path the row degrades to Warn/[!] with an actionable remedy (build the workspace or set the env to a real path) — the check probes the sidecar rather than trusting a compiled-in green?

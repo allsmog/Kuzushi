@@ -12721,6 +12721,201 @@ mod tests {
         assert!(coverage["gaps"]
             .as_array()
             .is_some_and(|gaps| gaps.iter().any(|gap| gap["path"] == json!("src/admin.js"))));
+        assert_eq!(
+            result["status"],
+            json!("partial"),
+            "an unsatisfied coverage invariant must not report completed"
+        );
+        assert!(
+            result["warnings"]
+                .as_array()
+                .is_some_and(|warnings| warnings.iter().any(|warning| warning
+                    .as_str()
+                    .is_some_and(|text| text.starts_with("coverage: ")))),
+            "the measured coverage shortfall must reach the operator as a warning: {:?}",
+            result["warnings"]
+        );
+    }
+
+    /// Observed 2026-07-30: a cold build collapsed 70 concrete file:line
+    /// surfaces into 6 abstract buckets with `path: null` and no evidence, and
+    /// still reported `completed`. Entry points that name a surface without
+    /// locating it are not usable attack surface, so the envelope must say so
+    /// even when the coverage invariant itself is satisfied.
+    fn anchor_free_surface_document() -> Value {
+        let mut document = sample_document();
+        document["threats"][0]["affectedFiles"] =
+            json!([{"filePath": "src/admin.js", "startLine": 1}]);
+        document["attackSurface"] = json!({
+            "entryPoints": [
+                {"id": "AS-BUCKET-01", "name": "admin HTTP handlers", "targetElementIds": ["web"]},
+                {"id": "AS-BUCKET-02", "name": "whitebox os.system paths", "targetElementIds": ["web"]},
+            ],
+            "externalSinks": [],
+            "roleGates": [],
+            "trustedCallers": [],
+        });
+        document
+    }
+
+    #[test]
+    fn anchor_free_entry_points_downgrade_the_build_to_partial() {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": anchor_free_surface_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/data/document/coverage/invariantSatisfied"),
+            Some(&json!(true)),
+            "the threat cites src/admin.js, so coverage itself must be satisfied"
+        );
+        assert_eq!(
+            result["status"],
+            json!("partial"),
+            "provenance-free entry points must not report completed"
+        );
+        let warnings = result["warnings"].as_array().cloned().unwrap_or_default();
+        assert!(
+            warnings.iter().any(|warning| warning
+                .as_str()
+                .is_some_and(|text| text == "attack surface: 2/2 entry points carry no path or evidence anchor")),
+            "the anchor-free count must reach the operator verbatim: {warnings:?}"
+        );
+        assert!(
+            !warnings.iter().any(|warning| warning
+                .as_str()
+                .is_some_and(|text| text.starts_with("coverage: "))),
+            "a satisfied coverage axis must stay silent: {warnings:?}"
+        );
+    }
+
+    /// Observed 2026-07-30: a run dispatched with `seedMode: "fresh"` still
+    /// loaded the full persisted model, because `sources` carried it through a
+    /// channel `seedMode` never gated. The resulting document was a paraphrase
+    /// of its own predecessor while its provenance claimed `seedMode: fresh`.
+    ///
+    /// This drives the real dispatch boundary on purpose: descriptor defaults
+    /// are materialized into the prepared input, so `sources` always names the
+    /// prior model by the time the tool sees it. Exclusion therefore cannot be
+    /// implemented by editing the source list — it must key off the resolved
+    /// seeding decision.
+    #[test]
+    fn fresh_seed_mode_keeps_the_persisted_model_out_of_every_prompt_channel() {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut prior = sample_document();
+        prior["threats"][0]["title"] = json!("MARKER-PRIOR-GENERATION-THREAT");
+        save_persistent_threat_model(workspace.root(), &prior, true).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"seedMode": "fresh", "preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let prompt = runtime.requests()[0].prompt.clone();
+        assert!(
+            !prompt.contains("MARKER-PRIOR-GENERATION-THREAT"),
+            "the persisted model must not reach the prompt through the source bundle"
+        );
+        assert!(
+            prompt.contains("Previous persistent model summary:\nnone"),
+            "nor through the prompt-header count summary, which must report none"
+        );
+        let provenance = result.pointer("/data/document/provenance").unwrap();
+        assert_eq!(
+            provenance["seedMode"],
+            json!("fresh"),
+            "the stamped mode is what was observed, not what was requested"
+        );
+        assert!(provenance.get("seededFrom").is_none());
+        let attestation = provenance["sources"].as_array().unwrap();
+        let prior_record = attestation
+            .iter()
+            .find(|row| row["label"] == json!("threat-model"))
+            .expect("the excluded source is still attested");
+        assert_eq!(
+            prior_record["status"],
+            json!("skipped"),
+            "exclusion is recorded, not silently dropped: {prior_record}"
+        );
+    }
+
+    /// The default path must be untouched: seeding still embeds the model.
+    #[test]
+    fn default_seed_mode_still_embeds_the_persisted_model() {
+        let temp = express_route_workspace();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut prior = sample_document();
+        prior["threats"][0]["title"] = json!("MARKER-PRIOR-GENERATION-THREAT");
+        save_persistent_threat_model(workspace.root(), &prior, true).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let prompt = runtime.requests()[0].prompt.clone();
+        assert!(
+            prompt.contains("MARKER-PRIOR-GENERATION-THREAT"),
+            "the default path must keep embedding the persisted model"
+        );
+        let provenance = result.pointer("/data/document/provenance").unwrap();
+        assert_eq!(provenance["seedMode"], json!("seeded"));
+        assert!(provenance["seededFrom"]["sha256"]
+            .as_str()
+            .is_some_and(|sha| sha.starts_with("sha256:")));
     }
 
     fn express_route_workspace() -> tempfile::TempDir {
@@ -12757,6 +12952,7 @@ mod tests {
         json!({
             "threats": [{
                 "id": "T-GAP-1",
+                "targetElementIds": ["web"],
                 "category": "elevation-of-privilege",
                 "title": "Debug route exposes admin state",
                 "surface": "GET /admin/debug",

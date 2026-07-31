@@ -153,31 +153,52 @@ pub(crate) fn deep_audit_module() -> BuiltinModule {
                 RuntimeRequirement::Always,
                 FindingStoreRequirement::Optional,
             ),
-            vec![hidden_tool_with_options(
-                "deep-audit:run",
-                "Compatibility alias for triage:run with strategy=deep.",
-                vec![
-                opt(
-                    "findingFingerprint",
-                    OptionType::String,
-                    "Fingerprint (or short prefix) of the finding to audit.",
-                )
-                .required(),
-                opt(
-                    "maxSteps",
-                    OptionType::Int,
-                    "Hard cap on tool-loop steps per finding.",
-                )
-                .default(serde_json::json!(24)),
-                opt(
-                    "depositUsd",
-                    OptionType::Float,
-                    "Initial spend ticket; refunded with the bridge's reported cost.",
-                )
-                .default(serde_json::json!(1.0)),
-                ],
-            )],
+            vec![deep_audit_tool()],
         ),
         vec![],
     )
+}
+
+fn deep_audit_tool() -> ToolDescriptor {
+    hidden_tool_with_options(
+        "deep-audit:run",
+        "Compatibility alias for triage:run with strategy=deep.",
+        deep_audit_options(),
+    )
+}
+
+fn deep_audit_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "findingFingerprint",
+            OptionType::String,
+            "Fingerprint (or short prefix) of the finding to audit.",
+        )
+        .required(),
+        opt(
+            "maxSteps",
+            OptionType::Int,
+            "Hard cap on tool-loop steps per finding.",
+        )
+        .default(serde_json::json!(24)),
+        opt(
+            "depositUsd",
+            OptionType::Float,
+            "Initial spend ticket; refunded with the bridge's reported cost.",
+        )
+        .default(serde_json::json!(1.0)),
+        opt(
+            "passes",
+            OptionType::Int,
+            "Independent consensus audit passes; majority verdict is reported when > 1.",
+        )
+        .default(serde_json::json!(1)),
+        opt(
+            "temperature",
+            OptionType::Float,
+            "Sampling temperature for every audit round-trip.",
+        )
+        .default(serde_json::json!(0.0)),
+        crate::modules::triage_module::taint_tools_option(),
+    ]
 }

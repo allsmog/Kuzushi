@@ -123,11 +123,26 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_stage2_tier_option(),
         triage_strategy_option(),
         deep_triage_options(),
+        taint_tools_option(),
         triage_prompt_option(),
         model_option(),
     ];
     options.extend(deep_triage_advanced_options());
     options
+}
+
+/// Dataflow tools offered to the deep auditor. Non-advanced: it changes what
+/// the auditor can do, so it must be visible without `show advanced`.
+pub(crate) fn taint_tools_option() -> OptionSpec {
+    opt(
+        "taintTools",
+        OptionType::Enum,
+        "Dataflow tools offered to the deep auditor: off, available (use an existing cpg graph), \
+build (build the graph first). Unavailable graphs degrade to grep-only navigation.",
+    )
+    .aliases(&["taint_tools"])
+    .choices(&["off", "available", "build"])
+    .default(json!("available"))
 }
 
 fn triage_scope_option() -> OptionSpec {

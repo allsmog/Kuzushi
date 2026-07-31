@@ -1,0 +1,37 @@
+# J33 — refused escalation: warning, not success (P3)  ⭐ release-blocking
+#
+# Keyless, deterministic. Uses the F4 seeded `refused-split-fixture` finding
+# (split panel, escalation refused: same model as primary). The split verdict
+# stands unchanged and the refusal renders in warn/danger tone — never a green ✓.
+#
+# L4/L5 lying-screen guard: pre-P3, every proof note renders as `✓ <note>` in
+# success green. A refusal must NOT read as a corroboration. Capture the .ansi
+# and check the row's SGR is danger, not success.
+name: refused escalation surfaces as a warning, never a success
+size: 120x36
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1 KUZUSHI_DEVEX_PHASE_FIXTURE=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+submit: demo
+wait-for: 120 RUN FOCUS
+keys: b
+wait-for: 30 findings / 1 crit
+wait: 2
+submit: open refused-split-fixture
+wait-for: 15 Order identifier crosses trust boundary
+nav-mode:
+keys: 4
+wait-live-snap: 12 Viewing Prove | prove-refused
+# The Prove proof pane is narrow at 120 cols, so the ⚠ refusal disclosure shows
+# but its tail may be width-clipped; assert the visible refusal facts here and
+# verify the full refusal disclosure in J34's refusal replay.
+expect: Order identifier crosses trust boundary
+expect: ⚠
+expect: split
+expect: refused
+expect: model_assessed
+expect-not: ✓ split
+ask: append_proof_notes hazard — is the refusal note rendered in warn/danger tone with NO green check anywhere on that row? (Capture the .ansi and check the SGR — danger, not success green.)
+ask: Does the completion receipt / context strip carry the refusal as a warning (completed WITH a warning), never as a clean verification, and does the <=90-char stage note fit the context strip without clipping into ambiguity?

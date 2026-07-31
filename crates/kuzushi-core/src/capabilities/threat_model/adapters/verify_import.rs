@@ -35,10 +35,11 @@ pub(crate) fn verify_threat_model_adapter(
         save_persistent_threat_model(root, &document, true)?;
     }
     let output = format!(
-        "threat-model:verify — {} ({} cited paths, {} missing; coverage {}/{})",
+        "threat-model:verify — {} ({} cited paths, {} missing; {} link errors; coverage {}/{})",
         verification.verdict,
         verification.checked_paths,
         verification.missing_count,
+        verification.link_error_count,
         verification.coverage_considered - verification.coverage_gaps,
         verification.coverage_considered,
     );
@@ -65,6 +66,7 @@ pub(crate) fn import_threat_model_adapter(
     let raw = import_document_value(&input)?;
     let methodology = import_methodology(&input, &raw);
     let mut document = normalize_document(raw, &methodology)?;
+    require_complete_security_context_links(&document)?;
     stamp_provenance(&mut document, root, "import");
     let verification = verify_threat_model_document(&document, root)?;
     stamp_verification(&mut document, &verification);
@@ -157,9 +159,14 @@ mod verify_import_tests {
     fn hand_written_document() -> Value {
         json!({
             "methodology": "stride",
-            "dfd": {"nodes": [], "flows": []},
+            "dfd": {
+                "nodes": [{"id": "app"}],
+                "flows": [],
+                "trustBoundaries": []
+            },
             "threats": [{
                 "id": "T-001",
+                "targetElementIds": ["app"],
                 "title": "download traversal",
                 "affectedFiles": ["src/app.py"],
             }],
@@ -172,18 +179,18 @@ mod verify_import_tests {
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
 
-        let result = import_threat_model_adapter(
-            json!({"document": hand_written_document()}),
-            &ctx,
-        )
-        .unwrap();
+        let result =
+            import_threat_model_adapter(json!({"document": hand_written_document()}), &ctx)
+                .unwrap();
         assert_eq!(result["data"]["verification"]["verdict"], json!("verified"));
 
         let live = load_persistent_threat_model(workspace.root()).unwrap();
-        assert_eq!(live.pointer("/verification/verdict"), Some(&json!("verified")));
+        assert_eq!(
+            live.pointer("/verification/verdict"),
+            Some(&json!("verified"))
+        );
         assert_eq!(live.pointer("/provenance/pipeline"), Some(&json!("import")));
-        let versions =
-            list_threat_model_versions(workspace.root(), 10).unwrap();
+        let versions = list_threat_model_versions(workspace.root(), 10).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].source, "import");
     }
@@ -197,11 +204,9 @@ mod verify_import_tests {
         edited["userEdited"] = json!(true);
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
 
-        let refused = import_threat_model_adapter(
-            json!({"document": hand_written_document()}),
-            &ctx,
-        )
-        .unwrap_err();
+        let refused =
+            import_threat_model_adapter(json!({"document": hand_written_document()}), &ctx)
+                .unwrap_err();
         assert!(refused.to_string().contains("force=true"), "{refused:#}");
 
         import_threat_model_adapter(
@@ -209,6 +214,26 @@ mod verify_import_tests {
             &ctx,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn import_rejects_dangling_context_links_without_replacing_live_document() {
+        let (_temp, workspace) = fixture();
+        let config = V2Config::default();
+        let ctx = ctx(&config, &workspace);
+        let live = hand_written_document();
+        save_persistent_threat_model(workspace.root(), &live, true).unwrap();
+        let mut invalid = hand_written_document();
+        invalid["threats"][0]["targetElementIds"] = json!(["missing"]);
+
+        let error = import_threat_model_adapter(json!({"document": invalid, "force": true}), &ctx)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("unknown DFD id `missing`"));
+        assert_eq!(
+            load_persistent_threat_model(workspace.root()).unwrap(),
+            live
+        );
     }
 
     #[test]

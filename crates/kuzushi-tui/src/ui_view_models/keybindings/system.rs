@@ -16,7 +16,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::UpdateAvailable => Some(update_available_keybindings()),
         ShellView::Interruption => Some(interruption_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
-        ShellView::Scene => Some(scene_keybindings(app.router.scene().page())),
+        ShellView::Scene => Some(scene_keybindings(app)),
         ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
         // First-run pickers own input — surface their controls in the footer
         // so the modal has one canonical hint row.
@@ -294,22 +294,48 @@ fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 
 // The security-viz gallery is fully interactive but its controls live only in
 // the key handler; surface them so Tab/orbit/pause are discoverable.
-fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
-    let mut bindings = Vec::new();
+fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let page = app.router.scene().page();
     if matches!(page, crate::scene3d::VizPage::Dfd) {
-        // Selection moves through topology; paging scrolls only the wrapped
-        // detail panel, never the graph itself.
-        bindings.push(bind("j/k/↑/↓", "select node/flow"));
-        bindings.push(bind("PgUp/PgDn", "scroll details"));
-    } else if !page.is_3d() {
+        let mut bindings = Vec::new();
+        push_dfd_keybindings(&mut bindings, app);
+        return bindings;
+    }
+    if matches!(page, crate::scene3d::VizPage::EntryPoints) {
+        return entry_point_keybindings(app);
+    }
+    non_dfd_scene_keybindings(app, page)
+}
+
+fn entry_point_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = vec![
+        bind("j/k", "select"),
+        bind("g/G", "ends"),
+        bind("PgUp/PgDn", "detail"),
+        bind("Enter", "DFD target"),
+    ];
+    if app.available_viz_pages().len() > 1 {
+        bindings.push(bind("Tab", "next page"));
+        bindings.push(bind("Shift+Tab", "prev page"));
+    }
+    bindings.push(bind("q", "leave"));
+    bindings
+}
+
+fn non_dfd_scene_keybindings(
+    app: &ShellApp,
+    page: crate::scene3d::VizPage,
+) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    if !page.is_frame_rendered() {
         bindings.push(bind("j/k/↑/↓", "scroll"));
         bindings.push(bind("g/G", "ends"));
     }
-    bindings.extend([
-        bind("Tab", "next page"),
-        bind("Shift+Tab", "prev page"),
-        bind("Esc/q", "leave"),
-    ]);
+    if app.available_viz_pages().len() > 1 {
+        bindings.push(bind("Tab", "next page"));
+        bindings.push(bind("Shift+Tab", "prev page"));
+    }
+    bindings.push(bind("Esc/q", "leave"));
     if page.is_3d() {
         bindings.extend([
             bind("h/l/j/k", "orbit 3D"),
@@ -318,6 +344,31 @@ fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
         ]);
     }
     bindings
+}
+
+fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    if app.router.scene().dfd_focused() {
+        bindings.push(bind("j/k/↑/↓", "context"));
+        bindings.push(bind("Enter", "topology"));
+        bindings.push(bind("Esc", "collapse"));
+        bindings.push(bind("q", "leave"));
+        return;
+    }
+    let model = crate::ui_view_models::dfd_model(app);
+    bindings.push(bind("j/k/↑/↓", "select"));
+    if model.empty_hint.is_some() {
+        bindings.push(bind("Enter", "generate DFD"));
+    } else if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
+        bindings.push(bind("Enter", "rebuild linked context"));
+    } else {
+        bindings.push(bind("Enter", "context"));
+    }
+    bindings.push(bind("PgUp/PgDn", "detail"));
+    if app.available_viz_pages().len() > 1 {
+        bindings.push(bind("Tab", "next page"));
+        bindings.push(bind("Shift+Tab", "prev page"));
+    }
+    bindings.push(bind("Esc/q", "leave"));
 }
 
 // SAST Tasks looks like a multi-select but is command-driven — advertise the

@@ -336,9 +336,10 @@ pub(in crate::modules) fn run_triage_stage2_deep(
     input: &TriageRunInput,
     config: &TriageExecutionConfig,
     findings: Vec<Finding>,
+    trace: Option<&crate::run_artifacts::TraceHandle>,
 ) -> Result<TriageRunStats> {
     run_triage_stage2_with(store, input, findings, &|finding| {
-        deep_triage_outcome(routed, config, input, finding)
+        deep_triage_outcome(routed, config, input, finding, trace)
     })
 }
 
@@ -362,6 +363,7 @@ fn deep_triage_outcome(
     config: &TriageExecutionConfig,
     input: &TriageRunInput,
     finding: &Finding,
+    trace: Option<&crate::run_artifacts::TraceHandle>,
 ) -> Result<TriageRuntimeOutcome> {
     let base = crate::capabilities::deep_auditor::DeepAuditConfig::new(config.cwd.clone());
     let tuning = input.deep_tuning;
@@ -370,13 +372,17 @@ fn deep_triage_outcome(
         max_steps: tuning.max_steps.unwrap_or(base.max_steps),
         deposit_usd: tuning.deposit_usd.unwrap_or(base.deposit_usd),
         temperature: tuning.temperature.unwrap_or(base.temperature),
+        taint_tools: tuning.taint_tools,
         ..base
     };
-    let outcome = crate::capabilities::deep_auditor::run_deep_auditor(routed, None, &cfg, finding)?;
+    let outcome = crate::capabilities::deep_auditor::run_deep_auditor_traced(
+        routed, None, &cfg, finding, trace,
+    )?;
     Ok(TriageRuntimeOutcome {
         outcome: outcome.triage,
         cached: false,
         failed_vote_summaries: Vec::new(),
+        evidence: outcome.evidence,
     })
 }
 
@@ -481,6 +487,7 @@ fn collect_triage_votes(
         outcome,
         cached: false,
         failed_vote_summaries,
+        evidence: Vec::new(),
     })
 }
 

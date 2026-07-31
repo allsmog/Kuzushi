@@ -24,15 +24,23 @@ pub fn probe(cfg: &AnthropicOauthConfig) -> Result<OauthReadiness> {
 }
 
 pub fn probe_path(path: &Path) -> Result<OauthReadiness> {
+    probe_provider_path(path, "anthropic")
+}
+
+pub fn probe_openai_path(path: &Path) -> Result<OauthReadiness> {
+    probe_provider_path(path, "openai-codex")
+}
+
+fn probe_provider_path(path: &Path, provider: &str) -> Result<OauthReadiness> {
     let raw = match read_credentials(path) {
         Ok(value) => value,
         Err(readiness) => return Ok(readiness),
     };
-    let entry = match anthropic_credentials_entry(path, &raw) {
+    let entry = match credentials_entry(path, &raw, provider) {
         Ok(entry) => entry,
         Err(readiness) => return Ok(readiness),
     };
-    readiness_from_entry(path, &entry)
+    readiness_from_entry(path, &entry, provider)
 }
 
 fn read_credentials(path: &Path) -> std::result::Result<String, OauthReadiness> {
@@ -50,25 +58,30 @@ fn read_credentials(path: &Path) -> std::result::Result<String, OauthReadiness> 
     }
 }
 
-fn anthropic_credentials_entry(
+fn credentials_entry(
     path: &Path,
     raw: &str,
+    provider: &str,
 ) -> std::result::Result<serde_json::Value, OauthReadiness> {
     let bag: serde_json::Value =
         serde_json::from_str(raw).map_err(|_| OauthReadiness::Invalid {
             searched: path.to_path_buf(),
             reason: "credentials file is not valid JSON".to_string(),
         })?;
-    match bag.get("anthropic") {
+    match bag.get(provider) {
         Some(value) if value.is_object() => Ok(value.clone()),
         _ => Err(OauthReadiness::Invalid {
             searched: path.to_path_buf(),
-            reason: "credentials file is missing an `anthropic` provider entry".to_string(),
+            reason: format!("credentials file is missing an `{provider}` provider entry"),
         }),
     }
 }
 
-fn readiness_from_entry(path: &Path, entry: &serde_json::Value) -> Result<OauthReadiness> {
+fn readiness_from_entry(
+    path: &Path,
+    entry: &serde_json::Value,
+    provider: &str,
+) -> Result<OauthReadiness> {
     let has_refresh = non_empty_string_field(entry, "refresh");
     let has_access = non_empty_string_field(entry, "access");
     let expires_at_ms = entry
@@ -79,7 +92,7 @@ fn readiness_from_entry(path: &Path, entry: &serde_json::Value) -> Result<OauthR
     if !has_access {
         return Ok(OauthReadiness::Invalid {
             searched: path.to_path_buf(),
-            reason: "anthropic entry is missing the `access` field".to_string(),
+            reason: format!("{provider} entry is missing the `access` field"),
         });
     }
 
@@ -88,8 +101,9 @@ fn readiness_from_entry(path: &Path, entry: &serde_json::Value) -> Result<OauthR
         if !has_refresh {
             return Ok(OauthReadiness::Invalid {
                 searched: path.to_path_buf(),
-                reason: "anthropic access token is expired and no `refresh` token is present"
-                    .to_string(),
+                reason: format!(
+                    "{provider} access token is expired and no `refresh` token is present"
+                ),
             });
         }
         return Ok(OauthReadiness::Expired { expires_at_ms });

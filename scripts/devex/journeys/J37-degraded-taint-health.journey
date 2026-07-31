@@ -1,0 +1,25 @@
+# J37a — degraded taint: Health tones the cpg-graph row Warn (P2)  ⭐ release-blocking
+#
+# Keyless, deterministic. On a target with NO cpg graph, the deep auditor refuses
+# to build implicitly and runs grep-only — so `health` must tone the cpg-graph row
+# Warn with the `run cpg:build` remedy, and the pre-P2 sentence "graphs build
+# implicitly on first hunt" must be gone. (J37b, the live grep-only run arm, needs
+# a model key and is advisory — not encoded here.)
+name: health tones the cpg-graph row Warn with the grep-only remedy
+size: 120x40
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+# The degraded precondition: no whole-graph cpg artifact for this target.
+shell: rm -rf @TMP_TARGET/.kuzushi/cpg-rs
+shell: test ! -d @TMP_TARGET/.kuzushi/cpg-rs
+launch: --target @TMP_TARGET
+wait: 6
+submit: health
+wait-for: 20 grep-only
+snap: health-degraded
+expect: cpg
+expect: grep-only
+expect: cpg:build
+expect-not: graphs build implicitly on first hunt
+ask: Is the cpg-graph row TONED Warn (check the .ansi), and is the remedy (`run cpg:build` / `taintTools=build`) actionable from the row itself? The pre-P2 "none prebuilt; graphs build implicitly" claim is now FALSE for the deep auditor and must be gone.

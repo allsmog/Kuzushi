@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) const CTRL_C_ARM_WINDOW: Duration = Duration::from_secs(2);
-
 pub(crate) const THROTTLE_STALE_AFTER: Duration = Duration::from_secs(30);
 
 /// How long a transient notice banner (error/warning) stays before it

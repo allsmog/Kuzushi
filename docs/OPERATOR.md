@@ -414,7 +414,12 @@ prompt note in deep triage),
 **Workspace & context** — `workspace:status`,
 `workspace:import-findings`, `workspace:export-findings`,
 `context:build`, `context-lite:index`, `cpg:build` (in-process cpg-rs graphs),
-`engagement:aim` (engagement scoping).
+`engagement:aim` (engagement scoping). `worklist:rank` is a deterministic,
+read-only Map tool that ranks files from the persisted attack surface and
+scan-coverage recommendations; `deep=true` additionally runs the Read-safe
+systems-hunt scorer. Every row retains each contributor's raw evidence, and
+the shell `worklist` command opens the same result in the visualization
+gallery.
 
 **Fuzzing (agentic-fuzz-engine)** — drives an external
 agentic-fuzz-engine checkout (`afeRepo` option) against C/C++ targets;

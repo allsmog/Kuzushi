@@ -3,7 +3,6 @@ use super::*;
 impl ShellApp {
     pub(crate) fn request_exit_abort_effect(&mut self) {
         self.request_active_abort();
-        self.cancel_active_tokens();
     }
 
     pub(crate) fn wait_for_abort_cleanup_effect(&mut self) {
@@ -22,35 +21,60 @@ impl ShellApp {
     }
 
     pub(crate) fn request_active_abort_with_reason(&mut self, reason: AbortReason) -> bool {
+        let had_running_work = self.has_running_work();
+        let requested = self.request_domain_aborts(reason);
+        self.cancel_active_tokens();
+        if !had_running_work {
+            return false;
+        }
+        self.log_unprojected_abort(requested);
+        self.pause_planning_after_abort();
+        self.mark_activity_canceling();
+        self.drop_queued_steer_items_for_abort();
+        self.flush_session_transcript();
+        true
+    }
+
+    fn request_domain_aborts(&mut self, reason: AbortReason) -> bool {
         let mut requested = false;
         requested |= self.request_scan_abort_for(reason);
         requested |= self.request_tool_abort_for(reason);
         requested |= self.request_agent_abort();
         requested |= self.request_plan_abort();
         requested |= self.request_threat_abort();
-        if requested {
-            if self.engagement.has_running_tool() || !self.engagement.planning_queues_empty() {
-                self.engagement.pause_planning_queue();
-                self.log(
-                    "planning",
-                    "planning queue paused after stop request; type `next` to review and resume",
-                );
-            }
-            if let Some(session) = self.activity_mut() {
-                session.mark_active_tasks_canceling();
-            }
-            // A full-stop abort must not leave queued work behind: the
-            // canceled worker's terminal event drains the steer queue
-            // (`advance_steer_queue` in `apply_job_event`), so anything left
-            // here would launch as fresh work seconds after the operator said
-            // "stop". Drop the queue on the same stage that cancels jobs and
-            // tell the operator exactly what was dropped.
-            self.drop_queued_steer_items_for_abort();
-            self.flush_session_transcript();
-        }
         requested
     }
 
+    fn log_unprojected_abort(&mut self, projected: bool) {
+        if !projected {
+            self.log(
+                "system",
+                "abort requested for active worker; waiting for cleanup",
+            );
+        }
+    }
+
+    fn pause_planning_after_abort(&mut self) {
+        if !self.engagement.has_running_tool() && self.engagement.planning_queues_empty() {
+            return;
+        }
+        self.engagement.pause_planning_queue();
+        self.log(
+            "planning",
+            "planning queue paused after stop request; type `next` to review and resume",
+        );
+    }
+
+    fn mark_activity_canceling(&mut self) {
+        if let Some(session) = self.activity_mut() {
+            session.mark_active_tasks_canceling();
+        }
+    }
+
+    // A full-stop abort must not leave queued work behind: the canceled
+    // worker's terminal event drains the steer queue (`advance_steer_queue` in
+    // `apply_job_event`), so anything left here would launch as fresh work
+    // seconds after the operator said "stop".
     fn drop_queued_steer_items_for_abort(&mut self) {
         let dropped = self.steer_queue_mut().drain_all();
         if dropped.is_empty() {
@@ -192,66 +216,26 @@ impl ShellApp {
     }
 
     pub(super) fn reduce_quit_chord(&mut self) -> InputUpdate {
-        if self.has_abortable_work() {
-            self.set_ctrl_c_armed_at(None);
-            return InputUpdate::handled_with_effects(vec![ShellEffect::CancelActiveJobs]);
-        }
-        if self.exit_or_arm_while_work_is_running() {
-            return InputUpdate::handled();
-        }
-        if self.armed_quit_chord_ready() {
-            return InputUpdate::handled_with_effects(vec![ShellEffect::RequestShellQuit]);
-        }
-        self.arm_quit_chord();
-        InputUpdate::handled()
-    }
-
-    fn has_abortable_work(&self) -> bool {
-        self.can_request_scan_abort()
-            || self.can_request_tool_abort()
-            || self.can_request_agent_abort()
-            || self.can_request_plan_abort()
-            || self.can_request_threat_abort()
-    }
-
-    fn exit_or_arm_while_work_is_running(&mut self) -> bool {
         if !self.has_running_work() {
-            return false;
+            return InputUpdate::handled_with_effects(vec![ShellEffect::RequestShellQuit]);
         }
         if self.abort_request_pending() {
             self.log(
                 "system",
                 "abort already requested; waiting for cleanup (type `quit` to force exit)",
             );
-            return true;
+            return InputUpdate::handled();
         }
-        self.arm_quit_chord();
-        true
+        InputUpdate::handled_with_effects(vec![ShellEffect::CancelActiveJobs])
     }
 
     fn abort_request_pending(&self) -> bool {
-        self.scan().is_some_and(|scan| scan.abort_requested)
+        self.jobs().has_cancel_requested()
+            || self.scan().is_some_and(|scan| scan.abort_requested)
             || self.tool_abort_requested()
             || self.agent_chat().is_some_and(|agent| agent.abort_requested)
             || self.plan_abort_requested()
             || self.threat_abort_requested()
-    }
-
-    fn can_request_tool_abort(&self) -> bool {
-        self.running_tool_name().is_some() && !self.tool_abort_requested()
-    }
-
-    fn can_request_agent_abort(&self) -> bool {
-        self.agent_chat()
-            .is_some_and(|agent| agent.running && !agent.abort_requested)
-    }
-
-    fn can_request_plan_abort(&self) -> bool {
-        self.planner_running() && !self.plan_abort_requested()
-    }
-
-    fn can_request_threat_abort(&self) -> bool {
-        self.threat_worker_running() && !self.threat_abort_requested()
     }
 
     fn cancel_active_tokens(&mut self) {
@@ -278,9 +262,7 @@ impl ShellApp {
     }
 
     fn cancel_job_or_token(&mut self, kind: JobKind, cancel: Option<ScanCancellation>) {
-        if self.jobs_mut().cancel(kind) {
-            return;
-        }
+        self.jobs_mut().cancel(kind);
         cancel_token(cancel.as_ref());
     }
 
@@ -301,18 +283,6 @@ impl ShellApp {
             || self.jobs().is_running(JobKind::Agent)
             || self.jobs().is_running(JobKind::Plan)
             || self.jobs().is_running(JobKind::Threat)
-    }
-
-    fn armed_quit_chord_ready(&self) -> bool {
-        self.ctrl_c_armed()
-    }
-
-    fn arm_quit_chord(&mut self) {
-        self.set_ctrl_c_armed_at(Some(Instant::now()));
-        self.log(
-            "system",
-            "press Ctrl+C again within 2s to exit (any other key cancels)",
-        );
     }
 }
 

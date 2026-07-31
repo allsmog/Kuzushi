@@ -38,11 +38,15 @@ pub(crate) fn refine_threat_model(
     let delta = collect_refine_delta(&input, ctx, &generated.document)?;
     emit_refine_delta(ctx, verb, &delta);
     let attach = attach_new_evidence(&mut generated.document, &delta.new_findings);
-    let gap_method = cover_changed_surfaces(runtime, ctx, verb, &input, &delta, &mut generated)?;
+    let (coverage, gap_method) =
+        cover_changed_surfaces(runtime, ctx, verb, &input, &delta, &mut generated)?;
     let closer = close_open_questions(runtime, ctx, verb, &input, &delta, &mut generated)?;
     record_unmatched_findings(&mut generated.document, &attach.unmatched);
-    finalize_refined_document(&input, &mut generated.document, &delta, &attach, gap_method, &closer);
-    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle)
+    let parked = park_unaccounted(&mut generated.document, &coverage.gaps);
+    finalize_refined_document(&input, &mut generated.document, &delta, &attach, gap_method, &closer, parked);
+    let reconciliation =
+        BuildReconciliation::from_report(&coverage, parked, "changed surfaces", &generated.document);
+    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle, reconciliation)
 }
 
 pub(crate) struct RefineDelta {
@@ -236,17 +240,32 @@ fn cover_changed_surfaces(
     input: &BuildInput,
     delta: &RefineDelta,
     generated: &mut GeneratedThreatModel,
-) -> Result<&'static str> {
+) -> Result<(CoverageReport, &'static str)> {
     let report = check_coverage(&generated.document, &delta.changed_surfaces);
     if report.invariant_satisfied() {
-        return Ok("none-needed");
+        return Ok((report, "none-needed"));
     }
     if input
         .budget_usd
         .is_some_and(|budget| generated.cost_usd >= budget)
     {
-        return Ok("budget-exhausted");
+        return Ok((report, "budget-exhausted"));
     }
+    run_refine_gap_fill(runtime, ctx, verb, input, &report, generated)?;
+    // Re-measure after remediation: the pre-gap-fill report describes the
+    // document the model was asked to repair, not the one being persisted.
+    let report = check_coverage(&generated.document, &delta.changed_surfaces);
+    Ok((report, "stride-llm"))
+}
+
+fn run_refine_gap_fill(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    report: &CoverageReport,
+    generated: &mut GeneratedThreatModel,
+) -> Result<()> {
     let outcome = run_gap_fill(
         runtime,
         ctx,
@@ -261,7 +280,7 @@ fn cover_changed_surfaces(
     )?
     .usd();
     generated.cost_usd_exact &= outcome.cost_usd_exact;
-    Ok("stride-llm")
+    Ok(())
 }
 
 /// Unmatched corroborated findings are surfaced honestly instead of being
@@ -335,6 +354,7 @@ fn finalize_refined_document(
     attach: &EvidenceAttachment,
     gap_method: &str,
     closer: &QuestionCloserOutcome,
+    parked: usize,
 ) {
     assign_stable_ids(document);
     stamp_provenance(document, &input.target, "staged");
@@ -353,6 +373,7 @@ fn finalize_refined_document(
                 "questionsClosed": closer.questions_closed,
                 "questionsOpen": closer.questions_open,
                 "questionCloserMethod": closer.method,
+                "parkedBySystem": parked,
             }),
         );
     }
