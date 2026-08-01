@@ -149,11 +149,11 @@ fn triage_scope_option() -> OptionSpec {
     opt(
         "scope",
         OptionType::Enum,
-        "Finding selection scope: `latest` triages the newest scan run only; `all` triages every \
-untriaged finding across all runs and tools in the store (and defaults the strategy to `deep`).",
+        "Finding selection scope: `all` triages every relevant untriaged finding across runs and \
+tools; `latest` restricts triage to the newest scan run. `all` defaults the strategy to `deep`.",
     )
     .choices(&["latest", "all"])
-    .default(json!("latest"))
+    .default(json!("all"))
 }
 
 fn triage_fingerprint_option() -> OptionSpec {
@@ -248,12 +248,12 @@ fn triage_stage2_tier_option() -> OptionSpec {
 
 fn triage_strategy_option() -> OptionSpec {
     // No declared default: absence is meaningful — an unset strategy resolves
-    // to `standard` for latest-scope runs and `deep` for scope=all bulk runs;
-    // an explicit value always wins.
+    // to `standard` for targeted/latest runs and `deep` for unfiltered
+    // scope=all bulk runs; an explicit value always wins.
     opt(
         "strategy",
         OptionType::Enum,
-        "Triage strategy. Unset defaults to standard (latest scope) or deep (scope=all).",
+        "Triage strategy. Unset defaults to standard for targeted/latest runs or deep for unfiltered scope=all bulk runs.",
     )
     .choices(&["standard", "deep", "gate-deep"])
     .advanced()

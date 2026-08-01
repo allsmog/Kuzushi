@@ -11,13 +11,14 @@ const COMPACT_MIN_HEIGHT: u16 = 14;
 pub(super) fn render(
     frame: &mut Frame<'_>,
     area: Rect,
+    app: &ShellApp,
     model: &MapPhaseModel,
     _header: &EngagementHeaderModel,
     state: PhaseRenderState,
 ) {
     match state.role {
         crate::ui_view_models::SurfaceRole::Canvas => {
-            return render_map_canvas(frame, area, model, state);
+            return render_map_canvas(frame, area, app, model, state);
         }
         crate::ui_view_models::SurfaceRole::Drawer => {
             return render_map_action_card(frame, area, model, state);
@@ -45,10 +46,16 @@ pub(super) fn render(
 }
 
 pub(super) fn plain_lines(
+    app: &ShellApp,
     model: &MapPhaseModel,
     _header: &EngagementHeaderModel,
     width: usize,
 ) -> Vec<Line<'static>> {
+    if crate::ui_view_models::map_gallery_is_primary(app) {
+        let mut lines = crate::renderer::views::scene::map_summary_plain_lines(app, width);
+        lines.push(map_artifact_status_line(model, width));
+        return lines;
+    }
     let mut lines = divider_lines("PROJECT CONTEXT", context_lines(model, width), width);
     lines.extend(divider_lines(
         "ATTACK SURFACE",
@@ -114,32 +121,43 @@ fn render_compact(
 fn render_map_canvas(
     frame: &mut Frame<'_>,
     area: Rect,
+    app: &ShellApp,
     model: &MapPhaseModel,
     state: PhaseRenderState,
 ) {
-    let width = area.width.saturating_sub(2) as usize;
-    let mut lines = vec![Line::from(vec![
-        Span::styled(fit(&model.project.scope_label, width), theme::heading()),
-        Span::styled(
-            format!(" · {}", model.project.revision_label),
-            theme::muted(),
-        ),
-    ])];
-    lines.extend(dfd_readiness_lines(&model.dfd, width));
-    lines.push(divider("ATTACK SURFACE", area.width.saturating_sub(2)));
-    lines.extend(attack_surface_lines(model.attack_surface.as_ref(), width));
-    lines.push(divider("HOT MODULES", area.width.saturating_sub(2)));
-    lines.extend(hot_module_lines(&model.hot_modules.modules, width));
-    lines.push(divider("WORKLIST", area.width.saturating_sub(2)));
-    lines.extend(worklist_pane_lines(model, width));
-    render_lines_pane(
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(area);
+    crate::renderer::views::scene::render_embedded_map_gallery(
         frame,
-        area,
-        "REPOSITORY / DATA-FLOW MAP · z visualize",
-        lines,
-        PhaseSurfaceId::MapDfd,
-        state,
+        sections[0],
+        app,
+        state.scroll(PhaseSurfaceId::MapDfd),
     );
+    frame.render_widget(
+        Paragraph::new(map_artifact_status_line(model, sections[1].width as usize)),
+        sections[1],
+    );
+}
+
+fn map_artifact_status_line(model: &MapPhaseModel, width: usize) -> Line<'static> {
+    let files = model
+        .context
+        .details
+        .as_ref()
+        .map(|details| details.files.as_str())
+        .unwrap_or("context inventory unavailable");
+    let status = format!(
+        "{} · {} · context:{} · {} · {} nodes · {} flows",
+        model.project.scope_label,
+        model.project.revision_label,
+        model.context.state,
+        files,
+        model.dfd.nodes.len(),
+        model.dfd.flows.len(),
+    );
+    Line::styled(fit(&status, width), theme::muted())
 }
 
 /// The contextual action drawer: missing artifacts become inline actions

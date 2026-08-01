@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: fix
 size: 160x48
 ---
-KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context│ ENGAGEMENT
+KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready · module context   │ ENGAGEMENT
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○                                                                                │ phase-target
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates                                                           │ scope: F-0001 · Review
  patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report      │
@@ -51,4 +51,4 @@ KUZUSHI · Viewing Fix · pipeline live in Review · target ./phase-target · �
 run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │
-◆ FIX › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                               │
+◆ FIX VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                          │

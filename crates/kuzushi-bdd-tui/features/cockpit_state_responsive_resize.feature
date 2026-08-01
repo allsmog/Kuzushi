@@ -1,7 +1,8 @@
 Feature: Durable phase pages survive in-place terminal resizing
-  One live shell process keeps its selected canonical phase while tmux resizes
-  through the supported cockpit matrix. Every assertion captures only the
-  active alternate screen.
+  One live shell process keeps an available canonical phase while tmux resizes
+  through the supported cockpit matrix. Locked phases remain visibly locked
+  instead of becoming selectable through a resize. Every assertion captures
+  only the active alternate screen.
 
   Background:
     Given a fresh kuzushi workspace
@@ -9,34 +10,46 @@ Feature: Durable phase pages survive in-place terminal resizing
     And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
     And no model is configured
 
-  Scenario Outline: A canonical phase survives the complete resize sequence
+  Scenario: The available Map phase survives the complete resize sequence
+    When I launch the shell
+    And I press "Esc"
+    And I press "1"
+    Then an alternate-screen capture shows "Viewing Map"
+    When I resize the live terminal to 120 by 36
+    Then the same shell process is still running
+    And the resized live frame shows "MAP"
+    When I resize the live terminal to 80 by 24
+    Then the same shell process is still running
+    And the resized live frame shows "MAP"
+    When I resize the live terminal to 60 by 20
+    Then the same shell process is still running
+    And the resized live frame shows "MAP"
+    When I resize the live terminal to 40 by 12
+    Then the same shell process is still running
+    And the resized live frame shows "MAP"
+    When I resize the live terminal to 160 by 48
+    Then the same shell process is still running
+    And the resized live frame shows "Viewing Map"
+
+  Scenario Outline: Locked phases remain locked through a resize
     When I launch the shell
     And I press "Esc"
     And I press "<key>"
-    Then an alternate-screen capture shows "Viewing <title>"
-    When I resize the live terminal to 120 by 36
-    Then the same shell process is still running
-    And the resized live frame shows "<phase>"
-    When I resize the live terminal to 80 by 24
-    Then the same shell process is still running
-    And the resized live frame shows "<phase>"
-    When I resize the live terminal to 60 by 20
-    Then the same shell process is still running
-    And the resized live frame shows "<phase>"
+    Then an alternate-screen capture shows "<title> is locked"
+    And an alternate-screen capture shows "Viewing Map"
     When I resize the live terminal to 40 by 12
     Then the same shell process is still running
-    And the resized live frame shows "<phase>"
+    And the resized live frame shows "MAP"
     When I resize the live terminal to 160 by 48
     Then the same shell process is still running
-    And the resized live frame shows "Viewing <title>"
+    And the resized live frame shows "Viewing Map"
 
     Examples:
-      | key | phase  | title  |
-      | 1   | MAP    | Map    |
-      | 2   | SCAN   | Scan   |
-      | 3   | REVIEW | Review |
-      | 4   | PROVE  | Prove  |
-      | 5   | FIX    | Fix    |
+      | key | title  |
+      | 2   | Scan   |
+      | 3   | Review |
+      | 4   | Prove  |
+      | 5   | Fix    |
 
   Scenario: A contextual DFD survives compact fallback and restores its origin
     Given the artifact ".kuzushi/context-snapshot.json" is seeded with "{\"target\":\"bdd\"}"
@@ -45,7 +58,6 @@ Feature: Durable phase pages survive in-place terminal resizing
     And I press "Esc"
     And I press "1"
     And I press "z"
-    And I press "Tab"
     And I press "Tab"
     Then an alternate-screen capture shows "DATA-FLOW DIAGRAM"
     When I resize the live terminal to 40 by 12

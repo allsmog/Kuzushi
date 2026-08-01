@@ -139,27 +139,12 @@ impl ShellApp {
         fallback_decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
         fallback_total: usize,
     ) -> FindingLedgerCounts {
-        match self.selected_scan_findings(store) {
-            Ok(Some(findings)) => self.count_journey_findings(store, &findings, findings.len()),
-            Ok(None) => match store.list_all_findings() {
-                Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
-                Err(error) => {
-                    self.log(
-                        "error",
-                        format!("could not load the full findings ledger: {error}"),
-                    );
-                    self.count_journey_findings_with_decisions(
-                        store,
-                        fallback_findings,
-                        fallback_decisions,
-                        fallback_total,
-                    )
-                }
-            },
+        match store.list_relevant_findings() {
+            Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
             Err(error) => {
                 self.log(
                     "error",
-                    format!("could not project the selected Scan generation: {error}"),
+                    format!("could not load the relevant findings corpus: {error}"),
                 );
                 self.count_journey_findings_with_decisions(
                     store,
@@ -169,19 +154,6 @@ impl ShellApp {
                 )
             }
         }
-    }
-
-    fn selected_scan_findings(&self, store: &FindingStore) -> anyhow::Result<Option<Vec<Finding>>> {
-        let Some(attempt) = self.engagement.selected_phase_attempt(WorkflowPhase::Scan) else {
-            return Ok(None);
-        };
-        let mut findings = BTreeMap::new();
-        for run_id in &attempt.completed.run_refs {
-            for finding in store.list_findings_for_scan_id(run_id)? {
-                findings.insert(finding_generation_key(&finding), finding);
-            }
-        }
-        Ok(Some(findings.into_values().collect()))
     }
 
     fn count_journey_findings(

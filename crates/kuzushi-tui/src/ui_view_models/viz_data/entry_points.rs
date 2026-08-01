@@ -213,6 +213,8 @@ mod tests {
             nodes: vec![DfdNodeModel {
                 key: "N1".into(),
                 name: "Admin API".into(),
+                description: None,
+                purpose: None,
                 zone: "app".into(),
                 kind: DfdKind::Process,
             }],

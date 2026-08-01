@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: prove
 size: 120x36
 ---
-KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
+KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report
@@ -39,4 +39,4 @@ KUZUSHI · Viewing Prove · pipeline live in Review · target ./phase-target · 
 run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-◎ PROVE › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+◎ PROVE VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

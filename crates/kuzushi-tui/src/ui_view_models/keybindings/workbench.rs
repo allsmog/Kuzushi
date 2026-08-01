@@ -13,26 +13,88 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if let Some(bindings) = guided_workbench_keybindings(app, plan.as_ref()) {
         return bindings;
     }
+    regular_workbench_keybindings(app, plan.as_ref())
+}
+
+fn regular_workbench_keybindings(
+    app: &ShellApp,
+    plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
+) -> Vec<FooterKeybinding> {
     // Keep the phase-native controls copyable at ordinary terminal widths.
     // This is presentation order only; the input dispatcher retains its own
     // first-match ordering.
     let mut bindings = Vec::new();
-    push_workbench_view_keybindings(&mut bindings, app, plan.as_ref());
-    match focused_enter_binding(app, plan.as_ref()) {
+    push_workbench_view_keybindings(&mut bindings, app, plan);
+    match focused_enter_binding(app, plan) {
         Some(binding) => replace_enter_binding(&mut bindings, binding),
         None => bindings.retain(|binding| binding.key != "Enter"),
     }
-    prioritize_phase_controls(&mut bindings, plan.as_ref());
-    bindings.extend([
-        bind("Ctrl+G", "palette"),
-        bind("scan", "guided plan"),
-        bind("run sast:scan {}", "rescan now"),
-    ]);
+    if ready_map_gallery_is_visible(app) {
+        apply_map_gallery_controls(&mut bindings, app);
+    }
+    prioritize_phase_controls(&mut bindings, plan);
+    append_workbench_commands(&mut bindings, app);
+    bindings
+}
+
+fn ready_map_gallery_is_visible(app: &ShellApp) -> bool {
+    active_workbench_page(app) == WorkbenchPage::Map
+        && crate::ui_view_models::map_gallery_is_primary(app)
+}
+
+fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    bindings.push(bind("Ctrl+G", "palette"));
+    if active_workbench_page(app) != WorkbenchPage::Map {
+        bindings.push(bind("scan", "guided plan"));
+        bindings.push(bind("run sast:scan {}", "rescan now"));
+    }
     if !app.findings().is_empty() {
         bindings.push(bind(WORKBENCH_REPORT_COMMAND, "open Report"));
     }
     bindings.push(bind("Ctrl+C", "exit"));
-    bindings
+}
+
+fn apply_map_gallery_controls(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    const REPLACED: [&str; 8] = ["Tab", "[", "]", "Z", "z", "j/k/↑/↓", "g/G", "Enter"];
+    bindings.retain(|binding| !REPLACED.contains(&binding.key.as_ref()));
+    bindings.extend([
+        bind("Tab", "map view"),
+        bind("z", "zoom"),
+        bind("PgUp/PgDn", map_page_detail_label(app)),
+    ]);
+    match app.current_map_viz_page() {
+        crate::scene3d::VizPage::Summary => {
+            bindings.push(bind("j/k/↑/↓", "component"));
+            bindings.push(bind("g/G", "ends"));
+            bindings.push(bind("Enter", "DFD target"));
+        }
+        crate::scene3d::VizPage::Dfd => {
+            bindings.push(bind("j/k/↑/↓", "select"));
+            bindings.push(bind("Enter", "context"));
+        }
+        crate::scene3d::VizPage::EntryPoints => {
+            bindings.push(bind("j/k/↑/↓", "select"));
+            bindings.push(bind("g/G", "ends"));
+            bindings.push(bind("Enter", "DFD target"));
+        }
+        crate::scene3d::VizPage::Components => {
+            bindings.push(bind("j/k/↑/↓", "scroll"));
+            bindings.push(bind("g/G", "ends"));
+        }
+        crate::scene3d::VizPage::AttackSurface
+        | crate::scene3d::VizPage::AttackPath
+        | crate::scene3d::VizPage::Heatmap
+        | crate::scene3d::VizPage::ExploitChain
+        | crate::scene3d::VizPage::Worklist => {}
+    }
+}
+
+fn map_page_detail_label(app: &ShellApp) -> &'static str {
+    match app.current_map_viz_page() {
+        crate::scene3d::VizPage::Summary | crate::scene3d::VizPage::Components => "scroll",
+        crate::scene3d::VizPage::Dfd | crate::scene3d::VizPage::EntryPoints => "detail",
+        _ => "scroll",
+    }
 }
 
 fn guided_workbench_keybindings(

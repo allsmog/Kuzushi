@@ -86,6 +86,25 @@ mod tests {
         assert_eq!(parsed.stage2_tier, ModelTier::Deep);
         assert_eq!(parsed.model.as_deref(), Some("openai:gpt-override"));
         assert!(parsed.retriage);
+        assert!(!parsed.deep);
+    }
+
+    #[test]
+    fn triage_run_input_defaults_deep_only_for_unfiltered_all_scope() {
+        let cwd = Path::new(".");
+
+        let bulk = TriageRunInput::from_tool_input(&json!({}), cwd).unwrap();
+        let targeted = TriageRunInput::from_tool_input(&json!({"fingerprint": "fp-1"}), cwd)
+            .unwrap();
+        let explicit_deep = TriageRunInput::from_tool_input(
+            &json!({"fingerprint": "fp-1", "strategy": "deep"}),
+            cwd,
+        )
+        .unwrap();
+
+        assert!(bulk.deep);
+        assert!(!targeted.deep);
+        assert!(explicit_deep.deep);
     }
 
     #[test]
@@ -374,7 +393,9 @@ mod tests {
             Vec::new(),
         );
         assert_eq!(response["data"]["failureDetailsOmitted"], json!(8));
-        assert!(response.to_string().contains("additional per-finding failure"));
+        assert!(response
+            .to_string()
+            .contains("additional per-finding failure"));
     }
 
     #[test]
@@ -395,12 +416,21 @@ mod tests {
     }
 
     #[test]
-    fn select_triage_findings_defaults_to_latest_scan() {
+    fn select_triage_findings_defaults_to_relevant_corpus() {
+        let old = Finding::new_tool(
+            "agentic-sast",
+            "rule-old",
+            "src/old.rs",
+            1,
+            None,
+            Severity::High,
+            "old sql",
+        );
         let store = store_with_scan_findings(&[
-            ("scan-a", finding_with(Severity::High, "semgrep", "old sql")),
+            ("scan-a", old),
             (
                 "scan-z",
-                finding_with(Severity::High, "semgrep", "latest xss"),
+                finding_with(Severity::High, "agentic-sast", "latest xss"),
             ),
         ]);
         let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
@@ -408,9 +438,11 @@ mod tests {
         let (findings, missing) = select_triage_findings(&store, &input).unwrap();
 
         assert!(missing.is_empty());
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].scan_id.as_deref(), Some("scan-z"));
-        assert_eq!(findings[0].message, "latest xss");
+        assert_eq!(findings.len(), 2);
+        assert!(findings.iter().any(|finding| finding.message == "old sql"));
+        assert!(findings
+            .iter()
+            .any(|finding| finding.message == "latest xss"));
     }
 
     #[test]
@@ -996,10 +1028,9 @@ mod tests {
             &stats,
             Vec::new(),
         );
-        assert!(response["warnings"][0]
-            .as_str()
-            .unwrap()
-            .contains("failed classifications=1, failed consensus votes=0, failed persistence writes=1"));
+        assert!(response["warnings"][0].as_str().unwrap().contains(
+            "failed classifications=1, failed consensus votes=0, failed persistence writes=1"
+        ));
     }
 
     #[test]

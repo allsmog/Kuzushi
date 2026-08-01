@@ -159,11 +159,29 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   its visible rows, never workspace totals or phase. Journey/autonomy chrome
   remains hidden until `Start Map` commits the engagement; visiting Scan,
   Review, Prove, or Fix does not advance it. Legacy scan/triage/verification/
-  patch artifacts are inferred without rewriting them.
+  patch artifacts are inferred without rewriting them. All five page names stay
+  visible after engagement start; unavailable future pages carry a locked
+  marker, page cycling skips them, and direct selection explains the missing
+  prerequisite. Historical artifacts independently reopen their corresponding
+  page even when the next required phase has moved backward.
+- **The relevant-finding corpus is mode-shared.** Review and default bulk triage
+  consume all open, non-suppressed findings in the vulnerability database, not
+  merely the findings attached to the selected Scan attempt. An explicit scan
+  id still requests run-scoped triage. A nondeterministic miss preserves the
+  prior observation; comparable deterministic lifecycle transitions may mark
+  it stale. Chain construction uses that same relevant corpus and the latest
+  review decision for a durable identity, so a later observation does not lose
+  an earlier confirmed/to-fix decision. A newly accepted Map invalidates Scan
+  completion ordering without deleting findings.
 - **Durable phase pages are shell-only presentation over shared truth.** Map
-  never reads live Run Focus state. Scan is a resting cockpit over selected
-  attempt, scope, engine outcomes, deltas, freshness, and run references; it is
-  never live progress. Review keeps confidence-first display sort without
+  never reads live Run Focus state. A ready Map embeds the shared real-data
+  gallery as its primary body: Summary by default after acceptance, then DFD,
+  Entry points, and Components when backed by artifacts. `Tab` changes that
+  local projection and `z` opens a Map-scoped full-frame zoom; project context
+  is a compact receipt, while missing/stale/blocked evidence retains one action
+  drawer. Scan is a resting cockpit over selected attempt, scope, engine
+  outcomes, deltas, freshness, and run references; it is never live progress.
+  Review keeps confidence-first display sort without
   changing export order. Review/Prove/Fix disclose a pinned finding outside the
   active filter before any action can target it. Prove keeps identity, STATUS,
   NEXT, proof, sources, and stale-proof warning in compact mode. Fix projects
@@ -206,7 +224,15 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   emits a notice and never steals focus. An interactive launch against a target
   with a persisted concrete DFD opens that DFD as the default deck (unless
   `ui.auto_open_viz=false`), with the reality-derived Workbench as its Esc
-  origin. Threat-model *completion* remains notification-only and never
+  origin. Map's `z` zoom preserves its smaller Summary/DFD/Entry/Components tab
+  scope and selected projection; explicit `scene` restores the complete
+  gallery. The DFD opens directly on concrete node, flow, and boundary
+  inspection. Summary explains the application purpose, aggregate zone flows,
+  and component purposes. Its tree cursor selects architectural components;
+  arrows work with an empty composer, Navigate mode adds `j/k` and `g/G`, and
+  Enter carries the selected component into the DFD. The cursor and its
+  selection-relative scroll survive Map zoom/back.
+  Threat-model *completion* remains notification-only and never
   force-opens a newly generated DFD. Other content-bearing tool mappings keep
   their contextual auto-open behavior.
 - **Durable session transcripts are shell-only.** Interactive, plain, and
@@ -266,10 +292,10 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   own trace items; `replay`/`trace` and `kuzushi run` render the same ordered
   labels. An escalation-resolved split stays `ModelAssessed`/`Unverified` — the
   ladder rung never advances and no `Confirmed`/`runtime_verified` is forged.
-- **The risk-worklist scene page, the Map `WORKLIST` section, and the `worklist`
-  verb are shell-only presentation** over the shared `worklist:rank` projection.
-  The scene Worklist page and the top-5 Map section both project the same ranked
-  rows (raw `A92`/`F17` citations, contributor states, `unranked` count, and the
+- **The risk-worklist scene page and the `worklist` verb are shell-only
+  presentation** over the shared `worklist:rank` projection.
+  The scene Worklist page projects ranked rows (raw `A92`/`F17` citations,
+  contributor states, `unranked` count, and the
   `⚠ degraded — no cpg graph` banner/chip); the page appears in the scene rail
   only when a `context-snapshot.json` exists (the EntryPoints gate-on-non-empty
   precedent), and `worklist` auto-opens it with contextual origin restore.

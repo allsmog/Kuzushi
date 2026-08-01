@@ -87,27 +87,27 @@ fn workbench_prompt_projects_the_selected_mode_token_and_placeholder() {
     for (page, token, placeholder) in [
         (
             WorkbenchPage::Map,
-            "◇ MAP › ",
-            "describe what to map · Esc list keys",
+            "◇ MAP VIEW › ",
+            "describe what to map · Esc map keys",
         ),
         (
             WorkbenchPage::Scan,
-            "▦ SCAN › ",
+            "▦ SCAN VIEW › ",
             "describe what to scan · Esc list keys",
         ),
         (
             WorkbenchPage::Review,
-            "▣ REVIEW › ",
+            "▣ REVIEW VIEW › ",
             "describe what to review · Esc list keys",
         ),
         (
             WorkbenchPage::Prove,
-            "◎ PROVE › ",
+            "◎ PROVE VIEW › ",
             "describe what to verify · Esc list keys",
         ),
         (
             WorkbenchPage::Fix,
-            "◆ FIX › ",
+            "◆ FIX VIEW › ",
             "describe the patch to draft · Esc list keys",
         ),
     ] {

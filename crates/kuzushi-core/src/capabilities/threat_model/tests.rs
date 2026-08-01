@@ -533,6 +533,14 @@ mod tests {
                 .map(Vec::len),
             Some(3)
         );
+        assert!(result.pointer("/data/snapshotHash").is_some());
+        assert!(result.pointer("/data/treeHash").is_some());
+        let current_tree =
+            crate::incremental_index::current_workspace_tree_hash(temp.path()).unwrap();
+        assert_eq!(
+            result.pointer("/data/treeHash").and_then(Value::as_str),
+            Some(current_tree.as_str())
+        );
     }
 
     #[test]
@@ -12796,9 +12804,10 @@ mod tests {
         );
         let warnings = result["warnings"].as_array().cloned().unwrap_or_default();
         assert!(
-            warnings.iter().any(|warning| warning
-                .as_str()
-                .is_some_and(|text| text == "attack surface: 2/2 entry points carry no path or evidence anchor")),
+            warnings
+                .iter()
+                .any(|warning| warning.as_str().is_some_and(|text| text
+                    == "attack surface: 2/2 entry points carry no path or evidence anchor")),
             "the anchor-free count must reach the operator verbatim: {warnings:?}"
         );
         assert!(

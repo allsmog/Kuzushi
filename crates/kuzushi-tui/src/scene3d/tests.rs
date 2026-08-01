@@ -39,6 +39,8 @@ fn yaw_rotation_moves_a_front_point_sideways() {
 #[test]
 fn viz_pages_cycle_and_wrap() {
     assert_eq!(VizPage::AttackSurface.next(), VizPage::AttackPath);
+    assert_eq!(VizPage::AttackPath.next(), VizPage::Summary);
+    assert_eq!(VizPage::Summary.next(), VizPage::Dfd);
     assert_eq!(VizPage::Dfd.next(), VizPage::EntryPoints);
     assert_eq!(VizPage::EntryPoints.next(), VizPage::Components);
     assert_eq!(VizPage::ExploitChain.next(), VizPage::Worklist);
@@ -52,6 +54,7 @@ fn only_attack_surface_is_3d_and_animated() {
     assert!(VizPage::AttackSurface.is_animated());
     for page in [
         VizPage::AttackPath,
+        VizPage::Summary,
         VizPage::Dfd,
         VizPage::EntryPoints,
         VizPage::Components,

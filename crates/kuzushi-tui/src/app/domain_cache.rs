@@ -167,6 +167,7 @@ pub struct DomainCache {
     review_decisions_revision: u64,
     finding_ledger_counts: Option<FindingLedgerCounts>,
     patch_lifecycles_by_reverify_run: BTreeMap<String, PatchLifecycleRecord>,
+    patch_lifecycle_count: usize,
     workspace_stale: Option<WorkspaceStaleSummary>,
     /// Cached "YOUR TOOLS" shelf (favorites + recents). Loaded from disk on
     /// target wiring and favorite toggles — never read per frame.
@@ -211,6 +212,7 @@ impl DomainCache {
             review_decisions_revision: 0,
             finding_ledger_counts: None,
             patch_lifecycles_by_reverify_run: BTreeMap::new(),
+            patch_lifecycle_count: 0,
             workspace_stale: None,
             tool_shelf: ToolShelf::default(),
         }
@@ -265,6 +267,7 @@ impl DomainCache {
         self.bump_review_decisions_revision();
         self.finding_ledger_counts = None;
         self.patch_lifecycles_by_reverify_run.clear();
+        self.patch_lifecycle_count = 0;
     }
 
     pub(crate) fn tool_shelf(&self) -> &ToolShelf {
@@ -689,6 +692,7 @@ impl DomainCache {
 
     pub(crate) fn set_patch_lifecycle_records(&mut self, records: &[PatchLifecycleRecord]) {
         self.patch_lifecycles_by_reverify_run.clear();
+        self.patch_lifecycle_count = records.len();
         for record in records {
             let Some(run_id) = record.reverify_run_id.as_ref() else {
                 continue;
@@ -697,6 +701,10 @@ impl DomainCache {
                 .entry(run_id.clone())
                 .or_insert_with(|| record.clone());
         }
+    }
+
+    pub(crate) fn has_patch_lifecycle_records(&self) -> bool {
+        self.patch_lifecycle_count > 0
     }
 
     pub(crate) fn matching_verified_reverify_run<'a>(

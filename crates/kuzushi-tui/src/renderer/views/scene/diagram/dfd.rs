@@ -22,6 +22,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use std::collections::HashMap;
 
 mod focus;
+mod overview;
 mod responsive;
 
 const GAP: u16 = 2;
@@ -37,7 +38,7 @@ const ZONE_PAGE_SIZE: usize = 4;
 
 pub(crate) struct DfdDiagram {
     pub model: DfdModel,
-    /// Inspector cursor over the flattened nodes-then-flows order;
+    /// Cursor over the flattened nodes, flows, and boundaries;
     /// `None` renders the plain diagram without highlight or inspector.
     pub selection: Option<usize>,
     /// Requested first row in the wrapped inspector panel.
@@ -46,6 +47,35 @@ pub(crate) struct DfdDiagram {
     pub focused: bool,
     /// Cursor over the security annotations in the focused graph.
     pub context_selection: usize,
+}
+
+pub(crate) struct DfdSummary {
+    pub model: DfdModel,
+    pub component_selection: usize,
+    pub scroll: i32,
+}
+
+impl Widget for DfdSummary {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        if let Some(hint) = &self.model.empty_hint {
+            let (hint, guidance) = dfd_empty_copy(area.width, hint);
+            render_empty_state_panel(
+                buf,
+                area,
+                "no system summary",
+                hint,
+                &[("threat-model:build", guidance)],
+            );
+            return;
+        }
+        overview::render(
+            buf,
+            area,
+            &self.model,
+            self.component_selection,
+            self.scroll,
+        );
+    }
 }
 
 struct Anchor {
@@ -426,7 +456,8 @@ impl DfdDiagram {
     }
 
     fn selected_node(&self, indices: &[usize]) -> Option<usize> {
-        self.selection.filter(|selected| indices.contains(selected))
+        self.element_selection()
+            .filter(|selected| indices.contains(selected))
     }
 
     fn selected_endpoint_indices(&self, indices: &[usize]) -> Vec<usize> {
@@ -465,8 +496,12 @@ impl DfdDiagram {
     }
 
     fn selected_flow_index(&self) -> Option<usize> {
-        self.selection
+        self.element_selection()
             .and_then(|selected| selected.checked_sub(self.model.nodes.len()))
+    }
+
+    fn element_selection(&self) -> Option<usize> {
+        self.selection
     }
 
     /// Node boxes draw AFTER the flows and blank their interiors first, so
@@ -480,7 +515,7 @@ impl DfdDiagram {
     ) {
         for placement in placements {
             let node = &self.model.nodes[placement.node_index];
-            let selected = self.selection == Some(placement.node_index);
+            let selected = self.element_selection() == Some(placement.node_index);
             let context_count = security_context_count(&self.model, &node.key);
             draw_node_box(buf, area, node, placement, nbw, context_count, selected);
         }
@@ -1056,6 +1091,22 @@ fn nonempty_list(values: &[String]) -> String {
 fn node_detail_content(model: &DfdModel, node: &DfdNodeModel, width: usize) -> DetailContent {
     let mut lines = Vec::new();
     append_detail_lines(&mut lines, "name", &node.name, width);
+    append_detail_lines(
+        &mut lines,
+        "does",
+        node.description
+            .as_deref()
+            .unwrap_or("not recorded in the threat model"),
+        width,
+    );
+    append_detail_lines(
+        &mut lines,
+        "purpose",
+        node.purpose
+            .as_deref()
+            .unwrap_or("not recorded; rebuild the threat model"),
+        width,
+    );
     append_linked_context_detail(&mut lines, model, &node.key, width);
     append_detail_lines(&mut lines, "type", kind_label(node.kind), width);
     append_detail_lines(&mut lines, "zone", &node.zone, width);
@@ -1463,6 +1514,8 @@ mod tests {
             nodes: vec![DfdNodeModel {
                 key: "oauth".into(),
                 name: "OAuth callback".into(),
+                description: None,
+                purpose: None,
                 zone: "app".into(),
                 kind: DfdKind::Process,
             }],
@@ -1521,6 +1574,8 @@ mod tests {
             ),
         ];
         DfdModel {
+            target_name: "opencode".into(),
+            system_context: None,
             zones,
             nodes,
             flows,
@@ -1630,6 +1685,8 @@ mod tests {
         DfdNodeModel {
             key: name.into(),
             name: name.into(),
+            description: None,
+            purpose: None,
             zone: zone.into(),
             kind: DfdKind::Process,
         }
@@ -1869,12 +1926,13 @@ mod tests {
     #[test]
     fn audit_regression_reaches_all_13_nodes_and_11_flows_at_120x36() {
         let model = audit_regression_model();
-        let total = model.nodes.len() + model.flows.len();
+        let element_total = model.nodes.len() + model.flows.len();
+        let navigation_total = element_total;
 
-        for selection in 0..total {
+        for selection in 0..element_total {
             let rendered = render_selection(&model, selection, 0, 120, 36);
             assert!(
-                rendered.contains(&format!("selected {}/{total}", selection + 1)),
+                rendered.contains(&format!("selected {}/{navigation_total}", selection + 1)),
                 "selection {selection} has dishonest counts: {rendered}"
             );
             assert_selected_item_visible(&model, selection, &rendered);

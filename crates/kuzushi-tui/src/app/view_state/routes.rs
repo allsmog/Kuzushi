@@ -1068,11 +1068,14 @@ fn is_overlay_view(view: &crate::app::ShellView) -> bool {
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneRouteState {
     page: crate::scene3d::VizPage,
+    /// A Map-origin zoom stays inside the four Map projections. Explicit
+    /// `scene` access restores the complete security-visualization gallery.
+    map_only: bool,
     yaw: f32,
     pitch: f32,
     paused: bool,
     last_advance: Option<Instant>,
-    /// DFD inspector cursor over the flattened nodes-then-flows order.
+    /// DFD cursor over flattened nodes, flows, and boundaries.
     dfd_selection: usize,
     /// Requested first row in the wrapped DFD detail panel.
     dfd_detail_scroll: usize,
@@ -1080,6 +1083,10 @@ pub struct SceneRouteState {
     dfd_focused: bool,
     /// Cursor over annotations attached to the selected DFD element.
     dfd_context_selection: usize,
+    /// Cursor over architectural components in the system-summary tree.
+    summary_component_selection: usize,
+    /// Signed row offset from the selected component's centered viewport.
+    summary_scroll: i32,
     /// Cursor over the trust-zone-grouped entry-point list.
     entry_point_selection: usize,
     /// Requested first row in the selected entry-point detail pane.
@@ -1090,6 +1097,7 @@ impl Default for SceneRouteState {
     fn default() -> Self {
         Self {
             page: crate::scene3d::VizPage::default(),
+            map_only: false,
             yaw: 0.6,
             pitch: 0.45,
             paused: false,
@@ -1098,6 +1106,8 @@ impl Default for SceneRouteState {
             dfd_detail_scroll: 0,
             dfd_focused: false,
             dfd_context_selection: 0,
+            summary_component_selection: 0,
+            summary_scroll: 0,
             entry_point_selection: 0,
             entry_point_detail_scroll: 0,
         }
@@ -1111,6 +1121,14 @@ impl SceneRouteState {
 
     pub(crate) fn set_page(&mut self, page: crate::scene3d::VizPage) {
         self.page = page;
+    }
+
+    pub(crate) fn map_only(&self) -> bool {
+        self.map_only
+    }
+
+    pub(crate) fn set_map_only(&mut self, map_only: bool) {
+        self.map_only = map_only;
     }
 
     pub(crate) fn yaw(&self) -> f32 {
@@ -1159,6 +1177,14 @@ impl SceneRouteState {
 
     pub(crate) fn dfd_context_selection(&self) -> usize {
         self.dfd_context_selection
+    }
+
+    pub(crate) fn summary_component_selection(&self) -> usize {
+        self.summary_component_selection
+    }
+
+    pub(crate) fn summary_scroll(&self) -> i32 {
+        self.summary_scroll
     }
 
     pub(crate) fn entry_point_selection(&self) -> usize {
@@ -1220,6 +1246,35 @@ impl SceneRouteState {
         } else {
             self.dfd_detail_scroll = self.dfd_detail_scroll.saturating_sub(amount);
         }
+    }
+
+    pub(crate) fn scroll_summary(&mut self, direction: i32, amount: usize) {
+        let amount = i32::try_from(amount).unwrap_or(i32::MAX);
+        self.summary_scroll = self
+            .summary_scroll
+            .saturating_add(direction.signum().saturating_mul(amount));
+    }
+
+    pub(crate) fn cycle_summary_component_selection(&mut self, direction: i32, len: usize) {
+        if len == 0 {
+            self.reset_summary_navigation();
+            return;
+        }
+        let current = self.summary_component_selection.min(len - 1) as i32;
+        self.set_summary_component_selection(
+            (current + direction).rem_euclid(len as i32) as usize,
+            len,
+        );
+    }
+
+    pub(crate) fn set_summary_component_selection(&mut self, selection: usize, len: usize) {
+        self.summary_component_selection = selection.min(len.saturating_sub(1));
+        self.summary_scroll = 0;
+    }
+
+    pub(crate) fn reset_summary_navigation(&mut self) {
+        self.summary_component_selection = 0;
+        self.summary_scroll = 0;
     }
 
     pub(crate) fn cycle_entry_point_selection(&mut self, direction: i32, len: usize) {
@@ -2123,6 +2178,26 @@ mod tests {
 
         assert_eq!(route.selected_panel(), 0);
         assert_eq!(route.selected_row(), 0);
+    }
+
+    #[test]
+    fn summary_component_cursor_wraps_and_recenters_its_scroll() {
+        let mut route = SceneRouteState::default();
+
+        route.scroll_summary(1, 12);
+        route.cycle_summary_component_selection(-1, 3);
+
+        assert_eq!(route.summary_component_selection(), 2);
+        assert_eq!(route.summary_scroll(), 0);
+
+        route.scroll_summary(-1, 7);
+        route.set_summary_component_selection(9, 3);
+
+        assert_eq!(route.summary_component_selection(), 2);
+        assert_eq!(route.summary_scroll(), 0);
+
+        route.reset_summary_navigation();
+        assert_eq!(route.summary_component_selection(), 0);
     }
 
     fn boot_snapshot() -> crate::app::BootSplashSnapshot {

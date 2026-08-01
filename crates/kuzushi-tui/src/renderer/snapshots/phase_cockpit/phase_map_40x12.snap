@@ -4,15 +4,15 @@ contract: cockpit-spine-v1
 phase: map
 size: 40x12
 ---
-KUZUSHI · Viewing Map · now in Review
+KUZUSHI · Viewing Map · next Review
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
-│▸ PROJECT CONTEXT
-│./phase-target · rev:unknown
-│context:present · ⠋ context:build...
-│○ scope tree    no persisted...
+◇ SYSTEM SUMMARY · system purpose +...
+views [summary] · 1/2 · Tab
+┌SYSTEM SUMMARY · component 1/3 · ↑/↓ s┐
+./phase-target · rev:unknown ·...
 run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-◇ MAP › NAVIGATE · Shift+Tab phase→ Tab/
+◇ MAP VIEW › NAVIGATE · Shift+Tab phase→

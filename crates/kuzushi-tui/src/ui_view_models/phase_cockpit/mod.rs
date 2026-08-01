@@ -34,6 +34,7 @@ pub(crate) use layout::{
     phase_presentation_plan, phase_surface_specs, AttentionMode, LayoutDensity,
     PhasePresentationPlan, PhaseSurfaceId, PlannedPhaseSurface, SurfaceInteraction, SurfaceState,
 };
+pub(crate) use map::map_gallery_is_primary;
 use map::map_phase_model;
 use phase_bodies::{fix_phase_model, review_phase_model};
 use scan::scan_phase_model;

@@ -3,6 +3,13 @@ use super::super::threat_dfd_diagram::{
 };
 use crate::{DfdModelCacheKey, ShellApp};
 
+mod overview;
+pub(crate) use overview::{
+    dfd_overview, dfd_overview_component_at, dfd_overview_component_count, display_target,
+    DfdContextCounts, DfdOverview, DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone,
+    DfdZoneFlow,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DfdKind {
     Entity,
@@ -14,6 +21,8 @@ pub(crate) enum DfdKind {
 pub(crate) struct DfdNodeModel {
     pub key: String,
     pub name: String,
+    pub description: Option<String>,
+    pub purpose: Option<String>,
     pub zone: String,
     pub kind: DfdKind,
 }
@@ -68,6 +77,8 @@ pub(crate) enum DfdLinkState {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DfdModel {
+    pub target_name: String,
+    pub system_context: Option<String>,
     pub zones: Vec<String>,
     pub nodes: Vec<DfdNodeModel>,
     pub flows: Vec<DfdFlowModel>,
@@ -117,6 +128,8 @@ fn dfd_model_from_doc(
         DfdLinkState::LegacyNeedsRebuild
     };
     DfdModel {
+        target_name: target_name(target),
+        system_context: system_context(doc),
         zones: zones_in_order(&nodes),
         nodes: project_dfd_nodes(&nodes),
         flows: project_dfd_flows(&flows),
@@ -134,12 +147,28 @@ fn empty_dfd(hint: impl Into<String>) -> DfdModel {
     }
 }
 
+fn target_name(target: Option<&std::path::Path>) -> String {
+    target
+        .and_then(std::path::Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "modeled system".to_string())
+}
+
+fn system_context(doc: &serde_json::Value) -> Option<String> {
+    ["systemContext", "system_context", "context", "description"]
+        .into_iter()
+        .find_map(|key| string_field(doc, key))
+}
+
 fn project_dfd_nodes(nodes: &[DfdNode]) -> Vec<DfdNodeModel> {
     nodes
         .iter()
         .map(|node| DfdNodeModel {
             key: node.id.clone(),
             name: node.name.clone(),
+            description: node.description.clone(),
+            purpose: node.purpose.clone(),
             zone: node.zone.clone(),
             kind: dfd_kind(&node.kind),
         })
@@ -280,8 +309,7 @@ pub(super) fn rows_at<'a>(
         .flatten()
 }
 
-/// Selection cursor item over the flattened nodes, flows, then boundaries order the `j`/`k`
-/// keys cycle through on the DFD deck.
+/// Selection cursor item over flattened nodes, flows, then boundaries.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum DfdSelected<'a> {
     Node(&'a DfdNodeModel),
@@ -382,6 +410,8 @@ mod tests {
             nodes: vec![DfdNodeModel {
                 key: "N1".into(),
                 name: "API".into(),
+                description: None,
+                purpose: None,
                 zone: "app".into(),
                 kind: DfdKind::Process,
             }],

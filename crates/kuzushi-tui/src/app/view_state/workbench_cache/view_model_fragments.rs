@@ -456,6 +456,8 @@ mod tests {
             nodes: vec![DfdNodeModel {
                 key: "api".to_string(),
                 name: "api".to_string(),
+                description: None,
+                purpose: None,
                 zone: "app".to_string(),
                 kind: DfdKind::Process,
             }],

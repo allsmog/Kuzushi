@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: prove
 size: 40x12
 ---
-KUZUSHI · Viewing Prove · now in Review
+KUZUSHI · Viewing Prove · next Review
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
 │▸ PROVE · STATUS / NEXT
@@ -15,4 +15,4 @@ run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-◎ PROVE › NAVIGATE · Shift+Tab phase→ Ta
+◎ PROVE VIEW › NAVIGATE · Shift+Tab phas

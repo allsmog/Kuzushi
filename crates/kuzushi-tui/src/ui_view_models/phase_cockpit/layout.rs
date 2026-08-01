@@ -209,58 +209,111 @@ fn screen_composition(
     visible: &[&PhaseSurfaceSpec],
 ) -> Composition {
     let columns = || Composition::Columns(visible.iter().map(|spec| spec.id).collect::<Vec<_>>());
+    if let Some(composition) = ready_map_composition(body, density) {
+        return composition;
+    }
     if !matches!(density, LayoutDensity::Dense | LayoutDensity::MasterDetail) {
         return columns();
     }
-    match body {
-        PhaseCockpitBody::Prove(model) if model.trace.is_some() => {
-            Composition::FullScreen(PhaseSurfaceId::ProveTrace)
-        }
-        PhaseCockpitBody::Prove(model) if model.investigation.is_some() => {
-            Composition::CenteredForm(PhaseSurfaceId::ProveInvestigation)
-        }
-        PhaseCockpitBody::Prove(model) if model.finding.is_some() => Composition::FocusDetail {
-            body: PhaseSurfaceId::ProveStatus,
-            action_menu: Some(PhaseSurfaceId::ProveNextAction),
-        },
-        PhaseCockpitBody::Fix(model)
-            if model.finding.is_some()
-                || model.patch.is_some()
-                || model.remediation.stage != super::RemediationLifecycleStage::NotDrafted =>
-        {
-            Composition::Triptych {
-                plan: PhaseSurfaceId::FixRemediation,
-                diff: PhaseSurfaceId::FixCandidate,
-                verification: PhaseSurfaceId::FixVerification,
-            }
-        }
-        PhaseCockpitBody::Scan(model) if model.live.is_some() => Composition::OperationalColumns {
+    rich_phase_composition(body, visible.len()).unwrap_or_else(columns)
+}
+
+/// A completed Map is one coherent gallery at every terminal size. Letting
+/// the generic sparse layout unwrap MapDfd would resurrect the retired textual
+/// readiness pane exactly where space is tightest.
+fn ready_map_composition(body: &PhaseCockpitBody, density: LayoutDensity) -> Option<Composition> {
+    let PhaseCockpitBody::Map(model) = body else {
+        return None;
+    };
+    if density == LayoutDensity::Guided {
+        return None;
+    }
+    (!super::map::map_requires_action(model)).then_some(Composition::CanvasWithDrawer {
+        canvas: PhaseSurfaceId::MapDfd,
+        drawer: None,
+    })
+}
+
+fn rich_phase_composition(body: &PhaseCockpitBody, visible_count: usize) -> Option<Composition> {
+    prove_composition(body)
+        .or_else(|| fix_composition(body))
+        .or_else(|| scan_composition(body))
+        .or_else(|| review_composition(body, visible_count))
+        .or_else(|| actionable_map_composition(body))
+}
+
+fn prove_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    let PhaseCockpitBody::Prove(model) = body else {
+        return None;
+    };
+    if model.trace.is_some() {
+        return Some(Composition::FullScreen(PhaseSurfaceId::ProveTrace));
+    }
+    if model.investigation.is_some() {
+        return Some(Composition::CenteredForm(
+            PhaseSurfaceId::ProveInvestigation,
+        ));
+    }
+    model.finding.is_some().then_some(Composition::FocusDetail {
+        body: PhaseSurfaceId::ProveStatus,
+        action_menu: Some(PhaseSurfaceId::ProveNextAction),
+    })
+}
+
+fn fix_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    let PhaseCockpitBody::Fix(model) = body else {
+        return None;
+    };
+    let active = model.finding.is_some()
+        || model.patch.is_some()
+        || model.remediation.stage != super::RemediationLifecycleStage::NotDrafted;
+    active.then_some(Composition::Triptych {
+        plan: PhaseSurfaceId::FixRemediation,
+        diff: PhaseSurfaceId::FixCandidate,
+        verification: PhaseSurfaceId::FixVerification,
+    })
+}
+
+fn scan_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    let PhaseCockpitBody::Scan(model) = body else {
+        return None;
+    };
+    model
+        .live
+        .is_some()
+        .then_some(Composition::OperationalColumns {
             left: PhaseSurfaceId::ScanScope,
             center: PhaseSurfaceId::ScanEngines,
             right: PhaseSurfaceId::ScanDelta,
             log_strip: Some(PhaseSurfaceId::ScanReceipt),
-        },
-        PhaseCockpitBody::Review(model) if model.chains.is_some() => {
-            Composition::FullScreen(PhaseSurfaceId::ReviewChains)
-        }
-        PhaseCockpitBody::Review(model) if visible.len() >= 2 => Composition::ListDetail {
-            list: PhaseSurfaceId::ReviewQueue,
-            detail: PhaseSurfaceId::ReviewDetail,
-            drawer: review_next_plan_drawer(model),
-        },
-        PhaseCockpitBody::Map(model) => Composition::CanvasWithDrawer {
-            canvas: PhaseSurfaceId::MapDfd,
-            drawer: Some(super::composition::DrawerSpec {
-                surface: PhaseSurfaceId::MapReadiness,
-                size: if map_readiness_actionable(model) {
-                    super::composition::DrawerSize::Expanded
-                } else {
-                    super::composition::DrawerSize::Compact
-                },
-            }),
-        },
-        _ => columns(),
+        })
+}
+
+fn review_composition(body: &PhaseCockpitBody, visible_count: usize) -> Option<Composition> {
+    let PhaseCockpitBody::Review(model) = body else {
+        return None;
+    };
+    if model.chains.is_some() {
+        return Some(Composition::FullScreen(PhaseSurfaceId::ReviewChains));
     }
+    (visible_count >= 2).then_some(Composition::ListDetail {
+        list: PhaseSurfaceId::ReviewQueue,
+        detail: PhaseSurfaceId::ReviewDetail,
+        drawer: review_next_plan_drawer(model),
+    })
+}
+
+fn actionable_map_composition(body: &PhaseCockpitBody) -> Option<Composition> {
+    let PhaseCockpitBody::Map(model) = body else {
+        return None;
+    };
+    super::map::map_requires_action(model).then_some(Composition::CanvasWithDrawer {
+        canvas: PhaseSurfaceId::MapDfd,
+        drawer: Some(super::composition::DrawerSpec {
+            surface: PhaseSurfaceId::MapReadiness,
+            size: super::composition::DrawerSize::Expanded,
+        }),
+    })
 }
 
 /// The Next-Investigation-Plan drawer appears only when the recommender has
@@ -282,17 +335,6 @@ fn review_next_plan_drawer(
         }
         _ => None,
     }
-}
-
-fn map_readiness_actionable(model: &super::MapPhaseModel) -> bool {
-    model.empty_hint.is_some()
-        || model.dfd.empty_hint.is_some()
-        || model.context.state.eq_ignore_ascii_case("stale")
-        || model
-            .context
-            .status
-            .to_ascii_lowercase()
-            .contains("blocked")
 }
 
 /// The spec backing a composition region. Regions the spec builder skipped

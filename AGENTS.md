@@ -391,8 +391,13 @@ is expected to behave identically and should be filed as a parity bug.
   hydrated engagement resumes its reality-derived phase page. `/setup` always
   reopens Setup explicitly.
 - **Durable Map/Scan/Review/Prove/Fix pages** project persisted artifacts and
-  finding truth. Map never reads live Run Focus state. Scan is a resting
-  cockpit over accepted attempts, scope/engine plan, per-engine outcomes,
+  finding truth. Map never reads live Run Focus state. A ready Map embeds the
+  shared real-data gallery as its primary body: Summary by default after an
+  accepted Map, then DFD, Entry points, and Components when their artifacts
+  exist. `Tab` changes the local projection; `z` opens the same projection in
+  a Map-scoped full-frame zoom. Project context is one compact receipt, and the
+  action drawer appears only for missing, stale, or blocked Map evidence. Scan
+  is a resting cockpit over accepted attempts, scope/engine plan, per-engine outcomes,
   finding/artifact deltas, cost, freshness, and run references; live progress
   remains in Run Focus. Review keeps the confidence-first shell sort and
   displays authority, severity, proof, source count, confidence, and decisions.
@@ -429,7 +434,9 @@ is expected to behave identically and should be filed as a parity bug.
   phase — raising the dial never forges phase progress.
 - **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
-  `Tab`-cycled gallery of eight pages (`scene3d::VizPage`). Pure view-model
+  `Tab`-cycled gallery of nine pages (`scene3d::VizPage`). Map directly embeds
+  the Summary/DFD/Entry/Components subset; its `z` zoom retains that smaller tab
+  scope, while explicit `/scene` restores the complete gallery. Pure view-model
   builders in `ui_view_models/viz_data.rs` turn `ShellApp` state into each
   page's model (`risk_by_module(&app.findings)`, `dfd_model(app)`,
   `entry_point_breakdown(app)`, `component_stack(app)`, `worklist_model(app)`,
@@ -447,6 +454,20 @@ is expected to behave identically and should be filed as a parity bug.
     boxes + orthogonal connectors (`─ │ ╭ ╮ ╰ ╯` + `▶`/`▼` arrowheads) in
     `renderer/views/scene/diagram`. Crisp full-cell strokes — deliberately *not*
     the braille `Canvas` (which read grainy).
+    A dedicated **system summary** page pairs a source-grounded explanation of
+    what the application does with aggregated trust-zone flows above a logical
+    component tree; narrow terminals present the same content as one scrollable
+    document. The tree groups DFD nodes by trust zone, distinguishes what each
+    component does from why the application needs it, shows linked
+    security-context counts, and lists each concrete flow once under its source.
+    Its component cursor is shared by embedded Map and Map-scoped zoom: arrows
+    select while the composer is empty, Navigate mode adds `j/k` and `g/G`,
+    `PgUp/PgDn` pages relative to the selected component, and Enter opens that
+    component as the selected DFD node. Selection survives Tab and zoom/back;
+    accepting a new Map resets it to the first component.
+    The separate DFD page opens directly on its node/flow/boundary graph; `j/k`
+    reaches every concrete element and Enter opens its linked context. Plain
+    output keeps the summary and DFD projections separate too.
   - **Entry-point browser** — every real `attackSurface.entryPoints[]` record in
     a trust-zone-grouped master-detail browser. `j/k` selects an ingress,
     `PgUp/PgDn` scrolls only its evidence, and `Enter` jumps to its first resolved
@@ -465,8 +486,9 @@ is expected to behave identically and should be filed as a parity bug.
     `Line`s in `renderer/views/scene/diagrams`.
   **Contextual auto-open:** `ui.auto_open_viz` remains on by default and
   `setg ui.auto_open_viz false` opts out (the compatibility environment value is
-  read only at the adapter boundary). Visualizations are contextual full-frame
-  decks over the workflow origin, not replacement workflow screens. A
+  read only at the adapter boundary). Non-Map visualizations are contextual
+  full-frame decks over the workflow origin; Map's shared visualization is its
+  native body and full-frame mode is only a zoom. A
   foreground completion first restores its exact origin, then opens the
   relevant non-empty deck; a background completion only emits a notice and
   never steals focus. Threat-model completion is notification-only and never

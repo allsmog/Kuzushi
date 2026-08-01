@@ -96,13 +96,13 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
 
     assert!(text.contains("Viewing Scan"), "{text}");
     assert!(
-        text.contains("now in Review"),
+        text.contains("next Review"),
         "reality must survive 40 columns via the compact phrasing: {text}"
     );
     assert!(!text.contains("target"), "{text}");
 
     let wide = line_text(identity_line(&header, 120));
-    assert!(wide.contains("pipeline live in Review"), "{wide}");
+    assert!(wide.contains("next required Review"), "{wide}");
 }
 
 #[test]

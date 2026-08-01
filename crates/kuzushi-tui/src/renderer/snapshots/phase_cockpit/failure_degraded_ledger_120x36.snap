@@ -5,9 +5,9 @@ scenario: degraded_ledger
 size: 120x36
 ---
 KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not built · model unconfigured · module all
- Map ● · Scan ○ · Review ○ · Prove ○ · Fix ○
+ Map ● · Scan × · Review × · Prove × · Fix ×
  ▸ NEXT build or explicitly skip the current-revision map
- next → Map · context build build context · jobs inspect prior runs · z open visualization
+ Tab cycle map views · z zoom selected view · next → Map · jobs inspect Map runs
 │PROJECT CONTEXT
 │./failure-target · rev:checking…
 │checking durable map artifacts…
@@ -39,4 +39,4 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 shell route · 1 result ready · workbench · Map 1/5 · ⛭ fix · workbench                                        0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Esc prompt   Ctrl+C exit
-◇ MAP › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

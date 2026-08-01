@@ -5,6 +5,47 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.9 — evidence-grounded cockpit and hardened analysis
+
+**Additive:**
+
+- The five-phase cockpit now keeps the full Map/Scan/Review/Prove/Fix rail
+  visible, distinguishes locked pages from durable completion, and reopens
+  historical phase material without treating page visits as progress.
+- Map embeds the real-data visualization gallery: a source-grounded system
+  summary, concrete DFD inspection, entry-point browser, and component stack
+  share selection and navigation with Map-scoped full-frame zoom.
+- Threat-model results carry registered source-tree identity, findings compare
+  honestly across scans, and the scan worklist exposes contributor provenance
+  and degraded-analysis state.
+- Taint, fuzzing, chain analysis, finding review, replay, and run-lifecycle
+  surfaces gained additional persisted evidence and focused operator controls.
+
+**Security and reliability:**
+
+- Review, default bulk triage, and chain construction consume the accumulated
+  relevant finding corpus. Later observations retain identity-scoped human
+  decisions, while deterministic and nondeterministic scan misses preserve
+  their distinct lifecycle meaning.
+- CodeQL, CPG, workspace traversal, subprocess, model-runtime, and artifact
+  persistence boundaries now authenticate inputs and snapshots more tightly,
+  keep cancellation bounded, and fail closed instead of changing execution
+  policy silently.
+- Typed run items remain the authoritative lifecycle stream, with durability,
+  integrity, comparison, and same-second ordering covered by shared reducers
+  and cross-surface tests.
+
+**Fixed:**
+
+- Map and DFD navigation now reaches concrete components, nodes, flows, and
+  boundaries at narrow and wide terminal sizes while preserving cursor and
+  scroll state across tabs and zoom transitions.
+- Accepting a newer Map correctly reopens Scan without deleting prior findings;
+  Review, Prove, and Fix no longer derive completion from a selected page,
+  filter, or transient Run Focus state.
+- Release, architecture, model-safety, CRAP-risk, packaging, and Rust lint/test
+  gates cover the expanded native control plane and evidence contracts.
+
 ## v0.24.0-alpha.8 — bounded runtime, truthful benchmarks, responsive shell
 
 **Additive:**

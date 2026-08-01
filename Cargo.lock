@@ -1887,7 +1887,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-bdd-tui"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "cucumber",
@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-cli"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "clap",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-codeindex"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "kuzushi-mcp-common",
@@ -1930,7 +1930,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-core"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1981,7 +1981,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-cpg"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "cpg-analysis",
  "cpg-cli",
@@ -1993,7 +1993,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-eval"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "clap",
@@ -2004,7 +2004,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-fleet"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "clap",
@@ -2016,7 +2016,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-clang"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2031,7 +2031,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-codeql"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-common"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2063,7 +2063,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-context"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2075,7 +2075,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-cpg"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-entry-points"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2101,7 +2101,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-findings"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2114,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-gtags"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2126,7 +2126,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-revng"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2140,7 +2140,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-threat-intel"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2152,7 +2152,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-threat-model"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2164,7 +2164,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-treesitter"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2187,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-mcp-x-ray"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2199,7 +2199,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-openai"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-sandbox"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "serde",
  "tempfile",
@@ -2225,7 +2225,7 @@ dependencies = [
 
 [[package]]
 name = "kuzushi-tui"
-version = "0.24.0-alpha.8"
+version = "0.24.0-alpha.9"
 dependencies = [
  "anyhow",
  "crossterm",

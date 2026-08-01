@@ -367,32 +367,11 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
             mode_style(header.phase),
         ),
     ];
-    if let Some(reality) = header
-        .reality_phase
-        .filter(|reality| *reality != header.phase)
-    {
-        atoms.push(IdentityAtom {
-            text: format!("pipeline live in {}", reality.title()),
-            compact: Some(format!("now in {}", reality.title())),
-            style: theme::muted(),
-        });
-    }
+    atoms.extend(reality_atom(header));
     atoms.push(atom(format!("target {}", header.target), theme::label()));
     let (live_text, live_style) = live_atom(header.liveness);
     atoms.push(atom(live_text, live_style));
-    if header.cost_invalid {
-        atoms.push(atom("cost accounting error".to_string(), theme::danger()));
-    } else if !header.cost_complete {
-        atoms.push(atom(
-            format!("cost >=${:.2} incomplete", header.cost_usd),
-            theme::warn(),
-        ));
-    } else if header.cost_usd > 0.0 {
-        atoms.push(atom(
-            format!("cost ${:.2}", header.cost_usd),
-            theme::primary(),
-        ));
-    }
+    atoms.extend(cost_atom(header));
     atoms.push(atom(header.context.clone(), context_style(&header.context)));
     atoms.push(atom(format!("model {}", header.model), theme::muted()));
     atoms.push(atom(
@@ -400,6 +379,30 @@ fn identity_atoms(header: &EngagementHeaderModel) -> Vec<IdentityAtom> {
         module_style(&header.module),
     ));
     atoms
+}
+
+fn reality_atom(header: &EngagementHeaderModel) -> Option<IdentityAtom> {
+    let reality = header
+        .reality_phase
+        .filter(|reality| *reality != header.phase)?;
+    Some(IdentityAtom {
+        text: format!("next required {}", reality.title()),
+        compact: Some(format!("next {}", reality.title())),
+        style: theme::muted(),
+    })
+}
+
+fn cost_atom(header: &EngagementHeaderModel) -> Option<IdentityAtom> {
+    if header.cost_invalid {
+        return Some(atom("cost accounting error".to_string(), theme::danger()));
+    }
+    if !header.cost_complete {
+        return Some(atom(
+            format!("cost >=${:.2} incomplete", header.cost_usd),
+            theme::warn(),
+        ));
+    }
+    (header.cost_usd > 0.0).then(|| atom(format!("cost ${:.2}", header.cost_usd), theme::primary()))
 }
 
 fn mode_style(phase: kuzushi_core::WorkflowPhase) -> ratatui::style::Style {
@@ -498,7 +501,7 @@ fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line
         }
         let style = journey_phase_tone_style(status.tone);
         spans.push(Span::styled(status.phase_label.to_string(), style));
-        spans.push(Span::styled(status.state_symbol.to_string(), style));
+        spans.push(Span::styled(status.navigation_symbol().to_string(), style));
     }
     let line = Line::from(spans);
     (line.width() <= width).then_some(line)

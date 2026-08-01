@@ -39,6 +39,22 @@ impl PhaseAttemptLedger {
         self.attempts.get(attempt_id)
     }
 
+    /// Whether `later_attempt_id` completed after `earlier_attempt_id` in the
+    /// durable ledger. Append order breaks same-second timestamp ties.
+    pub fn attempt_completed_after(
+        &self,
+        earlier_attempt_id: &str,
+        later_attempt_id: &str,
+    ) -> bool {
+        let Some(earlier) = self.attempts.get(earlier_attempt_id) else {
+            return false;
+        };
+        let Some(later) = self.attempts.get(later_attempt_id) else {
+            return false;
+        };
+        self.attempt_sort_key(later) > self.attempt_sort_key(earlier)
+    }
+
     /// Whether this target has ever entered the durable attempt protocol for
     /// `phase`. Snapshot revisions are intentionally ignored: once a phase has
     /// modern attempt history, its artifacts must never be reclassified as
@@ -97,15 +113,14 @@ impl PhaseAttemptLedger {
     }
 
     pub(crate) fn block_content_reuse(&mut self, attempt_id: impl Into<String>) {
-        self.content_reuse_blocked_attempts.insert(attempt_id.into());
+        self.content_reuse_blocked_attempts
+            .insert(attempt_id.into());
     }
 
     pub fn phase_was_skipped(&self, phase: WorkflowPhase, snapshot: &PhaseTargetSnapshot) -> bool {
-        self.skipped_checkpoints
-            .iter()
-            .any(|checkpoint| {
-                checkpoint.phase == phase && checkpoint.target_snapshot.equivalent_to(snapshot)
-            })
+        self.skipped_checkpoints.iter().any(|checkpoint| {
+            checkpoint.phase == phase && checkpoint.target_snapshot.equivalent_to(snapshot)
+        })
     }
 
     pub fn skipped_phases_for(&self, snapshot: &PhaseTargetSnapshot) -> BTreeSet<WorkflowPhase> {

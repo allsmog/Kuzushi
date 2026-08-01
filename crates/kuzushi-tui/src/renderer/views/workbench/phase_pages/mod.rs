@@ -68,7 +68,7 @@ pub(in crate::renderer::views) fn render_phase_cockpit_body(
         };
         match &model.body {
             PhaseCockpitBody::Map(map) => {
-                map::render(frame, surface.rect, map, &model.header, surface_state)
+                map::render(frame, surface.rect, app, map, &model.header, surface_state)
             }
             PhaseCockpitBody::Scan(scan) => scan::render(frame, surface.rect, scan, surface_state),
             PhaseCockpitBody::Review(hunt) => {
@@ -83,11 +83,12 @@ pub(in crate::renderer::views) fn render_phase_cockpit_body(
 }
 
 pub(in crate::renderer::views) fn phase_cockpit_plain_lines(
+    app: &ShellApp,
     model: &PhaseCockpitModel,
     width: usize,
 ) -> Vec<Line<'static>> {
     match &model.body {
-        PhaseCockpitBody::Map(map) => map::plain_lines(map, &model.header, width),
+        PhaseCockpitBody::Map(map) => map::plain_lines(app, map, &model.header, width),
         PhaseCockpitBody::Scan(scan) => scan::plain_lines(scan, width),
         PhaseCockpitBody::Review(hunt) => hunt::plain_lines(hunt, width),
         PhaseCockpitBody::Prove(confirm) => confirm::plain_lines(confirm, width),

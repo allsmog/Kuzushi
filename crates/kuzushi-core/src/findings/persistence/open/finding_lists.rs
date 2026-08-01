@@ -21,6 +21,29 @@ impl FindingStore {
         self.v3_all_findings()
     }
 
+    /// Findings that still belong to the active vulnerability corpus.
+    ///
+    /// A newer scan does not define this set: the durable lifecycle does.
+    /// Agentic and otherwise non-deterministic findings therefore remain
+    /// relevant when a later run does not rediscover them. Only an explicit
+    /// lifecycle transition (stale, suppressed, or rekeyed) removes a row
+    /// from active triage and chain composition.
+    pub fn list_relevant_findings(&self) -> Result<Vec<Finding>> {
+        let findings = self.v3_all_findings()?;
+        let stable_fps = findings.iter().map(finding_stable_key).collect::<Vec<_>>();
+        let statuses = self.current_statuses_for(&stable_fps)?;
+        Ok(findings
+            .into_iter()
+            .filter(|finding| finding_is_relevant_with_statuses(finding, &statuses))
+            .collect())
+    }
+
+    pub fn finding_is_relevant(&self, finding: &Finding) -> Result<bool> {
+        let key = finding_stable_key(finding);
+        let statuses = self.current_statuses_for(std::slice::from_ref(&key))?;
+        Ok(finding_is_relevant_with_statuses(finding, &statuses))
+    }
+
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
         let all_findings = self.v3_all_findings()?;
         collect_filtered_findings(self, all_findings, filter)
@@ -135,6 +158,16 @@ fn finding_stable_key(finding: &Finding) -> String {
         .identity_id
         .clone()
         .unwrap_or_else(|| finding.fingerprint.clone())
+}
+
+fn finding_is_relevant_with_statuses(
+    finding: &Finding,
+    statuses: &std::collections::BTreeMap<String, String>,
+) -> bool {
+    !finding.suppressed
+        && statuses
+            .get(&finding_stable_key(finding))
+            .is_none_or(|status| status == "open")
 }
 
 #[cfg(test)]

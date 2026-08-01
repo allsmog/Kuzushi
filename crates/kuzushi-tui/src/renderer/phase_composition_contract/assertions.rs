@@ -99,7 +99,7 @@ impl PhaseCompositionContract {
             "Ctrl+C request abort",
             "Esc prompt",
             "NAVIGATE",
-            "Shift+Tab phase→",
+            "Shift+Tab ph",
         ] {
             assert!(
                 flattened.contains(control),
@@ -125,7 +125,7 @@ impl PhaseCompositionContract {
 
     fn critical_compact_atoms(self) -> &'static [&'static str] {
         match self.phase {
-            kuzushi_core::WorkflowPhase::Map => &["Viewing Map", "context:present"],
+            kuzushi_core::WorkflowPhase::Map => &["Viewing Map", "SYSTEM SUMMARY"],
             kuzushi_core::WorkflowPhase::Scan => &["Viewing Scan", "complete", "scan-phase"],
             kuzushi_core::WorkflowPhase::Review => &["FINDINGS", "[●●●]", "s1"],
             kuzushi_core::WorkflowPhase::Prove => &["F-0001", "STATUS", "NEXT", "[●●●]"],
@@ -139,9 +139,14 @@ impl PhaseCompositionContract {
 fn adaptive_sections(phase: kuzushi_core::WorkflowPhase, width: u16) -> &'static [&'static str] {
     use kuzushi_core::WorkflowPhase;
     match (phase, width >= 120, width >= 78) {
-        (WorkflowPhase::Map, true, _) => &["PROJECT CONTEXT", "ATTACK SURFACE", "HOT MODULES"],
-        (WorkflowPhase::Map, false, true) => &["PROJECT CONTEXT", "ATTACK SURFACE"],
-        (WorkflowPhase::Map, false, false) => &["PROJECT CONTEXT"],
+        (WorkflowPhase::Map, true, _) => &[
+            "SYSTEM SUMMARY",
+            "EXECUTIVE SUMMARY",
+            "OVERALL DATA FLOW",
+            "COMPONENT TREE",
+        ],
+        (WorkflowPhase::Map, false, true) => &["SYSTEM SUMMARY", "EXECUTIVE SUMMARY"],
+        (WorkflowPhase::Map, false, false) => &["SYSTEM SUMMARY"],
         (WorkflowPhase::Scan, true, _) => &["ENGINE OUTCOMES", "SCAN RECEIPT", "SCOPE / PLAN"],
         (WorkflowPhase::Scan, false, true) => &["ENGINE OUTCOMES", "SCAN RECEIPT"],
         (WorkflowPhase::Scan, false, false) => &["ENGINE OUTCOMES"],

@@ -64,10 +64,16 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
             ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
             ViewHotkeyAction::WorkbenchPageNext => {
-                self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).next())
+                let current = crate::ui_view_models::active_workbench_page(self);
+                let page =
+                    crate::ui_view_models::adjacent_available_workbench_page(self, current, false);
+                self.set_workbench_page(page)
             }
             ViewHotkeyAction::WorkbenchPagePrev => {
-                self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).prev())
+                let current = crate::ui_view_models::active_workbench_page(self);
+                let page =
+                    crate::ui_view_models::adjacent_available_workbench_page(self, current, true);
+                self.set_workbench_page(page)
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
@@ -107,6 +113,15 @@ impl ShellApp {
     }
 
     pub(crate) fn set_workbench_page(&mut self, page: WorkbenchPage) {
+        if let Some(reason) =
+            crate::ui_view_models::workbench_page_access(self, page).locked_reason()
+        {
+            self.set_error_notice(
+                "workbench",
+                format!("{} is locked — {reason}", page.phase().title()),
+            );
+            return;
+        }
         let workbench = self.router.workbench_mut();
         workbench.set_page(Some(page));
         workbench.scroll_mut().set(page.primary_surface(), 0);
@@ -115,7 +130,8 @@ impl ShellApp {
     }
 
     pub(super) fn cycle_workbench_page_mode(&mut self) {
-        let page = crate::ui_view_models::active_workbench_page(self).next();
+        let current = crate::ui_view_models::active_workbench_page(self);
+        let page = crate::ui_view_models::adjacent_available_workbench_page(self, current, false);
         self.set_workbench_page(page);
     }
 
@@ -143,6 +159,10 @@ impl ShellApp {
     }
 
     fn open_workbench_focused_viz(&mut self) {
+        if crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Map {
+            self.open_map_scene_to_page(self.current_map_viz_page());
+            return;
+        }
         let Some(surface) = effective_phase_surface(self) else {
             return;
         };
@@ -174,6 +194,12 @@ impl ShellApp {
     }
 
     fn toggle_workbench_pane_zoom(&mut self) {
+        if crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Map
+            && crate::ui_view_models::map_gallery_is_primary(self)
+        {
+            self.open_map_scene_to_page(self.current_map_viz_page());
+            return;
+        }
         let focus = self.normalize_workbench_focus();
         self.router.workbench_mut().toggle_zoom(focus);
     }

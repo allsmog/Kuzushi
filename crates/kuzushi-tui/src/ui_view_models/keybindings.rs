@@ -169,6 +169,9 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
 /// keys out of the footer. Name the flow on the doorway itself so the footer
 /// still gives direction instead of a bare "nav mode".
 fn prompt_navigate_label(app: &ShellApp) -> String {
+    if map_summary_navigation_available(app) {
+        return "nav components · j/k move · Enter DFD".to_string();
+    }
     let review_flow_available = app.shell_view() == crate::ShellView::Workbench
         && super::active_workbench_page(app) == crate::app::WorkbenchPage::Review
         && super::visible_findings_len(app) > 0;
@@ -177,6 +180,13 @@ fn prompt_navigate_label(app: &ShellApp) -> String {
     } else {
         "nav mode".to_string()
     }
+}
+
+fn map_summary_navigation_available(app: &ShellApp) -> bool {
+    app.shell_view() == crate::ShellView::Workbench
+        && super::active_workbench_page(app) == crate::app::WorkbenchPage::Map
+        && super::map_gallery_is_primary(app)
+        && app.current_map_viz_page() == crate::scene3d::VizPage::Summary
 }
 
 fn after_critical_binding(bindings: &[FooterKeybinding]) -> usize {

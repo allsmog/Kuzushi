@@ -34,7 +34,21 @@ workflow before they become primary product surfaces.
 
 ## Current Snapshot Highlights
 
-This snapshot tightens the path from scanner output to human review:
+This snapshot makes the five-phase cockpit a direct projection of durable
+repository evidence:
+
+- The Map, Scan, Review, Prove, and Fix rail always names the whole engagement
+  after `Start Map`. Pages without the required evidence are visibly locked;
+  historical artifacts can reopen their page without pretending that a visit
+  advanced the current reality.
+- A ready Map embeds the real-data security gallery. Its source-grounded system
+  summary, DFD, entry-point browser, and component inventory share selection
+  and navigation between the cockpit and Map-scoped zoom, with no synthetic
+  placeholder architecture.
+- Review and default bulk triage operate on the accumulated open,
+  non-suppressed vulnerability corpus, while an explicit scan id remains the
+  opt-in run-scoped view. Durable human decisions remain attached to finding
+  identity across later observations and chain construction.
 
 - Findings have durable identities, source signatures, corroborating source
   rows, static proof state, latest runtime verification, run provenance, and
@@ -369,10 +383,11 @@ Piped shell output automatically uses the same strict plain renderer as
 ## Phase-Driven Workflow (Map → Scan → Review → Prove → Fix)
 
 Launching the shell against a target opens a guided five-phase engagement
-instead of a flat task list. `Shift+Tab` moves between the five interaction
-modes without changing the shared draft or the durable reality checkpoint.
-Each phase announces what it is for and constrains planning to its own
-descriptor-backed tools:
+instead of a flat task list. All five pages remain named after the engagement
+starts; unavailable future pages carry a lock marker, and `Shift+Tab` cycles
+the pages backed by current or historical evidence without changing the shared
+draft or the durable reality checkpoint. Each phase announces what it is for
+and constrains planning to its own descriptor-backed tools:
 
 | Phase | | Focus |
 | --- | --- | --- |
@@ -382,6 +397,15 @@ descriptor-backed tools:
 | ◎ **PROVE** | prove | verify actionable findings and retain empirical evidence with run provenance |
 | ◆ **FIX** | fix | draft, approve, apply, detector-bound re-verify, and report remediation |
 
+- **Map is the evidence canvas.** After an accepted Map, the shell embeds the
+  source-grounded Summary, DFD, Entry points, and Components projections when
+  their artifacts exist. `Tab` changes the Map projection and `z` opens the
+  same selection in a Map-scoped full-frame zoom; missing or stale Map evidence
+  keeps one explicit action drawer instead of fabricated content.
+- **Findings outlive one scan view.** Scan details remain tied to the selected
+  attempt, while Review and default triage use every currently relevant
+  finding in the workspace. A nondeterministic miss does not silently erase a
+  prior observation or its human decision.
 - **Target-aware preselection.** The target is classified (source / JVM /
   Android APK / native binary) and each phase pre-checks the relevant tasks —
   e.g. reverse-engineering and `x-ray` are preselected for an APK, not a source

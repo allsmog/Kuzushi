@@ -296,6 +296,16 @@ fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 // the key handler; surface them so Tab/orbit/pause are discoverable.
 fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let page = app.router.scene().page();
+    if matches!(page, crate::scene3d::VizPage::Summary) {
+        let mut bindings = vec![
+            bind("j/k/↑/↓", "component"),
+            bind("g/G", "ends"),
+            bind("PgUp/PgDn", "scroll"),
+            bind("Enter", "DFD target"),
+        ];
+        push_scene_cycle_and_exit(&mut bindings, app);
+        return bindings;
+    }
     if matches!(page, crate::scene3d::VizPage::Dfd) {
         let mut bindings = Vec::new();
         push_dfd_keybindings(&mut bindings, app);
@@ -314,7 +324,7 @@ fn entry_point_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("PgUp/PgDn", "detail"),
         bind("Enter", "DFD target"),
     ];
-    if app.available_viz_pages().len() > 1 {
+    if app.active_viz_pages().len() > 1 {
         bindings.push(bind("Tab", "next page"));
         bindings.push(bind("Shift+Tab", "prev page"));
     }
@@ -331,7 +341,7 @@ fn non_dfd_scene_keybindings(
         bindings.push(bind("j/k/↑/↓", "scroll"));
         bindings.push(bind("g/G", "ends"));
     }
-    if app.available_viz_pages().len() > 1 {
+    if app.active_viz_pages().len() > 1 {
         bindings.push(bind("Tab", "next page"));
         bindings.push(bind("Shift+Tab", "prev page"));
     }
@@ -344,6 +354,14 @@ fn non_dfd_scene_keybindings(
         ]);
     }
     bindings
+}
+
+fn push_scene_cycle_and_exit(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
+    if app.active_viz_pages().len() > 1 {
+        bindings.push(bind("Tab", "next page"));
+        bindings.push(bind("Shift+Tab", "prev page"));
+    }
+    bindings.push(bind("Esc/q", "leave"));
 }
 
 fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
@@ -364,7 +382,7 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
         bindings.push(bind("Enter", "context"));
     }
     bindings.push(bind("PgUp/PgDn", "detail"));
-    if app.available_viz_pages().len() > 1 {
+    if app.active_viz_pages().len() > 1 {
         bindings.push(bind("Tab", "next page"));
         bindings.push(bind("Shift+Tab", "prev page"));
     }

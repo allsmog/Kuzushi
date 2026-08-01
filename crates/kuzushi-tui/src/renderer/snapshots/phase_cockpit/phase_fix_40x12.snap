@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: fix
 size: 40x12
 ---
-KUZUSHI · Viewing Fix · now in Review
+KUZUSHI · Viewing Fix · next Review
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
 │▸ REMEDIATION
@@ -15,4 +15,4 @@ run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-◆ FIX › NAVIGATE · Shift+Tab phase→ Tab/
+◆ FIX VIEW › NAVIGATE · Shift+Tab phase→

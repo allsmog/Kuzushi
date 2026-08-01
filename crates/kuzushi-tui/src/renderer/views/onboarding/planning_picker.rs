@@ -480,7 +480,7 @@ fn phase_rail_line(phases: &[JourneyPhaseStatus], width: usize) -> Line<'static>
 
 fn push_phase_segment(spans: &mut Vec<Span<'static>>, index: usize, phase: &JourneyPhaseStatus) {
     let label = phase.phase_label.trim();
-    let text = format!("{} {label} {}", index + 1, phase.state_symbol);
+    let text = format!("{} {label} {}", index + 1, phase.navigation_symbol());
     if phase.state == JourneyPhaseState::Current {
         spans.push(Span::styled("[", theme::warn()));
         spans.push(Span::styled(text, phase_tone_style(phase.tone)));
@@ -499,6 +499,13 @@ fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'stati
                 JourneyPhaseState::Current
             } else {
                 JourneyPhaseState::Pending
+            },
+            access: if phase == current {
+                crate::ui_view_models::JourneyPhaseAccess::Available
+            } else {
+                crate::ui_view_models::JourneyPhaseAccess::Locked {
+                    reason: "complete the current phase first",
+                }
             },
             phase_label: fallback_phase_rail_label(phase),
             state_symbol: if phase == current { "●" } else { "·" },

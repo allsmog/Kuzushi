@@ -121,6 +121,21 @@ impl EngagementState {
         self.phase_attempt_ledger.selected_for(phase, snapshot)
     }
 
+    pub(crate) fn selected_attempt_completed_after(
+        &self,
+        earlier: WorkflowPhase,
+        later: WorkflowPhase,
+    ) -> bool {
+        let Some(earlier) = self.selected_phase_attempt(earlier) else {
+            return true;
+        };
+        let Some(later) = self.selected_phase_attempt(later) else {
+            return false;
+        };
+        self.phase_attempt_ledger
+            .attempt_completed_after(&earlier.completed.attempt_id, &later.completed.attempt_id)
+    }
+
     pub(crate) fn unresolved_phase_attempt(
         &self,
         phase: WorkflowPhase,

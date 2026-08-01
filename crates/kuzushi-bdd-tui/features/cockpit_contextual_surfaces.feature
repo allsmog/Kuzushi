@@ -33,9 +33,6 @@ Feature: Contextual surfaces restore the workflow origin
     When I launch the shell
     Then I see "Viewing Scan"
     When I type command "scene"
-    And I press "F2"
-    And I press "Tab"
-    And I press "Tab"
     Then I see "DATA-FLOW DIAGRAM"
     And I see "Client"
     And I see "Orders DB"

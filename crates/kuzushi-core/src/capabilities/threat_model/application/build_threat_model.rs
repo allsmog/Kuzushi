@@ -40,12 +40,24 @@ fn build_agentic_threat_model(
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
-    if input.is_refine() {
-        return refine_threat_model(runtime, ctx, flavor, verb, input);
-    }
-    if input.is_staged() {
-        return build_staged_threat_model(runtime, ctx, flavor, verb, input);
-    }
+    let snapshot = register_result_snapshot(ctx, verb, &input.target);
+    let result = if input.is_refine() {
+        refine_threat_model(runtime, ctx, flavor, verb, input)?
+    } else if input.is_staged() {
+        build_staged_threat_model(runtime, ctx, flavor, verb, input)?
+    } else {
+        build_single_threat_model(runtime, ctx, flavor, verb, input)?
+    };
+    Ok(attach_result_snapshot(result, snapshot))
+}
+
+fn build_single_threat_model(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+) -> Result<Value> {
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let grounding = load_prompt_grounding(&input, ctx)?;
@@ -60,7 +72,65 @@ fn build_agentic_threat_model(
         &source_bundle,
         &grounding,
     )?;
-    finish_agentic_threat_model(ctx, flavor, verb, input, generated, source_bundle, grounding)
+    finish_agentic_threat_model(
+        ctx,
+        flavor,
+        verb,
+        input,
+        generated,
+        source_bundle,
+        grounding,
+    )
+}
+
+struct ResultSnapshot {
+    snapshot_hash: String,
+    tree_hash: String,
+}
+
+fn register_result_snapshot(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    target: &Path,
+) -> Option<ResultSnapshot> {
+    let workspace = crate::workspace::WorkspaceTarget::new(target).ok()?;
+    let mut heartbeat = crate::progress::HeartbeatGate::new(std::time::Duration::from_secs(1));
+    let mut observer = |files: usize| {
+        if heartbeat.ready() {
+            emit_snapshot_progress(ctx, verb, format!("source identity · {files} files hashed"));
+        }
+    };
+    match crate::incremental_index::register_workspace_tree_identity_with_observer(
+        &workspace,
+        &mut observer,
+    ) {
+        Ok(indexed) => Some(ResultSnapshot {
+            snapshot_hash: indexed.snapshot_hash,
+            tree_hash: indexed.tree_hash,
+        }),
+        Err(error) => {
+            emit_snapshot_progress(
+                ctx,
+                verb,
+                format!("source identity unavailable · {error:#}"),
+            );
+            None
+        }
+    }
+}
+
+fn emit_snapshot_progress(ctx: &ToolExecutionContext<'_>, verb: &str, detail: String) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("tool-progress", verb, detail).emit();
+    }
+}
+
+fn attach_result_snapshot(mut result: Value, snapshot: Option<ResultSnapshot>) -> Value {
+    if let (Some(data), Some(snapshot)) = (result["data"].as_object_mut(), snapshot) {
+        data.insert("snapshotHash".to_string(), json!(snapshot.snapshot_hash));
+        data.insert("treeHash".to_string(), json!(snapshot.tree_hash));
+    }
+    result
 }
 
 fn finish_agentic_threat_model(
@@ -158,7 +228,7 @@ fn finish_threat_model_build(
 ) -> Result<Value> {
     let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
-    let mut lines = threat_model_output_lines(
+    let (lines, warnings) = finished_build_lines(
         flavor,
         &input,
         &summary,
@@ -166,18 +236,79 @@ fn finish_threat_model_build(
         artifacts.persisted,
         has_concrete_content,
         cost,
+        version_warning,
+        reconciliation,
     );
-    lines.extend(version_warning);
-    let warnings = reconciliation.warning_lines();
-    append_honesty_warnings(&mut lines, &warnings);
     emit_threat_model_terminal(ctx, verb, flavor, &summary, has_concrete_content);
+    finished_build_response(
+        input,
+        flavor,
+        generated,
+        artifacts,
+        findings,
+        has_concrete_content,
+        warnings,
+        cost,
+        lines,
+        source_bundle,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finished_build_response(
+    input: BuildInput,
+    flavor: BuildFlavor,
+    generated: GeneratedThreatModel,
+    artifacts: ThreatModelArtifacts,
+    findings: Vec<Value>,
+    has_concrete_content: bool,
+    warnings: Vec<String>,
+    cost: crate::runtime::RuntimeCostReport,
+    lines: Vec<String>,
+    source_bundle: ThreatModelSourceBundle,
+) -> Result<Value> {
     let honesty = ResultHonesty {
         has_concrete_content,
         warnings,
     };
     threat_model_response(
-        input, flavor, generated, artifacts, findings, honesty, cost, lines, source_bundle,
+        input,
+        flavor,
+        generated,
+        artifacts,
+        findings,
+        honesty,
+        cost,
+        lines,
+        source_bundle,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finished_build_lines(
+    flavor: BuildFlavor,
+    input: &BuildInput,
+    summary: &ThreatModelSummary,
+    finding_count: usize,
+    persisted: bool,
+    has_concrete_content: bool,
+    cost: crate::runtime::RuntimeCostReport,
+    version_warning: Option<String>,
+    reconciliation: BuildReconciliation,
+) -> (Vec<String>, Vec<String>) {
+    let mut lines = threat_model_output_lines(
+        flavor,
+        input,
+        summary,
+        finding_count,
+        persisted,
+        has_concrete_content,
+        cost,
+    );
+    lines.extend(version_warning);
+    let warnings = reconciliation.warning_lines();
+    append_honesty_warnings(&mut lines, &warnings);
+    (lines, warnings)
 }
 
 fn append_honesty_warnings(lines: &mut Vec<String>, warnings: &[String]) {
@@ -199,7 +330,11 @@ fn seal_build_document(
     source_bundle: &ThreatModelSourceBundle,
 ) -> Result<()> {
     stamp_build_seed_lineage(document, input)?;
-    stamp_source_provenance(document, source_bundle.provenance_json(), !input.is_refine());
+    stamp_source_provenance(
+        document,
+        source_bundle.provenance_json(),
+        !input.is_refine(),
+    );
     finalize_document_identity(document, &input.target)?;
     require_complete_security_context_links(document)
 }
@@ -430,7 +565,11 @@ fn emit_threat_model_start(
     }
 }
 
-pub(crate) fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, loaded_count: usize) {
+pub(crate) fn emit_source_bundle_loaded(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    loaded_count: usize,
+) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -442,7 +581,11 @@ pub(crate) fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &s
     }
 }
 
-pub(crate) fn emit_grounding_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, grounding: &PromptGrounding) {
+pub(crate) fn emit_grounding_loaded(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    grounding: &PromptGrounding,
+) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -461,11 +604,7 @@ pub(crate) fn emit_grounding_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, 
 /// A fresh run that leaves a real persisted model on the table says so before
 /// the model call. Emitted pre-persist, so the existence check reflects the
 /// disk state the operator would be comparing against.
-pub(crate) fn emit_seed_disclosure(
-    ctx: &ToolExecutionContext<'_>,
-    verb: &str,
-    input: &BuildInput,
-) {
+pub(crate) fn emit_seed_disclosure(ctx: &ToolExecutionContext<'_>, verb: &str, input: &BuildInput) {
     if input.embeds_prior_model() || !persistent_threat_model_path(&input.target).exists() {
         return;
     }
@@ -480,7 +619,11 @@ pub(crate) fn emit_seed_disclosure(
     }
 }
 
-pub(crate) fn emit_coverage_checked(ctx: &ToolExecutionContext<'_>, verb: &str, coverage: &CoverageReport) {
+pub(crate) fn emit_coverage_checked(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    coverage: &CoverageReport,
+) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -630,7 +773,10 @@ fn validate_threat_model_raw(raw: Value, methodology: &str) -> Result<Value> {
     Ok(raw)
 }
 
-pub(crate) fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<GeneratedThreatModel> {
+pub(crate) fn normalize_threat_model_raw(
+    raw: Value,
+    methodology: &str,
+) -> Result<GeneratedThreatModel> {
     let (document_candidate, bridge_findings) = extract_document_and_findings(raw)?;
     let document = normalize_document(document_candidate, methodology)?;
     let document = apply_methodology(document, methodology)?;

@@ -4,39 +4,39 @@ contract: cockpit-spine-v1
 phase: map
 size: 120x36
 ---
-KUZUSHI · Viewing Map · pipeline live in Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
+KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● LIVE · cost $0.37 · context ready
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
- next → Review · context build build context · jobs inspect prior runs · z open visualization · report open Report
-│REPOSITORY / DATA-FLOW MAP · z visualize
-│./phase-target · rev:unknown
-│ready · 3 nodes · 2 flows · 2 trust crossings
-│zones: external → application → data
-│Client ⇒ API · HTTPS request
-│API ⇒ Orders DB · SQL query
-│ ── ATTACK SURFACE ───────────────────────────────────────────────────────────────────────────────────────────────────
-│2 high/critical, max 91, tiers critical=1, high=1, frameworks Axum=2, top critical POST /login
-│criticalAxum · POST /login · 91
-│high    Axum · GET /orders/:id · 72
-│▸ z open terrain visualization
-│ ── HOT MODULES ──────────────────────────────────────────────────────────────────────────────────────────────────────
-│auth  12.0 · 1C 0H 1M 0L 0I
-│api   7.0 · 0C 1H 1M 0L 0I
-│web   5.0 · 0C 1H 0M 0L 0I
-│src   1.0 · 0C 0H 0M 1L 0I
-│ ── WORKLIST ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-│ranking files…
-│
-│
-│
-│
-│▸ PROJECT CONTEXT · NEXT SCANS
-│context:present · ⠋ context:build indexing repository context
-│NEXT SCANS
-│root · scan · never-scanned  no baseline recorded for any phase
-│
-│
+ Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs · report open Report
+◇ SYSTEM SUMMARY · why the system exists and how its parts move data
+views  [summary] · dfd  ·  Tab cycles · z zoom
+┌EXECUTIVE SUMMARY────────────────────────────────────┐┌OVERALL DATA FLOW──────────────────────────────────────────────┐
+│phase-target: purpose not recorded in this threat      ││external → application · 1 flow · boundary                     │
+│model. The primary process component is API. 3       ││application → data · 1 flow · boundary                         │
+│components exchange data over 2 flows across 3 trust ││                                                               │
+│zones; 2 flows cross a declared boundary. Rebuild to ││                                                               │
+│add a source-grounded product summary.               ││                                                               │
+│                                                     ││                                                               │
+│shape · 1 entities · 1 processes · 1 stores          ││                                                               │
+└─────────────────────────────────────────────────────┘└───────────────────────────────────────────────────────────────┘
+┌COMPONENT TREE · external · 1/3 · ↑/↓ select · Enter DFD · PgUp/PgDn scroll───────────────────────────────────────────┐
+│◇ phase-target · 3 components                                                                                           │
+│├─ external · 1 component                                                                                             │
+││  └─ › ◇ Client · entity · in 0 · out 1                                                                              │
+││     ├─ does · not recorded in the threat model                                                                      │
+││     ├─ purpose · not recorded; rebuild the threat model                                                             │
+││     └─ → API [application] · HTTPS request · boundary                                                               │
+│├─ application · 1 component                                                                                          │
+││  └─   ◇ API · process · in 1 · out 1                                                                                │
+││     ├─ does · not recorded in the threat model                                                                      │
+││     ├─ purpose · not recorded; rebuild the threat model                                                             │
+││     └─ → Orders DB [data] · SQL query · boundary                                                                    │
+│└─ data · 1 component                                                                                                 │
+│   └─   ◇ Orders DB · store · in 1 · out 0                                                                            │
+│      ├─ does · not recorded in the threat model                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+./phase-target · rev:unknown · context:present · indexed=3 total=3 · 3 nodes · 2 flows
 run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-◇ MAP › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc prompt

@@ -12,6 +12,8 @@ const MAX_FLOWS: usize = 64;
 pub(crate) struct DfdNode {
     pub(crate) id: String,
     pub(crate) name: String,
+    pub(crate) description: Option<String>,
+    pub(crate) purpose: Option<String>,
     pub(crate) zone: String,
     /// Raw node type from the doc (`process` | `external-entity` | `data-store`).
     pub(crate) kind: String,
@@ -51,6 +53,8 @@ fn node_from_value(value: &serde_json::Value) -> Option<DfdNode> {
     Some(DfdNode {
         id,
         name,
+        description: string_field(value, "description"),
+        purpose: string_field(value, "purpose"),
         zone,
         kind,
     })
@@ -154,7 +158,11 @@ mod tests {
             "dfd": {
                 "nodes": [
                     {"id": "user", "name": "Browser", "trustZone": "internet"},
-                    {"id": "api", "name": "API server", "trustZone": "app-tier"},
+                    {
+                        "id": "api", "name": "API server", "trustZone": "app-tier",
+                        "description": "Receives browser requests",
+                        "purpose": "Provides the application's remote API"
+                    },
                     {"id": "db", "name": "Postgres", "trustZone": "data-tier"}
                 ],
                 "flows": [
@@ -182,6 +190,14 @@ mod tests {
         assert_eq!(flows[0].source, "Browser");
         assert_eq!(flows[0].target, "API server");
         assert_eq!(flows[0].label, "https");
+        assert_eq!(
+            nodes[1].description.as_deref(),
+            Some("Receives browser requests")
+        );
+        assert_eq!(
+            nodes[1].purpose.as_deref(),
+            Some("Provides the application's remote API")
+        );
         assert!(flows.iter().all(|flow| flow.crosses));
     }
 

@@ -544,6 +544,14 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
+    app.router.scene_mut().set_page(VizPage::Summary);
+    let summary_bindings = footer_keybindings(&app);
+    assert!(summary_bindings.contains(&bind("PgUp/PgDn", "scroll")));
+    assert!(summary_bindings.contains(&bind("j/k/↑/↓", "component")));
+    assert!(summary_bindings.contains(&bind("g/G", "ends")));
+    assert!(summary_bindings.contains(&bind("Enter", "DFD target")));
+    app.router.scene_mut().set_page(VizPage::Dfd);
+
     app.router.scene_mut().toggle_dfd_focus();
     let focused_bindings = footer_keybindings(&app);
     assert!(focused_bindings.contains(&bind("j/k/↑/↓", "context")));

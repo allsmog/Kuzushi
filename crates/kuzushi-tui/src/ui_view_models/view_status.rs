@@ -64,6 +64,7 @@ fn viz_page_slug(page: crate::scene3d::VizPage) -> &'static str {
     match page {
         crate::scene3d::VizPage::AttackSurface => "terrain",
         crate::scene3d::VizPage::AttackPath => "path",
+        crate::scene3d::VizPage::Summary => "summary",
         crate::scene3d::VizPage::Dfd => "dfd",
         crate::scene3d::VizPage::EntryPoints => "entry",
         crate::scene3d::VizPage::Components => "components",

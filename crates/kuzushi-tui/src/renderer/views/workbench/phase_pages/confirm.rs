@@ -693,7 +693,10 @@ fn evidence_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<'stati
 /// finding carries dataflow rows. This is the frame-side parallel to the plain
 /// projection's `append_plain_dataflow`, so the interactive Prove EVIDENCE pane
 /// discloses the same falsifying dataflow the Review frame and plain output do.
-fn evidence_and_dataflow_lines(finding: &FindingDetailModel, pane_width: u16) -> Vec<Line<'static>> {
+fn evidence_and_dataflow_lines(
+    finding: &FindingDetailModel,
+    pane_width: u16,
+) -> Vec<Line<'static>> {
     let width = pane_width as usize;
     let mut lines = evidence_lines(finding, width);
     if !finding.dataflow_evidence.is_empty() {
@@ -970,7 +973,9 @@ mod dataflow_prove_tests {
         let text = helper_text(&finding_with_dataflow());
 
         let summary_at = text.find("evidence:0").expect("evidence summary present");
-        let dataflow_at = text.find("AUDITED DATAFLOW").expect("dataflow header present");
+        let dataflow_at = text
+            .find("AUDITED DATAFLOW")
+            .expect("dataflow header present");
         assert!(summary_at < dataflow_at, "{text}");
         assert!(text.contains("guard · src/users.ts:91"), "{text}");
         assert!(text.contains("falsifying evidence"), "{text}");

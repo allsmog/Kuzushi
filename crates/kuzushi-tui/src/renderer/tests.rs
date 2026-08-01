@@ -6932,7 +6932,7 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("Viewing Prove"), "{rendered}");
-    assert!(rendered.contains("pipeline live in Map"), "{rendered}");
+    assert!(rendered.contains("next required Map"), "{rendered}");
     assert!(rendered.contains("STATUS / NEXT"), "{rendered}");
     assert!(rendered.contains("EVIDENCE"), "{rendered}");
     assert!(rendered.contains("PROOF"), "{rendered}");
@@ -6972,18 +6972,23 @@ fn prove_selected_finding_keeps_evidence_and_proof_readable() {
 fn contextual_dfd_deck_renders_artifact_and_restores_workbench() {
     let temp = tempfile::tempdir().unwrap();
     let doc = serde_json::json!({
+        "systemContext": "Operators use Sample to review requests and preserve approved records.",
         "dfd": {
             "nodes": [
                 {
                     "id": "user",
                     "type": "external-entity",
                     "name": "Browser",
+                    "description": "Collects operator requests",
+                    "purpose": "Provides the operator surface",
                     "trustZone": "internet"
                 },
                 {
                     "id": "api",
                     "type": "process",
                     "name": "API server",
+                    "description": "Processes review requests",
+                    "purpose": "Applies the review policy",
                     "trustZone": "app-tier"
                 }
             ],
@@ -7019,10 +7024,23 @@ fn contextual_dfd_deck_renders_artifact_and_restores_workbench() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("INTERNET"), "{rendered}");
-    assert!(rendered.contains("APP-TIER"), "{rendered}");
-    assert!(rendered.contains("◆ Browser"), "{rendered}");
-    assert!(rendered.contains("◇ API server"), "{rendered}");
+    assert!(rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
+    assert!(rendered.contains("Browser"), "{rendered}");
+    assert!(rendered.contains("API server"), "{rendered}");
+
+    press_key(
+        &mut app,
+        crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Tab,
+            crossterm::event::KeyModifiers::empty(),
+        ),
+    );
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let summary = format!("{:?}", terminal.backend().buffer());
+    assert!(summary.contains("SYSTEM SUMMARY"), "{summary}");
+    assert!(summary.contains("EXECUTIVE SUMMARY"), "{summary}");
+    assert!(summary.contains("COMPONENT TREE"), "{summary}");
+    assert!(summary.contains("Applies the review policy"), "{summary}");
     assert_eq!(app.shell_view(), ShellView::Scene);
 
     press_key(

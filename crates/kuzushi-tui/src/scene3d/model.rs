@@ -77,6 +77,8 @@ pub enum VizPage {
     AttackSurface,
     /// 2D source→sink taint flow as a staged horizontal diagram.
     AttackPath,
+    /// System purpose, aggregate trust-zone flows, and logical component tree.
+    Summary,
     /// 2D data-flow diagram: actors/processes/stores across trust zones.
     Dfd,
     /// Inventory of every discovered ingress surface, grouped by kind and
@@ -95,9 +97,10 @@ pub enum VizPage {
 }
 
 impl VizPage {
-    pub const ALL: [VizPage; 8] = [
+    pub const ALL: [VizPage; 9] = [
         VizPage::AttackSurface,
         VizPage::AttackPath,
+        VizPage::Summary,
         VizPage::Dfd,
         VizPage::EntryPoints,
         VizPage::Components,
@@ -110,6 +113,7 @@ impl VizPage {
         match self {
             VizPage::AttackSurface => "attack surface (3D terrain)",
             VizPage::AttackPath => "attack path",
+            VizPage::Summary => "system summary",
             VizPage::Dfd => "data-flow diagram",
             VizPage::EntryPoints => "entry points",
             VizPage::Components => "components",
@@ -130,7 +134,11 @@ impl VizPage {
     pub fn is_frame_rendered(self) -> bool {
         matches!(
             self,
-            VizPage::AttackSurface | VizPage::Dfd | VizPage::EntryPoints | VizPage::ExploitChain
+            VizPage::AttackSurface
+                | VizPage::Summary
+                | VizPage::Dfd
+                | VizPage::EntryPoints
+                | VizPage::ExploitChain
         )
     }
 
@@ -165,8 +173,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gallery_has_eight_pages_including_the_line_based_worklist() {
-        assert_eq!(VizPage::ALL.len(), 8);
+    fn gallery_has_nine_pages_including_summary_and_worklist() {
+        assert_eq!(VizPage::ALL.len(), 9);
+        assert!(VizPage::ALL.contains(&VizPage::Summary));
         assert!(VizPage::ALL.contains(&VizPage::Worklist));
         assert!(!VizPage::Worklist.is_frame_rendered());
         assert!(!VizPage::Worklist.is_3d());

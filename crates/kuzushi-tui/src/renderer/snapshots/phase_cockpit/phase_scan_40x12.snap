@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: scan
 size: 40x12
 ---
-KUZUSHI · Viewing Scan · now in Review
+KUZUSHI · Viewing Scan · next Review
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
 │▸ RECORDED ENGINE OUTCOMES
@@ -15,4 +15,4 @@ run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt
-▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab
+▦ SCAN VIEW › NAVIGATE · Shift+Tab phase

@@ -192,8 +192,8 @@ pub(crate) use jobs_registry::{
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
     finding_is_review_actionable, finding_ledger_counts, journey_footer_segment, journey_model,
-    journey_phase_segment, JourneyDestination, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
-    JourneyPhaseTone, ReportReason,
+    journey_phase_segment, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
+    JourneyPhaseStatus, JourneyPhaseTone, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -231,15 +231,15 @@ pub(crate) use phase_cockpit::investigation_verify_command;
 #[cfg(test)]
 pub(crate) use phase_cockpit::phase_cockpit_model;
 pub(crate) use phase_cockpit::{
-    phase_cockpit_model_for_phase, phase_presentation_plan, phase_surface_specs, AttentionMode,
-    ChainArtifactsModel, ChainCandidateModel, ChainLinkModel, Composition, DrawerSize, DrawerSpec,
-    EngagementHeaderModel, FixPhaseModel, InvestigationPlanModel, LayoutDensity, LiveScanModel,
-    MapPhaseModel, NextScanRow, NextScansState, PhaseCockpitBody, PhaseCockpitModel,
-    PhasePresentationPlan, PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface,
-    ProofReplayModel, ProvePhaseModel, RemediationLifecycleModel, RemediationLifecycleStage,
-    RemediationLoadState, ReviewPhaseModel, ScanAttemptModel, ScanEngineOutcomeModel,
-    ScanPhaseModel, SelectionDisclosureModel, SurfaceInteraction, SurfaceRole, SurfaceState,
-    TraceEvidenceModel, TraceHopModel,
+    map_gallery_is_primary, phase_cockpit_model_for_phase, phase_presentation_plan,
+    phase_surface_specs, AttentionMode, ChainArtifactsModel, ChainCandidateModel, ChainLinkModel,
+    Composition, DrawerSize, DrawerSpec, EngagementHeaderModel, FixPhaseModel,
+    InvestigationPlanModel, LayoutDensity, LiveScanModel, MapPhaseModel, NextScanRow,
+    NextScansState, PhaseCockpitBody, PhaseCockpitModel, PhasePresentationPlan,
+    PhaseResultCardModel, PhaseSurfaceId, PlannedPhaseSurface, ProofReplayModel, ProvePhaseModel,
+    RemediationLifecycleModel, RemediationLifecycleStage, RemediationLoadState, ReviewPhaseModel,
+    ScanAttemptModel, ScanEngineOutcomeModel, ScanPhaseModel, SelectionDisclosureModel,
+    SurfaceInteraction, SurfaceRole, SurfaceState, TraceEvidenceModel, TraceHopModel,
 };
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use planning_overview::{
@@ -351,20 +351,23 @@ pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::selected_taint_flow_path;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
-    cached_risk_by_module, component_stack, dfd_model, dfd_security_items_for_selection,
-    dfd_selectable_count, dfd_selected_item, dfd_selection_for_key, entry_point_breakdown,
+    cached_risk_by_module, component_stack, dfd_model, dfd_overview, dfd_overview_component_at,
+    dfd_overview_component_count, dfd_security_items_for_selection, dfd_selectable_count,
+    dfd_selected_item, dfd_selection_for_key, display_target, entry_point_breakdown,
     risk_by_module, taint_flow_path, taint_flow_path_for_finding, worklist_model, AttackChain,
     AttackTree, ComponentItem, ComponentScope, ComponentSource, ComponentSourceKind,
-    ComponentStack, DfdBoundaryModel, DfdFlowModel, DfdKind, DfdLinkState, DfdModel, DfdNodeModel,
-    DfdSecurityItem, DfdSecurityKind, DfdSelected, EntryPointBreakdown, EntryPointGroup,
-    EntryPointItem, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule,
-    TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
+    ComponentStack, DfdBoundaryModel, DfdContextCounts, DfdFlowModel, DfdKind, DfdLinkState,
+    DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone,
+    DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow, EntryPointBreakdown,
+    EntryPointGroup, EntryPointItem, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk,
+    RiskByModule, TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
-    active_review_queue_mode, active_workbench_page, work_liveness,
-    workbench_presentation_snapshot, workbench_report_command, workbench_reverify_control_hint,
-    WorkLiveness, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
-    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
+    active_review_queue_mode, active_workbench_page, adjacent_available_workbench_page,
+    work_liveness, workbench_page_access, workbench_presentation_snapshot,
+    workbench_report_command, workbench_reverify_control_hint, WorkLiveness, WorkbenchChromeModel,
+    WorkbenchHint, WorkbenchPageAccess, WorkbenchPresentationSnapshot, WorkbenchState,
+    WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

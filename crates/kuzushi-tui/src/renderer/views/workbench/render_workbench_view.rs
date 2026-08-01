@@ -382,7 +382,7 @@ fn journey_lines(top: &WorkbenchTopBar, width: usize) -> Vec<Line<'static>> {
 fn phase_rail_line(statuses: &[JourneyPhaseStatus], width: usize) -> Option<Line<'static>> {
     let rail_text = statuses
         .iter()
-        .map(|status| format!("{}{}", status.phase_label, status.state_symbol))
+        .map(|status| format!("{}{}", status.phase_label, status.navigation_symbol()))
         .collect::<Vec<_>>()
         .join(" · ");
     if width < 100 || crate::renderer::shared::text::display_width(&rail_text) >= width {
@@ -433,7 +433,7 @@ fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPh
         }
         let style = journey_phase_tone_style(status.tone);
         spans.push(Span::styled(status.phase_label.to_string(), style));
-        spans.push(Span::styled(status.state_symbol.to_string(), style));
+        spans.push(Span::styled(status.navigation_symbol().to_string(), style));
     }
 }
 
@@ -454,6 +454,7 @@ fn phase_workbench_lines(
         workbench_header_lines(app, chrome, &phase.header, area.width as usize, usize::MAX);
     lines.push(blank());
     lines.extend(super::phase_pages::phase_cockpit_plain_lines(
+        app,
         phase,
         area.width as usize,
     ));

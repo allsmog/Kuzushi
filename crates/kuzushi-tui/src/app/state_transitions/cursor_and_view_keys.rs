@@ -1,5 +1,11 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GalleryKeyTarget {
+    EmbeddedMap,
+    FullScene,
+}
+
 impl ShellApp {
     pub(super) fn handle_cursor_key(
         &mut self,
@@ -144,15 +150,30 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if !self.scene_view_owns_keys(modifiers) {
+        let Some(target) = self.gallery_key_target(modifiers) else {
             return InputUpdate::ignored();
-        }
+        };
         // Gallery hotkeys yield to the prompt the moment the operator starts
         // typing — otherwise `back`/`home` are untypeable on the 3D page
         // (h/j/k/l would orbit the camera instead of reaching the prompt).
         if !self.input().is_empty() {
             return InputUpdate::ignored();
         }
+        match target {
+            GalleryKeyTarget::EmbeddedMap => self.handle_embedded_map_gallery_key(key),
+            GalleryKeyTarget::FullScene => self.handle_full_scene_view_key(key),
+        }
+    }
+
+    fn gallery_key_target(&self, modifiers: KeyModifierState) -> Option<GalleryKeyTarget> {
+        if self.embedded_map_gallery_owns_keys(modifiers) {
+            return Some(GalleryKeyTarget::EmbeddedMap);
+        }
+        self.scene_view_owns_keys(modifiers)
+            .then_some(GalleryKeyTarget::FullScene)
+    }
+
+    fn handle_full_scene_view_key(&mut self, key: KeyEvent) -> InputUpdate {
         // 3D controls only apply on the attack-surface page; on the DFD page
         // selection keys drive the node/flow inspector cursor instead. Other
         // 2D pages use the shared document-scroll handler. Tab/Shift+Tab/Esc/q
@@ -161,11 +182,15 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         let is_3d = self.router.scene().page().is_3d();
+        let is_summary = matches!(self.router.scene().page(), crate::scene3d::VizPage::Summary);
         let is_dfd = matches!(self.router.scene().page(), crate::scene3d::VizPage::Dfd);
         let is_entry_points = matches!(
             self.router.scene().page(),
             crate::scene3d::VizPage::EntryPoints
         );
+        if is_summary {
+            return self.handle_summary_key(key);
+        }
         self.handle_frame_scene_key(key, is_3d, is_dfd, is_entry_points)
     }
 
@@ -224,6 +249,132 @@ impl ShellApp {
         modifiers.plain && matches!(self.shell_view(), ShellView::Scene)
     }
 
+    fn embedded_map_gallery_owns_keys(&self, modifiers: KeyModifierState) -> bool {
+        if !modifiers.plain
+            || self.shell_view() != ShellView::Workbench
+            || crate::ui_view_models::active_workbench_page(self) != crate::app::WorkbenchPage::Map
+        {
+            return false;
+        }
+        crate::ui_view_models::map_gallery_is_primary(self)
+    }
+
+    fn handle_embedded_map_gallery_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.code == KeyCode::Tab {
+            self.cycle_map_viz_page(1);
+            return InputUpdate::handled();
+        }
+        match self.current_map_viz_page() {
+            crate::scene3d::VizPage::Summary => self.handle_summary_key(key),
+            crate::scene3d::VizPage::Dfd => self.handle_embedded_dfd_key(key),
+            crate::scene3d::VizPage::EntryPoints => self.handle_embedded_entry_key(key),
+            crate::scene3d::VizPage::Components => self.handle_embedded_component_key(key),
+            _ => InputUpdate::ignored(),
+        }
+    }
+
+    fn handle_summary_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if let Some(update) = self.handle_summary_scene_navigation_key(key) {
+            return update;
+        }
+        if self.handle_summary_arrow_or_scroll_key(key) {
+            return InputUpdate::handled();
+        }
+        if self.input_mode() != InputMode::Navigate {
+            return InputUpdate::ignored();
+        }
+        self.handle_summary_navigation_key(key)
+    }
+
+    fn handle_summary_scene_navigation_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.shell_view() != ShellView::Scene {
+            return None;
+        }
+        match key.code {
+            KeyCode::Tab => self.cycle_scene(1),
+            KeyCode::BackTab => self.cycle_scene(-1),
+            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
+            _ => return None,
+        }
+        Some(InputUpdate::handled())
+    }
+
+    fn handle_summary_arrow_or_scroll_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Down => self.cycle_summary_component_selection(1),
+            KeyCode::Up => self.cycle_summary_component_selection(-1),
+            KeyCode::PageDown => self.scroll_summary(1),
+            KeyCode::PageUp => self.scroll_summary(-1),
+            _ => return false,
+        }
+        true
+    }
+
+    fn handle_summary_navigation_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match key.code {
+            KeyCode::Char('j') => self.cycle_summary_component_selection(1),
+            KeyCode::Char('k') => self.cycle_summary_component_selection(-1),
+            KeyCode::Char('g') => self.jump_summary_component_selection(false),
+            KeyCode::Char('G') => self.jump_summary_component_selection(true),
+            KeyCode::Enter => return self.activate_summary_component_selection(),
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
+    }
+
+    fn handle_embedded_dfd_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.cycle_active_dfd_selection(1),
+            KeyCode::Char('k') | KeyCode::Up => self.cycle_active_dfd_selection(-1),
+            KeyCode::PageDown => self.scroll_dfd_detail(1),
+            KeyCode::PageUp => self.scroll_dfd_detail(-1),
+            KeyCode::Enter => return self.activate_dfd_selection(),
+            KeyCode::Esc if self.router.scene_mut().collapse_dfd_focus() => {}
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
+    }
+
+    fn handle_embedded_entry_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => self.cycle_entry_point_selection(1),
+            KeyCode::Char('k') | KeyCode::Up => self.cycle_entry_point_selection(-1),
+            KeyCode::Char('g') => self.jump_entry_point_selection(false),
+            KeyCode::Char('G') => self.jump_entry_point_selection(true),
+            KeyCode::PageDown => self.scroll_entry_point_detail(1),
+            KeyCode::PageUp => self.scroll_entry_point_detail(-1),
+            KeyCode::Enter => return self.activate_entry_point_selection(),
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
+    }
+
+    fn handle_embedded_component_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let scroll = self.router.workbench_mut().scroll_mut();
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                scroll.shift(crate::ui_view_models::PhaseSurfaceId::MapDfd, 1)
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                scroll.shift(crate::ui_view_models::PhaseSurfaceId::MapDfd, -1)
+            }
+            KeyCode::Char('g') => scroll.set(crate::ui_view_models::PhaseSurfaceId::MapDfd, 0),
+            KeyCode::Char('G') => {
+                scroll.set(crate::ui_view_models::PhaseSurfaceId::MapDfd, u16::MAX)
+            }
+            KeyCode::PageDown => scroll.shift(
+                crate::ui_view_models::PhaseSurfaceId::MapDfd,
+                VIEWPORT_PAGE_LINES as i32,
+            ),
+            KeyCode::PageUp => scroll.shift(
+                crate::ui_view_models::PhaseSurfaceId::MapDfd,
+                -(VIEWPORT_PAGE_LINES as i32),
+            ),
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
+    }
+
     fn handle_line_scene_scroll_key(&mut self, key: KeyEvent) -> bool {
         if self.router.scene().page().is_frame_rendered() {
             return false;
@@ -259,6 +410,51 @@ impl ShellApp {
             });
         }
         self.router.scene_mut().toggle_dfd_focus();
+        InputUpdate::handled()
+    }
+
+    fn cycle_summary_component_selection(&mut self, direction: i32) {
+        let overview = crate::ui_view_models::dfd_overview(&crate::ui_view_models::dfd_model(self));
+        let len = crate::ui_view_models::dfd_overview_component_count(&overview);
+        self.router
+            .scene_mut()
+            .cycle_summary_component_selection(direction, len);
+    }
+
+    fn jump_summary_component_selection(&mut self, last: bool) {
+        let overview = crate::ui_view_models::dfd_overview(&crate::ui_view_models::dfd_model(self));
+        let len = crate::ui_view_models::dfd_overview_component_count(&overview);
+        let selection = if last { len.saturating_sub(1) } else { 0 };
+        self.router
+            .scene_mut()
+            .set_summary_component_selection(selection, len);
+    }
+
+    fn activate_summary_component_selection(&mut self) -> InputUpdate {
+        let dfd = crate::ui_view_models::dfd_model(self);
+        let overview = crate::ui_view_models::dfd_overview(&dfd);
+        let selected = self.router.scene().summary_component_selection();
+        let target = crate::ui_view_models::dfd_overview_component_at(&overview, selected)
+            .map(|(_, component)| component.key.clone());
+        let Some(selection) = target
+            .as_deref()
+            .and_then(|key| crate::ui_view_models::dfd_selection_for_key(&dfd, key))
+        else {
+            return self.summary_component_target_missing();
+        };
+        let len = crate::ui_view_models::dfd_selectable_count(&dfd);
+        self.router.scene_mut().set_dfd_selection(selection, len);
+        self.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Dfd);
+        InputUpdate::handled()
+    }
+
+    fn summary_component_target_missing(&mut self) -> InputUpdate {
+        self.set_warn_notice(
+            "component tree",
+            "selected component has no resolved DFD node · rebuild with `threat-model:build`",
+        );
         InputUpdate::handled()
     }
 
@@ -325,6 +521,12 @@ impl ShellApp {
         self.router
             .scene_mut()
             .scroll_dfd_detail(direction, VIEWPORT_PAGE_LINES);
+    }
+
+    fn scroll_summary(&mut self, direction: i32) {
+        self.router
+            .scene_mut()
+            .scroll_summary(direction, VIEWPORT_PAGE_LINES);
     }
 
     fn cycle_scene(&mut self, direction: i32) {

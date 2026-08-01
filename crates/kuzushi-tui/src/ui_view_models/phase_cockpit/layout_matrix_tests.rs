@@ -1,3 +1,4 @@
+use super::layout::PhaseSurfaceSpec;
 use super::*;
 use kuzushi_core::WorkflowPhase;
 use ratatui::layout::Rect;
@@ -100,58 +101,20 @@ fn assert_matrix_cell(
     let specs = phase_surface_specs(body);
     let density = expected_density(specs.len(), area, state.attention());
     let visible_count = expected_visible_count(specs.len(), density);
-
-    assert_eq!(plan.density, density, "{cell}: density");
-    assert_eq!(
-        surface_ids(&plan.available_surfaces),
-        surface_ids(&specs),
-        "{cell}: available focused-deck surfaces"
-    );
-    assert_eq!(
-        plan.primary,
-        expected_primary(phase, state),
-        "{cell}: primary"
-    );
+    assert_matrix_plan_identity(&plan, &specs, density, phase, state, &cell);
     let multi_surface = matches!(
         plan.density,
         LayoutDensity::Dense | LayoutDensity::MasterDetail
     );
-    let expected_visible = match phase {
-        // Map adopted the canvas+drawer composition: the data-flow canvas
-        // dominates and the readiness action card rides the drawer.
-        WorkflowPhase::Map if multi_surface => {
-            vec![PhaseSurfaceId::MapDfd, PhaseSurfaceId::MapReadiness]
-        }
-        // Prove adopted the focus+action-menu composition when a finding is
-        // selected: one triage body plus the Choose-Next-Action menu.
-        WorkflowPhase::Prove
-            if multi_surface
-                && specs
-                    .iter()
-                    .any(|spec| spec.id == PhaseSurfaceId::ProveStatus) =>
-        {
-            vec![PhaseSurfaceId::ProveStatus, PhaseSurfaceId::ProveNextAction]
-        }
-        // Fix adopted the plan/diff/verification triptych once anything is
-        // staged; the third column trades for the diff below 120 columns.
-        WorkflowPhase::Fix
-            if multi_surface
-                && specs
-                    .iter()
-                    .any(|spec| spec.id == PhaseSurfaceId::FixCandidate) =>
-        {
-            if area.width >= 120 {
-                vec![
-                    PhaseSurfaceId::FixRemediation,
-                    PhaseSurfaceId::FixCandidate,
-                    PhaseSurfaceId::FixVerification,
-                ]
-            } else {
-                vec![PhaseSurfaceId::FixRemediation, PhaseSurfaceId::FixCandidate]
-            }
-        }
-        _ => surface_ids(&specs[..visible_count]),
-    };
+    let expected_visible = expected_visible_surfaces(
+        phase,
+        body,
+        &specs,
+        visible_count,
+        multi_surface,
+        density == LayoutDensity::Guided,
+        area.width,
+    );
     assert_eq!(
         surface_ids(&plan.surfaces),
         expected_visible,
@@ -160,6 +123,107 @@ fn assert_matrix_cell(
     assert!(plan.surfaces.len() <= 3, "{cell}: more than three surfaces");
     assert_rectangles(&plan, area, &cell);
     assert_attention_owner(&plan, state.attention(), &cell);
+}
+
+fn assert_matrix_plan_identity(
+    plan: &PhasePresentationPlan,
+    specs: &[PhaseSurfaceSpec],
+    density: LayoutDensity,
+    phase: WorkflowPhase,
+    state: SemanticFixture,
+    cell: &str,
+) {
+    assert_eq!(plan.density, density, "{cell}: density");
+    assert_eq!(
+        surface_ids(&plan.available_surfaces),
+        surface_ids(specs),
+        "{cell}: available focused-deck surfaces"
+    );
+    assert_eq!(
+        plan.primary,
+        expected_primary(phase, state),
+        "{cell}: primary"
+    );
+}
+
+fn expected_visible_surfaces(
+    phase: WorkflowPhase,
+    body: &PhaseCockpitBody,
+    specs: &[PhaseSurfaceSpec],
+    visible_count: usize,
+    multi_surface: bool,
+    guided: bool,
+    width: u16,
+) -> Vec<PhaseSurfaceId> {
+    if phase == WorkflowPhase::Map {
+        return expected_map_surfaces(body, specs, visible_count, multi_surface, guided);
+    }
+    if phase == WorkflowPhase::Prove {
+        return expected_prove_surfaces(specs, visible_count, multi_surface);
+    }
+    if phase == WorkflowPhase::Fix {
+        return expected_fix_surfaces(specs, visible_count, multi_surface, width);
+    }
+    surface_ids(&specs[..visible_count])
+}
+
+fn expected_map_surfaces(
+    body: &PhaseCockpitBody,
+    specs: &[PhaseSurfaceSpec],
+    visible_count: usize,
+    multi_surface: bool,
+    guided: bool,
+) -> Vec<PhaseSurfaceId> {
+    let PhaseCockpitBody::Map(map) = body else {
+        unreachable!("Map phase body")
+    };
+    if !super::map::map_requires_action(map) && !guided {
+        return vec![PhaseSurfaceId::MapDfd];
+    }
+    if multi_surface {
+        return vec![PhaseSurfaceId::MapDfd, PhaseSurfaceId::MapReadiness];
+    }
+    surface_ids(&specs[..visible_count])
+}
+
+fn expected_prove_surfaces(
+    specs: &[PhaseSurfaceSpec],
+    visible_count: usize,
+    multi_surface: bool,
+) -> Vec<PhaseSurfaceId> {
+    let has_status = specs
+        .iter()
+        .any(|spec| spec.id == PhaseSurfaceId::ProveStatus);
+    if multi_surface && has_status {
+        return vec![PhaseSurfaceId::ProveStatus, PhaseSurfaceId::ProveNextAction];
+    }
+    surface_ids(&specs[..visible_count])
+}
+
+fn expected_fix_surfaces(
+    specs: &[PhaseSurfaceSpec],
+    visible_count: usize,
+    multi_surface: bool,
+    width: u16,
+) -> Vec<PhaseSurfaceId> {
+    let has_candidate = specs
+        .iter()
+        .any(|spec| spec.id == PhaseSurfaceId::FixCandidate);
+    if !multi_surface || !has_candidate {
+        return surface_ids(&specs[..visible_count]);
+    }
+    expected_fix_triptych(width)
+}
+
+fn expected_fix_triptych(width: u16) -> Vec<PhaseSurfaceId> {
+    if width >= 120 {
+        return vec![
+            PhaseSurfaceId::FixRemediation,
+            PhaseSurfaceId::FixCandidate,
+            PhaseSurfaceId::FixVerification,
+        ];
+    }
+    vec![PhaseSurfaceId::FixRemediation, PhaseSurfaceId::FixCandidate]
 }
 
 #[test]

@@ -8,7 +8,7 @@ const DYNAMIC_HOST_PROTOCOL_VERSION = 1;
 // Baked at release time and checked by scripts/check-release-contract.mjs.
 // Do not derive this from KUZUSHI_HOST_VERSION: that would let a stale host
 // simply echo the native process's expectation and defeat the ABI handshake.
-const HOST_PACKAGE_VERSION = "0.24.0-alpha.8";
+const HOST_PACKAGE_VERSION = "0.24.0-alpha.9";
 const OPTION_TYPES_BY_JSON_SCHEMA_TYPE = {
   string: "string",
   boolean: "bool",

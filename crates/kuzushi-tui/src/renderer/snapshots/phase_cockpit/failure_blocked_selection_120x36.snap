@@ -4,8 +4,8 @@ contract: failure-path decision cards render honest outcome copy and recovery ac
 scenario: blocked_selection
 size: 120x36
 ---
-KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · ○ idle · context not built · model unconfigured
- Map ● · Scan ○ · Review ○ · Prove ○ · Fix ○
+KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
+ Map ● · Scan ○ · Review × · Prove × · Fix ×
  ▸ NEXT build or explicitly skip the current-revision map
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
 │RECORDED ENGINE OUTCOMES
@@ -39,4 +39,4 @@ KUZUSHI · Viewing Scan · pipeline live in Map · target ./failure-target · �
 shell route · 1 partial result · workbench · Map 1/5 · ⛭ fix · workbench                                      0 findings
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Esc prompt   Ctrl+C exit
-▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

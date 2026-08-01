@@ -3,9 +3,9 @@
 //! buffer, shading, fog, glow) is pure and lives in `scene3d::render`; this file
 //! is just the ratatui glue: header, framebuffer→cells, label stamping.
 
-use super::diagram::{DfdDiagram, TreeDiagram};
+use super::diagram::{DfdDiagram, DfdSummary, TreeDiagram};
 use super::entry_points::EntryPointBrowser;
-use super::gallery::gallery_header_lines;
+use super::gallery::{gallery_header_lines, map_gallery_header_lines, page_body_lines};
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
@@ -16,7 +16,7 @@ use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model, entry
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Paragraph, Wrap};
 
 const CAM_DISTANCE: f32 = 4.2;
 
@@ -32,37 +32,110 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         Paragraph::new(gallery_header_lines(app, area.width as usize)),
         outer[0],
     );
-    match app.router.scene().page() {
-        VizPage::Dfd => frame.render_widget(
-            DfdDiagram {
-                model: dfd_model(app),
-                selection: Some(app.router.scene().dfd_selection()),
-                detail_scroll: app.router.scene().dfd_detail_scroll(),
-                focused: app.router.scene().dfd_focused(),
-                context_selection: app.router.scene().dfd_context_selection(),
-            },
-            outer[1],
-        ),
-        VizPage::ExploitChain => frame.render_widget(
-            TreeDiagram {
-                model: attack_tree(app),
-            },
-            outer[1],
-        ),
-        VizPage::EntryPoints => frame.render_widget(
-            EntryPointBrowser {
-                model: entry_point_breakdown(app),
-                selection: app.router.scene().entry_point_selection(),
-                detail_scroll: app.router.scene().entry_point_detail_scroll(),
-            },
-            outer[1],
-        ),
-        VizPage::AttackSurface => render_terrain_body(frame, outer[1], app),
-        // Line-rendered pages never reach the frame path (guarded by
-        // `uses_scene_frame`); draw nothing rather than the wrong page. Exhaustive
-        // so a future frame-rendered variant forces an explicit decision here.
-        VizPage::AttackPath | VizPage::Components | VizPage::Heatmap | VizPage::Worklist => {}
+    render_scene_body(frame, outer[1], app, app.router.scene().page(), 0);
+}
+
+/// Render the same gallery inside Map. `z` promotes this exact projection to
+/// the full-frame Scene view; there is no second, weaker Map visualization.
+pub(crate) fn render_embedded_map_gallery(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    line_scroll: u16,
+) {
+    let outer = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(2), Constraint::Min(0)])
+        .split(area);
+    frame.render_widget(
+        Paragraph::new(map_gallery_header_lines(app, area.width as usize)),
+        outer[0],
+    );
+    render_scene_body(
+        frame,
+        outer[1],
+        app,
+        app.current_map_viz_page(),
+        line_scroll,
+    );
+}
+
+fn render_scene_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    page: VizPage,
+    line_scroll: u16,
+) {
+    match page {
+        VizPage::Summary => render_summary_body(frame, area, app),
+        VizPage::Dfd => render_dfd_body(frame, area, app),
+        VizPage::ExploitChain => render_exploit_chain_body(frame, area, app),
+        VizPage::EntryPoints => render_entry_points_body(frame, area, app),
+        VizPage::AttackSurface => render_terrain_body(frame, area, app),
+        VizPage::AttackPath | VizPage::Components | VizPage::Heatmap | VizPage::Worklist => {
+            render_line_page_body(frame, area, app, page, line_scroll)
+        }
     }
+}
+
+fn render_summary_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    frame.render_widget(
+        DfdSummary {
+            model: dfd_model(app),
+            component_selection: app.router.scene().summary_component_selection(),
+            scroll: app.router.scene().summary_scroll(),
+        },
+        area,
+    );
+}
+
+fn render_dfd_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    frame.render_widget(
+        DfdDiagram {
+            model: dfd_model(app),
+            selection: Some(app.router.scene().dfd_selection()),
+            detail_scroll: app.router.scene().dfd_detail_scroll(),
+            focused: app.router.scene().dfd_focused(),
+            context_selection: app.router.scene().dfd_context_selection(),
+        },
+        area,
+    );
+}
+
+fn render_exploit_chain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    frame.render_widget(
+        TreeDiagram {
+            model: attack_tree(app),
+        },
+        area,
+    );
+}
+
+fn render_entry_points_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    frame.render_widget(
+        EntryPointBrowser {
+            model: entry_point_breakdown(app),
+            selection: app.router.scene().entry_point_selection(),
+            detail_scroll: app.router.scene().entry_point_detail_scroll(),
+        },
+        area,
+    );
+}
+
+fn render_line_page_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    page: VizPage,
+    line_scroll: u16,
+) {
+    frame.render_widget(
+        Paragraph::new(page_body_lines(app, area, page))
+            .wrap(Wrap { trim: false })
+            .scroll((line_scroll, 0)),
+        area,
+    );
 }
 
 // ── 3D terrain body: rasterize via scene3d, then overlay labels ────────────

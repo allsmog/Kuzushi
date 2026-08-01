@@ -111,6 +111,24 @@ fn reference_header_matches_hydrated_journey_reality() {
 }
 
 #[test]
+fn ready_map_renders_the_gallery_as_its_primary_body() {
+    let map = CONTRACTS
+        .iter()
+        .copied()
+        .find(|contract| contract.page == WorkbenchPage::Map)
+        .expect("Map composition contract");
+    let (_, text) = render_phase(map, 160, 48, TerminalProfile::ALL[0]);
+
+    assert!(text.contains("SYSTEM SUMMARY"), "{text}");
+    assert!(text.contains("EXECUTIVE SUMMARY"), "{text}");
+    assert!(text.contains("OVERALL DATA FLOW"), "{text}");
+    assert!(text.contains("COMPONENT TREE"), "{text}");
+    assert!(text.contains("views  [summary] · dfd"), "{text}");
+    assert!(!text.contains("REPOSITORY / DATA-FLOW MAP"), "{text}");
+    assert!(!text.contains("PROJECT CONTEXT · NEXT SCANS"), "{text}");
+}
+
+#[test]
 fn phase_composition_contract_covers_120_phase_size_profile_buffers() {
     let mut count = 0;
     for contract in CONTRACTS {

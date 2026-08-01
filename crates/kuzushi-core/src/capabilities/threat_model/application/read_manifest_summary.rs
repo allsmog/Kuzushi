@@ -26,6 +26,19 @@ pub(crate) fn read_manifest_summary(root: &Path) -> Result<String> {
     }
 }
 
+pub(crate) fn read_project_overview_evidence(root: &Path) -> Result<String> {
+    let Some(path) = ["README.md", "README", "README.txt"]
+        .into_iter()
+        .map(|name| root.join(name))
+        .find(|path| path.is_file())
+    else {
+        return Ok("(no recognized project overview)".to_string());
+    };
+    let raw = crate::bounded_file::read_utf8_text_within(root, &path, 256 * 1024)
+        .with_context(|| format!("Could not read project overview {}", path.display()))?;
+    Ok(raw.chars().take(12_000).collect())
+}
+
 pub(crate) fn should_skip_path(name: &str) -> bool {
     matches!(
         name,
@@ -139,5 +152,19 @@ mod tests {
         let error = read_manifest_summary(&target).unwrap_err();
 
         assert!(!error.to_string().contains("OUTSIDE_MANIFEST_TOKEN"));
+    }
+
+    #[test]
+    fn project_overview_reads_bounded_readme_content() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("README.md"),
+            "A local-first review tool for release operators.",
+        )
+        .unwrap();
+
+        let overview = read_project_overview_evidence(temp.path()).unwrap();
+
+        assert!(overview.contains("local-first review tool"));
     }
 }

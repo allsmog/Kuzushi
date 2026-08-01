@@ -131,7 +131,10 @@ fn select_referenced_triage_findings(
     let mut missing = Vec::new();
     for reference in references {
         match store.get_finding_by_reference(reference)? {
-            Some(finding) if finding_matches_triage_scope(&finding, scan_id) => {
+            Some(finding)
+                if store.finding_is_relevant(&finding)?
+                    && finding_matches_triage_scope(&finding, scan_id) =>
+            {
                 push_triage_candidate(store, findings, seen, finding, input.retriage)?;
             }
             _ => missing.push(reference.clone()),
@@ -147,7 +150,11 @@ fn select_all_triage_findings(
     findings: &mut Vec<Finding>,
     seen: &mut BTreeSet<String>,
 ) -> Result<()> {
-    for finding in store.list_findings(FindingListFilter::MAX_LIMIT)? {
+    let candidates = match scan_id {
+        Some(_) => store.list_findings(FindingListFilter::MAX_LIMIT)?,
+        None => store.list_relevant_findings()?,
+    };
+    for finding in candidates {
         if finding_matches_triage_scope(&finding, scan_id) {
             push_triage_candidate(store, findings, seen, finding, input.retriage)?;
         }

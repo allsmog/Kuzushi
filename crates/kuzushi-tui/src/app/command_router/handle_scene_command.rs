@@ -22,19 +22,33 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
 impl ShellApp {
     /// Open the gallery, keeping whatever page was last shown.
     pub fn open_scene(&mut self) {
+        self.router.scene_mut().set_map_only(false);
         let page = self.available_viz_page(self.router.scene().page());
         self.open_scene_to_page(page);
     }
 
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
+        self.router.scene_mut().set_map_only(false);
         let page = self.available_viz_page(page);
+        self.open_scene_page(page);
+    }
+
+    /// Zoom the Map's selected projection without widening its tab set to
+    /// unrelated Scan/Review visualizations.
+    pub(crate) fn open_map_scene_to_page(&mut self, page: VizPage) {
+        self.router.scene_mut().set_map_only(true);
+        let page = self.available_map_viz_page(page);
+        self.open_scene_page(page);
+    }
+
+    fn open_scene_page(&mut self, page: VizPage) {
         if !matches!(self.shell_view(), ShellView::Scene) {
             self.push_nav_history(self.shell_view());
         }
         self.router.scene_mut().set_page(page);
         self.set_shell_view(ShellView::Scene);
-        let page_cycle = (self.available_viz_pages().len() > 1).then_some(" · Tab cycles pages");
+        let page_cycle = (self.active_viz_pages().len() > 1).then_some(" · Tab cycles pages");
         self.log(
             "scene",
             format!(
@@ -68,7 +82,7 @@ impl ShellApp {
     /// the deck renders from, so re-hydrate and re-check content before
     /// opening — never land the operator on an empty deck.
     pub(crate) fn open_deferred_viz_page(&mut self, page: VizPage) {
-        if page == VizPage::Dfd {
+        if matches!(page, VizPage::Summary | VizPage::Dfd) {
             self.hydrate_latest_threat_model_for_dfd();
         }
         if self.viz_page_has_content(page) {
@@ -164,6 +178,7 @@ impl ShellApp {
         match page {
             VizPage::AttackPath => self.domain().taint_flow().is_some(),
             VizPage::ExploitChain => self.domain().has_exploit_chains(),
+            VizPage::Summary => crate::ui_view_models::dfd_model(self).empty_hint.is_none(),
             VizPage::Dfd => crate::ui_view_models::dfd_model(self).empty_hint.is_none(),
             VizPage::EntryPoints => !crate::ui_view_models::entry_point_breakdown(self)
                 .entries
@@ -188,8 +203,43 @@ impl ShellApp {
             .collect()
     }
 
+    /// Map owns a smaller artifact vocabulary than the global gallery. The
+    /// DFD remains as the generation surface; every other tab is backed by a
+    /// real persisted artifact.
+    pub(crate) fn available_map_viz_pages(&self) -> Vec<VizPage> {
+        [
+            VizPage::Summary,
+            VizPage::Dfd,
+            VizPage::EntryPoints,
+            VizPage::Components,
+        ]
+        .into_iter()
+        .filter(|page| *page == VizPage::Dfd || self.viz_page_has_content(*page))
+        .collect()
+    }
+
+    pub(crate) fn active_viz_pages(&self) -> Vec<VizPage> {
+        if self.router.scene().map_only() {
+            self.available_map_viz_pages()
+        } else {
+            self.available_viz_pages()
+        }
+    }
+
+    pub(crate) fn current_map_viz_page(&self) -> VizPage {
+        self.available_map_viz_page(self.router.scene().page())
+    }
+
+    pub(crate) fn cycle_map_viz_page(&mut self, direction: i32) -> VizPage {
+        let pages = self.available_map_viz_pages();
+        let current = self.current_map_viz_page();
+        let next = cycle_available_page(&pages, current, direction);
+        self.router.scene_mut().set_page(next);
+        next
+    }
+
     pub(crate) fn cycle_scene_page(&mut self, direction: i32) -> VizPage {
-        let pages = self.available_viz_pages();
+        let pages = self.active_viz_pages();
         let next = cycle_available_page(&pages, self.router.scene().page(), direction);
         self.router.scene_mut().set_page(next);
         next
@@ -208,6 +258,18 @@ impl ShellApp {
             || self.viz_page_has_content(requested)
         {
             requested
+        } else {
+            VizPage::Dfd
+        }
+    }
+
+    fn available_map_viz_page(&self, requested: VizPage) -> VizPage {
+        let pages = self.available_map_viz_pages();
+        if pages.contains(&requested) {
+            return requested;
+        }
+        if pages.contains(&VizPage::Summary) {
+            VizPage::Summary
         } else {
             VizPage::Dfd
         }

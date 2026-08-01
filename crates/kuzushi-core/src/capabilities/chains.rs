@@ -127,11 +127,7 @@ pub struct ChainReport {
 /// A finding may qualify for several roles; an empty result means the
 /// finding never participates in a candidate.
 pub fn chain_roles(finding: &Finding) -> Vec<ChainRole> {
-    let text = format!(
-        "{} {} {}",
-        finding.title, finding.message, finding.rule_id
-    )
-    .to_lowercase();
+    let text = format!("{} {} {}", finding.title, finding.message, finding.rule_id).to_lowercase();
     let mut roles = Vec::new();
     if contains_any(&text, ENTRY_MARKERS) {
         roles.push(ChainRole::Entry);
@@ -296,38 +292,13 @@ fn candidate(
     impact: &Finding,
     pivots: &[&Finding],
 ) -> ChainCandidate {
-    let bridge: Vec<ChainLink> = pivots
-        .iter()
-        .filter(|pivot| {
-            pivot.fingerprint != entry.fingerprint && pivot.fingerprint != impact.fingerprint
-        })
-        .take(MAX_PIVOTS_PER_CHAIN)
-        .map(|pivot| chain_link(pivot, ChainRole::Pivot))
-        .collect();
-    let base_score =
-        severity_weight(&entry.severity) + severity_weight(&impact.severity) + bridge.len() as u32;
-    // Entry and impact in one file almost always sit behind the same trust
-    // boundary (facets of one handler), so composing them escalates nothing.
+    let bridge = candidate_bridge(entry, impact, pivots);
     let same_file = entry.file_path == impact.file_path;
-    let score = if same_file { base_score / 2 } else { base_score };
-    let rationale = format!(
-        "entry `{}` and impact `{}` share surface `{}`{}{}",
-        entry.title,
-        impact.title,
-        surface,
-        if bridge.is_empty() {
-            String::new()
-        } else {
-            format!(" with {} pivot lead(s)", bridge.len())
-        },
-        if same_file {
-            "; same-file pair (same boundary) — discounted"
-        } else {
-            ""
-        }
-    );
+    let id = chain_identity(surface, entry, &bridge, impact);
+    let score = candidate_score(entry, impact, bridge.len(), same_file);
+    let rationale = candidate_rationale(surface, entry, impact, bridge.len(), same_file);
     ChainCandidate {
-        id: chain_identity(surface, entry, &bridge, impact),
+        id,
         surface: surface.to_string(),
         entry: chain_link(entry, ChainRole::Entry),
         pivots: bridge,
@@ -335,6 +306,54 @@ fn candidate(
         score,
         rationale,
     }
+}
+
+fn candidate_bridge(entry: &Finding, impact: &Finding, pivots: &[&Finding]) -> Vec<ChainLink> {
+    pivots
+        .iter()
+        .filter(|pivot| {
+            pivot.fingerprint != entry.fingerprint && pivot.fingerprint != impact.fingerprint
+        })
+        .take(MAX_PIVOTS_PER_CHAIN)
+        .map(|pivot| chain_link(pivot, ChainRole::Pivot))
+        .collect()
+}
+
+fn candidate_score(entry: &Finding, impact: &Finding, pivots: usize, same_file: bool) -> u32 {
+    let base_score =
+        severity_weight(&entry.severity) + severity_weight(&impact.severity) + pivots as u32;
+    // Entry and impact in one file almost always sit behind the same trust
+    // boundary (facets of one handler), so composing them escalates nothing.
+    if same_file {
+        base_score / 2
+    } else {
+        base_score
+    }
+}
+
+fn candidate_rationale(
+    surface: &str,
+    entry: &Finding,
+    impact: &Finding,
+    pivots: usize,
+    same_file: bool,
+) -> String {
+    format!(
+        "entry `{}` and impact `{}` share surface `{}`{}{}",
+        entry.title,
+        impact.title,
+        surface,
+        if pivots == 0 {
+            String::new()
+        } else {
+            format!(" with {pivots} pivot lead(s)")
+        },
+        if same_file {
+            "; same-file pair (same boundary) — discounted"
+        } else {
+            ""
+        }
+    )
 }
 
 /// Deterministic chain identity over the constituent finding fingerprints.
@@ -495,18 +514,42 @@ fn chain_member_fingerprints(candidate: &ChainCandidate) -> Vec<String> {
     members
 }
 
-pub(crate) fn confirmed_findings(
-    store: &crate::findings::FindingStore,
-) -> Result<Vec<Finding>> {
-    let findings = store.list_all_findings()?;
-    let decisions = store.list_review_decisions_for_findings(&findings)?;
-    let confirmed_ids =
-        crate::capabilities::campaign::coverage::confirmed_finding_ids_from_decisions(&decisions);
+pub(crate) fn confirmed_findings(store: &crate::findings::FindingStore) -> Result<Vec<Finding>> {
+    let findings = store.list_relevant_findings()?;
+    let decisions = store.latest_review_decisions_for_findings(&findings, false)?;
     Ok(findings
         .into_iter()
-        .filter(|finding| !finding.suppressed)
-        .filter(|finding| finding.id.is_some_and(|id| confirmed_ids.contains(&id)))
+        .filter(|finding| finding_is_confirmed(finding, &decisions))
         .collect())
+}
+
+fn finding_is_confirmed(
+    finding: &Finding,
+    decisions: &std::collections::BTreeMap<String, crate::findings::ReviewDecision>,
+) -> bool {
+    let decision = review_decision_key(finding)
+        .and_then(|key| decisions.get(&key))
+        .map(|decision| decision.verdict)
+        .or_else(|| {
+            finding.triage.as_ref().map(|triage| {
+                crate::findings::ReviewDecisionVerdict::from_triage_verdict(triage.verdict)
+            })
+        });
+    matches!(
+        decision,
+        Some(
+            crate::findings::ReviewDecisionVerdict::Confirmed
+                | crate::findings::ReviewDecisionVerdict::ToFix
+        )
+    )
+}
+
+fn review_decision_key(finding: &Finding) -> Option<String> {
+    finding
+        .identity_id
+        .as_ref()
+        .map(|identity| format!("identity:{identity}"))
+        .or_else(|| finding.id.map(|id| format!("finding:{id}")))
 }
 
 fn max_chains_from_input(input: &Value) -> Result<usize> {
@@ -535,8 +578,7 @@ fn persist_chain_artifacts(
     let pretty = format!("{}\n", serde_json::to_string_pretty(report_json)?);
     crate::workspace::write_workspace_state_file(
         workspace.root(),
-        std::path::Path::new(crate::workspace::KUZUSHI_STATE_DIR)
-            .join("v3/reports/chains.json"),
+        std::path::Path::new(crate::workspace::KUZUSHI_STATE_DIR).join("v3/reports/chains.json"),
         pretty.as_bytes(),
     )?;
     // Per-run archive: the canonical chains.json is overwritten on every
@@ -721,9 +763,7 @@ mod tests {
             "src/java/core/src/main/scala/com/acme/common/ratelimit"
         );
         assert_ne!(
-            surface_key(
-                "src/java/core/src/main/scala/com/acme/auth/saml/SamlUtil.scala"
-            ),
+            surface_key("src/java/core/src/main/scala/com/acme/auth/saml/SamlUtil.scala"),
             surface_key(
                 "src/java/core/src/main/scala/com/acme/common/ratelimit/ShaperWrapper.scala"
             ),
@@ -799,6 +839,47 @@ mod tests {
         assert_eq!(chain.impact.fingerprint, "fp-impact-x");
         assert_eq!(chain.pivots.len(), 1);
         assert!(chain.score >= 12);
+    }
+
+    #[test]
+    fn confirmed_identity_remains_chain_eligible_after_later_observation() {
+        let store = crate::findings::FindingStore::open_in_memory().unwrap();
+        let finding = Finding::new_tool(
+            "agentic-sast",
+            "rule/entry",
+            "src/svc/a/handler.rs",
+            8,
+            None,
+            Severity::High,
+            "remote request reaches an unguarded handler",
+        );
+        store
+            .record_run_started("scan-a", std::path::Path::new("/repo"), "completed")
+            .unwrap();
+        let first_id = store.insert_finding("scan-a", &finding).unwrap();
+        store.record_run_finished("scan-a", "completed", 1).unwrap();
+        store
+            .append_user_review_decision(
+                first_id,
+                &crate::findings::ReviewDecision {
+                    verdict: crate::findings::ReviewDecisionVerdict::Confirmed,
+                    author: crate::findings::TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "confirmed by operator".to_string(),
+                    dismiss_reason: None,
+                    actor: Some("operator".to_string()),
+                },
+            )
+            .unwrap();
+        store
+            .record_run_started("scan-b", std::path::Path::new("/repo"), "completed")
+            .unwrap();
+        store.insert_finding("scan-b", &finding).unwrap();
+        store.record_run_finished("scan-b", "completed", 1).unwrap();
+
+        let confirmed = confirmed_findings(&store).unwrap();
+        assert_eq!(confirmed.len(), 1);
+        assert_eq!(confirmed[0].scan_id.as_deref(), Some("scan-b"));
     }
 
     #[test]
@@ -916,9 +997,7 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("finding fp-entry"));
-        assert!(steps
-            .last()
-            .unwrap()["description"]
+        assert!(steps.last().unwrap()["description"]
             .as_str()
             .unwrap()
             .contains("finding fp-impact"));

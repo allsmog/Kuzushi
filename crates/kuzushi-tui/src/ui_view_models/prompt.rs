@@ -47,7 +47,15 @@ fn prompt_placeholder(app: &ShellApp, mode: Option<WorkbenchPage>) -> Option<Str
         // The nav hint lives in the placeholder because that is where a
         // first-session operator is already looking when they wonder why
         // j/k types letters instead of moving the list.
-        Some(page) => format!("{} · Esc list keys", workbench_prompt_placeholder(page)),
+        Some(page) => format!(
+            "{} · Esc {} keys",
+            workbench_prompt_placeholder(page),
+            if page == WorkbenchPage::Map {
+                "map"
+            } else {
+                "list"
+            }
+        ),
         None => "type help or press Tab".to_string(),
     })
 }
@@ -57,7 +65,14 @@ pub(crate) fn workbench_prompt_mode(app: &ShellApp) -> Option<WorkbenchPage> {
 }
 
 pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
-    let mut text = "NAVIGATE · Shift+Tab phase→ Tab/[/] pane".to_string();
+    let controls = if workbench_prompt_mode(app) == Some(WorkbenchPage::Map)
+        && super::map_gallery_is_primary(app)
+    {
+        map_navigation_controls(app)
+    } else {
+        "Shift+Tab phase→ Tab/[/] pane"
+    };
+    let mut text = format!("NAVIGATE · {controls}");
     let keys = app
         .ui()
         .keymap_binding_labels("composer", "prompt_mode", &["Esc"]);
@@ -69,13 +84,21 @@ pub(crate) fn navigation_prompt_label(app: &ShellApp) -> String {
     text
 }
 
+fn map_navigation_controls(app: &ShellApp) -> &'static str {
+    if app.current_map_viz_page() == crate::scene3d::VizPage::Summary {
+        "Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom"
+    } else {
+        "Shift+Tab phase→ Tab map view · z zoom"
+    }
+}
+
 pub(crate) const fn workbench_prompt_token(page: WorkbenchPage) -> &'static str {
     match page {
-        WorkbenchPage::Map => "◇ MAP › ",
-        WorkbenchPage::Scan => "▦ SCAN › ",
-        WorkbenchPage::Review => "▣ REVIEW › ",
-        WorkbenchPage::Prove => "◎ PROVE › ",
-        WorkbenchPage::Fix => "◆ FIX › ",
+        WorkbenchPage::Map => "◇ MAP VIEW › ",
+        WorkbenchPage::Scan => "▦ SCAN VIEW › ",
+        WorkbenchPage::Review => "▣ REVIEW VIEW › ",
+        WorkbenchPage::Prove => "◎ PROVE VIEW › ",
+        WorkbenchPage::Fix => "◆ FIX VIEW › ",
     }
 }
 

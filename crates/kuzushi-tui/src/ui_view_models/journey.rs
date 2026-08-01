@@ -60,9 +60,25 @@ impl ReportReason {
 pub struct JourneyPhaseStatus {
     pub phase: WorkflowPhase,
     pub state: JourneyPhaseState,
+    pub(crate) access: JourneyPhaseAccess,
     pub phase_label: &'static str,
     pub state_symbol: &'static str,
     pub tone: JourneyPhaseTone,
+}
+
+impl JourneyPhaseStatus {
+    pub(crate) fn navigation_symbol(self) -> &'static str {
+        match self.access {
+            JourneyPhaseAccess::Available => self.state_symbol,
+            JourneyPhaseAccess::Locked { .. } => "×",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JourneyPhaseAccess {
+    Available,
+    Locked { reason: &'static str },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -203,7 +219,7 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     let explicitly_skipped = app.engagement.projected_skipped_phases();
     let next_action = projected_next_action(app, destination, progress);
     Some(JourneyModel {
-        phases: phase_statuses(destination, &explicitly_skipped, &failed),
+        phases: phase_statuses(app, destination, progress, &explicitly_skipped, &failed),
         current,
         destination,
         progress,
@@ -245,7 +261,11 @@ fn journey_progress(app: &ShellApp, map_artifacts_built: bool) -> JourneyProgres
     let legacy = legacy_checkpoints(app, map_artifacts_built);
     progress.map_checkpoint =
         selected_map.is_some() || app.engagement.phase_is_skipped(WorkflowPhase::Map) || legacy.map;
-    progress.scan_checkpoint = selected_scan.is_some() || legacy.scan;
+    progress.scan_checkpoint = selected_scan.is_some()
+        && app
+            .engagement
+            .selected_attempt_completed_after(WorkflowPhase::Map, WorkflowPhase::Scan)
+        || legacy.scan && selected_map.is_none();
     progress.scan_partial_acknowledged = selected_scan == Some(true);
     progress.legacy_inferred = legacy.map || legacy.scan;
     progress
@@ -503,23 +523,95 @@ fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
 }
 
 fn phase_statuses(
+    app: &ShellApp,
     destination: JourneyDestination,
+    progress: JourneyProgress,
     explicitly_skipped: &BTreeSet<WorkflowPhase>,
     failed: &BTreeSet<WorkflowPhase>,
 ) -> Vec<JourneyPhaseStatus> {
+    let access = phase_access(app, progress);
     WorkflowPhase::ORDER
         .iter()
-        .map(|&phase| {
+        .zip(access)
+        .map(|(&phase, access)| {
             let state = phase_state(phase, destination, explicitly_skipped, failed);
             JourneyPhaseStatus {
                 phase,
                 state,
+                access,
                 phase_label: phase_rail_label(phase),
                 state_symbol: state.glyph(),
                 tone: JourneyPhaseTone::from_state(state),
             }
         })
         .collect()
+}
+
+fn phase_access(app: &ShellApp, progress: JourneyProgress) -> [JourneyPhaseAccess; 5] {
+    [
+        JourneyPhaseAccess::Available,
+        available_for(
+            app,
+            WorkflowPhase::Scan,
+            scan_view_has_material(app, progress),
+            "complete or skip Map first",
+        ),
+        available_for(
+            app,
+            WorkflowPhase::Review,
+            app.findings_total_count() > 0,
+            "no vulnerabilities to review; complete Scan or import findings",
+        ),
+        available_for(
+            app,
+            WorkflowPhase::Prove,
+            prove_view_has_material(app, progress),
+            "confirm a vulnerability in Review first",
+        ),
+        available_for(
+            app,
+            WorkflowPhase::Fix,
+            fix_view_has_material(app, progress),
+            "produce proof or a patch record first",
+        ),
+    ]
+}
+
+fn available_for(
+    app: &ShellApp,
+    phase: WorkflowPhase,
+    has_material: bool,
+    reason: &'static str,
+) -> JourneyPhaseAccess {
+    if has_material || app.engagement.unresolved_phase_attempt(phase).is_some() {
+        JourneyPhaseAccess::Available
+    } else {
+        JourneyPhaseAccess::Locked { reason }
+    }
+}
+
+fn scan_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
+    progress.map_checkpoint
+        || progress.scan_checkpoint
+        || app
+            .engagement
+            .has_phase_attempt_for_target(WorkflowPhase::Scan)
+}
+
+fn prove_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
+    progress.confirmed_findings > 0
+        || progress.proven_findings > 0
+        || app
+            .findings()
+            .iter()
+            .any(|finding| finding.verification.is_some())
+}
+
+fn fix_view_has_material(app: &ShellApp, progress: JourneyProgress) -> bool {
+    progress.proof_backed_findings > 0
+        || progress.remediated_findings > 0
+        || app.engagement.pending_patch().is_some()
+        || app.domain().has_patch_lifecycle_records()
 }
 
 fn phase_state(
@@ -948,8 +1040,11 @@ mod tests {
 
     #[test]
     fn report_marks_not_applicable_future_phases_skipped() {
+        let app = ShellApp::new(V2Config::default(), None);
         let statuses = phase_statuses(
+            &app,
             JourneyDestination::Report(ReportReason::CleanScan),
+            progress(true, true, 0, 0, 0, 0, 0, 0),
             &BTreeSet::new(),
             &BTreeSet::new(),
         );
@@ -1006,6 +1101,44 @@ mod tests {
             assert!(!journey.progress.legacy_inferred, "discarded={discarded}");
             assert_eq!(journey.current, WorkflowPhase::Scan);
         }
+    }
+
+    #[test]
+    fn newer_selected_map_reopens_scan_without_dropping_findings() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        record_selected_scan_attempt(target.path(), PhaseAttemptOutcome::Completed);
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "map-new",
+            "threat-model:build",
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "new map",
+                "warnings": [],
+                "data": {"components": 4}
+            }),
+        );
+        let map = crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Map,
+            "map-new",
+            PhaseAttemptOutcome::Completed,
+        );
+        crate::test_support::select_typed_attempt(target.path(), &map);
+
+        let mut app = hydrated_app(&workspace, Vec::new());
+        let finding = finding_with_scan_id("scan-clean");
+        let counts = finding_ledger_counts(std::slice::from_ref(&finding), &[], 1);
+        app.set_findings(vec![finding]);
+        app.domain_mut().set_finding_ledger_counts(counts);
+
+        let journey = journey_model(&app).unwrap();
+        assert!(journey.progress.map_checkpoint);
+        assert!(!journey.progress.scan_checkpoint);
+        assert_eq!(journey.progress.finding_total, 1);
+        assert_eq!(journey.current, WorkflowPhase::Scan);
     }
 
     #[test]

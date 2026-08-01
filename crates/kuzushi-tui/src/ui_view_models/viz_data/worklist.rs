@@ -20,8 +20,11 @@ use kuzushi_core::capabilities::worklist::{
     WorklistRow,
 };
 use kuzushi_core::workspace::AttackSurfaceMap;
-use serde::Deserialize;
 use std::collections::BTreeMap;
+
+mod snapshot;
+
+use snapshot::project_snapshot;
 
 /// How many rows the fold retains for the scene deck; the Map section trims
 /// this to its own top-N.
@@ -379,83 +382,6 @@ fn empty_hint_for(rows_empty: bool, attack_surface: Option<&ContributorState>) -
         .then(|| "no worklist yet — run `context:build`, then `worklist:rank`".to_string())
 }
 
-// --- F6: project the captured `worklist:rank` tool JSON --------------------
-//
-// The core `Worklist` is serialize-only (a `&'static str` field blocks
-// `Deserialize`), so a purpose-built mirror deserializes only the fields the
-// view model renders. Unknown/extra fields (`raw`, `normalized`,
-// `normalization`, `reasons`) are ignored.
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotWorklist {
-    #[serde(default)]
-    rows: Vec<SnapshotRow>,
-    #[serde(default)]
-    ranked_total: usize,
-    #[serde(default)]
-    degraded: Vec<String>,
-    #[serde(default)]
-    unranked: Vec<serde::de::IgnoredAny>,
-    #[serde(default)]
-    contributors: BTreeMap<Contributor, ContributorState>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotRow {
-    rank: usize,
-    path: String,
-    #[serde(default)]
-    line: Option<u32>,
-    #[serde(default)]
-    citations: Vec<SnapshotCitation>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotCitation {
-    contributor: Contributor,
-    #[serde(default)]
-    raw: f64,
-    raw_display: String,
-}
-
-fn project_snapshot(value: &serde_json::Value) -> Option<WorklistViewModel> {
-    let snapshot: SnapshotWorklist = serde_json::from_value(value.clone()).ok()?;
-    // Older snapshots without `rankedTotal` fall back to the visible row count.
-    let ranked_total = snapshot.ranked_total.max(snapshot.rows.len());
-    Some(WorklistViewModel {
-        rows: snapshot.rows.iter().map(snapshot_row_model).collect(),
-        legend: snapshot
-            .contributors
-            .iter()
-            .map(|(contributor, state)| legend_entry(*contributor, state))
-            .collect(),
-        degraded: snapshot.degraded,
-        unranked_count: snapshot.unranked.len(),
-        ranked_total,
-        empty_hint: empty_hint_for(
-            snapshot.rows.is_empty(),
-            snapshot.contributors.get(&Contributor::AttackSurface),
-        ),
-    })
-}
-
-fn snapshot_row_model(row: &SnapshotRow) -> WorklistRowModel {
-    let display = dedupe_citations(
-        row.citations
-            .iter()
-            .map(|c| (c.contributor.glyph(), c.raw, c.raw_display.clone())),
-    );
-    WorklistRowModel {
-        rank: row.rank,
-        glyphs: display.iter().map(|d| d.glyph).collect(),
-        location: location_label(&row.path, row.line),
-        summary: summary_label(&display),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -643,7 +569,10 @@ mod tests {
             .find(|entry| entry.glyph == Contributor::AttackSurface.glyph())
             .expect("attack-surface legend entry present");
         let word = surface.state_word.as_deref().unwrap_or_default();
-        assert!(word.contains("no attack-surface map"), "state word: {word:?}");
+        assert!(
+            word.contains("no attack-surface map"),
+            "state word: {word:?}"
+        );
         assert!(model.degraded.is_empty(), "{:?}", model.degraded);
     }
 
@@ -693,8 +622,7 @@ mod tests {
             status: RecommendationsStatus::NotLoaded,
         };
 
-        let model =
-            build_worklist_model(AttackSurfaceArtifactState::Absent, &recommendations);
+        let model = build_worklist_model(AttackSurfaceArtifactState::Absent, &recommendations);
 
         let surface = model
             .legend
@@ -702,9 +630,15 @@ mod tests {
             .find(|entry| entry.glyph == Contributor::AttackSurface.glyph())
             .expect("attack-surface legend entry present");
         let word = surface.state_word.as_deref().unwrap_or_default();
-        assert!(word.contains("no attack-surface map"), "state word: {word:?}");
+        assert!(
+            word.contains("no attack-surface map"),
+            "state word: {word:?}"
+        );
         assert!(model.degraded.is_empty(), "{:?}", model.degraded);
-        assert!(model.empty_hint.is_some(), "absent map offers the empty hint");
+        assert!(
+            model.empty_hint.is_some(),
+            "absent map offers the empty hint"
+        );
     }
 
     fn snapshot_rank_result() -> serde_json::Value {

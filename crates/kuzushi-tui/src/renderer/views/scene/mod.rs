@@ -10,5 +10,5 @@ mod scene_color;
 mod worklist;
 
 pub(in crate::renderer) use diagram::{DfdDiagram, TreeDiagram};
-pub(crate) use gallery::scene_page_lines;
-pub(crate) use render_scene_view::render_scene_view;
+pub(crate) use gallery::{map_summary_plain_lines, scene_page_lines};
+pub(crate) use render_scene_view::{render_embedded_map_gallery, render_scene_view};

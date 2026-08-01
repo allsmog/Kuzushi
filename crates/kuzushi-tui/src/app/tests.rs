@@ -11165,6 +11165,26 @@ fn closing_the_planner_restores_the_workbench_page_the_operator_came_from() {
 }
 
 #[test]
+fn locked_future_page_keeps_the_current_view_and_explains_why() {
+    let target = tempfile::tempdir().expect("target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.open_workbench();
+    app.set_workbench_page(WorkbenchPage::Review);
+
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&app),
+        WorkbenchPage::Map
+    );
+    let notice = app.advisory().notice.as_ref().expect("lock notice");
+    assert_eq!(notice.severity, crate::NoticeSeverity::Error);
+    assert_eq!(
+        notice.message,
+        "Review is locked — no vulnerabilities to review; complete Scan or import findings"
+    );
+}
+
+#[test]
 fn next_command_opens_report_for_a_clean_selected_scan_without_mutating_reality() {
     use kuzushi_core::workflow_attempts::phase_attempt_ledger_path;
 
@@ -18415,6 +18435,123 @@ fn gallery_cycle_skips_pages_without_backing_artifacts() {
 }
 
 #[test]
+fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
+    use crate::scene3d::VizPage;
+    let target = tempfile::tempdir().unwrap();
+    kuzushi_core::capabilities::save_persistent_threat_model(
+        target.path(),
+        &serde_json::json!({
+            "systemContext": "Operators use Sample to review local records.",
+            "dfd": {
+                "nodes": [
+                    {"id": "operator", "name": "Operator", "trustZone": "local"},
+                    {"id": "app", "name": "Desktop app", "trustZone": "desktop"}
+                ],
+                "flows": [{"id": "open", "sourceId": "operator", "targetId": "app"}],
+                "trustBoundaries": []
+            },
+            "attackSurface": {"entryPoints": [{
+                "id": "AS-open", "name": "open", "targetElementIds": ["app"]
+            }]},
+            "assets": [],
+            "threats": []
+        }),
+        true,
+    )
+    .unwrap();
+    persist_adequate_test_map_result(target.path(), "map-gallery");
+    persist_selected_test_phase_attempt(target.path(), WorkflowPhase::Map, "map-gallery");
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
+    app.refresh_phase_attempt_projection();
+    app.hydrate_all_view_data_for_test();
+    app.set_workbench_page(WorkbenchPage::Map);
+    app.set_input_mode(InputMode::Navigate);
+    app.router.scene_mut().set_page(VizPage::AttackSurface);
+
+    assert!(crate::ui_view_models::map_gallery_is_primary(&app));
+    assert_eq!(app.current_map_viz_page(), VizPage::Summary);
+    assert_eq!(
+        app.available_map_viz_pages(),
+        vec![VizPage::Summary, VizPage::Dfd, VizPage::EntryPoints]
+    );
+
+    app.set_input_mode(InputMode::Prompt);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().summary_component_selection(), 1);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+    );
+    assert_eq!(
+        app.input(),
+        "k",
+        "printable keys still belong to the composer"
+    );
+    assert_eq!(app.router.scene().summary_component_selection(), 1);
+    app.clear_input();
+    assert_eq!(
+        crate::ui_view_models::navigation_prompt_label(&app),
+        "NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc prompt"
+    );
+    let prompt_bindings = crate::ui_view_models::footer_keybindings(&app);
+    assert!(prompt_bindings.iter().any(|binding| {
+        binding.key == "Esc" && binding.label == "nav components · j/k move · Enter DFD"
+    }));
+
+    app.set_input_mode(InputMode::Navigate);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().summary_component_selection(), 0);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.scene().summary_component_selection(), 1);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert_eq!(app.current_map_viz_page(), VizPage::Dfd);
+    assert_eq!(app.router.scene().dfd_selection(), 1);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.current_map_viz_page(), VizPage::Summary);
+    assert_eq!(app.router.scene().summary_component_selection(), 1);
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.current_map_viz_page(), VizPage::Dfd);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('z'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.shell_view(), ShellView::Scene);
+    assert!(app.router.scene().map_only());
+    assert_eq!(app.active_viz_pages(), app.available_map_viz_pages());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::EntryPoints);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::Summary);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::Dfd);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::EntryPoints);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.current_map_viz_page(), VizPage::EntryPoints);
+}
+
+#[test]
 fn viz_page_for_tool_maps_artifacts_to_pages() {
     use crate::scene3d::VizPage;
     assert_eq!(
@@ -18449,6 +18586,7 @@ fn viz_page_has_content_tracks_backing_artifacts() {
     assert!(!app.viz_page_has_content(VizPage::EntryPoints));
     assert!(!app.viz_page_has_content(VizPage::Components));
     assert!(!app.viz_page_has_content(VizPage::Heatmap));
+    assert!(!app.viz_page_has_content(VizPage::Summary));
     assert!(!app.viz_page_has_content(VizPage::Dfd));
 
     // A cached taint flow gives the attack-path page something to draw.
@@ -21800,6 +21938,20 @@ fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
     assert_eq!(app.router.scene().dfd_selection(), 0);
     assert_eq!(app.router.scene().dfd_detail_scroll(), 0);
     assert_eq!(app.input(), "", "selection keys never land in the composer");
+
+    app.router
+        .scene_mut()
+        .set_page(crate::scene3d::VizPage::Summary);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
+    );
+    assert!(app.router.scene().summary_scroll() > 0);
+    assert_eq!(
+        app.input(),
+        "",
+        "summary scrolling never lands in the composer"
+    );
 }
 
 #[test]

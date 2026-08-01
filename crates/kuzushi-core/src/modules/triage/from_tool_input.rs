@@ -1,7 +1,7 @@
 use super::*;
 
-/// Finding selection scope: the latest scan run only (default) or every run
-/// and tool in the store.
+/// Finding selection scope: the active corpus across every run and tool
+/// (default), or an explicitly requested latest/run-scoped projection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::modules) enum TriageScope {
     Latest,
@@ -68,18 +68,19 @@ fn parse_triage_taint_tools(
 
 impl TriageRunInput {
     pub(in crate::modules) fn from_tool_input(input: &Value, cwd: &Path) -> Result<Self> {
-        let scope = parse_triage_scope(input)?;
         let scan_id = parse_triage_scan_id(input)?;
-        anyhow::ensure!(
-            !(scope == TriageScope::All && scan_id.is_some()),
-            "triage:run scope=all conflicts with an explicit scanId; drop one of them"
-        );
+        let fingerprints = parse_triage_fingerprints(input)?;
+        let scope = if scan_id.is_some() {
+            TriageScope::Latest
+        } else {
+            parse_triage_scope(input)?
+        };
         Ok(Self {
-            fingerprints: parse_triage_fingerprints(input)?,
+            deep: triage_deep_enabled(input, scope, fingerprints.is_none()),
+            fingerprints,
             prompt_template: parse_triage_prompt_template(input, cwd)?,
             scan_id,
             scope,
-            deep: triage_deep_enabled(input, scope),
             concurrency: parse_triage_concurrency(input)?,
             cost_cap_usd: parse_triage_cost_cap_usd(input)?,
             prefilter_threshold: parse_triage_prefilter_threshold(input),
@@ -95,19 +96,19 @@ impl TriageRunInput {
 
 pub(in crate::modules) fn parse_triage_scope(input: &Value) -> Result<TriageScope> {
     let Some(value) = input.get("scope") else {
-        return Ok(TriageScope::Latest);
+        return Ok(TriageScope::All);
     };
     match value.as_str().map(str::trim) {
-        Some("latest") | Some("") => Ok(TriageScope::Latest),
-        Some("all") => Ok(TriageScope::All),
+        Some("latest") => Ok(TriageScope::Latest),
+        Some("all") | Some("") => Ok(TriageScope::All),
         _ => anyhow::bail!("triage:run scope must be \"latest\" or \"all\", got {value}"),
     }
 }
 
-/// Deep classification is opt-in for latest-scope runs (`strategy=deep`) and
-/// the default for `scope=all` bulk runs; an explicit `strategy=standard`
-/// keeps the cheap single-shot path.
-fn triage_deep_enabled(input: &Value, scope: TriageScope) -> bool {
+/// Deep classification is opt-in for targeted/latest runs (`strategy=deep`)
+/// and the default for unfiltered `scope=all` bulk runs. An explicit
+/// `strategy=standard` keeps the cheap single-shot path.
+fn triage_deep_enabled(input: &Value, scope: TriageScope, is_unfiltered: bool) -> bool {
     match input
         .get("strategy")
         .and_then(Value::as_str)
@@ -117,7 +118,7 @@ fn triage_deep_enabled(input: &Value, scope: TriageScope) -> bool {
     {
         Some("standard") | Some("gate-deep") => false,
         Some("deep") => true,
-        _ => scope == TriageScope::All,
+        _ => scope == TriageScope::All && is_unfiltered,
     }
 }
 

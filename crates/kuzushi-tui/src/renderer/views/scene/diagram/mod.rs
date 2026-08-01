@@ -8,7 +8,7 @@
 mod dfd;
 mod tree;
 
-pub(crate) use dfd::DfdDiagram;
+pub(crate) use dfd::{DfdDiagram, DfdSummary};
 pub(crate) use tree::TreeDiagram;
 
 use ratatui::buffer::Buffer;
@@ -296,6 +296,8 @@ mod tests {
         DfdNodeModel {
             key: key.into(),
             name: key.into(),
+            description: None,
+            purpose: None,
             zone: zone.into(),
             kind,
         }

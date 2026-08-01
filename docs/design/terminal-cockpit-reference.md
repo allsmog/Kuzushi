@@ -47,12 +47,18 @@ Map   Scan   Review   Prove   Fix
 - `LIVE` means work is actually running; it is never inferred from the page.
 - The phase rail is hidden before `Start Map` commits the engagement.
 - Prompt and Navigate modes remain explicit on durable screens.
-- `Shift+Tab` cycles all five pages in either mode without changing the shared
-  composer draft or cursor; Navigate-mode `1..5` selects directly.
+- All five page names remain visible. `×` marks a page whose required durable
+  material does not exist yet; completed or historically populated pages keep
+  their ordinary workflow-state symbol.
+- `Shift+Tab` cycles available pages in either mode without changing the shared
+  composer draft or cursor. Navigate-mode `1..5` selects directly when the page
+  is available; selecting a locked page keeps the current view and names the
+  missing prerequisite.
 - `Tab` retains completion/pane-forward ownership; `]` also advances a pane and
   `[` moves back. Pickers, editors, questions, and Run Focus own keys first.
-- Selected mode and reality are named separately when they differ, for example
-  `VIEW SCAN · REALITY REVIEW`. Page selection changes no durable state.
+- Selected mode and the next required phase are named separately when they
+  differ, for example `Viewing Scan · next required Review`. Page selection
+  changes no durable state.
 - Foreground Run Focus owns all input and reserves no generic prompt row.
 - TTY and plain rendering consume the same presentation models. Plain output
   serializes the reading order and prints exact command equivalents for any
@@ -221,25 +227,31 @@ Dense mode.
 ### Map
 
 Map is a projection of durable target artifacts, never live Activity state. It
-shows target context, source inventory, grouped attack surface, hot modules,
-threat-model/DFD status, harness/material readiness, and freshness. An unrelated
-retained run cannot appear as Map truth.
+uses the real visualization gallery as its primary body. Summary is the default
+projection after a newly accepted Map; DFD, Entry points, and Components are
+neighboring tabs when their persisted artifacts exist. An unrelated retained
+run cannot appear as Map truth.
 
 ```text
-MAP · TARGET CONTEXT                    ARTIFACTS
-Rust · Cargo · main@8fd22ac             context      fresh
-143 sources · 11 entry points           attack map  fresh
+[Summary] · DFD · Entry points · Components
 
-ATTACK SURFACE                          MATERIALS
-request boundary      7 routes          threat/DFD  ready
-storage boundary      3 stores          harness     ready
+EXECUTIVE SUMMARY                       OVERALL DATA FLOW
+What the application does and why       user -> webview -> backend -> store
 
-NEXT open Review · d DFD · t terrain · h heatmap
+COMPONENT TREE
+webview
+`- backend
+   `- local storage
+
+target · revision · context state · file count · node/flow count
 ```
 
-Missing artifacts render one actionable hint. DFDs and other visual material
-are still first-class: they open as contextual visualization decks (§8), while
-Map remains the durable summary.
+`Tab` cycles the local Map tabs. `z` promotes the selected projection to a
+full-frame zoom with the same Map-only tab set; `Esc` restores the embedded
+Map without changing the selection. Empty tabs are absent. Project context is
+one compact artifact receipt rather than a second pane, and scan recommendations
+belong to Scan. Missing, stale, or blocked Map evidence still replaces the
+gallery with one actionable drawer.
 
 ### Scan
 
@@ -266,12 +278,21 @@ downstream phases not applicable. Imported findings appear as an imported Scan
 attempt. Legacy scan records are labeled `legacy inferred` rather than
 rewritten.
 
+The selected Scan attempt controls this page's run detail, not the Review
+corpus. Findings accumulate in the vulnerability database across scans. A
+newer nondeterministic scan that does not rediscover an open finding does not
+erase it; only an explicit suppression or a lifecycle transition such as a
+comparable deterministic rerun marking it stale removes it from the relevant
+corpus. Accepting a newer Map reopens Scan, including for an unchanged revision,
+without discarding prior findings or their review decisions.
+
 ### Review
 
 Review is a findings queue plus selected detail. Every row includes authority
 marker, severity, canonical proof mini-meter, unique source count, confidence,
 and human decision when present. Confidence-first ordering remains the shell
-contract.
+contract. Bulk triage defaults to every relevant, untriaged finding in the
+database; an explicit scan id remains the opt-in run-scoped form.
 
 ```text
 REVIEW · 8 NEED ACTION                 SELECTED · F-0007
@@ -369,9 +390,10 @@ support becomes an inline error. Exports include additive remediation metadata.
 ## 8. Contextual surfaces and visualizations
 
 Help, Controls, and Capabilities are modal contextual surfaces. Jobs, Replay,
-Trace, DFD, entry-point inventory, terrain, heatmap, attack tree, and
-attack-path visualizations are scrollable full-frame decks. These screens do
-not replace the workflow route.
+Trace, terrain, heatmap, attack tree, and attack-path visualizations are
+scrollable full-frame decks. Map embeds Summary, DFD, entry-point inventory,
+and Components directly; `z` is their full-frame zoom, not a separate route to
+otherwise hidden content.
 
 One non-nesting contextual route captures the original workflow view and its
 input mode. Opening a second contextual surface replaces the first while
@@ -381,7 +403,14 @@ including page/pane, scroll, selected or pinned finding, and input mode.
 The visualization gallery remains real-data only:
 
 - terrain: severity-weighted risk by hot module;
-- DFD: persisted threat-model data-flow graph;
+- summary: source-grounded application purpose, aggregate trust-zone flows,
+  and a logical component tree distinguishing what each component does from
+  why the application needs it. The selected component is marked in place,
+  kept visible across wrapped terminal widths, and opens as the selected DFD
+  node with Enter. Arrows work with an empty composer; `j/k` and `g/G` are
+  Navigate-mode shortcuts;
+- DFD: persisted threat-model node/flow/boundary graph and linked-context
+  inspection;
 - entry points: every persisted ingress in a trust-zone-grouped selectable list
   with a selected detail pane and Enter-to-DFD navigation;
 - components: detected languages/build systems plus an SBOM tree that keeps

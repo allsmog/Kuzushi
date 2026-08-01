@@ -19,8 +19,8 @@ pub(super) const CONTRACTS: [PhaseCompositionContract; 5] = [
         page: WorkbenchPage::Map,
         phase: kuzushi_core::WorkflowPhase::Map,
         slug: "map",
-        complete_command: "z open terrain",
-        compact_command: "z open terrain",
+        complete_command: "z zoom",
+        compact_command: "z zoom",
     },
     PhaseCompositionContract {
         page: WorkbenchPage::Scan,
@@ -63,7 +63,7 @@ impl PhaseCompositionContract {
 
     pub(super) const fn plain_truth_atom(self) -> &'static str {
         match self.phase {
-            kuzushi_core::WorkflowPhase::Map => "context:present",
+            kuzushi_core::WorkflowPhase::Map => "SYSTEM SUMMARY",
             kuzushi_core::WorkflowPhase::Scan => "scan-phase-run",
             kuzushi_core::WorkflowPhase::Review => "s1",
             kuzushi_core::WorkflowPhase::Prove => "replay verify-phase-run",

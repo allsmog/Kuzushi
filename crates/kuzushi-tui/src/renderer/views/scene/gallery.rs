@@ -10,8 +10,9 @@ use super::*;
 use crate::scene3d::VizPage;
 use crate::theme;
 use crate::ui_view_models::{
-    attack_tree, cached_findings_heatmap, component_stack, dfd_model, entry_point_breakdown,
-    taint_flow_path, worklist_model, AttackTree, DfdKind, DfdModel,
+    attack_tree, cached_findings_heatmap, component_stack, dfd_model, dfd_overview, display_target,
+    entry_point_breakdown, taint_flow_path, worklist_model, AttackTree, DfdContextCounts, DfdKind,
+    DfdModel, DfdOverview, DfdOverviewComponent, DfdOverviewZone,
 };
 use crate::ChainSeverity;
 use ratatui::layout::Rect;
@@ -34,8 +35,49 @@ pub(crate) fn gallery_header_lines(app: &ShellApp, width: usize) -> Vec<Line<'st
             width,
             theme::muted(),
         ),
-        responsive_nav_line(app, page, width),
+        responsive_nav_line("pages", &app.active_viz_pages(), page, width, "Tab cycles"),
     ]
+}
+
+/// Compact header for the visualization embedded directly in Map. The
+/// Workbench already owns the screen title and journey chrome, so this keeps
+/// only the selected projection's framing and its local tab rail.
+pub(crate) fn map_gallery_header_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let page = app.current_map_viz_page();
+    vec![
+        responsive_header_line(
+            &format!("◇ {} · {}", page.label().to_uppercase(), page_tagline(page)),
+            &format!(
+                "◇ {} · {}",
+                page.label().to_uppercase(),
+                compact_page_tagline(page)
+            ),
+            width,
+            theme::heading(),
+        ),
+        responsive_nav_line(
+            "views",
+            &app.available_map_viz_pages(),
+            page,
+            width,
+            "Tab cycles · z zoom",
+        ),
+    ]
+}
+
+/// Non-TTY projection of Map's default Summary tab. Plain output cannot
+/// cycle tabs, so it expands the summary's executive description, zone-level
+/// flow, and component tree in one exhaustive reading order.
+pub(crate) fn map_summary_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::styled("SYSTEM SUMMARY", theme::heading()),
+        Line::styled(
+            fit_plain("views · summary · dfd · z zoom", width),
+            theme::muted(),
+        ),
+    ];
+    lines.extend(summary_plain_lines(width, &dfd_model(app)));
+    lines
 }
 
 /// Line-based entry for the gallery (2D pages always; the 3D page only in plain
@@ -47,7 +89,7 @@ pub(crate) fn scene_page_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec
     lines
 }
 
-fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'static>> {
+pub(super) fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'static>> {
     let width = area.width as usize;
     match page {
         VizPage::AttackPath => attack_path_lines(width, &taint_flow_path(app)),
@@ -58,6 +100,7 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
         VizPage::AttackSurface => attack_surface_plain_lines(app, width),
+        VizPage::Summary => summary_plain_lines(width, &dfd_model(app)),
         VizPage::Dfd => dfd_plain_lines(width, &dfd_model(app)),
         VizPage::ExploitChain => exploit_chain_plain_lines(width, &attack_tree(app)),
     }
@@ -233,13 +276,10 @@ fn append_dfd_node_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &D
             theme::muted(),
         )]));
         for node in model.nodes.iter().filter(|node| &node.zone == zone) {
-            lines.extend(
-                crate::renderer::shared::text::wrap_text(
-                    &format!("    - {} · {}", node.name, dfd_kind_label(node.kind)),
-                    width,
-                )
-                .into_iter()
-                .map(Line::from),
+            append_wrapped_plain(
+                lines,
+                width,
+                format!("    - {} · {}", node.name, dfd_kind_label(node.kind)),
             );
         }
     }
@@ -255,18 +295,227 @@ fn append_dfd_flow_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &D
         } else {
             String::new()
         };
-        lines.extend(
-            crate::renderer::shared::text::wrap_text(
-                &format!(
-                    "  {} -> {} · {}{}",
-                    flow.from, flow.to, flow.label, boundary
-                ),
-                width,
-            )
-            .into_iter()
-            .map(Line::from),
+        append_wrapped_plain(
+            lines,
+            width,
+            format!("  {} -> {} · {}{boundary}", flow.from, flow.to, flow.label),
         );
     }
+}
+
+fn summary_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
+    if let Some(hint) = &model.empty_hint {
+        return crate::renderer::empty_state_panel(
+            "no system summary",
+            &[hint],
+            &[("threat-model:build", "describe the system and its flows")],
+        );
+    }
+    let mut lines = Vec::new();
+    let overview = dfd_overview(model);
+    append_dfd_executive_summary(&mut lines, width, &overview);
+    append_dfd_zone_flows(&mut lines, width, &overview);
+    append_dfd_component_tree(&mut lines, width, model, &overview);
+    lines
+}
+
+fn append_dfd_executive_summary(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    overview: &DfdOverview,
+) {
+    lines.push(Line::from(vec![Span::styled(
+        "EXECUTIVE SUMMARY",
+        theme::heading(),
+    )]));
+    lines.extend(
+        crate::renderer::shared::text::wrap_text(&overview.executive_summary, width)
+            .into_iter()
+            .map(Line::from),
+    );
+}
+
+fn append_dfd_zone_flows(lines: &mut Vec<Line<'static>>, width: usize, overview: &DfdOverview) {
+    lines.push(Line::from(vec![Span::styled(
+        "OVERALL DATA FLOW",
+        theme::heading(),
+    )]));
+    for flow in &overview.zone_flows {
+        let crossing = if flow.crossing_count > 0 {
+            format!(" · {} boundary crossing(s)", flow.crossing_count)
+        } else {
+            String::new()
+        };
+        append_wrapped_plain(
+            lines,
+            width,
+            format!(
+                "  {} -> {} · {} flow(s){crossing}",
+                flow.from_zone, flow.to_zone, flow.flow_count
+            ),
+        );
+    }
+}
+
+fn append_dfd_component_tree(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    model: &DfdModel,
+    overview: &DfdOverview,
+) {
+    lines.push(Line::from(vec![Span::styled(
+        "COMPONENT TREE",
+        theme::heading(),
+    )]));
+    append_wrapped_plain(
+        lines,
+        width,
+        format!(
+            "◇ {} · {} component(s)",
+            display_target(model),
+            model.nodes.len()
+        ),
+    );
+    for (index, zone) in overview.zones.iter().enumerate() {
+        append_dfd_zone(lines, width, zone, index + 1 == overview.zones.len());
+    }
+}
+
+fn append_dfd_zone(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    zone: &DfdOverviewZone,
+    last: bool,
+) {
+    let branch = if last { "└─" } else { "├─" };
+    append_wrapped_plain(
+        lines,
+        width,
+        format!(
+            "{branch} {} · {} component(s)",
+            zone.name,
+            zone.components.len()
+        ),
+    );
+    for (index, component) in zone.components.iter().enumerate() {
+        append_dfd_component(
+            lines,
+            width,
+            component,
+            last,
+            index + 1 == zone.components.len(),
+        );
+    }
+}
+
+fn append_dfd_component(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    component: &DfdOverviewComponent,
+    zone_last: bool,
+    component_last: bool,
+) {
+    let zone_indent = if zone_last { "   " } else { "│  " };
+    let component_branch = if component_last { "└─" } else { "├─" };
+    append_wrapped_plain(
+        lines,
+        width,
+        format!(
+            "{zone_indent}{component_branch} ◇ {} · {} · in {} · out {}",
+            component.name,
+            dfd_kind_label(component.kind),
+            component.inbound_count,
+            component.outgoing.len()
+        ),
+    );
+    let child_indent = format!("{zone_indent}{}  ", if component_last { " " } else { "│" });
+    append_dfd_component_children(
+        lines,
+        width,
+        &child_indent,
+        dfd_component_children(component),
+    );
+}
+
+fn dfd_component_children(component: &DfdOverviewComponent) -> Vec<String> {
+    let mut children = vec![format!(
+        "does · {}",
+        component
+            .description
+            .as_deref()
+            .unwrap_or("not recorded in the threat model")
+    )];
+    children.push(format!(
+        "purpose · {}",
+        component
+            .purpose
+            .as_deref()
+            .unwrap_or("not recorded; rebuild the threat model")
+    ));
+    for flow in &component.outgoing {
+        let crossing = if flow.crosses { " · boundary" } else { "" };
+        children.push(format!(
+            "-> {} [{}] · {}{crossing}",
+            flow.target, flow.target_zone, flow.label
+        ));
+    }
+    if let Some(context) = dfd_context_summary(component.context) {
+        children.push(context);
+    }
+    children
+}
+
+fn append_dfd_component_children(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    indent: &str,
+    children: Vec<String>,
+) {
+    let child_count = children.len();
+    for (index, child) in children.into_iter().enumerate() {
+        let branch = if index + 1 == child_count {
+            "└─"
+        } else {
+            "├─"
+        };
+        append_wrapped_plain(lines, width, format!("{indent}{branch} {child}"));
+    }
+}
+
+fn dfd_context_summary(counts: DfdContextCounts) -> Option<String> {
+    let labels = [
+        (counts.entry_points, "entry"),
+        (counts.role_gates, "gate"),
+        (counts.external_sinks, "sink"),
+        (counts.trusted_callers, "caller"),
+        (counts.assets, "asset"),
+        (counts.threats, "threat"),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, label)| dfd_plain_count(count, label))
+    .collect::<Vec<_>>();
+    (!labels.is_empty()).then(|| format!("context · {}", labels.join(" · ")))
+}
+
+fn dfd_plain_count(count: usize, singular: &str) -> String {
+    if count == 1 {
+        return format!("{count} {singular}");
+    }
+    let plural = if singular == "entry" {
+        "entries".to_string()
+    } else {
+        format!("{singular}s")
+    };
+    format!("{count} {plural}")
+}
+
+fn append_wrapped_plain(lines: &mut Vec<Line<'static>>, width: usize, value: String) {
+    lines.extend(
+        crate::renderer::shared::text::wrap_text(&value, width)
+            .into_iter()
+            .map(Line::from),
+    );
 }
 
 fn dfd_kind_label(kind: DfdKind) -> &'static str {
@@ -285,6 +534,7 @@ fn page_tagline(page: VizPage) -> &'static str {
     match page {
         VizPage::AttackSurface => "risk density as 3D relief — peaks are the hottest modules",
         VizPage::AttackPath => "how tainted input reaches a dangerous sink, stage by stage",
+        VizPage::Summary => "why the system exists and how its parts move data",
         VizPage::Dfd => "data flows across trust boundaries — crossings are where STRIDE lives",
         VizPage::EntryPoints => "trust-zone browser — select an ingress to inspect its evidence",
         VizPage::Components => {
@@ -300,6 +550,7 @@ fn compact_page_tagline(page: VizPage) -> &'static str {
     match page {
         VizPage::AttackSurface => "module risk peaks",
         VizPage::AttackPath => "source-to-sink path",
+        VizPage::Summary => "system purpose + shape",
         VizPage::Dfd => "trust-boundary flows",
         VizPage::EntryPoints => "select an ingress",
         VizPage::Components => "stack + versions",
@@ -323,18 +574,23 @@ fn responsive_header_line(
     Line::styled(fit_plain(value, width), style)
 }
 
-fn responsive_nav_line(app: &ShellApp, page: VizPage, width: usize) -> Line<'static> {
-    let full = Line::from(nav_spans(app, page));
+fn responsive_nav_line(
+    prefix: &'static str,
+    available: &[VizPage],
+    page: VizPage,
+    width: usize,
+    suffix: &'static str,
+) -> Line<'static> {
+    let full = Line::from(nav_spans_for_pages(prefix, available, page, suffix));
     if full.width() <= width {
         return full;
     }
-    let available = app.available_viz_pages();
     let position = available
         .iter()
         .position(|candidate| *candidate == page)
         .map_or(1, |index| index + 1);
     let label = page_nav_label(page);
-    let compact = format!("pages [{label}] · {position}/{} · Tab", available.len());
+    let compact = format!("{prefix} [{label}] · {position}/{} · Tab", available.len());
     if compact.chars().count() <= width {
         return Line::styled(compact, theme::muted());
     }
@@ -344,12 +600,21 @@ fn responsive_nav_line(app: &ShellApp, page: VizPage, width: usize) -> Line<'sta
     )
 }
 
+#[cfg(test)]
 fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
-    let mut spans = vec![Span::styled("pages  ".to_string(), theme::muted())];
-    let available = app.available_viz_pages();
+    nav_spans_for_pages("pages", &app.active_viz_pages(), page, "Tab cycles")
+}
+
+fn nav_spans_for_pages(
+    prefix: &'static str,
+    available: &[VizPage],
+    page: VizPage,
+    suffix: &'static str,
+) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled(format!("{prefix}  "), theme::muted())];
     append_page_tabs(&mut spans, &available, page);
     if available.len() > 1 {
-        spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
+        spans.push(Span::styled(format!("  ·  {suffix}"), theme::muted()));
     }
     spans
 }
@@ -376,6 +641,7 @@ fn page_nav_label(page: VizPage) -> &'static str {
     match page {
         VizPage::AttackSurface => "terrain",
         VizPage::AttackPath => "path",
+        VizPage::Summary => "summary",
         VizPage::Dfd => "dfd",
         VizPage::EntryPoints => "entry",
         VizPage::Components => "components",
@@ -417,6 +683,8 @@ mod tests {
             text.contains("DFD · 3 nodes · 2 flows · 3 zones · 1 boundary crossings"),
             "{text}"
         );
+        assert!(text.contains("NODES"));
+        assert!(text.contains("FLOWS"));
         assert!(text.contains("Browser · entity"));
         assert!(text.contains("API server · process"));
         assert!(text.contains("Browser -> API server · https · boundaries: tb-edge"));
@@ -429,6 +697,31 @@ mod tests {
     }
 
     #[test]
+    fn summary_page_explains_system_and_component_purpose() {
+        let temp = tempfile::tempdir().expect("temp target");
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_persistent_threat_model(temp.path(), &sample_dfd_doc(), true).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::Summary);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("EXECUTIVE SUMMARY"), "{text}");
+        assert!(
+            text.contains("Operators use Sample to review requests"),
+            "{text}"
+        );
+        assert!(text.contains("OVERALL DATA FLOW"), "{text}");
+        assert!(text.contains("COMPONENT TREE"), "{text}");
+        assert!(text.contains("does · Handles browser requests"), "{text}");
+        assert!(
+            text.contains("purpose · Applies the product's review policy"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn empty_gallery_header_only_shows_the_permanent_dfd_page() {
         let app = ShellApp::new(V2Config::default(), None);
 
@@ -437,6 +730,7 @@ mod tests {
         assert!(text.contains("pages  [dfd]"), "{text}");
         assert!(!text.contains("terrain"), "{text}");
         assert!(!text.contains("path"), "{text}");
+        assert!(!text.contains("summary"), "{text}");
         assert!(!text.contains("entry"), "{text}");
         assert!(!text.contains("components"), "{text}");
         assert!(!text.contains("heatmap"), "{text}");
@@ -492,6 +786,7 @@ mod tests {
         let cases = [
             (VizPage::AttackSurface, "scan"),
             (VizPage::AttackPath, "taint-iris:hunt"),
+            (VizPage::Summary, "threat-model:build"),
             (VizPage::Dfd, "threat-model:build"),
             (VizPage::EntryPoints, "threat-model:build"),
             (VizPage::Components, "sbom-scan:scan"),
@@ -581,11 +876,15 @@ mod tests {
 
     fn sample_dfd_doc() -> serde_json::Value {
         json!({
+            "systemContext": "Operators use Sample to review requests before approved records are stored.",
             "dfd": {
                 "nodes": [
-                    {"id": "user", "name": "Browser", "type": "external entity", "trustZone": "internet"},
-                    {"id": "api", "name": "API server", "type": "process", "trustZone": "app-tier"},
-                    {"id": "db", "name": "Postgres", "type": "data store", "trustZone": "data-tier"}
+                    {"id": "user", "name": "Browser", "type": "external entity", "trustZone": "internet",
+                     "description": "Collects operator requests", "purpose": "Provides the operator surface"},
+                    {"id": "api", "name": "API server", "type": "process", "trustZone": "app-tier",
+                     "description": "Handles browser requests", "purpose": "Applies the product's review policy"},
+                    {"id": "db", "name": "Postgres", "type": "data store", "trustZone": "data-tier",
+                     "description": "Stores approved records", "purpose": "Preserves durable review state"}
                 ],
                 "flows": [
                     {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https",

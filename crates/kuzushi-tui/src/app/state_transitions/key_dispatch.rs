@@ -382,6 +382,7 @@ impl ShellApp {
         continue_after: bool,
     ) {
         self.engagement.clear_attempt_lineage(phase);
+        self.reset_map_gallery_after_selection(phase);
         self.log(
             "workflow",
             format!(
@@ -390,14 +391,26 @@ impl ShellApp {
                 record.completed.attempt_id
             ),
         );
-        if let Some(patch) = selected_fix_patch {
-            self.engagement.set_pending_patch(patch);
-        }
+        self.remember_selected_fix_patch(selected_fix_patch);
         if self.finish_guided_result_selection(phase, continue_after) {
             return;
         }
         if continue_after {
             self.open_rederived_journey_destination();
+        }
+    }
+
+    fn reset_map_gallery_after_selection(&mut self, phase: WorkflowPhase) {
+        if phase == WorkflowPhase::Map {
+            let scene = self.router.scene_mut();
+            scene.set_page(crate::scene3d::VizPage::Summary);
+            scene.reset_summary_navigation();
+        }
+    }
+
+    fn remember_selected_fix_patch(&mut self, patch: Option<PendingPatch>) {
+        if let Some(patch) = patch {
+            self.engagement.set_pending_patch(patch);
         }
     }
 
@@ -2339,6 +2352,9 @@ mod tests {
         // the Map attempt anyway instead of dying as a silent no-op.
         let (_target, mut app, attempt_id) = app_with_unresolved_map_result(V2Config::default());
         app.router.workbench_mut().set_page(None);
+        app.router
+            .scene_mut()
+            .set_page(crate::scene3d::VizPage::Dfd);
 
         assert_eq!(app.phase_result_target_phase(), Some(WorkflowPhase::Map));
         assert!(app.reduce_key(plain_key(KeyCode::Char('u'))).handled);
@@ -2348,6 +2364,11 @@ mod tests {
                 .unresolved_phase_attempt(WorkflowPhase::Map)
                 .is_none(),
             "attempt {attempt_id} must be resolved by the advertised key"
+        );
+        assert_eq!(
+            app.router.scene().page(),
+            crate::scene3d::VizPage::Summary,
+            "accepting a new Map returns its embedded gallery to Summary"
         );
     }
 

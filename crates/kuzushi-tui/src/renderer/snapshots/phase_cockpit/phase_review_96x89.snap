@@ -92,4 +92,4 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE · cost $0.37 · 
 run route · ⠋ context:build · 42s · 1/2 · Review 3/5 ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-▣ REVIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+▣ REVIEW VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

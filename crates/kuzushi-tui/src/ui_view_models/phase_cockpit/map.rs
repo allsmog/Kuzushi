@@ -33,6 +33,22 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     }
 }
 
+pub(crate) fn map_gallery_is_primary(app: &ShellApp) -> bool {
+    !map_requires_action(&map_phase_model(app))
+}
+
+pub(super) fn map_requires_action(model: &MapPhaseModel) -> bool {
+    model.empty_hint.is_some()
+        || model.dfd.empty_hint.is_some()
+        || model.decompose_first.is_some()
+        || model.context.state.eq_ignore_ascii_case("stale")
+        || model
+            .context
+            .status
+            .to_ascii_lowercase()
+            .contains("blocked")
+}
+
 /// Recommend module decomposition before threat modeling when the indexed
 /// repository is monorepo-sized and no nested scope decomposition exists yet.
 /// A persisted scope tree (or an unhydrated/unreadable verdict) keeps the

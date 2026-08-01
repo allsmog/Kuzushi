@@ -4,7 +4,7 @@ contract: cockpit-spine-v1
 phase: scan
 size: 80x24
 ---
-KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · ● LIVE
+KUZUSHI · Viewing Scan · next required Review · target ./phase-target · ● LIVE
  Map ✓ · Scan ✓ · Review ● · Prove ○ · Fix ○
  ▸ NEXT record terminal dispositions for 6 of 6 ledger candidates
  run sast:scan {} scan now · next → Review · z open findings heatmap
@@ -27,4 +27,4 @@ KUZUSHI · Viewing Scan · pipeline live in Review · target ./phase-target · �
 run route · ⠋ context:build · 42s · 1/2...  6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
-▦ SCAN › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
+▦ SCAN VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt
