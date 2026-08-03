@@ -1,0 +1,134 @@
+name: Kuzushi Security Scan
+description: Run Kuzushi's source-bound security scan and emit a SARIF artifact for GitHub Code Scanning.
+author: allsmog
+
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  version:
+    description: Published npm version of Kuzushi to install.
+    required: false
+    default: 0.24.0-alpha.9
+  target:
+    description: Repository-relative target path to scan.
+    required: false
+    default: .
+  mode:
+    description: Scan mode: standard or whitebox-static.
+    required: false
+    default: standard
+  tasks:
+    description: Optional comma-separated scan tasks, such as semgrep,secret-scan.
+    required: false
+    default: ""
+  triage:
+    description: Run model-backed triage after scanning. Requires an explicit model and provider credentials.
+    required: false
+    default: "false"
+  model:
+    description: Optional explicit provider:model value exposed to Kuzushi as KUZUSHI_MODEL.
+    required: false
+    default: ""
+  fail-on:
+    description: Optional severity gate: low, medium, high, or critical. Kuzushi exits 3 when the gate trips.
+    required: false
+    default: ""
+  sarif:
+    description: SARIF output path. Upload it in a following github/codeql-action/upload-sarif step.
+    required: false
+    default: kuzushi.sarif
+  doctor:
+    description: Run Kuzushi preflight diagnostics before scanning.
+    required: false
+    default: "true"
+
+outputs:
+  sarif:
+    description: SARIF path produced by the scan.
+    value: ${{ steps.scan.outputs.sarif }}
+  exit-code:
+    description: Kuzushi scan exit code. Zero is clean; three means the severity gate found blocking findings.
+    value: ${{ steps.scan.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Kuzushi
+      shell: bash
+      env:
+        KUZUSHI_ACTION_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        case "$KUZUSHI_ACTION_VERSION" in
+          ""|*[!A-Za-z0-9._+-]*)
+            echo "::error::Kuzushi version contains unsupported characters"
+            exit 2
+            ;;
+        esac
+        npm install --global "kuzushi@${KUZUSHI_ACTION_VERSION}"
+
+    - name: Validate action inputs
+      shell: bash
+      env:
+        KUZUSHI_ACTION_MODE: ${{ inputs.mode }}
+        KUZUSHI_ACTION_TRIAGE: ${{ inputs.triage }}
+        KUZUSHI_ACTION_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        case "$KUZUSHI_ACTION_MODE" in
+          standard|whitebox-static) ;;
+          *) echo "::error::mode must be standard or whitebox-static"; exit 2 ;;
+        esac
+        case "$KUZUSHI_ACTION_TRIAGE" in
+          true|false) ;;
+          *) echo "::error::triage must be true or false"; exit 2 ;;
+        esac
+        case "$KUZUSHI_ACTION_FAIL_ON" in
+          ""|low|medium|high|critical) ;;
+          *) echo "::error::fail-on must be low, medium, high, or critical"; exit 2 ;;
+        esac
+
+    - name: Kuzushi doctor
+      if: ${{ inputs.doctor == 'true' }}
+      shell: bash
+      env:
+        KUZUSHI_MODEL: ${{ inputs.model }}
+        KUZUSHI_ACTION_TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        kuzushi doctor --target "$KUZUSHI_ACTION_TARGET" --json
+
+    - name: Run Kuzushi scan
+      id: scan
+      shell: bash
+      env:
+        KUZUSHI_MODEL: ${{ inputs.model }}
+        KUZUSHI_ACTION_TARGET: ${{ inputs.target }}
+        KUZUSHI_ACTION_MODE: ${{ inputs.mode }}
+        KUZUSHI_ACTION_TASKS: ${{ inputs.tasks }}
+        KUZUSHI_ACTION_TRIAGE: ${{ inputs.triage }}
+        KUZUSHI_ACTION_FAIL_ON: ${{ inputs.fail-on }}
+        KUZUSHI_ACTION_SARIF: ${{ inputs.sarif }}
+      run: |
+        set -euo pipefail
+        args=(scan "$KUZUSHI_ACTION_TARGET" --mode "$KUZUSHI_ACTION_MODE" --ci --sarif "$KUZUSHI_ACTION_SARIF")
+        if [[ -n "$KUZUSHI_ACTION_TASKS" ]]; then
+          args+=(--tasks "$KUZUSHI_ACTION_TASKS")
+        fi
+        if [[ "$KUZUSHI_ACTION_TRIAGE" == "true" ]]; then
+          args+=(--triage)
+        fi
+        if [[ -n "$KUZUSHI_ACTION_FAIL_ON" ]]; then
+          args+=(--fail-on "$KUZUSHI_ACTION_FAIL_ON")
+        fi
+
+        set +e
+        kuzushi "${args[@]}"
+        status=$?
+        set -e
+
+        printf 'sarif=%s\n' "$KUZUSHI_ACTION_SARIF" >> "$GITHUB_OUTPUT"
+        printf 'exit-code=%s\n' "$status" >> "$GITHUB_OUTPUT"
+        exit "$status"
