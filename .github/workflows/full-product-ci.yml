@@ -22,28 +22,43 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - id: private-cpg
-        name: Materialize SHA-pinned private CPG source
-        uses: allsmog/oxidized-joern/.github/actions/export-cpg-source@efde8d4a744b429abe3be6d166cc3286b70e5d1b
+      - uses: moonrepo/setup-rust@v1
         with:
-          destination: ${{ runner.temp }}/oxidized-joern-cpg-rs
-          expected-engine-base-sha: 9ab43859f0c3342c734ff38ea6366711d216c8fd
-      - name: Verify exported source contract
+          inherit-toolchain: true
+      - name: Configure least-privilege private dependency access
         env:
-          CPG_SOURCE_ROOT: ${{ steps.private-cpg.outputs.source-root }}
-          CPG_ENGINE_BASE_SHA: ${{ steps.private-cpg.outputs.engine-base-sha }}
-          CPG_TREE_SHA256: ${{ steps.private-cpg.outputs.tree-sha256 }}
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
           set -euo pipefail
-          test "${CPG_ENGINE_BASE_SHA}" = "9ab43859f0c3342c734ff38ea6366711d216c8fd"
-          test -f "${CPG_SOURCE_ROOT}/Cargo.toml"
-          test -f "${CPG_SOURCE_ROOT}/cpg-analysis/Cargo.toml"
-          test -f "${CPG_SOURCE_ROOT}/cpg-cli/Cargo.toml"
-          test -f "${CPG_SOURCE_ROOT}/cpg-core/Cargo.toml"
-          test -f "${CPG_SOURCE_ROOT}/cpg-incremental/Cargo.toml"
-          test "${#CPG_TREE_SHA256}" -eq 64
-          printf 'private CPG source: base=%s tree-sha256=%s\n' \
-            "${CPG_ENGINE_BASE_SHA}" "${CPG_TREE_SHA256}"
+          if [[ -z "${OXIDIZED_JOERN_TOKEN:-}" ]]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is missing. Configure a read-only fine-grained token scoped only to allsmog/oxidized-joern contents."
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Verify exact private source resolution
+        run: |
+          set -euo pipefail
+          metadata="${RUNNER_TEMP}/cargo-metadata.json"
+          cargo metadata --format-version 1 --locked > "${metadata}"
+          python3 - "${metadata}" <<'PY'
+          import json
+          import sys
+
+          expected = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#"
+          packages = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
+          required = {"cpg-analysis", "cpg-cli", "cpg-core", "cpg-incremental"}
+          seen = {
+              package["name"]
+              for package in packages
+              if package.get("source", "").startswith(expected)
+          }
+          missing = sorted(required - seen)
+          if missing:
+              raise SystemExit(f"private CPG metadata missing exact pinned packages: {missing}")
+          print(f"resolved exact private CPG packages: {', '.join(sorted(seen))}")
+          PY
+      - name: Compile the real default-feature CPG adapter
+        run: cargo check --package kuzushi-cpg --all-targets --locked
