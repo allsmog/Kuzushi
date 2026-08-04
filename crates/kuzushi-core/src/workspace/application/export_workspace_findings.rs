@@ -770,16 +770,20 @@ fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
 
 /// Guard CSV cells against spreadsheet formula/injection (CWE-1236).
 /// Excel, Google Sheets, and LibreOffice interpret a cell whose first
-/// character is `=`, `+`, `-`, `@`, a tab, or a carriage return as a
-/// formula. Kuzushi exports findings whose text (titles, rule ids, file
-/// paths, model reasoning) can originate from an untrusted scan target, so
-/// a crafted finding could execute a formula when an analyst opens the CSV.
-/// Prefix any such value with a single quote, matching the OWASP mitigation.
-/// Values that do not begin with a dangerous character are returned unchanged.
+/// character is `=`, `+`, `-`, or `@` as a formula; leading control bytes
+/// (tab, carriage return, line feed) are neutralized in the same family
+/// because some importers strip them before parsing. Kuzushi exports
+/// findings whose text (titles, rule ids, file paths, model reasoning) can
+/// originate from an untrusted scan target, so a crafted finding could
+/// execute a formula when an analyst opens the CSV. Prefix any such value
+/// with a single quote, matching the OWASP mitigation. Values that do not
+/// begin with a dangerous character are returned unchanged. Matching on the
+/// leading byte is sufficient: every dangerous character is ASCII, and a
+/// multibyte UTF-8 character always leads with a byte >= 0x80.
 pub(crate) fn sanitize_csv_field(value: &str) -> String {
     if matches!(
         value.as_bytes().first(),
-        Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r')
+        Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'\n')
     ) {
         format!("'{value}")
     } else {

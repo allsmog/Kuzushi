@@ -1378,7 +1378,7 @@ mod tests {
 
     #[test]
     fn sanitize_csv_field_guards_formula_leading_characters() {
-        for dangerous in ["=1+1", "+1", "-1", "@SUM(A1)", "\tcmd", "\rcmd"] {
+        for dangerous in ["=1+1", "+1", "-1", "@SUM(A1)", "\tcmd", "\rcmd", "\n=cmd"] {
             assert_eq!(sanitize_csv_field(dangerous), format!("'{dangerous}"));
         }
         // Benign values and interior dangerous characters are left untouched.
