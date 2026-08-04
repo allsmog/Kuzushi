@@ -102,6 +102,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # The guard scripts (public-core-workspace.mjs, public-core-cargo-lock.mjs)
+      # import only node: builtins, so this lane needs a pinned Node runtime but
+      # no pnpm store or workspace install.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
