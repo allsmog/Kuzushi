@@ -1,8 +1,8 @@
 #![cfg(not(feature = "private-cpg"))]
 
 use kuzushi_core::{
-    cpg_artifact_langs, cpg_engine_available, cpg_engine_unavailable_message,
-    cpg_has_artifacts, cpg_supported_languages,
+    cpg_artifact_langs, cpg_engine_available, cpg_engine_unavailable_message, cpg_has_artifacts,
+    cpg_supported_languages,
 };
 
 #[test]
