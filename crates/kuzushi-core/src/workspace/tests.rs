@@ -9,6 +9,7 @@ mod tests {
     use crate::run_artifacts::{write_run_summary, RunLlmCallAudit, RunSummary};
     use crate::runtime::{RuntimeCost, RuntimeCostReport};
     use std::fs;
+    use super::super::application::sanitize_csv_field;
 
     #[test]
     fn missing_workspace_target_reports_domain_failure_with_actionable_cli_guidance() {
@@ -1373,6 +1374,55 @@ mod tests {
         ));
         assert!(body.contains("fixture/rule-0"));
         assert!(body.contains("fixture/rule-1"));
+    }
+
+    #[test]
+    fn sanitize_csv_field_guards_formula_leading_characters() {
+        for dangerous in ["=1+1", "+1", "-1", "@SUM(A1)", "\tcmd", "\rcmd"] {
+            assert_eq!(sanitize_csv_field(dangerous), format!("'{dangerous}"));
+        }
+        // Benign values and interior dangerous characters are left untouched.
+        assert_eq!(sanitize_csv_field("fixture/rule-0"), "fixture/rule-0");
+        assert_eq!(sanitize_csv_field("a=b"), "a=b");
+        assert_eq!(sanitize_csv_field(""), "");
+        // A leading multibyte UTF-8 character is not a formula trigger.
+        assert_eq!(sanitize_csv_field("é=mc2"), "é=mc2");
+    }
+
+    #[test]
+    fn csv_export_neutralizes_formula_injection_in_finding_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_fixture_source(workspace.root());
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+        // A scan target can influence finding text (rule id, title). A crafted
+        // finding whose fields begin with `=` would execute as a spreadsheet
+        // formula if written verbatim into a CSV cell.
+        let finding = Finding::new_tool(
+            "fixture",
+            "=cmd",
+            "src/app.ts",
+            10,
+            Some(13),
+            Severity::High,
+            "=1+1",
+        );
+        store.insert_finding("run-1", &finding).unwrap();
+
+        let output = tmp.path().join("out.csv");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let body = fs::read_to_string(&output).unwrap();
+
+        // The dangerous cells are prefixed with a single quote, so a
+        // spreadsheet treats them as text instead of evaluating a formula.
+        assert!(body.contains("'=cmd"), "rule id not guarded: {body}");
+        assert!(body.contains("'=1+1"), "title not guarded: {body}");
+        // The raw, unguarded formula never appears at a cell boundary.
+        assert!(!body.contains(",=cmd,"), "unguarded rule id present: {body}");
+        assert!(!body.contains(",=1+1,"), "unguarded title present: {body}");
     }
 
     #[test]

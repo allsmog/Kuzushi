@@ -768,6 +768,25 @@ fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
     Ok(())
 }
 
+/// Guard CSV cells against spreadsheet formula/injection (CWE-1236).
+/// Excel, Google Sheets, and LibreOffice interpret a cell whose first
+/// character is `=`, `+`, `-`, `@`, a tab, or a carriage return as a
+/// formula. Kuzushi exports findings whose text (titles, rule ids, file
+/// paths, model reasoning) can originate from an untrusted scan target, so
+/// a crafted finding could execute a formula when an analyst opens the CSV.
+/// Prefix any such value with a single quote, matching the OWASP mitigation.
+/// Values that do not begin with a dangerous character are returned unchanged.
+pub(crate) fn sanitize_csv_field(value: &str) -> String {
+    if matches!(
+        value.as_bytes().first(),
+        Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r')
+    ) {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    }
+}
+
 fn write_csv_rows(
     writer: &mut csv::Writer<Vec<u8>>,
     records: &[WorkspaceFindingExportRecord],
@@ -776,7 +795,11 @@ fn write_csv_rows(
 ) -> Result<()> {
     let metadata = csv_metadata_fields(records.len(), total_count, options);
     for record in records {
-        writer.write_record(csv_finding_row(record, &metadata))?;
+        let guarded: Vec<String> = csv_finding_row(record, &metadata)
+            .iter()
+            .map(|field| sanitize_csv_field(field))
+            .collect();
+        writer.write_record(&guarded)?;
     }
     Ok(())
 }
