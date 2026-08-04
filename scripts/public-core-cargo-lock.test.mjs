@@ -22,10 +22,11 @@ function fullLock() {
   return lock([
     { name: "kuzushi-core", version: "1.0.0" },
     { name: "kuzushi-cpg", version: "1.0.0" },
-    { name: "cpg-analysis", source: privateSource },
+    { name: "cpg-analysis", version: "0.2.0", source: privateSource },
     { name: "cpg-cli", source: privateSource },
     { name: "cpg-core", source: privateSource },
     { name: "cpg-incremental", source: privateSource },
+    { name: "cpg-language", source: privateSource },
     { name: "serde", version: "1.0.0", source: registrySource, checksum: "abc" },
   ]);
 }
@@ -34,7 +35,7 @@ function publicLock(extra = []) {
   return lock([
     { name: "kuzushi-core", version: "1.0.0" },
     { name: "kuzushi-cpg", version: "1.0.0" },
-    { name: "cpg-analysis" },
+    { name: "cpg-analysis", version: "0.2.0" },
     { name: "cpg-cli" },
     { name: "cpg-core" },
     { name: "cpg-incremental" },
@@ -46,7 +47,7 @@ function publicLock(extra = []) {
 test("accepts local resolver stubs without changing retained packages", () => {
   const result = validatePublicCoreLock(fullLock(), publicLock());
 
-  assert.equal(result.removedPrivatePackages, 4);
+  assert.equal(result.removedPrivatePackages, 5);
   assert.equal(result.resolverStubs, 4);
 });
 
@@ -88,6 +89,18 @@ test("rejects a missing resolver stub", () => {
   assert.throws(
     () => validatePublicCoreLock(fullLock(), missing),
     /one local resolver stub for cpg-cli/,
+  );
+});
+
+test("rejects a resolver stub with the wrong private package version", () => {
+  const wrongVersion = publicLock().replace(
+    'name = "cpg-analysis"\nversion = "0.2.0"',
+    'name = "cpg-analysis"\nversion = "0.1.0"',
+  );
+
+  assert.throws(
+    () => validatePublicCoreLock(fullLock(), wrongVersion),
+    /one local resolver stub for cpg-analysis/,
   );
 });
 
