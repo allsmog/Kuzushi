@@ -7,6 +7,7 @@ use crate::findings::{Finding, FindingListFilter, ProofConfidence};
 pub(crate) struct PromptGrounding {
     pub(crate) surfaces: Vec<AttackSurface>,
     pub(crate) confirmed_findings: Vec<ConfirmedFindingRow>,
+    pub(crate) entry_point_catalog: crate::capabilities::entry_points::EntryPointCatalogGrounding,
 }
 
 pub(crate) struct ConfirmedFindingRow {
@@ -23,10 +24,248 @@ pub(crate) fn load_prompt_grounding(
     input: &BuildInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<PromptGrounding> {
+    let catalog = load_entry_point_catalog(input)?;
+    let (surfaces, records_selected) =
+        prompt_grounding_surfaces(&input.target, input.max_elements, catalog.catalog.as_ref())?;
+    let entry_point_catalog = catalog_grounding(
+        &catalog,
+        records_selected,
+        input.max_elements.max(1),
+        surfaces.len(),
+    );
     Ok(PromptGrounding {
-        surfaces: grounding_surfaces(&input.target, input.max_elements)?,
+        surfaces,
         confirmed_findings: confirmed_finding_rows(ctx)?,
+        entry_point_catalog,
     })
+}
+
+fn load_entry_point_catalog(
+    input: &BuildInput,
+) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
+    if catalog_loading_disabled(input) {
+        return Ok(disabled_catalog_resolution(input));
+    }
+    if input.context_mode == "off" {
+        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(&input.target);
+    }
+    load_current_or_explicit_catalog(input)
+}
+
+fn catalog_loading_disabled(input: &BuildInput) -> bool {
+    has_catalog_source(input, "none")
+        || (input.context_mode == "off" && !has_catalog_source(input, "entry-points"))
+}
+
+fn has_catalog_source(input: &BuildInput, expected: &str) -> bool {
+    input.sources.iter().any(|source| source == expected)
+}
+
+fn load_current_or_explicit_catalog(
+    input: &BuildInput,
+) -> Result<crate::capabilities::entry_points::EntryPointCatalogResolution> {
+    let resolution =
+        crate::capabilities::entry_points::ensure_current_entry_point_catalog(&input.target)?;
+    if resolution.catalog.is_none() && has_catalog_source(input, "entry-points") {
+        return crate::capabilities::entry_points::load_explicit_entry_point_catalog(&input.target);
+    }
+    Ok(resolution)
+}
+
+fn disabled_catalog_resolution(
+    input: &BuildInput,
+) -> crate::capabilities::entry_points::EntryPointCatalogResolution {
+    crate::capabilities::entry_points::EntryPointCatalogResolution {
+        catalog: None,
+        status: "disabled".to_string(),
+        path: crate::workspace::workspace_state_root(&input.target).join("entry-points.json"),
+    }
+}
+
+fn prompt_grounding_surfaces(
+    target: &Path,
+    max_elements: usize,
+    catalog: Option<&crate::capabilities::entry_points::EntryPointCatalog>,
+) -> Result<(Vec<AttackSurface>, usize)> {
+    let Some(catalog) = catalog else {
+        return Ok((grounding_surfaces(target, max_elements)?, 0));
+    };
+    let limit = max_elements.max(1);
+    let catalog_limit = catalog_selection_limit(limit, catalog.total);
+    catalog_grounding_surfaces(target, limit, catalog, catalog_limit)
+}
+
+fn catalog_grounding_surfaces(
+    target: &Path,
+    limit: usize,
+    catalog: &crate::capabilities::entry_points::EntryPointCatalog,
+    catalog_limit: usize,
+) -> Result<(Vec<AttackSurface>, usize)> {
+    let catalog_rows = catalog
+        .entry_points
+        .iter()
+        .map(|entry| entry.surface.clone())
+        .collect();
+    let mut selected = stratified_top_surfaces(catalog_rows, catalog_limit);
+    let selected_catalog = selected.len();
+    fill_non_catalog_surfaces(target, limit, catalog, &mut selected)?;
+    Ok((selected, selected_catalog))
+}
+
+fn catalog_selection_limit(limit: usize, catalog_total: usize) -> usize {
+    if catalog_total == 0 {
+        return 0;
+    }
+    limit
+        .saturating_mul(3)
+        .div_ceil(4)
+        .max(1)
+        .min(catalog_total)
+}
+
+fn fill_non_catalog_surfaces(
+    target: &Path,
+    limit: usize,
+    catalog: &crate::capabilities::entry_points::EntryPointCatalog,
+    selected: &mut Vec<AttackSurface>,
+) -> Result<()> {
+    let catalog_ids = catalog
+        .entry_points
+        .iter()
+        .map(|entry| entry.surface.id.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut candidates = crate::attack_surface::build_attack_surface_map(target)
+        .context("threat-model grounding: attack-surface map failed")?
+        .surfaces;
+    candidates.extend(infra_surface_rows(target));
+    candidates.retain(|surface| !catalog_ids.contains(surface.id.as_str()));
+    append_unique_surfaces(selected, stratified_top_surfaces(candidates, limit), limit);
+    Ok(())
+}
+
+fn append_unique_surfaces(
+    selected: &mut Vec<AttackSurface>,
+    candidates: Vec<AttackSurface>,
+    limit: usize,
+) {
+    let mut ids = selected
+        .iter()
+        .map(|surface| surface.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    for surface in candidates {
+        if selected.len() >= limit {
+            return;
+        }
+        if ids.insert(surface.id.clone()) {
+            selected.push(surface);
+        }
+    }
+}
+
+fn catalog_grounding(
+    resolution: &crate::capabilities::entry_points::EntryPointCatalogResolution,
+    records_selected: usize,
+    grounding_limit: usize,
+    grounding_records_selected: usize,
+) -> crate::capabilities::entry_points::EntryPointCatalogGrounding {
+    let Some(catalog) = resolution.catalog.as_ref() else {
+        let mut grounding =
+            crate::capabilities::entry_points::EntryPointCatalogGrounding::unavailable(
+                &resolution.status,
+            );
+        grounding.receipt.grounding_limit = grounding_limit;
+        grounding.receipt.grounding_records_selected = grounding_records_selected;
+        return grounding;
+    };
+    crate::capabilities::entry_points::EntryPointCatalogGrounding {
+        receipt: catalog_receipt(
+            catalog,
+            &resolution.status,
+            records_selected,
+            grounding_limit,
+            grounding_records_selected,
+        ),
+        catalog_ids: catalog
+            .entry_points
+            .iter()
+            .map(|entry| entry.surface.id.clone())
+            .collect(),
+        catalog_surfaces: catalog
+            .entry_points
+            .iter()
+            .map(|entry| entry.surface.clone())
+            .collect(),
+    }
+}
+
+fn catalog_receipt(
+    catalog: &crate::capabilities::entry_points::EntryPointCatalog,
+    status: &str,
+    records_selected: usize,
+    grounding_limit: usize,
+    grounding_records_selected: usize,
+) -> crate::capabilities::entry_points::EntryPointCatalogReceipt {
+    let provenance = &catalog.provenance;
+    crate::capabilities::entry_points::EntryPointCatalogReceipt {
+        status: status.to_string(),
+        sha256: Some(provenance.sha256.clone()),
+        records: catalog.total,
+        records_selected,
+        grounding_limit,
+        grounding_records_selected,
+        snapshot_timestamp: Some(catalog.snapshot_timestamp),
+        context_sha256: Some(provenance.context_snapshot_sha256.clone()),
+        tree_hash: provenance.context_snapshot_tree_hash.clone(),
+        selection_policy: crate::capabilities::entry_points::ENTRY_POINT_SELECTION_POLICY.to_string(),
+        revision: provenance.revision.clone(),
+        revision_dirty: provenance.revision_dirty,
+    }
+}
+
+pub(crate) fn stamp_entry_point_catalog_receipt(
+    document: &mut Value,
+    catalog: &crate::capabilities::entry_points::EntryPointCatalogGrounding,
+) {
+    let Some(root) = document.as_object_mut() else {
+        return;
+    };
+    let provenance = object_field(root, "provenance");
+    provenance.insert("entryPointCatalog".to_string(), catalog.receipt.json());
+    let linked = linked_catalog_entry_points(document, &catalog.catalog_ids);
+    let Some(root) = document.as_object_mut() else {
+        return;
+    };
+    let coverage = object_field(root, "coverage");
+    coverage.insert(
+        "catalogEntryPointsTotal".to_string(),
+        json!(catalog.receipt.records),
+    );
+    coverage.insert(
+        "catalogEntryPointsSelected".to_string(),
+        json!(catalog.receipt.records_selected),
+    );
+    coverage.insert("catalogEntryPointsLinked".to_string(), json!(linked));
+}
+
+fn object_field<'a>(root: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+    if !root.get(key).is_some_and(Value::is_object) {
+        root.insert(key.to_string(), json!({}));
+    }
+    root.get_mut(key)
+        .and_then(Value::as_object_mut)
+        .expect("object field")
+}
+
+fn linked_catalog_entry_points(document: &Value, catalog_ids: &BTreeSet<String>) -> usize {
+    document
+        .pointer("/attackSurface/entryPoints")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get("id").and_then(Value::as_str))
+        .filter(|id| catalog_ids.contains(*id))
+        .collect::<BTreeSet<_>>()
+        .len()
 }
 
 /// Context-free grounding surfaces (ranked code surfaces + infra rows) —
@@ -445,6 +684,37 @@ mod tests {
         }
     }
 
+    fn catalog(rows: Vec<AttackSurface>) -> crate::capabilities::entry_points::EntryPointCatalog {
+        let entry_points = rows
+            .into_iter()
+            .map(
+                |surface| crate::capabilities::entry_points::EntryPointRecord {
+                    name: json!(surface.title),
+                    location: json!(surface.path),
+                    surface,
+                    extra: Map::new(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let sha256 = crate::capabilities::entry_points::entry_points_sha256(&entry_points).unwrap();
+        crate::capabilities::entry_points::EntryPointCatalog {
+            target: "/repo".to_string(),
+            timestamp: 10,
+            snapshot_timestamp: 9,
+            total: entry_points.len(),
+            entry_points,
+            provenance: crate::capabilities::entry_points::EntryPointCatalogProvenance {
+                built_at_ms: 10,
+                sha256,
+                revision: Some("abc".to_string()),
+                revision_dirty: Some(false),
+                context_snapshot_timestamp: 9,
+                context_snapshot_sha256: "sha256:context".to_string(),
+                context_snapshot_tree_hash: None,
+            },
+        }
+    }
+
     #[test]
     fn stratified_selection_keeps_minority_kinds_out_of_a_monoculture() {
         let mut surfaces: Vec<AttackSurface> = (0..30)
@@ -494,6 +764,172 @@ mod tests {
         let selected = stratified_top_surfaces(surfaces, 8);
 
         assert_eq!(selected.len(), MAX_GROUNDING_ROWS_PER_FILE);
+    }
+
+    #[test]
+    fn prompt_selection_bounds_catalog_rows_then_fills_non_catalog_infra() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("Dockerfile"), "FROM scratch").unwrap();
+        let catalog = catalog(vec![
+            surface_row("one", AttackSurfaceKind::HttpRoute, "src/one.rs", 90),
+            surface_row("two", AttackSurfaceKind::RpcHandler, "src/two.rs", 80),
+            surface_row(
+                "three",
+                AttackSurfaceKind::BackgroundJob,
+                "src/three.rs",
+                70,
+            ),
+            surface_row("four", AttackSurfaceKind::CliEntrypoint, "src/four.rs", 60),
+        ]);
+
+        let (selected, catalog_selected) =
+            prompt_grounding_surfaces(target.path(), 4, Some(&catalog)).unwrap();
+
+        assert_eq!(catalog_selected, 3);
+        assert_eq!(selected.len(), 4);
+        assert!(selected.iter().any(|surface| surface.path == "Dockerfile"));
+        assert_eq!(
+            selected
+                .iter()
+                .map(|surface| &surface.id)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            selected.len()
+        );
+    }
+
+    #[test]
+    fn catalog_receipt_is_system_owned_and_counts_only_stable_id_links() {
+        let catalog = catalog(vec![
+            surface_row("one", AttackSurfaceKind::HttpRoute, "src/one.rs", 90),
+            surface_row("two", AttackSurfaceKind::RpcHandler, "src/two.rs", 80),
+        ]);
+        let resolution = crate::capabilities::entry_points::EntryPointCatalogResolution {
+            catalog: Some(catalog),
+            status: "current".to_string(),
+            path: PathBuf::from("/repo/.kuzushi/entry-points.json"),
+        };
+        let grounding = catalog_grounding(&resolution, 1, 4, 4);
+        let mut document = json!({
+            "attackSurface": {"entryPoints": [
+                {"id": "one", "name": "linked"},
+                {"id": "two", "name": "seeded catalog row"},
+                {"id": "model-only", "name": "not catalog"}
+            ]},
+            "coverage": {"entryPointsConsidered": 4},
+        });
+
+        stamp_entry_point_catalog_receipt(&mut document, &grounding);
+
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["status"],
+            json!("current")
+        );
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["records"],
+            json!(2)
+        );
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["recordsSelected"],
+            json!(1)
+        );
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["groundingRecordsSelected"],
+            json!(4)
+        );
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["groundingLimit"],
+            json!(4)
+        );
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["revision"],
+            json!("abc")
+        );
+        assert_eq!(document["coverage"]["catalogEntryPointsTotal"], json!(2));
+        assert_eq!(document["coverage"]["catalogEntryPointsSelected"], json!(1));
+        assert_eq!(
+            document["coverage"]["catalogEntryPointsLinked"],
+            json!(2),
+            "linked counts every output overlap and may exceed the bounded selected subset"
+        );
+        assert_eq!(
+            document["attackSurface"]["entryPoints"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+    }
+
+    #[test]
+    fn context_off_never_loads_or_refreshes_a_catalog() {
+        let target = tempfile::tempdir().unwrap();
+        let input = BuildInput {
+            target: target.path().to_path_buf(),
+            context_mode: "off".to_string(),
+            ..BuildInput::default()
+        };
+
+        let resolution = load_entry_point_catalog(&input).unwrap();
+
+        assert_eq!(resolution.status, "disabled");
+        assert!(resolution.catalog.is_none());
+        assert!(!resolution.path.exists());
+    }
+
+    #[test]
+    fn sources_none_bypasses_catalog_artifacts() {
+        let target = tempfile::tempdir().unwrap();
+        let input = BuildInput {
+            target: target.path().to_path_buf(),
+            context_mode: "auto".to_string(),
+            sources: vec!["none".to_string()],
+            ..BuildInput::default()
+        };
+        std::fs::create_dir_all(crate::workspace::workspace_state_root(target.path())).unwrap();
+        std::fs::write(
+            crate::workspace::workspace_state_root(target.path()).join("entry-points.json"),
+            "malformed but intentionally out of scope",
+        )
+        .unwrap();
+
+        let resolution = load_entry_point_catalog(&input).unwrap();
+
+        assert_eq!(resolution.status, "disabled");
+        assert!(resolution.catalog.is_none());
+    }
+
+    #[test]
+    fn context_off_honors_an_explicit_self_validating_catalog() {
+        let target = tempfile::tempdir().unwrap();
+        let mut surface = surface_row(
+            "one",
+            AttackSurfaceKind::HttpRoute,
+            "src/one.rs",
+            90,
+        );
+        surface.id = crate::workspace::attack_surface::attack_surface_id(&surface);
+        let mut catalog = catalog(vec![surface]);
+        catalog.target = target.path().canonicalize().unwrap().display().to_string();
+        catalog.provenance.revision = None;
+        catalog.provenance.revision_dirty = None;
+        catalog.provenance.context_snapshot_tree_hash = Some(
+            crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap(),
+        );
+        let path = crate::workspace::workspace_state_root(target.path()).join("entry-points.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, serde_json::to_vec_pretty(&catalog).unwrap()).unwrap();
+        let input = BuildInput {
+            target: target.path().to_path_buf(),
+            context_mode: "off".to_string(),
+            sources: vec!["entry-points".to_string()],
+            ..BuildInput::default()
+        };
+
+        let resolution = load_entry_point_catalog(&input).unwrap();
+
+        assert_eq!(resolution.status, "explicit");
+        assert_eq!(resolution.catalog.unwrap().total, 1);
     }
 
     #[test]

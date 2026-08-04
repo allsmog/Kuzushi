@@ -27,6 +27,8 @@ set -uo pipefail
 MODE=${1:---fast}
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
+# shellcheck source=scripts/devex/lib.sh
+. "$REPO_ROOT/scripts/devex/lib.sh"
 GATE_TARGET_DIR="$REPO_ROOT/target-dev"
 GATE_ROOT=${EVIDENCE_LOOP_GATE_ROOT:-"$HOME/kz-evidence-loop/phaseC"}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -35,6 +37,7 @@ mkdir -p "$RUN_DIR"
 LOG="$RUN_DIR/gate.log"
 VERDICT="$RUN_DIR/verdict.txt"
 FAILED=0
+REVIEW_REQUIRED=0
 
 say() { printf '%s\n' "$*" | tee -a "$LOG"; }
 fail() { FAILED=1; say "GATE-FAIL: $*"; }
@@ -117,13 +120,20 @@ run_crate_tests kuzushi-tui ''
 if [ "$MODE" = "--full" ]; then
   for journey in J21 J22 J23 J24; do
     say "JOURNEY $journey"
-    if KUZUSHI_BIN="$KUZUSHI_BIN" \
-       KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys" \
-       "$REPO_ROOT/scripts/devex/run-journey.sh" "$journey" >>"$LOG" 2>&1; then
-      say "PASS journey $journey ($(grep -h 'result:' "$RUN_DIR"/journeys/*/"$journey"/report.txt 2>/dev/null | tail -1))"
-    else
-      fail "journey $journey ($(grep -h 'result:' "$RUN_DIR"/journeys/*/"$journey"/report.txt 2>/dev/null | tail -1))"
-    fi
+    journey_rc=0
+    KUZUSHI_BIN="$KUZUSHI_BIN" \
+      KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys" \
+      "$REPO_ROOT/scripts/devex/run-journey.sh" "$journey" >>"$LOG" 2>&1 \
+      || journey_rc=$?
+    report_line=$(grep -h 'result:' "$RUN_DIR"/journeys/*/"$journey"/report.txt 2>/dev/null | tail -1)
+    case $journey_rc in
+      0) say "PASS journey $journey ($report_line)";;
+      "$DEVEX_REVIEW_REQUIRED_EXIT")
+        REVIEW_REQUIRED=1
+        say "REVIEW journey $journey — human judgment required ($report_line)"
+        ;;
+      *) fail "journey $journey ($report_line)";;
+    esac
   done
 fi
 
@@ -146,11 +156,21 @@ fi
     echo "  - provider capability: doctor probe unavailable (binary missing or doctor failed;"
     echo "    see doctor.txt if present) — no capability is claimed without a probe"
   fi
-  if [ $FAILED -eq 0 ]; then
-    echo "verdict: CLEAN"
-  else
+  if [ $FAILED -ne 0 ]; then
     echo "verdict: FAILED"
+  elif [ $REVIEW_REQUIRED -ne 0 ]; then
+    echo "verdict: REVIEW REQUIRED"
+  else
+    echo "verdict: CLEAN"
   fi
 } | tee "$VERDICT" | tee -a "$LOG" >/dev/null
-say "verdict: $([ $FAILED -eq 0 ] && echo CLEAN || echo FAILED) · artifacts: $RUN_DIR"
-exit $FAILED
+if [ $FAILED -ne 0 ]; then
+  say "verdict: FAILED · artifacts: $RUN_DIR"
+  exit 1
+fi
+if [ $REVIEW_REQUIRED -ne 0 ]; then
+  say "verdict: REVIEW REQUIRED · artifacts: $RUN_DIR"
+  exit "$DEVEX_REVIEW_REQUIRED_EXIT"
+fi
+say "verdict: CLEAN · artifacts: $RUN_DIR"
+exit 0

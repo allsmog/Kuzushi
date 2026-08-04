@@ -194,6 +194,36 @@ impl WorkbenchCache {
         )
     }
 
+    pub(crate) fn cached_json_file_version(&self, path: &Path) -> Option<u64> {
+        self.json_files.get(path).map(|cache| cache.version)
+    }
+
+    pub(crate) fn cached_json_file_content_sha256(&self, path: &Path) -> Option<String> {
+        self.json_files
+            .get(path)
+            .and_then(|cache| cache.content_sha256.clone())
+    }
+
+    pub(crate) fn cached_entry_point_catalog_authentication(
+        &self,
+        path: &Path,
+    ) -> Option<
+        Result<kuzushi_core::capabilities::entry_points::EntryPointCatalogAuthentication, String>,
+    > {
+        self.json_files
+            .get(path)
+            .and_then(|cache| cache.entry_point_catalog_authentication.clone())
+    }
+
+    pub(crate) fn cached_entry_point_catalog_context_authentication(
+        &self,
+        path: &Path,
+    ) -> Option<EntryPointCatalogContextAuthentication> {
+        self.json_files
+            .get(path)
+            .and_then(|cache| cache.entry_point_catalog_context_authentication.clone())
+    }
+
     pub(crate) fn cached_path_state(&self, target: &Path, path: &Path) -> ViewDataState<PathState> {
         if let Some(cache) = self.path_states.get(path) {
             return ViewDataState::Ready(cache.state);

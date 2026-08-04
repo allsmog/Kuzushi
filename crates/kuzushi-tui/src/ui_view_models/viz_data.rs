@@ -24,7 +24,9 @@ pub(crate) use dfd::{
     DfdOverviewFlow, DfdOverviewZone, DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow,
 };
 pub(crate) use entry_points::{
-    entry_point_breakdown, EntryPointBreakdown, EntryPointGroup, EntryPointItem, EntryPointTarget,
+    entry_point_breakdown, EntryPointArtifactStatus, EntryPointBreakdown, EntryPointComposition,
+    EntryPointCounts, EntryPointDisposition, EntryPointFreshness, EntryPointGroup, EntryPointItem,
+    EntryPointReceipt, EntryPointTarget,
 };
 pub(crate) use worklist::{worklist_model, LegendEntry, WorklistRowModel, WorklistViewModel};
 

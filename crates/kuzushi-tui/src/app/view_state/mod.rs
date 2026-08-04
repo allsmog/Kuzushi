@@ -122,10 +122,10 @@ pub use theme_picker::{
 };
 pub use update_available::{UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus};
 pub(crate) use workbench_cache::{
-    harness_file_path, DfdModelCacheKey, DirectoryListingState, JsonFileState, PathState,
-    ProjectScopeTreeState, PromptMutationsState, ReviewQueueCacheKey, RiskByModuleCacheKey,
-    StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey, WorkbenchCache,
-    WorklistCacheKey,
+    harness_file_path, DfdModelCacheKey, DirectoryListingState, EntryPointBreakdownCacheKey,
+    JsonFileState, PathState, ProjectScopeTreeState, PromptMutationsState, ReviewQueueCacheKey,
+    RiskByModuleCacheKey, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
+    WorkbenchCache, WorklistCacheKey,
 };
 #[cfg(test)]
 pub use workbench_review_state::ReviewCommand;

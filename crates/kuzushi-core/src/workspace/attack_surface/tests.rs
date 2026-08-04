@@ -773,6 +773,178 @@ mod tests {
     }
 
     #[test]
+    fn attack_surface_emits_only_registered_tauri_command_handlers() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"tauri-fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/commands.rs"),
+            r#"#[tauri::command]
+pub async fn load_packet(id: String) -> Result<(), String> { Ok(()) }
+
+#[tauri::command]
+/// Persists a packet.
+#[allow(clippy::needless_pass_by_value)]
+pub(crate) fn save_packet(packet: String) {}
+
+#[tauri::command]
+const ORPHAN: &str = "not a function";
+fn helper() {}
+"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/lib.rs"),
+            r#"#[tauri::command]
+fn local_status() {}
+
+fn setup() {
+    tauri::Builder::default().invoke_handler(
+        tauri::generate_handler![
+            crate::commands::load_packet,
+            local_status,
+        ],
+    );
+}
+"#,
+        )
+        .unwrap();
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+        let commands = map
+            .surfaces
+            .iter()
+            .filter(|surface| {
+                surface.metadata.pointer("/detector").and_then(Value::as_str)
+                    == Some("rust.tauri-command")
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(commands.len(), 2, "{:#?}", map.surfaces);
+        assert_tauri_command(&commands, "load_packet", "src/commands.rs", 2, 1);
+        assert_tauri_command(&commands, "local_status", "src/lib.rs", 2, 1);
+        assert!(commands
+            .iter()
+            .all(|surface| surface.route.as_deref() != Some("save_packet")));
+        assert!(commands.iter().all(|surface| surface.framework.as_deref() == Some("Tauri")));
+        assert!(commands.iter().all(|surface| {
+            surface.metadata["reachability"] == json!("registered")
+                && surface.metadata["registrationSites"].is_array()
+        }));
+    }
+
+    #[test]
+    fn annotated_tauri_command_without_registration_is_not_reachable_rpc() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"tauri-fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/lib.rs"),
+            "#[tauri::command]\nfn annotated_only() {}\n",
+        )
+        .unwrap();
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+
+        assert!(map.surfaces.iter().all(|surface| {
+            surface.metadata["detector"] != json!("rust.tauri-command")
+                && surface.boundary.as_deref() != Some("native_command")
+        }));
+    }
+
+    #[test]
+    fn qualified_tauri_registration_does_not_promote_same_named_command() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"tauri-fixture\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/alpha.rs"),
+            "#[tauri::command]\npub fn ping() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/beta.rs"),
+            "#[tauri::command]\npub fn ping() {}\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/lib.rs"),
+            "fn setup() { builder.invoke_handler(tauri::generate_handler![alpha::ping]); }\n",
+        )
+        .unwrap();
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+        let commands = map
+            .surfaces
+            .iter()
+            .filter(|surface| surface.metadata["detector"] == json!("rust.tauri-command"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(commands.len(), 1, "{:#?}", map.surfaces);
+        assert_eq!(commands[0].path, "src/alpha.rs");
+    }
+
+    #[test]
+    fn tauri_registration_does_not_cross_cargo_crate_scope() {
+        let temp = tempfile::tempdir().unwrap();
+        for crate_name in ["registered", "unregistered"] {
+            let source_dir = temp.path().join("crates").join(crate_name).join("src");
+            fs::create_dir_all(&source_dir).unwrap();
+            fs::write(
+                source_dir.join("lib.rs"),
+                if crate_name == "registered" {
+                    "#[tauri::command]\nfn ping() {}\nfn setup() { builder.invoke_handler(tauri::generate_handler![ping]); }\n"
+                } else {
+                    "#[tauri::command]\nfn ping() {}\n"
+                },
+            )
+            .unwrap();
+        }
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+        let commands = map
+            .surfaces
+            .iter()
+            .filter(|surface| surface.metadata["detector"] == json!("rust.tauri-command"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(commands.len(), 1, "{:#?}", map.surfaces);
+        assert_eq!(commands[0].path, "crates/registered/src/lib.rs");
+    }
+
+    fn assert_tauri_command(
+        commands: &[&AttackSurface],
+        name: &str,
+        path: &str,
+        function_line: u32,
+        attribute_line: u32,
+    ) {
+        let command = commands
+            .iter()
+            .find(|surface| surface.route.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("missing Tauri command {name}: {commands:#?}"));
+        assert_eq!(command.kind, AttackSurfaceKind::RpcHandler);
+        assert_eq!(command.path, path);
+        assert_eq!(command.line, Some(function_line));
+        assert_eq!(command.boundary.as_deref(), Some("native_command"));
+        assert!(command.evidence.contains(&format!("fn {name}")));
+        assert_eq!(command.metadata["handler"], json!(name));
+        assert_eq!(command.metadata["attributeLine"], json!(attribute_line));
+    }
+
+    #[test]
     fn attack_surface_promotes_go_fiber_routes_and_tenant_boundaries() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("svc")).unwrap();

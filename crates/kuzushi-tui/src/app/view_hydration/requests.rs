@@ -29,6 +29,7 @@ fn append_view_hydration_keys(app: &ShellApp, view: ShellView, keys: &mut Vec<Vi
         ShellView::Tune | ShellView::PromptsEditor => append_prompt_keys(app, keys),
         ShellView::Threat | ShellView::ThreatEditor | ShellView::Scene => {
             append_threat_model_key(app, keys);
+            append_entry_point_catalog_key(app, keys);
         }
         ShellView::RunDiff => append_run_diff_keys(app, keys),
         ShellView::Replay => append_replay_keys(app, keys, app.router.replay().run_id()),
@@ -105,6 +106,7 @@ fn append_module_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
 fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     append_latest_run_keys(app, keys);
     append_threat_model_key(app, keys);
+    append_entry_point_catalog_key(app, keys);
     append_selected_source_key(app, keys);
     append_scanned_snippet_key(app, keys);
     append_selected_proof_key(app, keys);
@@ -253,6 +255,18 @@ fn append_threat_model_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     };
     keys.push(ViewHydrationKey::JsonFile {
         path: kuzushi_core::capabilities::persistent_threat_model_path(target),
+    });
+}
+
+fn append_entry_point_catalog_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some(target) = app.target() else {
+        return;
+    };
+    keys.push(ViewHydrationKey::JsonFile {
+        path: kuzushi_core::workspace::workspace_state_root(target).join("entry-points.json"),
+    });
+    keys.push(ViewHydrationKey::JsonFile {
+        path: kuzushi_core::context_snapshot_path(target),
     });
 }
 

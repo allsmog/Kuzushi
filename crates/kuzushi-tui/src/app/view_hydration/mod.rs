@@ -212,7 +212,7 @@ pub(crate) enum ViewHydrationValue {
     StrategyQueue(StrategyQueueState),
     PromptMutations(PromptMutationsState),
     HarnessFile(Option<String>),
-    JsonFile(JsonFileState),
+    JsonFile(JsonFileHydration),
     PathState(PathState),
     DirectoryListing(DirectoryListingState),
     PromptOverrideHash(Result<Option<String>, String>),
@@ -222,6 +222,35 @@ pub(crate) enum ViewHydrationValue {
     CpgArtifacts(bool),
     ScanRecommendations(ScanRecommendationsState),
     TargetBase(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct JsonFileHydration {
+    pub(crate) state: JsonFileState,
+    pub(crate) content_sha256: Option<String>,
+    pub(crate) entry_point_catalog_authentication: Option<
+        Result<kuzushi_core::capabilities::entry_points::EntryPointCatalogAuthentication, String>,
+    >,
+    pub(crate) entry_point_catalog_context_authentication:
+        Option<EntryPointCatalogContextAuthentication>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum EntryPointCatalogContextAuthentication {
+    Authenticated(kuzushi_core::capabilities::entry_points::EntryPointCatalogAuthentication),
+    Rejected(String),
+    Unavailable(String),
+}
+
+impl JsonFileHydration {
+    pub(crate) fn state(state: JsonFileState) -> Self {
+        Self {
+            state,
+            content_sha256: None,
+            entry_point_catalog_authentication: None,
+            entry_point_catalog_context_authentication: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{DfdModel, RiskByModule, WorklistViewModel};
+use crate::ui_view_models::{DfdModel, EntryPointBreakdown, RiskByModule, WorklistViewModel};
 use audit_dataflow::FindingAuditDataflowCache;
 use cache_entries::{
     project_scope_tree_for_target, run_summary_index_from_entries, CompletionValuesCache,
@@ -54,8 +54,8 @@ pub(crate) use cache_entries::{
     StrategyQueueState,
 };
 pub(crate) use view_model_fragments::{
-    DfdModelCacheKey, ReviewQueueCacheKey, RiskByModuleCacheKey, VisibleFindingProjection,
-    VisibleFindingsCacheKey, WorklistCacheKey,
+    DfdModelCacheKey, EntryPointBreakdownCacheKey, ReviewQueueCacheKey, RiskByModuleCacheKey,
+    VisibleFindingProjection, VisibleFindingsCacheKey, WorklistCacheKey,
 };
 
 #[derive(Debug, Default)]
@@ -81,6 +81,7 @@ pub(crate) struct WorkbenchCache {
     prompt_mutations: Option<PromptMutationsCache>,
     harness_file: Option<HarnessFileCache>,
     json_files: BTreeMap<PathBuf, JsonFileCache>,
+    json_file_generation: u64,
     path_states: BTreeMap<PathBuf, PathStateCache>,
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
     run_projections: BTreeMap<(PathBuf, String), RunProjectionCache>,
@@ -692,11 +693,16 @@ impl WorkbenchCache {
             return cache.state.clone();
         }
         let state = read_json_file(path);
+        self.json_file_generation = self.json_file_generation.wrapping_add(1).max(1);
         insert_bounded(
             &mut self.json_files,
             path.to_path_buf(),
             JsonFileCache {
                 state: state.clone(),
+                version: self.json_file_generation,
+                content_sha256: None,
+                entry_point_catalog_authentication: None,
+                entry_point_catalog_context_authentication: None,
             },
             MAX_PATH_CACHE_ENTRIES,
         );
@@ -814,6 +820,21 @@ impl WorkbenchCache {
 
     pub(crate) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
         self.view_models.cache_dfd_model(key, model);
+    }
+
+    pub(crate) fn entry_point_breakdown(
+        &self,
+        key: &EntryPointBreakdownCacheKey,
+    ) -> Option<Arc<EntryPointBreakdown>> {
+        self.view_models.entry_point_breakdown(key)
+    }
+
+    pub(crate) fn cache_entry_point_breakdown(
+        &mut self,
+        key: EntryPointBreakdownCacheKey,
+        model: Arc<EntryPointBreakdown>,
+    ) {
+        self.view_models.cache_entry_point_breakdown(key, model);
     }
 }
 

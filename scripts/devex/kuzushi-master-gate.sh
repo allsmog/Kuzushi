@@ -23,6 +23,8 @@ set -uo pipefail
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 LOCAL_GATE="$REPO_ROOT/scripts/devex/local-monorepo-gate.sh"
 JOURNEY_DIR="$REPO_ROOT/scripts/devex/journeys"
+# shellcheck source=scripts/devex/lib.sh
+. "$REPO_ROOT/scripts/devex/lib.sh"
 
 CYCLE="" MODE=""
 while [ $# -gt 0 ]; do
@@ -42,6 +44,7 @@ case $MODE in
 esac
 
 FAILED=0
+REVIEW_REQUIRED=0
 note() { printf 'master-gate: %s\n' "$*"; }
 flunk() { FAILED=1; note "FAIL: $*"; }
 
@@ -139,11 +142,16 @@ audit_whole_catalog() {
 
 # ---------------------------------------------------------------- modes
 delegate() { # <local-gate mode> [extra args]
-  local mode=$1; shift || true
+  local mode=$1 rc=0; shift || true
   GATE_FAST_TESTS="$FAST_TESTS" \
   GATE_FAST_JOURNEYS="$FAST_JOURNEYS" \
   GATE_FULL_JOURNEYS="$FULL_JOURNEYS" \
-    "$LOCAL_GATE" "$mode" "$@" || FAILED=1
+    "$LOCAL_GATE" "$mode" "$@" || rc=$?
+  case $rc in
+    0) ;;
+    "$DEVEX_REVIEW_REQUIRED_EXIT") REVIEW_REQUIRED=1;;
+    *) FAILED=1;;
+  esac
 }
 
 FAST_TESTS=$(tests_for_cycle "$CYCLE")
@@ -209,9 +217,13 @@ case $MODE in
     ;;
 esac
 
-if [ $FAILED -eq 0 ]; then
-  note "verdict: CLEAN (cycle=$CYCLE mode=$MODE)"
-else
+if [ $FAILED -ne 0 ]; then
   note "verdict: FAILED (cycle=$CYCLE mode=$MODE)"
+  exit 1
+elif [ $REVIEW_REQUIRED -ne 0 ]; then
+  note "verdict: REVIEW REQUIRED (cycle=$CYCLE mode=$MODE)"
+  exit "$DEVEX_REVIEW_REQUIRED_EXIT"
+else
+  note "verdict: CLEAN (cycle=$CYCLE mode=$MODE)"
 fi
-exit $FAILED
+exit 0

@@ -374,8 +374,8 @@ impl WorkbenchCache {
             (ViewHydrationKey::HarnessFile, ViewHydrationValue::HarnessFile(contents)) => {
                 self.harness_file = Some(HarnessFileCache { target, contents });
             }
-            (ViewHydrationKey::JsonFile { path }, ViewHydrationValue::JsonFile(state)) => {
-                self.store_json_file(path, state);
+            (ViewHydrationKey::JsonFile { path }, ViewHydrationValue::JsonFile(hydration)) => {
+                self.store_json_file(path, hydration);
             }
             (ViewHydrationKey::PathState { path }, ViewHydrationValue::PathState(state)) => {
                 self.store_path_state(path, state);
@@ -394,11 +394,19 @@ impl WorkbenchCache {
         }
     }
 
-    fn store_json_file(&mut self, path: PathBuf, state: JsonFileState) {
+    fn store_json_file(&mut self, path: PathBuf, hydration: JsonFileHydration) {
+        self.json_file_generation = self.json_file_generation.wrapping_add(1).max(1);
         insert_bounded(
             &mut self.json_files,
             path,
-            JsonFileCache { state },
+            JsonFileCache {
+                state: hydration.state,
+                version: self.json_file_generation,
+                content_sha256: hydration.content_sha256,
+                entry_point_catalog_authentication: hydration.entry_point_catalog_authentication,
+                entry_point_catalog_context_authentication: hydration
+                    .entry_point_catalog_context_authentication,
+            },
             MAX_PATH_CACHE_ENTRIES,
         );
     }
@@ -501,5 +509,43 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::CpgArtifacts
         | ViewHydrationKey::ScanRecommendations
         | ViewHydrationKey::TargetBase => HydrationGroup::Status,
+    }
+}
+
+#[cfg(test)]
+mod entry_point_authentication_tests {
+    use super::*;
+
+    #[test]
+    fn catalog_authentication_from_worker_is_cached_without_recomputation() {
+        let target = PathBuf::from("/target");
+        let path = kuzushi_core::workspace::workspace_state_root(&target).join("entry-points.json");
+        let mut cache = WorkbenchCache::default();
+
+        cache.apply_view_hydration(ViewHydrationResult {
+            target: target.clone(),
+            key: ViewHydrationKey::JsonFile { path: path.clone() },
+            value: ViewHydrationValue::JsonFile(JsonFileHydration {
+                state: JsonFileState::Present(serde_json::json!({"entryPoints": []})),
+                content_sha256: None,
+                entry_point_catalog_authentication: Some(Err("worker auth".to_string())),
+                entry_point_catalog_context_authentication: Some(
+                    EntryPointCatalogContextAuthentication::Unavailable(
+                        "worker context auth".to_string(),
+                    ),
+                ),
+            }),
+        });
+
+        assert!(matches!(
+            cache.cached_entry_point_catalog_authentication(&path),
+            Some(Err(error)) if error == "worker auth"
+        ));
+        assert!(cache.cached_json_file_version(&path).is_some());
+        assert!(matches!(
+            cache.cached_entry_point_catalog_context_authentication(&path),
+            Some(EntryPointCatalogContextAuthentication::Unavailable(error))
+                if error == "worker context auth"
+        ));
     }
 }

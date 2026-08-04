@@ -22,15 +22,18 @@
 #   * KUZUSHI_MONOREPO_ALIAS is optional; defaults to the target basename.
 #   * Existing <target>/.kuzushi engagement state is inventoried, never
 #     deleted to manufacture a clean test state.
-#   * Target revision + dirty state are recorded before and after every
-#     journey batch; a change is classified TARGET DRIFT, not an error to
-#     reset away.
+#   * Target revision + dirty state are recorded around every journey batch;
+#     each real-target journey additionally authenticates complete porcelain-v2
+#     status and actual source bytes/state with `.git` and `.kuzushi` excluded.
+#     Drift is reported, never reset.
 set -uo pipefail
 
 MODE=${1:---fast}
 PARITY_PATH=${2:-}
 REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
+# shellcheck source=scripts/devex/lib.sh
+. "$REPO_ROOT/scripts/devex/lib.sh"
 
 GATE_ROOT=${KUZUSHI_MONOREPO_GATE_ROOT:-"$HOME/kz-local-monorepo"}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
@@ -40,6 +43,7 @@ LOG="$RUN_DIR/gate.log"
 VERDICT="$RUN_DIR/verdict.txt"
 FAILED=0
 DRIFTED=0
+REVIEW_REQUIRED=0
 
 say()  { printf '%s\n' "$*" | tee -a "$LOG"; }
 fail() { FAILED=1; say "GATE-FAIL: $*"; }
@@ -79,8 +83,10 @@ record_target_provenance() { # <label>
     printf '  "existing_kuzushi_state": "%s",\n' "$( [ -d "$TARGET_REAL/.kuzushi" ] && echo present || echo absent )"
     printf '  "kuzushi_head": "%s",\n' "$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)"
     printf '  "kuzushi_dirty_entries": %s,\n' "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
-    printf '  "binary": "%s",\n' "$KUZUSHI_BIN"
-    printf '  "binary_sha256": "%s",\n' "$( [ -f "$KUZUSHI_BIN" ] && sha256sum "$KUZUSHI_BIN" | awk '{print $1}' || echo unbuilt )"
+    printf '  "native_binary": "%s",\n' "$KUZUSHI_NATIVE_BIN"
+    printf '  "native_binary_sha256": "%s",\n' "$( [ -f "$KUZUSHI_NATIVE_BIN" ] && devex_file_sha256 "$KUZUSHI_NATIVE_BIN" || echo unbuilt )"
+    printf '  "journey_wrapper": "%s",\n' "${KUZUSHI_WRAPPER_BIN:-unavailable}"
+    printf '  "journey_wrapper_sha256": "%s",\n' "$( [ -f "${KUZUSHI_WRAPPER_BIN:-}" ] && devex_file_sha256 "$KUZUSHI_WRAPPER_BIN" || echo unavailable )"
     printf '  "tmux": "%s",\n' "$(tmux -V 2>/dev/null || echo unavailable)"
     printf '  "rust": "%s"\n' "$(rustc --version 2>/dev/null || echo unavailable)"
     printf '}\n'
@@ -88,15 +94,47 @@ record_target_provenance() { # <label>
   say "provenance[$1]: $out"
 }
 
-REV_BEFORE=""
-drift_checkpoint_begin() {
-  REV_BEFORE="$(target_revision):$(target_dirty)"
+REV_BEFORE="" SOURCE_STATUS_BEFORE="" SOURCE_TREE_BEFORE=""
+CAPTURED_SOURCE_STATUS="" CAPTURED_SOURCE_TREE=""
+capture_batch_source_state() { # <label> <before|after>
+  local label=$1 point=$2 status_receipt tree_receipt
+  status_receipt="$RUN_DIR/target-$label-$point.source-status.txt"
+  tree_receipt="$RUN_DIR/target-$label-$point.source-tree.txt"
+  devex_capture_target_source_status "$TARGET_REAL" "$status_receipt" || return 1
+  devex_capture_target_source_tree "$TARGET_REAL" "$tree_receipt" || return 1
+  CAPTURED_SOURCE_STATUS=$(devex_file_sha256 "$status_receipt")
+  CAPTURED_SOURCE_TREE=$(devex_file_sha256 "$tree_receipt")
+  [ "$CAPTURED_SOURCE_STATUS" != unavailable ] \
+    && [ "$CAPTURED_SOURCE_TREE" != unavailable ]
+}
+
+drift_checkpoint_begin() { # <label>
+  REV_BEFORE=$(target_revision)
+  if capture_batch_source_state "$1" before; then
+    SOURCE_STATUS_BEFORE=$CAPTURED_SOURCE_STATUS
+    SOURCE_TREE_BEFORE=$CAPTURED_SOURCE_TREE
+  else
+    SOURCE_STATUS_BEFORE=unavailable
+    SOURCE_TREE_BEFORE=unavailable
+    fail "cannot authenticate target source state for $1/before"
+  fi
 }
 drift_checkpoint_end() { # <label>
-  local now="$(target_revision):$(target_dirty)"
-  if [ "$now" != "$REV_BEFORE" ]; then
+  local now source_status_after source_tree_after
+  now=$(target_revision)
+  if capture_batch_source_state "$1" after; then
+    source_status_after=$CAPTURED_SOURCE_STATUS
+    source_tree_after=$CAPTURED_SOURCE_TREE
+  else
+    source_status_after=unavailable
+    source_tree_after=unavailable
+    fail "cannot authenticate target source state for $1/after"
+  fi
+  if ! devex_target_state_unchanged \
+      "$REV_BEFORE" "$SOURCE_STATUS_BEFORE" "$SOURCE_TREE_BEFORE" \
+      "$now" "$source_status_after" "$source_tree_after"; then
     DRIFTED=1
-    say "TARGET-DRIFT[$1]: $REV_BEFORE -> $now (captures preserved; journey classified TARGET DRIFT, not reset)"
+    fail "TARGET-DRIFT[$1]: $REV_BEFORE/$SOURCE_STATUS_BEFORE/$SOURCE_TREE_BEFORE -> $now/$source_status_after/$source_tree_after (captures preserved; .git/.kuzushi excluded)"
     record_target_provenance "drift-$1"
   fi
 }
@@ -114,10 +152,16 @@ inventory_kuzushi_state() { # <label>
 }
 
 # ---------------------------------------------------------------- build
-KUZUSHI_BIN="$REPO_ROOT/target/debug/kuzushi"
+KUZUSHI_NATIVE_BIN="$REPO_ROOT/target/debug/kuzushi"
+KUZUSHI_BIN="$KUZUSHI_NATIVE_BIN"
+KUZUSHI_WRAPPER_BIN=${KUZUSHI_WRAPPER_BIN:-$(command -v kz 2>/dev/null || true)}
 build_once() {
   if ! cargo build -p kuzushi-cli >>"$LOG" 2>&1; then
     fail "cargo build -p kuzushi-cli"
+    return 1
+  fi
+  if [ ! -x "$KUZUSHI_WRAPPER_BIN" ]; then
+    fail "installed kz wrapper is required for operator journeys"
     return 1
   fi
   say "PASS build ($KUZUSHI_BIN)"
@@ -129,21 +173,34 @@ build_once() {
 # JOURNEY_RECORD_ONLY=1 to log outcomes without flipping the gate verdict.
 JOURNEY_RECORD_ONLY=0
 run_journeys() { # <label> <journey ids...>
-  local label=$1; shift
-  drift_checkpoint_begin
+  local label=$1 journey_rc report_line review_count; shift
+  drift_checkpoint_begin "$label"
   for journey in "$@"; do
     say "JOURNEY $journey"
-    if KUZUSHI_BIN="$KUZUSHI_BIN" \
-       KUZUSHI_DEVEX_TARGET="$TARGET_REAL" \
-       KUZUSHI_MONOREPO_ALIAS="$ALIAS" \
-       KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys-$label" \
-       "$REPO_ROOT/scripts/devex/run-journey.sh" "$journey" >>"$LOG" 2>&1; then
-      say "PASS journey $journey ($(grep -h 'result:' "$RUN_DIR/journeys-$label"/*/"$journey"/report.txt 2>/dev/null | tail -1))"
-    elif [ "$JOURNEY_RECORD_ONLY" = 1 ]; then
-      say "RECORDED journey $journey with failing checks — baseline evidence ($(grep -h 'result:' "$RUN_DIR/journeys-$label"/*/"$journey"/report.txt 2>/dev/null | tail -1))"
-    else
-      fail "journey $journey ($(grep -h 'result:' "$RUN_DIR/journeys-$label"/*/"$journey"/report.txt 2>/dev/null | tail -1))"
-    fi
+    journey_rc=0
+    KUZUSHI_NATIVE_BIN="$KUZUSHI_NATIVE_BIN" \
+      KUZUSHI_BIN="$KUZUSHI_WRAPPER_BIN" \
+      KUZUSHI_DEVEX_TARGET="$TARGET_REAL" \
+      KUZUSHI_MONOREPO_ALIAS="$ALIAS" \
+      KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys-$label" \
+      "$REPO_ROOT/scripts/devex/run-journey.sh" "$journey" >>"$LOG" 2>&1 \
+      || journey_rc=$?
+    report_line=$(grep -h 'result:' "$RUN_DIR/journeys-$label"/*/"$journey"/report.txt 2>/dev/null | tail -1)
+    review_count=$(devex_report_review_count "$report_line")
+    [ "$review_count" -gt 0 ] && REVIEW_REQUIRED=1
+    case $journey_rc in
+      0) say "PASS journey $journey ($report_line)";;
+      "$DEVEX_REVIEW_REQUIRED_EXIT")
+        say "REVIEW journey $journey — human judgment required ($report_line)"
+        ;;
+      *)
+        if [ "$JOURNEY_RECORD_ONLY" = 1 ]; then
+          say "RECORDED journey $journey with failing checks — baseline evidence ($report_line)"
+        else
+          fail "journey $journey ($report_line)"
+        fi
+        ;;
+    esac
   done
   drift_checkpoint_end "$label"
 }
@@ -256,17 +313,24 @@ kuzushi-core --lib capabilities::scan_recommender"}
     # shellcheck disable=SC2086
     run_journeys full ${GATE_FULL_JOURNEYS:-J17 J25 J26 J27}
     # Responsive matrix on the identity journey.
-    drift_checkpoint_begin
+    drift_checkpoint_begin matrix
     for size in 160x48 120x36 104x61 80x24 60x20; do
       say "MATRIX J25 @ $size"
-      if KUZUSHI_BIN="$KUZUSHI_BIN" KUZUSHI_DEVEX_TARGET="$TARGET_REAL" \
-         KUZUSHI_MONOREPO_ALIAS="$ALIAS" \
-         KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/matrix-$size" \
-         "$REPO_ROOT/scripts/devex/run-journey.sh" --size "$size" J25 >>"$LOG" 2>&1; then
-        say "PASS matrix J25 @ $size"
-      else
-        fail "matrix J25 @ $size"
-      fi
+      matrix_rc=0
+      KUZUSHI_NATIVE_BIN="$KUZUSHI_NATIVE_BIN" \
+        KUZUSHI_BIN="$KUZUSHI_WRAPPER_BIN" KUZUSHI_DEVEX_TARGET="$TARGET_REAL" \
+        KUZUSHI_MONOREPO_ALIAS="$ALIAS" \
+        KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/matrix-$size" \
+        "$REPO_ROOT/scripts/devex/run-journey.sh" --size "$size" J25 >>"$LOG" 2>&1 \
+        || matrix_rc=$?
+      case $matrix_rc in
+        0) say "PASS matrix J25 @ $size";;
+        "$DEVEX_REVIEW_REQUIRED_EXIT")
+          REVIEW_REQUIRED=1
+          say "REVIEW matrix J25 @ $size — human judgment required"
+          ;;
+        *) fail "matrix J25 @ $size";;
+      esac
     done
     drift_checkpoint_end matrix
     if ! git diff --check >>"$LOG" 2>&1; then fail "git diff --check"; else say "PASS git diff --check"; fi
@@ -295,11 +359,21 @@ kuzushi-core --lib capabilities::scan_recommender"}
       say "primary: $local_rev (dirty=$(target_dirty)) · parity: $other_rev (dirty=$other_dirty)"
       if [ "$local_rev" = "$other_rev" ] && [ "$(target_dirty)" = "0" ] && [ "$other_dirty" = "0" ]; then
         say "revisions equivalent — running parity journey against second path"
-        KUZUSHI_DEVEX_TARGET="$PARITY_PATH" KUZUSHI_MONOREPO_ALIAS="$(basename "$PARITY_PATH")" \
-          KUZUSHI_BIN="$KUZUSHI_BIN" \
+        parity_rc=0
+        KUZUSHI_NATIVE_BIN="$KUZUSHI_NATIVE_BIN" \
+          KUZUSHI_DEVEX_TARGET="$PARITY_PATH" KUZUSHI_MONOREPO_ALIAS="$(basename "$PARITY_PATH")" \
+          KUZUSHI_BIN="$KUZUSHI_WRAPPER_BIN" \
           KUZUSHI_DEVEX_ARTIFACT_ROOT="$RUN_DIR/journeys-parity" \
           "$REPO_ROOT/scripts/devex/run-journey.sh" J25 >>"$LOG" 2>&1 \
-          && say "PASS parity journey J25" || fail "parity journey J25"
+          || parity_rc=$?
+        case $parity_rc in
+          0) say "PASS parity journey J25";;
+          "$DEVEX_REVIEW_REQUIRED_EXIT")
+            REVIEW_REQUIRED=1
+            say "REVIEW parity journey J25 — human judgment required"
+            ;;
+          *) fail "parity journey J25";;
+        esac
       else
         say "EXPECTED REVISION DRIFT: the two checkouts are at different revisions/dirty states — reporting drift instead of a false mismatch"
       fi
@@ -317,7 +391,21 @@ esac
   echo "kuzushi: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
   echo "completed: $(date -u +%FT%TZ)"
   [ "$DRIFTED" = 1 ] && echo "target drift observed during this run (see TARGET-DRIFT lines)"
-  if [ $FAILED -eq 0 ]; then echo "verdict: CLEAN"; else echo "verdict: FAILED"; fi
+  if [ $FAILED -ne 0 ]; then
+    echo "verdict: FAILED"
+  elif [ $REVIEW_REQUIRED -ne 0 ]; then
+    echo "verdict: REVIEW REQUIRED"
+  else
+    echo "verdict: CLEAN"
+  fi
 } | tee "$VERDICT" | tee -a "$LOG" >/dev/null
-say "verdict: $([ $FAILED -eq 0 ] && echo CLEAN || echo FAILED) · artifacts: $RUN_DIR"
-exit $FAILED
+if [ $FAILED -ne 0 ]; then
+  say "verdict: FAILED · artifacts: $RUN_DIR"
+  exit 1
+fi
+if [ $REVIEW_REQUIRED -ne 0 ]; then
+  say "verdict: REVIEW REQUIRED · artifacts: $RUN_DIR"
+  exit "$DEVEX_REVIEW_REQUIRED_EXIT"
+fi
+say "verdict: CLEAN · artifacts: $RUN_DIR"
+exit 0

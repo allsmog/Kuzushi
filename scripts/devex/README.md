@@ -10,7 +10,10 @@ signifier↔state↔intent review.
 ## Run it
 
 ```bash
-cargo build -p kuzushi-cli              # harness drives target/debug/kuzushi
+cargo build -p kuzushi-cli
+KUZUSHI_NATIVE_BIN="$PWD/target/debug/kuzushi" \
+  KUZUSHI_BIN="$(command -v kz)" \
+  ./scripts/devex/run-journey.sh J25    # real journey: wrapper → exact build
 
 ./scripts/devex/run-journey.sh --list   # journey catalog
 ./scripts/devex/run-journey.sh J1       # one journey
@@ -18,12 +21,17 @@ cargo build -p kuzushi-cli              # harness drives target/debug/kuzushi
 ./scripts/devex/run-journey.sh all      # J1..J17
 ./scripts/devex/run-journey.sh --size 80x24 J14   # environment-matrix cell
 ./scripts/devex/run-journey.sh --artifact-root /tmp/kuzushi-audit J17
+./scripts/devex/test-harness-contracts.sh          # no TUI; evidence-contract tests
 ```
 
 Overrides:
 
 - `KUZUSHI_BIN=<path>` (or `--bin <path>`) — binary to drive (default
   `target/debug/kuzushi`).
+- `KUZUSHI_NATIVE_BIN=<path>` — native binary delegated to by the installed
+  `kz` wrapper. Real-target journeys can require this wrapper flow and record
+  both executable identities instead of treating the wrapper hash as the
+  native hash.
 - `KUZUSHI_DEVEX_TARGET=<dir>` — what the `@TARGET` token points at (default:
   a tiny seeded fixture repo per journey).
 - `KUZUSHI_DEVEX_ARTIFACT_ROOT=<dir>` (or `--artifact-root <dir>`) — capture
@@ -43,9 +51,13 @@ symlinks the newest run):
 
 - `NN-<label>.txt` — plain pane capture (content / honesty audit)
 - `NN-<label>.ansi` — capture with escape sequences (palette audit, J15)
-- `NN-<label>.provenance.json` — capture kind, exact binary identity, Git
-  state, target context, profile, requested/actual dimensions, tmux state, and
-  journey step
+- `NN-<label>.provenance.json` — capture kind, wrapper and delegated-native
+  identities, Kuzushi Git state, target context, profile, requested/actual
+  dimensions, tmux state, and journey step
+- `target-{before,after}.source-status.txt` and adjacent `.provenance.json` —
+  canonical real-target path, HEAD, and source-status digest with `.kuzushi`
+  excluded. Journeys that require `KUZUSHI_DEVEX_TARGET` fail if either HEAD or
+  source status drifts.
 - `report.txt` — the PASS / FAIL / REVIEW log for the journey
 - `fixture-target/`, `home/` — the seeded target repo and temp `$HOME`, kept
   for inspection
@@ -56,9 +68,10 @@ Three kinds of checkpoint, deliberately distinct:
 
 - **PASS/FAIL** — `expect:` / `expect-not:` / `wait-for:` substring checks a
   machine can honestly decide against the captured pane.
-- **REVIEW** — `ask:` lines. Judgment calls (the signifier↔state↔intent
-  invariant) are emitted as open questions next to their snapshot. The
-  harness never converts these into a verdict.
+- **REVIEW REQUIRED** — `ask:` lines. Judgment calls (the
+  signifier↔state↔intent invariant) are emitted as open questions next to their
+  snapshot. The harness never converts these into PASS; they remain a distinct
+  result until a human records the judgments.
 - **SKIP** — missing required env (e.g. no API key). Reported, not hidden.
 
 Color-profile checks read the ANSI capture directly. J15 requires indexed
@@ -66,7 +79,11 @@ SGR (`38;5` / `48;5`) for its xterm-256color launch and RGB SGR (`38;2` /
 `48;2`) for truecolor launches; inherited `NO_COLOR` is explicitly removed
 before each matrix cell.
 
-Exit code is non-zero iff any machine check failed.
+Exit code `0` means every machine check passed and no human judgment is open;
+`1` means a machine check failed; `3` is the internal per-journey skip status;
+and `4` means machine checks passed but REVIEW judgment is still required.
+Acceptance wrappers preserve exit `4` as `REVIEW REQUIRED`, never `PASS` or
+`CLEAN`.
 
 ## Adding or editing a journey
 
@@ -81,6 +98,7 @@ cwd: @TMP_TARGET                   # working dir for the session
 env: HOME=@TMP_HOME K=V            # env for the NEXT launch only
 env-unset: ANTHROPIC_API_KEY       # unset for the NEXT launch only
 require-any-env: ANTHROPIC_API_KEY OPENAI_API_KEY   # else SKIP (require-env = all)
+require-wrapper-flow:                # if KUZUSHI_NATIVE_BIN is set, require kz
 shell: printf 'x' > @ART/seed.txt  # host-side setup command
 launch: --target @TARGET           # kuzushi <args>; empty = bare launch
 launch-raw: @KUZUSHI demo | cat    # full shell line (pipes, --plain)
@@ -124,6 +142,9 @@ Notes:
   `scripts/devex/artifacts` untouched.
 - Keep `expect:` for stable, load-bearing strings; use `ask:` for anything
   that needs eyes. Don't fake judgment as assertion.
+- A journey with `require-env: KUZUSHI_DEVEX_TARGET` automatically records and
+  compares target HEAD and source status before/after. Normal `.kuzushi` writes
+  are excluded; any target-source or Git drift is a machine failure.
 - macOS keychain / OAuth-cached credentials cannot be masked by `env-unset:`;
   keyless journeys note this caveat inline.
 

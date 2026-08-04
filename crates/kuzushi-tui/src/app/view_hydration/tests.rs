@@ -89,7 +89,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::PromptMutations(PromptMutationsState::Ready(Vec::new()))
         }
         ViewHydrationKey::HarnessFile => ViewHydrationValue::HarnessFile(None),
-        ViewHydrationKey::JsonFile { .. } => ViewHydrationValue::JsonFile(JsonFileState::Missing),
+        ViewHydrationKey::JsonFile { .. } => {
+            ViewHydrationValue::JsonFile(JsonFileHydration::state(JsonFileState::Missing))
+        }
         ViewHydrationKey::PathState { .. } => ViewHydrationValue::PathState(PathState::Missing),
         ViewHydrationKey::DirectoryListing { .. } => {
             ViewHydrationValue::DirectoryListing(DirectoryListingState::Missing)
@@ -193,6 +195,31 @@ fn workbench_hydrates_the_map_artifact_state() {
     app.set_shell_view(ShellView::Workbench);
 
     assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::MapArtifacts));
+}
+
+#[test]
+fn entry_point_surfaces_hydrate_catalog_context_and_threat_model_together() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let catalog =
+        kuzushi_core::workspace::workspace_state_root(workspace.root()).join("entry-points.json");
+    let threat_model = kuzushi_core::capabilities::persistent_threat_model_path(workspace.root());
+    let context = kuzushi_core::context_snapshot_path(workspace.root());
+
+    for view in [ShellView::Workbench, ShellView::Scene] {
+        app.set_shell_view(view);
+        let keys = active_view_hydration_keys(&app);
+        assert!(keys.contains(&ViewHydrationKey::JsonFile {
+            path: catalog.clone(),
+        }));
+        assert!(keys.contains(&ViewHydrationKey::JsonFile {
+            path: threat_model.clone(),
+        }));
+        assert!(keys.contains(&ViewHydrationKey::JsonFile {
+            path: context.clone(),
+        }));
+    }
 }
 
 #[test]

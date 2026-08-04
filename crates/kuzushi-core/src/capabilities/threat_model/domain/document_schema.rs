@@ -262,14 +262,14 @@ fn output_contract_section() -> &'static str {
 - dfd.flows with id, description, sourceId, targetId, trustBoundaryIds
 - dfd.trustBoundaries with id, name, innerZone, outerZone, crossingFlowIds
 - Every id across dfd.nodes, dfd.flows, and dfd.trustBoundaries must be globally unique. Every sourceId, targetId, trustBoundaryIds item, and crossingFlowIds item must resolve to an emitted DFD element of the expected type.
-- threats with id, targetElementIds, category, title, description, actor, surface, asset, attackVector, preconditions, impact, likelihood, status, existingMitigations, missingMitigations, recommendedMitigation, relatedCwe, affectedFiles, evidence
+- threats with id, targetElementIds, entryPointIds, category, title, description, actor, surface, asset, attackVector, preconditions, impact, likelihood, status, existingMitigations, missingMitigations, recommendedMitigation, relatedCwe, affectedFiles, evidence. When a threat covers a grounded AS-* row, entryPointIds must contain that exact stable id.
   - actor is your judgment from the closed set: remote_unauth | remote_auth | adjacent_network | local_user | local_admin | supply_chain | insider
   - impact from: low | medium | high | critical | existential
   - likelihood from: very_rare | rare | possible | likely | almost_certain — score the residual likelihood after existing controls; evidence raises likelihood, it is not the threat
   - status from: unmitigated | partially_mitigated | mitigated | risk_accepted
   - do not emit displayId; display ids are assigned deterministically and persist across refines
 - assets with id (A-*), targetElementIds, asset, description, sensitivity (low | medium | high | critical) for the data and capabilities an attacker would target
-- deprioritized with entryPoint or boundary, reason, and evidence when a covered surface has no material threat
+- deprioritized with entryPointId (the exact grounded AS-* id), entryPoint or boundary, reason, and evidence when a covered surface has no material threat
 - openQuestions for uncertain architecture/security facts
 - provenance with source labels used and any source confidence notes
 - recommendedMitigations as structured rows {mitigation, threatIds, closesClass: yes|partial, effort: S|M|L} for class-level controls across related threats

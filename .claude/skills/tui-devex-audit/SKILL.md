@@ -14,7 +14,9 @@ adds the judgment pass the harness deliberately refuses to fake.
 
 ```bash
 cargo build -p kuzushi-cli   # only if target/debug/kuzushi is stale/missing
-./scripts/devex/run-journey.sh <args>
+KUZUSHI_NATIVE_BIN="$PWD/target/debug/kuzushi" \
+  KUZUSHI_BIN="$(command -v kz)" \
+  ./scripts/devex/run-journey.sh <args>
 ```
 
 - Args given to the skill are journey ids (`J1 J8`, `all`, `--size 60x20 J14`).
@@ -40,6 +42,10 @@ palette questions) and judge it with the lenses from
 A journey fails the audit if the operator would get stuck, misled, or
 dead-ended — even when every machine check passed. `[FAIL]` lines from the
 harness are hard findings; do not explain them away.
+
+The harness exits `4` while any `[REVIEW]` item remains open. Treat that as
+`REVIEW REQUIRED`, not a machine failure and never a pass; answer every item
+before issuing the final journey verdict.
 
 ## 3. Report
 

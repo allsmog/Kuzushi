@@ -61,6 +61,7 @@ fn build_single_threat_model(
     let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let grounding = load_prompt_grounding(&input, ctx)?;
+    source_bundle.authenticate_entry_point_sources(&grounding.entry_point_catalog.receipt)?;
     emit_grounding_loaded(ctx, verb, &grounding);
     emit_seed_disclosure(ctx, verb, &input);
     let generated = generate_threat_model_document(
@@ -142,15 +143,8 @@ fn finish_agentic_threat_model(
     source_bundle: ThreatModelSourceBundle,
     grounding: PromptGrounding,
 ) -> Result<Value> {
-    stamp_provenance(&mut generated.document, &input.target, "single");
-    let coverage = check_coverage(&generated.document, &grounding.surfaces);
-    let parked = park_unaccounted(&mut generated.document, &coverage.gaps);
-    apply_coverage(
-        &mut generated.document,
-        &coverage,
-        single_pipeline_gap_fill_method(&coverage),
-        parked,
-    );
+    let (coverage, parked) =
+        finalize_single_document(&mut generated.document, &input.target, &grounding)?;
     emit_coverage_checked(ctx, verb, &coverage);
     let reconciliation = BuildReconciliation::from_report(
         &coverage,
@@ -167,6 +161,29 @@ fn finish_agentic_threat_model(
         source_bundle,
         reconciliation,
     )
+}
+
+fn finalize_single_document(
+    document: &mut Value,
+    target: &Path,
+    grounding: &PromptGrounding,
+) -> Result<(CoverageReport, usize)> {
+    restore_grounded_entry_point_facts(
+        document,
+        &grounding.surfaces,
+        &grounding.entry_point_catalog.catalog_surfaces,
+    )?;
+    stamp_provenance(document, target, "single");
+    let coverage = check_coverage(document, &grounding.surfaces);
+    let parked = park_unaccounted(document, &coverage.gaps);
+    apply_coverage(
+        document,
+        &coverage,
+        single_pipeline_gap_fill_method(&coverage),
+        parked,
+    );
+    stamp_entry_point_catalog_receipt(document, &grounding.entry_point_catalog);
+    Ok((coverage, parked))
 }
 
 /// Shared tail of every agentic build pipeline: artifact writes, persistence,
@@ -968,4 +985,52 @@ fn threat_model_result_data(
         "findings": findings,
         "persisted": artifacts.persisted,
     })
+}
+
+#[cfg(test)]
+mod catalog_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn single_finalizer_stamps_catalog_receipt_and_overlap_counts() {
+        let target = tempfile::tempdir().unwrap();
+        let grounding = PromptGrounding {
+            surfaces: Vec::new(),
+            confirmed_findings: Vec::new(),
+            entry_point_catalog: crate::capabilities::entry_points::EntryPointCatalogGrounding {
+                receipt: crate::capabilities::entry_points::EntryPointCatalogReceipt {
+                    status: "current".to_string(),
+                    sha256: Some("sha256:catalog".to_string()),
+                    records: 519,
+                    records_selected: 30,
+                    grounding_limit: 40,
+                    grounding_records_selected: 40,
+                    snapshot_timestamp: Some(9),
+                    context_sha256: Some("sha256:context".to_string()),
+                    tree_hash: None,
+                    selection_policy: "risk-kind-stratified-v1".to_string(),
+                    revision: None,
+                    revision_dirty: None,
+                },
+                catalog_ids: ["AS-one".to_string()].into_iter().collect(),
+                catalog_surfaces: Vec::new(),
+            },
+        };
+        let mut document = json!({
+            "threats": [],
+            "attackSurface": {"entryPoints": [{"id": "AS-one"}]},
+        });
+
+        finalize_single_document(&mut document, target.path(), &grounding).unwrap();
+
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["records"],
+            json!(519)
+        );
+        assert_eq!(
+            document["coverage"]["catalogEntryPointsSelected"],
+            json!(30)
+        );
+        assert_eq!(document["coverage"]["catalogEntryPointsLinked"], json!(1));
+    }
 }

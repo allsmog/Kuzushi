@@ -1,4 +1,4 @@
-use crate::app::RunSummaryEntriesState;
+use crate::app::{EntryPointCatalogContextAuthentication, RunSummaryEntriesState};
 use kuzushi_core::workspace::ProjectModelDocument;
 use kuzushi_core::{
     LatestRunPointerState, NestedProjectScopeTree, PromptMutation, RunSummary, RunSummaryEntry,
@@ -202,6 +202,16 @@ pub(super) struct PromptMutationsCache {
 #[derive(Debug)]
 pub(super) struct JsonFileCache {
     pub(super) state: JsonFileState,
+    /// Monotonic hydration identity used by presentation memos. Computing it
+    /// once when the document enters the cache keeps large JSON folds out of
+    /// the render path.
+    pub(super) version: u64,
+    pub(super) content_sha256: Option<String>,
+    pub(super) entry_point_catalog_authentication: Option<
+        Result<kuzushi_core::capabilities::entry_points::EntryPointCatalogAuthentication, String>,
+    >,
+    pub(super) entry_point_catalog_context_authentication:
+        Option<EntryPointCatalogContextAuthentication>,
 }
 
 #[derive(Debug)]

@@ -1,5 +1,6 @@
 use crate::ui_view_models::{
-    DfdModel, ReviewFacetGroup, ReviewQueueRow, RiskByModule, WorklistViewModel,
+    DfdModel, EntryPointBreakdown, ReviewFacetGroup, ReviewQueueRow, RiskByModule,
+    WorklistViewModel,
 };
 use kuzushi_core::Finding;
 use std::collections::hash_map::DefaultHasher;
@@ -13,6 +14,7 @@ pub(super) struct ViewModelFragmentCache {
     risk_by_module: Option<CachedRiskByModule>,
     dfd_model: Option<CachedDfdModel>,
     worklist: Option<CachedWorklist>,
+    entry_point_breakdown: Option<CachedEntryPointBreakdown>,
 }
 
 impl ViewModelFragmentCache {
@@ -120,6 +122,24 @@ impl ViewModelFragmentCache {
     pub(super) fn cache_worklist(&mut self, key: WorklistCacheKey, model: WorklistViewModel) {
         self.worklist = Some(CachedWorklist { key, model });
     }
+
+    pub(super) fn entry_point_breakdown(
+        &self,
+        key: &EntryPointBreakdownCacheKey,
+    ) -> Option<Arc<EntryPointBreakdown>> {
+        self.entry_point_breakdown
+            .as_ref()
+            .filter(|cache| &cache.key == key)
+            .map(|cache| Arc::clone(&cache.model))
+    }
+
+    pub(super) fn cache_entry_point_breakdown(
+        &mut self,
+        key: EntryPointBreakdownCacheKey,
+        model: Arc<EntryPointBreakdown>,
+    ) {
+        self.entry_point_breakdown = Some(CachedEntryPointBreakdown { key, model });
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -189,6 +209,33 @@ impl RiskByModuleCacheKey {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DfdModelCacheKey {
     threat_doc: ViewModelVersion,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EntryPointBreakdownCacheKey {
+    target: std::path::PathBuf,
+    catalog: Option<u64>,
+    context_snapshot: Option<u64>,
+    threat_model: Option<u64>,
+    git: Option<(String, bool)>,
+}
+
+impl EntryPointBreakdownCacheKey {
+    pub(crate) fn from_parts(
+        target: &std::path::Path,
+        catalog: Option<u64>,
+        context_snapshot: Option<u64>,
+        threat_model: Option<u64>,
+        git: Option<(&str, bool)>,
+    ) -> Self {
+        Self {
+            target: target.to_path_buf(),
+            catalog,
+            context_snapshot,
+            threat_model,
+            git: git.map(|(sha, dirty)| (sha.to_string(), dirty)),
+        }
+    }
 }
 
 impl DfdModelCacheKey {
@@ -269,6 +316,12 @@ struct CachedDfdModel {
 struct CachedWorklist {
     key: WorklistCacheKey,
     model: WorklistViewModel,
+}
+
+#[derive(Debug)]
+struct CachedEntryPointBreakdown {
+    key: EntryPointBreakdownCacheKey,
+    model: Arc<EntryPointBreakdown>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -358,6 +411,40 @@ mod tests {
         let after = WorklistCacheKey::from_parts(Some(7), 2, None);
 
         assert_ne!(before, after);
+    }
+
+    #[test]
+    fn entry_point_breakdown_warm_hit_reuses_the_same_projection() {
+        let mut cache = ViewModelFragmentCache::default();
+        let key = EntryPointBreakdownCacheKey::from_parts(
+            std::path::Path::new("/target"),
+            Some(7),
+            Some(8),
+            Some(9),
+            Some(("revision", false)),
+        );
+        let projection = Arc::new(EntryPointBreakdown::default());
+        cache.cache_entry_point_breakdown(key.clone(), Arc::clone(&projection));
+
+        let warm = cache.entry_point_breakdown(&key).expect("warm hit");
+        let changed = EntryPointBreakdownCacheKey::from_parts(
+            std::path::Path::new("/target"),
+            Some(8),
+            Some(8),
+            Some(9),
+            Some(("revision", false)),
+        );
+        let context_changed = EntryPointBreakdownCacheKey::from_parts(
+            std::path::Path::new("/target"),
+            Some(7),
+            Some(10),
+            Some(9),
+            Some(("revision", false)),
+        );
+
+        assert!(Arc::ptr_eq(&projection, &warm));
+        assert!(cache.entry_point_breakdown(&changed).is_none());
+        assert!(cache.entry_point_breakdown(&context_changed).is_none());
     }
 
     #[test]

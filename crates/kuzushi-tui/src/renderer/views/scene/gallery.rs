@@ -863,10 +863,10 @@ mod tests {
         let nav = spans_text(nav_spans(&app, VizPage::EntryPoints));
 
         assert!(
-            text.contains("ENTRY POINTS · 1 found · 1 kinds · 1 zones · 2/2 DFD links"),
+            text.contains("ENTRY POINTS · 0 extracted · 1 modeled · 0 overlap · 1 union"),
             "{text}"
         );
-        assert!(text.contains("INTERNET · 1"), "{text}");
+        assert!(text.contains("MODEL ONLY · 1"), "{text}");
         assert!(text.contains("[http route]"), "{text}");
         assert!(text.contains("POST /login"), "{text}");
         assert!(text.contains("Browser"), "{text}");

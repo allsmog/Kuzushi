@@ -42,8 +42,9 @@ repository evidence:
   historical artifacts can reopen their page without pretending that a visit
   advanced the current reality.
 - A ready Map embeds the real-data security gallery. Its source-grounded system
-  summary, DFD, entry-point browser, and component inventory share selection
-  and navigation between the cockpit and Map-scoped zoom, with no synthetic
+  summary, DFD, complete deterministic entry-point inventory with explicit
+  model-linkage provenance, and component inventory share selection and
+  navigation between the cockpit and Map-scoped zoom, with no synthetic
   placeholder architecture.
 - Review and default bulk triage operate on the accumulated open,
   non-suppressed vulnerability corpus, while an explicit scan id remains the

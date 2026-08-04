@@ -10,10 +10,15 @@ pub(in crate::modules) fn build_context_snapshot(
             "context:build",
         ))?;
     let options = context_build_options(&input)?;
+    emit_context_build_start(ctx, workspace.root());
+    let starting = trace_snapshot_provenance(workspace, ctx, ContextBuildStage::ScanFiles)?;
     let (file_sample, mut snapshot) = assemble_context_snapshot(workspace.root(), &options, ctx)?;
+    let provenance =
+        trace_snapshot_provenance(workspace, ctx, ContextBuildStage::RegisterTreeIdentity)?;
+    require_unchanged_context_tree(&starting.tree_hash, &provenance.tree_hash)?;
+    stamp_context_tree_hash(&mut snapshot, &provenance.tree_hash)?;
     emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
     let snapshot_path = save_context_snapshot(workspace.root(), &mut snapshot)?;
-    let provenance = trace_snapshot_provenance(workspace, ctx);
     let partial = context_partial(&file_sample, &snapshot);
     emit_context_build_done(ctx, file_sample.files_indexed, partial);
     let state_dir = workspace.state_dir();
@@ -25,7 +30,7 @@ pub(in crate::modules) fn build_context_snapshot(
         snapshot,
         file_sample.files_indexed,
         partial,
-        provenance,
+        Some(provenance),
     ))
 }
 
@@ -34,7 +39,6 @@ fn assemble_context_snapshot(
     options: &ContextBuildOptions,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<(ContextFileSample, Value)> {
-    emit_context_build_start(ctx, root);
     emit_context_build_stage(ctx, ContextBuildStage::ScanFiles, None);
     let file_sample = collect_context_file_sample(root, options.sample_limit)?;
     let snapshot = context_snapshot_value_with_progress(
@@ -64,25 +68,23 @@ fn context_stage_detail(
 fn trace_snapshot_provenance(
     workspace: &crate::workspace::WorkspaceTarget,
     ctx: &ToolExecutionContext<'_>,
-) -> Option<SnapshotProvenance> {
-    emit_context_build_stage(ctx, ContextBuildStage::RegisterTreeIdentity, None);
+    stage: ContextBuildStage,
+) -> Result<SnapshotProvenance> {
+    emit_context_build_stage(ctx, stage, None);
     let mut heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
     let mut on_files_hashed = |files: usize| {
         if heartbeat.ready() {
             emit_context_build_stage(
                 ctx,
-                ContextBuildStage::RegisterTreeIdentity,
+                stage,
                 Some(format!("{files} files hashed")),
             );
         }
     };
-    match index_snapshot_provenance(workspace, &mut on_files_hashed) {
-        Ok(provenance) => Some(provenance),
-        Err(error) => {
-            emit_context_build_note(ctx, format!("tree identity unavailable: {error:#}"));
-            None
-        }
-    }
+    index_snapshot_provenance(workspace, &mut on_files_hashed).map_err(|error| {
+        emit_context_build_note(ctx, format!("tree identity unavailable: {error:#}"));
+        error.context("context:build requires a content tree identity")
+    })
 }
 
 struct SnapshotProvenance {
@@ -94,9 +96,9 @@ struct SnapshotProvenance {
 /// verifiable content identity. A clean git commit provides one for free; a
 /// dirty tree (untracked state, vendored churn) needs the indexed-snapshot
 /// claim, so the build registers the hash-only tree identity — no blob
-/// storage, so monorepo-scale targets fit — and cites it. Losing the claim
-/// (identity budget, unreadable file) costs identity verification only —
-/// never the build.
+/// storage, so monorepo-scale targets fit — and cites it. A context snapshot
+/// without that identity cannot truthfully be reused for dirty or non-Git
+/// targets, so identity failure is an explicit build error.
 fn index_snapshot_provenance(
     workspace: &crate::workspace::WorkspaceTarget,
     on_files_hashed: &mut dyn FnMut(usize),
@@ -119,6 +121,23 @@ fn emit_context_build_note(ctx: &ToolExecutionContext<'_>, note: String) {
     }
 }
 
+fn stamp_context_tree_hash(snapshot: &mut Value, tree_hash: &str) -> Result<()> {
+    let provenance = snapshot
+        .get_mut("provenance")
+        .and_then(Value::as_object_mut)
+        .context("context snapshot provenance is not an object")?;
+    provenance.insert("treeHash".to_string(), json!(tree_hash));
+    Ok(())
+}
+
+fn require_unchanged_context_tree(starting: &str, ending: &str) -> Result<()> {
+    anyhow::ensure!(
+        starting == ending,
+        "target source changed while context snapshot rows were assembled; retry `context:build`"
+    );
+    Ok(())
+}
+
 /// True when any walk budget stopped short: the snapshot is usable but must
 /// be presented as partial coverage, never as a complete map.
 fn context_partial(file_sample: &ContextFileSample, snapshot: &Value) -> bool {
@@ -128,14 +147,10 @@ fn context_partial(file_sample: &ContextFileSample, snapshot: &Value) -> bool {
             .is_some_and(|value| !value.is_null())
 }
 
-pub(crate) struct ContextSnapshotBuild {
-    pub(crate) snapshot: Value,
-}
-
 pub(crate) fn build_context_snapshot_for_root(
     root: &Path,
     sample_limit: usize,
-) -> Result<ContextSnapshotBuild> {
+) -> Result<()> {
     let options = ContextBuildOptions {
         sample_limit: sample_limit.min(2_000),
         discovery: "auto".to_string(),
@@ -148,11 +163,17 @@ pub(crate) fn build_context_snapshot_for_root(
 fn build_context_snapshot_for_root_with_options(
     root: &Path,
     options: &ContextBuildOptions,
-) -> Result<ContextSnapshotBuild> {
+) -> Result<()> {
+    let starting_tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
+        .context("context snapshot requires a content tree identity")?;
     let file_sample = collect_context_file_sample(root, options.sample_limit)?;
     let mut snapshot = context_snapshot_value(root, options, &file_sample)?;
+    let tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
+        .context("context snapshot requires a content tree identity")?;
+    require_unchanged_context_tree(&starting_tree_hash, &tree_hash)?;
+    stamp_context_tree_hash(&mut snapshot, &tree_hash)?;
     save_context_snapshot(root, &mut snapshot)?;
-    Ok(ContextSnapshotBuild { snapshot })
+    Ok(())
 }
 
 struct ContextBuildOptions {
@@ -261,6 +282,28 @@ fn context_snapshot_value_with_progress(
 ) -> Result<Value> {
     progress(ContextBuildStage::InferRepository, None);
     let mut repo_context = infer_repo_context(root, &file_sample.files_sample)?;
+    let repository_inventory = build_context_inventory(root, &mut progress, should_cancel)?;
+    apply_inventory_repo_context(&mut repo_context, &repository_inventory);
+    progress(ContextBuildStage::MapAttackSurface, None);
+    let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
+        root,
+        &repository_inventory,
+    )?;
+    context_snapshot_document(
+        root,
+        options,
+        file_sample,
+        repo_context,
+        repository_inventory,
+        attack_surface_map,
+    )
+}
+
+fn build_context_inventory(
+    root: &Path,
+    progress: &mut impl FnMut(ContextBuildStage, Option<String>),
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<crate::repository_inventory::RepositoryInventory> {
     progress(ContextBuildStage::BuildInventory, None);
     let mut inventory_heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
     let mut on_entries = |entries: usize| {
@@ -271,20 +314,26 @@ fn context_snapshot_value_with_progress(
             );
         }
     };
-    let repository_inventory = crate::repository_inventory::build_repository_inventory_with_observer(
+    crate::repository_inventory::build_repository_inventory_with_observer(
         root,
         &mut on_entries,
         should_cancel,
-    )?;
-    apply_inventory_repo_context(&mut repo_context, &repository_inventory);
-    progress(ContextBuildStage::MapAttackSurface, None);
-    let attack_surface_map = crate::attack_surface::build_attack_surface_map_from_inventory(
-        root,
-        &repository_inventory,
-    )?;
+    )
+}
+
+fn context_snapshot_document(
+    root: &Path,
+    options: &ContextBuildOptions,
+    file_sample: &ContextFileSample,
+    repo_context: Value,
+    repository_inventory: crate::repository_inventory::RepositoryInventory,
+    attack_surface_map: crate::attack_surface::AttackSurfaceMap,
+) -> Result<Value> {
+    let provenance = context_snapshot_revision(root);
     Ok(json!({
         "target": root.display().to_string(),
         "timestamp": now_ms()?,
+        "provenance": provenance,
         "discovery": options.discovery,
         "options": {
             "enrichment": options.enrichment,
@@ -300,6 +349,18 @@ fn context_snapshot_value_with_progress(
         "filesIndexed": file_sample.files_indexed,
         "filesSample": file_sample.files_sample,
     }))
+}
+
+fn context_snapshot_revision(root: &Path) -> Value {
+    crate::workspace::target_git_metadata(root).map_or_else(
+        || json!({}),
+        |metadata| {
+            json!({
+                "revision": metadata.sha,
+                "revisionDirty": metadata.dirty,
+            })
+        },
+    )
 }
 
 /// The alphabetical file sample can land entirely in one corner of a
@@ -359,8 +420,8 @@ impl ContextBuildStage {
             Self::InferRepository => 2,
             Self::BuildInventory => 3,
             Self::MapAttackSurface => 4,
-            Self::WriteSnapshot => 5,
-            Self::RegisterTreeIdentity => 6,
+            Self::RegisterTreeIdentity => 5,
+            Self::WriteSnapshot => 6,
         }
     }
 
@@ -740,6 +801,13 @@ mod stage_tests {
 mod provenance_tests {
     use super::*;
 
+    #[test]
+    fn context_assembly_rejects_a_changed_source_tree() {
+        let error = require_unchanged_context_tree("tree-before", "tree-after").unwrap_err();
+        assert!(error.to_string().contains("source changed"), "{error:#}");
+        require_unchanged_context_tree("tree-stable", "tree-stable").unwrap();
+    }
+
     /// On a dirty tree the attempt ledger can only credit a map whose run
     /// cites a registered indexed snapshot — the response must carry the
     /// claim the identity verifier reads.
@@ -751,10 +819,9 @@ mod provenance_tests {
         let workspace = crate::workspace::WorkspaceTarget::new(temp.path()).unwrap();
 
         let mut hashed_counts = Vec::new();
-        let provenance = index_snapshot_provenance(&workspace, &mut |files| {
-            hashed_counts.push(files)
-        })
-        .expect("indexable workspace");
+        let provenance =
+            index_snapshot_provenance(&workspace, &mut |files| hashed_counts.push(files))
+                .expect("indexable workspace");
         assert!(
             !hashed_counts.is_empty(),
             "identity walk must report per-file progress so monorepo builds are never silent"

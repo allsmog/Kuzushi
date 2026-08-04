@@ -227,6 +227,21 @@ cannot see.
   `crates/kuzushi-bdd-tui/features/cockpit_patch_lifecycle.feature`; J17 is the
   visual five-phase reference rather than a second mutation harness.
 
+### J25 — Real-target Map and durable-page truth
+- **Journey:** require an explicit existing `KUZUSHI_DEVEX_TARGET`, enter through
+  the installed `kz` wrapper when `KUZUSHI_NATIVE_BIN` pins the freshly built
+  native, then capture Map, Scan, Review, Prove, and Fix sequentially.
+- **Evidence contract:** record the target's canonical path, HEAD, and complete
+  source-status receipt before and after, excluding only normal `.kuzushi`
+  writes. Any drift is a machine failure. Each capture records both the wrapper
+  and delegated native hashes plus requested and actual terminal dimensions.
+- **Verify:** wait for explicit page identity before every capture. Machine
+  assertions establish only reachability and identity; every `ask:` remains
+  `REVIEW REQUIRED` until an auditor answers it from the referenced screen.
+- **Judge:** target/revision facts are real, stored receipts remain distinct
+  from live progress, locked phases explain their prerequisite without
+  manufacturing evidence, and remediation never implies unapproved mutation.
+
 ---
 
 ## F. Model-ladder verification & split-verdict escalation (P1/P3)

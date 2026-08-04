@@ -2,9 +2,9 @@ use super::task_id::PlanningTaskId;
 use std::collections::BTreeSet;
 
 /// Returns the direct (non-transitive) dependencies of `task` in the
-/// canonical planning DAG. Mirrors the `dependsOn` lists declared on
-/// each module's `dag(...)` node in kuzushi-core; the equality test in
-/// `tests` keeps the two in lockstep.
+/// canonical operator planning DAG. Dependencies include artifact ordering
+/// required by the TUI even when module descriptors only describe their
+/// direct execution prerequisite.
 pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
     use PlanningTaskId::*;
     match task {
@@ -13,9 +13,9 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         MapEntryPoints => &[GatherRepoContext],
         DecomposeModules => &[GatherRepoContext],
         BuildXRay => &[GatherRepoContext],
-        BuildThreatModel => &[GatherRepoContext],
-        BuildStrideThreatModel => &[GatherRepoContext],
-        BuildPastaThreatModel => &[GatherRepoContext],
+        BuildThreatModel => &[MapEntryPoints],
+        BuildStrideThreatModel => &[MapEntryPoints],
+        BuildPastaThreatModel => &[MapEntryPoints],
         BuildCodePropertyGraph => &[GatherRepoContext],
         BuildCodeQlDatabase => &[GatherRepoContext],
         ThreatIntelCves => &[GatherRepoContext],
@@ -166,6 +166,40 @@ mod tests {
         // context — they hang off their own prerequisite.
         assert!(!dependents.contains(&ScanCodeql));
         assert!(!dependents.contains(&HuntTaint));
+        assert!(!dependents.contains(&BuildThreatModel));
+        assert!(!dependents.contains(&BuildStrideThreatModel));
+        assert!(!dependents.contains(&BuildPastaThreatModel));
+    }
+
+    #[test]
+    fn threat_model_variants_directly_require_extracted_entry_points() {
+        for task in [
+            BuildThreatModel,
+            BuildStrideThreatModel,
+            BuildPastaThreatModel,
+        ] {
+            assert_eq!(direct_dependencies(task), &[MapEntryPoints]);
+            let deps = transitive_dependencies(task);
+            assert!(deps.contains(&MapEntryPoints));
+            assert!(deps.contains(&GatherRepoContext));
+        }
+    }
+
+    #[test]
+    fn topo_orders_entry_points_before_every_threat_model_variant() {
+        for task in [
+            BuildThreatModel,
+            BuildStrideThreatModel,
+            BuildPastaThreatModel,
+        ] {
+            let selected = [GatherRepoContext, MapEntryPoints, task]
+                .into_iter()
+                .collect();
+            assert_eq!(
+                topological_order(&selected),
+                vec![GatherRepoContext, MapEntryPoints, task]
+            );
+        }
     }
 
     #[test]

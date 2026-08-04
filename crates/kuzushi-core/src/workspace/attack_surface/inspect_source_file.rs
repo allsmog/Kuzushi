@@ -4,6 +4,7 @@ pub(crate) fn inspect_source_file(
     root: &Path,
     source_file: &InventorySourceFile,
     builder: &mut AttackSurfaceBuilder,
+    tauri_commands: &mut TauriCommandCatalog,
 ) -> Result<()> {
     let full_path = root.join(&source_file.path);
     let bytes = crate::bounded_file::read_regular_bytes_within(root, &full_path, 16 * 1024 * 1024)
@@ -14,7 +15,13 @@ pub(crate) fn inspect_source_file(
     let text = String::from_utf8_lossy(&bytes);
     let framework = framework_for_source(&source_file.language, &text);
 
-    inspect_source_routes(source_file, framework.as_deref(), &text, builder);
+    inspect_file_level_surfaces(
+        source_file,
+        framework.as_deref(),
+        &text,
+        builder,
+        tauri_commands,
+    );
 
     for (index, line) in text.lines().enumerate() {
         let line_number = u32::try_from(index + 1).unwrap_or(u32::MAX);
@@ -30,13 +37,15 @@ pub(crate) fn inspect_source_file(
     Ok(())
 }
 
-fn inspect_source_routes(
+fn inspect_file_level_surfaces(
     source_file: &InventorySourceFile,
     framework: Option<&str>,
     text: &str,
     builder: &mut AttackSurfaceBuilder,
+    tauri_commands: &mut TauriCommandCatalog,
 ) {
     match source_file.language.as_str() {
+        "Rust" => inspect_rust_tauri_commands(source_file, text, tauri_commands),
         "C#" => inspect_dotnet_routes(source_file, framework, text, builder),
         "Java" | "Kotlin" => inspect_jvm_routes(source_file, framework, text, builder),
         _ => {}

@@ -1,18 +1,29 @@
 use crate::attack_surface::AttackSurface;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 
 /// Deterministic coverage invariant over the surfaces the model was shown:
-/// every ground-truth entry point needs at least one threat or an explicit
-/// deprioritized row. The model's own coverage claim is replaced by this
-/// check — coverage is measured, never self-reported.
+/// every ground-truth entry point needs its stable id in an explicit
+/// deprioritized row, or in both the modeled entry-point inventory and a
+/// covering threat. Paths and titles are prose, not identity. The model's
+/// own coverage claim is replaced by this check.
 pub(crate) struct CoverageReport {
     pub(crate) considered: usize,
     pub(crate) gaps: Vec<CoverageGap>,
 }
 
 pub(crate) struct CoverageGap {
+    pub(crate) entry_point_id: String,
     pub(crate) entry_point: String,
+    pub(crate) kind: String,
     pub(crate) path: String,
+}
+
+#[derive(Default)]
+struct CoverageIndex {
+    modeled_ids: BTreeSet<String>,
+    threatened_ids: BTreeSet<String>,
+    deprioritized_ids: BTreeSet<String>,
 }
 
 impl CoverageReport {
@@ -26,10 +37,10 @@ impl CoverageReport {
 }
 
 pub(crate) fn check_coverage(document: &Value, surfaces: &[AttackSurface]) -> CoverageReport {
-    let haystacks = coverage_haystacks(document);
+    let index = coverage_index(document);
     let gaps = surfaces
         .iter()
-        .filter(|surface| !surface_is_covered(&haystacks, surface))
+        .filter(|surface| !surface_is_covered(&index, surface))
         .map(coverage_gap)
         .collect();
     CoverageReport {
@@ -40,31 +51,71 @@ pub(crate) fn check_coverage(document: &Value, surfaces: &[AttackSurface]) -> Co
 
 fn coverage_gap(surface: &AttackSurface) -> CoverageGap {
     CoverageGap {
+        entry_point_id: surface.id.clone(),
         entry_point: surface.title.clone(),
+        kind: surface.kind.as_str().to_string(),
         path: surface.path.clone(),
     }
 }
 
-fn coverage_haystacks(document: &Value) -> Vec<String> {
-    let mut haystacks = collect_row_texts(document.pointer("/threats"));
-    haystacks.extend(collect_row_texts(document.pointer("/deprioritized")));
-    haystacks
+fn coverage_index(document: &Value) -> CoverageIndex {
+    CoverageIndex {
+        modeled_ids: row_ids(document.pointer("/attackSurface/entryPoints"), "id"),
+        threatened_ids: threat_entry_point_ids(document.pointer("/threats")),
+        deprioritized_ids: deprioritized_entry_point_ids(document.pointer("/deprioritized")),
+    }
 }
 
-fn collect_row_texts(rows: Option<&Value>) -> Vec<String> {
+fn row_ids(rows: Option<&Value>, field: &str) -> BTreeSet<String> {
     rows.and_then(Value::as_array)
-        .map(|rows| rows.iter().map(row_text).collect())
-        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .filter_map(|row| row.get(field).and_then(Value::as_str))
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
-fn row_text(row: &Value) -> String {
-    serde_json::to_string(row).unwrap_or_default()
+fn threat_entry_point_ids(rows: Option<&Value>) -> BTreeSet<String> {
+    let mut ids = row_ids(rows, "entryPointId");
+    for row in rows.and_then(Value::as_array).into_iter().flatten() {
+        ids.extend(
+            row.get("entryPointIds")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter(|id| !id.trim().is_empty())
+                .map(str::to_string),
+        );
+    }
+    ids
 }
 
-fn surface_is_covered(haystacks: &[String], surface: &AttackSurface) -> bool {
-    haystacks
-        .iter()
-        .any(|haystack| haystack.contains(&surface.path) || haystack.contains(&surface.title))
+fn deprioritized_entry_point_ids(rows: Option<&Value>) -> BTreeSet<String> {
+    rows.and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|row| row.get("parkedBy").and_then(Value::as_str) != Some("system"))
+        .filter(|row| {
+            row.get("reason")
+                .and_then(Value::as_str)
+                .is_some_and(|reason| !reason.trim().is_empty())
+        })
+        .filter_map(|row| {
+            row.get("entryPointId")
+                .or_else(|| row.get("entryPoint"))
+                .and_then(Value::as_str)
+        })
+        .filter(|id| !id.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn surface_is_covered(index: &CoverageIndex, surface: &AttackSurface) -> bool {
+    index.deprioritized_ids.contains(&surface.id)
+        || (index.modeled_ids.contains(&surface.id)
+            && index.threatened_ids.contains(&surface.id))
 }
 
 pub(crate) fn apply_coverage(
@@ -100,7 +151,9 @@ pub(crate) fn coverage_json(
 
 fn gap_json(gap: &CoverageGap) -> Value {
     json!({
+        "entryPointId": gap.entry_point_id,
         "entryPoint": gap.entry_point,
+        "kind": gap.kind,
         "path": gap.path,
     })
 }
@@ -129,18 +182,81 @@ mod tests {
     }
 
     #[test]
-    fn covered_surface_via_affected_files_and_deprioritized_row() {
+    fn coverage_requires_stable_ids_and_a_modeled_entry_for_threats() {
+        let upload = surface("src/upload.ts", "POST /upload");
+        let health = surface("src/health.ts", "GET /health");
         let document = json!({
-            "threats": [{"title": "RCE via upload", "affectedFiles": [{"filePath": "src/upload.ts"}]}],
-            "deprioritized": [{"entryPoint": "GET /health", "reason": "no data crosses"}],
+            "attackSurface": {"entryPoints": [{"id": upload.id}]},
+            "threats": [{
+                "title": "RCE via upload",
+                "entryPointIds": [upload.id],
+                "affectedFiles": [{"filePath": "src/upload.ts"}]
+            }],
+            "deprioritized": [{
+                "entryPointId": health.id,
+                "entryPoint": health.title,
+                "reason": "no data crosses"
+            }],
         });
-        let surfaces = vec![
-            surface("src/upload.ts", "POST /upload"),
-            surface("src/health.ts", "GET /health"),
-        ];
+        let surfaces = vec![upload, health];
         let report = check_coverage(&document, &surfaces);
         assert!(report.invariant_satisfied(), "both surfaces are covered");
         assert_eq!(report.covered(), 2);
+    }
+
+    #[test]
+    fn path_or_title_prose_cannot_forge_stable_id_coverage() {
+        let surface = surface("src/upload.ts", "POST /upload");
+        let document = json!({
+            "threats": [{
+                "title": "POST /upload",
+                "affectedFiles": [{"filePath": "src/upload.ts"}]
+            }],
+            "deprioritized": [{"entryPoint": "POST /upload", "reason": "prose only"}],
+        });
+
+        let report = check_coverage(&document, &[surface]);
+
+        assert_eq!(report.gaps.len(), 1);
+    }
+
+    #[test]
+    fn threat_id_without_matching_attack_surface_row_is_not_linked_coverage() {
+        let surface = surface("src/upload.ts", "POST /upload");
+        let document = json!({"threats": [{"entryPointIds": [surface.id]}]});
+
+        let report = check_coverage(&document, &[surface]);
+
+        assert_eq!(report.gaps.len(), 1);
+    }
+
+    #[test]
+    fn deprioritization_without_a_reason_is_not_coverage() {
+        let surface = surface("src/upload.ts", "POST /upload");
+        let document = json!({
+            "deprioritized": [{"entryPointId": surface.id, "reason": "  "}]
+        });
+
+        let report = check_coverage(&document, &[surface]);
+
+        assert_eq!(report.gaps.len(), 1);
+    }
+
+    #[test]
+    fn system_parking_never_becomes_coverage_on_a_later_check() {
+        let surface = surface("src/upload.ts", "POST /upload");
+        let document = json!({
+            "deprioritized": [{
+                "entryPointId": surface.id,
+                "reason": "unaccounted: system bookkeeping",
+                "parkedBy": "system"
+            }]
+        });
+
+        let report = check_coverage(&document, &[surface]);
+
+        assert_eq!(report.gaps.len(), 1);
+        assert!(!report.invariant_satisfied());
     }
 
     #[test]
@@ -168,7 +284,14 @@ mod tests {
         assert_eq!(document["coverage"]["entryPointsCovered"], json!(0));
         assert_eq!(document["coverage"]["invariantSatisfied"], json!(false));
         assert_eq!(document["coverage"]["gapFillMethod"], json!("unresolved"));
-        assert_eq!(document["coverage"]["gaps"][0]["path"], json!("src/admin.ts"));
+        assert_eq!(
+            document["coverage"]["gaps"][0]["path"],
+            json!("src/admin.ts")
+        );
+        assert_eq!(
+            document["coverage"]["gaps"][0]["entryPointId"],
+            json!("surface-src/admin.ts")
+        );
         assert_eq!(document["coverage"]["parkedBySystem"], json!(1));
     }
 

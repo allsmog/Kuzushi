@@ -468,13 +468,20 @@ is expected to behave identically and should be filed as a parity bug.
     The separate DFD page opens directly on its node/flow/boundary graph; `j/k`
     reaches every concrete element and Enter opens its linked context. Plain
     output keeps the summary and DFD projections separate too.
-  - **Entry-point browser** — every real `attackSurface.entryPoints[]` record in
-    a trust-zone-grouped master-detail browser. `j/k` selects an ingress,
-    `PgUp/PgDn` scrolls only its evidence, and `Enter` jumps to its first resolved
-    DFD node/flow/boundary. Wide terminals render list + detail side by side;
+  - **Entry-point browser** — the complete deterministic
+    `.kuzushi/entry-points.json` catalog joined with
+    `attackSurface.entryPoints[]` model annotations by stable surface id. Catalog
+    path/line/kind/evidence remains authoritative; the model adds trust-zone
+    context and DFD links without manufacturing links for every extracted row.
+    The disposition-grouped master-detail browser distinguishes modeled,
+    deprioritized, extracted-only, and model-only rows and reports extracted,
+    selected, modeled, and linked counts plus exact catalog/model provenance.
+    Stale, malformed, legacy-unverifiable, and changed-since-model catalogs are
+    disclosed rather than presented as current. `j/k` selects every union row,
+    `PgUp/PgDn` scrolls only its evidence, and `Enter` jumps when a resolved DFD
+    node/flow/boundary exists. Wide terminals render list + detail side by side;
     narrow terminals stack a bounded list above the selected detail. Plain output
-    remains exhaustive and grouped by trust zone. The page appears in the rail
-    only when entry points exist.
+    remains exhaustive. The page appears when either backing artifact has rows.
   - **Component stack** — an asynchronously collected SBOM projection grouped
     as a tree by ecosystem, manifest/lockfile, scope, and component. Manifest
     constraints are labeled `declared`; lockfile values are labeled `resolved`,

@@ -10,6 +10,84 @@
 
 use super::*;
 
+const GROUNDED_ENTRY_POINT_FIELDS: &[&str] = &[
+    "id",
+    "name",
+    "location",
+    "kind",
+    "path",
+    "line",
+    "language",
+    "framework",
+    "title",
+    "evidence",
+    "method",
+    "route",
+    "boundary",
+    "risk",
+    "metadata",
+];
+
+/// Replace every deterministic field on a model-emitted grounded row with
+/// the exact source surface. Model-owned links and explanations survive.
+pub(crate) fn restore_grounded_entry_point_facts(
+    document: &mut Value,
+    surfaces: &[crate::attack_surface::AttackSurface],
+    catalog_surfaces: &[crate::attack_surface::AttackSurface],
+) -> Result<()> {
+    let by_id = surfaces
+        .iter()
+        .chain(catalog_surfaces)
+        .map(|surface| (surface.id.as_str(), surface))
+        .collect::<BTreeMap<_, _>>();
+    let Some(rows) = document
+        .pointer_mut("/attackSurface/entryPoints")
+        .and_then(Value::as_array_mut)
+    else {
+        return Ok(());
+    };
+    for row in rows {
+        let Some(surface) = row
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|id| by_id.get(id))
+        else {
+            continue;
+        };
+        restore_grounded_row(row, surface)?;
+    }
+    Ok(())
+}
+
+fn restore_grounded_row(
+    row: &mut Value,
+    surface: &crate::attack_surface::AttackSurface,
+) -> Result<()> {
+    let fields = row
+        .as_object_mut()
+        .context("grounded attack-surface row is not an object")?;
+    for field in GROUNDED_ENTRY_POINT_FIELDS {
+        fields.remove(*field);
+    }
+    let source = serde_json::to_value(surface)?;
+    fields.extend(
+        source
+            .as_object()
+            .context("serialized attack surface is not an object")?
+            .clone(),
+    );
+    fields.insert("name".to_string(), json!(surface.title));
+    fields.insert("location".to_string(), grounded_location(surface));
+    Ok(())
+}
+
+fn grounded_location(surface: &crate::attack_surface::AttackSurface) -> Value {
+    surface.line.map_or_else(
+        || json!(surface.path),
+        |line| json!(format!("{}:{line}", surface.path)),
+    )
+}
+
 /// Measured facts about how one build's document reconciles against the
 /// ground truth it was shown. Built by each pipeline after its final coverage
 /// check and consumed by the result envelope.
@@ -30,7 +108,8 @@ impl BuildReconciliation {
         scope_label: &'static str,
         document: &Value,
     ) -> Self {
-        let (anchor_free_entry_points, entry_point_total) = count_anchor_free_entry_points(document);
+        let (anchor_free_entry_points, entry_point_total) =
+            count_anchor_free_entry_points(document);
         Self {
             considered: report.considered,
             covered: report.covered(),
@@ -89,8 +168,6 @@ pub(crate) fn park_unaccounted(document: &mut Value, gaps: &[CoverageGap]) -> us
     if gaps.is_empty() {
         return 0;
     }
-    let rows: Vec<Value> = gaps.iter().map(parked_row).collect();
-    let parked = rows.len();
     if !document.get("deprioritized").is_some_and(Value::is_array) {
         document["deprioritized"] = json!([]);
     }
@@ -98,13 +175,30 @@ pub(crate) fn park_unaccounted(document: &mut Value, gaps: &[CoverageGap]) -> us
         .get_mut("deprioritized")
         .and_then(Value::as_array_mut)
     {
+        let parked_ids = existing_system_parked_ids(existing);
+        let rows: Vec<Value> = gaps
+            .iter()
+            .filter(|gap| !parked_ids.contains(&gap.entry_point_id))
+            .map(parked_row)
+            .collect();
+        let parked = rows.len();
         existing.extend(rows);
+        return parked;
     }
-    parked
+    0
+}
+
+fn existing_system_parked_ids(rows: &[Value]) -> BTreeSet<String> {
+    rows.iter()
+        .filter(|row| row.get("parkedBy").and_then(Value::as_str) == Some("system"))
+        .filter_map(|row| row.get("entryPointId").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 fn parked_row(gap: &CoverageGap) -> Value {
     json!({
+        "entryPointId": gap.entry_point_id,
         "entryPoint": gap.entry_point,
         "path": gap.path,
         "reason": "unaccounted: model emitted neither a threat nor a deprioritized row for this ground-truth surface",
@@ -127,14 +221,40 @@ fn has_non_empty_text(value: Option<&Value>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attack_surface::{AttackSurface, AttackSurfaceKind, AttackSurfaceRisk};
     use serde_json::json;
+
+    fn grounded_surface() -> AttackSurface {
+        AttackSurface {
+            id: "AS-grounded".to_string(),
+            kind: AttackSurfaceKind::RpcHandler,
+            path: "src/commands.rs".to_string(),
+            line: Some(42),
+            language: "Rust".to_string(),
+            framework: None,
+            title: "open_project".to_string(),
+            evidence: "#[tauri::command]".to_string(),
+            method: None,
+            route: None,
+            boundary: Some("desktop-ipc".to_string()),
+            risk: AttackSurfaceRisk {
+                rank: 3,
+                score: 81,
+                tier: "high".to_string(),
+                reasons: vec!["privileged command".to_string()],
+            },
+            metadata: json!({"command": "open_project"}),
+        }
+    }
 
     fn report(considered: usize, gaps: usize) -> CoverageReport {
         CoverageReport {
             considered,
             gaps: (0..gaps)
                 .map(|index| CoverageGap {
+                    entry_point_id: format!("surface-{index}"),
                     entry_point: format!("surface {index}"),
+                    kind: "http_route".to_string(),
                     path: format!("src/file{index}.rs"),
                 })
                 .collect(),
@@ -147,15 +267,23 @@ mod tests {
 
     #[test]
     fn clean_reconciliation_emits_no_warnings() {
-        let reconciliation =
-            BuildReconciliation::from_report(&report(40, 0), 0, "grounded surfaces", &anchored_document());
+        let reconciliation = BuildReconciliation::from_report(
+            &report(40, 0),
+            0,
+            "grounded surfaces",
+            &anchored_document(),
+        );
         assert!(reconciliation.warning_lines().is_empty());
     }
 
     #[test]
     fn unaccounted_surfaces_report_measured_counts() {
-        let reconciliation =
-            BuildReconciliation::from_report(&report(40, 19), 19, "grounded surfaces", &anchored_document());
+        let reconciliation = BuildReconciliation::from_report(
+            &report(40, 19),
+            19,
+            "grounded surfaces",
+            &anchored_document(),
+        );
         assert_eq!(
             reconciliation.warning_lines(),
             vec![
@@ -196,6 +324,7 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0]["parkedBy"], json!("system"));
         assert_eq!(rows[0]["path"], json!("src/file0.rs"));
+        assert_eq!(rows[0]["entryPointId"], json!("surface-0"));
         assert_eq!(rows[0]["entryPoint"], json!("surface 0"));
         assert!(rows[0]["reason"]
             .as_str()
@@ -213,9 +342,51 @@ mod tests {
     }
 
     #[test]
+    fn repeated_parking_does_not_duplicate_system_rows() {
+        let mut document = json!({"threats": []});
+        let gaps = report(2, 2).gaps;
+
+        assert_eq!(park_unaccounted(&mut document, &gaps), 2);
+        assert_eq!(park_unaccounted(&mut document, &gaps), 0);
+        assert_eq!(document["deprioritized"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
     fn parking_nothing_leaves_the_document_untouched() {
         let mut document = json!({"threats": []});
         assert_eq!(park_unaccounted(&mut document, &[]), 0);
         assert!(document.get("deprioritized").is_none());
+    }
+
+    #[test]
+    fn unselected_catalog_facts_replace_model_prose_without_erasing_model_links() {
+        let surface = grounded_surface();
+        let mut document = json!({"attackSurface": {"entryPoints": [{
+            "id": surface.id,
+            "targetElementIds": ["desktop-shell"],
+            "trustZone": "local-user",
+            "description": "model judgment",
+            "name": "invented",
+            "kind": "http_route",
+            "path": "invented.rs",
+            "line": 999,
+            "method": "POST",
+            "evidence": "unsupported prose",
+            "risk": {"score": 100}
+        }]}});
+
+        restore_grounded_entry_point_facts(&mut document, &[], &[surface]).unwrap();
+
+        let row = &document["attackSurface"]["entryPoints"][0];
+        assert_eq!(row["name"], json!("open_project"));
+        assert_eq!(row["kind"], json!("rpc_handler"));
+        assert_eq!(row["path"], json!("src/commands.rs"));
+        assert_eq!(row["line"], json!(42));
+        assert_eq!(row["evidence"], json!("#[tauri::command]"));
+        assert_eq!(row["risk"]["score"], json!(81));
+        assert!(row.get("method").is_none());
+        assert_eq!(row["targetElementIds"], json!(["desktop-shell"]));
+        assert_eq!(row["description"], json!("model judgment"));
+        assert_eq!(row["trustZone"], json!("local-user"));
     }
 }

@@ -7,6 +7,7 @@ pub mod chrome_rce;
 pub mod corpus_dedupe;
 pub mod classifier_gate;
 pub mod deep_auditor;
+pub mod entry_points;
 pub mod findings_ground;
 pub mod full_mode_multi;
 pub mod fuzz_engine;

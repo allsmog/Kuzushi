@@ -54,10 +54,12 @@ pub fn build_attack_surface_map_from_inventory(
     }
 
     let mut builder = AttackSurfaceBuilder::default();
+    let mut tauri_commands = TauriCommandCatalog::default();
     add_inventory_surfaces(&mut builder, inventory);
     for source_file in &inventory.source_files {
-        inspect_source_file(&root, source_file, &mut builder)?;
+        inspect_source_file(&root, source_file, &mut builder, &mut tauri_commands)?;
     }
+    tauri_commands.add_registered_surfaces(&mut builder);
 
     Ok(builder.finish(inventory.root_name.clone()))
 }

@@ -232,13 +232,25 @@ impl ShellApp {
         match key.code {
             KeyCode::Tab => self.cycle_scene(1),
             KeyCode::BackTab => self.cycle_scene(-1),
-            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
-            KeyCode::Char('j') | KeyCode::Down => self.cycle_entry_point_selection(1),
-            KeyCode::Char('k') | KeyCode::Up => self.cycle_entry_point_selection(-1),
-            KeyCode::Char('g') => self.jump_entry_point_selection(false),
-            KeyCode::Char('G') => self.jump_entry_point_selection(true),
+            KeyCode::Esc | KeyCode::Char('q') if self.input_mode() == InputMode::Navigate => {
+                self.go_back()
+            }
+            _ => return self.handle_entry_point_navigation_key(key),
+        }
+        InputUpdate::handled()
+    }
+
+    fn handle_entry_point_navigation_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match key.code {
+            KeyCode::Down => self.cycle_entry_point_selection(1),
+            KeyCode::Up => self.cycle_entry_point_selection(-1),
             KeyCode::PageDown => self.scroll_entry_point_detail(1),
             KeyCode::PageUp => self.scroll_entry_point_detail(-1),
+            _ if self.input_mode() != InputMode::Navigate => return InputUpdate::ignored(),
+            KeyCode::Char('j') => self.cycle_entry_point_selection(1),
+            KeyCode::Char('k') => self.cycle_entry_point_selection(-1),
+            KeyCode::Char('g') => self.jump_entry_point_selection(false),
+            KeyCode::Char('G') => self.jump_entry_point_selection(true),
             KeyCode::Enter => return self.activate_entry_point_selection(),
             _ => return InputUpdate::ignored(),
         }
@@ -336,17 +348,7 @@ impl ShellApp {
     }
 
     fn handle_embedded_entry_key(&mut self, key: KeyEvent) -> InputUpdate {
-        match key.code {
-            KeyCode::Char('j') | KeyCode::Down => self.cycle_entry_point_selection(1),
-            KeyCode::Char('k') | KeyCode::Up => self.cycle_entry_point_selection(-1),
-            KeyCode::Char('g') => self.jump_entry_point_selection(false),
-            KeyCode::Char('G') => self.jump_entry_point_selection(true),
-            KeyCode::PageDown => self.scroll_entry_point_detail(1),
-            KeyCode::PageUp => self.scroll_entry_point_detail(-1),
-            KeyCode::Enter => return self.activate_entry_point_selection(),
-            _ => return InputUpdate::ignored(),
-        }
-        InputUpdate::handled()
+        self.handle_entry_point_navigation_key(key)
     }
 
     fn handle_embedded_component_key(&mut self, key: KeyEvent) -> InputUpdate {
@@ -484,22 +486,24 @@ impl ShellApp {
     }
 
     fn activate_entry_point_selection(&mut self) -> InputUpdate {
-        let entries = crate::ui_view_models::entry_point_breakdown(self).entries;
+        let breakdown = crate::ui_view_models::entry_point_breakdown(self);
+        let entries = &breakdown.entries;
         let selection = self
             .router
             .scene()
             .entry_point_selection()
             .min(entries.len().saturating_sub(1));
-        let target = entries
-            .get(selection)
+        let selected = entries.get(selection);
+        let disposition = selected.map(|entry| entry.disposition);
+        let target = selected
             .and_then(|entry| entry.targets.first())
             .map(|target| target.id.clone());
         let Some(target) = target else {
-            return self.entry_point_target_missing();
+            return self.entry_point_target_missing(disposition);
         };
         let dfd = crate::ui_view_models::dfd_model(self);
         let Some(selection) = crate::ui_view_models::dfd_selection_for_key(&dfd, &target) else {
-            return self.entry_point_target_missing();
+            return self.entry_point_target_missing(disposition);
         };
         let len = crate::ui_view_models::dfd_selectable_count(&dfd);
         self.router.scene_mut().set_dfd_selection(selection, len);
@@ -509,11 +513,26 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
-    fn entry_point_target_missing(&mut self) -> InputUpdate {
-        self.set_warn_notice(
-            "entry points",
-            "selected entry has no resolved DFD target — rebuild with `threat-model:build`",
-        );
+    fn entry_point_target_missing(
+        &mut self,
+        disposition: Option<crate::ui_view_models::EntryPointDisposition>,
+    ) -> InputUpdate {
+        use crate::ui_view_models::EntryPointDisposition;
+        let detail = match disposition {
+            Some(EntryPointDisposition::ExtractedOnly) => {
+                "extractor evidence is not represented in the threat model · run `threat-model:build`"
+            }
+            Some(EntryPointDisposition::Deprioritized) => {
+                "entry point was explicitly deprioritized and has no DFD target"
+            }
+            Some(EntryPointDisposition::ModelOnly) => {
+                "model-only entry has no resolved DFD target · run `threat-model:build`"
+            }
+            Some(EntryPointDisposition::Modeled) | None => {
+                "modeled entry has no resolved DFD target · run `threat-model:build`"
+            }
+        };
+        self.set_warn_notice("entry points", detail);
         InputUpdate::handled()
     }
 

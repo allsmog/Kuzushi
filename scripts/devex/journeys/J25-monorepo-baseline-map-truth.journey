@@ -7,13 +7,16 @@
 # resets pre-existing `.kuzushi` engagement state on the target: prior
 # findings, runs, and coverage rows are part of the baseline being recorded.
 #
-# The root-first holistic-gate acceptance row lives in J29 (cycle 3), not
+# The root-first whole-repository gate acceptance row lives in J29 (cycle 3), not
 # here: this journey verifies harness truth on the real target — identity,
-# non-destructive entry, honest page-state disclosure — and stays green on
-# those facts alone. The holistic judgment `ask:` below remains as an honest
-# open question either way.
+# non-destructive entry, honest page-state disclosure. Those facts can pass
+# their machine checks, but the journey remains REVIEW REQUIRED until every
+# `ask:` below receives an explicit human judgment.
 name: Monorepo baseline · entry and phase pages (real target)
 require-env: KUZUSHI_DEVEX_TARGET
+# When the scheduled audit pins a freshly-built native with
+# KUZUSHI_NATIVE_BIN, the operator journey must still enter through `kz`.
+require-wrapper-flow:
 size: 120x36
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
@@ -31,25 +34,22 @@ expect: target ./
 # partial-result cards own the expanded PROJECT CONTEXT label.
 expect-wide: 80 context:
 expect-wide: 80 rev:
-ask: Map — with no accepted root holistic baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
+ask: Map — with no accepted root scan baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
 ask: Map — are the repository facts on screen (target name, revision, scope names, counts) derived from the real checkout rather than hard-coded or fabricated?
 keys: 2
 wait-live-snap: 15 Viewing Scan | scan-initial
-ask: Scan — are recorded receipts from the pre-existing engagement state clearly separated from live progress, and is scope-level scan guidance honestly gated when no root holistic baseline exists?
+ask: Scan — are recorded receipts from the pre-existing engagement state clearly separated from live progress, and is scope-level scan guidance honestly gated when no root scan baseline exists?
 keys: 3
-wait: 1
-live-snap: review-initial
+wait-live-snap: 15 Viewing Review || Review is locked | review-initial
 ask: Review — if findings exist, do they surface with honest run/revision provenance; otherwise, does the shell explicitly explain why Review is locked?
 keys: Escape
 nav-mode:
 keys: 4
-wait: 1
-live-snap: prove-initial
+wait-live-snap: 15 Viewing Prove || Prove is locked | prove-initial
 ask: Prove — if a confirmed finding exists, is its verification state honest; otherwise, does the shell explicitly explain why Prove is locked without fabricating proof?
 keys: Escape
 nav-mode:
 keys: 5
-wait: 1
-live-snap: fix-initial
+wait-live-snap: 15 Viewing Fix || Fix is locked | fix-initial
 ask: Fix — if proof or patch records exist, is remediation limited to planning/diff-preview with explicit application authorization; otherwise, does the shell explicitly explain why Fix is locked?
 keys: Escape

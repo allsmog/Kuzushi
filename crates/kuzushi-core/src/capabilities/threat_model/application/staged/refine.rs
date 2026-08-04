@@ -21,21 +21,9 @@ pub(crate) fn refine_threat_model(
     verb: &str,
     input: BuildInput,
 ) -> Result<Value> {
-    let Some(document) = try_load_persistent_threat_model(&input.target)? else {
-        anyhow::bail!(
-            "threat-model:build mode=refine requires a persisted .kuzushi/threat-model.json for {}; run a full build first",
-            input.target.display()
-        );
-    };
-    let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
-    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    let mut generated = GeneratedThreatModel {
-        document,
-        bridge_findings: None,
-        cost_usd: 0.0,
-        cost_usd_exact: true,
-    };
+    let (mut generated, source_bundle) = load_refine_state(ctx, verb, &input)?;
     let delta = collect_refine_delta(&input, ctx, &generated.document)?;
+    source_bundle.authenticate_entry_point_sources(&delta.entry_point_catalog.receipt)?;
     emit_refine_delta(ctx, verb, &delta);
     let attach = attach_new_evidence(&mut generated.document, &delta.new_findings);
     let (coverage, gap_method) =
@@ -43,10 +31,71 @@ pub(crate) fn refine_threat_model(
     let closer = close_open_questions(runtime, ctx, verb, &input, &delta, &mut generated)?;
     record_unmatched_findings(&mut generated.document, &attach.unmatched);
     let parked = park_unaccounted(&mut generated.document, &coverage.gaps);
-    finalize_refined_document(&input, &mut generated.document, &delta, &attach, gap_method, &closer, parked);
+    finalize_refined_document(
+        &input,
+        &mut generated.document,
+        &delta,
+        &attach,
+        &coverage,
+        gap_method,
+        &closer,
+        parked,
+    )?;
+    complete_refined_build(
+        ctx,
+        flavor,
+        verb,
+        input,
+        generated,
+        source_bundle,
+        &coverage,
+        parked,
+    )
+}
+
+fn load_refine_state(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+) -> Result<(GeneratedThreatModel, ThreatModelSourceBundle)> {
+    let Some(document) = try_load_persistent_threat_model(&input.target)? else {
+        anyhow::bail!(
+            "threat-model:build mode=refine requires a persisted .kuzushi/threat-model.json for {}; run a full build first",
+            input.target.display()
+        );
+    };
+    let source_bundle = load_threat_model_source_bundle(ctx, input)?;
+    emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
+    let generated = GeneratedThreatModel {
+        document,
+        bridge_findings: None,
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+    };
+    Ok((generated, source_bundle))
+}
+
+fn complete_refined_build(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+    coverage: &CoverageReport,
+    parked: usize,
+) -> Result<Value> {
     let reconciliation =
-        BuildReconciliation::from_report(&coverage, parked, "changed surfaces", &generated.document);
-    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle, reconciliation)
+        BuildReconciliation::from_report(coverage, parked, "changed surfaces", &generated.document);
+    complete_threat_model_build(
+        ctx,
+        flavor,
+        verb,
+        input,
+        generated,
+        source_bundle,
+        reconciliation,
+    )
 }
 
 pub(crate) struct RefineDelta {
@@ -54,6 +103,9 @@ pub(crate) struct RefineDelta {
     pub(crate) changed_files: Option<Vec<String>>,
     pub(crate) new_findings: Vec<ConfirmedFindingRow>,
     pub(crate) changed_surfaces: Vec<AttackSurface>,
+    pub(crate) grounding_surfaces: Vec<AttackSurface>,
+    pub(crate) entry_point_catalog: crate::capabilities::entry_points::EntryPointCatalogGrounding,
+    pub(crate) entry_point_catalog_changed: bool,
     /// Citable anchors for the question closer: surfaces, confirmed
     /// findings, and operator vuln ids known at refine time.
     pub(crate) evidence_index: BTreeSet<String>,
@@ -66,6 +118,8 @@ fn collect_refine_delta(
 ) -> Result<RefineDelta> {
     let changed_files = delta_changed_files(input, document)?;
     let grounding = load_prompt_grounding(input, ctx)?;
+    let entry_point_catalog_changed =
+        catalog_digest_changed(document, &grounding.entry_point_catalog);
     let mut evidence_index = super::research::build_evidence_index(&grounding, &[]);
     evidence_index.extend(input.vulns.iter().map(|row| row.id.clone()));
     let cited = existing_evidence_refs(document);
@@ -74,13 +128,34 @@ fn collect_refine_delta(
         .into_iter()
         .filter(|finding| !cited.contains(&finding.fingerprint))
         .collect();
-    let changed_surfaces = changed_file_surfaces(grounding.surfaces, changed_files.as_deref());
+    let changed_surfaces = refine_changed_surfaces(
+        grounding.surfaces.clone(),
+        changed_files.as_deref(),
+        entry_point_catalog_changed,
+        &grounding.entry_point_catalog.catalog_ids,
+    );
     Ok(RefineDelta {
         changed_files,
         new_findings,
         changed_surfaces,
+        grounding_surfaces: grounding.surfaces,
+        entry_point_catalog: grounding.entry_point_catalog,
+        entry_point_catalog_changed,
         evidence_index,
     })
+}
+
+fn catalog_digest_changed(
+    document: &Value,
+    current: &crate::capabilities::entry_points::EntryPointCatalogGrounding,
+) -> bool {
+    let Some(current_sha256) = current.receipt.sha256.as_deref() else {
+        return false;
+    };
+    document
+        .pointer("/provenance/entryPointCatalog/sha256")
+        .and_then(Value::as_str)
+        != Some(current_sha256)
 }
 
 fn delta_changed_files(input: &BuildInput, document: &Value) -> Result<Option<Vec<String>>> {
@@ -98,16 +173,18 @@ fn delta_changed_files(input: &BuildInput, document: &Value) -> Result<Option<Ve
     )
 }
 
-fn changed_file_surfaces(
+fn refine_changed_surfaces(
     surfaces: Vec<AttackSurface>,
     changed_files: Option<&[String]>,
+    catalog_changed: bool,
+    catalog_ids: &BTreeSet<String>,
 ) -> Vec<AttackSurface> {
-    let Some(changed) = changed_files else {
-        return Vec::new();
-    };
     surfaces
         .into_iter()
-        .filter(|surface| changed.iter().any(|file| file == &surface.path))
+        .filter(|surface| {
+            changed_files.is_some_and(|changed| changed.contains(&surface.path))
+                || (catalog_changed && catalog_ids.contains(&surface.id))
+        })
         .collect()
 }
 
@@ -305,7 +382,10 @@ fn close_open_questions(
         .budget_usd
         .is_some_and(|budget| generated.cost_usd >= budget)
     {
-        return Ok(QuestionCloserOutcome::skipped("budget-exhausted", open.len()));
+        return Ok(QuestionCloserOutcome::skipped(
+            "budget-exhausted",
+            open.len(),
+        ));
     }
     let outcome = run_question_closer(
         runtime,
@@ -352,12 +432,32 @@ fn finalize_refined_document(
     document: &mut Value,
     delta: &RefineDelta,
     attach: &EvidenceAttachment,
+    coverage: &CoverageReport,
+    gap_method: &str,
+    closer: &QuestionCloserOutcome,
+    parked: usize,
+) -> Result<()> {
+    restore_grounded_entry_point_facts(
+        document,
+        &delta.grounding_surfaces,
+        &delta.entry_point_catalog.catalog_surfaces,
+    )?;
+    assign_stable_ids(document);
+    apply_coverage(document, coverage, gap_method, parked);
+    stamp_provenance(document, &input.target, "staged");
+    stamp_entry_point_catalog_receipt(document, &delta.entry_point_catalog);
+    stamp_refine_delta_provenance(document, delta, attach, gap_method, closer, parked);
+    Ok(())
+}
+
+fn stamp_refine_delta_provenance(
+    document: &mut Value,
+    delta: &RefineDelta,
+    attach: &EvidenceAttachment,
     gap_method: &str,
     closer: &QuestionCloserOutcome,
     parked: usize,
 ) {
-    assign_stable_ids(document);
-    stamp_provenance(document, &input.target, "staged");
     if let Some(provenance) = document["provenance"].as_object_mut() {
         provenance.insert("mode".to_string(), json!("refine"));
         provenance.insert(
@@ -369,6 +469,7 @@ fn finalize_refined_document(
                 "likelihoodRaised": attach.likelihood_raised,
                 "unmatchedFindings": attach.unmatched.len(),
                 "changedSurfaces": delta.changed_surfaces.len(),
+                "entryPointCatalogChanged": delta.entry_point_catalog_changed,
                 "gapFillMethod": gap_method,
                 "questionsClosed": closer.questions_closed,
                 "questionsOpen": closer.questions_open,
@@ -404,6 +505,43 @@ fn emit_refine_delta(ctx: &ToolExecutionContext<'_>, verb: &str, delta: &RefineD
 mod tests {
     use super::*;
 
+    fn surface(id: &str, path: &str) -> AttackSurface {
+        serde_json::from_value(json!({
+            "id": id,
+            "kind": "rpc_handler",
+            "path": path,
+            "language": "rust",
+            "title": "Tauri command",
+            "evidence": "#[tauri::command]",
+            "risk": {"rank": 1, "score": 10, "tier": "medium", "reasons": []}
+        }))
+        .unwrap()
+    }
+
+    fn catalog(
+        sha256: &str,
+        ids: &[&str],
+    ) -> crate::capabilities::entry_points::EntryPointCatalogGrounding {
+        crate::capabilities::entry_points::EntryPointCatalogGrounding {
+            receipt: crate::capabilities::entry_points::EntryPointCatalogReceipt {
+                status: "current".to_string(),
+                sha256: Some(sha256.to_string()),
+                records: ids.len(),
+                records_selected: ids.len(),
+                grounding_limit: ids.len(),
+                grounding_records_selected: ids.len(),
+                snapshot_timestamp: Some(9),
+                context_sha256: Some("sha256:context".to_string()),
+                tree_hash: None,
+                selection_policy: "risk-kind-stratified-v1".to_string(),
+                revision: Some("abc".to_string()),
+                revision_dirty: Some(false),
+            },
+            catalog_ids: ids.iter().map(|id| (*id).to_string()).collect(),
+            catalog_surfaces: Vec::new(),
+        }
+    }
+
     fn row(fingerprint: &str, file: &str) -> ConfirmedFindingRow {
         ConfirmedFindingRow {
             fingerprint: fingerprint.to_string(),
@@ -429,7 +567,10 @@ mod tests {
         });
         let attach = attach_new_evidence(&mut document, &[row("fp3_new", "src/auth.ts")]);
         assert_eq!(attach.attached, 1);
-        assert_eq!(attach.likelihood_raised, 1, "2→3 evidence rows crosses the bump threshold");
+        assert_eq!(
+            attach.likelihood_raised, 1,
+            "2→3 evidence rows crosses the bump threshold"
+        );
         assert!(attach.unmatched.is_empty());
         let threat = &document["threats"][0];
         assert_eq!(threat["likelihood"], json!("likely"));
@@ -447,5 +588,149 @@ mod tests {
         assert!(document["openQuestions"][0]["question"]
             .as_str()
             .is_some_and(|question| question.contains("fp3_lost")));
+    }
+
+    #[test]
+    fn same_revision_new_catalog_digest_refreshes_bounded_catalog_surfaces() {
+        let document = json!({
+            "provenance": {
+                "revision": "abc",
+                "entryPointCatalog": {"sha256": "sha256:old"}
+            }
+        });
+        let grounding = catalog("sha256:new", &["AS-new"]);
+
+        let changed = catalog_digest_changed(&document, &grounding);
+        let selected = refine_changed_surfaces(
+            vec![
+                surface("AS-new", "src/commands.rs"),
+                surface("infra", "Dockerfile"),
+            ],
+            Some(&[]),
+            changed,
+            &grounding.catalog_ids,
+        );
+
+        assert!(changed);
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].id, "AS-new");
+    }
+
+    #[test]
+    fn unchanged_catalog_digest_preserves_zero_surface_delta() {
+        let document = json!({
+            "provenance": {"entryPointCatalog": {"sha256": "sha256:same"}}
+        });
+        let grounding = catalog("sha256:same", &["AS-existing"]);
+
+        let changed = catalog_digest_changed(&document, &grounding);
+        let selected = refine_changed_surfaces(
+            vec![surface("AS-existing", "src/commands.rs")],
+            None,
+            changed,
+            &grounding.catalog_ids,
+        );
+
+        assert!(!changed);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn missing_prior_catalog_receipt_refreshes_catalog_surfaces() {
+        let document = json!({"provenance": {"revision": "abc"}});
+        let grounding = catalog("sha256:new", &["AS-new"]);
+
+        assert!(catalog_digest_changed(&document, &grounding));
+    }
+
+    #[test]
+    fn refine_finalizer_replaces_stale_coverage_and_stamps_catalog() {
+        let target = tempfile::tempdir().unwrap();
+        let catalog = crate::capabilities::entry_points::EntryPointCatalogGrounding {
+            receipt: crate::capabilities::entry_points::EntryPointCatalogReceipt {
+                status: "current".to_string(),
+                sha256: Some("sha256:catalog".to_string()),
+                records: 519,
+                records_selected: 30,
+                grounding_limit: 40,
+                grounding_records_selected: 40,
+                snapshot_timestamp: Some(9),
+                context_sha256: Some("sha256:context".to_string()),
+                tree_hash: None,
+                selection_policy: "risk-kind-stratified-v1".to_string(),
+                revision: Some("abc".to_string()),
+                revision_dirty: Some(false),
+            },
+            catalog_ids: ["AS-one".to_string(), "AS-two".to_string()]
+                .into_iter()
+                .collect(),
+            catalog_surfaces: Vec::new(),
+        };
+        let delta = RefineDelta {
+            changed_files: Some(Vec::new()),
+            new_findings: Vec::new(),
+            changed_surfaces: Vec::new(),
+            grounding_surfaces: Vec::new(),
+            entry_point_catalog: catalog,
+            entry_point_catalog_changed: false,
+            evidence_index: BTreeSet::new(),
+        };
+        let attach = EvidenceAttachment {
+            attached: 0,
+            likelihood_raised: 0,
+            unmatched: Vec::new(),
+        };
+        let closer = QuestionCloserOutcome::skipped("none-needed", 0);
+        let input = BuildInput {
+            target: target.path().to_path_buf(),
+            ..BuildInput::default()
+        };
+        let mut document = json!({
+            "threats": [],
+            "attackSurface": {"entryPoints": [{"id": "AS-one"}, {"id": "model-only"}]},
+            "coverage": {"entryPointsConsidered": 0},
+        });
+
+        finalize_refined_document(
+            &input,
+            &mut document,
+            &delta,
+            &attach,
+            &CoverageReport {
+                considered: 2,
+                gaps: vec![CoverageGap {
+                    entry_point_id: "AS-two".to_string(),
+                    entry_point: "second route".to_string(),
+                    kind: "http_route".to_string(),
+                    path: "src/two.rs".to_string(),
+                }],
+            },
+            "none-needed",
+            &closer,
+            1,
+        )
+        .unwrap();
+
+        assert_eq!(
+            document["provenance"]["entryPointCatalog"]["records"],
+            json!(519)
+        );
+        assert_eq!(
+            document["coverage"]["catalogEntryPointsSelected"],
+            json!(30)
+        );
+        assert_eq!(document["coverage"]["catalogEntryPointsLinked"], json!(1));
+        assert_eq!(document["coverage"]["entryPointsConsidered"], json!(2));
+        assert_eq!(document["coverage"]["entryPointsCovered"], json!(1));
+        assert_eq!(document["coverage"]["invariantSatisfied"], json!(false));
+        assert_eq!(document["coverage"]["parkedBySystem"], json!(1));
+        assert_eq!(
+            document["coverage"]["gaps"][0]["entryPointId"],
+            json!("AS-two")
+        );
+        assert_eq!(
+            document["provenance"]["refineDelta"]["entryPointCatalogChanged"],
+            json!(false)
+        );
     }
 }

@@ -22189,6 +22189,7 @@ fn dfd_page_cycles_all_13_nodes_and_11_flows_and_scrolls_details() {
 #[test]
 fn entry_points_page_selects_entries_and_pages_only_the_detail() {
     let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
+    app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(
         &mut app,
@@ -22219,13 +22220,42 @@ fn entry_points_page_selects_entries_and_pages_only_the_detail() {
 }
 
 #[test]
-fn entry_point_enter_jumps_to_its_first_resolved_dfd_target() {
+fn entry_point_printable_navigation_requires_navigate_mode() {
     let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
+    assert_eq!(app.input(), "j", "Prompt mode owns printable input");
+    assert_eq!(app.router.scene().entry_point_selection(), 0);
+
+    let (_navigate_temp, mut navigate_app) = entry_point_browser_app(entry_point_rows());
+    navigate_app.set_input_mode(crate::InputMode::Navigate);
+    assert_eq!(navigate_app.input_mode(), crate::InputMode::Navigate);
+    press_key(
+        &mut navigate_app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert_eq!(navigate_app.router.scene().entry_point_selection(), 1);
+    assert_eq!(navigate_app.input(), "");
+}
+
+#[test]
+fn entry_point_enter_jumps_to_its_first_resolved_dfd_target() {
+    let (_temp, mut app) = entry_point_browser_app(entry_point_rows());
+    app.set_input_mode(crate::InputMode::Navigate);
+    let http_index = crate::ui_view_models::entry_point_breakdown(&app)
+        .entries
+        .iter()
+        .position(|entry| entry.id == "EP-http")
+        .expect("HTTP entry point");
+    let entry_count = crate::ui_view_models::entry_point_breakdown(&app)
+        .entries
+        .len();
+    app.router
+        .scene_mut()
+        .set_entry_point_selection(http_index, entry_count);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
@@ -22245,6 +22275,7 @@ fn unresolved_entry_point_enter_stays_put_with_rebuild_guidance() {
         "targetElementIds": ["missing"]
     }]);
     let (_temp, mut app) = entry_point_browser_app(entries);
+    app.set_input_mode(crate::InputMode::Navigate);
 
     press_key(
         &mut app,

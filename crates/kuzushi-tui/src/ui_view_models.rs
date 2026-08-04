@@ -358,9 +358,11 @@ pub(crate) use viz_data::{
     AttackTree, ComponentItem, ComponentScope, ComponentSource, ComponentSourceKind,
     ComponentStack, DfdBoundaryModel, DfdContextCounts, DfdFlowModel, DfdKind, DfdLinkState,
     DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent, DfdOverviewFlow, DfdOverviewZone,
-    DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow, EntryPointBreakdown,
-    EntryPointGroup, EntryPointItem, EntryPointTarget, FindingsHeatmap, LegendEntry, ModuleRisk,
-    RiskByModule, TaintFlowPath, TaintStageModel, WorklistRowModel, WorklistViewModel,
+    DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow, EntryPointArtifactStatus,
+    EntryPointBreakdown, EntryPointComposition, EntryPointCounts, EntryPointDisposition,
+    EntryPointFreshness, EntryPointGroup, EntryPointItem, EntryPointReceipt, EntryPointTarget,
+    FindingsHeatmap, LegendEntry, ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
+    WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, adjacent_available_workbench_page,

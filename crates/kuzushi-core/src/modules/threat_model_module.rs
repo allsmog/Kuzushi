@@ -10,7 +10,7 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
         vec![dag(
             "threat-model:build",
             "threat-model",
-            &["context:build"],
+            &["context:build", "entry-points:extract"],
         )],
     )
 }

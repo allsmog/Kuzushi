@@ -5,6 +5,198 @@
 devex_log() { printf '%s\n' "$*" >&2; }
 devex_die() { devex_log "error: $*"; exit 1; }
 
+# Exit contract shared by the standalone driver and its acceptance wrappers.
+# Machine failures win; otherwise unresolved human judgments are a distinct
+# outcome and must never be promoted to a clean pass.
+DEVEX_REVIEW_REQUIRED_EXIT=4
+
+devex_journey_exit_code() { # <fail-count> <review-count>
+  if [ "$1" -gt 0 ]; then
+    printf '%s' 1
+  elif [ "$2" -gt 0 ]; then
+    printf '%s' "$DEVEX_REVIEW_REQUIRED_EXIT"
+  else
+    printf '%s' 0
+  fi
+}
+
+devex_journey_result_label() { # <fail-count> <review-count>
+  case $(devex_journey_exit_code "$1" "$2") in
+    0) printf '%s' PASS;;
+    1) printf '%s' FAIL;;
+    "$DEVEX_REVIEW_REQUIRED_EXIT") printf '%s' REVIEW_REQUIRED;;
+  esac
+}
+
+devex_report_review_count() { # <result-line>
+  local count
+  count=$(printf '%s' "$1" | sed -n \
+    's#.* / \([0-9][0-9]*\) review-for-human.*#\1#p')
+  printf '%s' "${count:-0}"
+}
+
+devex_file_contains_any() { # <file> <literal-a[ || literal-b ...]>
+  local file=$1 alternatives=$2 candidate
+  while :; do
+    case $alternatives in
+      *' || '*)
+        candidate=${alternatives%% || *}
+        alternatives=${alternatives#* || }
+        ;;
+      *)
+        candidate=$alternatives
+        alternatives=''
+        ;;
+    esac
+    [ -n "$candidate" ] && grep -Fiq -- "$candidate" "$file" && return 0
+    [ -n "$alternatives" ] || return 1
+  done
+}
+
+devex_footer_is_navigate() { # <last-three-lines>
+  case $1 in
+    *'Esc dismiss'*) return 1;;
+    *'Esc prompt'*) return 0;;
+    *) return 1;;
+  esac
+}
+
+devex_canonical_path() {
+  realpath "$1" 2>/dev/null || {
+    local dir base
+    dir=$(dirname "$1")
+    base=$(basename "$1")
+    (cd "$dir" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$base")
+  }
+}
+
+devex_file_sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+  else
+    printf '%s' unavailable
+  fi
+}
+
+devex_stdin_sha256() {
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+  else
+    cat >/dev/null
+    printf '%s' unavailable
+  fi
+}
+
+devex_path_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null \
+    || stat -c '%a' "$1" 2>/dev/null \
+    || printf '%s' unavailable
+}
+
+devex_capture_target_source_status() { # <target> <receipt-path>
+  LC_ALL=C git -C "$1" status --porcelain=v2 --untracked-files=all \
+    -- . ':(exclude).kuzushi' > "$2"
+}
+
+devex_path_has_symlink_parent() { # <target> <relative-path>
+  local current=$1 parent component
+  parent=${2%/*}
+  [ "$parent" != "$2" ] || return 1
+  while [ -n "$parent" ]; do
+    component=${parent%%/*}
+    current="$current/$component"
+    [ -L "$current" ] && return 0
+    case $parent in
+      */*) parent=${parent#*/};;
+      *) parent='';;
+    esac
+  done
+  return 1
+}
+
+# Capture a deterministic manifest of actual worktree state, not only Git's
+# status classes. It covers tracked and non-ignored untracked paths, records
+# type/mode/content, and hashes symlink text rather than following the link.
+# Root .git and .kuzushi state is excluded from the source comparison.
+devex_capture_target_source_tree() { # <target> <receipt-path>
+  local target=$1 receipt=$2 paths entries rel path kind mode payload entry quoted
+  paths=$(mktemp "${receipt}.paths.XXXXXX") || return 1
+  entries=$(mktemp "${receipt}.entries.XXXXXX") || {
+    rm -f "$paths"
+    return 1
+  }
+  if ! git -C "$target" ls-files -z --cached --others --exclude-standard \
+      -- . ':(exclude).kuzushi' > "$paths"; then
+    rm -f "$paths" "$entries"
+    return 1
+  fi
+
+  : > "$entries"
+  # shellcheck disable=SC2094 # Error cleanup deliberately removes the loop's temporary input.
+  while IFS= read -r -d '' rel; do
+    case $rel in
+      .git|.git/*|.kuzushi|.kuzushi/*) continue;;
+    esac
+    path="$target/$rel"
+    if devex_path_has_symlink_parent "$target" "$rel"; then
+      rm -f "$paths" "$entries"
+      return 1
+    fi
+    mode=$(devex_path_mode "$path")
+    if [ -L "$path" ]; then
+      kind='symlink'
+      payload=$(readlink "$path" | devex_stdin_sha256)
+    elif [ -f "$path" ]; then
+      kind='file'
+      payload=$(devex_file_sha256 "$path")
+    elif [ -d "$path" ]; then
+      kind='directory'
+      payload='-'
+    elif [ -e "$path" ]; then
+      kind='special'
+      payload='-'
+    else
+      kind='missing'
+      mode='-'
+      payload='-'
+    fi
+    if [ "$kind" != missing ] && [ "$mode" = unavailable ]; then
+      rm -f "$paths" "$entries"
+      return 1
+    fi
+    [ "$payload" != unavailable ] || {
+      rm -f "$paths" "$entries"
+      return 1
+    }
+    entry=$(printf '%s\0%s\0%s\0%s\0' "$kind" "$mode" "$payload" "$rel" \
+      | devex_stdin_sha256)
+    [ "$entry" != unavailable ] || {
+      rm -f "$paths" "$entries"
+      return 1
+    }
+    quoted=$(printf '%q' "$rel")
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "$entry" "$kind" "$mode" "$payload" "$quoted" >> "$entries"
+  done < "$paths"
+
+  LC_ALL=C sort "$entries" > "$receipt"
+  rm -f "$paths" "$entries"
+}
+
+devex_target_state_unchanged() { # <before-head> <before-status> <before-tree> <after-head> <after-status> <after-tree>
+  [ "$1" = "$4" ] && [ "$2" = "$5" ] && [ "$3" = "$6" ]
+}
+
+devex_is_kz_wrapper_flow() { # <wrapper-path> <native-path>
+  [ "$(basename "$1")" = kz ] || return 1
+  [ -x "$1" ] && [ -x "$2" ] || return 1
+  [ "$(devex_canonical_path "$1")" != "$(devex_canonical_path "$2")" ]
+}
+
 # ---------------------------------------------------------------------------
 # tmux session lifecycle — every session we create is tracked and killed on
 # exit (trap), so an aborted run never orphans a tmux session.
@@ -23,14 +215,23 @@ devex_cleanup_sessions() {
   DEVEX_SESSIONS=""
 }
 
-# devex_session_start <name> <cols> <rows> <cwd>
+# devex_session_start <name> <cols> <rows> <cwd> <native-bin> <wrapper-bin> <target>
 # Starts a bare /bin/sh at a controlled size. The journey then "launches" the
 # TUI by sending a command line, exactly like a real operator — this also
 # survives the program exiting (the shell stays), so multi-launch journeys
 # (e.g. palette matrix) reuse one session.
+#
+# tmux servers outlive clients and copy only their configured
+# `update-environment` allowlist into new sessions. These audit identities are
+# intentionally session-local so a pre-existing server cannot drop them and
+# the harness never mutates the operator's tmux global environment.
 devex_session_start() {
+  local native_bin=${5-} wrapper_bin=${6-} target=${7-}
   tmux kill-session -t "$1" 2>/dev/null || true
-  tmux new-session -d -s "$1" -x "$2" -y "$3" -c "$4" /bin/sh \
+  tmux new-session -d -s "$1" -x "$2" -y "$3" -c "$4" \
+    -e "KUZUSHI_NATIVE_BIN=$native_bin" \
+    -e "KUZUSHI_BIN=$wrapper_bin" \
+    -e "KUZUSHI_DEVEX_TARGET=$target" /bin/sh \
     || devex_die "tmux new-session failed for $1"
   DEVEX_SESSIONS="$DEVEX_SESSIONS $1"
 }

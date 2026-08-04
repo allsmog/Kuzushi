@@ -1,0 +1,161 @@
+use crate::attack_surface::AttackSurface;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+pub(crate) const ENTRY_POINTS_FILE: &str = "entry-points.json";
+pub(crate) const MAX_ENTRY_POINTS_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const ENTRY_POINT_SELECTION_POLICY: &str = "risk-kind-stratified-v1";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EntryPointRecord {
+    #[serde(flatten)]
+    pub(crate) surface: AttackSurface,
+    #[serde(default)]
+    pub(crate) name: Value,
+    #[serde(default)]
+    pub(crate) location: Value,
+    #[serde(flatten)]
+    pub(crate) extra: Map<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EntryPointCatalogProvenance {
+    pub(crate) built_at_ms: u64,
+    pub(crate) sha256: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) revision: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) revision_dirty: Option<bool>,
+    pub(crate) context_snapshot_timestamp: u64,
+    pub(crate) context_snapshot_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) context_snapshot_tree_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EntryPointCatalog {
+    pub(crate) target: String,
+    pub(crate) timestamp: u64,
+    pub(crate) snapshot_timestamp: u64,
+    pub(crate) total: usize,
+    pub(crate) entry_points: Vec<EntryPointRecord>,
+    pub(crate) provenance: EntryPointCatalogProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ContextSnapshotIdentity {
+    pub(crate) target: String,
+    pub(crate) timestamp: u64,
+    pub(crate) sha256: String,
+    pub(crate) revision: Option<String>,
+    pub(crate) revision_dirty: Option<bool>,
+    pub(crate) tree_hash: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ContextSnapshotDocument {
+    pub(crate) value: Value,
+    pub(crate) identity: ContextSnapshotIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EntryPointCatalogReceipt {
+    pub(crate) status: String,
+    pub(crate) sha256: Option<String>,
+    pub(crate) records: usize,
+    pub(crate) records_selected: usize,
+    pub(crate) grounding_limit: usize,
+    pub(crate) grounding_records_selected: usize,
+    pub(crate) snapshot_timestamp: Option<u64>,
+    pub(crate) context_sha256: Option<String>,
+    pub(crate) tree_hash: Option<String>,
+    pub(crate) selection_policy: String,
+    pub(crate) revision: Option<String>,
+    pub(crate) revision_dirty: Option<bool>,
+}
+
+impl EntryPointCatalogReceipt {
+    pub(crate) fn unavailable(status: &str) -> Self {
+        Self {
+            status: status.to_string(),
+            sha256: None,
+            records: 0,
+            records_selected: 0,
+            grounding_limit: 0,
+            grounding_records_selected: 0,
+            snapshot_timestamp: None,
+            context_sha256: None,
+            tree_hash: None,
+            selection_policy: ENTRY_POINT_SELECTION_POLICY.to_string(),
+            revision: None,
+            revision_dirty: None,
+        }
+    }
+
+    pub(crate) fn json(&self) -> Value {
+        let mut value = json!({
+            "status": self.status,
+            "sha256": self.sha256,
+            "records": self.records,
+            "recordsSelected": self.records_selected,
+            "groundingLimit": self.grounding_limit,
+            "groundingRecordsSelected": self.grounding_records_selected,
+            "snapshotTimestamp": self.snapshot_timestamp,
+            "contextSha256": self.context_sha256,
+            "treeHash": self.tree_hash,
+            "selectionPolicy": self.selection_policy,
+        });
+        insert_optional_provenance(&mut value, self);
+        value
+    }
+}
+
+fn insert_optional_provenance(value: &mut Value, receipt: &EntryPointCatalogReceipt) {
+    let Some(fields) = value.as_object_mut() else {
+        return;
+    };
+    if let Some(revision) = receipt.revision.as_ref() {
+        fields.insert("revision".to_string(), json!(revision));
+    }
+    if let Some(dirty) = receipt.revision_dirty {
+        fields.insert("revisionDirty".to_string(), json!(dirty));
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EntryPointCatalogGrounding {
+    pub(crate) receipt: EntryPointCatalogReceipt,
+    pub(crate) catalog_ids: BTreeSet<String>,
+    pub(crate) catalog_surfaces: Vec<crate::attack_surface::AttackSurface>,
+}
+
+impl EntryPointCatalogGrounding {
+    pub(crate) fn unavailable(status: &str) -> Self {
+        Self {
+            receipt: EntryPointCatalogReceipt::unavailable(status),
+            catalog_ids: BTreeSet::new(),
+            catalog_surfaces: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct EntryPointCatalogResolution {
+    pub(crate) catalog: Option<EntryPointCatalog>,
+    pub(crate) status: String,
+    pub(crate) path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryPointCatalogAuthentication {
+    pub sha256: String,
+    pub total: usize,
+    pub snapshot_timestamp: u64,
+    pub context_sha256: String,
+    pub tree_hash: Option<String>,
+}

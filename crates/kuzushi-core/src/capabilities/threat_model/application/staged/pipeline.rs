@@ -1,11 +1,17 @@
 use super::super::*;
-use super::gap_fill::run_gap_fill;
+use super::gap_fill::{run_gap_fill, GapFillOutcome};
 use super::research::{research_artifact_json, research_stats, run_research, ResearchDossier};
 use super::synthesis::staged_synthesis_prompt;
 use super::variant_scan::{run_variant_scan, variant_scan_stats, VariantScanOutcome};
 use crate::spend::{Operation, SpendLimiter, SpendTicket};
 
 const ESTIMATED_STAGE_DEPOSIT_USD: f64 = 1.0;
+
+struct StagedBuildOutput {
+    generated: GeneratedThreatModel,
+    source_bundle: ThreatModelSourceBundle,
+    reconciliation: BuildReconciliation,
+}
 
 /// Staged pipeline: R research (deterministic) → S synthesis+generalize
 /// (1 LLM call) → V coverage validation (deterministic) → G conditional
@@ -17,15 +23,71 @@ pub(crate) fn build_staged_threat_model(
     verb: &str,
     input: BuildInput,
 ) -> Result<Value> {
-    // Stage checkpoints give a failed run real resume coordinates; the
-    // synthesis model call itself replays free through the semantic cache
-    // on an identical re-dispatch of an unchanged workspace.
     let checkpoints = ctx.stage_checkpoints();
-    let source_bundle = load_threat_model_source_bundle(ctx, &input)?;
+    let (source_bundle, dossier) = run_staged_research_stage(ctx, verb, &input, &checkpoints)?;
+    let spend = staged_spend_limiter(ctx)?;
+    let (mut generated, evidence_warnings) = run_staged_synthesis_stage(
+        runtime,
+        ctx,
+        flavor,
+        verb,
+        &input,
+        &source_bundle,
+        &dossier,
+        spend.as_ref(),
+        &checkpoints,
+    )?;
+    let reconciliation = run_staged_post_synthesis(
+        runtime,
+        ctx,
+        verb,
+        &input,
+        &dossier,
+        &mut generated,
+        spend.as_ref(),
+        evidence_warnings,
+        &checkpoints,
+    )?;
+    let output = StagedBuildOutput {
+        generated,
+        source_bundle,
+        reconciliation,
+    };
+    complete_staged_build(ctx, flavor, verb, input, output)
+}
+
+fn complete_staged_build(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: BuildInput,
+    output: StagedBuildOutput,
+) -> Result<Value> {
+    complete_threat_model_build(
+        ctx,
+        flavor,
+        verb,
+        input,
+        output.generated,
+        output.source_bundle,
+        output.reconciliation,
+    )
+}
+
+fn run_staged_research_stage(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    checkpoints: &Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>>,
+) -> Result<(ThreatModelSourceBundle, ResearchDossier)> {
+    let source_bundle = load_threat_model_source_bundle(ctx, input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
-    emit_seed_disclosure(ctx, verb, &input);
-    let research_stage = stage_scope(&checkpoints, "research");
-    let dossier = run_research(&input, ctx)?;
+    emit_seed_disclosure(ctx, verb, input);
+    let research_stage = stage_scope(checkpoints, "research");
+    let dossier = run_research(input, ctx)?;
+    source_bundle.authenticate_entry_point_sources(
+        &dossier.grounding.entry_point_catalog.receipt,
+    )?;
     emit_research(ctx, verb, &dossier);
     write_stage_artifact(
         &input.target,
@@ -33,24 +95,72 @@ pub(crate) fn build_staged_threat_model(
         "research.json",
         &research_artifact_json(&dossier),
     )?;
-    complete_stage(research_stage, vec![stage_artifact_rel(&input, "research.json")]);
-    let spend = staged_spend_limiter(ctx)?;
-    let synthesis_stage = stage_scope(&checkpoints, "synthesis");
-    let mut generated = run_synthesis(runtime, ctx, flavor, verb, &input, &source_bundle, &dossier, spend.as_ref())?;
+    complete_stage(
+        research_stage,
+        vec![stage_artifact_rel(input, "research.json")],
+    );
+    Ok((source_bundle, dossier))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_staged_synthesis_stage(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: &BuildInput,
+    source_bundle: &ThreatModelSourceBundle,
+    dossier: &ResearchDossier,
+    spend: Option<&SpendLimiter>,
+    checkpoints: &Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>>,
+) -> Result<(GeneratedThreatModel, Vec<String>)> {
+    let synthesis_stage = stage_scope(checkpoints, "synthesis");
+    let mut generated = run_synthesis(
+        runtime,
+        ctx,
+        flavor,
+        verb,
+        input,
+        source_bundle,
+        dossier,
+        spend,
+    )?;
     complete_stage(synthesis_stage, Vec::new());
-    let evidence_warnings = validate_synthesis_document(&mut generated.document, &dossier);
-    let gapfill_stage = stage_scope(&checkpoints, "gapfill");
-    let gap_fill = resolve_coverage(runtime, ctx, verb, &input, &dossier, &mut generated, spend.as_ref())?;
-    let variants = run_optional_variant_scan(ctx, verb, &input, &mut generated)?;
-    let reconciliation = finalize_staged_document(&input, &dossier, &mut generated, &gap_fill, variants, evidence_warnings)?;
+    let warnings = validate_synthesis_document(&mut generated.document, dossier);
+    Ok((generated, warnings))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_staged_post_synthesis(
+    runtime: &dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+    dossier: &ResearchDossier,
+    generated: &mut GeneratedThreatModel,
+    spend: Option<&SpendLimiter>,
+    evidence_warnings: Vec<String>,
+    checkpoints: &Option<std::sync::Arc<crate::run_artifacts::StageCheckpointHandle>>,
+) -> Result<BuildReconciliation> {
+    let gapfill_stage = stage_scope(checkpoints, "gapfill");
+    let gap_fill = resolve_coverage(runtime, ctx, verb, input, dossier, generated, spend)?;
+    let variants = run_optional_variant_scan(ctx, verb, input, generated)?;
+    let reconciliation = finalize_staged_document(
+        input,
+        dossier,
+        generated,
+        &gap_fill,
+        variants,
+        evidence_warnings,
+    )?;
     complete_stage(
         gapfill_stage,
         vec![
-            stage_artifact_rel(&input, "coverage.json"),
-            stage_artifact_rel(&input, "gapfill.json"),
+            stage_artifact_rel(input, "coverage.json"),
+            stage_artifact_rel(input, "gapfill.json"),
         ],
     );
-    complete_threat_model_build(ctx, flavor, verb, input, generated, source_bundle, reconciliation)
+    Ok(reconciliation)
 }
 
 pub(crate) fn stage_scope<'a>(
@@ -107,6 +217,11 @@ struct GapFillResolution {
     artifact: Value,
 }
 
+enum GapFillBudget {
+    Reserved(Option<SpendTicket>),
+    Exhausted(String),
+}
+
 fn resolve_coverage(
     runtime: &dyn AgentRuntime,
     ctx: &ToolExecutionContext<'_>,
@@ -146,40 +261,75 @@ fn gap_fill_resolution(
     spend: Option<&SpendLimiter>,
     report: CoverageReport,
 ) -> Result<GapFillResolution> {
-    let ticket = match reserve_stage_budget(spend) {
-        Ok(ticket) => ticket,
-        Err(error) if is_spend_cap_exhausted(&error) => {
-            return Ok(GapFillResolution {
-                report,
-                method: "budget-exhausted",
-                artifact: json!({"ran": false, "reason": format!("{error:#}")}),
-            });
+    let ticket = match reserve_gap_fill_budget(spend)? {
+        GapFillBudget::Reserved(ticket) => ticket,
+        GapFillBudget::Exhausted(reason) => {
+            return Ok(skipped_gap_fill_resolution(report, reason));
         }
-        Err(error) => return Err(error),
     };
-    let outcome = run_gap_fill(runtime, ctx, input, verb, &report.gaps, &mut generated.document);
-    if let Ok(outcome) = &outcome {
-        settle_gap_fill_cost(spend, ticket, outcome.cost_usd)?;
-        generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
-            [generated.cost_usd, outcome.cost_usd],
-            "staged threat-model cost",
-        )?
-        .usd();
-        generated.cost_usd_exact &= outcome.cost_usd_exact;
-    }
-    let outcome = outcome?;
+    let outcome = run_gap_fill(
+        runtime,
+        ctx,
+        input,
+        verb,
+        &report.gaps,
+        &mut generated.document,
+    )?;
+    record_gap_fill_cost(spend, ticket, generated, &outcome)?;
     let after = check_coverage(&generated.document, &dossier.grounding.surfaces);
     emit_coverage_checked(ctx, verb, &after);
-    Ok(GapFillResolution {
+    Ok(completed_gap_fill_resolution(after, &outcome))
+}
+
+fn reserve_gap_fill_budget(spend: Option<&SpendLimiter>) -> Result<GapFillBudget> {
+    match reserve_stage_budget(spend) {
+        Ok(ticket) => Ok(GapFillBudget::Reserved(ticket)),
+        Err(error) if is_spend_cap_exhausted(&error) => {
+            Ok(GapFillBudget::Exhausted(format!("{error:#}")))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn skipped_gap_fill_resolution(report: CoverageReport, reason: String) -> GapFillResolution {
+    GapFillResolution {
+        report,
+        method: "budget-exhausted",
+        artifact: json!({"ran": false, "reason": reason}),
+    }
+}
+
+fn record_gap_fill_cost(
+    spend: Option<&SpendLimiter>,
+    ticket: Option<SpendTicket>,
+    generated: &mut GeneratedThreatModel,
+    outcome: &GapFillOutcome,
+) -> Result<()> {
+    settle_gap_fill_cost(spend, ticket, outcome.cost_usd)?;
+    generated.cost_usd = crate::runtime::RuntimeCost::checked_sum(
+        [generated.cost_usd, outcome.cost_usd],
+        "staged threat-model cost",
+    )?
+    .usd();
+    generated.cost_usd_exact &= outcome.cost_usd_exact;
+    Ok(())
+}
+
+fn completed_gap_fill_resolution(
+    report: CoverageReport,
+    outcome: &GapFillOutcome,
+) -> GapFillResolution {
+    GapFillResolution {
         artifact: json!({
             "ran": true,
             "addedThreats": outcome.added_threats,
             "addedDeprioritized": outcome.added_deprioritized,
-            "residualGaps": after.gaps.len(),
+            "addedEntryPoints": outcome.added_entry_points,
+            "residualGaps": report.gaps.len(),
         }),
         method: "stride-llm",
-        report: after,
-    })
+        report,
+    }
 }
 
 fn run_optional_variant_scan(
@@ -217,19 +367,76 @@ fn finalize_staged_document(
     variants: Option<VariantScanOutcome>,
     evidence_warnings: Vec<String>,
 ) -> Result<BuildReconciliation> {
+    let parked = stamp_staged_document(
+        input,
+        dossier,
+        generated,
+        gap_fill,
+        variants.as_ref(),
+        evidence_warnings,
+    )?;
+    write_staged_resolution_artifacts(input, gap_fill, parked)?;
+    Ok(BuildReconciliation::from_report(
+        &gap_fill.report,
+        parked,
+        "grounded surfaces",
+        &generated.document,
+    ))
+}
+
+fn stamp_staged_document(
+    input: &BuildInput,
+    dossier: &ResearchDossier,
+    generated: &mut GeneratedThreatModel,
+    gap_fill: &GapFillResolution,
+    variants: Option<&VariantScanOutcome>,
+    evidence_warnings: Vec<String>,
+) -> Result<usize> {
+    restore_grounded_entry_point_facts(
+        &mut generated.document,
+        &dossier.grounding.surfaces,
+        &dossier.grounding.entry_point_catalog.catalog_surfaces,
+    )?;
     assign_stable_ids(&mut generated.document);
     let parked = park_unaccounted(&mut generated.document, &gap_fill.report.gaps);
-    apply_coverage(&mut generated.document, &gap_fill.report, gap_fill.method, parked);
-    stamp_provenance(&mut generated.document, &input.target, "staged");
-    if let Some(provenance) = generated.document["provenance"].as_object_mut() {
-        provenance.insert("researchStats".to_string(), research_stats(dossier));
-        if let Some(variants) = &variants {
-            provenance.insert("variantScan".to_string(), variant_scan_stats(variants));
-        }
-    }
+    apply_coverage(
+        &mut generated.document,
+        &gap_fill.report,
+        gap_fill.method,
+        parked,
+    );
+    stamp_entry_point_catalog_receipt(
+        &mut generated.document,
+        &dossier.grounding.entry_point_catalog,
+    );
+    stamp_staged_run_provenance(&mut generated.document, input, dossier, variants);
     if !evidence_warnings.is_empty() {
         generated.document["evidenceWarnings"] = json!(evidence_warnings);
     }
+    Ok(parked)
+}
+
+fn stamp_staged_run_provenance(
+    document: &mut Value,
+    input: &BuildInput,
+    dossier: &ResearchDossier,
+    variants: Option<&VariantScanOutcome>,
+) {
+    stamp_provenance(document, &input.target, "staged");
+    let Some(provenance) = document["provenance"].as_object_mut() else {
+        return;
+    };
+    provenance.insert("researchStats".to_string(), research_stats(dossier));
+    if let Some(variants) = variants {
+        provenance.insert("variantScan".to_string(), variant_scan_stats(variants));
+    }
+}
+
+fn write_staged_resolution_artifacts(
+    input: &BuildInput,
+    gap_fill: &GapFillResolution,
+    parked: usize,
+) -> Result<()> {
     write_stage_artifact(
         &input.target,
         &input.output_dir,
@@ -242,12 +449,7 @@ fn finalize_staged_document(
         "gapfill.json",
         &gap_fill.artifact,
     )?;
-    Ok(BuildReconciliation::from_report(
-        &gap_fill.report,
-        parked,
-        "grounded surfaces",
-        &generated.document,
-    ))
+    Ok(())
 }
 
 fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchDossier) {
@@ -268,9 +470,7 @@ fn emit_research(ctx: &ToolExecutionContext<'_>, verb: &str, dossier: &ResearchD
 }
 
 fn budget_exhausted(input: &BuildInput, spent_usd: f64) -> bool {
-    input
-        .budget_usd
-        .is_some_and(|budget| spent_usd >= budget)
+    input.budget_usd.is_some_and(|budget| spent_usd >= budget)
 }
 
 /// Workspace spend-ledger protection (hard ceiling + operator caps), same
@@ -327,4 +527,93 @@ fn is_spend_cap_exhausted(error: &anyhow::Error) -> bool {
                 | crate::spend::SpendError::HardCeilingExceeded { .. }
         )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn catalog_grounding() -> crate::capabilities::entry_points::EntryPointCatalogGrounding {
+        crate::capabilities::entry_points::EntryPointCatalogGrounding {
+            receipt: crate::capabilities::entry_points::EntryPointCatalogReceipt {
+                status: "current".to_string(),
+                sha256: Some("sha256:catalog".to_string()),
+                records: 519,
+                records_selected: 30,
+                grounding_limit: 40,
+                grounding_records_selected: 40,
+                snapshot_timestamp: Some(9),
+                context_sha256: Some("sha256:context".to_string()),
+                tree_hash: None,
+                selection_policy: "risk-kind-stratified-v1".to_string(),
+                revision: None,
+                revision_dirty: None,
+            },
+            catalog_ids: ["AS-one".to_string()].into_iter().collect(),
+            catalog_surfaces: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn staged_finalizer_stamps_catalog_receipt_and_coverage_counts() {
+        let target = tempfile::tempdir().unwrap();
+        let input = BuildInput {
+            target: target.path().to_path_buf(),
+            output_dir: "artifacts".to_string(),
+            ..BuildInput::default()
+        };
+        let dossier = ResearchDossier {
+            grounding: PromptGrounding {
+                surfaces: Vec::new(),
+                confirmed_findings: Vec::new(),
+                entry_point_catalog: catalog_grounding(),
+            },
+            vuln_commits: Vec::new(),
+            history_mined: false,
+            advisories: Vec::new(),
+            docs: Vec::new(),
+            operator_vulns: Vec::new(),
+            evidence_index: BTreeSet::new(),
+        };
+        let mut generated = GeneratedThreatModel {
+            document: json!({
+                "threats": [],
+                "attackSurface": {"entryPoints": [{"id": "AS-one"}]},
+            }),
+            bridge_findings: None,
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        };
+        let gap_fill = GapFillResolution {
+            report: CoverageReport {
+                considered: 0,
+                gaps: Vec::new(),
+            },
+            method: "none-needed",
+            artifact: json!({"ran": false}),
+        };
+
+        finalize_staged_document(
+            &input,
+            &dossier,
+            &mut generated,
+            &gap_fill,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            generated.document["provenance"]["entryPointCatalog"]["records"],
+            json!(519)
+        );
+        assert_eq!(
+            generated.document["coverage"]["catalogEntryPointsSelected"],
+            json!(30)
+        );
+        assert_eq!(
+            generated.document["coverage"]["catalogEntryPointsLinked"],
+            json!(1)
+        );
+    }
 }

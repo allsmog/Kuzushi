@@ -18,7 +18,8 @@
 #
 # Verdicts are honest: `expect:` lines are machine-checked substrings
 # (PASS/FAIL); `ask:` lines are human-judgment invariant questions emitted as
-# REVIEW items next to their snapshot — never faked into a pass.
+# REVIEW items next to their snapshot — never faked into a pass. Exit 4 means
+# machine checks passed but human judgment is still required.
 set -eo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -28,7 +29,7 @@ DEFAULT_ARTIFACT_ROOT="$SCRIPT_DIR/artifacts"
 DEFAULT_SIZE="110x32"
 DEFAULT_WAIT_FOR_TIMEOUT=20
 
-# shellcheck source=lib.sh
+# shellcheck source=scripts/devex/lib.sh
 . "$SCRIPT_DIR/lib.sh"
 
 usage() {
@@ -68,6 +69,8 @@ J_COLS=0 J_ROWS=0 J_CWD="" SESSION_STARTED=0
 ENV_PREFIX=""    # accumulated `env -u K K=V` prefix, consumed by next launch
 TMP_HOME="" FIXTURE_TARGET=""
 ACTIVE_PROFILE="default" ACTIVE_LAUNCH_ARGS="" ACTIVE_TARGET_CONTEXT="not launched"
+TARGET_PROOF_REQUIRED=0 TARGET_PROOF_ACTIVE=0 TARGET_REAL="" TARGET_TOPLEVEL=""
+TARGET_HEAD_BEFORE="" TARGET_STATUS_BEFORE="" TARGET_TREE_BEFORE=""
 
 report() { # <TAG> <text>
   printf '  [%s] %s\n' "$1" "$2" | tee -a "$REPORT"
@@ -120,12 +123,114 @@ profile_for_launch_env() {
   esac
 }
 
+write_target_state_receipt() { # <label> <head> <status-digest> <status-file> <tree-digest> <tree-file>
+  local label=$1 head=$2 status_digest=$3 status_file=$4 tree_digest=$5 tree_file=$6 timestamp
+  timestamp=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+  {
+    printf '{\n'
+    printf '  "label": "%s",\n' "$(json_escape "$label")"
+    printf '  "timestamp_utc": "%s",\n' "$(json_escape "$timestamp")"
+    printf '  "target_requested": "%s",\n' "$(json_escape "$KUZUSHI_DEVEX_TARGET")"
+    printf '  "target_canonical": "%s",\n' "$(json_escape "$TARGET_REAL")"
+    printf '  "target_toplevel": "%s",\n' "$(json_escape "$TARGET_TOPLEVEL")"
+    printf '  "target_head": "%s",\n' "$(json_escape "$head")"
+    printf '  "source_status_sha256": "%s",\n' "$(json_escape "$status_digest")"
+    printf '  "source_status_excludes": ".kuzushi",\n'
+    printf '  "source_status_receipt": "%s",\n' "$(json_escape "$(devex_canonical_path "$status_file")")"
+    printf '  "source_tree_sha256": "%s",\n' "$(json_escape "$tree_digest")"
+    printf '  "source_tree_scope": "tracked and non-ignored untracked worktree entries",\n'
+    printf '  "source_tree_excludes": ".git,.kuzushi",\n'
+    printf '  "source_tree_receipt": "%s"\n' "$(json_escape "$(devex_canonical_path "$tree_file")")"
+    printf '}\n'
+  } > "$JDIR/target-$label.provenance.json"
+}
+
+capture_target_state() { # <before|after>
+  local label=$1 status_file tree_file head status_digest tree_digest
+  status_file="$JDIR/target-$label.source-status.txt"
+  tree_file="$JDIR/target-$label.source-tree.txt"
+  if ! devex_capture_target_source_status "$TARGET_REAL" "$status_file"; then
+    fail "target $label source status could not be captured from $TARGET_REAL"
+    return 1
+  fi
+  head=$(git -C "$TARGET_REAL" rev-parse HEAD 2>/dev/null) || {
+    fail "target $label HEAD could not be resolved from $TARGET_REAL"
+    return 1
+  }
+  if ! devex_capture_target_source_tree "$TARGET_REAL" "$tree_file"; then
+    fail "target $label source tree could not be captured from $TARGET_REAL"
+    return 1
+  fi
+  status_digest=$(devex_file_sha256 "$status_file")
+  tree_digest=$(devex_file_sha256 "$tree_file")
+  [ "$status_digest" != unavailable ] && [ "$tree_digest" != unavailable ] || {
+    fail "target $label source state cannot be authenticated: no SHA-256 tool"
+    return 1
+  }
+  if ! write_target_state_receipt "$label" "$head" "$status_digest" "$status_file" \
+      "$tree_digest" "$tree_file"; then
+    fail "target $label provenance receipt could not be written"
+    return 1
+  fi
+  case $label in
+    before)
+      TARGET_HEAD_BEFORE=$head
+      TARGET_STATUS_BEFORE=$status_digest
+      TARGET_TREE_BEFORE=$tree_digest
+      ;;
+    after)
+      TARGET_HEAD_AFTER=$head
+      TARGET_STATUS_AFTER=$status_digest
+      TARGET_TREE_AFTER=$tree_digest
+      ;;
+  esac
+  report target "$label · $TARGET_REAL @ $head · status sha256:$status_digest · tree sha256:$tree_digest (.git/.kuzushi excluded)"
+}
+
+ensure_target_proof() {
+  [ "$TARGET_PROOF_REQUIRED" = 1 ] || return 0
+  [ "$TARGET_PROOF_ACTIVE" = 0 ] || return 0
+  [ -n "$KUZUSHI_DEVEX_TARGET" ] || {
+    fail "real-target journey requires KUZUSHI_DEVEX_TARGET"
+    return 1
+  }
+  [ -d "$KUZUSHI_DEVEX_TARGET" ] || {
+    fail "real-target journey target is not a directory: $KUZUSHI_DEVEX_TARGET"
+    return 1
+  }
+  TARGET_REAL=$(devex_canonical_path "$KUZUSHI_DEVEX_TARGET") || {
+    fail "real-target journey target cannot be canonicalized: $KUZUSHI_DEVEX_TARGET"
+    return 1
+  }
+  TARGET_TOPLEVEL=$(git -C "$TARGET_REAL" rev-parse --show-toplevel 2>/dev/null) || {
+    fail "real-target journey target is not a Git worktree: $TARGET_REAL"
+    return 1
+  }
+  TARGET_TOPLEVEL=$(devex_canonical_path "$TARGET_TOPLEVEL")
+  capture_target_state before || return 1
+  TARGET_PROOF_ACTIVE=1
+}
+
+finish_target_proof() {
+  [ "$TARGET_PROOF_ACTIVE" = 1 ] || return 0
+  capture_target_state after || return 1
+  if ! devex_target_state_unchanged \
+      "$TARGET_HEAD_BEFORE" "$TARGET_STATUS_BEFORE" "$TARGET_TREE_BEFORE" \
+      "$TARGET_HEAD_AFTER" "$TARGET_STATUS_AFTER" "$TARGET_TREE_AFTER"; then
+    fail "TARGET DRIFT · before $TARGET_HEAD_BEFORE/$TARGET_STATUS_BEFORE/$TARGET_TREE_BEFORE · after $TARGET_HEAD_AFTER/$TARGET_STATUS_AFTER/$TARGET_TREE_AFTER"
+    return 1
+  fi
+  pass "target HEAD, source status, and source tree unchanged (.git/.kuzushi excluded)"
+}
+
 # ---------------------------------------------------------------------------
 # directives
 # ---------------------------------------------------------------------------
 ensure_session() {
   [ "$SESSION_STARTED" = 1 ] && return 0
-  devex_session_start "$SESSION" "$J_COLS" "$J_ROWS" "$J_CWD"
+  devex_session_start \
+    "$SESSION" "$J_COLS" "$J_ROWS" "$J_CWD" \
+    "${KUZUSHI_NATIVE_BIN:-}" "$KUZUSHI_BIN" "$KUZUSHI_DEVEX_TARGET"
   SESSION_STARTED=1
   sleep 0.5
 }
@@ -179,6 +284,26 @@ d_require_any_env() { # at least one named var must be set
   return 3
 }
 
+d_require_wrapper_flow() {
+  local wrapper_hash native_hash
+  if [ -z "${KUZUSHI_NATIVE_BIN:-}" ]; then
+    report step "wrapper-flow proof not requested (KUZUSHI_NATIVE_BIN is unset)"
+    return 0
+  fi
+  if devex_is_kz_wrapper_flow "$KUZUSHI_BIN" "$KUZUSHI_NATIVE_BIN"; then
+    wrapper_hash=$(devex_file_sha256 "$KUZUSHI_BIN")
+    native_hash=$(devex_file_sha256 "$KUZUSHI_NATIVE_BIN")
+    if [ "$wrapper_hash" = unavailable ] || [ "$native_hash" = unavailable ]; then
+      fail "wrapper-flow identities cannot be authenticated: no SHA-256 tool"
+      return 1
+    fi
+    pass "operator journey uses kz wrapper with explicit KUZUSHI_NATIVE_BIN"
+    return 0
+  fi
+  fail "wrapper-flow required: KUZUSHI_BIN must be an executable kz wrapper distinct from executable KUZUSHI_NATIVE_BIN"
+  return 1
+}
+
 d_shell() { # host-side setup command (fixture seeding etc.)
   local cmd; cmd=$(expand_tokens "$1")
   sh -c "$cmd" || fail "shell setup failed: $cmd"
@@ -191,6 +316,7 @@ launch_cmd() { # assemble `env -u K K=V ... <cmd>`
 }
 
 d_launch() { # args appended to the kuzushi binary ('' = bare launch)
+  ensure_target_proof || return $?
   ensure_session
   local args cmd; args=$(expand_tokens "$1")
   ACTIVE_PROFILE=$(profile_for_launch_env "$ENV_PREFIX")
@@ -202,10 +328,11 @@ d_launch() { # args appended to the kuzushi binary ('' = bare launch)
   cmd=$(launch_cmd "$(devex_shell_quote "$KUZUSHI_BIN")${args:+ $args}")
   ENV_PREFIX=""
   devex_send_line "$SESSION" "$cmd"
-  report step "launch: kuzushi${args:+ $args}"
+  report step "launch: $(basename "$KUZUSHI_BIN")${args:+ $args}"
 }
 
 d_launch_raw() { # full shell command line (pipes, --plain, non-TTY checks)
+  ensure_target_proof || return $?
   ensure_session
   local raw cmd; raw=$(expand_tokens "$1")
   ACTIVE_PROFILE=$(profile_for_launch_env "$ENV_PREFIX")
@@ -302,13 +429,11 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   local tries=0 tail3
   while (( tries++ <= 60 )); do
     tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
-    case $tail3 in
-      *'Esc prompt'*)
-        report step "nav-mode (converged)"
-        return 0;;
-      *)
-        tmux send-keys -t "$SESSION" Escape;;
-    esac
+    if devex_footer_is_navigate "$tail3"; then
+      report step "nav-mode (converged)"
+      return 0
+    fi
+    tmux send-keys -t "$SESSION" Escape
     sleep 0.5
   done
   fail "nav-mode — Navigate footer never rendered"
@@ -350,20 +475,11 @@ json_escape() {
 }
 
 canonical_file_path() {
-  local dir base
-  dir=$(dirname "$1")
-  base=$(basename "$1")
-  (cd "$dir" 2>/dev/null && printf '%s/%s' "$(pwd -P)" "$base") || printf '%s' "$1"
+  devex_canonical_path "$1" || printf '%s' "$1"
 }
 
 file_sha256() {
-  if command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{print $1}'
-  elif command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{print $1}'
-  else
-    printf '%s' unavailable
-  fi
+  devex_file_sha256 "$1"
 }
 
 file_mtime_epoch() {
@@ -372,6 +488,7 @@ file_mtime_epoch() {
 
 write_snapshot_provenance() { # <capture-kind>
   local kind=$1 actual alt binary_path binary_version binary_hash binary_mtime
+  local native_requested native_path native_hash native_mtime
   local head dirty_count dirty timestamp tmux_version journey rendered_target
   actual=$(tmux display-message -p -t "$SESSION" '#{pane_width} #{pane_height}')
   # shellcheck disable=SC2086 # Split the trusted two-field tmux format.
@@ -381,6 +498,16 @@ write_snapshot_provenance() { # <capture-kind>
   binary_version=$("$KUZUSHI_BIN" --version 2>/dev/null | head -1 || printf '%s' unavailable)
   binary_hash=$(file_sha256 "$KUZUSHI_BIN")
   binary_mtime=$(file_mtime_epoch "$KUZUSHI_BIN")
+  native_requested=${KUZUSHI_NATIVE_BIN:-}
+  if [ -n "$native_requested" ] && [ -f "$native_requested" ]; then
+    native_path=$(canonical_file_path "$native_requested")
+    native_hash=$(file_sha256 "$native_requested")
+    native_mtime=$(file_mtime_epoch "$native_requested")
+  else
+    native_path=unavailable
+    native_hash=unavailable
+    native_mtime=unavailable
+  fi
   head=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || printf '%s' unavailable)
   dirty_count=$(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal 2>/dev/null | awk 'END { print NR + 0 }')
   [ "$dirty_count" -gt 0 ] && dirty=true || dirty=false
@@ -399,10 +526,22 @@ write_snapshot_provenance() { # <capture-kind>
     printf '  "binary_version": "%s",\n' "$(json_escape "$binary_version")"
     printf '  "binary_sha256": "%s",\n' "$(json_escape "$binary_hash")"
     printf '  "binary_mtime_epoch": "%s",\n' "$(json_escape "$binary_mtime")"
+    printf '  "wrapper_invocation": "%s",\n' "$(json_escape "$KUZUSHI_BIN")"
+    printf '  "wrapper_resolved_path": "%s",\n' "$(json_escape "$binary_path")"
+    printf '  "wrapper_sha256": "%s",\n' "$(json_escape "$binary_hash")"
+    printf '  "native_override": "%s",\n' "$(json_escape "${native_requested:-unset}")"
+    printf '  "native_resolved_path": "%s",\n' "$(json_escape "$native_path")"
+    printf '  "native_sha256": "%s",\n' "$(json_escape "$native_hash")"
+    printf '  "native_mtime_epoch": "%s",\n' "$(json_escape "$native_mtime")"
     printf '  "head": "%s",\n' "$(json_escape "$head")"
+    printf '  "kuzushi_head": "%s",\n' "$(json_escape "$head")"
     printf '  "dirty": %s,\n' "$dirty"
     printf '  "dirty_entry_count": %s,\n' "$dirty_count"
     printf '  "target_context": "%s",\n' "$(json_escape "$ACTIVE_TARGET_CONTEXT")"
+    printf '  "target_canonical": "%s",\n' "$(json_escape "${TARGET_REAL:-unavailable}")"
+    printf '  "target_head_at_start": "%s",\n' "$(json_escape "${TARGET_HEAD_BEFORE:-unavailable}")"
+    printf '  "target_source_status_sha256_at_start": "%s",\n' "$(json_escape "${TARGET_STATUS_BEFORE:-unavailable}")"
+    printf '  "target_source_tree_sha256_at_start": "%s",\n' "$(json_escape "${TARGET_TREE_BEFORE:-unavailable}")"
     printf '  "rendered_target_line": "%s",\n' "$(json_escape "$rendered_target")"
     printf '  "launch_args": "%s",\n' "$(json_escape "$ACTIVE_LAUNCH_ARGS")"
     printf '  "terminal_profile": "%s",\n' "$(json_escape "$ACTIVE_PROFILE")"
@@ -444,7 +583,7 @@ capture_pending() { # <automatic|live|saved>
   esac
 }
 
-d_wait_snap_kind() { # <automatic|live> <[timeout] substring | label>
+d_wait_snap_kind() { # <automatic|live> <[timeout] substring[ || substring] | label>
   ensure_session
   local requested_kind=$1 timeout=$DEFAULT_WAIT_FOR_TIMEOUT spec=$2
   local needle label waited=0 recorded_kind
@@ -459,7 +598,8 @@ d_wait_snap_kind() { # <automatic|live> <[timeout] substring | label>
   needle=$(expand_tokens "$needle")
   prepare_snapshot "$label"
   while [ "$waited" -le "$((timeout * 2))" ]; do
-    if capture_pending "$requested_kind" && grep -Fiq -- "$needle" "$PENDING_SNAP"; then
+    if capture_pending "$requested_kind" \
+        && devex_file_contains_any "$PENDING_SNAP" "$needle"; then
       [ "$requested_kind" = automatic ] \
         && recorded_kind=$(automatic_capture_kind) \
         || recorded_kind=$requested_kind
@@ -617,6 +757,7 @@ dispatch() { # <directive> <value>
     env-unset)       d_env_unset "$2";;
     require-env)     d_require_env "$2" || return $?;;
     require-any-env) d_require_any_env "$2" || return $?;;
+    require-wrapper-flow) d_require_wrapper_flow || return $?;;
     shell)           d_shell "$2";;
     launch)          d_launch "$2";;
     launch-raw)      d_launch_raw "$2";;
@@ -647,7 +788,7 @@ dispatch() { # <directive> <value>
 # ---------------------------------------------------------------------------
 run_journey() { # <journey-file> <run-dir>
   CURRENT_FILE=$1
-  local id line directive value declared_size rc=0
+  local id line directive value declared_size rc=0 result_code result_label
   id=$(basename "$1" .journey)
   JDIR="$2/${id%%-*}"
   mkdir -p "$JDIR"
@@ -659,6 +800,12 @@ run_journey() { # <journey-file> <run-dir>
   J_COLS=${RUN_SIZE%x*} J_ROWS=${RUN_SIZE#*x} J_CWD=$REPO_ROOT
   TMP_HOME="" FIXTURE_TARGET=""
   ACTIVE_PROFILE="default" ACTIVE_LAUNCH_ARGS="" ACTIVE_TARGET_CONTEXT="not launched"
+  TARGET_PROOF_REQUIRED=0 TARGET_PROOF_ACTIVE=0 TARGET_REAL="" TARGET_TOPLEVEL=""
+  TARGET_HEAD_BEFORE="" TARGET_STATUS_BEFORE="" TARGET_TREE_BEFORE=""
+  TARGET_HEAD_AFTER="" TARGET_STATUS_AFTER="" TARGET_TREE_AFTER=""
+  if grep -Eq '^require-env:[[:space:]].*KUZUSHI_DEVEX_TARGET([[:space:]]|$)' "$1"; then
+    TARGET_PROOF_REQUIRED=1
+  fi
 
   if [ -z "$SIZE_OVERRIDE" ]; then
     declared_size=$(sed -n 's/^size:[[:space:]]*//p' "$1" | head -1)
@@ -677,14 +824,21 @@ run_journey() { # <journey-file> <run-dir>
   done 3< "$1"
 
   devex_session_kill "$SESSION"
+  finish_target_proof || true
+  if [ "$rc" = 3 ]; then
+    result_label=SKIP
+    result_code=3
+  else
+    result_code=$(devex_journey_exit_code "$FAIL_N" "$REVIEW_N")
+    result_label=$(devex_journey_result_label "$FAIL_N" "$REVIEW_N")
+  fi
   {
-    printf 'result: %s pass / %s fail / %s review-for-human\n' "$PASS_N" "$FAIL_N" "$REVIEW_N"
+    printf 'result: %s · %s pass / %s fail / %s review-for-human\n' \
+      "$result_label" "$PASS_N" "$FAIL_N" "$REVIEW_N"
     printf 'artifacts: %s\n' "$JDIR"
   } | tee -a "$REPORT"
 
-  [ "$rc" = 3 ] && return 3
-  [ "$FAIL_N" -gt 0 ] && return 1
-  return 0
+  return "$result_code"
 }
 
 # ---------------------------------------------------------------------------
@@ -725,13 +879,15 @@ main() {
 
   devex_register_cleanup
 
-  local n rc total_fail=0 total_skip=0 summary=""
+  local n rc total_fail=0 total_skip=0 total_review_required=0 summary=""
   for n in $ids; do
     rc=0
     run_journey "$(journey_file_for "J$n")" "$run_dir" || rc=$?
     case $rc in
       0) summary="$summary
   J$n  ok      ($PASS_N pass, $REVIEW_N review)";;
+      "$DEVEX_REVIEW_REQUIRED_EXIT") total_review_required=$((total_review_required + 1)); summary="$summary
+  J$n  REVIEW  ($PASS_N machine pass, $REVIEW_N human judgment required)";;
       3) total_skip=$((total_skip + 1)); summary="$summary
   J$n  SKIP    (missing required env)";;
       *) total_fail=$((total_fail + 1)); summary="$summary
@@ -740,8 +896,9 @@ main() {
   done
 
   printf '\n=== summary ===%s\n\nartifacts: %s\n' "$summary" "$run_dir"
-  printf 'review items are honest open questions — judge each snapshot against signifier<->state<->intent.\n'
+  printf 'REVIEW means human judgment is still required; judge every referenced snapshot before claiming the journey passed.\n'
   [ "$total_fail" -eq 0 ] || exit 1
+  [ "$total_review_required" -eq 0 ] || exit "$DEVEX_REVIEW_REQUIRED_EXIT"
 }
 
 main "$@"
