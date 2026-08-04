@@ -3,21 +3,18 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import {
-  parseCargoLock,
   PRIVATE_SOURCE_NEEDLE,
+  parseCargoLock,
   RESOLVER_PACKAGES,
   resolverStubVersions,
 } from "./public-core-cargo-lock.mjs";
 
 const PRIVATE_SOURCE_URL = `https://${PRIVATE_SOURCE_NEEDLE}`;
-const REVISION = '[0-9a-f]{40}';
+const REVISION = "[0-9a-f]{40}";
 
 function dependencyPattern(name) {
   const escapedUrl = PRIVATE_SOURCE_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(
-    `^${name} = \\{ git = "${escapedUrl}", rev = "${REVISION}" \\}$`,
-    "m",
-  );
+  return new RegExp(`^${name} = \\{ git = "${escapedUrl}", rev = "${REVISION}" \\}$`, "m");
 }
 
 function portablePath(path) {
@@ -35,8 +32,7 @@ function replacePrivateDependency(manifest, name, stubPath) {
 
 export function rewriteWorkspaceManifest(manifest, stubRoot) {
   const rewritten = RESOLVER_PACKAGES.reduce(
-    (current, name) =>
-      replacePrivateDependency(current, name, portablePath(`${stubRoot}/${name}`)),
+    (current, name) => replacePrivateDependency(current, name, portablePath(`${stubRoot}/${name}`)),
     manifest,
   );
   if (rewritten.includes(PRIVATE_SOURCE_NEEDLE)) {
@@ -64,10 +60,7 @@ export function preparePublicCoreWorkspace(workspaceRoot, stubsRoot) {
   const lockPath = resolve(workspaceRoot, "Cargo.lock");
   const versions = resolverStubVersions(parseCargoLock(readFileSync(lockPath, "utf8")));
   const relativeStubRoot = portablePath(relative(workspaceRoot, stubsRoot));
-  const manifest = rewriteWorkspaceManifest(
-    readFileSync(manifestPath, "utf8"),
-    relativeStubRoot,
-  );
+  const manifest = rewriteWorkspaceManifest(readFileSync(manifestPath, "utf8"), relativeStubRoot);
   writeFileSync(manifestPath, manifest);
   for (const name of RESOLVER_PACKAGES) {
     writeResolverStub(stubsRoot, name, versions.get(name));
@@ -78,9 +71,7 @@ export function preparePublicCoreWorkspace(workspaceRoot, stubsRoot) {
 function main() {
   const [workspaceRoot, stubsRoot] = process.argv.slice(2);
   if (!workspaceRoot || !stubsRoot) {
-    throw new Error(
-      "usage: node scripts/public-core-workspace.mjs <workspace-root> <stubs-root>",
-    );
+    throw new Error("usage: node scripts/public-core-workspace.mjs <workspace-root> <stubs-root>");
   }
   const result = preparePublicCoreWorkspace(workspaceRoot, stubsRoot);
   process.stdout.write(`${JSON.stringify(result)}\n`);
