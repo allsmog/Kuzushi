@@ -25,9 +25,9 @@ jobs:
   private-source-contract:
     name: private-source-contract
     if: >-
-      github.event_name != 'pull_request' ||
-      (github.event.pull_request.head.repo.full_name == github.repository &&
-       github.actor == github.repository_owner)
+      github.actor == github.repository_owner &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -144,9 +144,9 @@ jobs:
     name: full-product-gauntlet
     if: >-
       always() &&
+      github.actor == github.repository_owner &&
       (github.event_name != 'pull_request' ||
-       (github.event.pull_request.head.repo.full_name == github.repository &&
-        github.actor == github.repository_owner))
+       github.event.pull_request.head.repo.full_name == github.repository)
     needs:
       - private-source-contract
       - complete-private-product
