@@ -30,6 +30,23 @@ automatically. pnpm is pinned via `packageManager` in `package.json` and
 activated by `pnpm setup` through corepack — you don't need to install
 pnpm yourself.
 
+### Credential-free Rust core validation
+
+The default product includes the private `oxidized-joern` CPG engine. A clean
+fork or unauthenticated checkout can still compile and lint every
+`kuzushi-core` target and execute the fail-closed adapter contract:
+
+```sh
+bash scripts/check-public-rust-core.sh
+```
+
+That command disables only the `kuzushi-core/private-cpg` default feature. It
+never substitutes another engine, treats old graph files as unavailable, and
+cannot validate the private CPG implementation, the complete native package,
+or release archives. The reusable release CI lane enables the default feature,
+requires the read-only `OXIDIZED_JOERN_TOKEN`, and fails before full validation
+when that credential is absent.
+
 Using VS Code / Codespaces? Open the repo and "Reopen in Container"; the
 `.devcontainer/` definition runs bootstrap + installs semgrep + python for you.
 
