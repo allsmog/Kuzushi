@@ -53,7 +53,8 @@ pub use persisted_results::{
 };
 pub use proof_confidence::ProofConfidence;
 pub use review_decision::{
-    DismissReason, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict,
+    DismissReason, ReviewDecision, ReviewDecisionProvenance, ReviewDecisionRecord,
+    ReviewDecisionVerdict,
 };
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::{StaticProofState, StaticProofStateEvent};

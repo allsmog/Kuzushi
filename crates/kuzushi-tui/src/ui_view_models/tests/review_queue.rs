@@ -663,6 +663,7 @@ fn review_queue_model_applies_loaded_append_only_decisions() {
         },
         triage_verdict: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
+        provenance: None,
     }]);
 
     let complete_model = review_queue_model(&app, ReviewQueueMode::Complete);
@@ -743,6 +744,7 @@ fn review_decision_record(
         },
         triage_verdict: None,
         created_at: "2026-07-10T00:00:00Z".to_string(),
+        provenance: None,
     }
 }
 

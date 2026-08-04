@@ -192,10 +192,20 @@ fn decision_contradictions(decisions: &[ReviewDecisionRecord]) -> Vec<String> {
                 "human claim assessment changed from {} to {} at {}",
                 window[0].1.as_str(),
                 window[1].1.as_str(),
-                window[1].0.created_at
+                decision_moment(window[1].0)
             )
         })
         .collect()
+}
+
+/// Event sequence is the authoritative causal label for a decision flip;
+/// timestamps can collide and stay as the fallback for legacy rows only.
+fn decision_moment(record: &ReviewDecisionRecord) -> String {
+    record
+        .provenance
+        .as_ref()
+        .map(|provenance| format!("event {}", provenance.event_seq))
+        .unwrap_or_else(|| record.created_at.clone())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -407,6 +417,7 @@ mod tests {
             },
             triage_verdict: verdict.to_triage_verdict(),
             created_at: created_at.to_string(),
+            provenance: None,
         }
     }
 }

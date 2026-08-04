@@ -1008,6 +1008,7 @@ fn perf_baseline_pure_folds_at_10k_30k() {
                 },
                 triage_verdict: None,
                 created_at: "2026-01-01T00:00:00Z".to_string(),
+                provenance: None,
             });
         }
     }

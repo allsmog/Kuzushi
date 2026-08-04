@@ -229,6 +229,149 @@ fn review_decision_updates_search_projection() {
 }
 
 #[test]
+fn review_decision_projection_retains_event_provenance() {
+    let db = ProjectionDb::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    let with_watermark = log
+        .append(
+            EventKind::TriageDecided,
+            "human",
+            Some("run-1".to_string()),
+            None,
+            serde_json::json!({
+                "stableFp": "fp3_prov",
+                "findingId": 7,
+                "verdict": "confirmed",
+                "rationale": "verified",
+                "author": "human",
+                "confidenceMillis": 900,
+                "readWatermark": 0,
+            }),
+        )
+        .unwrap();
+    let legacy_without_watermark = append_review_decision_event(&log);
+
+    db.apply_event(&with_watermark).unwrap();
+    db.apply_event(&legacy_without_watermark).unwrap();
+
+    let rows: Vec<(i64, String, Option<i64>)> = db
+        .conn
+        .prepare(
+            "select decision_event_seq, decision_event_hash, decision_read_watermark
+               from review_decisions order by id asc",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(
+        rows[0],
+        (
+            with_watermark.seq as i64,
+            with_watermark.event_hash.as_str().to_string(),
+            Some(0)
+        )
+    );
+    assert_eq!(
+        rows[1],
+        (
+            legacy_without_watermark.seq as i64,
+            legacy_without_watermark.event_hash.as_str().to_string(),
+            None
+        )
+    );
+}
+
+#[test]
+fn opening_legacy_projection_backfills_decision_provenance_from_finding_events() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let conn = Connection::open(&db_path).unwrap();
+    conn.execute_batch(
+        r#"
+        create table review_decisions (
+          id integer primary key autoincrement,
+          finding_id integer not null,
+          identity_id text,
+          decision_verdict text not null,
+          triage_verdict text,
+          confidence real not null,
+          rationale text not null,
+          author text not null,
+          created_at text not null,
+          dismiss_reason text,
+          dismissed_by text
+        );
+        create table finding_events (
+          event_hash text primary key,
+          seq integer not null unique,
+          stable_fp text,
+          event_kind text not null,
+          payload_json text not null,
+          actor text not null,
+          created_at text not null
+        );
+        insert into finding_events values
+          ('hash-5', 5, 'fp_a', 'triage-decided',
+           '{"findingId":7,"verdict":"confirmed","readWatermark":4}',
+           'human', '2026-01-01T00:00:00Z'),
+          ('hash-6', 6, 'fp_a', 'finding-reopened',
+           '{"stableFp":"fp_a"}', 'scanner', '2026-01-01T00:00:01Z'),
+          ('hash-9', 9, 'fp_a', 'suppression-added',
+           '{"findingId":7,"verdict":"suppressed"}',
+           'human', '2026-01-02T00:00:00Z'),
+          ('hash-12', 12, 'fp_a', 'triage-decided',
+           '{"findingId":7,"verdict":"deferred","readWatermark":11}',
+           'human', '2026-01-03T00:00:00Z');
+        insert into review_decisions
+          (finding_id, identity_id, decision_verdict, triage_verdict, confidence,
+           rationale, author, created_at, dismiss_reason, dismissed_by)
+        values
+          (7, null, 'confirmed', 'true_positive', 0.9, 'r', 'human',
+           '2026-01-01T00:00:00Z', null, null),
+          (7, null, 'suppressed', null, 1.0, 'r', 'human',
+           '2026-01-02T00:00:00Z', null, null),
+          (7, null, 'deferred', null, 1.0, 'r', 'human',
+           '2026-01-03T00:00:99Z', null, null);
+        "#,
+    )
+    .unwrap();
+    drop(conn);
+
+    drop(ProjectionDb::open(&db_path).unwrap());
+
+    let conn = Connection::open(&db_path).unwrap();
+    let rows: Vec<(Option<i64>, Option<String>, Option<i64>)> = conn
+        .prepare(
+            "select decision_event_seq, decision_event_hash, decision_read_watermark
+               from review_decisions order by id asc",
+        )
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(rows[0], (Some(5), Some("hash-5".to_string()), Some(4)));
+    assert_eq!(rows[1], (Some(9), Some("hash-9".to_string()), None));
+    // Timestamp disagreement with the ranked event: provenance must stay
+    // null rather than be misattributed.
+    assert_eq!(rows[2], (None, None, None));
+
+    // Re-opening after the one-shot backfill must not rewrite anything.
+    drop(ProjectionDb::open(&db_path).unwrap());
+    let unchanged: Option<i64> = conn
+        .query_row(
+            "select decision_event_seq from review_decisions where id = 3",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(unchanged, None);
+}
+
+#[test]
 fn review_decision_requires_confidence_millis() {
     let db = ProjectionDb::open_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();

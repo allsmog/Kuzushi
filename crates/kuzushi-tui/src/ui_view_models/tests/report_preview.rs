@@ -165,6 +165,7 @@ fn report_preview_counts_deferred_decision_as_terminal() {
         },
         triage_verdict: None,
         created_at: "2026-07-03T00:00:00Z".to_string(),
+        provenance: None,
     }]);
 
     let all_model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);
@@ -211,6 +212,7 @@ fn report_preview_keeps_reappeared_rejected_identity_open() {
         },
         triage_verdict: Some(TriageVerdict::FalsePositive),
         created_at: "2026-07-03T00:00:00Z".to_string(),
+        provenance: None,
     }]);
 
     let open_model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::Open);

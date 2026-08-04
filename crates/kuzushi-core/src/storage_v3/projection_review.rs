@@ -4,9 +4,10 @@ use rusqlite::{params, Transaction};
 
 use super::projection_fts::rebuild_fts_if_available;
 use super::projection_payload::{
-    payload_f64, payload_i64, payload_str, require_payload_str, require_payload_u64,
+    payload_f64, payload_i64, payload_str, payload_u64, require_payload_str, require_payload_u64,
     stable_fp_from_payload, triage_verdict_for_review,
 };
+use super::{sql_seq, sql_watermark};
 
 pub(super) fn project_review_decision(
     tx: &Transaction<'_>,
@@ -24,13 +25,32 @@ pub(super) fn project_review_decision(
     let verdict = require_payload_str(&event.payload, "verdict")?;
     let confidence = require_payload_u64(&event.payload, "confidenceMillis")? as f64 / 1000.0;
     let triage_verdict = triage_verdict_for_review(verdict)?;
+    let review_decision_id =
+        insert_review_decision_row(tx, event, finding_id, verdict, triage_verdict, confidence)?;
+    project_finding_triage_json(tx, event, finding_id, triage_verdict, confidence)?;
+    project_review_search(tx, event, verdict)?;
+    Ok(Some(review_decision_id))
+}
+
+fn insert_review_decision_row(
+    tx: &Transaction<'_>,
+    event: &EventEnvelope,
+    finding_id: i64,
+    verdict: &str,
+    triage_verdict: Option<&str>,
+    confidence: f64,
+) -> Result<i64> {
+    let read_watermark = payload_u64(&event.payload, "readWatermark")
+        .map(sql_watermark)
+        .transpose()?;
     tx.execute(
         r#"
         insert into review_decisions(
           finding_id, identity_id, decision_verdict, triage_verdict, confidence,
-          rationale, author, created_at, dismiss_reason, dismissed_by
+          rationale, author, created_at, dismiss_reason, dismissed_by,
+          decision_event_seq, decision_event_hash, decision_read_watermark
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
         "#,
         params![
             finding_id,
@@ -43,12 +63,12 @@ pub(super) fn project_review_decision(
             event.created_at,
             payload_str(&event.payload, "dismissReason"),
             payload_str(&event.payload, "dismissedBy"),
+            sql_seq(event.seq)?,
+            event.event_hash.as_str(),
+            read_watermark,
         ],
     )?;
-    let review_decision_id = tx.last_insert_rowid();
-    project_finding_triage_json(tx, event, finding_id, triage_verdict, confidence)?;
-    project_review_search(tx, event, verdict)?;
-    Ok(Some(review_decision_id))
+    Ok(tx.last_insert_rowid())
 }
 
 fn project_finding_triage_json(
