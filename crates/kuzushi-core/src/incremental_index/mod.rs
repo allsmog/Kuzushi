@@ -165,6 +165,18 @@ pub fn current_workspace_tree_hash(root: impl AsRef<Path>) -> Result<String> {
     Ok(object_hash(ObjectKind::Tree, &bytes).as_str().to_string())
 }
 
+/// Bounded content identity for source-sensitive resume state. The tree hash
+/// covers the same indexed source universe for Git, dirty, and non-Git targets;
+/// a Git revision is an additional binding, never a substitute for content.
+pub fn current_workspace_resume_identity(root: impl AsRef<Path>) -> Result<String> {
+    let root = root.as_ref();
+    let tree_hash = current_workspace_tree_hash(root)?;
+    Ok(match target_git_metadata(root) {
+        Some(metadata) => format!("git:{};tree:{tree_hash}", metadata.sha),
+        None => format!("tree:{tree_hash}"),
+    })
+}
+
 /// Register a hash-only workspace tree identity: tree and snapshot objects
 /// in the content store plus a `target_snapshots` projection row, with no
 /// blob storage. This is what lets a phase attempt cite a verifiable

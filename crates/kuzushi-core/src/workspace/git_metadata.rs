@@ -90,6 +90,10 @@ fn status_line_is_kuzushi_state(line: &str) -> bool {
 }
 
 fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
+    git_stdout_allow_empty(target, args).filter(|value| !value.is_empty())
+}
+
+fn git_stdout_allow_empty(target: &Path, args: &[&str]) -> Option<String> {
     let mut command = Command::new("git");
     // Metadata probes must not refresh `.git/index`: the workspace watcher
     // would treat that optional write as an external change and reschedule us.
@@ -103,7 +107,6 @@ fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|value| !value.is_empty())
 }
 
 fn run_git_checked(target: &Path, args: &[&str]) -> Result<()> {
