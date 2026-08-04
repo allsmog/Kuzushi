@@ -1,0 +1,52 @@
+name: Export validation source
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/export-validation-source.yml'
+      - '.github/workflows/full-product-ci.yml'
+      - '.github/workflows/ci.yml'
+      - '.github/workflows/release.yml'
+      - 'crates/kuzushi-cpg/**'
+      - 'crates/kuzushi-core/src/modules/registry/tests.rs'
+      - 'scripts/check-public-rust-core.sh'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: >-
+      github.actor == github.repository_owner &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - name: Archive exact private validation source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "${EXPECTED_HEAD}"
+          tar --sort=name \
+            --mtime='UTC 1970-01-01' \
+            --owner=0 --group=0 --numeric-owner \
+            --exclude='.git' \
+            --exclude='target' \
+            --exclude='node_modules' \
+            -czf "${RUNNER_TEMP}/kuzushi-${EXPECTED_HEAD}.tar.gz" .
+          sha256sum "${RUNNER_TEMP}/kuzushi-${EXPECTED_HEAD}.tar.gz" \
+            | tee "${RUNNER_TEMP}/kuzushi-${EXPECTED_HEAD}.tar.gz.sha256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kuzushi-validation-source-${{ github.event.pull_request.head.sha }}
+          path: |
+            ${{ runner.temp }}/kuzushi-${{ github.event.pull_request.head.sha }}.tar.gz
+            ${{ runner.temp }}/kuzushi-${{ github.event.pull_request.head.sha }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
