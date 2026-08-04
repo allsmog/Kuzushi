@@ -29,21 +29,25 @@ jobs:
           ci = Path('.github/workflows/ci.yml')
           text = ci.read_text()
           dispatch_anchor = "        default: true\n  workflow_call:"
-          dispatch_replacement = """        default: true
-                quality_base_ref:
-                  description: Explicit Git base for changed-code quality gates
-                  required: false
-                  type: string
-                  default: ''
-              workflow_call:""".replace("              ", "")
+          dispatch_replacement = (
+              "        default: true\n"
+              "      quality_base_ref:\n"
+              "        description: Explicit Git base for changed-code quality gates\n"
+              "        required: false\n"
+              "        type: string\n"
+              "        default: ''\n"
+              "  workflow_call:"
+          )
           call_anchor = "        default: true\n    secrets:"
-          call_replacement = """        default: true
-                quality_base_ref:
-                  description: Explicit Git base for changed-code quality gates
-                  required: false
-                  type: string
-                  default: ''
-              secrets:""".replace("              ", "")
+          call_replacement = (
+              "        default: true\n"
+              "      quality_base_ref:\n"
+              "        description: Explicit Git base for changed-code quality gates\n"
+              "        required: false\n"
+              "        type: string\n"
+              "        default: ''\n"
+              "    secrets:"
+          )
           for old, new, label in (
               (dispatch_anchor, dispatch_replacement, 'workflow_dispatch input'),
               (call_anchor, call_replacement, 'workflow_call input'),
@@ -51,8 +55,9 @@ jobs:
               if text.count(old) != 1:
                   raise SystemExit(f'expected one {label} anchor, found {text.count(old)}')
               text = text.replace(old, new)
-          old_base = "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
-          new_base = "${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
+          expression = '$' + '{{'
+          old_base = expression + " github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
+          new_base = expression + " inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
           if text.count(old_base) != 3:
               raise SystemExit(f'expected three changed-code base expressions, found {text.count(old_base)}')
           ci.write_text(text.replace(old_base, new_base))
