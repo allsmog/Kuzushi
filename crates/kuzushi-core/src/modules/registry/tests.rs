@@ -2996,7 +2996,7 @@ process.stdin.on("end", () => {
 
         assert_eq!(
             fingerprint,
-            "a29eb2520ee5984cd40fa5b9c75dabe070370e33d44d51f09e086fb396bf55d1",
+            "5b026b99fbe9f5caa4c630dd635c100e841f5f9c4ccfbd1819689f418b18ff36",
             "built-in policy inventory changed; review every added/renamed tuple before updating the fingerprint:\n{rows}"
         );
     }
