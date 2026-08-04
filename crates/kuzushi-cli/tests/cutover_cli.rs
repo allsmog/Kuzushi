@@ -882,6 +882,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     assert!(plain.contains("Proof state: source_sink_linked"));
     assert!(plain.contains("Runtime validation: runtime_verified"));
     assert!(plain.contains("Patch result:"));
+    assert!(plain.contains("Security case:"));
     assert!(plain.contains("Next action: validate"));
 
     let prefix = &fingerprint[..8];
@@ -906,6 +907,10 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
         .starts_with("runtime_verified"));
     assert_eq!(report["nextAction"], "validate");
     assert_eq!(report["patchResults"].as_array().unwrap().len(), 1);
+    assert!(report["securityCase"]["caseId"]
+        .as_str()
+        .is_some_and(|case_id| case_id.starts_with("identity:")));
+    assert_eq!(report["securityCase"]["disposition"], "confirmed");
 }
 
 #[test]

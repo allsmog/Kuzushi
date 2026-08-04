@@ -14,7 +14,25 @@ impl FindingDetailReport {
             proof_ladder,
             next_action,
             patch_results,
+            security_case: None,
         }
+    }
+
+    /// Attach the append-only review history and project one canonical case
+    /// when the finding has a durable identity. The existing finding fields
+    /// remain available; the case is a deterministic read model over those
+    /// same persisted facts.
+    pub fn with_review_decisions(mut self, decisions: Vec<ReviewDecisionRecord>) -> Self {
+        self.security_case = security_case_projection(
+            &self.finding,
+            &self.proof_state,
+            &self.runtime_validation,
+            &self.proof_ladder,
+            self.next_action,
+            decisions,
+            self.patch_results.clone(),
+        );
+        self
     }
 
     pub fn output(&self) -> String {
@@ -25,6 +43,7 @@ impl FindingDetailReport {
         self.append_triage_lines(&mut lines);
         self.append_verification_lines(&mut lines);
         self.append_patch_lines(&mut lines);
+        self.append_security_case_lines(&mut lines);
         lines.push(String::new());
         lines.push(format!("Next action: {}", self.next_action.as_str()));
         lines.join("\n")
@@ -110,6 +129,24 @@ impl FindingDetailReport {
             append_optional_line(lines, "Worktree", patch.worktree_path.as_deref());
         } else {
             lines.push("  not recorded".to_string());
+        }
+    }
+
+    fn append_security_case_lines(&self, lines: &mut Vec<String>) {
+        let Some(case) = &self.security_case else {
+            return;
+        };
+        lines.push(String::new());
+        lines.push("Security case:".to_string());
+        lines.push(format!("  Id: {}", case.case_id));
+        lines.push(format!("  Disposition: {}", case.disposition));
+        lines.push(format!("  Observations: {}", case.observations.len()));
+        lines.push(format!("  Decisions: {}", case.decisions.len()));
+        if !case.contradictions.is_empty() {
+            lines.push(format!("  Contradictions: {}", case.contradictions.len()));
+        }
+        for question in &case.unresolved_questions {
+            lines.push(format!("  Open question: {question}"));
         }
     }
 }

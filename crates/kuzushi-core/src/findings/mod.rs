@@ -41,17 +41,19 @@ pub(crate) use domain::{
     safe_target_path, tool_components,
 };
 pub use persistence::{
-    threat_model_document_sha256, FindingAuditEvent, FindingStore, ModelRekeyRequest, ObservationSourceRef,
-    SuppressionLifecycleEvent, ThreatModelVersionRecord,
+    threat_model_document_sha256, FindingAuditEvent, FindingStore, ModelRekeyRequest,
+    ObservationSourceRef, SuppressionLifecycleEvent, ThreatModelVersionRecord,
 };
 pub use presentation::{
     compare_findings_by_confidence, dataflow_evidence_rows, finding_lifecycle_status,
     finding_next_action, format_finding_alias, format_stage_note, parse_finding_alias,
     parse_stage_note, proof_ladder_state, proof_state_label, resolve_finding_alias,
-    runtime_validation_label, runtime_validation_summary, sorted_finding_alias_indices,
-    sorted_finding_aliases, stable_finding_alias, static_proof_summary, DataflowEvidenceRow,
-    FindingDetailReport, FindingLifecycleStatusFilter, FindingListFilter, FindingListReport,
-    FindingNextAction, FindingReviewCompletenessFilter, FindingVerdictFilter, ProofLadderState,
-    RuntimeValidationSummary, StaticProofSummary, VerificationStageDisclosure,
-    DATAFLOW_EVIDENCE_SUBJECT, STAGE_NOTE_SENTINEL,
+    runtime_validation_label, runtime_validation_summary, security_case_projection,
+    sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
+    static_proof_summary, DataflowEvidenceRow, FindingDetailReport, FindingLifecycleStatusFilter,
+    FindingListFilter, FindingListReport, FindingNextAction, FindingReviewCompletenessFilter,
+    FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary, SecurityCaseClaim,
+    SecurityCaseProjection, SecurityCaseProof, SecurityCaseSource, StaticProofSummary,
+    VerificationStageDisclosure, DATAFLOW_EVIDENCE_SUBJECT, SECURITY_CASE_SCHEMA_VERSION,
+    STAGE_NOTE_SENTINEL,
 };

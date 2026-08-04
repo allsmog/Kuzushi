@@ -61,7 +61,13 @@ pub(crate) fn finding_command(
     };
     let alias = stable_finding_alias(&all_findings, &finding.fingerprint);
     let patch_results = store.get_patch_results_for_finding(&finding.fingerprint)?;
-    let report = FindingDetailReport::new(alias, finding, patch_results);
+    let decisions = finding
+        .id
+        .map(|finding_id| store.list_review_decisions_for_finding_identity(finding_id))
+        .transpose()?
+        .unwrap_or_default();
+    let report =
+        FindingDetailReport::new(alias, finding, patch_results).with_review_decisions(decisions);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);

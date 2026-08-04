@@ -40,4 +40,8 @@ pub struct FindingDetailReport {
     pub proof_ladder: ProofLadderState,
     pub next_action: FindingNextAction,
     pub patch_results: Vec<PatchResult>,
+    /// Canonical evidence-case projection. Present when the caller loads the
+    /// append-only review history in addition to the current finding row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security_case: Option<SecurityCaseProjection>,
 }
