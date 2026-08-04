@@ -148,8 +148,8 @@ fn default_preview_rows(reduced_motion: bool) -> Vec<String> {
     let spinner = if reduced_motion { "paused" } else { "animated" };
     vec![
         "   --:--:--  ●  /scan".to_string(),
-        format!("   --:--:--  ⏵  sast:scan · progress {spinner}"),
-        "   --:--:--  ▸  finding rows keep severity labels".to_string(),
+        "   --:--:--  ▸  Scan phase planner · awaiting confirmation".to_string(),
+        format!("   --:--:--  ⏵  run sast:scan · progress {spinner}"),
         "   --:--:--  ✗  hard stops stay explicit".to_string(),
     ]
 }

@@ -1,6 +1,7 @@
 mod pickers;
 
 use super::ActivityRouteState;
+pub(crate) use pickers::PendingTargetIntent;
 pub use pickers::{
     AuthPickerRouteState, ModelPickerRouteState, PlanningPickerRouteState, SetupEditor,
     SetupRouteState, SetupRowId, TargetPickerRouteState,

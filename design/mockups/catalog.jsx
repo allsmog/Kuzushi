@@ -99,7 +99,7 @@ function CatalogView() {
         stage: 'idle', findings: 0, mod: null,
         keybinds: [
           ['j/k', 'row'], ['1..4', 'jump category'],
-          ['enter', '/use'], ['/scan', 'run sast:scan'],
+          ['enter', '/use'], ['/scan', 'Scan planner'],
           ['?', 'help'],
         ],
       })}

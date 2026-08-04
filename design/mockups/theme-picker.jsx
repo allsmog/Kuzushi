@@ -49,7 +49,7 @@ function ThemePickerView() {
     swatch(false, 'tokyo-night',      '#1a1b26', '#a9b1d6', '#7aa2f7', '#f7768e', 'familiar to vscode users'),
     window.blankRow(W, 'b2'),
     window.sectionHeader('PREVIEW · charcoal · sample console', W, 's2'),
-    window.row([T('   '), m('14:32:14 '), [' ● ', 'c-accent'], m(' /scan')], W, 'pr1'),
+    window.row([T('   '), m('14:32:14 '), [' ● ', 'c-accent'], m(' /scan · plan confirmed')], W, 'pr1'),
     window.row([T('   '), m('14:32:14 '), [' ⏵ ', 'c-primary'], m(' sast:scan · tasks '),
       a('semgrep, secrets'),  m(' · triage on')], W, 'pr2'),
     window.row([T('   '), m('14:33:42 '), [' ◆ ', 'c-accent'],

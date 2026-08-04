@@ -6,14 +6,14 @@
 #   Prove `v`  — bounded investigation plan (3g)
 #   Prove `t`  — full-screen trace evidence (3j)
 #   Review `C` — attack-chain artifacts (3h)
-#   `scan`     — threat-model-seeded configure card (3b)
+#   `/full`    — threat-model-seeded configure card (3b)
 # The offline demo activates via the `demo` command; the fixture then seeds on
 # scan completion. Numeric page keys are printable view hotkeys, so this
 # journey toggles nav mode with Esc (empty prompt) before page selection.
-# The configure card is Map-first by design: `scan` without an accepted
+# The configure card is Map-first by design: `/full` without an accepted
 # current-revision Map routes through the Map plan, the operator authorizes a
-# context-only Map run (STRIDE toggled off — no model is configured), and the
-# re-entered `scan` shows the threat-model-seeded SCAN · MODULES card.
+# context-only Map run (Build threat model toggled off — no model is configured), and the
+# re-entered guided flow shows the threat-model-seeded SCAN · MODULES card.
 name: Recommend-then-authorize screens
 size: 120x36
 cwd: @TMP_TARGET
@@ -62,14 +62,14 @@ ask: Chains — are chains rendered as artifacts over constituent findings (assu
 keys: C
 wait: 1
 keys: Escape
-submit: scan
+submit: /full
 wait-live-snap: 15 MAP · ROUTE | 6-map-route
 expect: Map establishes the target context Scan engines will consume.
 expect: RECOMMENDED
 ask: Map-first — does the guided flow refuse to configure Scan without an accepted Map, recommending the Map plan instead of silently skipping?
 keys: Enter
 wait-for: 10 MAP · MODULES
-keys: 4
+keys: 5
 wait: 1
 keys: Enter
 wait-for: 10 STEP 3 OF 3

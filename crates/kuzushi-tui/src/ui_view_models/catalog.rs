@@ -410,7 +410,7 @@ const SCAN_ACTIONS: [CapabilityActionSpec; 3] = [
     action!(
         "recommended-hunt",
         "Recommended hunt",
-        "Run the target-aware SAST strategy",
+        "Open the target-aware Scan phase planner",
         "scan",
         "CURRENT",
         tool = "sast:scan"

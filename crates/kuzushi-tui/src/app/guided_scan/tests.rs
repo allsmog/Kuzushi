@@ -23,6 +23,34 @@ fn persist_adequate_map_result(target: &std::path::Path, run_id: &str) {
     );
 }
 
+fn persist_unresolved_scan_result(target: &std::path::Path, run_id: &str) -> PhaseAttemptCompleted {
+    use kuzushi_core::workflow_attempts::{
+        append_phase_checkpoint_skipped, PhaseCheckpointSkipped,
+    };
+
+    append_phase_checkpoint_skipped(
+        target,
+        PhaseCheckpointSkipped::new(WorkflowPhase::Map, PhaseTargetSnapshot::capture(target)),
+    )
+    .unwrap();
+    crate::test_support::record_indexed_run(
+        target,
+        run_id,
+        "findings:import",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "data": {"count": 0}
+        }),
+    );
+    crate::test_support::append_typed_attempt(
+        target,
+        WorkflowPhase::Scan,
+        run_id,
+        PhaseAttemptOutcome::Completed,
+    )
+}
+
 fn app_with_open_guided_other() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut flow = GuidedScanFlow::new(GuidedScanStage::MapRoute);
@@ -40,6 +68,17 @@ fn type_guided_other(app: &mut ShellApp, text: &str) {
         ));
         assert!(update.handled);
     }
+}
+
+fn assert_full_stopped_at_map(app: &ShellApp) {
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app.engagement.guided_scan().is_none());
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "full"
+            && line.body.contains("full pipeline complete at Map")
+            && line.body.contains("phases.stop_after=map")
+    }));
 }
 
 #[test]
@@ -658,6 +697,147 @@ fn selecting_map_result_continues_into_scan_module_questions() {
             .map(|question| question.header),
         Some("SCAN · MODULES".to_string())
     );
+}
+
+#[test]
+fn full_pipeline_stops_cleanly_after_map_when_configured() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut config = V2Config::default();
+    config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    persist_adequate_map_result(target.path(), "run-map-stop");
+    let completed = crate::test_support::append_typed_attempt(
+        target.path(),
+        WorkflowPhase::Map,
+        "run-map-stop",
+        PhaseAttemptOutcome::Completed,
+    );
+    app.refresh_phase_attempt_projection();
+    app.engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::Running(
+            WorkflowPhase::Map,
+        )));
+    assert!(app.bind_guided_phase_result(WorkflowPhase::Map, completed.attempt_id));
+    app.show_guided_phase(WorkflowPhase::Map);
+
+    let update = app.apply_phase_result_command(PhaseResultCommand::Continue);
+
+    assert!(update.handled);
+    assert_full_stopped_at_map(&app);
+}
+
+#[test]
+fn full_pipeline_reusing_accepted_map_honors_map_stop() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut config = V2Config::default();
+    config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+    persist_adequate_map_result(target.path(), "run-map-reused");
+    let completed = crate::test_support::append_typed_attempt(
+        target.path(),
+        WorkflowPhase::Map,
+        "run-map-reused",
+        PhaseAttemptOutcome::Completed,
+    );
+    crate::test_support::select_typed_attempt(target.path(), &completed);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.refresh_phase_attempt_projection();
+    app.begin_guided_scan_questions();
+    assert!(app.has_accepted_map());
+
+    let update = app.activate_map_route(0);
+
+    assert!(update.handled);
+    assert_full_stopped_at_map(&app);
+}
+
+#[test]
+fn full_pipeline_empty_accepted_map_plan_honors_map_stop() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut config = V2Config::default();
+    config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+    persist_adequate_map_result(target.path(), "run-map-empty-plan");
+    let completed = crate::test_support::append_typed_attempt(
+        target.path(),
+        WorkflowPhase::Map,
+        "run-map-empty-plan",
+        PhaseAttemptOutcome::Completed,
+    );
+    crate::test_support::select_typed_attempt(target.path(), &completed);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.refresh_phase_attempt_projection();
+    app.begin_guided_scan_questions();
+    app.set_guided_stage(GuidedScanStage::ModuleSelection(WorkflowPhase::Map));
+    app.engagement.planning_picker_mut().selected_mut().clear();
+    assert!(build_execution_plan(
+        app.engagement.planning_picker().tasks(),
+        app.engagement.planning_picker().selected(),
+        app.engagement.planning_picker().rebuild(),
+    )
+    .is_empty());
+
+    let update = app.launch_guided_phase(WorkflowPhase::Map);
+
+    assert!(update.handled);
+    assert_full_stopped_at_map(&app);
+}
+
+#[test]
+fn full_pipeline_clean_scan_hands_off_to_report() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let completed = persist_unresolved_scan_result(target.path(), "run-scan-clean");
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.refresh_phase_attempt_projection();
+    app.engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::Running(
+            WorkflowPhase::Scan,
+        )));
+    assert!(app.bind_guided_phase_result(WorkflowPhase::Scan, completed.attempt_id));
+    app.show_guided_phase(WorkflowPhase::Scan);
+
+    let update = app.apply_phase_result_command(PhaseResultCommand::Continue);
+
+    assert!(update.handled);
+    assert!(app.engagement.guided_scan().is_none());
+    assert_eq!(app.shell_view(), ShellView::Report);
+}
+
+#[test]
+fn full_pipeline_scan_with_findings_hands_off_to_review() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let completed = persist_unresolved_scan_result(target.path(), "run-scan-finding");
+    let finding = kuzushi_core::Finding {
+        fingerprint: "full-handoff-finding".to_string(),
+        rule_id: "test/rule".to_string(),
+        title: "review this finding".to_string(),
+        severity: kuzushi_core::Severity::High,
+        file_path: "src/lib.rs".to_string(),
+        start_line: 1,
+        tool: "test".to_string(),
+        ..kuzushi_core::Finding::default()
+    };
+    let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+    store.insert_finding("run-scan-finding", &finding).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_findings(vec![finding]);
+    app.refresh_phase_attempt_projection();
+    app.engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::Running(
+            WorkflowPhase::Scan,
+        )));
+    assert!(app.bind_guided_phase_result(WorkflowPhase::Scan, completed.attempt_id));
+    app.show_guided_phase(WorkflowPhase::Scan);
+
+    let update = app.apply_phase_result_command(PhaseResultCommand::Continue);
+
+    assert!(update.handled);
+    assert!(app.engagement.guided_scan().is_none());
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Review));
 }
 
 #[test]

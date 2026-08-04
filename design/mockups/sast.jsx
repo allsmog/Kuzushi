@@ -42,7 +42,7 @@ function SastView() {
   }
 
   const lines = [
-    window.logLine('in', '14:31:55', [m(' /scan')], W, 'l1'),
+    window.logLine('in', '14:31:55', [m(' /scan · plan confirmed')], W, 'l1'),
     window.logLine('run', '14:31:55', [m(' sast:scan · tasks '), a('semgrep, secret-scan, agentic-sast'), m(' · triage on')], W, 'l2'),
     window.blankRow(W, 'b1'),
     window.row([T('   '), ...bar('semgrep             ', 612, 612, 'done · 18 raw hits',     'c-success')], W, 'p1'),
@@ -75,7 +75,7 @@ function SastView() {
   ];
 
   return (
-    <window.TermFrame title="kuzushi · sast · /scan (umbrella)">
+    <window.TermFrame title="kuzushi · sast:scan · umbrella run">
       {window.statusStrip({ target: '~/work/acme-checkout', ctx: 'fresh', module: 'sast', cost: '$0.41' })}
       {window.ruleRow(W, 'r1')}
       {window.blankRow(W, 'b1')}

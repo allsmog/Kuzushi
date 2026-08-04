@@ -684,13 +684,15 @@ second TypeScript router. Common verbs include:
 - Navigation: `help`, `modules`, `tools`, `use <module>`, `back`, `logs`
   (alias `log` / `transcript` — full-screen scrollable transcript with
   j/k/g/G/PgUp/PgDn).
-- Run/scan: `scan [target]`, `run <tool> [json]`, `ask <question>`.
+- Run/scan: `full [target]` (`pipeline` alias), `run <tool> [json]`,
+  `ask <question>`.
 - Options/tasks: `options [tool]`, `set`, `setg`, `unset`, `tasks`,
   `task <verb>`.
 - Context/KB: `context <verb>`, `workspace <verb>`, `kb`, `attach`, `detach`,
   `reparse`.
-- Workflow: `setup`, `workbench`, `next` (`continue`), `findings`, `open <id>`,
-  `report`, and `activity` (`/a`, `/progress`, presented as Run Focus).
+- Workflow: `setup`, `workbench`, `next` (`continue`), the exact phase verbs
+  `map`, `scan`, `review`, `prove`, and `fix`, `findings`, `open <id>`, `report`,
+  and `activity` (`/a`, `/progress`, presented as Run Focus).
 - Evidence/utilities: `since <ref>`, `show aliases`, `show runs`,
   `replay <runId>`, `trace <runId>`, `jobs`, `scene`, and `viz`.
 - Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,

@@ -454,6 +454,7 @@ impl ShellApp {
     ) -> Option<Vec<ShellEffect>> {
         match command {
             ShellCommand::Model(model) => Some(self.reduce_model_command(model)),
+            ShellCommand::Full(target) => Some(self.reduce_full_command(target.clone())),
             ShellCommand::Scan(target) => Some(vec![ShellEffect::OpenGuidedScan(GuidedScanOpen {
                 target: target.clone(),
             })]),
@@ -688,15 +689,69 @@ impl ShellApp {
         }
     }
 
-    fn open_requested_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
-        if self.target().is_none() {
-            self.open_target_picker();
+    pub(crate) fn open_requested_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
+        if self.phase_switch_blocked(phase) {
             return;
         }
+        if self.request_phase_target_if_missing(phase) {
+            return;
+        }
+        if self.requested_phase_blocked_by_config(phase) {
+            return;
+        }
+        self.switch_to_requested_phase_picker(phase);
+    }
+
+    fn switch_to_requested_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
         self.workbench_cache()
             .borrow_mut()
             .invalidate_map_artifacts();
-        self.open_phase_picker(phase);
+        if self.try_open_phase_picker(phase) {
+            self.clear_guided_scan();
+        }
+    }
+
+    fn request_phase_target_if_missing(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        if self.target().is_some() {
+            return false;
+        }
+        self.open_target_picker();
+        self.router
+            .target_picker_mut()
+            .set_pending_intent(PendingTargetIntent::Phase(phase));
+        true
+    }
+
+    fn phase_switch_blocked(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        if !self.has_running_work() {
+            return false;
+        }
+        self.log(
+            "phase",
+            format!(
+                "{} phase blocked · finish or cancel the active work, then retry",
+                phase.word()
+            ),
+        );
+        true
+    }
+
+    fn reduce_full_command(&mut self, target: Option<PathBuf>) -> Vec<ShellEffect> {
+        if target.is_some() || self.target().is_some() {
+            return vec![ShellEffect::OpenGuidedScan(GuidedScanOpen { target })];
+        }
+        if self.has_running_work() {
+            self.log(
+                "full",
+                "full pipeline blocked · finish or cancel the active work, then retry",
+            );
+            return Vec::new();
+        }
+        self.open_target_picker();
+        self.router
+            .target_picker_mut()
+            .set_pending_intent(PendingTargetIntent::Full);
+        Vec::new()
     }
 
     fn reduce_next_command(&mut self, fresh: bool) {

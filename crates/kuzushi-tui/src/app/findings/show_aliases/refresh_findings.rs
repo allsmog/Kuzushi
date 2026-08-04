@@ -334,7 +334,7 @@ impl ShellApp {
         if announce {
             self.log(
                 "error",
-                with_next_step(error.to_string(), "scan <target> or workspace status"),
+                with_next_step(error.to_string(), "full <target> or workspace status"),
             );
         }
     }

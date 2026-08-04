@@ -115,7 +115,7 @@ fn interactive_only_plain_model(app: &ShellApp) -> Option<PlainInteractiveOnlyMo
         }),
         ShellView::PlanningPicker => Some(PlainInteractiveOnlyModel {
             title: "PLANNING PICKER",
-            next: "This picker needs an interactive terminal. Use explicit `scan` or `run <tool>` commands in plain mode.".to_string(),
+            next: "This picker needs an interactive terminal. For automation, use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`.".to_string(),
         }),
         ShellView::ThreatEditor => Some(PlainInteractiveOnlyModel {
             title: "THREAT EDITOR",

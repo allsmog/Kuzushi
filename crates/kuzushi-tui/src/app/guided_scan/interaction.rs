@@ -171,7 +171,7 @@ impl ShellApp {
     pub(super) fn activate_map_route(&mut self, index: usize) -> InputUpdate {
         let has_map = self.has_accepted_map();
         if has_map && index == 0 {
-            self.prepare_guided_phase(WorkflowPhase::Scan);
+            self.continue_guided_after_map();
             return InputUpdate::handled();
         }
         let rerun_index = usize::from(has_map);
@@ -277,7 +277,7 @@ impl ShellApp {
             self.engagement.planning_picker().rebuild(),
         );
         if plan.is_empty() && phase == WorkflowPhase::Map && self.has_accepted_map() {
-            self.prepare_guided_phase(WorkflowPhase::Scan);
+            self.continue_guided_after_map();
             return InputUpdate::handled();
         }
         if plan.is_empty() {
@@ -327,7 +327,7 @@ impl ShellApp {
     fn dismiss_guided_questions(&mut self) {
         self.clear_guided_scan();
         self.set_input_mode(InputMode::Prompt);
-        self.log("scan", "guided scan questions dismissed; draft preserved");
+        self.log("full", "full pipeline questions dismissed; draft preserved");
     }
 }
 

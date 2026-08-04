@@ -15,10 +15,7 @@ pub(crate) fn activity_empty_state_model() -> ActivityEmptyStateModel {
             "start work from this shell to keep control without leaving the TUI.",
         ],
         ctas: &[
-            (
-                "scan",
-                "run the configured target through the scan pipeline",
-            ),
+            ("scan", "open the Scan phase planner"),
             ("run <tool>", "launch one module and stream its output here"),
         ],
     }
@@ -40,10 +37,7 @@ mod tests {
                     "start work from this shell to keep control without leaving the TUI.",
                 ],
                 ctas: &[
-                    (
-                        "scan",
-                        "run the configured target through the scan pipeline"
-                    ),
+                    ("scan", "open the Scan phase planner"),
                     ("run <tool>", "launch one module and stream its output here"),
                 ],
             }

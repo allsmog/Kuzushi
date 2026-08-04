@@ -386,6 +386,14 @@ mod tests {
     }
 
     #[test]
+    fn missing_workspace_status_names_the_headless_cli_command() {
+        let status = workspace_status_for_target(None, None);
+
+        assert!(status.status.contains("Next: kuzushi scan <target>"));
+        assert!(!status.status.contains("Next: scan <target>"));
+    }
+
+    #[test]
     fn rejects_unsupported_findings_export_extensions() {
         let tmp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();

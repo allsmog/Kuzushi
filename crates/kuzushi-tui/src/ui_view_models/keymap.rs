@@ -156,7 +156,11 @@ fn dispatch_keymap_section() -> KeymapSection {
         "DISPATCH",
         "commands you reach for daily",
         &[
-            ("/scan", "sast umbrella · semgrep + secrets + agentic"),
+            (
+                "/map · /scan · /review · /prove · /fix",
+                "open the exact phase planner",
+            ),
+            ("/full [target]", "guided Map → Scan workflow"),
             (
                 "/use <module>",
                 "enter a module · /use sast · /use ndiff cve-…",
@@ -263,7 +267,12 @@ mod tests {
     fn default_keymap_advertised_command_examples_parse() {
         for command in [
             "help",
+            "/map",
             "/scan",
+            "/review",
+            "/prove",
+            "/fix",
+            "/full .",
             "/use sast",
             "/run sast:scan",
             "/show runs",

@@ -30,7 +30,7 @@ fn append_history_rows(lines: &mut Vec<Line<'static>>, model: &CommandHistoryMod
             &[
                 ("help", "browse the full command catalog"),
                 ("modules", "see what's loaded"),
-                ("scan .", "smallest one-shot run"),
+                ("scan", "open the Scan phase planner"),
             ],
         ));
     } else {
@@ -94,7 +94,7 @@ fn append_story_events(lines: &mut Vec<Line<'static>>, model: &SessionStoryModel
                 "run something to populate it.",
             ],
             &[
-                ("scan <target>", "umbrella scan against a workspace"),
+                ("full <target>", "guided Map → Scan workflow"),
                 ("ask <question>", "single-shot agent question"),
                 ("run <tool>", "dispatch a registered tool"),
             ],

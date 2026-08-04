@@ -38,7 +38,7 @@ submit: options threat-model:build
 wait: 1
 submit: set pipeline deterministic
 wait: 1
-submit: scan
+submit: /full
 wait-for: 15 MAP · ROUTE
 snap: map-route
 expect: Map establishes the target context Scan engines will consume.
@@ -58,10 +58,9 @@ wait-for: 10 STEP 4 OF 4
 keys: a
 wait-live-snap: 300 RESULT READY | map-result-ready
 # A healthy partial map is selectable AND continuable: the card offers the
-# explicit "Use map & choose Scan modules" hand-off as row 3 (`Enter` takes
-# the recommended action, which for partial evidence is plain "Use map").
+# explicit "Use map & choose Scan modules" hand-off as the recommended row.
 expect: Use map & choose Scan modules
-keys: 3
+keys: Enter
 wait-live-snap: 20 SCAN · MODULES | configure-scan
 # Desired: a seeded plan with rationales tied to recorded evidence. Baseline:
 # the recommender is blocked on this target class, so this fails honestly.

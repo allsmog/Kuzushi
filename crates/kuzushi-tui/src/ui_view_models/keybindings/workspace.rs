@@ -38,7 +38,8 @@ fn workspace_status_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings.push(bind("workspace status", "summary"));
     bindings.push(bind("workspace scope init", "scope file"));
     bindings.push(bind("workspace export", "export findings"));
-    bindings.push(bind("scan <target>", "select target"));
+    bindings.push(bind("target <path>", "select target"));
+    bindings.push(bind("full <path>", "guided Map → Scan"));
     bindings
 }
 

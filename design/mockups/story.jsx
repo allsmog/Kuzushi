@@ -23,7 +23,7 @@ function StoryView() {
     line('We have a verified PoC for F-0001 and F-0012; F-0002 is plausible but unverified.'),
     window.blankRow(W, 'b3'),
     line('What we ran', 'c-warn'),
-    line(' · /scan (umbrella) · 14:31 · semgrep, secret-scan, agentic-sast, triage  · $0.41 · 38 promoted'),
+    line(' · sast:scan · 14:31 · semgrep, secret-scan, agentic-sast, triage  · $0.41 · 38 promoted'),
     line(' · /use threat-model · 14:18 · PASTA + STRIDE · 9 trust boundaries · 21 attacker stories'),
     line(' · /use carlini · 14:08 · h=2 · 12 frames · 1 high-confidence finding (F-0012)'),
     line(' · /use verify F-0001 · 14:36 · sqlmap PoC against ephemeral pg · OK'),

@@ -50,7 +50,7 @@ function KbPullView() {
       m(' will run a variant hunt against your tree')], W, 'in1'),
     window.blankRow(W, 'b5'),
     window.logLine('flow','14:56:18',[m(' '), a('/kb pull --schedule daily'),
-      m('  cron via systemd / launchd · auto-run on /scan if stale')], W, 'l3'),
+      m('  cron via systemd / launchd · auto-run when Scan work starts if stale')], W, 'l3'),
   ];
 
   return (

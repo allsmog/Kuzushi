@@ -164,7 +164,7 @@ impl ShellApp {
     }
 
     fn log_open_finding_error(&mut self, error: String) {
-        self.log("error", with_next_step(error, "findings or scan <target>"));
+        self.log("error", with_next_step(error, "findings or full <target>"));
     }
 }
 

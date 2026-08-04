@@ -94,7 +94,7 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     // Review with findings: the Esc doorway must teach the findings flow the
     // Prompt-mode filter otherwise hides (j/k select, Enter opens Prove).
     assert!(prompt.contains(&bind("Esc", "nav findings · j/k move · Enter prove")));
-    assert!(prompt.contains(&bind("scan", "guided plan")));
+    assert!(prompt.contains(&bind("scan", "Scan phase planner")));
     assert!(prompt.contains(&bind("run sast:scan {}", "rescan now")));
     assert!(prompt.contains(&bind("Ctrl+C", "exit")));
     assert!(!prompt.contains(&bind("n/N", "page")));
@@ -109,7 +109,7 @@ fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     assert!(navigate.contains(&bind("1..5", "page")));
     assert!(navigate.contains(&bind("[", "pane back")));
     assert!(navigate.contains(&bind("]", "pane")));
-    assert!(!navigate.contains(&bind("scan", "guided plan")));
+    assert!(!navigate.contains(&bind("scan", "Scan phase planner")));
     assert!(!navigate.contains(&bind("run sast:scan {}", "rescan now")));
     assert!(!navigate.contains(&bind("Tab", "complete")));
 }
@@ -334,7 +334,7 @@ fn footer_keybindings_deduplicate_view_bindings() {
 
     assert_eq!(count_binding(&bindings, "j/k/↑/↓", "move"), 1);
     assert_eq!(count_binding(&bindings, "n/N", "page"), 1);
-    assert_eq!(count_binding(&bindings, "scan", "guided plan"), 0);
+    assert_eq!(count_binding(&bindings, "scan", "Scan phase planner"), 0);
 }
 
 #[test]

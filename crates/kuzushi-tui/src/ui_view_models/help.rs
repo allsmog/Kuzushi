@@ -4,6 +4,12 @@ use crate::commands::{
 };
 use crate::ShellApp;
 
+const PLAIN_HELP_EXAMPLES: &[&str] = &[
+    "kuzushi scan <target>",
+    "kuzushi --target <target> run sast:scan",
+    "findings export report.sarif sarif",
+];
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HelpModel {
     pub(crate) intro: &'static str,
@@ -65,25 +71,43 @@ pub(crate) fn help_model(query: Option<&str>) -> HelpModel {
             .is_none()
             .then(|| shell_help_examples().to_vec())
             .unwrap_or_default(),
-        categories: ShellCommandCategory::ORDER
-            .iter()
-            .filter_map(|category| help_category_model(*category, query))
-            .collect(),
+        categories: help_categories(query),
     }
 }
 
+fn help_categories(query: Option<&str>) -> Vec<HelpCategoryModel> {
+    let mut categories = ShellCommandCategory::ORDER
+        .iter()
+        .filter_map(|category| help_category_model(*category, query))
+        .collect::<Vec<_>>();
+    if let Some(query) = query {
+        categories.sort_by_key(|category| !category_has_exact_command(category, query));
+    }
+    categories
+}
+
+fn category_has_exact_command(category: &HelpCategoryModel, query: &str) -> bool {
+    category
+        .commands
+        .iter()
+        .any(|row| command_head_matches(&row.cells[0], query))
+}
+
 pub(crate) fn plain_help_model(query: Option<&str>) -> PlainHelpModel {
-    PlainHelpModel::from_help_model(help_model(query))
+    let examples_line = normalized_help_query(query)
+        .is_none()
+        .then(|| plain_examples_line(PLAIN_HELP_EXAMPLES));
+    PlainHelpModel::from_help_model(help_model(query), examples_line)
 }
 
 impl PlainHelpModel {
-    fn from_help_model(model: HelpModel) -> Self {
+    fn from_help_model(model: HelpModel, examples_line: Option<String>) -> Self {
         PlainHelpModel {
             title: "HELP",
             intro: model.intro,
             glossary: model.glossary,
             filter_note: model.filter_note,
-            examples_line: plain_examples_line(&model.examples),
+            examples_line,
             categories: model
                 .categories
                 .into_iter()
@@ -93,8 +117,8 @@ impl PlainHelpModel {
     }
 }
 
-fn plain_examples_line(examples: &[&'static str]) -> Option<String> {
-    (!examples.is_empty()).then(|| format!("Examples: {}", examples.join("  ·  ")))
+fn plain_examples_line(examples: &[&str]) -> String {
+    format!("Examples: {}", examples.join("  ·  "))
 }
 
 fn plain_help_category(category: HelpCategoryModel) -> PlainHelpCategoryModel {
@@ -111,12 +135,26 @@ fn plain_help_category(category: HelpCategoryModel) -> PlainHelpCategoryModel {
 fn plain_help_command_rows(row: HelpCommandRow) -> Vec<String> {
     let command = &row.cells[0];
     let aliases = &row.cells[1];
-    let description = &row.cells[2];
+    let description = match plain_workflow_guidance(command) {
+        Some(guidance) => guidance,
+        None => row.cells[2].as_str(),
+    };
     let mut rows = vec![format!("{command} - {description}")];
     if aliases != "-" {
         rows.push(format!("  aliases / examples: {aliases}"));
     }
     rows
+}
+
+fn plain_workflow_guidance(command: &str) -> Option<&'static str> {
+    matches!(
+        command,
+        "map" | "scan" | "review" | "prove" | "fix" | "phase <map|scan|review|prove|fix>"
+            | "full [target]"
+    )
+    .then_some(
+        "interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`",
+    )
 }
 
 pub(crate) fn quickstart_model(app: &ShellApp) -> QuickstartModel {
@@ -163,14 +201,23 @@ fn filtered_help_specs(
         .map(|spec| (help_search_key(spec), spec))
         .collect::<Vec<_>>();
     let ranked = rank_fuzzy(entries.iter().map(|(key, _)| key.clone()).collect(), query);
-    ranked
+    let mut specs = ranked
         .into_iter()
         .filter_map(|key| {
             entries
                 .iter()
                 .find_map(|(candidate, spec)| (candidate == &key).then_some(*spec))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    specs.sort_by_key(|spec| !command_head_matches(spec.command, query));
+    specs
+}
+
+fn command_head_matches(command: &str, query: &str) -> bool {
+    command
+        .split_whitespace()
+        .next()
+        .is_some_and(|head| head.eq_ignore_ascii_case(query))
 }
 
 fn help_search_key(spec: &ShellCommandSpec) -> String {

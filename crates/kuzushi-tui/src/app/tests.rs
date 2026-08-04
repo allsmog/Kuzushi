@@ -6,6 +6,14 @@ fn wb_focus(app: &ShellApp) -> crate::ui_view_models::PhaseSurfaceId {
         .workbench()
         .focus_for(crate::ui_view_models::active_workbench_page(app))
 }
+
+fn show_guided_map_for_test(app: &mut ShellApp) {
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Map));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(InputMode::Navigate);
+}
 #[path = "../ui_view_models/tests/run_lifecycle_semantic_equivalence.rs"]
 mod run_lifecycle_semantic_equivalence_tests;
 
@@ -2072,13 +2080,14 @@ fn run_tool_launch_keeps_path_like_hydrated_prompt_as_prepared_input() {
 }
 
 #[test]
-fn scan_command_reducer_defers_guided_scan_open_to_effect_runtime() {
+fn full_command_reducer_defers_guided_pipeline_open_to_effect_runtime() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    let command = parse_command(&format!("full {}", temp.path().display()));
 
     let effects = app
-        .reduce_command_effects(&ShellCommand::Scan(Some(temp.path().to_path_buf())))
-        .expect("scan command should be effect-routed");
+        .reduce_command_effects(&command)
+        .expect("full command should be effect-routed");
 
     assert!(matches!(
         effects.as_slice(),
@@ -2749,7 +2758,15 @@ fn command_effect_reducer_routes_existing_effectful_commands() {
         Some(EffectKind::RunArtifact)
     );
     assert_eq!(
+        command_effect_kind(ShellCommand::Full(Some(PathBuf::from(".")))),
+        Some(EffectKind::OpenGuidedScan)
+    );
+    assert_eq!(
         command_effect_kind(ShellCommand::Scan(Some(PathBuf::from(".")))),
+        Some(EffectKind::OpenGuidedScan)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::Scan(None)),
         Some(EffectKind::OpenGuidedScan)
     );
     assert_eq!(
@@ -3322,7 +3339,10 @@ fn workspace_status_reducer_defers_projection_to_effect_runtime() {
 
     assert_eq!(app.shell_view(), ShellView::Workspace);
     assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "workspace" && line.body.contains("start shell with --target")
+        line.prefix == "workspace"
+            && line
+                .body
+                .contains("target <path>, then map; or full <path>")
     }));
 }
 
@@ -4216,6 +4236,7 @@ fn effect_routed_command_fixtures() -> Vec<(&'static str, ShellCommand)> {
         ("plan", ShellCommand::Plan("map authz drift".to_string())),
         ("plan-apply", ShellCommand::PlanApply),
         ("plan-discard", ShellCommand::PlanDiscard),
+        ("full", ShellCommand::Full(Some(PathBuf::from(".")))),
         ("scan", ShellCommand::Scan(Some(PathBuf::from(".")))),
         (
             "set-option",
@@ -5047,10 +5068,12 @@ fn workspace_status_reports_no_active_workspace() {
         .workspace_view()
         .status
         .contains("no active workspace"));
-    assert!(app
-        .log_lines()
-        .iter()
-        .any(|line| line.prefix == "workspace" && line.body.contains("start shell with --target")));
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "workspace"
+            && line
+                .body
+                .contains("target <path>, then map; or full <path>")
+    }));
 }
 
 #[test]
@@ -6339,10 +6362,12 @@ fn ux_empty_and_error_states_name_next_real_commands() {
         &mut no_workspace_app,
         ShellCommand::Workspace(WorkspaceCommand::Status),
     );
-    assert!(no_workspace_app
-        .log_lines()
-        .iter()
-        .any(|line| { line.prefix == "workspace" && line.body.contains("Next: scan <target>") }));
+    assert!(no_workspace_app.log_lines().iter().any(|line| {
+        line.prefix == "workspace"
+            && line
+                .body
+                .contains("Next: target <path>, then map; or full <path>")
+    }));
 
     run_command(&mut app, ShellCommand::Use("sat".to_string()));
     let unknown_module = app
@@ -10877,8 +10902,10 @@ fn ctrl_c_in_reverse_search_still_cancels_running_tool() {
 }
 
 #[test]
-fn command_palette_opens_filters_and_loads_without_executing() {
-    let mut app = ShellApp::new(V2Config::default(), None);
+fn command_palette_executes_the_zero_argument_scan_phase_command() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.set_shell_view(ShellView::Catalog);
 
     // Ctrl+G opens the palette.
@@ -10901,8 +10928,7 @@ fn command_palette_opens_filters_and_loads_without_executing() {
         "query `scan` should surface the scan command"
     );
 
-    // Enter loads the canonical head into the prompt but does NOT execute.
-    let before_log = app.log_len();
+    // Zero-argument entries execute directly from the palette.
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
@@ -10912,17 +10938,9 @@ fn command_palette_opens_filters_and_loads_without_executing() {
         ShellView::CommandPalette,
         "palette closed"
     );
-    assert!(
-        !app.input().is_empty(),
-        "selected command loaded into prompt"
-    );
-    assert!(
-        !app.log_lines()
-            .iter()
-            .skip(before_log)
-            .any(|line| line.prefix == ">"),
-        "accepting must not submit the command"
-    );
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    assert!(app.input().is_empty());
 }
 
 #[test]
@@ -11254,20 +11272,199 @@ fn report_escape_and_q_restore_the_exact_scan_origin() {
 
 #[test]
 fn phase_command_opens_requested_phase_picker() {
+    for &phase in WorkflowPhase::ORDER {
+        let dir = tempfile::tempdir().expect("temp target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(dir.path().to_path_buf()));
+
+        run_command(&mut app, ShellCommand::Phase(phase));
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker, "{phase:?}");
+        assert_eq!(app.engagement.current_phase(), Some(phase));
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == phase));
+        assert!(!app.has_running_work(), "{phase:?} started work early");
+    }
+}
+
+#[test]
+fn phase_command_replaces_an_idle_guided_flow_only_after_picker_opens() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
+    app.engagement
+        .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::MapRoute));
+    show_guided_map_for_test(&mut app);
 
-    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Prove));
+    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Review));
 
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
-    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Prove));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
+    assert!(app.engagement.guided_scan().is_none());
     assert!(app
         .engagement
         .planning_picker()
         .tasks()
         .iter()
-        .all(|row| row.id.phase() == WorkflowPhase::Prove));
+        .all(|row| row.id.phase() == WorkflowPhase::Review));
+}
+
+#[test]
+fn phase_command_preserves_view_phase_and_guided_draft_while_work_is_active() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let mut flow = GuidedScanFlow::new(GuidedScanStage::MapRoute);
+    flow.open_other();
+    app.engagement.set_guided_scan(flow);
+    app.engagement.set_phase(WorkflowPhase::Map);
+    show_guided_map_for_test(&mut app);
+    app.reduce_guided_scan_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
+    let tasks_before = app.engagement.planning_picker().tasks().to_vec();
+    let selected_before = app.engagement.planning_picker().selected().clone();
+    app.set_planner_running(true);
+
+    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Prove));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    let flow = app.engagement.guided_scan().expect("guided draft retained");
+    assert_eq!(flow.stage(), GuidedScanStage::MapRoute);
+    assert_eq!(flow.other_draft(), "x");
+    assert_eq!(app.engagement.planning_picker().tasks(), tasks_before);
+    assert_eq!(
+        app.engagement.planning_picker().selected(),
+        &selected_before
+    );
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "phase" && line.body.contains("finish or cancel the active work")
+    }));
+}
+
+#[test]
+fn phase_command_resumes_after_target_picker_activation() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Scan));
+    assert_eq!(app.shell_view(), ShellView::TargetPicker);
+    assert_eq!(
+        app.router.target_picker().pending_intent(),
+        Some(PendingTargetIntent::Phase(WorkflowPhase::Scan))
+    );
+    app.router
+        .target_picker_mut()
+        .replace_candidates(vec![crate::app::TargetCandidate {
+            path: dir.path().to_path_buf(),
+            label: "selected".to_string(),
+            hint: "test target",
+            scope: None,
+        }]);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
+    assert!(app.router.target_picker().pending_intent().is_none());
+    assert!(app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .all(|row| row.id.phase() == WorkflowPhase::Scan));
+}
+
+#[test]
+fn canceling_target_picker_clears_phase_continuation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Fix));
+    assert!(app.router.target_picker().pending_intent().is_some());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.router.target_picker().pending_intent().is_none());
+    assert!(app.target().is_none());
+    assert_eq!(app.shell_view(), ShellView::Catalog);
+}
+
+#[test]
+fn full_command_resumes_guided_map_after_target_picker_activation() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    run_command(&mut app, parse_command("full"));
+    assert_eq!(
+        app.router.target_picker().pending_intent(),
+        Some(PendingTargetIntent::Full)
+    );
+    app.router
+        .target_picker_mut()
+        .replace_candidates(vec![crate::app::TargetCandidate {
+            path: dir.path().to_path_buf(),
+            label: "selected".to_string(),
+            hint: "test target",
+            scope: None,
+        }]);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert_eq!(
+        app.engagement.guided_scan().map(GuidedScanFlow::stage),
+        Some(GuidedScanStage::MapRoute)
+    );
+    assert!(!app.has_running_work());
+    assert!(app.router.target_picker().pending_intent().is_none());
+}
+
+#[test]
+fn rejected_phase_preserves_guided_draft_and_map_cache() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut config = V2Config::default();
+    config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.hydrate_view_keys_blocking(dir.path(), vec![crate::app::ViewHydrationKey::MapArtifacts]);
+    assert_eq!(
+        app.workbench_cache()
+            .borrow()
+            .cached_map_artifacts_built(Some(dir.path())),
+        crate::app::ViewDataState::Ready(false)
+    );
+    let mut flow = GuidedScanFlow::new(GuidedScanStage::MapRoute);
+    flow.open_other();
+    app.engagement.set_guided_scan(flow);
+    app.engagement.set_phase(WorkflowPhase::Map);
+    show_guided_map_for_test(&mut app);
+    app.reduce_guided_scan_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
+
+    run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Scan));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert_eq!(
+        app.engagement
+            .guided_scan()
+            .expect("guided draft retained")
+            .other_draft(),
+        "x"
+    );
+    assert_eq!(
+        app.workbench_cache()
+            .borrow()
+            .cached_map_artifacts_built(Some(dir.path())),
+        crate::app::ViewDataState::Ready(false)
+    );
 }
 
 #[test]

@@ -269,7 +269,7 @@ fn plain_launch_summary(app: &ShellApp) -> String {
     let next = if app.target().is_some() {
         "printf 'findings\\n' | kuzushi --plain --target <path>"
     } else {
-        "printf 'scan .\\n' | kuzushi --plain"
+        "kuzushi scan ."
     };
     format!(
         "KUZUSHI PLAIN SESSION SUMMARY\nstatus: idle\ntarget: {target}\ncommands: 0\nNext: {next}\n"
@@ -289,7 +289,7 @@ mod plain_summary_tests {
         assert!(output.contains("status: idle"));
         assert!(output.contains("target: none"));
         assert!(output.contains("commands: 0"));
-        assert!(output.contains("Next: printf 'scan .\\n' | kuzushi --plain"));
+        assert!(output.contains("Next: kuzushi scan ."));
         assert_eq!(output.lines().count(), 5);
         assert!(!output.contains("press "));
         assert!(!output.contains("kuzushi>"));

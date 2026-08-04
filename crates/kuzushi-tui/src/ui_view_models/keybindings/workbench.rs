@@ -45,7 +45,7 @@ fn ready_map_gallery_is_visible(app: &ShellApp) -> bool {
 fn append_workbench_commands(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
     bindings.push(bind("Ctrl+G", "palette"));
     if active_workbench_page(app) != WorkbenchPage::Map {
-        bindings.push(bind("scan", "guided plan"));
+        bindings.push(bind("scan", "Scan phase planner"));
         bindings.push(bind("run sast:scan {}", "rescan now"));
     }
     if !app.findings().is_empty() {

@@ -466,6 +466,7 @@ impl ShellApp {
     }
 
     fn defer_target_picker(&mut self) {
+        self.router.target_picker_mut().clear_pending_intent();
         // Dismissing the picker never touches an existing binding: from the
         // Setup editor it returns to Setup with the target intact, and from
         // an already-targeted session it returns to the workbench.

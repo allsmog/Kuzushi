@@ -207,21 +207,57 @@ fn submit_plain_scripted_command(
     command: &str,
     terminal_before: Option<&PlainTerminalSnapshot>,
 ) -> PlainSubmission {
-    let submission = match crate::commands::parse_command(command) {
-        ShellCommand::Scan(None) if app.target().is_none() => {
-            app.log(
-                "error",
-                "scripted scan needs an explicit target; use `scan .` to consent to cwd",
-            );
-            return PlainSubmission::Rejected;
-        }
-        ShellCommand::Scan(target) => {
-            update_and_execute_effects(app, Msg::Cmd(ShellCommand::ScriptedScan(target)));
-            PlainSubmission::RunExpected
-        }
-        _ => submit_plain_line(app, command),
-    };
+    if let Some(workflow) = plain_interactive_workflow(command) {
+        return reject_plain_workflow_command(app, &workflow);
+    }
+    let submission = submit_plain_line(app, command);
     classify_plain_submission(app, terminal_before, submission)
+}
+
+/// Queue commands are reparsed by the reducer, so inspect their payloads here
+/// too. Otherwise `queue scan` would bypass the plain-mode boundary and open an
+/// interactive picker while reporting a successful scripted command.
+fn plain_interactive_workflow(command: &str) -> Option<String> {
+    let mut pending = command.trim().to_string();
+    loop {
+        match crate::commands::parse_command(&pending) {
+            ShellCommand::Phase(phase) => return Some(phase.word().to_string()),
+            ShellCommand::Full(_) | ShellCommand::Scan(_) => {
+                return Some(command_head(&pending).to_string())
+            }
+            ShellCommand::QueueCommand(queued) => pending = queued,
+            ShellCommand::Unknown(_) if is_legacy_scan_with_target(&pending) => {
+                return Some("scan".to_string())
+            }
+            _ => return None,
+        }
+    }
+}
+
+fn command_head(command: &str) -> &str {
+    command
+        .trim()
+        .strip_prefix('/')
+        .unwrap_or(command.trim())
+        .split_whitespace()
+        .next()
+        .unwrap_or("workflow")
+}
+
+fn is_legacy_scan_with_target(command: &str) -> bool {
+    let normalized = command.trim().strip_prefix('/').unwrap_or(command.trim());
+    let mut parts = normalized.split_whitespace();
+    parts.next() == Some("scan") && parts.next().is_some()
+}
+
+fn reject_plain_workflow_command(app: &mut ShellApp, command: &str) -> PlainSubmission {
+    app.log(
+        "error",
+        format!(
+            "`{command}` is an interactive TUI workflow; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`"
+        ),
+    );
+    PlainSubmission::Rejected
 }
 
 fn classify_plain_submission(

@@ -33,7 +33,7 @@ pub(crate) fn default_workspace_view(target: Option<&WorkspaceTarget>) -> Worksp
             findings_db: None,
             findings_count: None,
             last_export: None,
-            status: "no active workspace. Next: scan <target> or start shell with --target ."
+            status: "no active workspace. Next: target <path>, then map; or full <path>"
                 .to_string(),
         },
     }

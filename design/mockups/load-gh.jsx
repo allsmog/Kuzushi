@@ -31,7 +31,7 @@ function LoadGhView() {
       m(' · patches '), p('staged-only')], W, 'cp5'),
     window.blankRow(W, 'b3'),
     window.sectionHeader('SUGGESTED RUNS', W, 's3'),
-    window.row([T('   '), m('· '), a('/scan --diff-only'),                  m('     run sast over the 14 changed files')], W, 's3a'),
+    window.row([T('   '), m('· '), a('/scan'),                              m('                 review Scan tasks for the cloned diff')], W, 's3a'),
     window.row([T('   '), m('· '), a('/use carlini --scope changed'),       m(' carlini hunt scoped to the diff')], W, 's3b'),
     window.row([T('   '), m('· '), a('/use threat-model --diff-only'),      m('  refresh model where the diff touches it')], W, 's3c'),
     window.row([T('   '), m('· '), a('/story --audience pr'),               m('       render review comments as kuzushi memo')], W, 's3d'),
@@ -50,7 +50,7 @@ function LoadGhView() {
       {window.footer({
         stage: 'load · gh:acme/checkout#PR412 · 14 files · ttl 24h', findings: 38,
         promptModule: 'load',
-        keybinds: [['y','clone'],['e','edit'],['n','cancel'],['/scan --diff-only','focused']],
+        keybinds: [['y','clone'],['e','edit'],['n','cancel'],['/scan','Scan planner']],
       })}
     </window.TermFrame>
   );

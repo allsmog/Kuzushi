@@ -118,10 +118,14 @@ impl ShellApp {
         let Some(phases) = self.target_phase_config(&workspace) else {
             return Vec::new();
         };
-        let scan_input = target_activation_scan_input(activation.source);
+        let source = activation.source;
+        let scan_input = target_activation_scan_input(source);
         let mut effects = self.activate_target_with_phases(workspace, phases);
         self.apply_initial_onboarding_phase();
-        self.finish_target_activation(activation);
+        effects.extend(self.finish_target_activation(activation));
+        if source == TargetActivationSource::GuidedFull {
+            effects.push(ShellEffect::FinalizeGuidedScanOpen);
+        }
         if let Some(input) = scan_input {
             effects.extend(self.reduce_scan_start(None, input));
         }
@@ -299,7 +303,7 @@ impl ShellApp {
         true
     }
 
-    fn finish_target_activation(&mut self, activation: TargetActivation) {
+    fn finish_target_activation(&mut self, activation: TargetActivation) -> Vec<ShellEffect> {
         if let Some(scope) = activation.selected_scope {
             self.set_active_scope(Some(scope.clone()));
             self.log(
@@ -312,14 +316,26 @@ impl ShellApp {
                 ),
             );
         }
-        if activation.source == TargetActivationSource::Picker
-            && self.shell_view() == ShellView::TargetPicker
-        {
-            self.set_shell_view(ShellView::Workbench);
-            self.router
-                .workbench_mut()
-                .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
-            self.clamp_findings_cursor();
+        if activation.source != TargetActivationSource::Picker {
+            return Vec::new();
+        }
+        match self.router.target_picker_mut().take_pending_intent() {
+            Some(PendingTargetIntent::Phase(phase)) => {
+                self.open_requested_phase_picker(phase);
+                Vec::new()
+            }
+            Some(PendingTargetIntent::Full) => {
+                vec![ShellEffect::OpenGuidedScan(GuidedScanOpen { target: None })]
+            }
+            None if self.shell_view() == ShellView::TargetPicker => {
+                self.set_shell_view(ShellView::Workbench);
+                self.router
+                    .workbench_mut()
+                    .set_focus(crate::ui_view_models::PhaseSurfaceId::ReviewQueue);
+                self.clamp_findings_cursor();
+                Vec::new()
+            }
+            None => Vec::new(),
         }
     }
 
@@ -592,7 +608,9 @@ fn target_activation_scan_input(
     match source {
         TargetActivationSource::ScriptedScan => Some(None),
         TargetActivationSource::OfflineDemo => Some(Some(kuzushi_core::offline_demo_scan_input())),
-        TargetActivationSource::Command | TargetActivationSource::Picker => None,
+        TargetActivationSource::Command
+        | TargetActivationSource::GuidedFull
+        | TargetActivationSource::Picker => None,
     }
 }
 

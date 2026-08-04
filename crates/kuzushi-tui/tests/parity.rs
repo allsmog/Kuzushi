@@ -613,7 +613,7 @@ fn use_theme_picker_handoff_fixture(app: &mut ShellApp) {
         selected_palette: 0,
         preview_title: "charcoal · sample console".to_string(),
         preview_rows: vec![
-            "   14:32:14  ●  /scan".to_string(),
+            "   14:32:14  ●  /scan · plan confirmed".to_string(),
             "   14:32:14  ⏵  sast:scan · tasks semgrep, secrets · triage on".to_string(),
             "   14:33:42  ◆  two CRITICALs share a sink — F-0001 · F-0002".to_string(),
             "   14:33:42  ▸  F-0012  ·  CRITICAL  · refund-bot.ts:127".to_string(),
@@ -792,9 +792,17 @@ fn keymap_handoff_sections() -> Vec<KeymapSection> {
         ),
         keymap_section(
             "DISPATCH",
-            "commands you reach for daily",
+            "phase planners · full workflow · tools",
             &[
-                ("/scan", "sast umbrella · semgrep + secrets + agentic"),
+                ("/map · /scan", "open only that phase's planning picker"),
+                (
+                    "/review · /prove",
+                    "open only that phase's planning picker · /fix works too",
+                ),
+                (
+                    "/full [target]",
+                    "guided Map → Scan · hand off to Review or Report · /pipeline alias",
+                ),
                 (
                     "/use <module>",
                     "enter a module · /use sast · /use ndiff cve-…",
@@ -1676,7 +1684,7 @@ fn use_context_handoff_fixture(app: &mut ShellApp) {
             findings: 0,
             keybinds: vec![
                 ("/show".to_string(), "snapshot".to_string()),
-                ("/scan".to_string(), "run sast".to_string()),
+                ("/scan".to_string(), "Scan planner".to_string()),
                 ("/back".to_string(), "catalog".to_string()),
                 ("?".to_string(), "help".to_string()),
             ],
@@ -2245,7 +2253,7 @@ fn options_set_handoff_rows() -> Vec<String> {
         String::new(),
         "    i   /set is run-scoped · /setg writes ~/.kuzushi/v2/options.toml · /unsetg clears global"
             .to_string(),
-        "    !   triage.auto = off will skip the post-scan triage actor on the next /scan"
+        "    !   triage.auto = off will skip the post-scan triage actor on the next confirmed Scan run"
             .to_string(),
         String::new(),
         " 14:12:03  …  y commit · e edit · n discard · /show options sast --after to dry-run"
@@ -2305,11 +2313,14 @@ fn help_handoff_rows() -> Vec<String> {
             .to_string(),
         " /back                                       pop the focused module".to_string(),
         String::new(),
-        mockup_section_header("RUN dispatch tools and scans"),
+        mockup_section_header("RUN open phase planners or dispatch tools"),
+        " /map · /scan · /review · /prove · /fix     open only that phase's planning picker"
+            .to_string(),
+        " /full [target] · /pipeline [target]         guided Map → Scan; hand off to Review or Report; full . selects cwd"
+            .to_string(),
         " /run <tool> [json] · run . [json]           execute a registered tool with typed input"
             .to_string(),
-        " /scan [target]                              native sast umbrella scan".to_string(),
-        " /ask <question>, ?text                      explicit agent route — never silent".to_string(),
+        " /ask <question>, ?text                      explicit agent route · never silent".to_string(),
         " /options [tool] · show missing              inspect typed options · see what's required"
             .to_string(),
         " /set <key> <value> · setg <k> <v>           session / global option overrides"

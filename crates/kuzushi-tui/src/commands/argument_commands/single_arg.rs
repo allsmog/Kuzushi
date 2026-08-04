@@ -10,8 +10,8 @@ pub(crate) fn parse_single_arg_command(
         "open" | "use" | "since" | "replay" | "trace" | "detach" | "reparse" => {
             parse_required_single_arg_command(verb, first, original)
         }
-        "scan" | "provider" | "backend" | "resume" | "kb" | "attachments" | "files"
-        | "file-picker" | "component" => parse_optional_single_arg_command(verb, first),
+        "provider" | "backend" | "resume" | "kb" | "attachments" | "files" | "file-picker"
+        | "component" => parse_optional_single_arg_command(verb, first),
         "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
         "next" | "continue" => parse_next_command(first, original),
@@ -29,7 +29,6 @@ fn parse_required_single_arg_command(
 ) -> ShellCommand {
     match verb {
         "open" => required_arg(first, original, ShellCommand::Open),
-        "scan" => ShellCommand::Scan(first.map(PathBuf::from)),
         "use" => required_arg(first, original, ShellCommand::Use),
         "since" => required_arg(first, original, ShellCommand::Since),
         "replay" => required_arg(first, original, ShellCommand::Replay),
@@ -42,7 +41,6 @@ fn parse_required_single_arg_command(
 
 fn parse_optional_single_arg_command(verb: &str, first: Option<&str>) -> ShellCommand {
     match verb {
-        "scan" => ShellCommand::Scan(first.map(PathBuf::from)),
         "provider" => ShellCommand::Provider(first.map(ToString::to_string)),
         "backend" => ShellCommand::Backend(first.map(ToString::to_string)),
         "target" => ShellCommand::Target(first.map(ToString::to_string)),

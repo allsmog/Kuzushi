@@ -55,7 +55,7 @@ function ScheduleView() {
     window.row([T('   '), [' 02:00 ', 'c-accent'], m(' · '), p('j-001 nightly sast'),         m('             · est '), a('4m 12s'),  m(' · '), p('budget '), a('$0.42')], W, 'u3'),
     window.blankRow(W, 'b3'),
     window.sectionHeader('CREATE · /schedule add', W, 's2'),
-    window.row([T('   '), m('   '), a('/schedule add nightly-sast --cron "0 2 * * *" -- /scan')], W, 'c1'),
+    window.row([T('   '), m('   '), a('/schedule add nightly-sast --cron "0 2 * * *" -- kuzushi scan <target>')], W, 'c1'),
     window.row([T('   '), m('   '), a('/schedule add cve-libxml2 --on cve.feed.match=libxml2 -- /run ndiff --cve $CVE')], W, 'c2'),
     window.blankRow(W, 'b4'),
     window.logLine('flow','17:14:14',[m(' '), a('j/k'), m(' job · '),

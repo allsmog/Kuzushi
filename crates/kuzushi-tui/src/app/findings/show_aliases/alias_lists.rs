@@ -78,7 +78,7 @@ impl ShellApp {
         }
         self.clamp_findings_cursor();
         if self.findings().is_empty() {
-            self.log("findings", "no findings yet. Next: scan or scan <target>");
+            self.log("findings", "no findings yet. Next: scan, or full <target>");
         }
     }
 

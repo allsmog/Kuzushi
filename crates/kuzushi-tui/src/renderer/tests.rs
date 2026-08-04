@@ -1130,7 +1130,7 @@ fn renders_long_prompt_on_single_row() {
     let backend = TestBackend::new(40, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_input("scan ./a/very/long/path/that/should/not/wrap");
+    app.set_input("full ./a/very/long/path/that/should/not/wrap");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2842,7 +2842,11 @@ fn plain_help_aliases_and_examples_are_width_safe() {
 
     assert!(rendered.contains("HELP"));
     assert!(rendered.contains("browse modules and tools"));
-    for example in shell_help_examples() {
+    for example in [
+        "kuzushi scan <target>",
+        "kuzushi --target <target> run sast:scan",
+        "findings export report.sarif sarif",
+    ] {
         assert!(
             rendered.contains(example),
             "missing plain help example {example}"
@@ -3908,7 +3912,7 @@ fn command_list_line_accents_each_command_with_subtle_separators() {
     // appears at the bottom of many views (workspace, agent-chat,
     // history, kb).  The mockup paints commands in c-accent and
     // the ` · ` separator in c-subtle.
-    let line = command_list_line(&["scan .", "findings", "back"], 120);
+    let line = command_list_line(&["scan", "findings", "back"], 120);
     let mut accent_chunks = 0usize;
     let mut subtle_chunks = 0usize;
     for span in &line.spans {

@@ -104,7 +104,7 @@ impl ShellApp {
     fn submit_map_route_other(&mut self, draft: &str) -> InputUpdate {
         let normalized = draft.to_ascii_lowercase();
         if self.has_accepted_map() && normalized.contains("scan") {
-            self.prepare_guided_phase(WorkflowPhase::Scan);
+            self.continue_guided_after_map();
             return InputUpdate::handled();
         }
         self.apply_freeform_map_route(&normalized);

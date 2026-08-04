@@ -5,10 +5,13 @@ impl ShellApp {
         if self.scan_start_blocked() {
             return Vec::new();
         }
+        let activates_target = target.is_some();
         let Some(mut effects) = self.guided_scan_target_effects(target) else {
             return Vec::new();
         };
-        effects.push(ShellEffect::FinalizeGuidedScanOpen);
+        if !activates_target {
+            effects.push(ShellEffect::FinalizeGuidedScanOpen);
+        }
         effects
     }
 
@@ -32,8 +35,8 @@ impl ShellApp {
                 return Some(Vec::new());
             }
             self.log(
-                "scan",
-                "no active workspace target; run `target <path>` first, or `scan .` to use cwd",
+                "full",
+                "no active workspace target; choose one first, or use `full .` to select cwd explicitly",
             );
             return None;
         };
@@ -41,7 +44,7 @@ impl ShellApp {
             Ok(_) => Some(self.request_target_activation(TargetActivation {
                 path: target,
                 selected_scope: None,
-                source: TargetActivationSource::Command,
+                source: TargetActivationSource::GuidedFull,
             })),
             Err(error) => {
                 self.log(
@@ -235,7 +238,7 @@ impl ShellApp {
         let Some(target_path) = self.scan_target_path(target) else {
             self.log(
                 "error",
-                "scan needs an explicit target; use `scan .` to consent to cwd",
+                "scan execution needs an explicit target; use `kuzushi scan <target>` for scripts",
             );
             return None;
         };

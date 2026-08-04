@@ -43,7 +43,7 @@ function OptionsSetView() {
     window.blankRow(W, 'b4'),
     window.row([T('   '), [' i ', 'c-accent'], m('  '), p('/set'), m(' is run-scoped · '), p('/setg'), m(' writes ~/.kuzushi/v2/options.toml · '),
       p('/unsetg'), m(' clears global')], W, 'i1'),
-    window.row([T('   '), [' ! ', 'c-warn'], m('  triage.auto = off will skip the post-scan triage actor on the next /scan')], W, 'i2'),
+    window.row([T('   '), [' ! ', 'c-warn'], m('  triage.auto = off will skip the post-scan triage actor on the next confirmed Scan run')], W, 'i2'),
     window.blankRow(W, 'b5'),
     window.logLine('flow','14:12:03',[m(' '), a('y'), m(' commit · '), a('e'), m(' edit · '), a('n'), m(' discard · '),
       a('/show options sast --after'), m(' to dry-run')], W, 'l6'),

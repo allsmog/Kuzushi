@@ -44,7 +44,7 @@ function SastInProgressView() {
   );
 
   const lines = [
-    window.logLine('in', '14:31:55', [m(' /scan')], W, 'l1'),
+    window.logLine('in', '14:31:55', [m(' /scan · plan confirmed')], W, 'l1'),
     window.logLine('run', '14:31:55', [m(' sast:scan · tasks '), a('semgrep, secret-scan, agentic-sast'), m(' · triage on')], W, 'l2'),
     window.blankRow(W, 'b1'),
     window.row([T('   '), ...bar('semgrep             ', 612, 612, 'done · 18 raw hits', 'c-success')], W, 'p1'),
@@ -93,7 +93,7 @@ function SastInProgressView() {
   ], W, 'strip');
 
   return (
-    <window.TermFrame title="kuzushi · sast · /scan (in progress)">
+    <window.TermFrame title="kuzushi · sast:scan · in progress">
       {customStrip}
       {window.ruleRow(W, 'r1')}
       {window.blankRow(W, 'b1')}

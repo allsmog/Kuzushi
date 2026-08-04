@@ -19,7 +19,7 @@ fn home_keybindings() -> Vec<FooterKeybinding> {
         bind("n", "next phase"),
         bind("modules", "browse"),
         bind("options sast:scan", "tune scan"),
-        bind("scan", "run scanners"),
+        bind("scan", "Scan phase planner"),
         bind("Ctrl+C", "exit"),
     ]
 }

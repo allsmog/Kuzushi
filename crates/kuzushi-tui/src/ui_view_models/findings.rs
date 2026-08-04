@@ -1255,16 +1255,13 @@ fn filtered_empty_state(app: &ShellApp) -> Option<FilteredFindingsEmptyState> {
 
 fn context_empty_state(context_state: &'static str) -> FindingsEmptyState {
     let (hint, context_cta) = match context_state {
-        "present" => (
-            "opens the guided Scan workflow for the active target.",
-            None,
-        ),
+        "present" => ("opens the Scan phase planner for the active target.", None),
         "malformed" => (
             "context snapshot is malformed; rebuild it before scanning.",
             Some(("context build", "rewrite the malformed snapshot first")),
         ),
         _ => (
-            "opens the guided workflow for the target.",
+            "opens the Scan phase planner for the target.",
             Some((
                 "context build",
                 "optional: index the repo first for richer analysis.",

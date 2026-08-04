@@ -28,7 +28,7 @@ fn session_history_model_tails_commands_with_original_numbers() {
 fn session_story_model_filters_prompt_echoes_and_tails_events() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.replace_log_for_test(vec![
-        log_line(">", "scan ."),
+        log_line(">", "full ."),
         log_line("scan", "started"),
         log_line("tool", "semgrep"),
         log_line("finding", "sql injection"),

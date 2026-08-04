@@ -65,13 +65,13 @@ fn prompt_model_projects_prompt_and_editor_state() {
     app.set_focused_module(Some("sast".to_string()));
     app.set_shell_view(ShellView::ModuleRun);
     app.set_running_tool_for_test("sast:scan");
-    app.set_input("scan ./demo");
+    app.set_input("full ./demo");
     app.set_cursor(4);
 
     let model = prompt_model(&app);
 
     assert!(model.prefix.ends_with("/sast/run> "));
-    assert_eq!(model.input, "scan ./demo");
+    assert_eq!(model.input, "full ./demo");
     assert_eq!(model.cursor, 4);
 
     app.clear_running_tool_for_test();

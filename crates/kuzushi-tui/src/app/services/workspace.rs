@@ -67,10 +67,22 @@ pub(crate) fn workspace_view_for_target(
     target: Option<&PathBuf>,
     last_export: Option<PathBuf>,
 ) -> WorkspaceView {
-    workspace_view_from_status(workspace_status_for_target(
+    let mut view = workspace_view_from_status(workspace_status_for_target(
         target.map(PathBuf::as_path),
         last_export,
-    ))
+    ));
+    if view.root.is_none() {
+        view.status = shell_workspace_recovery(&view.status);
+    }
+    view
+}
+
+fn shell_workspace_recovery(status: &str) -> String {
+    let detail = status
+        .split_once(". Next:")
+        .map_or(status, |(detail, _)| detail)
+        .trim_end_matches('.');
+    format!("{detail}. Next: target <path>, then map; or full <path>")
 }
 
 fn workspace_view_from_status(status: WorkspaceStatus) -> WorkspaceView {
@@ -86,4 +98,24 @@ fn workspace_view_from_status(status: WorkspaceStatus) -> WorkspaceView {
 
 fn workspace_output_path(workspace: &WorkspaceTarget, output: &PathBuf) -> Result<PathBuf> {
     kuzushi_core::workspace::resolve_contained_output_path(workspace.root(), output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_workspace_preserves_error_and_projects_shell_recovery() {
+        let temp = tempfile::tempdir().unwrap();
+        let missing = temp.path().join("missing-target");
+
+        let view = workspace_view_for_target(Some(&missing), None);
+
+        assert!(view.root.is_none());
+        assert!(view.status.contains("Target path does not exist"));
+        assert!(view
+            .status
+            .contains("Next: target <path>, then map; or full <path>"));
+        assert!(!view.status.contains("kuzushi scan <target>"));
+    }
 }

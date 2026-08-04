@@ -40,10 +40,8 @@ fn append_workspace_empty_state(lines: &mut Vec<Line<'static>>, model: &Workspac
             "pick a target before running modules.",
         ],
         &[
-            (
-                "scan <target>",
-                "scan + remember <target> as the active workspace",
-            ),
+            ("target <path>", "select and remember the workspace"),
+            ("full <path>", "open the guided Map → Scan workflow"),
             (
                 "kuzushi shell --target .",
                 "launch with the current dir as workspace",

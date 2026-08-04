@@ -5,11 +5,30 @@
 name: Discoverability — what can this thing do
 env: KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
 launch: --target @TMP_TARGET
-wait-for: 30 kuzushi>
+wait-for: 30 KUZUSHI
 submit: help
 wait: 2
 snap: help
 ask: `help` — is it grouped by operator task (scan/triage/export/...) or an alphabetical wall? Could a returning user find their next verb in <10s?
+keys: Escape
+submit: help planner
+wait: 2
+snap: help-phase-shortcuts
+expect: open the Map phase planner
+expect: open the Scan phase planner
+expect: open the Review phase planner
+expect: open the Prove phase planner
+expect: open the Fix phase planner
+ask: Phase shortcuts: are `/map`, `/scan`, `/review`, `/prove`, and `/fix` presented as direct planning surfaces rather than pipeline launchers?
+keys: Escape
+submit: help full
+wait: 2
+snap: help-full-pipeline
+expect: full [target]
+expect: hand off to Review or Report
+expect: /pipeline [target]
+ask: Guided workflow: is `/full [target]` clearly the guided Map → Scan workflow and Review/Report handoff, with `/pipeline [target]` discoverable as its alias?
+keys: Escape
 submit: tools
 wait: 2
 snap: tools

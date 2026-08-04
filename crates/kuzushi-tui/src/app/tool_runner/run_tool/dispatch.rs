@@ -284,7 +284,7 @@ impl ShellApp {
                     "error",
                     with_next_step(
                         error.to_string(),
-                        "scan <target> or start kuzushi shell --target .",
+                        "full <target> or start kuzushi shell --target .",
                     ),
                 );
                 None

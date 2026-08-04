@@ -166,7 +166,7 @@ impl ShellApp {
         self.set_shell_view(ShellView::Runs);
         self.log(
             "resume",
-            "nothing to resume — no paused scan and no failed/interrupted run. Next: show runs, replay <runId>, or scan <target>",
+            "nothing to resume · no paused scan and no failed/interrupted run. Next: show runs, replay <runId>, or full <target>",
         );
     }
 
@@ -280,7 +280,7 @@ impl ShellApp {
     fn log_pause_unavailable(&mut self) {
         self.log(
             "pause",
-            "no live pause/resume control is active in the Rust shell. Next: scan <target> or run <tool>",
+            "no live pause/resume control is active in the Rust shell. Next: full <target> or run <tool>",
         );
     }
 

@@ -20,15 +20,20 @@ pub enum ShellCommand {
     FindingsFilter(String),
     Component(Option<String>),
     Open(String),
+    /// Compatibility route for callers that constructed the former public
+    /// `scan [target]` guided-workflow command directly. The shell parser no
+    /// longer emits this variant.
     Scan(Option<PathBuf>),
+    /// Open the guided Map → Scan workflow, optionally selecting a target
+    /// first. Emitted by the public `full` and `pipeline` shell verbs.
+    Full(Option<PathBuf>),
     /// Internal launch command. Chooses the initial terminal route without
     /// going through a public slash verb.
     LaunchStartView,
     /// Internal launch command for bare interactive shells without a target.
     LaunchTargetPicker,
-    /// Internal command for non-interactive scripted input. The public `scan`
-    /// verb opens the guided workflow in the TUI; scripted plain mode starts
-    /// the scan immediately and still routes through `Msg::Cmd`.
+    /// Compatibility route for the former non-interactive `scan [target]`
+    /// behavior. Scripted plain input no longer emits it.
     ScriptedScan(Option<PathBuf>),
     Demo,
     Model(Option<String>),

@@ -1,6 +1,6 @@
 # J27 — Local monorepo baseline: scan plan, Run Focus, cancellation receipt.
 #
-# Against the real local monorepo checkout, captures (1) the guided scan
+# Against the real local monorepo checkout, captures (1) the guided Map-to-Scan workflow
 # plan surfaces (route + module cards) without launching a scan, then
 # (2) a live Run Focus over a deterministic runtime-free run
 # (`context:build`), an operator cancellation, and whatever receipt the
@@ -17,7 +17,7 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY NO_COLOR
 env: HOME=@TMP_HOME COLORTERM=truecolor KUZUSHI_REDUCED_MOTION=1 KUZUSHI_SKIP_ONBOARDING=1
 launch: --target @TARGET
 wait-for: 60 KUZUSHI
-submit: scan
+submit: /full
 wait-for: 20 MAP · ROUTE
 snap: scan-route
 ask: Route — is the guided route derived from the real target state (context/coverage present or missing), and does it lead root-first when no holistic baseline exists?

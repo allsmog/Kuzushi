@@ -364,7 +364,9 @@ Piped shell output automatically uses the same strict plain renderer as
 | --- | --- |
 | `/help` | Show grouped shell help. |
 | `/modules`, `/tools`, `/use <module>`, `/back` | Browse modules/tools, focus a module, and step back. |
-| `/run <tool> [json]`, `run . [json]`, `/scan [target]` | Dispatch a tool or start the native scan path. In the shell, `run .` resolves to the focused module's primary tool; from a terminal use `kuzushi run <module:tool>`. |
+| `/map`, `/scan`, `/review`, `/prove`, `/fix` | Open that exact phase's planning picker. No phase work starts until the operator reviews and confirms its tasks. The longer `phase <map\|scan\|review\|prove\|fix>` form remains available. |
+| `/full [target]`, `/pipeline [target]` | Open the guided Map → Scan workflow, then hand off to Review or Report. Use `full .` to opt into cwd explicitly. |
+| `/run <tool> [json]`, `run . [json]` | Dispatch a tool. In the shell, `run .` resolves to the focused module's primary tool; from a terminal use `kuzushi run <module:tool>`. |
 | `/ask <question>`, `ask <question>`, `?text` | Ask an explicit agent question with the configured model. |
 | `/options [tool]`, `show options [tool]`, `show advanced [tool]`, `show missing [tool]` | Inspect typed Rust tool options and missing required values. |
 | `/set <key> <value>`, `setg <key> <value>`, `/unset <key>`, `unsetg <key>` | Set or clear session/global option values for subsequent runs and scans. |
@@ -379,6 +381,14 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/session`, `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Show durable transcript health plus session utilities and precise replacement messages for unsupported legacy live-control paths. |
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
 | `/quit`, `exit`, `/exit` | Exit. |
+
+The in-shell `scan` verb no longer accepts a target or starts the guided
+pipeline. Select first with `target <path>` and then use `scan`, or use
+`full <path>` when the guided Map → Scan workflow is intended. The top-level
+`kuzushi scan <target>` CLI remains the headless scan entry point. Phase,
+`full`, and `pipeline` verbs require an interactive TUI; scripted `--plain`
+sessions direct automation to `kuzushi scan <target>` or
+`kuzushi --target <target> run sast:scan`.
 
 ## Phase-Driven Workflow (Map → Scan → Review → Prove → Fix)
 

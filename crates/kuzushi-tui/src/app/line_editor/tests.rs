@@ -68,6 +68,22 @@ mod tests {
     }
 
     #[test]
+    fn completion_exposes_phase_and_full_pipeline_verbs() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        for command in ["/map", "/scan", "/review", "/prove", "/fix", "/full"] {
+            assert!(
+                app.completion_candidates(command)
+                    .contains(&command.to_string()),
+                "missing completion for {command}"
+            );
+        }
+        assert!(app
+            .completion_candidates("/pipe")
+            .contains(&"/pipeline".to_string()));
+    }
+
+    #[test]
     fn threats_and_prompt_subverbs_complete() {
         let app = ShellApp::new(V2Config::default(), None);
 

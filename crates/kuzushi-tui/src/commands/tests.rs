@@ -95,6 +95,13 @@ mod tests {
             })
         );
         assert_eq!(
+            parse_command("/review rejected insufficient corroboration"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "rejected".to_string(),
+                reason: "insufficient corroboration".to_string(),
+            })
+        );
+        assert_eq!(
             parse_command("decision suppressed"),
             ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
                 "decision suppressed".to_string(),
@@ -207,7 +214,7 @@ mod tests {
         );
         assert_eq!(
             parse_command("/scan ./repo"),
-            ShellCommand::Scan(Some(PathBuf::from("./repo")))
+            ShellCommand::Unknown("/scan ./repo".to_string())
         );
         assert_eq!(parse_command("/demo"), ShellCommand::Demo);
         assert_eq!(
@@ -657,6 +664,75 @@ mod tests {
     }
 
     #[test]
+    fn canonical_phase_verbs_open_only_the_requested_phase() {
+        for (verb, phase) in [
+            ("map", WorkflowPhase::Map),
+            ("scan", WorkflowPhase::Scan),
+            ("review", WorkflowPhase::Review),
+            ("prove", WorkflowPhase::Prove),
+            ("fix", WorkflowPhase::Fix),
+        ] {
+            assert_eq!(parse_command(verb), ShellCommand::Phase(phase));
+            assert_eq!(
+                parse_command(&format!("/{verb}")),
+                ShellCommand::Phase(phase)
+            );
+        }
+    }
+
+    #[test]
+    fn phase_verbs_reject_arguments_without_shadowing_review_or_verify() {
+        for command in ["map now", "prove F-0001", "fix all"] {
+            assert_eq!(
+                parse_command(command),
+                ShellCommand::Unknown(command.to_string())
+            );
+        }
+        assert_eq!(
+            parse_command("scan ./repo"),
+            ShellCommand::Unknown("scan ./repo".to_string())
+        );
+        assert_eq!(
+            parse_command("review confirmed source-linked evidence reviewed"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "confirmed".to_string(),
+                reason: "source-linked evidence reviewed".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("verify F-0001"),
+            ShellCommand::RunTool {
+                tool: Some("verify:finding".to_string()),
+                input: Some(r#"{"fingerprint":"F-0001"}"#.to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn full_and_pipeline_accept_at_most_one_target() {
+        for command in ["full", "/full", "pipeline", "/pipeline"] {
+            assert_eq!(parse_command(command), ShellCommand::Full(None));
+        }
+        for command in [
+            "full ./repo",
+            "/full ./repo",
+            "pipeline ./repo",
+            "/pipeline ./repo",
+        ] {
+            assert_eq!(
+                parse_command(command),
+                ShellCommand::Full(Some(PathBuf::from("./repo")))
+            );
+        }
+        for command in ["full ./repo extra", "/pipeline ./repo extra"] {
+            assert_eq!(
+                parse_command(command),
+                ShellCommand::Unknown(command.to_string())
+            );
+        }
+    }
+
+    #[test]
     fn recon_import_compiles_native_syntax_into_descriptor_input() {
         let ShellCommand::RunTool {
             tool: Some(tool),
@@ -719,7 +795,7 @@ mod tests {
         );
         assert_eq!(
             parse_command("scan ./repo"),
-            ShellCommand::Scan(Some(PathBuf::from("./repo")))
+            ShellCommand::Unknown("scan ./repo".to_string())
         );
         assert_eq!(parse_command("q"), ShellCommand::Quit);
         assert_eq!(
@@ -853,7 +929,7 @@ mod tests {
             "review-decision",
             "run-diff",
             "run-tool",
-            "scan",
+            "full",
             "scene",
             "session-info",
             "set-option",
@@ -961,6 +1037,7 @@ mod tests {
             vec![
                 "demo",
                 "next",
+                "full .",
                 "use semgrep",
                 "run .",
                 "findings",
@@ -998,6 +1075,7 @@ mod tests {
             ShellCommand::Component(_) => "component",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
+            ShellCommand::Full(_) => "full",
             ShellCommand::LaunchStartView => "launch-start-view",
             ShellCommand::LaunchTargetPicker => "launch-target-picker",
             ShellCommand::ScriptedScan(_) => "scripted-scan",

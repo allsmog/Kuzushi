@@ -13,11 +13,34 @@ pub(crate) fn unknown_command_message(raw: &str) -> String {
 }
 
 fn known_unknown_command_message(normalized: &str, verb: &str) -> Option<String> {
-    missing_argument_message(verb)
+    scan_target_migration_message(normalized)
+        .or_else(|| missing_argument_message(verb))
         .or_else(|| missing_option_message(verb))
         .or_else(|| legacy_auth_selector_message(normalized))
         .or_else(|| cli_only_command_message(verb))
         .or_else(|| findings_alias_typo_message(normalized, verb))
+}
+
+fn scan_target_migration_message(normalized: &str) -> Option<String> {
+    let mut parts = normalized.split_whitespace();
+    (parts.next() == Some("scan") && parts.next().is_some()).then(|| {
+        "scan opens the Scan phase planner and no longer accepts a target. Next: `target <path>` then `scan`, or `full <path>` for guided Map → Scan."
+            .to_string()
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::unknown_command_message;
+
+    #[test]
+    fn scan_with_target_explains_the_phase_command_migration() {
+        let message = unknown_command_message("/scan ./repo");
+
+        assert!(message.contains("Scan phase planner"));
+        assert!(message.contains("`target <path>` then `scan`"));
+        assert!(message.contains("`full <path>`"));
+    }
 }
 
 fn cli_only_command_message(verb: &str) -> Option<String> {

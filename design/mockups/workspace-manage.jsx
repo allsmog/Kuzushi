@@ -53,7 +53,7 @@ function WorkspaceManageView() {
     window.blankRow(W, 'b2'),
     window.sectionHeader('PROPOSED ACTIONS', W, 's1'),
     window.row([T('   '), [' switch ', 'c-success'], m('   to '), p('acme-mobile'),
-      m(' · ctx will rebuild on first /scan')], W, 'a1'),
+      m(' · ctx will rebuild when Scan work starts')], W, 'a1'),
     window.row([T('   '), [' archive', 'c-warn'],    m('   '), p('tof-2026-q2'), m(' · idle 12d · all findings closed')], W, 'a2'),
     window.row([T('   '), [' prune  ', 'c-danger'],  m('   '), p('acme-old-monorepo'),
       m(' archive · last touched 60d ago · '), p('892 MB'), m(' artifacts')], W, 'a3'),

@@ -8,7 +8,7 @@ assertion_line: 162
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture
 review; randori=threat model; tob/shinsa=plugin adapters.
-Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  findings export report.sarif sarif
+Examples: kuzushi scan <target>  ·  kuzushi --target <target> run sast:scan  ·  findings export report.sarif sarif
 
 NAVIGATION — browse modules and tools
 home - open the current phase cockpit
@@ -44,7 +44,18 @@ setup - review target, Map plan, model/credentials, prompt, and budget readiness
 next [fresh] - continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the
 pass at the Map planner
   aliases / examples: next, /next
-phase <map|scan|review|prove|fix> - open a specific engagement phase picker
+map - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+  aliases / examples: /map
+scan - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+  aliases / examples: /scan
+review - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+  aliases / examples: /review
+prove - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+  aliases / examples: /prove
+fix - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
+  aliases / examples: /fix
+phase <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
+<target> run sast:scan`
   aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
 autonomy [recon|scan|review|prove|fix] - read/set the autonomy dial (also Ctrl+Up/Down) — the tool-dispatch ceiling
   aliases / examples: autonomy, /autonomy, posture, /posture
@@ -56,8 +67,9 @@ background - drop to Workbench, keep the job running (Ctrl+C still cancels)
 RUN / SCAN — dispatch tools and scans
 demo - run a 90-second offline fixture scan; no key, model, or external scanner
   aliases / examples: /demo
-scan [target] - open the guided workflow for a target; `scan .` opts into cwd
-  aliases / examples: scan ., /scan [target]
+full [target] - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run
+sast:scan`
+  aliases / examples: full ., /full [target], pipeline [target], /pipeline [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
 recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path> - import an external reconnaissance export through the

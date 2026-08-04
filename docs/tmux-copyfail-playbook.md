@@ -45,7 +45,7 @@ Inside the TUI, run this sequence:
 1. `auth status`
 2. `model 3`
 3. `use core:sast` (or `modules` then pick the SAST module shown)
-4. `scan /path/to/linux`
+4. `full /path/to/linux`
 
 For this bug family, bias prompts toward syscall-reachable flows touching:
 

@@ -271,6 +271,12 @@ impl AuthPickerRouteState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PendingTargetIntent {
+    Phase(WorkflowPhase),
+    Full,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TargetPickerRouteState {
     cursor: usize,
@@ -278,6 +284,7 @@ pub struct TargetPickerRouteState {
     candidates: Vec<crate::app::TargetCandidate>,
     facts: Option<crate::app::TargetCandidateFacts>,
     facts_loading: bool,
+    pending_intent: Option<PendingTargetIntent>,
 }
 
 impl TargetPickerRouteState {
@@ -287,6 +294,7 @@ impl TargetPickerRouteState {
         self.focus = PickerFocus::List;
         self.facts = None;
         self.facts_loading = true;
+        self.pending_intent = None;
     }
 
     pub(crate) fn cursor(&self) -> usize {
@@ -354,6 +362,23 @@ impl TargetPickerRouteState {
             self.facts = Some(facts);
             self.facts_loading = false;
         }
+    }
+
+    pub(crate) fn set_pending_intent(&mut self, intent: PendingTargetIntent) {
+        self.pending_intent = Some(intent);
+    }
+
+    pub(crate) fn take_pending_intent(&mut self) -> Option<PendingTargetIntent> {
+        self.pending_intent.take()
+    }
+
+    pub(crate) fn clear_pending_intent(&mut self) {
+        self.pending_intent = None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_intent(&self) -> Option<PendingTargetIntent> {
+        self.pending_intent
     }
 }
 

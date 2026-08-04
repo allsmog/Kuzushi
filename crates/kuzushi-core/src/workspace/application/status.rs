@@ -25,7 +25,7 @@ pub fn workspace_status_for_target(
             findings_db: None,
             findings_count: None,
             last_export,
-            status: format!("{error}. Next: scan <target>"),
+            status: format!("{error}. Next: kuzushi scan <target>"),
         },
     }
 }
@@ -37,7 +37,7 @@ fn missing_workspace_status(last_export: Option<PathBuf>) -> WorkspaceStatus {
         findings_db: None,
         findings_count: None,
         last_export,
-        status: "no active workspace. Next: scan <target> or start shell with --target ."
+        status: "no active workspace. Next: kuzushi scan <target> or start shell with --target ."
             .to_string(),
     }
 }

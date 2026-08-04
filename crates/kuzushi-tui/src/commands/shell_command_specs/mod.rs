@@ -27,6 +27,7 @@ pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
 pub(crate) const FEATURED_HELP_EXAMPLES: &[&str] = &[
     "demo",
     "next",
+    "full .",
     "use semgrep",
     "run .",
     "findings",
@@ -75,11 +76,48 @@ fn parse_routed_command(trimmed: &str) -> ShellCommand {
     let args = tokens.get(1..).unwrap_or_default();
 
     parse_help_command(verb, args)
+        .or_else(|| parse_direct_phase_command(verb, args, trimmed))
+        .or_else(|| parse_full_command(verb, args, trimmed))
         .or_else(|| parse_static_command(verb))
         .or_else(|| parse_single_arg_command(verb, args, trimmed))
         .or_else(|| parse_joined_arg_command(verb, args, trimmed))
         .or_else(|| parse_nested_shell_command(verb, args, trimmed))
         .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string()))
+}
+
+/// The five workflow names are zero-argument shortcuts for their exact phase
+/// planners. `review` with arguments remains the human-decision command, while
+/// `scan` with a target receives a dedicated migration error downstream.
+const DIRECT_PHASE_COMMANDS: [(&str, WorkflowPhase); 5] = [
+    ("map", WorkflowPhase::Map),
+    ("scan", WorkflowPhase::Scan),
+    ("review", WorkflowPhase::Review),
+    ("prove", WorkflowPhase::Prove),
+    ("fix", WorkflowPhase::Fix),
+];
+
+fn parse_direct_phase_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
+    let phase = DIRECT_PHASE_COMMANDS
+        .iter()
+        .find_map(|(command, phase)| (*command == verb).then_some(*phase))?;
+    if args.is_empty() {
+        return Some(ShellCommand::Phase(phase));
+    }
+    if verb == "review" {
+        return None;
+    }
+    Some(ShellCommand::Unknown(original.to_string()))
+}
+
+fn parse_full_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
+    if !matches!(verb, "full" | "pipeline") {
+        return None;
+    }
+    Some(match args {
+        [] => ShellCommand::Full(None),
+        [target] => ShellCommand::Full(Some(PathBuf::from(target))),
+        _ => ShellCommand::Unknown(original.to_string()),
+    })
 }
 
 fn parse_help_command(verb: &str, args: &[&str]) -> Option<ShellCommand> {

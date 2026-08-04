@@ -184,8 +184,8 @@ fn known_command_head(raw: &str) -> bool {
 }
 
 /// A submission that dispatches a tool run — the steerable case that queues
-/// behind a live job. Deliberately excludes `Scan` (opens the guided picker,
-/// not a direct dispatch) so a busy operator isn't blocked from navigating.
+/// behind a live job. Deliberately excludes `Full` and the compatibility
+/// `Scan` variant: both open the guided picker rather than dispatching work.
 fn is_steerable_submission(command: &ShellCommand) -> bool {
     matches!(command, ShellCommand::RunTool { .. })
 }

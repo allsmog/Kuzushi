@@ -9,8 +9,8 @@ impl ShellApp {
             .set_guided_scan(GuidedScanFlow::new(GuidedScanStage::MapRoute));
         self.show_guided_phase(WorkflowPhase::Map);
         self.log(
-            "scan",
-            "guided scan opened — answer the Map questions, then Kuzushi will hand off to Scan",
+            "full",
+            "full pipeline opened · answer the Map questions, then Kuzushi will hand off to Scan",
         );
     }
 
@@ -78,12 +78,38 @@ impl ShellApp {
         }
         self.ui_mut().clear_phase_result_cursor();
         if phase == WorkflowPhase::Map {
-            self.prepare_guided_phase(WorkflowPhase::Scan);
+            self.continue_guided_after_map();
         } else {
             self.clear_guided_scan();
             self.open_rederived_journey_destination();
         }
         true
+    }
+
+    /// Every guided Map → Scan edge must pass through this gate. Map can be
+    /// reused, skipped as an empty cached plan, or freshly completed; keeping
+    /// the stop policy here prevents one route from leaking into Scan when the
+    /// operator configured a Map-only engagement.
+    pub(super) fn continue_guided_after_map(&mut self) {
+        if self.full_pipeline_stops_after_map() {
+            self.finish_guided_pipeline_at_map();
+            return;
+        }
+        self.prepare_guided_phase(WorkflowPhase::Scan);
+    }
+
+    fn full_pipeline_stops_after_map(&self) -> bool {
+        self.config().phases.stop_after == Some(kuzushi_core::GuidedPhase::Map)
+    }
+
+    fn finish_guided_pipeline_at_map(&mut self) {
+        self.clear_guided_scan();
+        self.engagement.set_phase(WorkflowPhase::Map);
+        self.show_guided_phase(WorkflowPhase::Map);
+        self.set_success_notice(
+            "full",
+            "full pipeline complete at Map · configured phases.stop_after=map",
+        );
     }
 
     pub(super) fn prepare_guided_phase(&mut self, phase: WorkflowPhase) {

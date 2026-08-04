@@ -15,7 +15,7 @@ fn activity_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let mut bindings = Vec::new();
     push_view_keybindings(&mut bindings, app);
     bindings.extend([
-        bind("scan", "start scan"),
+        bind("scan", "Scan phase planner"),
         bind("run <tool>", "launch tool"),
         bind("jobs", "run control"),
     ]);

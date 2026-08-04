@@ -2,30 +2,111 @@ use super::*;
 use kuzushi_core::run_lifecycle::RunItemStatus;
 
 #[test]
-fn scripted_scan_starts_worker_instead_of_opening_picker() {
-    let temp = tempfile::tempdir().unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
+fn interactive_workflow_commands_are_rejected_in_plain_mode() {
+    for command in [
+        "map",
+        "/map",
+        "scan",
+        "/scan",
+        "review",
+        "/review",
+        "prove",
+        "/prove",
+        "fix",
+        "/fix",
+        "full",
+        "/full",
+        "pipeline",
+        "/pipeline",
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
 
-    submit_plain_scripted_command(&mut app, &format!("scan {}", temp.path().display()), None);
+        let report = execute_plain_scripted_session(&mut app, &[command], 80);
 
-    assert!(app.scan().is_some_and(|scan| scan.running));
-    assert_eq!(app.shell_view(), ShellView::Activity);
-    assert_ne!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(report.outcome, PlainCommandOutcome::Rejected, "{command}");
+        assert_eq!(report.outcome.exit_code(), 1, "{command}");
+        assert!(
+            report.output.contains("interactive TUI workflow"),
+            "{}",
+            report.output
+        );
+        assert!(
+            report.output.contains("for scripts use `kuzushi scan"),
+            "{}",
+            report.output
+        );
+        assert!(!app.has_running_work(), "{command}");
+        assert!(app.scan().is_none(), "{command}");
+    }
 }
 
 #[test]
-fn targetless_scripted_scan_is_a_failed_plain_outcome() {
-    let mut app = ShellApp::new(V2Config::default(), None);
+fn full_aliases_with_explicit_target_are_rejected_in_plain_mode() {
+    let target = tempfile::tempdir().unwrap();
+    for verb in ["full", "/full", "pipeline", "/pipeline"] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let command = format!("{verb} {}", target.path().display());
 
-    let report = execute_plain_scripted_session(&mut app, &["scan"], 80);
+        let report = execute_plain_scripted_session(&mut app, &[&command], 80);
+
+        assert_eq!(report.outcome, PlainCommandOutcome::Rejected, "{command}");
+        assert_eq!(report.outcome.exit_code(), 1, "{command}");
+        assert!(
+            report
+                .output
+                .contains("kuzushi --target <target> run sast:scan"),
+            "{command}"
+        );
+        assert!(app.target().is_none(), "{command}");
+        assert!(app.scan().is_none(), "{command}");
+        assert!(!target.path().join(".kuzushi").exists(), "{command}");
+    }
+}
+
+#[test]
+fn queued_workflow_commands_cannot_bypass_plain_mode_rejection() {
+    let target = tempfile::tempdir().unwrap();
+    let commands = [
+        "queue scan".to_string(),
+        "queue queue scan".to_string(),
+        format!("queue full {}", target.path().display()),
+        format!("queue pipeline {}", target.path().display()),
+    ];
+
+    for command in commands {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let report = execute_plain_scripted_session(&mut app, &[&command], 80);
+
+        assert_eq!(report.outcome, PlainCommandOutcome::Rejected, "{command}");
+        assert_eq!(report.outcome.exit_code(), 1, "{command}");
+        assert!(
+            report.output.contains("interactive TUI workflow"),
+            "{}",
+            report.output
+        );
+        assert!(app.target().is_none(), "{command}");
+        assert!(!app.has_running_work(), "{command}");
+        assert!(app.scan().is_none(), "{command}");
+    }
+}
+
+#[test]
+fn legacy_scan_target_in_plain_mode_points_to_headless_commands() {
+    let target = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let command = format!("scan {}", target.path().display());
+
+    let report = execute_plain_scripted_session(&mut app, &[&command], 160);
 
     assert_eq!(report.outcome, PlainCommandOutcome::Rejected);
     assert_eq!(report.outcome.exit_code(), 1);
-    assert!(
-        report.output.contains("explicit target"),
-        "{}",
-        report.output
-    );
+    assert!(report.output.contains("`kuzushi scan <target>`"));
+    assert!(report
+        .output
+        .contains("`kuzushi --target <target> run sast:scan`"));
+    assert!(!report.output.contains("`target <path>` then `scan`"));
+    assert!(app.target().is_none());
     assert!(!app.has_running_work());
 }
 

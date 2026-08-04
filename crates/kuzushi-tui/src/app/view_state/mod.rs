@@ -92,6 +92,7 @@ pub use rank::PlanChange;
 pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
+pub(crate) use routes::PendingTargetIntent;
 pub(crate) use routes::ReportOrigin;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,

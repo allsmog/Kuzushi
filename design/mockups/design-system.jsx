@@ -52,7 +52,7 @@ function DesignSystemView() {
       T('       '), [' · ', 'c-subtle'], m('  log      (ambient · low signal)')], W, 'g4'),
     window.blankRow(W, 'b4'),
     head('CONSOLE LINE · timestamp + glyph + body'),
-    window.logLine('in',    '14:31:55', [m(' /scan')], W, 'cl1'),
+    window.logLine('in',    '14:31:55', [m(' /scan · plan confirmed')], W, 'cl1'),
     window.logLine('run',   '14:31:55', [m(' sast:scan · tasks '), a('semgrep, secrets'), m(' · triage on')], W, 'cl2'),
     window.logLine('agent', '14:33:42', [m(' two CRITICALs share a sink — '), a('F-0001'),
       m(' and '), a('F-0002'), m(' both end at '), [' orders.rs:142', 'c-warn']], W, 'cl3'),

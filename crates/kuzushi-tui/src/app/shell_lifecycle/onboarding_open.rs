@@ -224,16 +224,24 @@ impl ShellApp {
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
     /// presses `g` to regenerate.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
-        self.open_phase_picker_with_freshness(phase, false);
+        self.try_open_phase_picker_with_freshness(phase, false);
     }
 
     pub(crate) fn open_fresh_map_picker(&mut self) {
-        self.open_phase_picker_with_freshness(crate::app::WorkflowPhase::Map, true);
+        self.try_open_phase_picker_with_freshness(crate::app::WorkflowPhase::Map, true);
     }
 
-    fn open_phase_picker_with_freshness(&mut self, phase: crate::app::WorkflowPhase, fresh: bool) {
+    pub(crate) fn try_open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        self.try_open_phase_picker_with_freshness(phase, false)
+    }
+
+    fn try_open_phase_picker_with_freshness(
+        &mut self,
+        phase: crate::app::WorkflowPhase,
+        fresh: bool,
+    ) -> bool {
         if !self.prepare_phase_picker_state(phase, fresh) {
-            return;
+            return false;
         }
         self.set_shell_view(ShellView::PlanningPicker);
         self.log(
@@ -246,6 +254,7 @@ impl ShellApp {
                 phase.intent()
             ),
         );
+        true
     }
 
     pub(crate) fn prepare_phase_picker_state(
@@ -307,12 +316,7 @@ impl ShellApp {
     }
 
     fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
-        let Some(stop_after) = self
-            .config()
-            .phases
-            .stop_after
-            .map(guided_phase_to_workflow_phase)
-        else {
+        let Some(stop_after) = self.configured_stop_phase() else {
             return false;
         };
         if phase <= stop_after {
@@ -328,6 +332,34 @@ impl ShellApp {
             ),
         );
         true
+    }
+
+    pub(crate) fn requested_phase_blocked_by_config(
+        &mut self,
+        phase: crate::app::WorkflowPhase,
+    ) -> bool {
+        let Some(stop_after) = self.configured_stop_phase() else {
+            return false;
+        };
+        if phase <= stop_after {
+            return false;
+        }
+        self.log(
+            "phase",
+            format!(
+                "{} stopped by config phases.stop_after={}",
+                phase.word(),
+                stop_after.word()
+            ),
+        );
+        true
+    }
+
+    fn configured_stop_phase(&self) -> Option<crate::app::WorkflowPhase> {
+        self.config()
+            .phases
+            .stop_after
+            .map(guided_phase_to_workflow_phase)
     }
 
     /// Fold this phase's session-model recommendations into the preselection

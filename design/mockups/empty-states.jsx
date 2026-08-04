@@ -28,16 +28,17 @@ function EmptyStatesView() {
       'kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.',
       'nothing has been promoted on this workspace.',
     ], [
-      ['/scan',                      'umbrella SAST · semgrep + secrets + agentic-sast'],
-      ['/use threat-model',          'build the model first if you have time'],
-      ['/load gh:acme/checkout#PR412','seed from a GitHub PR'],
+      ['/map',  'open only the Map phase planning picker'],
+      ['/scan', 'open only the Scan phase planning picker'],
+      ['/full', 'guided Map → Scan · hand off to Review or Report'],
     ]),
     ...panel('RUNS · empty', '∅  no runs persisted', [
       'every dispatch writes a run dir under .kuzushi/runs/<id>/.',
       'this workspace has not run a module yet.',
     ], [
-      ['/scan',           'first run will land at .kuzushi/runs/r-0001/'],
-      ['/use context',    'cheapest first run · indexes the workspace'],
+      ['/map',  'start with the Map phase planning picker'],
+      ['/scan', 'start only the Scan phase planning picker'],
+      ['/full', 'run the guided workflow · full . explicitly selects cwd'],
     ]),
     ...panel('KB · empty', '∅  no advisories indexed', [
       'kuzushi can pull KEV / NVD / CISA advisories into ~/.kuzushi/v2/kb.',
@@ -66,7 +67,7 @@ function EmptyStatesView() {
       {window.blankRow(W, 'b-end')}
       {window.footer({
         stage: 'empty-states · 0 findings · 0 runs · 0 kb · 0 workspaces', findings: 0,
-        keybinds: [['/scan','start'],['/use context','cheap first'],['/kb pull','seed kb'],['?','help']],
+        keybinds: [['/map','Map planner'],['/scan','Scan planner'],['/full','full workflow'],['?','help']],
       })}
     </window.TermFrame>
   );

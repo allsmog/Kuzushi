@@ -1,19 +1,24 @@
 # J4 — Bounty operator, scan to finding
 # Persona: bug-bounty hunter WITH a key. Workbench → next (phase rail) →
-# scan → findings → open <id>. Needs a live model key; skips honestly if
+# /full → findings → open <id>. Needs a live model key; skips honestly if
 # absent. Point @TARGET at a real fixture repo with KUZUSHI_DEVEX_TARGET.
 name: Bounty operator, scan to finding
 require-any-env: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: KUZUSHI_REDUCED_MOTION=1
 launch: --target @TARGET
-wait-for: 30 kuzushi>
+wait-for: 30 KUZUSHI
 snap: workbench-landing
 ask: Workbench landing — does the phase chip (組 map 1/4 style) match on-disk reality for a fresh target, or is progress fabricated?
 submit: next
 wait: 3
 snap: phase-rail
 ask: `next` — does the phase rail (Map→Hunt→Confirm→Fix) tell the operator what the CURRENT phase needs, with an obvious next action?
-submit: scan
+submit: /full
+wait-live-snap: 30 MAP · ROUTE | guided-map-route
+expect: Map establishes the target context Scan engines will consume.
+keys: Escape
+wait: 1
+submit: run sast:scan {}
 wait-for: 30 ACTIVITY
 snap: scan-running
 wait-for: 600 completed

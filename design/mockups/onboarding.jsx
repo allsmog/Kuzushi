@@ -34,7 +34,7 @@ function OnboardingView() {
       'works with openai, anthropic, google, local (ollama).',
       '/auth login anthropic   · the recommended starter actor for offense',
     ]),
-    ...step(4, false, 'first scan · /scan', [
+    ...step(4, false, 'first guided run · /full', [
       'umbrella sast: semgrep + secret-scan + agentic-sast + triage.',
       'budget caps default to $5/run · pause/resume any time.',
     ]),
@@ -66,7 +66,7 @@ function OnboardingView() {
       {window.blankRow(W, 'b-end')}
       {window.footer({
         stage: 'onboarding · step 3 of 5', findings: 0,
-        keybinds: [['/auth','login'],['/scan','first run'],['?','help'],['Ctrl+C','quit']],
+        keybinds: [['/auth','login'],['/full','guided run'],['?','help'],['Ctrl+C','quit']],
       })}
     </window.TermFrame>
   );

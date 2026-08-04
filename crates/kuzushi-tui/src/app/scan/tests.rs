@@ -48,10 +48,10 @@ mod tests {
 
         assert!(matches!(
             &effects[..],
-            [
-                ShellEffect::ActivateTarget(TargetActivation { .. }),
-                ShellEffect::FinalizeGuidedScanOpen
-            ]
+            [ShellEffect::ActivateTarget(TargetActivation {
+                source: TargetActivationSource::GuidedFull,
+                ..
+            })]
         ));
 
         EffectRuntime::execute(&mut app, effects);
@@ -66,7 +66,7 @@ mod tests {
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.prefix == "scan" && line.body.contains("guided scan opened")));
+            .any(|line| line.prefix == "full" && line.body.contains("full pipeline opened")));
     }
 
     #[test]
@@ -109,7 +109,27 @@ mod tests {
         assert!(app
             .log_lines()
             .iter()
-            .any(|line| line.prefix == "scan" && line.body.contains("scan .")));
+            .any(|line| line.prefix == "full" && line.body.contains("full .")));
+    }
+
+    #[test]
+    fn failed_full_target_activation_does_not_run_against_the_old_target() {
+        let first = tempfile::tempdir().unwrap();
+        let rejected = tempfile::tempdir().unwrap();
+        std::fs::create_dir(rejected.path().join(".kuzushi")).unwrap();
+        std::fs::write(rejected.path().join(".kuzushi/.gitignore"), "").unwrap();
+        let workspace = WorkspaceTarget::new(first.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let effects = app.open_guided_scan(Some(rejected.path().to_path_buf()));
+        EffectRuntime::execute(&mut app, effects);
+
+        assert_eq!(app.target(), Some(workspace.root()));
+        assert!(app.engagement.guided_scan().is_none());
+        assert!(app.scan_is_none());
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "target" && line.body.contains("activation failed before state changed")
+        }));
     }
 
     #[test]

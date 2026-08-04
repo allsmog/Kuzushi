@@ -100,6 +100,36 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "continue the engagement (alias: continue) — open the derived phase's picker; `next fresh` restarts the pass at the Map planner",
     },
     ShellCommandSpec {
+        command: "map",
+        aliases: &["/map"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Map phase planner",
+    },
+    ShellCommandSpec {
+        command: "scan",
+        aliases: &["/scan"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Scan phase planner",
+    },
+    ShellCommandSpec {
+        command: "review",
+        aliases: &["/review"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Review phase planner",
+    },
+    ShellCommandSpec {
+        command: "prove",
+        aliases: &["/prove"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Prove phase planner",
+    },
+    ShellCommandSpec {
+        command: "fix",
+        aliases: &["/fix"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the Fix phase planner",
+    },
+    ShellCommandSpec {
         command: "phase <map|scan|review|prove|fix>",
         aliases: &[
             "phase map",

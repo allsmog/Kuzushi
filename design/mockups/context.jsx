@@ -63,7 +63,7 @@ function ContextView() {
         stage: 'context:build (done)', findings: 0,
         promptModule: 'context',
         keybinds: [
-          ['/show', 'snapshot'], ['/scan', 'run sast'],
+          ['/show', 'snapshot'], ['/scan', 'Scan planner'],
           ['/back', 'catalog'], ['?', 'help'],
         ],
       })}

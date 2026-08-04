@@ -68,6 +68,23 @@ noise:
   recovery.
 - `smoke:next-step` was a hidden runtime smoke-test helper and is removed.
 
+## Shell phase commands
+
+The canonical in-shell phase verbs are `map`, `scan`, `review`, `prove`, and
+`fix`. Each zero-argument verb opens only that phase's planning picker; it does
+not start a full pipeline. The longer `phase <phase>` spelling remains a
+compatibility route, including its temporary `hunt` and `confirm` input
+aliases.
+
+The guided Map → Scan workflow moved from `scan [target]` to `full [target]`;
+`pipeline [target]` is an equivalent alias. `scan <target>` is rejected with a
+migration hint instead of silently changing targets or running the guided
+workflow. Use `target <path>` followed by `scan` for the Scan planner, or
+`full <path>` for the guided workflow. This shell change does not affect the
+top-level `kuzushi scan <target>` command. Phase, `full`, and `pipeline` verbs
+are interactive-only; scripted `--plain` sessions receive the corresponding
+headless CLI guidance instead of starting work.
+
 ## Streaming SSE routes
 
 The optional scan streaming server exposes:

@@ -451,6 +451,7 @@ pub(crate) struct TargetRevisionSwitch {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TargetActivationSource {
     Command,
+    GuidedFull,
     Picker,
     ScriptedScan,
     OfflineDemo,
