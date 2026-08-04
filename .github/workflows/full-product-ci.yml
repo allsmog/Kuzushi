@@ -1,0 +1,49 @@
+name: Full product CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: full-product-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  private-source-contract:
+    name: private-source-contract
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - id: private-cpg
+        name: Materialize SHA-pinned private CPG source
+        uses: allsmog/oxidized-joern/.github/actions/export-cpg-source@efde8d4a744b429abe3be6d166cc3286b70e5d1b
+        with:
+          destination: ${{ runner.temp }}/oxidized-joern-cpg-rs
+          expected-engine-base-sha: 9ab43859f0c3342c734ff38ea6366711d216c8fd
+      - name: Verify exported source contract
+        env:
+          CPG_SOURCE_ROOT: ${{ steps.private-cpg.outputs.source-root }}
+          CPG_ENGINE_BASE_SHA: ${{ steps.private-cpg.outputs.engine-base-sha }}
+          CPG_TREE_SHA256: ${{ steps.private-cpg.outputs.tree-sha256 }}
+        run: |
+          set -euo pipefail
+          test "${CPG_ENGINE_BASE_SHA}" = "9ab43859f0c3342c734ff38ea6366711d216c8fd"
+          test -f "${CPG_SOURCE_ROOT}/Cargo.toml"
+          test -f "${CPG_SOURCE_ROOT}/cpg-analysis/Cargo.toml"
+          test -f "${CPG_SOURCE_ROOT}/cpg-cli/Cargo.toml"
+          test -f "${CPG_SOURCE_ROOT}/cpg-core/Cargo.toml"
+          test -f "${CPG_SOURCE_ROOT}/cpg-incremental/Cargo.toml"
+          test "${#CPG_TREE_SHA256}" -eq 64
+          printf 'private CPG source: base=%s tree-sha256=%s\n' \
+            "${CPG_ENGINE_BASE_SHA}" "${CPG_TREE_SHA256}"
