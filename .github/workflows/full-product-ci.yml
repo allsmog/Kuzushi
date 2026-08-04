@@ -95,7 +95,8 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       private_cpg: true
-    secrets: inherit
+    secrets:
+      OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
 
   private-cpg-compatibility:
     name: private-cpg-compatibility
