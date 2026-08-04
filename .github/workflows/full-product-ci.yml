@@ -4,7 +4,19 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
   workflow_call:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
     secrets:
       OXIDIZED_JOERN_TOKEN:
         description: Read-only token scoped only to allsmog/oxidized-joern contents
@@ -22,12 +34,34 @@ env:
   PRIVATE_CPG_REV: 9ab43859f0c3342c734ff38ea6366711d216c8fd
 
 jobs:
+  # Never let an untrusted invocation look green merely because every secret
+  # consumer was skipped. This gate runs unconditionally and fails closed.
+  trigger-policy:
+    name: trigger-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require an owner-triggered trusted source ref
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ "${ACTOR}" != "${OWNER}" ]]; then
+            echo "::error::full-product CI requires the repository owner as the triggering actor"
+            exit 1
+          fi
+          if [[ "${EVENT_NAME}" == "pull_request" && "${HEAD_REPOSITORY}" != "${REPOSITORY}" ]]; then
+            echo "::error::full-product CI refuses fork pull requests because it consumes a private dependency credential"
+            exit 1
+          fi
+
   private-source-contract:
     name: private-source-contract
-    if: >-
-      github.actor == github.repository_owner &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    needs: trigger-policy
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -61,14 +95,22 @@ jobs:
           import sys
 
           metadata_path, revision = sys.argv[1:]
-          expected = f"git+https://github.com/allsmog/oxidized-joern.git?rev={revision}#"
+          expected_source = (
+              "git+https://github.com/allsmog/oxidized-joern.git"
+              f"?rev={revision}#{revision}"
+          )
           packages = json.load(open(metadata_path, encoding="utf-8"))["packages"]
-          required = {"cpg-analysis", "cpg-cli", "cpg-core", "cpg-incremental"}
-          exact = [
-              package
-              for package in packages
-              if package.get("source", "").startswith(expected)
-          ]
+          required = {
+              "cpg-analysis",
+              "cpg-cli",
+              "cpg-core",
+              "cpg-frontend",
+              "cpg-incremental",
+              "cpg-lang-c",
+              "cpg-lang-python",
+              "cpg-lang-ts",
+          }
+          exact = [package for package in packages if package.get("source") == expected_source]
           counts = {
               name: sum(package["name"] == name for package in exact)
               for name in required
@@ -76,16 +118,16 @@ jobs:
           wrong_counts = {name: count for name, count in counts.items() if count != 1}
           if wrong_counts:
               raise SystemExit(
-                  f"private CPG metadata must contain each pinned package exactly once: {wrong_counts}"
+                  f"private CPG metadata must contain every pinned package exactly once: {wrong_counts}"
               )
           unexpected = sorted(
-              package["name"]
+              (package["name"], package.get("source"))
               for package in packages
-              if "github.com/allsmog/oxidized-joern.git" in package.get("source", "")
-              and not package.get("source", "").startswith(expected)
+              if "github.com/allsmog/oxidized-joern.git" in (package.get("source") or "")
+              and package.get("source") != expected_source
           )
           if unexpected:
-              raise SystemExit(f"private CPG metadata contains an unexpected revision: {unexpected}")
+              raise SystemExit(f"private CPG metadata contains an unexpected source: {unexpected}")
           print(f"resolved exact private CPG packages: {', '.join(sorted(counts))}")
           PY
 
@@ -95,6 +137,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       private_cpg: true
+      quality_base_ref: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
     secrets:
       OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
 
@@ -142,12 +185,9 @@ jobs:
 
   full-product-gauntlet:
     name: full-product-gauntlet
-    if: >-
-      always() &&
-      github.actor == github.repository_owner &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+    if: always()
     needs:
+      - trigger-policy
       - private-source-contract
       - complete-private-product
       - private-cpg-compatibility
@@ -157,6 +197,7 @@ jobs:
     steps:
       - name: Require every full-product contract
         env:
+          TRIGGER: ${{ needs.trigger-policy.result }}
           SOURCE: ${{ needs.private-source-contract.result }}
           PRODUCT: ${{ needs.complete-private-product.result }}
           COMPATIBILITY: ${{ needs.private-cpg-compatibility.result }}
@@ -164,7 +205,7 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for gate in SOURCE PRODUCT COMPATIBILITY BENCHMARKS; do
+          for gate in TRIGGER SOURCE PRODUCT COMPATIBILITY BENCHMARKS; do
             result="${!gate}"
             if [[ "${result}" != "success" ]]; then
               echo "::error::${gate} ended ${result}"
