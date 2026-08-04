@@ -149,7 +149,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Configure pinned private Rust dependency
+      - name: Require pinned private Rust dependency credential
         env:
           OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
@@ -158,9 +158,12 @@ jobs:
             echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
             exit 1
           fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      # cargo-deny-action is a Docker action, so the host runner's global Git
+      # configuration is not visible inside it. Feed the same read-only token
+      # through the action's credential-helper input instead.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
+          credentials: ${{ format('https://x-access-token:{0}@github.com', secrets.OXIDIZED_JOERN_TOKEN) }}
           command: check advisories licenses bans sources
 
   # ── Full Rust CLI build + tests ──────────────────────────────────────────
