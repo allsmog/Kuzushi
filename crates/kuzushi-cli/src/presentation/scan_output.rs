@@ -205,7 +205,10 @@ mod tests {
         let data = scan_result_data(&envelope);
         let output = scan_json_output(&workspace, &envelope, &data);
 
-        let cost = output.get("costUsd").and_then(serde_json::Value::as_f64).unwrap();
+        let cost = output
+            .get("costUsd")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap();
         assert!((cost - scan_cost_usd(&envelope)).abs() < 1e-9, "got {cost}");
     }
 
