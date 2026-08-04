@@ -32,20 +32,29 @@ pnpm yourself.
 
 ### Credential-free Rust core validation
 
-The default product includes the private `oxidized-joern` CPG engine. A clean
-fork or unauthenticated checkout can still compile and lint every
-`kuzushi-core` target and execute the fail-closed adapter contract:
+The default product includes the private `oxidized-joern` CPG engine. Cargo
+resolves optional Git dependency manifests before feature selection, so
+`--no-default-features` alone cannot make the canonical workspace
+credential-free. Use the repository contract instead:
 
 ```sh
 bash scripts/check-public-rust-core.sh
 ```
 
-That command disables only the `kuzushi-core/private-cpg` default feature. It
-never substitutes another engine, treats old graph files as unavailable, and
-cannot validate the private CPG implementation, the complete native package,
-or release archives. The reusable release CI lane enables the default feature,
-requires the read-only `OXIDIZED_JOERN_TOKEN`, and fails before full validation
-when that credential is absent.
+The command requires a clean checkout, creates a detached disposable worktree,
+and replaces only the four pinned private source declarations there with
+version-matched local resolver stubs. It validates that the generated lockfile
+contains no private source and introduces no external dependency drift before
+running core check, Clippy, tests, and rustfmt with the private CPG feature
+disabled. The stubs are resolver-only and are never presented as an engine; the
+fail-closed adapter reports no supported languages or graph readiness. The
+canonical checkout and `Cargo.lock` remain unchanged.
+
+This contract validates the public `kuzushi-core` source boundary, not the
+private CPG implementation, the complete native package, or release archives.
+The reusable release CI lane keeps the real pinned Git dependencies, requires
+the read-only `OXIDIZED_JOERN_TOKEN`, and fails before full validation when that
+credential is absent.
 
 Using VS Code / Codespaces? Open the repo and "Reopen in Container"; the
 `.devcontainer/` definition runs bootstrap + installs semgrep + python for you.
