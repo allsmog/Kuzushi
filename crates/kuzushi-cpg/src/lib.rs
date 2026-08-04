@@ -7,9 +7,11 @@
 //! - translation of kuzushi's literal catalog signals (`req.query`,
 //!   `.execute(`) into an engine taint specification.
 //!
-//! The default build enables the private engine. `--no-default-features` is a
-//! credential-free validation contract: it preserves the public adapter types
-//! but every engine operation fails closed and artifact readiness is false.
+//! The default build enables the private engine. The repository's public-core
+//! validation contract first removes private Git resolution in a disposable
+//! workspace, then builds with `--no-default-features`; that mode preserves the
+//! public adapter types while every engine operation fails closed and artifact
+//! readiness is false.
 
 #[cfg(feature = "private-engine")]
 mod artifacts;
