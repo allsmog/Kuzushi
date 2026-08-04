@@ -111,6 +111,10 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          # This lane writes to a disposable target directory and deliberately
+          # ignores the full private-workspace cache, so restoring it only burns
+          # time and disk before the isolation script removes it.
+          cache: false
       - run: bash scripts/check-public-rust-core.sh
 
   # ── Full Rust lint: private CPG + clippy as a hard release gate ──────────
