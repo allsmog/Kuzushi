@@ -7,6 +7,7 @@ pub struct BuiltinModule {
     pub(in crate::modules) tools: Vec<ToolDescriptor>,
     pub(in crate::modules) dag_nodes: Vec<DagNodeDescriptor>,
     pub(in crate::modules) hidden: bool,
+    pub(in crate::modules) maturity: ModuleMaturity,
 }
 
 impl BuiltinModule {
@@ -26,8 +27,27 @@ impl BuiltinModule {
         self.hidden
     }
 
+    pub fn maturity(&self) -> ModuleMaturity {
+        self.maturity
+    }
+
     pub(in crate::modules) fn deferred(mut self) -> Self {
         self.hidden = true;
+        self
+    }
+
+    /// Mark an explicitly callable module as a research capability. Labs
+    /// modules remain registered for exact dispatch but are omitted from the
+    /// default catalog and guided surfaces.
+    pub(in crate::modules) fn labs(mut self) -> Self {
+        self.maturity = ModuleMaturity::Labs;
+        self
+    }
+
+    /// Mark an explicitly callable module as a retained migration/integration
+    /// surface rather than the recommended product path.
+    pub(in crate::modules) fn compatibility(mut self) -> Self {
+        self.maturity = ModuleMaturity::Compatibility;
         self
     }
 
@@ -149,6 +169,7 @@ pub(in crate::modules) fn module(
         tools,
         dag_nodes,
         hidden,
+        maturity: ModuleMaturity::Core,
     }
 }
 

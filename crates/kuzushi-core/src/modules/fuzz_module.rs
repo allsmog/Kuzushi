@@ -22,93 +22,126 @@ pub(in crate::modules) fn fuzz_module() -> BuiltinModule {
          engine workspace outside the repo, run bounded libFuzzer/SymCC/KLEE rounds, author \
          harnesses for parked workorders through the model runtime, and import verified \
          crashes into the findings store.",
-        vec![
-            tool_with_options(
-                "fuzz:run",
-                "Bootstrap the engine workspace (init, sink scan, deterministic generation, \
-                 builds) as needed, run bounded fuzz campaign rounds, and import verified \
-                 crashes. Without afeRepo the pinned engine revision is auto-cloned into the \
-                 cache; a failed provision returns an explicit skipped result.",
-                fuzz_run_options(),
-            )
-            .with_policy(repository_execute_policy(
-                ToolPhase::Scan,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "fuzz:author",
-                "Author harnesses for the engine's parked workorders through a Rust-driven \
-                 model tool loop: the model reads sources and workorders, writes harness/build \
-                 files under hard containment, and iterates the compile/smoke tools; a \
-                 deterministic verdict grades each target.",
-                fuzz_author_options(),
-            )
-            .with_policy(repository_execute_policy(
-                ToolPhase::Map,
-                RuntimeRequirement::Always,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "fuzz:import",
-                "Import the engine's verified crash ledger (findings-index.jsonl) into the \
-                 findings store with impact-derived severity, without running the engine.",
-                fuzz_import_options(),
-            )
-            .with_policy(workspace_policy(
-                ToolPhase::Scan,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "fuzz:prove",
-                "Run the engine's per-finding impact pass (PoV replay for the ASAN primitive, \
-                 UBSan wrap evidence, flag-profile matrix, adjacency leads) over verified \
-                 findings that lack an impact verdict, then refresh the import so \
-                 impact-derived severity lands in the findings store.",
-                fuzz_prove_options(),
-            )
-            .with_policy(repository_execute_policy(
-                ToolPhase::Prove,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Required,
-            )),
-            tool_with_options(
-                "fuzz:sweep",
-                "Build a sanitizer-variant fuzzer (MSan uninitialized-read or TSan race \
-                 oracle) for one engine target and replay its corpus in keep-going mode with \
-                 benign-input baseline subtraction, reporting input-dependent signature \
-                 groups ranked write-first.",
-                fuzz_sweep_options(),
-            )
-            .with_policy(repository_execute_policy(
-                ToolPhase::Scan,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Optional,
-            )),
-            tool_with_options(
-                "fuzz:differential",
-                "Replay one engine target's corpus through N implementations (fork vs \
-                 upstream, or one command as a metamorphic self-check) and rank the \
-                 divergences: crash-split first, then validity- and output-splits — the \
-                 silent-wrong-data oracle the crash lane never fires on.",
-                fuzz_differential_options(),
-            )
-            .with_policy(repository_execute_policy(
-                ToolPhase::Scan,
-                RuntimeRequirement::Never,
-                FindingStoreRequirement::Optional,
-            )),
-            tool_with_options(
-                "fuzz:status",
-                "Probe the engine workspace: bootstrap state, targets, built fuzzers, parked \
-                 workorders, and verified finding counts. Read-only, no engine invocation.",
-                fuzz_status_options(),
-            )
-            .with_policy(read_policy(ToolPhase::Scan, WorkspaceRequirement::Required)),
-        ],
+        fuzz_tools(),
         vec![dag("fuzz:run", "fuzz", &[])],
     )
+    .labs()
+}
+
+fn fuzz_tools() -> Vec<ToolDescriptor> {
+    vec![
+        fuzz_run_tool(),
+        fuzz_author_tool(),
+        fuzz_import_tool(),
+        fuzz_prove_tool(),
+        fuzz_sweep_tool(),
+        fuzz_differential_tool(),
+        fuzz_status_tool(),
+    ]
+}
+
+fn fuzz_run_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:run",
+        "Bootstrap the engine workspace (init, sink scan, deterministic generation, builds) \
+         as needed, run bounded fuzz campaign rounds, and import verified crashes. Without \
+         afeRepo the pinned engine revision is auto-cloned into the cache; a failed provision \
+         returns an explicit skipped result.",
+        fuzz_run_options(),
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn fuzz_author_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:author",
+        "Author harnesses for the engine's parked workorders through a Rust-driven model tool \
+         loop: the model reads sources and workorders, writes harness/build files under hard \
+         containment, and iterates the compile/smoke tools; a deterministic verdict grades \
+         each target.",
+        fuzz_author_options(),
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Map,
+        RuntimeRequirement::Always,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn fuzz_import_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:import",
+        "Import the engine's verified crash ledger (findings-index.jsonl) into the findings \
+         store with impact-derived severity, without running the engine.",
+        fuzz_import_options(),
+    )
+    .with_policy(workspace_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn fuzz_prove_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:prove",
+        "Run the engine's per-finding impact pass (PoV replay for the ASAN primitive, UBSan \
+         wrap evidence, flag-profile matrix, adjacency leads) over verified findings that \
+         lack an impact verdict, then refresh the import so impact-derived severity lands in \
+         the findings store.",
+        fuzz_prove_options(),
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Prove,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Required,
+    ))
+}
+
+fn fuzz_sweep_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:sweep",
+        "Build a sanitizer-variant fuzzer (MSan uninitialized-read or TSan race oracle) for \
+         one engine target and replay its corpus in keep-going mode with benign-input \
+         baseline subtraction, reporting input-dependent signature groups ranked \
+         write-first.",
+        fuzz_sweep_options(),
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn fuzz_differential_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:differential",
+        "Replay one engine target's corpus through N implementations (fork vs upstream, or \
+         one command as a metamorphic self-check) and rank the divergences: crash-split first, \
+         then validity- and output-splits — the silent-wrong-data oracle the crash lane never \
+         fires on.",
+        fuzz_differential_options(),
+    )
+    .with_policy(repository_execute_policy(
+        ToolPhase::Scan,
+        RuntimeRequirement::Never,
+        FindingStoreRequirement::Optional,
+    ))
+}
+
+fn fuzz_status_tool() -> ToolDescriptor {
+    tool_with_options(
+        "fuzz:status",
+        "Probe the engine workspace: bootstrap state, targets, built fuzzers, parked \
+         workorders, and verified finding counts. Read-only, no engine invocation.",
+        fuzz_status_options(),
+    )
+    .with_policy(read_policy(ToolPhase::Scan, WorkspaceRequirement::Required))
 }
 
 fn shared_engine_options() -> Vec<OptionSpec> {

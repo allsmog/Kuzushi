@@ -103,8 +103,8 @@ impl ShellApp {
     /// Snapshot taken once at palette open — never rebuilt per keystroke.
     fn build_palette_entries(&self) -> Vec<PaletteEntry> {
         let mut entries = command_entries();
-        entries.extend(self.registry().tools().map(tool_entry));
-        entries.extend(self.registry().modules().map(module_entry));
+        entries.extend(self.registry().discoverable_tools().map(tool_entry));
+        entries.extend(self.registry().discoverable_modules().map(module_entry));
         entries
     }
 }

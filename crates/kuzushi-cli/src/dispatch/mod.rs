@@ -207,7 +207,10 @@ mod tests {
     #[test]
     fn metadata_doctor_and_findings_commands_reject_dynamic_load() {
         let commands = [
-            Command::Modules { json: false },
+            Command::Modules {
+                json: false,
+                all: false,
+            },
             Command::Doctor { json: false },
             Command::Sessions {
                 command: SessionsCommand::List { json: false },
@@ -249,20 +252,35 @@ mod tests {
 
         assert!(reject_dynamic_load_for_command(&shell, &dynamic_specifier()).is_ok());
         assert!(reject_dynamic_load_for_command(&run, &dynamic_specifier()).is_ok());
-        assert!(reject_dynamic_load_for_command(&Command::Modules { json: false }, &[]).is_ok());
+        assert!(reject_dynamic_load_for_command(
+            &Command::Modules {
+                json: false,
+                all: false,
+            },
+            &[]
+        )
+        .is_ok());
     }
 
     #[test]
     fn session_persistence_opt_out_is_shell_only() {
         assert!(reject_session_persistence_flag_for_command(&Command::Shell {}, true).is_ok());
 
-        let error =
-            reject_session_persistence_flag_for_command(&Command::Modules { json: false }, true)
-                .unwrap_err()
-                .to_string();
+        let error = reject_session_persistence_flag_for_command(
+            &Command::Modules {
+                json: false,
+                all: false,
+            },
+            true,
+        )
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("supported only by the shell"), "{error}");
         assert!(reject_session_persistence_flag_for_command(
-            &Command::Modules { json: false },
+            &Command::Modules {
+                json: false,
+                all: false,
+            },
             false
         )
         .is_ok());

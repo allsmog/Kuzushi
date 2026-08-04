@@ -23,7 +23,12 @@ impl ShellApp {
                     .resolve_tool("sast:scan")
                     .map(|_| "sast:scan".to_string())
             })
-            .or_else(|| self.registry().tools().next().map(|tool| tool.name.clone()))
+            .or_else(|| {
+                self.registry()
+                    .discoverable_tools()
+                    .next()
+                    .map(|tool| tool.name.clone())
+            })
             .context("no tools are loaded. Next: modules")
     }
 

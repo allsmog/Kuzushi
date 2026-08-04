@@ -3,7 +3,7 @@ mod tests {
     use super::super::*;
 
     #[test]
-    fn builds_visible_and_hidden_modules() {
+    fn builds_visible_hidden_and_maturity_tiered_modules() {
         let visible = builtin_module(
             "demo",
             "Demo",
@@ -14,6 +14,7 @@ mod tests {
         );
         assert_eq!(visible.metadata().id, "demo");
         assert!(!visible.is_hidden());
+        assert_eq!(visible.maturity(), ModuleMaturity::Core);
         assert_eq!(visible.tools()[0].name, "demo:run");
         assert!(!visible.tools()[0].hidden);
         assert_eq!(visible.dag_nodes()[0].depends_on, vec!["context:build"]);
@@ -27,6 +28,29 @@ mod tests {
             vec![],
         );
         assert!(hidden.is_hidden());
+
+        let labs = builtin_module(
+            "research-demo",
+            "Research Demo",
+            ModuleKind::Offense,
+            "Opt-in research module",
+            vec![],
+            vec![],
+        )
+        .labs();
+        assert_eq!(labs.maturity(), ModuleMaturity::Labs);
+        assert!(!labs.is_hidden());
+
+        let compatibility = builtin_module(
+            "legacy-demo",
+            "Legacy Demo",
+            ModuleKind::Internal,
+            "Retained compatibility module",
+            vec![],
+            vec![],
+        )
+        .compatibility();
+        assert_eq!(compatibility.maturity(), ModuleMaturity::Compatibility);
 
         let deferred = builtin_module(
             "deferred-demo",

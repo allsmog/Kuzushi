@@ -51,7 +51,7 @@ pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
     ToolsModel {
         groups,
         visible_count,
-        total_count: app.registry().tools_with_modules().count(),
+        total_count: app.registry().discoverable_tools_with_modules().count(),
         filter: filter.map(str::to_string),
     }
 }
@@ -62,7 +62,7 @@ fn scored_tools<'a>(
     shelf: &ToolShelf,
 ) -> Vec<ScoredTool<'a>> {
     app.registry()
-        .tools_with_modules()
+        .discoverable_tools_with_modules()
         .filter(|(module, tool)| query.is_none_or(|q| q.matches(module, tool, shelf)))
         .map(|(module, tool)| ScoredTool {
             tool,

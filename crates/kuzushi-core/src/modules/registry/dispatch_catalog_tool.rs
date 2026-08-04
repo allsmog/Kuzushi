@@ -4,10 +4,10 @@ impl ModuleRegistry {
     pub(in crate::modules) fn dispatch_catalog_tool(&self, name: &str) -> ToolDispatchResult {
         match name {
             "catalog:modules" => Some(Ok(json!(self
-                .modules()
+                .discoverable_modules()
                 .map(|builtin| builtin.metadata())
                 .collect::<Vec<_>>()))),
-            "catalog:tools" => Some(Ok(json!(self.tools().collect::<Vec<_>>()))),
+            "catalog:tools" => Some(Ok(json!(self.discoverable_tools().collect::<Vec<_>>()))),
             _ => None,
         }
     }
@@ -34,7 +34,10 @@ impl ModuleRegistry {
 }
 
 fn visible_tool_names(registry: &ModuleRegistry) -> Vec<String> {
-    registry.tools().map(|tool| tool.name.clone()).collect()
+    registry
+        .discoverable_tools()
+        .map(|tool| tool.name.clone())
+        .collect()
 }
 
 pub(in crate::modules) fn dispatch_context_workspace_tool(

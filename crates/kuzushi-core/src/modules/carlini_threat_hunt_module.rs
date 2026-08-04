@@ -20,6 +20,7 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
             &["threat-model:build"],
         )],
     )
+    .compatibility()
 }
 
 fn carlini_threat_hunt_tool() -> ToolDescriptor {
@@ -107,6 +108,7 @@ pub(crate) fn taint_iris_module() -> BuiltinModule {
         vec![taint_iris_tool()],
         vec![dag("taint-iris:hunt", "findings", &["context:build"])],
     )
+    .compatibility()
 }
 
 fn taint_iris_tool() -> ToolDescriptor {

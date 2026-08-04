@@ -137,9 +137,9 @@ pub use builtins::{
 pub use catalog_query::{RuntimeFilter, ToolQuery};
 pub use contracts::{
     canonical_tool_phase, ApprovalPolicy, BuiltinModule, ContinuationSupport, DagNodeDescriptor,
-    FileReferenceSemantics, FindingStoreRequirement, ModuleKind, ModuleMetadata, OptionSpec,
-    OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor, ToolEffect,
-    ToolPhase, ToolPolicy, WorkspaceRequirement,
+    FileReferenceSemantics, FindingStoreRequirement, ModuleKind, ModuleMaturity, ModuleMetadata,
+    OptionSpec, OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
+    ToolEffect, ToolPhase, ToolPolicy, WorkspaceRequirement,
 };
 pub use contracts::{ExecutionAuthorization, ToolExecutionContext};
 pub use display_name::tool_display_name;

@@ -66,7 +66,7 @@ impl ShellApp {
     fn phase_intent_planner_goal(&self, phase: WorkflowPhase, text: &str) -> String {
         let tools = self
             .registry()
-            .tools()
+            .discoverable_tools()
             .filter(|tool| !tool.hidden)
             .filter(|tool| kuzushi_core::modules::autonomy::tool_phase(&tool.name) == Some(phase))
             .map(|tool| format!("{} — {}", tool.name, tool.description))

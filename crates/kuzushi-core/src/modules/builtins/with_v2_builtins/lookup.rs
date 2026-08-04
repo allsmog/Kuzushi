@@ -15,8 +15,15 @@ impl ModuleRegistry {
             .is_some_and(|tool| tool.workspace_requirement == WorkspaceRequirement::Required)
     }
 
+    /// Every operator-visible module, preserving the original registry API.
     pub fn modules(&self) -> impl Iterator<Item = &BuiltinModule> {
         self.modules.values().filter(|builtin| !builtin.is_hidden())
+    }
+
+    /// Default discovery surface: visible Core modules only.
+    pub fn discoverable_modules(&self) -> impl Iterator<Item = &BuiltinModule> {
+        self.modules()
+            .filter(|builtin| builtin.maturity().is_core())
     }
 
     pub fn all_modules(&self) -> impl Iterator<Item = &BuiltinModule> {
@@ -32,14 +39,45 @@ impl ModuleRegistry {
             .collect()
     }
 
+    /// Every operator-visible tool, preserving the original registry API.
     pub fn tools(&self) -> impl Iterator<Item = &ToolDescriptor> {
         self.tools
             .values()
             .filter(|tool| self.is_tool_visible(tool))
     }
 
-    /// Iterate visible `(module, tool)` pairs for catalog grouping and querying.
-    /// Skips hidden tools and tools whose owning module is hidden.
+    /// Default discovery surface: visible tools owned by Core modules only.
+    pub fn discoverable_tools(&self) -> impl Iterator<Item = &ToolDescriptor> {
+        self.tools()
+            .filter(|tool| self.is_tool_discoverable(tool))
+    }
+
+    /// Complete operator-visible tool catalog with owning maturity metadata.
+    pub fn catalog_tools_with_modules(
+        &self,
+    ) -> impl Iterator<Item = (&BuiltinModule, &ToolDescriptor)> {
+        self.modules
+            .values()
+            .filter(|module| !module.is_hidden())
+            .flat_map(|module| {
+                module
+                    .tools()
+                    .iter()
+                    .filter(|tool| !tool.hidden)
+                    .map(move |tool| (module, tool))
+            })
+    }
+
+    /// Default catalog projection with owning module maturity available to
+    /// presentation layers.
+    pub fn discoverable_catalog_tools_with_modules(
+        &self,
+    ) -> impl Iterator<Item = (&BuiltinModule, &ToolDescriptor)> {
+        self.catalog_tools_with_modules()
+            .filter(|(module, _)| module.maturity().is_core())
+    }
+
+    /// Iterate every operator-visible `(module metadata, tool)` pair.
     pub fn tools_with_modules(&self) -> impl Iterator<Item = (&ModuleMetadata, &ToolDescriptor)> {
         self.modules
             .values()
@@ -51,6 +89,15 @@ impl ModuleRegistry {
                     .filter(|tool| !tool.hidden)
                     .map(move |tool| (module.metadata(), tool))
             })
+    }
+
+    /// Iterate visible Core `(module metadata, tool)` pairs for default
+    /// catalog grouping and guided queries.
+    pub fn discoverable_tools_with_modules(
+        &self,
+    ) -> impl Iterator<Item = (&ModuleMetadata, &ToolDescriptor)> {
+        self.discoverable_catalog_tools_with_modules()
+            .map(|(module, tool)| (module.metadata(), tool))
     }
 
     pub fn resolve_tool(&self, name: &str) -> Option<&ToolDescriptor> {
@@ -87,9 +134,7 @@ impl ModuleRegistry {
         self.tool_needs_runtime(name, input) || tool_optionally_wants_runtime(name, input, config)
     }
 
-    /// Visible to callers that need the same hidden-tool/hidden-module policy
-    /// outside the catalog iterators above (e.g. recents bookkeeping at the
-    /// dispatch boundary in `execution.rs`).
+    /// Whether a tool is operator-visible, independent of its maturity tier.
     pub(crate) fn is_tool_visible(&self, tool: &ToolDescriptor) -> bool {
         if tool.hidden {
             return false;
@@ -100,6 +145,18 @@ impl ModuleRegistry {
         self.modules
             .get(module_id)
             .is_some_and(|module| !module.is_hidden())
+    }
+
+    fn is_tool_discoverable(&self, tool: &ToolDescriptor) -> bool {
+        if !self.is_tool_visible(tool) {
+            return false;
+        }
+        let Some((module_id, _)) = tool.name.split_once(':') else {
+            return false;
+        };
+        self.modules
+            .get(module_id)
+            .is_some_and(|module| module.maturity().is_core())
     }
 
     fn dynamic_specifier_for_module(&self, module_id: &str) -> Option<String> {

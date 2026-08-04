@@ -26,6 +26,7 @@ pub(in crate::modules) fn pwn_module() -> BuiltinModule {
         pwn_tools(),
         vec![],
     )
+    .labs()
 }
 
 fn pwn_tools() -> Vec<ToolDescriptor> {

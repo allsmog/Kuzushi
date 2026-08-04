@@ -480,4 +480,40 @@ mod tests {
         assert!(visible_tools.contains(&"tob:audit"));
         assert!(visible_tools.contains(&"vuln-scout:audit"));
     }
+
+    #[test]
+    fn maturity_is_descriptor_owned_without_changing_registry_visibility() {
+        let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+        let module = |id: &str| {
+            registry
+                .all_modules()
+                .find(|module| module.metadata().id == id)
+                .unwrap()
+        };
+
+        assert_eq!(module("fuzz").maturity(), ModuleMaturity::Labs);
+        assert!(!module("fuzz").is_hidden());
+        assert_eq!(module("pwn").maturity(), ModuleMaturity::Labs);
+        assert!(module("pwn").is_hidden());
+        assert_eq!(
+            module("carlini-threat-hunt").maturity(),
+            ModuleMaturity::Compatibility
+        );
+        assert!(module("carlini-threat-hunt").is_hidden());
+        assert_eq!(
+            module("taint-iris").maturity(),
+            ModuleMaturity::Compatibility
+        );
+        assert!(module("taint-iris").is_hidden());
+        assert!(registry.resolve_tool("taint-iris:hunt").unwrap().hidden);
+
+        assert!(registry.modules().any(|module| module.metadata().id == "fuzz"));
+        assert!(registry.tools().any(|tool| tool.name == "fuzz:run"));
+        assert!(registry
+            .discoverable_modules()
+            .all(|module| module.metadata().id != "fuzz"));
+        assert!(registry
+            .discoverable_tools()
+            .all(|tool| tool.name != "fuzz:run"));
+    }
 }

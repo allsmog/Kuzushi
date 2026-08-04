@@ -103,7 +103,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
     let artifacts = home_artifact_rows(app, &run);
     let journey = journey_model(app);
-    let module_count = app.registry().modules().count();
+    let module_count = app.registry().discoverable_modules().count();
     HomeCockpitModel {
         title: "HOME",
         attack_surface: attack_surface_model_for_run(app, &run),

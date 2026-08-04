@@ -193,6 +193,17 @@ mod tests {
     }
 
     #[test]
+    fn palette_omits_labs_while_exact_dispatch_stays_registered() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.open_command_palette();
+
+        let matches = app.palette_matches();
+        assert!(matches.iter().all(|entry| entry.label != "fuzz"));
+        assert!(matches.iter().all(|entry| entry.label != "fuzz:run"));
+        assert!(app.registry().resolve_tool("fuzz:run").is_some());
+    }
+
+    #[test]
     fn selected_palette_row_stays_windowed_and_has_non_color_marker() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.open_command_palette();

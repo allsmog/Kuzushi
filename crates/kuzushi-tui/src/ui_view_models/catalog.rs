@@ -72,7 +72,7 @@ impl CapabilityActionSpec {
             .is_none_or(|tool| app.registry().resolve_tool(tool).is_some());
         let integration_visible = self.required_visible_module.is_none_or(|id| {
             app.registry()
-                .modules()
+                .discoverable_modules()
                 .any(|module| module.metadata().id == id)
         });
         tool_available && integration_visible

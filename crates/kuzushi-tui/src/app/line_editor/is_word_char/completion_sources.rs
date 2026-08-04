@@ -3,7 +3,7 @@ use super::*;
 impl ShellApp {
     pub(in crate::app::line_editor) fn module_completion_values(&self) -> Vec<String> {
         self.registry()
-            .modules()
+            .discoverable_modules()
             .map(|module| module.metadata().id.clone())
             .collect()
     }
@@ -11,12 +11,12 @@ impl ShellApp {
     pub(in crate::app::line_editor) fn tool_completion_values(&self) -> Vec<String> {
         let mut values = self
             .registry()
-            .tools()
+            .discoverable_tools()
             .map(|tool| tool.name.clone())
             .collect::<Vec<_>>();
         if let Some(module) = self.focused_module() {
             let prefix = format!("{module}:");
-            values.extend(self.registry().tools().filter_map(|tool| {
+            values.extend(self.registry().discoverable_tools().filter_map(|tool| {
                 tool.name
                     .strip_prefix(&prefix)
                     .map(|short_name| short_name.to_string())
@@ -139,6 +139,17 @@ mod tests {
     use crate::ScanPanelState;
     use kuzushi_core::V2Config;
     use std::path::PathBuf;
+
+    #[test]
+    fn completion_omits_labs_while_exact_dispatch_stays_registered() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert!(!app.module_completion_values().contains(&"fuzz".to_string()));
+        assert!(!app
+            .tool_completion_values()
+            .contains(&"fuzz:run".to_string()));
+        assert!(app.registry().resolve_tool("fuzz:run").is_some());
+    }
 
     #[test]
     fn run_id_completion_values_read_shared_runs_root() {

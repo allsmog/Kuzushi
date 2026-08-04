@@ -234,12 +234,18 @@ pub(crate) enum Command {
         /// Emit the module list as machine-readable JSON.
         #[arg(long)]
         json: bool,
+        /// Include opt-in Labs and retained Compatibility modules.
+        #[arg(long)]
+        all: bool,
     },
     /// List native tools.
     Tools {
         /// Emit the tool list as machine-readable JSON.
         #[arg(long)]
         json: bool,
+        /// Include tools from opt-in Labs and retained Compatibility modules.
+        #[arg(long)]
+        all: bool,
     },
     /// Run Rust CLI preflight diagnostics.
     Doctor {

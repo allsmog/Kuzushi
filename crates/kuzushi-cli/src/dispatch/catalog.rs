@@ -13,8 +13,8 @@ pub(super) fn dispatch_catalog_command(
     match command {
         Command::Config { command } => config_command(command, default_target.clone()),
         Command::Auth { command } => auth_command(command, default_target),
-        Command::Modules { json } => modules_command(json),
-        Command::Tools { json } => tools_command(json),
+        Command::Modules { json, all } => modules_command(json, all),
+        Command::Tools { json, all } => tools_command(json, all),
         Command::Kwp { command } => kwp_command(command, default_target),
         _ => unreachable!("non-catalog command routed to catalog dispatcher"),
     }

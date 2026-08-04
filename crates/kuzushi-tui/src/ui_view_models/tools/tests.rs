@@ -12,6 +12,10 @@ fn tools_model_lists_registry_tools() {
     assert!(all_tool_rows(&model)
         .iter()
         .any(|row| row.cells[0] == "sast:scan"));
+    assert!(all_tool_rows(&model)
+        .iter()
+        .all(|row| row.cells[0] != "fuzz:run"));
+    assert!(app.registry().resolve_tool("fuzz:run").is_some());
     assert!(model
         .groups
         .iter()

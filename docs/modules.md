@@ -9,7 +9,8 @@ two package exports:
 
 Companion docs: [`mcp-server-requirements.md`](./mcp-server-requirements.md)
 for MCP-bridged modules; [`api-compatibility.md`](./api-compatibility.md)
-for legacy aliases and route compatibility;
+for legacy aliases and route compatibility; [`module-maturity.md`](./module-maturity.md)
+for Core, Labs, and Compatibility discovery policy;
 [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
 for the SDK audit that shaped the current surface.
 

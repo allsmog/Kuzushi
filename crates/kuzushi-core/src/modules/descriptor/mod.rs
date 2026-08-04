@@ -7,6 +7,7 @@ mod descriptor_model;
 mod max_findings_option;
 mod mcp_options;
 mod metadata;
+mod module_maturity;
 mod tool_phase;
 mod tool_policy;
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ pub use descriptor_model::{
     OptionSpec, OptionType, PathSemantics, PromptSpec, RuntimeRequirement, ToolDescriptor,
 };
 pub use metadata::BuiltinModule;
+pub use module_maturity::ModuleMaturity;
 pub use tool_phase::{canonical_tool_phase, ToolPhase};
 pub(in crate::modules) use tool_policy::{
     external_action_policy, read_policy, repository_execute_policy, target_write_policy,

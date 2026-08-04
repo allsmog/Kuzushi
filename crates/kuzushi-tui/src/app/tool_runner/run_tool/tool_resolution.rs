@@ -4,7 +4,7 @@ impl ShellApp {
     pub(crate) fn unknown_module_message(&self, module: &str) -> String {
         let module_ids = self
             .registry()
-            .modules()
+            .discoverable_modules()
             .map(|entry| entry.metadata().id.clone())
             .collect::<Vec<_>>();
         let module_refs = module_ids.iter().map(String::as_str).collect::<Vec<_>>();
@@ -31,7 +31,7 @@ impl ShellApp {
         }
         if let Some(tool_name) = self
             .registry()
-            .modules()
+            .discoverable_modules()
             .find(|entry| entry.metadata().id == module)
             .and_then(|entry| entry.tools().iter().find(|tool| !tool.hidden))
             .map(|tool| tool.name.clone())
@@ -40,7 +40,7 @@ impl ShellApp {
         }
         let prefix = format!("{module}:");
         self.registry()
-            .tools()
+            .discoverable_tools()
             .find(|tool| tool.name.starts_with(&prefix))
             .map(|tool| tool.name.clone())
     }
