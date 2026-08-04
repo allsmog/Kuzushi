@@ -222,6 +222,23 @@ pub(crate) enum RunsCommand {
     },
 }
 
+/// Review-yield adjudication census and dataset export.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ReviewYieldCommand {
+    /// Count adjudicated identities and label eligibility for this target.
+    Census {
+        /// Emit the census as machine-readable JSON instead of the plain summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export leakage-safe, event-bounded training examples as JSONL.
+    Export {
+        /// Destination file for the JSONL dataset; the manifest is written alongside it.
+        #[arg(long = "out")]
+        output: PathBuf,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum SessionsCommand {
     /// List durable shell session transcripts.

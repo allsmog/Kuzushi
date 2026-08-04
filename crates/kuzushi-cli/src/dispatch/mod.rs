@@ -391,6 +391,9 @@ async fn dispatch_non_scan_command(
             update_baseline,
             summary,
         } => dispatch_ci_command(target, fail_on, update_baseline, summary, default_target),
+        Command::ReviewYield { command } => {
+            crate::application::review_yield::review_yield_command(command, default_target)
+        }
         Command::Sessions { command } => {
             crate::application::sessions::sessions_command(command, default_target)
         }

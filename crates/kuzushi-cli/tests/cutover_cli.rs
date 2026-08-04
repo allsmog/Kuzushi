@@ -521,6 +521,11 @@ fn workspace_commands_refuse_targetless_cwd_without_creating_state() {
         ("doctor", vec!["doctor"]),
         ("scan", vec!["scan"]),
         ("workspace run", vec!["run", "context:build"]),
+        ("review-yield census", vec!["review-yield", "census"]),
+        (
+            "review-yield export",
+            vec!["review-yield", "export", "--out", "d.jsonl"],
+        ),
     ];
 
     for (label, args) in cases {

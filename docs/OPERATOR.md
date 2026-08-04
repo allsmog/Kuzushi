@@ -204,6 +204,28 @@ two or more snapshots the deck shows a sparkline strip
 (`HISTORY  fp ▁▂▇ · spend ▁▄█ · N snapshots`) so drift is visible at a
 glance without opening the JSONL.
 
+## 5.1 Review-yield census and dataset export
+
+`kuzushi review-yield` turns the review ledger into an auditable training
+corpus. Both subcommands need an explicit target and fail when the target has
+no recorded findings database.
+
+```sh
+kuzushi --target <repo> review-yield census            # counts, plus --json
+kuzushi --target <repo> review-yield export --out review-yield.jsonl
+```
+
+The census counts every decision and explains every exclusion: automated and
+imported authors, policy outcomes (accepted risk, suppressed, deferred, still
+open), conflicting human reversals, decisions with no usable read cutoff, and
+identities with no snapshot from before the reviewer looked. The export writes
+one JSONL row per durable identity plus a `<out>.manifest.json` sidecar
+carrying the label policy, the frozen feature vocabulary, the census, and a
+BLAKE3 digest over the manifest and every row. Features are read only from
+finding snapshots that existed at or before the decision's read cutoff, so a
+row can never contain the verdict it is supposed to predict. Paths, snippets,
+messages, rationales, and reviewer identities never leave the workspace.
+
 ## 6. The CI gate
 
 `kuzushi ci` is deterministic: it reads the findings ledger, applies
