@@ -1,18 +1,9 @@
 import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  preparePublicCoreWorkspace,
-  rewriteWorkspaceManifest,
-} from "./public-core-workspace.mjs";
+import { preparePublicCoreWorkspace, rewriteWorkspaceManifest } from "./public-core-workspace.mjs";
 
 const privateUrl = "https://github.com/allsmog/oxidized-joern.git";
 const revision = "9ab43859f0c3342c734ff38ea6366711d216c8fd";
