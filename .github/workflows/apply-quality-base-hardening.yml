@@ -28,14 +28,14 @@ jobs:
 
           ci = Path('.github/workflows/ci.yml')
           text = ci.read_text()
-          dispatch = '''      private_cpg:
+          dispatch = """      private_cpg:
                   description: Run the credentialed full-workspace CPG, package, and e2e gates
                   required: false
                   type: boolean
                   default: true
                 workflow_call:
-          '''.replace('        ', '')
-          dispatch_replacement = '''      private_cpg:
+          """.replace("                ", "")
+          dispatch_replacement = """      private_cpg:
                   description: Run the credentialed full-workspace CPG, package, and e2e gates
                   required: false
                   type: boolean
@@ -46,15 +46,15 @@ jobs:
                   type: string
                   default: ''
                 workflow_call:
-          '''.replace('        ', '')
-          call = '''      private_cpg:
+          """.replace("                ", "")
+          call = """      private_cpg:
                   description: Run the credentialed full-workspace CPG, package, and e2e gates
                   required: false
                   type: boolean
                   default: true
                 secrets:
-          '''.replace('        ', '')
-          call_replacement = '''      private_cpg:
+          """.replace("                ", "")
+          call_replacement = """      private_cpg:
                   description: Run the credentialed full-workspace CPG, package, and e2e gates
                   required: false
                   type: boolean
@@ -65,7 +65,7 @@ jobs:
                   type: string
                   default: ''
                 secrets:
-          '''.replace('        ', '')
+          """.replace("                ", "")
           for old, new, label in (
               (dispatch, dispatch_replacement, 'workflow_dispatch input'),
               (call, call_replacement, 'workflow_call input'),
@@ -77,21 +77,20 @@ jobs:
           new_base = "${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
           if text.count(old_base) != 3:
               raise SystemExit(f'expected three changed-code base expressions, found {text.count(old_base)}')
-          text = text.replace(old_base, new_base)
-          ci.write_text(text)
+          ci.write_text(text.replace(old_base, new_base))
 
           release = Path('.github/workflows/release.yml')
           text = release.read_text()
-          old = '''  ci:
+          old = """  ci:
               uses: ./.github/workflows/full-product-ci.yml
               secrets:
-          '''.replace('      ', '')
-          new = '''  ci:
+          """.replace("            ", "")
+          new = """  ci:
               uses: ./.github/workflows/full-product-ci.yml
               with:
                 quality_base_ref: HEAD^
               secrets:
-          '''.replace('      ', '')
+          """.replace("            ", "")
           if text.count(old) != 1:
               raise SystemExit('expected one release full-product caller')
           release.write_text(text.replace(old, new))
