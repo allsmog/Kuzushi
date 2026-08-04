@@ -22,6 +22,8 @@ jobs:
   # ── Gate: require the complete private/default product contract ──────────
   ci:
     uses: ./.github/workflows/full-product-ci.yml
+    with:
+      quality_base_ref: HEAD^
     secrets:
       OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
     permissions:
