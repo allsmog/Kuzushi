@@ -26,15 +26,12 @@ jobs:
     name: private-source-contract
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      (github.event.pull_request.head.repo.full_name == github.repository &&
+       github.actor == github.repository_owner)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: moonrepo/setup-rust@v1
-        with:
-          inherit-toolchain: true
-      - name: Configure least-privilege private dependency access
+      - name: Require least-privilege private dependency credential
         env:
           OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
@@ -43,6 +40,16 @@ jobs:
             echo "::error::OXIDIZED_JOERN_TOKEN is missing. Configure a read-only fine-grained token scoped only to allsmog/oxidized-joern contents."
             exit 1
           fi
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - name: Configure private dependency access
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
           git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Verify exact private source resolution
         run: |
@@ -57,14 +64,20 @@ jobs:
           expected = f"git+https://github.com/allsmog/oxidized-joern.git?rev={revision}#"
           packages = json.load(open(metadata_path, encoding="utf-8"))["packages"]
           required = {"cpg-analysis", "cpg-cli", "cpg-core", "cpg-incremental"}
-          seen = {
-              package["name"]
+          exact = [
+              package
               for package in packages
               if package.get("source", "").startswith(expected)
+          ]
+          counts = {
+              name: sum(package["name"] == name for package in exact)
+              for name in required
           }
-          missing = sorted(required - seen)
-          if missing:
-              raise SystemExit(f"private CPG metadata missing exact pinned packages: {missing}")
+          wrong_counts = {name: count for name, count in counts.items() if count != 1}
+          if wrong_counts:
+              raise SystemExit(
+                  f"private CPG metadata must contain each pinned package exactly once: {wrong_counts}"
+              )
           unexpected = sorted(
               package["name"]
               for package in packages
@@ -73,7 +86,7 @@ jobs:
           )
           if unexpected:
               raise SystemExit(f"private CPG metadata contains an unexpected revision: {unexpected}")
-          print(f"resolved exact private CPG packages: {', '.join(sorted(seen))}")
+          print(f"resolved exact private CPG packages: {', '.join(sorted(counts))}")
           PY
 
   complete-private-product:
@@ -131,7 +144,8 @@ jobs:
     if: >-
       always() &&
       (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
+       (github.event.pull_request.head.repo.full_name == github.repository &&
+        github.actor == github.repository_owner))
     needs:
       - private-source-contract
       - complete-private-product
