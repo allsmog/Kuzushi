@@ -18,5 +18,8 @@ pub(super) fn ensure_directory(target: &Path) -> Result<()> {
 pub(super) fn ignored_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| matches!(name, ".git" | "node_modules" | "target" | "vendor"))
+        .is_some_and(|name| {
+            crate::workspace::inventory::ignored_dir(name)
+                || matches!(name, "node_modules" | "target" | "vendor")
+        })
 }

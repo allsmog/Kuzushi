@@ -199,10 +199,7 @@ impl ShellApp {
             // focused (Target row opens the target picker again), so the
             // advertised Start Map action needs a key that works regardless
             // of cursor position.
-            KeyCode::Char('s') => {
-                self.start_setup_map();
-                InputUpdate::handled()
-            }
+            KeyCode::Char('s') => self.start_setup_map(),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.open_workbench();
                 InputUpdate::handled()

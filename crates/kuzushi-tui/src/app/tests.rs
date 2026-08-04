@@ -10718,31 +10718,28 @@ fn fresh_target_opens_aggregate_setup() {
 #[test]
 fn setup_start_key_commits_regardless_of_the_focused_row() {
     // `Enter` activates the focused row (Target row → target picker), so the
-    // advertised Start Map commit needs `s` to work from any cursor position.
+    // advertised Start Map commit needs `s` to dispatch from any cursor position.
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
     app.open_setup();
-    app.router.setup_mut().set_cursor(0);
+    app.engagement.planning_picker_mut().selected_mut().clear();
+    app.engagement
+        .planning_picker_mut()
+        .selected_mut()
+        .insert(PlanningTaskId::GatherRepoContext);
+    app.router.setup_mut().set_cursor(1);
+    assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
-    );
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
 
-    // The commit attempt ran from the Target row: either the plan started
-    // (phase committed) or the first readiness blocker was disclosed —
-    // never the target-picker loop.
-    let started = app.engagement.current_phase() == Some(WorkflowPhase::Map);
-    let blocked = app
-        .log_lines()
-        .iter()
-        .any(|line| line.body.contains("Start Map blocked"));
+    assert!(update.handled);
+    assert!(matches!(
+        update.effects.as_slice(),
+        [ShellEffect::DispatchNextPlanningTask(_)]
+    ));
     assert_ne!(app.shell_view(), ShellView::TargetPicker);
-    assert!(
-        started || blocked,
-        "s must attempt the Start Map commit from any row"
-    );
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 }
 
 #[test]

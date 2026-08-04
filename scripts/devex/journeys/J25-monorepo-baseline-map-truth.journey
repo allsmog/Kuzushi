@@ -27,10 +27,9 @@ keys: 1
 wait-live-snap: 30 Viewing Map | map-initial
 # Target identity must survive every size (top chrome renders `target ./<name>`):
 expect: target ./
-# Full Map facts render at >=80 cols (evidenced: 80x24 shows them, 60x20
-# compact layout omits the PROJECT CONTEXT pane and revision — ledgered as a
-# cycle-visual product gap, not asserted away):
-expect-wide: 80 PROJECT CONTEXT
+# Ready Map uses one compact target/revision/context receipt; readiness and
+# partial-result cards own the expanded PROJECT CONTEXT label.
+expect-wide: 80 context:
 expect-wide: 80 rev:
 ask: Map — with no accepted root holistic baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
 ask: Map — are the repository facts on screen (target name, revision, scope names, counts) derived from the real checkout rather than hard-coded or fabricated?
@@ -38,13 +37,19 @@ keys: 2
 wait-live-snap: 15 Viewing Scan | scan-initial
 ask: Scan — are recorded receipts from the pre-existing engagement state clearly separated from live progress, and is scope-level scan guidance honestly gated when no root holistic baseline exists?
 keys: 3
-wait-live-snap: 15 Viewing Review | review-initial
-expect: FINDINGS
-ask: Review — do pre-existing engagement findings surface with honest provenance (which run/revision produced them) instead of presenting as fresh results?
+wait: 1
+live-snap: review-initial
+ask: Review — if findings exist, do they surface with honest run/revision provenance; otherwise, does the shell explicitly explain why Review is locked?
+keys: Escape
+nav-mode:
 keys: 4
-wait-live-snap: 15 Viewing Prove | prove-initial
-ask: Prove — does the page state honestly that no verification evidence exists for the current selection, without fabricating proof state?
+wait: 1
+live-snap: prove-initial
+ask: Prove — if a confirmed finding exists, is its verification state honest; otherwise, does the shell explicitly explain why Prove is locked without fabricating proof?
+keys: Escape
+nav-mode:
 keys: 5
-wait-live-snap: 15 Viewing Fix | fix-initial
-ask: Fix — is remediation strictly planning/diff-preview against the live checkout, with explicit operator authorization required before any application?
+wait: 1
+live-snap: fix-initial
+ask: Fix — if proof or patch records exist, is remediation limited to planning/diff-preview with explicit application authorization; otherwise, does the shell explicitly explain why Fix is locked?
 keys: Escape

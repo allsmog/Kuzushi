@@ -119,6 +119,32 @@ fn sbom_scan_extracts_package_cargo_and_python_dependencies() {
 }
 
 #[test]
+fn sbom_scan_ignores_nested_agent_and_kuzushi_state() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies":{"product":"1.0.0"}}"#,
+    )
+    .unwrap();
+    for state_dir in [".claude/worktrees/copy", ".kuzushi/worktrees/copy"] {
+        let nested = temp.path().join(state_dir);
+        fs::create_dir_all(&nested).unwrap();
+        fs::write(
+            nested.join("package.json"),
+            r#"{"dependencies":{"duplicate":"9.9.9"}}"#,
+        )
+        .unwrap();
+    }
+
+    let report = scan_sbom(temp.path(), &ScanCancellation::default()).unwrap();
+
+    assert_eq!(report.manifests_scanned, 1);
+    assert_eq!(report.components.len(), 1);
+    assert_eq!(report.components[0].name, "product");
+    assert_eq!(report.components[0].manifest_path, "package.json");
+}
+
+#[test]
 fn sbom_scan_extracts_package_json_root_edges_without_lockfile() {
     let temp = tempfile::tempdir().unwrap();
     fs::write(
