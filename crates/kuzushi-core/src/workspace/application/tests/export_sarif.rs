@@ -36,6 +36,18 @@ fn absolute_url_location_drops_uri_base_id_and_unknown_line_region() {
 }
 
 #[test]
+fn absolute_url_location_with_known_line_keeps_region_but_drops_uri_base_id() {
+    let physical = physical_location_of("https://api.lab.test/orders", 7, None);
+
+    assert_eq!(
+        physical["artifactLocation"]["uri"],
+        "https://api.lab.test/orders"
+    );
+    assert!(physical["artifactLocation"].get("uriBaseId").is_none());
+    assert_eq!(physical["region"], json!({ "startLine": 7 }));
+}
+
+#[test]
 fn relative_path_without_line_keeps_workspace_root_and_omits_region() {
     let physical = physical_location_of("Cargo.toml", 0, None);
 
