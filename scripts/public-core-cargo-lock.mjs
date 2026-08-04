@@ -136,9 +136,7 @@ export function validatePublicCoreLock(originalText, publicText) {
 function main() {
   const [originalPath, publicPath] = process.argv.slice(2);
   if (!originalPath || !publicPath) {
-    throw new Error(
-      "usage: node scripts/public-core-cargo-lock.mjs <full-lock> <public-lock>",
-    );
+    throw new Error("usage: node scripts/public-core-cargo-lock.mjs <full-lock> <public-lock>");
   }
   const result = validatePublicCoreLock(
     readFileSync(originalPath, "utf8"),
