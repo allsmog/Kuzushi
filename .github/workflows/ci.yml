@@ -6,11 +6,24 @@ on:
   pull_request:
     branches: [main]
   merge_group:
+  workflow_dispatch:
+    inputs:
+      private_cpg:
+        description: Run the credentialed full-workspace CPG, package, and e2e gates
+        required: false
+        type: boolean
+        default: true
   workflow_call:
+    inputs:
+      private_cpg:
+        description: Run the credentialed full-workspace CPG, package, and e2e gates
+        required: false
+        type: boolean
+        default: true
     secrets:
       OXIDIZED_JOERN_TOKEN:
         description: Read-only token for the pinned private oxidized-joern dependency
-        required: true
+        required: false
 
 # Cancel in-progress CI runs on the same PR branch; keep main pushes running.
 concurrency:
@@ -79,12 +92,33 @@ jobs:
       - run: pnpm check:docs
       - run: pnpm check
 
-  # ── Rust lint: clippy as a hard gate ─────────────────────────────────────
-  # clippy is hard-blocking via the workspace `[workspace.lints.clippy]`
-  # baseline in Cargo.toml. Formatting is also hard-blocking: the workspace is
-  # rustfmt-clean, so new drift must fail where it is introduced.
+  # ── Credential-free public/core Rust contract ────────────────────────────
+  # Direct push/PR CI always runs this lane. It compiles every kuzushi-core
+  # target with the private engine feature disabled and executes the explicit
+  # fail-closed adapter tests, without reading any cross-repository secret.
+  rust-core:
+    name: rust-core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      # The guard scripts (public-core-workspace.mjs, public-core-cargo-lock.mjs)
+      # import only node: builtins, so this lane needs a pinned Node runtime but
+      # no pnpm store or workspace install.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - run: bash scripts/check-public-rust-core.sh
+
+  # ── Full Rust lint: private CPG + clippy as a hard release gate ──────────
+  # Reusable release CI and an explicit workflow dispatch opt into this lane.
+  # Missing private credentials still fail before any full-workspace claim.
   rust-lint:
     name: rust-lint
+    if: ${{ inputs.private_cpg }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -110,6 +144,7 @@ jobs:
   # ── Dependency advisories, license policy, duplicate bans ────────────────
   cargo-deny:
     name: cargo-deny
+    if: ${{ inputs.private_cpg }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -128,9 +163,10 @@ jobs:
         with:
           command: check advisories licenses bans sources
 
-  # ── Rust CLI build + tests ───────────────────────────────────────────────
+  # ── Full Rust CLI build + tests ──────────────────────────────────────────
   rust-cli:
     name: rust-cli
+    if: ${{ inputs.private_cpg }}
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -227,6 +263,7 @@ jobs:
   # ── Measured coverage: direct Node boundaries + changed executable Rust ──
   coverage:
     name: coverage
+    if: ${{ inputs.private_cpg }}
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -401,13 +438,15 @@ jobs:
           KUZUSHI_CMD: node bin/kuzushi-rs.mjs
         run: pnpm test:e2e
 
-  # One stable branch-protection context. Every dependency is inspected even
-  # when an upstream failure skips downstream package/E2E jobs.
+  # One stable branch-protection context. Direct PR/push CI requires the
+  # credential-free core contract. Reusable release/manual full mode also
+  # requires every private CPG, package, coverage, mutation, and e2e gate.
   quality-gauntlet:
     name: quality-gauntlet
     if: always()
     needs:
       - lint
+      - rust-core
       - rust-lint
       - cargo-deny
       - rust-cli
@@ -420,9 +459,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every quality gate
+      - name: Require every applicable quality gate
         env:
+          PRIVATE_CPG: ${{ inputs.private_cpg }}
           LINT: ${{ needs.lint.result }}
+          RUST_CORE: ${{ needs.rust-core.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
           CARGO_DENY: ${{ needs.cargo-deny.result }}
           RUST_CLI: ${{ needs.rust-cli.result }}
@@ -435,11 +476,30 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for gate in LINT RUST_LINT CARGO_DENY RUST_CLI NODE22 NODE_TESTS COVERAGE MUTATION PACK E2E; do
+          for gate in LINT RUST_CORE NODE_TESTS; do
             result="${!gate}"
             if [ "${result}" != "success" ]; then
               echo "::error::${gate} ended ${result}"
               failed=1
             fi
           done
+
+          private_gates=(RUST_LINT CARGO_DENY RUST_CLI NODE22 COVERAGE MUTATION PACK E2E)
+          if [ "${PRIVATE_CPG:-false}" = "true" ]; then
+            for gate in "${private_gates[@]}"; do
+              result="${!gate}"
+              if [ "${result}" != "success" ]; then
+                echo "::error::${gate} ended ${result} in required private-CPG mode"
+                failed=1
+              fi
+            done
+          else
+            for gate in "${private_gates[@]}"; do
+              result="${!gate}"
+              if [ "${result}" != "skipped" ]; then
+                echo "::error::${gate} unexpectedly ended ${result} in public-core mode"
+                failed=1
+              fi
+            done
+          fi
           exit "${failed}"
