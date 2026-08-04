@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Serialize concurrent release runs; don't cancel mid-publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # Run JS-based actions on Node 24 ahead of the June 2026 default flip
+  # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  # ── Gate: require the complete private/default product contract ──────────
+  ci:
+    uses: ./.github/workflows/full-product-ci.yml
+    with:
+      quality_base_ref: HEAD^
+    secrets:
+      OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+    permissions:
+      contents: read
+
+  # ── Publish to npm (stages every platform binary built by this release) ─
+  publish-npm:
+    needs: [ci, native-binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # id-token is only required when NPM_PROVENANCE is opted in; safe to declare.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      - run: pnpm install --frozen-lockfile
+      - name: Download cross-platform binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-native-*
+          merge-multiple: true
+      - name: Stage native binaries for every built platform
+        # Each matrix leg uploads kuzushi-<tag>-<slug>.{tar.gz,zip}; extract
+        # them into native/<slug>/ so the npm tarball works on every platform
+        # that produced a green build (previously: linux-x64 only).
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in kuzushi-*.tar.gz; do
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
+            mkdir -p "native/${slug}"
+            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
+            chmod 755 "native/${slug}"/kuzushi*
+            rm -f "${archive}"
+          done
+          for archive in kuzushi-*.zip; do
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
+            mkdir -p "native/${slug}"
+            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
+            rm -f "${archive}"
+          done
+          ls -la native/*/
+      - name: Verify required multi-platform package assembly
+        env:
+          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+        run: pnpm verify:pack
+      # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
+      # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+        run: |
+          set -euo pipefail
+          if [ "${NPM_PROVENANCE:-}" = "true" ]; then
+            echo "Publishing with --provenance"
+            npm publish --access public --provenance --ignore-scripts
+          else
+            npm publish --access public --ignore-scripts
+          fi
+
+  # ── Cross-platform native binaries for the GitHub Release ───────────────
+  # Each leg builds natively on its own runner arch (no cross toolchains).
+  # linux-x64 is proven by CI on every push; the other platforms are
+  # best-effort until they have produced a green tag build — promote them
+  # to hard-blocking by removing `continue-on-error` once they have.
+  native-binaries:
+    needs: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-x64
+            required: true
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+            required: false
+          - os: macos-15-intel
+            slug: darwin-x64
+            required: false
+          - os: macos-14
+            slug: darwin-arm64
+            required: true
+          - os: windows-latest
+            slug: win32-x64
+            required: false
+    name: native-${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.required }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure pinned private Rust dependency
+        shell: bash
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${OXIDIZED_JOERN_TOKEN:-}" ]]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is required for release-native compilation"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache-target: release
+      - run: node scripts/build-native-runtime.mjs
+      - name: Execute staged native runtime on its release platform
+        run: node scripts/smoke-native-runtime.mjs
+      - name: Exercise platform-specific process and atomic-write contracts
+        run: |
+          cargo test -p kuzushi-core fs_atomic::tests
+          cargo test -p kuzushi-core scan::subprocess::scan_cancellation::tests
+          cargo test -p kuzushi-core capabilities::recon::adapters::process::tests
+          cargo test -p kuzushi-cli mcp::tests
+      - name: Package binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          staging="kuzushi-${version}-${{ matrix.slug }}"
+          mkdir -p "${staging}"
+          # `kz` is an argv0 alias of `kuzushi`; the other files are the
+          # sibling MCP servers used by the CLI and agent bridge.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp native/${{ matrix.slug }}/*.exe "${staging}/"
+            7z a "${staging}.zip" "${staging}" > /dev/null
+          else
+            cp native/${{ matrix.slug }}/* "${staging}/"
+            tar -czf "${staging}.tar.gz" "${staging}"
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-native-${{ matrix.slug }}
+          path: |
+            kuzushi-*.tar.gz
+            kuzushi-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ── Create GitHub Release (reuses dist/native artifacts + changelog) ────
+  github-release:
+    needs: [ci, native-binaries]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Download cross-platform binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: release-native-*
+          merge-multiple: true
+
+      - name: Stage native binaries for every built platform
+        # Same staging as publish-npm so the .tgz attached to the GitHub
+        # Release is multi-platform too. The original archives are kept in
+        # the workspace — the release step attaches them below.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in kuzushi-*.tar.gz; do
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
+            mkdir -p "native/${slug}"
+            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
+            chmod 755 "native/${slug}"/kuzushi*
+          done
+          for archive in kuzushi-*.zip; do
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
+            mkdir -p "native/${slug}"
+            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
+          done
+          ls -la native/*/
+
+      - name: Verify required multi-platform release assembly
+        env:
+          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+        run: pnpm verify:pack
+
+      # Pack the schema/native package after native/ was staged above; skip
+      # prepack so the already-tested binaries are not rebuilt.
+      - run: npm pack --ignore-scripts
+
+      - name: Generate changelog from commits since previous tag
+        run: |
+          set -euo pipefail
+          CHANGELOG="${RUNNER_TEMP}/changelog.txt"
+          # Canonical "previous tag reachable from the parent of the release commit";
+          # fall back to the initial commit for first-ever releases.
+          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
+          if [ -z "${PREV_TAG}" ]; then
+            INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n 1)
+            echo "No previous tag; using initial commit ${INITIAL_COMMIT}."
+            git log --pretty=format:"- %s (%h)" "${INITIAL_COMMIT}..HEAD" > "${CHANGELOG}"
+          else
+            echo "Previous tag: ${PREV_TAG}"
+            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > "${CHANGELOG}"
+          fi
+          echo "CHANGELOG_PATH=${CHANGELOG}" >> "${GITHUB_ENV}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          body_path: ${{ env.CHANGELOG_PATH }}
+          files: |
+            kuzushi-*.tgz
+            kuzushi-*.tar.gz
+            kuzushi-*.zip
