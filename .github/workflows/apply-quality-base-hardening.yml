@@ -26,9 +26,10 @@ jobs:
         with:
           ref: ci/2026-08-04-full-private-product
           fetch-depth: 1
-      - name: Wire one explicit base through reusable and release CI
+      - name: Generate exact reusable and release workflow contents
         run: |
           set -euo pipefail
+          mkdir -p .generated-workflows
           python3 - <<'PY'
           from pathlib import Path
 
@@ -66,23 +67,23 @@ jobs:
           new_base = expression + " inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
           if text.count(old_base) != 3:
               raise SystemExit(f'expected three changed-code base expressions, found {text.count(old_base)}')
-          ci.write_text(text.replace(old_base, new_base))
+          Path('.generated-workflows/ci.yml').write_text(text.replace(old_base, new_base))
 
-          release = Path('.github/workflows/release.yml')
-          text = release.read_text()
+          text = Path('.github/workflows/release.yml').read_text()
           old = "    uses: ./.github/workflows/full-product-ci.yml\n    secrets:"
           new = "    uses: ./.github/workflows/full-product-ci.yml\n    with:\n      quality_base_ref: HEAD^\n    secrets:"
           if text.count(old) != 1:
               raise SystemExit(f'expected one release caller anchor, found {text.count(old)}')
-          release.write_text(text.replace(old, new))
+          Path('.generated-workflows/release.yml').write_text(text.replace(old, new))
           PY
-          git diff --check
-          git diff -- .github/workflows/ci.yml .github/workflows/release.yml
-      - name: Commit explicit quality-base wiring
+          git diff --no-index --check /dev/null .generated-workflows/ci.yml || true
+          git diff --no-index --check /dev/null .generated-workflows/release.yml || true
+          sha256sum .generated-workflows/ci.yml .generated-workflows/release.yml
+      - name: Commit generated blobs outside protected workflow paths
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/ci.yml .github/workflows/release.yml
-          git commit -m 'ci: pass an explicit changed-code base through release validation'
+          git add .generated-workflows/ci.yml .generated-workflows/release.yml
+          git commit -m 'ci: stage generated full-product workflow blobs'
           git push origin HEAD:ci/2026-08-04-full-private-product
