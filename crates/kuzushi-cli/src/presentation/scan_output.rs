@@ -107,6 +107,7 @@ pub(crate) fn scan_json_output(
         "runId": data.get("runId").cloned(),
         "target": data.get("target").cloned(),
         "findingsCount": data.get("findingsCount").cloned(),
+        "costUsd": scan_cost_usd(result),
         "db": workspace.findings_db_path(),
         "mode": data.get("mode").cloned(),
         "whiteboxStatic": data.get("whiteboxStatic").cloned(),
@@ -187,6 +188,25 @@ mod tests {
         });
         let total = scan_cost_usd(&envelope);
         assert!((total - 0.18344).abs() < 1e-6, "got {total}");
+    }
+
+    #[test]
+    fn scan_json_output_reports_the_same_rolled_up_cost() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let envelope = json!({
+            "ok": true,
+            "data": {
+                "runId": "scan-cost-json",
+                "agentic": { "costUsd": 0.17743 },
+                "triage": { "costUsd": 0.00601 },
+            }
+        });
+        let data = scan_result_data(&envelope);
+        let output = scan_json_output(&workspace, &envelope, &data);
+
+        let cost = output.get("costUsd").and_then(serde_json::Value::as_f64).unwrap();
+        assert!((cost - scan_cost_usd(&envelope)).abs() < 1e-9, "got {cost}");
     }
 
     #[test]
