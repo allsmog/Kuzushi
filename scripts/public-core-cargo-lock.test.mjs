@@ -14,8 +14,7 @@ version = "${version}"${source ? `\nsource = "${source}"` : ""}${
     .join("\n")}`;
 }
 
-const privateSource =
-  "git+https://github.com/allsmog/oxidized-joern.git?rev=deadbeef#deadbeef";
+const privateSource = "git+https://github.com/allsmog/oxidized-joern.git?rev=deadbeef#deadbeef";
 const registrySource = "registry+https://github.com/rust-lang/crates.io-index";
 
 function fullLock() {
@@ -81,10 +80,7 @@ test("rejects registry drift or a new external dependency", () => {
 });
 
 test("rejects a missing resolver stub", () => {
-  const missing = publicLock().replace(
-    '[[package]]\nname = "cpg-cli"\nversion = "0.1.0"\n\n',
-    "",
-  );
+  const missing = publicLock().replace('[[package]]\nname = "cpg-cli"\nversion = "0.1.0"\n\n', "");
 
   assert.throws(
     () => validatePublicCoreLock(fullLock(), missing),
