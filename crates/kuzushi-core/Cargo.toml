@@ -8,6 +8,12 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["private-cpg"]
+# Default product builds keep the in-process CPG engine. CI can disable this
+# one feature to compile every kuzushi-core target without private Git access.
+private-cpg = ["kuzushi-cpg/private-engine"]
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
@@ -25,9 +31,10 @@ globset = "0.4"
 # ipnet powers CIDR-range matching in `.kuzushi/scope.toml`.
 ipnet = "2.10"
 kuzushi-codeindex = { path = "../kuzushi-codeindex" }
-# In-process cpg-rs engine adapter: implicit CPG builds + taint-spec
-# translation for the cpg-rs taint backend (no JVM, no external binary).
-kuzushi-cpg = { path = "../kuzushi-cpg" }
+# In-process cpg-rs engine adapter. Its private implementation is enabled by
+# the default `private-cpg` feature; disabling defaults keeps only a fail-closed
+# compile adapter for credential-free core validation.
+kuzushi-cpg = { path = "../kuzushi-cpg", default-features = false }
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }
 libc.workspace = true
