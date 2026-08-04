@@ -28,50 +28,28 @@ jobs:
 
           ci = Path('.github/workflows/ci.yml')
           text = ci.read_text()
-          dispatch = """      private_cpg:
-                  description: Run the credentialed full-workspace CPG, package, and e2e gates
-                  required: false
-                  type: boolean
-                  default: true
-                workflow_call:
-          """.replace("                ", "")
-          dispatch_replacement = """      private_cpg:
-                  description: Run the credentialed full-workspace CPG, package, and e2e gates
-                  required: false
-                  type: boolean
-                  default: true
+          dispatch_anchor = "        default: true\n  workflow_call:"
+          dispatch_replacement = """        default: true
                 quality_base_ref:
                   description: Explicit Git base for changed-code quality gates
                   required: false
                   type: string
                   default: ''
-                workflow_call:
-          """.replace("                ", "")
-          call = """      private_cpg:
-                  description: Run the credentialed full-workspace CPG, package, and e2e gates
-                  required: false
-                  type: boolean
-                  default: true
-                secrets:
-          """.replace("                ", "")
-          call_replacement = """      private_cpg:
-                  description: Run the credentialed full-workspace CPG, package, and e2e gates
-                  required: false
-                  type: boolean
-                  default: true
+              workflow_call:""".replace("              ", "")
+          call_anchor = "        default: true\n    secrets:"
+          call_replacement = """        default: true
                 quality_base_ref:
                   description: Explicit Git base for changed-code quality gates
                   required: false
                   type: string
                   default: ''
-                secrets:
-          """.replace("                ", "")
+              secrets:""".replace("              ", "")
           for old, new, label in (
-              (dispatch, dispatch_replacement, 'workflow_dispatch input'),
-              (call, call_replacement, 'workflow_call input'),
+              (dispatch_anchor, dispatch_replacement, 'workflow_dispatch input'),
+              (call_anchor, call_replacement, 'workflow_call input'),
           ):
               if text.count(old) != 1:
-                  raise SystemExit(f'expected one {label} anchor')
+                  raise SystemExit(f'expected one {label} anchor, found {text.count(old)}')
               text = text.replace(old, new)
           old_base = "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
           new_base = "${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
@@ -81,18 +59,10 @@ jobs:
 
           release = Path('.github/workflows/release.yml')
           text = release.read_text()
-          old = """  ci:
-              uses: ./.github/workflows/full-product-ci.yml
-              secrets:
-          """.replace("            ", "")
-          new = """  ci:
-              uses: ./.github/workflows/full-product-ci.yml
-              with:
-                quality_base_ref: HEAD^
-              secrets:
-          """.replace("            ", "")
+          old = "    uses: ./.github/workflows/full-product-ci.yml\n    secrets:"
+          new = "    uses: ./.github/workflows/full-product-ci.yml\n    with:\n      quality_base_ref: HEAD^\n    secrets:"
           if text.count(old) != 1:
-              raise SystemExit('expected one release full-product caller')
+              raise SystemExit(f'expected one release caller anchor, found {text.count(old)}')
           release.write_text(text.replace(old, new))
           PY
           git diff --check
