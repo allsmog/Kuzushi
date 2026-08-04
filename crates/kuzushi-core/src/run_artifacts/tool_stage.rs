@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 /// Tool-generic per-run stage receipts (`<run>/stages.jsonl`), the durable
 /// audit sibling of the sast:scan-specific `phase-stages.jsonl`. Any
@@ -13,10 +14,16 @@ pub struct ToolStageReceipt {
     /// Stable stage id, e.g. "research", "actor:remote_unauth", "engine:semgrep".
     pub stage: String,
     pub outcome: PhaseStageOutcome,
-    /// Target-relative paths this stage wrote; a continuation only trusts a
-    /// completed stage whose artifacts still exist.
+    /// Target-relative paths this stage wrote. A continuation trusts a
+    /// completed stage only when every path still exists and its digest still
+    /// matches the content committed by the completing run.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<String>,
+    /// Content digest keyed by the exact target-relative artifact path. Empty
+    /// on legacy receipts and skipped stages; a completed stage with artifacts
+    /// but no complete digest set is deliberately not reusable.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub artifact_digests: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub recorded_at_ms: u64,
@@ -80,6 +87,7 @@ mod tests {
             stage: stage.to_string(),
             outcome: PhaseStageOutcome::Completed,
             artifacts: vec![format!(".kuzushi/tm/{stage}.json")],
+            artifact_digests: BTreeMap::new(),
             detail: None,
             recorded_at_ms: 7,
         };
@@ -97,6 +105,19 @@ mod tests {
                 && artifact.label == "tool stage receipts"
                 && artifact.kind == "jsonl"
         }));
+    }
+
+    #[test]
+    fn legacy_receipt_without_digests_still_deserializes() {
+        let receipt: ToolStageReceipt = serde_json::from_value(serde_json::json!({
+            "stage": "research",
+            "outcome": "completed",
+            "artifacts": ["research.json"],
+            "recordedAtMs": 7
+        }))
+        .unwrap();
+
+        assert!(receipt.artifact_digests.is_empty());
     }
 
     #[test]

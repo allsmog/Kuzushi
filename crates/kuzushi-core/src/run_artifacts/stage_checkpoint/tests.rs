@@ -10,7 +10,7 @@ fn workspace() -> tempfile::TempDir {
 
 fn open_handle(target: &Path, run_id: &str) -> StageCheckpointHandle {
     let store = StageCheckpointStore::discover(target, &[7u8; 32]).unwrap();
-    StageCheckpointHandle::open_with_tree_identity(
+    StageCheckpointHandle::open_with_source_identity(
         store,
         target,
         run_id,
@@ -105,6 +105,184 @@ fn missing_stage_artifact_forces_the_stage_to_rerun() {
 }
 
 #[test]
+fn changed_stage_artifact_content_forces_the_stage_to_rerun() {
+    let temp = workspace();
+    let artifact = temp.path().join("research.json");
+    fs::write(&artifact, "{\"version\":1}").unwrap();
+
+    let first = open_handle(temp.path(), "run-1");
+    first
+        .stage("research")
+        .complete(vec!["research.json".into()]);
+    assert!(first.completed_stage("research").is_some());
+    drop(first);
+
+    fs::write(&artifact, "{\"version\":2}").unwrap();
+    let second = open_handle(temp.path(), "run-2");
+
+    assert!(second.resumed_from().is_none());
+    assert!(
+        second.completed_stage("research").is_none(),
+        "an existing artifact with different bytes must not satisfy resume"
+    );
+}
+
+#[test]
+fn changed_upstream_artifact_invalidates_later_stage_reuse() {
+    let temp = workspace();
+    let research = temp.path().join("research.json");
+    let coverage = temp.path().join("coverage.json");
+    fs::write(&research, "{\"version\":1}").unwrap();
+    fs::write(&coverage, "{\"coverage\":1}").unwrap();
+
+    let first = open_handle(temp.path(), "run-1");
+    first
+        .stage("research")
+        .complete(vec!["research.json".into()]);
+    first
+        .stage("coverage")
+        .complete(vec!["coverage.json".into()]);
+    drop(first);
+
+    fs::write(&research, "{\"version\":2}").unwrap();
+    let second = open_handle(temp.path(), "run-2");
+
+    assert!(second.completed_stage("research").is_none());
+    assert!(
+        second.completed_stage("coverage").is_none(),
+        "a downstream stage must not survive an invalid upstream dependency"
+    );
+}
+
+#[test]
+fn rerunning_upstream_stage_discards_later_prior_receipts() {
+    let temp = workspace();
+    fs::write(temp.path().join("research.json"), "{}").unwrap();
+    fs::write(temp.path().join("coverage.json"), "{}").unwrap();
+
+    let first = open_handle(temp.path(), "run-1");
+    first
+        .stage("research")
+        .complete(vec!["research.json".into()]);
+    first
+        .stage("coverage")
+        .complete(vec!["coverage.json".into()]);
+    drop(first);
+
+    let second = open_handle(temp.path(), "run-2");
+    assert!(second.completed_stage("research").is_some());
+    second.record_reused_stage("research", "checked before rerun");
+    assert!(second.completed_stage("coverage").is_some());
+    second
+        .stage("research")
+        .complete(vec!["research.json".into()]);
+
+    assert!(second.completed_stage("research").is_some());
+    assert!(
+        second.completed_stage("coverage").is_none(),
+        "rerunning an upstream stage must invalidate its downstream suffix"
+    );
+}
+
+#[test]
+fn recording_reuse_preserves_the_remaining_ordered_suffix() {
+    let temp = workspace();
+    let first = open_handle(temp.path(), "run-1");
+    first.stage("research").complete(Vec::new());
+    first.stage("coverage").complete(Vec::new());
+    drop(first);
+
+    let second = open_handle(temp.path(), "run-2");
+    assert!(second.completed_stage("research").is_some());
+    second.record_reused_stage("research", "reused research");
+
+    assert!(
+        second.completed_stage("coverage").is_some(),
+        "auditing reuse must not invalidate the next paid stage"
+    );
+}
+
+#[test]
+fn inserted_stage_discards_only_the_unconsumed_prior_suffix() {
+    let temp = workspace();
+    let first = open_handle(temp.path(), "run-1");
+    first.stage("research").complete(Vec::new());
+    first.stage("coverage").complete(Vec::new());
+    drop(first);
+
+    let second = open_handle(temp.path(), "run-2");
+    assert!(second.completed_stage("research").is_some());
+    second.record_reused_stage("research", "reused research");
+    second.stage("new-validation").complete(Vec::new());
+    drop(second);
+
+    let third = open_handle(temp.path(), "run-3");
+    assert!(third.completed_stage("research").is_some());
+    third.record_reused_stage("research", "reused research");
+    assert!(third.completed_stage("new-validation").is_some());
+    third.record_reused_stage("new-validation", "reused validation");
+    assert!(
+        third.completed_stage("coverage").is_none(),
+        "a stage inserted into the plan must invalidate the old downstream suffix"
+    );
+}
+
+#[test]
+fn out_of_order_lookup_cannot_reuse_a_downstream_stage() {
+    let temp = workspace();
+    let first = open_handle(temp.path(), "run-1");
+    first.stage("research").complete(Vec::new());
+    first.stage("coverage").complete(Vec::new());
+    drop(first);
+
+    let second = open_handle(temp.path(), "run-2");
+
+    assert!(second.completed_stage("coverage").is_none());
+    assert!(
+        second.completed_stage("research").is_none(),
+        "requesting a downstream stage first invalidates the stale plan"
+    );
+}
+
+#[test]
+fn pending_disclosure_rejects_modified_checkpoint_artifacts() {
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    crate::workspace::initialize_workspace_state(temp.path()).unwrap();
+    fs::write(temp.path().join("source.rs"), "fn stable() {}\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "stable"]);
+
+    let artifact = temp.path().join(".kuzushi/research.json");
+    fs::write(&artifact, "{\"version\":1}").unwrap();
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(vec![".kuzushi/research.json".into()]);
+    write_requested_operation(temp.path(), "run-1", [7u8; 32]);
+
+    let before = pending_stage_checkpoints(temp.path());
+    assert_eq!(before.len(), 1);
+    assert_eq!(before[0].completed_stages, 1);
+    assert!(before[0].reuse_eligible);
+
+    fs::write(&artifact, "{\"version\":2}").unwrap();
+    let after = pending_stage_checkpoints(temp.path());
+
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].completed_stages, 0);
+    assert!(!after[0].reuse_eligible);
+    assert_eq!(after[0].current_stage.as_deref(), Some("research"));
+    assert!(matching_checkpoint_coordinates_for_run(temp.path(), "run-1").is_none());
+}
+
+#[test]
 fn clear_on_completion_removes_the_pending_checkpoint() {
     let temp = workspace();
     let handle = open_handle(temp.path(), "run-1");
@@ -158,7 +336,7 @@ fn changed_clean_revision_does_not_reuse_a_stage_checkpoint() {
 }
 
 #[test]
-fn non_git_target_never_reuses_a_stage_checkpoint() {
+fn non_git_target_reuses_a_checkpoint_when_content_is_unchanged() {
     let temp = workspace();
     open_real_handle(temp.path(), "run-1")
         .stage("research")
@@ -166,12 +344,12 @@ fn non_git_target_never_reuses_a_stage_checkpoint() {
 
     let next = open_real_handle(temp.path(), "run-2");
 
-    assert!(next.resumed_from().is_none());
-    assert!(next.completed_stage("research").is_none());
+    assert_eq!(next.resumed_from().as_deref(), Some("run-1"));
+    assert!(next.completed_stage("research").is_some());
 }
 
 #[test]
-fn dirty_target_never_reuses_a_clean_stage_checkpoint() {
+fn changed_dirty_target_does_not_reuse_a_stage_checkpoint() {
     if std::process::Command::new("git")
         .arg("--version")
         .output()
@@ -194,6 +372,82 @@ fn dirty_target_never_reuses_a_clean_stage_checkpoint() {
 
     assert!(next.resumed_from().is_none());
     assert!(next.completed_stage("research").is_none());
+}
+
+#[test]
+fn unchanged_dirty_target_reuses_a_content_bound_checkpoint() {
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    fs::write(temp.path().join(".gitignore"), ".kuzushi/\n").unwrap();
+    fs::write(temp.path().join("source.rs"), "fn clean() {}\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "clean"]);
+    fs::write(temp.path().join("source.rs"), "fn dirty() {}\n").unwrap();
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+
+    let next = open_real_handle(temp.path(), "run-2");
+
+    assert_eq!(next.resumed_from().as_deref(), Some("run-1"));
+    assert!(next.completed_stage("research").is_some());
+}
+
+#[test]
+fn changed_git_ignored_source_does_not_reuse_a_stage_checkpoint() {
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    let temp = workspace();
+    git(temp.path(), &["init"]);
+    fs::write(
+        temp.path().join(".gitignore"),
+        ".kuzushi/\nlocal-policy.toml\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("source.rs"), "fn stable() {}\n").unwrap();
+    fs::write(temp.path().join("local-policy.toml"), "mode = 'first'\n").unwrap();
+    git(temp.path(), &["add", "."]);
+    git(temp.path(), &["commit", "-m", "stable"]);
+    open_real_handle(temp.path(), "run-1")
+        .stage("research")
+        .complete(Vec::new());
+
+    fs::write(temp.path().join("local-policy.toml"), "mode = 'second'\n").unwrap();
+    let next = open_real_handle(temp.path(), "run-2");
+
+    assert!(next.resumed_from().is_none());
+    assert!(next.completed_stage("research").is_none());
+}
+
+#[test]
+fn different_kuzushi_build_identity_does_not_reuse_a_checkpoint() {
+    let temp = workspace();
+    let first = open_handle(temp.path(), "run-1");
+    first.stage("research").complete(Vec::new());
+    let path = first.store.path.clone();
+    drop(first);
+    let mut file: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    file["implementationIdentity"] = serde_json::json!("different-build");
+    fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let next = open_handle(temp.path(), "run-2");
+
+    assert!(next.resumed_from().is_none());
+    assert!(next.completed_stage("research").is_none());
+    assert!(pending_stage_checkpoints(temp.path()).is_empty());
 }
 
 #[test]

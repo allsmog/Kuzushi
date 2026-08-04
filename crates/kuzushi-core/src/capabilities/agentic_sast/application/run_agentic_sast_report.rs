@@ -156,7 +156,7 @@ fn read_agentic_stage_checkpoint(
     let receipt = handle.completed_stage(stage_id)?;
     let payload = handle.read_stage_payload(&receipt)?;
     let checkpoint = serde_json::from_value::<AgenticSastStageCheckpoint>(payload).ok()?;
-    handle.stage(stage_id).skip("reused completed agentic SAST stage");
+    handle.record_reused_stage(stage_id, "reused completed agentic SAST stage");
     Some(checkpoint.into_reused_result())
 }
 

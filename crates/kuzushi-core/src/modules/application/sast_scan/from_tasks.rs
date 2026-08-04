@@ -306,9 +306,10 @@ fn reuse_completed_engine_output(
     let handle = handle?;
     let receipt = handle.completed_stage(stage_id)?;
     let output = handle.read_stage_payload(&receipt)?;
-    handle
-        .stage(stage_id)
-        .skip("reused completed engine output from prior failed run");
+    handle.record_reused_stage(
+        stage_id,
+        "reused completed engine output from prior failed run",
+    );
     Some(output)
 }
 

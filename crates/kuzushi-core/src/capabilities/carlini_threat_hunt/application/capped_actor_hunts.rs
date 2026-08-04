@@ -244,9 +244,10 @@ fn reuse_checkpointed_actor_response(
     let source = handle
         .resumed_from()
         .unwrap_or_else(|| "prior run".to_string());
-    handle
-        .stage(stage_id)
-        .skip(&format!("reused checkpointed actor response from {source}"));
+    handle.record_reused_stage(
+        stage_id,
+        &format!("reused checkpointed actor response from {source}"),
+    );
     record_normalized_actor_findings(state, target, options, actor_fingerprint, payload)?;
     Ok(true)
 }

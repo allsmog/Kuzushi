@@ -1,6 +1,7 @@
 use super::tool_stage::{append_tool_stage_receipt, ToolStageReceipt};
 use super::*;
 use crate::run_artifacts::scan_stage::PhaseStageOutcome;
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 #[path = "stage_checkpoint/discovery.rs"]
@@ -24,7 +25,7 @@ mod tests;
 /// survive, and re-dispatching the identical operation after a failure
 /// resumes at the failed stage. Completion clears the checkpoint. All writes
 /// are best-effort: a failed checkpoint write must never fail the paid run.
-pub(super) const STAGE_CHECKPOINT_VERSION: u32 = 1;
+pub(super) const STAGE_CHECKPOINT_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,13 +34,16 @@ pub struct StageCheckpointFile {
     /// Full hex operation fingerprint; the file name carries the first 16
     /// chars, the body keeps the whole value for match validation.
     pub fingerprint: String,
+    /// Kuzushi build that owns the staged executor contract. Checkpoints from
+    /// another build never cross the live Rust dispatch boundary.
+    pub implementation_identity: String,
     pub tool: String,
     /// The run that most recently wrote this checkpoint.
     pub source_run_id: String,
-    /// Workspace content identity at write time (clean git revision). None
-    /// for dirty or non-git targets; those checkpoints are never reused.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tree_identity: Option<String>,
+    /// Bounded workspace content identity at write time. Git targets include
+    /// the revision as an additional binding; dirty and non-Git targets remain
+    /// reusable only while their indexed content is byte-for-byte unchanged.
+    pub source_identity: String,
     /// Last stage that started but has not completed — the resume point.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub current_stage: Option<String>,
@@ -50,6 +54,7 @@ pub struct StageCheckpointFile {
 pub struct StageCheckpointStore {
     path: PathBuf,
     fingerprint: String,
+    implementation_identity: String,
 }
 
 impl StageCheckpointStore {
@@ -60,19 +65,25 @@ impl StageCheckpointStore {
         if !kuzushi_dir.is_dir() {
             return None;
         }
+        let implementation_identity = stage_implementation_identity()?;
         let fingerprint = hex_fingerprint(operation_fingerprint);
         let path = kuzushi_dir
             .join("v3")
             .join("checkpoints")
             .join(format!("stage-{}.json", &fingerprint[..16]));
-        Some(Self { path, fingerprint })
+        Some(Self {
+            path,
+            fingerprint,
+            implementation_identity,
+        })
     }
 
     fn load(&self) -> Option<StageCheckpointFile> {
         let raw = fs::read_to_string(&self.path).ok()?;
         let file = serde_json::from_str::<StageCheckpointFile>(&raw).ok()?;
-        let matches =
-            file.version == STAGE_CHECKPOINT_VERSION && file.fingerprint == self.fingerprint;
+        let matches = file.version == STAGE_CHECKPOINT_VERSION
+            && file.fingerprint == self.fingerprint
+            && file.implementation_identity == self.implementation_identity;
         matches.then_some(file)
     }
 
@@ -99,8 +110,14 @@ fn hex_fingerprint(fingerprint: &[u8; 32]) -> String {
         .collect()
 }
 
+fn stage_implementation_identity() -> Option<String> {
+    let git_sha = option_env!("KUZUSHI_GIT_SHA")?.trim();
+    (!git_sha.is_empty()).then(|| format!("{}@{git_sha}", env!("CARGO_PKG_VERSION")))
+}
+
 struct StageCheckpointState {
     prior: Vec<ToolStageReceipt>,
+    reused_prior: usize,
     completed_now: Vec<ToolStageReceipt>,
     current: Option<String>,
 }
@@ -115,38 +132,47 @@ pub struct StageCheckpointHandle {
     target: PathBuf,
     run_id: String,
     tool: String,
-    tree_identity: Option<String>,
+    source_identity: String,
     resumed_from: Option<String>,
     state: Mutex<StageCheckpointState>,
 }
 
 impl StageCheckpointHandle {
     pub fn open(store: StageCheckpointStore, target: &Path, run_id: &str, tool: &str) -> Self {
-        let tree_identity = clean_tree_identity(target);
-        Self::open_with_tree_identity(store, target, run_id, tool, tree_identity)
+        let source_identity =
+            crate::incremental_index::current_workspace_resume_identity(target).ok();
+        Self::open_with_source_identity(store, target, run_id, tool, source_identity)
     }
 
-    fn open_with_tree_identity(
+    fn open_with_source_identity(
         store: StageCheckpointStore,
         target: &Path,
         run_id: &str,
         tool: &str,
-        tree_identity: Option<String>,
+        source_identity: Option<String>,
     ) -> Self {
         let prior_file = store
             .load()
-            .filter(|file| prior_checkpoint_is_fresh(file, tool, tree_identity.as_deref()));
-        let resumed_from = prior_file.as_ref().map(|file| file.source_run_id.clone());
-        let prior = prior_file.map(|file| file.completed).unwrap_or_default();
+            .filter(|file| prior_checkpoint_is_fresh(file, tool, source_identity.as_deref()));
+        let (resumed_from, prior) = prior_file
+            .map(|file| {
+                let mut prior = file.completed;
+                let reusable = reusable_stage_prefix_len(target, &prior);
+                prior.truncate(reusable);
+                let resumed_from = (!prior.is_empty()).then_some(file.source_run_id);
+                (resumed_from, prior)
+            })
+            .unwrap_or_default();
         Self {
             store,
             target: target.to_path_buf(),
             run_id: run_id.to_string(),
             tool: tool.to_string(),
-            tree_identity,
+            source_identity: source_identity.unwrap_or_default(),
             resumed_from,
             state: Mutex::new(StageCheckpointState {
                 prior,
+                reused_prior: 0,
                 completed_now: Vec::new(),
                 current: None,
             }),
@@ -158,22 +184,69 @@ impl StageCheckpointHandle {
         self.resumed_from.clone()
     }
 
-    /// A completed receipt for `stage`, only while every artifact it
-    /// declared still exists — otherwise the stage must re-run.
+    /// A completed receipt for `stage`, only while every stage through it is
+    /// still reusable. Stage checkpoints form an ordered dependency chain: if
+    /// an upstream artifact is missing or changed, that stage and every later
+    /// stage must re-run even when a downstream artifact still matches.
     pub fn completed_stage(&self, stage: &str) -> Option<ToolStageReceipt> {
-        let state = self.state.lock().ok()?;
-        state
+        let mut state = self.state.lock().ok()?;
+        let reusable_prior = reusable_stage_prefix_len(&self.target, &state.prior);
+        if reusable_prior < state.prior.len() {
+            state.prior.truncate(reusable_prior);
+            state.reused_prior = state.reused_prior.min(reusable_prior);
+            state.completed_now.clear();
+        }
+        let reusable_now = reusable_stage_prefix_len(&self.target, &state.completed_now);
+        state.completed_now.truncate(reusable_now);
+        if let Some(receipt) = state
             .completed_now
             .iter()
-            .chain(state.prior.iter())
+            .chain(state.prior[..state.reused_prior].iter())
             .find(|receipt| receipt.stage == stage)
-            .filter(|receipt| self.artifacts_exist(receipt))
-            .cloned()
+        {
+            return Some(receipt.clone());
+        }
+        let next = state.prior.get(state.reused_prior)?.clone();
+        if next.stage != stage {
+            let reused = state.reused_prior;
+            state.prior.truncate(reused);
+            self.save_locked(&state);
+            return None;
+        }
+        state.reused_prior += 1;
+        Some(next)
+    }
+
+    /// Record that a previously completed stage was consumed by this run.
+    /// This writes a visible Skipped receipt and advances checkpoint ownership
+    /// without entering the execution path that invalidates a stage suffix.
+    pub fn record_reused_stage(&self, stage: &str, detail: &str) {
+        let receipt = stage_receipt(
+            stage,
+            PhaseStageOutcome::Skipped,
+            Vec::new(),
+            BTreeMap::new(),
+            Some(detail.to_string()),
+        );
+        let Ok(state) = self.state.lock() else {
+            return;
+        };
+        let was_reused = state.prior[..state.reused_prior]
+            .iter()
+            .chain(state.completed_now.iter())
+            .any(|completed| completed.stage == stage);
+        if !was_reused {
+            return;
+        }
+        let _ = append_tool_stage_receipt(&self.target, &self.run_id, &receipt);
+        self.save_locked(&state);
     }
 
     /// Begin a stage: records it as the resume point and returns the RAII
-    /// guard. Dropping the guard without `complete`/`skip` records nothing —
-    /// an incomplete stage is implied by absence.
+    /// guard. Starting a previously completed stage invalidates that stage's
+    /// old receipt and every later receipt before execution begins, so a crash
+    /// during the rerun cannot resurrect a stale downstream suffix. Dropping
+    /// the guard without `complete`/`skip` records no completion.
     pub fn stage(&self, stage: &str) -> StageGuard<'_> {
         self.mark_current(stage);
         StageGuard {
@@ -186,6 +259,7 @@ impl StageCheckpointHandle {
     /// point reports a real resume coordinate.
     pub fn mark_current(&self, stage: &str) {
         if let Ok(mut state) = self.state.lock() {
+            invalidate_from_stage(&mut state, stage);
             state.current = Some(stage.to_string());
             self.save_locked(&state);
         }
@@ -214,18 +288,18 @@ impl StageCheckpointHandle {
         serde_json::from_str(&raw).ok()
     }
 
-    fn artifacts_exist(&self, receipt: &ToolStageReceipt) -> bool {
-        receipt
-            .artifacts
-            .iter()
-            .all(|artifact| self.target.join(artifact).exists())
-    }
-
     fn record_completed(&self, stage: &str, artifacts: Vec<String>) {
-        let receipt = stage_receipt(stage, PhaseStageOutcome::Completed, artifacts, None);
+        let artifact_digests = stage_artifact_digests(&self.target, &artifacts);
+        let receipt = stage_receipt(
+            stage,
+            PhaseStageOutcome::Completed,
+            artifacts,
+            artifact_digests,
+            None,
+        );
         let _ = append_tool_stage_receipt(&self.target, &self.run_id, &receipt);
         if let Ok(mut state) = self.state.lock() {
-            state.prior.retain(|prior| prior.stage != stage);
+            invalidate_from_stage(&mut state, stage);
             state.completed_now.push(receipt);
             state.current = None;
             self.save_locked(&state);
@@ -237,6 +311,7 @@ impl StageCheckpointHandle {
             stage,
             PhaseStageOutcome::Skipped,
             Vec::new(),
+            BTreeMap::new(),
             Some(detail.to_string()),
         );
         let _ = append_tool_stage_receipt(&self.target, &self.run_id, &receipt);
@@ -258,29 +333,86 @@ impl StageCheckpointHandle {
         self.store.save(&StageCheckpointFile {
             version: STAGE_CHECKPOINT_VERSION,
             fingerprint: self.store.fingerprint.clone(),
+            implementation_identity: self.store.implementation_identity.clone(),
             tool: self.tool.clone(),
             source_run_id: self.run_id.clone(),
-            tree_identity: self.tree_identity.clone(),
+            source_identity: self.source_identity.clone(),
             current_stage: state.current.clone(),
             completed,
         });
     }
 }
 
-/// A prior checkpoint is trusted only for the same tool and the same known,
-/// clean workspace revision. Dirty and non-git targets rerun paid stages
-/// rather than risking stale evidence reuse.
+fn invalidate_from_stage(state: &mut StageCheckpointState, stage: &str) {
+    if let Some(index) = state.prior.iter().position(|prior| prior.stage == stage) {
+        state.prior.truncate(index);
+        state.reused_prior = state.reused_prior.min(index);
+        state.completed_now.clear();
+    } else if let Some(index) = state
+        .completed_now
+        .iter()
+        .position(|completed| completed.stage == stage)
+    {
+        state.completed_now.truncate(index);
+    } else if state.reused_prior < state.prior.len() {
+        state.prior.truncate(state.reused_prior);
+    }
+}
+
+/// A prior checkpoint is trusted only for the same tool and exact bounded
+/// workspace content identity.
 fn prior_checkpoint_is_fresh(
     file: &StageCheckpointFile,
     tool: &str,
-    tree_identity: Option<&str>,
+    source_identity: Option<&str>,
 ) -> bool {
-    if file.tool != tool {
+    file.tool == tool && source_identity.is_some_and(|current| file.source_identity == current)
+}
+
+pub(super) fn reusable_stage_prefix_len(
+    target: &Path,
+    completed: &[ToolStageReceipt],
+) -> usize {
+    completed
+        .iter()
+        .take_while(|receipt| stage_receipt_artifacts_are_current(target, receipt))
+        .count()
+}
+
+fn stage_receipt_artifacts_are_current(target: &Path, receipt: &ToolStageReceipt) -> bool {
+    if receipt.artifacts.is_empty() {
+        return receipt.artifact_digests.is_empty();
+    }
+    if receipt.artifact_digests.len() != receipt.artifacts.len() {
         return false;
     }
-    matches!(
-        (file.tree_identity.as_deref(), tree_identity),
-        (Some(prior), Some(current)) if prior == current
+    receipt.artifacts.iter().all(|artifact| {
+        let Some(expected) = receipt.artifact_digests.get(artifact) else {
+            return false;
+        };
+        stage_artifact_digest(target, artifact).as_deref() == Some(expected.as_str())
+    })
+}
+
+fn stage_artifact_digests(target: &Path, artifacts: &[String]) -> BTreeMap<String, String> {
+    artifacts
+        .iter()
+        .filter_map(|artifact| {
+            stage_artifact_digest(target, artifact).map(|digest| (artifact.clone(), digest))
+        })
+        .collect()
+}
+
+fn stage_artifact_digest(target: &Path, artifact: &str) -> Option<String> {
+    let canonical_target = target.canonicalize().ok()?;
+    let canonical_artifact = target.join(artifact).canonicalize().ok()?;
+    if !canonical_artifact.starts_with(&canonical_target) {
+        return None;
+    }
+    let bytes = fs::read(canonical_artifact).ok()?;
+    Some(
+        crate::identity::hash_parts("kuzushi.stage-artifact.v1", &[bytes.as_slice()])
+            .to_string(),
     )
 }
 
@@ -303,22 +435,18 @@ fn relative_to_target(target: &Path, path: &str) -> Option<String> {
     Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
-fn clean_tree_identity(target: &Path) -> Option<String> {
-    crate::workspace::target_git_metadata(target)
-        .filter(|metadata| !metadata.dirty)
-        .map(|metadata| metadata.sha)
-}
-
 fn stage_receipt(
     stage: &str,
     outcome: PhaseStageOutcome,
     artifacts: Vec<String>,
+    artifact_digests: BTreeMap<String, String>,
     detail: Option<String>,
 ) -> ToolStageReceipt {
     ToolStageReceipt {
         stage: stage.to_string(),
         outcome,
         artifacts,
+        artifact_digests,
         detail,
         recorded_at_ms: epoch_ms(),
     }

@@ -1,5 +1,6 @@
 use super::{
-    clean_tree_identity, StageCheckpointFile, StageCheckpointHandle, STAGE_CHECKPOINT_VERSION,
+    reusable_stage_prefix_len, stage_implementation_identity, StageCheckpointFile,
+    StageCheckpointHandle, STAGE_CHECKPOINT_VERSION,
 };
 use std::cell::RefCell;
 use std::fs;
@@ -57,18 +58,19 @@ pub fn checkpoint_coordinates_for_run(
     checkpoint_files(target)
         .into_iter()
         .find(|(_, file)| file.source_run_id == run_id)
-        .map(|(_, file)| coordinates(file))
+        .map(|(_, file)| coordinates(target, file))
 }
 
 /// Continuation coordinates are eligible only when they match the operation
-/// requested by that exact failed run.
+/// requested by that exact failed run and retain at least one reusable stage.
 pub fn matching_checkpoint_coordinates_for_run(
     target: &Path,
     run_id: &str,
 ) -> Option<StageCheckpointCoordinates> {
     let coordinates = checkpoint_coordinates_for_run(target, run_id)?;
     let requested = requested_operation_fingerprint(target, run_id)?;
-    (requested == coordinates.fingerprint).then_some(coordinates)
+    (requested == coordinates.fingerprint && !coordinates.completed_stages.is_empty())
+        .then_some(coordinates)
 }
 
 fn requested_operation_fingerprint(target: &Path, run_id: &str) -> Option<String> {
@@ -88,17 +90,22 @@ fn requested_operation_fingerprint(target: &Path, run_id: &str) -> Option<String
     })
 }
 
-fn coordinates(file: StageCheckpointFile) -> StageCheckpointCoordinates {
+fn coordinates(target: &Path, file: StageCheckpointFile) -> StageCheckpointCoordinates {
+    let reusable = reusable_stage_prefix_len(target, &file.completed);
+    let completed = &file.completed[..reusable];
+    let resume_from = if reusable < file.completed.len() {
+        Some(file.completed[reusable].stage.clone())
+    } else {
+        file.current_stage
+    };
     StageCheckpointCoordinates {
         fingerprint: file.fingerprint,
-        resume_from: file.current_stage,
-        completed_stages: file
-            .completed
+        resume_from,
+        completed_stages: completed
             .iter()
             .map(|receipt| receipt.stage.clone())
             .collect(),
-        checkpoint_artifacts: file
-            .completed
+        checkpoint_artifacts: completed
             .iter()
             .flat_map(|receipt| receipt.artifacts.iter().cloned())
             .collect(),
@@ -121,31 +128,44 @@ pub struct PendingStageCheckpoint {
 /// surfaces use this to disclose that re-running the failed operation
 /// resumes from its checkpointed stages.
 pub fn pending_stage_checkpoints(target: &Path) -> Vec<PendingStageCheckpoint> {
-    let tree_identity = clean_tree_identity(target);
+    let source_identity =
+        crate::incremental_index::current_workspace_resume_identity(target).ok();
     let mut pending: Vec<PendingStageCheckpoint> = checkpoint_files(target)
         .into_iter()
-        .map(|(path, file)| pending_checkpoint(path, file, tree_identity.as_deref()))
+        .map(|(path, file)| {
+            pending_checkpoint(target, path, file, source_identity.as_deref())
+        })
         .collect();
     pending.sort_by_key(|entry| std::cmp::Reverse(entry.modified_at_unix));
     pending
 }
 
 fn pending_checkpoint(
+    target: &Path,
     path: PathBuf,
     file: StageCheckpointFile,
-    tree_identity: Option<&str>,
+    source_identity: Option<&str>,
 ) -> PendingStageCheckpoint {
-    let reuse_eligible = matches!(
-        (file.tree_identity.as_deref(), tree_identity),
-        (Some(prior), Some(current)) if prior == current
-    );
+    let source_matches = source_identity.is_some_and(|current| file.source_identity == current);
+    let reusable = if source_matches {
+        reusable_stage_prefix_len(target, &file.completed)
+    } else {
+        0
+    };
+    let current_stage = if !source_matches {
+        None
+    } else if reusable < file.completed.len() {
+        Some(file.completed[reusable].stage.clone())
+    } else {
+        file.current_stage.clone()
+    };
     PendingStageCheckpoint {
         tool: file.tool,
         source_run_id: file.source_run_id,
-        completed_stages: file.completed.len() as u32,
-        current_stage: file.current_stage,
+        completed_stages: reusable as u32,
+        current_stage,
         modified_at_unix: modified_at_unix(&path),
-        reuse_eligible,
+        reuse_eligible: reusable > 0,
     }
 }
 
@@ -171,7 +191,10 @@ fn is_stage_checkpoint_leaf(path: &Path) -> bool {
 fn parse_checkpoint_file(path: &Path) -> Option<StageCheckpointFile> {
     let raw = fs::read_to_string(path).ok()?;
     let file = serde_json::from_str::<StageCheckpointFile>(&raw).ok()?;
-    (file.version == STAGE_CHECKPOINT_VERSION).then_some(file)
+    let implementation_identity = stage_implementation_identity()?;
+    (file.version == STAGE_CHECKPOINT_VERSION
+        && file.implementation_identity == implementation_identity)
+        .then_some(file)
 }
 
 fn modified_at_unix(path: &Path) -> Option<u64> {
