@@ -83,6 +83,7 @@ mod registry;
 mod pack_module;
 mod report_module;
 mod runtime_requirements;
+mod sast_scan_delegation;
 mod sast_run;
 mod support;
 mod taint_iris;
@@ -149,8 +150,9 @@ pub use dynamic_loader::{
 pub use options::coerce_option_value;
 pub use registry::ModuleRegistry;
 pub use runtime_requirements::{
-    agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace,
-    tool_execution_model, tool_needs_finding_store, tool_needs_runtime,
+    agent_runtime_tool_names, tool_continuation, tool_defaults_to_workspace, tool_execution_model,
+    tool_needs_finding_store, tool_needs_runtime,
     tool_requires_agent_runtime, tool_uses_agent_runtime, tool_uses_finding_store,
     tool_wants_runtime, wants_sast_runtime,
 };
+pub use sast_scan_delegation::sast_scan_delegated_tools;

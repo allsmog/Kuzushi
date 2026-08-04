@@ -186,13 +186,9 @@ fn prepare_interactive_scan_input(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<kuzushi_core::PreparedToolInput> {
     let prepared = registry.prepare_dispatch_input("sast:scan", input, ctx, None)?;
-    let auto_patch = prepared
-        .value()
-        .get("autoPatch")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false);
-    if auto_patch {
-        return Ok(prepared.authorize_interactive_with_delegated_tools(&["patch:finding"]));
+    let delegated_tools = kuzushi_core::modules::sast_scan_delegated_tools(prepared.value());
+    if !delegated_tools.is_empty() {
+        return Ok(prepared.authorize_interactive_with_delegated_tools(&delegated_tools));
     }
     Ok(prepared)
 }

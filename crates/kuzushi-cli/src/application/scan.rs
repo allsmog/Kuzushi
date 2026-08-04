@@ -505,13 +505,9 @@ fn emit_scan_patch_validation_disclosure(
 }
 
 fn authorize_headless_scan(prepared: PreparedToolInput) -> PreparedToolInput {
-    if prepared
-        .value()
-        .get("autoPatch")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-    {
-        return prepared.authorize_explicit_headless_with_delegated_tools(&["patch:finding"]);
+    let delegated_tools = kuzushi_core::modules::sast_scan_delegated_tools(prepared.value());
+    if !delegated_tools.is_empty() {
+        return prepared.authorize_explicit_headless_with_delegated_tools(&delegated_tools);
     }
     prepared.authorize_explicit_headless()
 }

@@ -9,27 +9,42 @@ pub fn confirm_gate_for_tool(
     allowlist: &std::collections::BTreeSet<String>,
 ) -> Option<PendingConfirm> {
     destructive_verb_confirm(tool, input)
-        .or_else(|| delegated_target_write_confirm(tool, input))
+        .or_else(|| delegated_sast_effect_confirm(tool, input))
         .or_else(|| network_egress_confirm(tool, input, allowlist))
         .or_else(|| pwn_candidate_confirm(tool, input, allowlist))
         .or_else(|| fs_write_confirm(tool, input, allowlist))
 }
 
-fn delegated_target_write_confirm(tool: &str, input: &serde_json::Value) -> Option<PendingConfirm> {
-    let auto_patch = tool == "sast:scan"
-        && input
-            .get("autoPatch")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-    auto_patch.then(|| PendingConfirm {
+fn delegated_sast_effect_confirm(tool: &str, input: &serde_json::Value) -> Option<PendingConfirm> {
+    if tool != "sast:scan" {
+        return None;
+    }
+    let delegated_tools = kuzushi_core::modules::sast_scan_delegated_tools(input);
+    let rationale = delegated_sast_effect_rationale(&delegated_tools)?;
+    Some(PendingConfirm {
         kind: ConfirmKind::DescriptorEffect,
         tool: tool.to_string(),
-        target: "patch:finding".to_string(),
-        rationale: Some("autoPatch delegates an approved target write".to_string()),
+        target: delegated_tools.join(" → "),
+        rationale: Some(rationale.to_string()),
         allowlist: None,
         actor: opt_str(input, "actor"),
         remembered: false,
     })
+}
+
+fn delegated_sast_effect_rationale(delegated_tools: &[&str]) -> Option<&'static str> {
+    match delegated_tools {
+        ["verify:exploit", "patch:finding"] => Some(
+            "pocExecution runs generated proof harnesses in an isolated sandbox; autoPatch delegates patch generation and build/test validation in an isolated copy",
+        ),
+        ["verify:exploit"] => {
+            Some("pocExecution runs generated proof harnesses in an isolated sandbox")
+        }
+        ["patch:finding"] => Some(
+            "autoPatch delegates patch generation and build/test validation in an isolated copy",
+        ),
+        _ => None,
+    }
 }
 
 /// Descriptor-owned approval is the final shell gate. It deliberately does

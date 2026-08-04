@@ -133,6 +133,61 @@ fn run_sast_verifier(
     primary_run_id: &str,
     fingerprint: String,
 ) -> Result<Value> {
+    if sast_empirical_verification_requested(input)? {
+        return run_empirical_sast_verifier(
+            registry,
+            ctx,
+            runtime,
+            option_store,
+            artifacts,
+            primary_run_id,
+            fingerprint,
+        );
+    }
+    run_model_sast_verifier(
+        registry,
+        input,
+        ctx,
+        runtime,
+        option_store,
+        artifacts,
+        primary_run_id,
+        fingerprint,
+    )
+}
+
+fn run_empirical_sast_verifier(
+    registry: &ModuleRegistry,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    primary_run_id: &str,
+    fingerprint: String,
+) -> Result<Value> {
+    run_sast_phase_subtool(
+        registry,
+        "verify:exploit",
+        json!({ "fingerprint": fingerprint }),
+        ctx,
+        runtime,
+        option_store,
+        artifacts,
+        WorkflowPhase::Prove,
+        primary_run_id,
+    )
+}
+
+fn run_model_sast_verifier(
+    registry: &ModuleRegistry,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    primary_run_id: &str,
+    fingerprint: String,
+) -> Result<Value> {
     let verify_input = with_sast_prompt_override(
         json!({ "fingerprint": fingerprint }),
         input,
@@ -151,6 +206,10 @@ fn run_sast_verifier(
         WorkflowPhase::Prove,
         primary_run_id,
     )
+}
+
+fn sast_empirical_verification_requested(input: &Value) -> Result<bool> {
+    bool_input(input, &["pocExecution", "poc_execution"])
 }
 
 fn run_optional_sast_patch(
@@ -248,6 +307,29 @@ mod tests {
     use crate::WorkspaceTarget;
     use crate::{TriageOutcome, TriageVerdict};
     use std::path::Path;
+
+    #[test]
+    fn poc_execution_selects_empirical_verification() {
+        assert!(sast_empirical_verification_requested(&json!({
+            "pocExecution": true
+        }))
+        .unwrap());
+        assert!(sast_empirical_verification_requested(&json!({
+            "poc_execution": true
+        }))
+        .unwrap());
+        assert!(!sast_empirical_verification_requested(&json!({})).unwrap());
+    }
+
+    #[test]
+    fn empirical_exploitability_is_eligible_for_fix() {
+        assert!(sast_verification_exploitable(&json!({
+            "data": {"exploitable": true}
+        })));
+        assert!(!sast_verification_exploitable(&json!({
+            "data": {"exploitable": false}
+        })));
+    }
 
     #[test]
     fn non_exploitable_verification_does_not_execute_or_record_fix() {

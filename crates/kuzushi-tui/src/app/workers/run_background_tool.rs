@@ -105,16 +105,13 @@ fn authorize_background_prepared_input(
                 .authorize_requested_with_delegated_tools(authorization, &[detector.as_str()]);
         }
     }
-    let delegates_patch = prepared.tool_name() == "sast:scan"
-        && prepared
-            .value()
-            .get("autoPatch")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-    let prepared = if delegates_patch {
-        prepared.authorize_requested_with_delegated_tools(authorization, &["patch:finding"])?
-    } else {
+    let delegated_tools = (prepared.tool_name() == "sast:scan")
+        .then(|| kuzushi_core::modules::sast_scan_delegated_tools(prepared.value()))
+        .unwrap_or_default();
+    let prepared = if delegated_tools.is_empty() {
         prepared.authorize_requested(authorization)?
+    } else {
+        prepared.authorize_requested_with_delegated_tools(authorization, &delegated_tools)?
     };
     Ok(prepared)
 }

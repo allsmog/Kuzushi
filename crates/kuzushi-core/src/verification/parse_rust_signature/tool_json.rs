@@ -10,6 +10,7 @@ pub fn to_tool_json(finding: &Finding, outcome: &VerificationOutcome) -> Value {
             "fingerprint": finding.fingerprint,
             "ruleId": finding.rule_id,
             "summary": summary,
+            "exploitable": outcome.proof_verdict == ProofVerdict::Exploited,
             "proof": proof,
             "verification": outcome,
     });
@@ -46,4 +47,42 @@ fn verification_proof_snapshot(finding: &Finding, outcome: &VerificationOutcome)
         "costUsd": outcome.cost_usd,
         "provenance": outcome.provenance,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empirical_tool_json_exposes_patch_eligibility_without_reinterpreting_proof() {
+        let finding = Finding::new_tool(
+            "fixture",
+            "fixture/cwe-787",
+            "src/lib.rs",
+            10,
+            None,
+            crate::findings::Severity::High,
+            "fixture",
+        );
+        let outcome = VerificationOutcome {
+            proof_level: 4,
+            proof_verdict: ProofVerdict::Exploited,
+            backend: SandboxBackend::Bwrap,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: Some("sink reached".to_string()),
+            duration_ms: 10,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            provenance: None,
+        };
+
+        let output = to_tool_json(&finding, &outcome);
+
+        assert_eq!(output.pointer("/data/exploitable"), Some(&json!(true)));
+        assert_eq!(
+            output.pointer("/data/proof/proofVerdict"),
+            Some(&json!("exploited"))
+        );
+    }
 }

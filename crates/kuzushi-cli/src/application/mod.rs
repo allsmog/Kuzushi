@@ -7,6 +7,7 @@ pub(crate) mod config_diagnostics;
 pub(crate) mod demo;
 pub(crate) mod export;
 pub(crate) mod findings;
+pub(crate) mod investigate;
 pub(crate) mod kwp;
 pub(crate) mod permissions;
 pub(crate) mod pr_comment;

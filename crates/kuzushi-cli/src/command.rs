@@ -1,8 +1,10 @@
 use clap::Subcommand;
 use std::path::PathBuf;
 
+mod investigate_args;
 mod pr_comment_args;
 mod subcommands;
+pub(crate) use investigate_args::InvestigateArgs;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
     AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
@@ -71,6 +73,8 @@ pub(crate) enum Command {
         #[arg(long)]
         sarif: Option<PathBuf>,
     },
+    /// Run an opinionated evidence campaign through the canonical SAST pipeline.
+    Investigate(InvestigateArgs),
     /// List persisted findings.
     Findings {
         /// Maximum number of findings to list.

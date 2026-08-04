@@ -26,10 +26,10 @@ pub(crate) fn verify_module() -> BuiltinModule {
             )),
             hidden_tool_with_options(
                 "verify:exploit",
-                "Compatibility alias for verify:finding with mode=empirical.",
+                "Empirically verify a finding with an isolated proof harness.",
                 vec![fingerprint_option()],
             )
-            .with_policy(workspace_policy(
+            .with_policy(repository_execute_policy(
                 ToolPhase::Prove,
                 RuntimeRequirement::Never,
                 FindingStoreRequirement::Required,

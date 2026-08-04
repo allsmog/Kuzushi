@@ -29,6 +29,9 @@ pub(crate) async fn dispatch_command(
             dispatch_shell_command(default_target, plain, load, no_session_persistence, argv)
         }
         scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
+        investigate @ Command::Investigate(_) => {
+            dispatch_investigate_command(investigate, default_target).await
+        }
         other => dispatch_non_scan_command(other, default_target, load).await,
     }
 }
@@ -91,13 +94,48 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
     .await
 }
 
+async fn dispatch_investigate_command(
+    command: Command,
+    default_target: Option<PathBuf>,
+) -> Result<()> {
+    let Command::Investigate(args) = command else {
+        unreachable!("non-investigate command routed to investigate dispatcher")
+    };
+    crate::application::investigate::investigate_command(investigate_request(args, default_target)?)
+        .await
+}
+
+fn investigate_request(
+    args: crate::command::InvestigateArgs,
+    default_target: Option<PathBuf>,
+) -> Result<crate::application::investigate::InvestigateRequest> {
+    let target = require_cli_target("investigate", args.target, default_target)?;
+    let gate = crate::application::scan_gate::ScanGatePolicy {
+        fail_on: args.fail_on.map(crate::command::FailOnArg::as_severity),
+        sarif: args.sarif,
+    };
+    Ok(crate::application::investigate::InvestigateRequest {
+        target,
+        profile: args.profile,
+        plan: args.plan,
+        json: args.json,
+        ci: args.ci,
+        scope: crate::application::scan::ScanScopeArgs {
+            shard: args.shard,
+            shard_manifest: args.shard_manifest,
+            paths: args.paths,
+        },
+        gate,
+    })
+}
+
 fn reject_dynamic_load_for_command(command: &Command, specifiers: &[String]) -> Result<()> {
     if specifiers.is_empty() || matches!(command, Command::Shell { .. } | Command::Run { .. }) {
         return Ok(());
     }
-    if matches!(command, Command::Scan { .. }) {
+    if matches!(command, Command::Scan { .. } | Command::Investigate(_)) {
         anyhow::bail!(
-            "--load is supported by shell and `kuzushi run`, not `kuzushi scan`. Next: invoke the trusted dynamic tool with `kuzushi --load <specifier> run <module:tool>`."
+            "--load is supported by shell and `kuzushi run`, not scan or investigate. Next: invoke the trusted dynamic tool with `kuzushi --load <specifier> run <module:tool>`."
         );
     }
     anyhow::bail!(
@@ -111,7 +149,7 @@ mod tests {
         reject_dynamic_load_for_command, reject_session_persistence_flag_for_command,
         shell_target_source,
     };
-    use crate::command::{Command, SessionsCommand};
+    use crate::command::{Command, InvestigateArgs, SessionsCommand};
     use kuzushi_tui::ShellTargetSource;
     use std::path::PathBuf;
 
@@ -141,8 +179,29 @@ mod tests {
             .unwrap_err()
             .to_string();
 
-        assert!(error.contains("not `kuzushi scan`"), "{error}");
+        assert!(error.contains("not scan or investigate"), "{error}");
         assert!(error.contains("kuzushi --load <specifier> run"), "{error}");
+    }
+
+    #[test]
+    fn investigate_rejects_dynamic_load_instead_of_ignoring_it() {
+        let command = Command::Investigate(InvestigateArgs {
+            target: None,
+            profile: "standard".to_string(),
+            plan: false,
+            json: false,
+            ci: false,
+            shard: None,
+            shard_manifest: None,
+            paths: Vec::new(),
+            fail_on: None,
+            sarif: None,
+        });
+        let error = reject_dynamic_load_for_command(&command, &dynamic_specifier())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("not scan or investigate"), "{error}");
     }
 
     #[test]
@@ -328,7 +387,9 @@ async fn dispatch_non_scan_command(
         }
         Command::Mcp { command } => mcp_command(command).await,
         Command::Demo { json } => crate::application::demo::demo_command(json).await,
-        Command::Shell { .. } | Command::Scan { .. } => unreachable!("handled before dispatch"),
+        Command::Shell { .. } | Command::Scan { .. } | Command::Investigate(_) => {
+            unreachable!("handled before dispatch")
+        }
     }
 }
 

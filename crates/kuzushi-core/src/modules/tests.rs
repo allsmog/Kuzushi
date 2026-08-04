@@ -76,6 +76,19 @@ mod tests {
     }
 
     #[test]
+    fn empirical_verification_requires_repository_execution_approval() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let descriptor = registry.resolve_tool("verify:exploit").unwrap();
+
+        assert_eq!(descriptor.effect, ToolEffect::RepositoryExecute);
+        assert_eq!(descriptor.approval, ApprovalPolicy::Explicit);
+        assert_eq!(
+            descriptor.workspace_requirement,
+            WorkspaceRequirement::Required
+        );
+    }
+
+    #[test]
     fn worklist_rank_is_registered_read_only_and_runtime_free() {
         let registry = ModuleRegistry::with_v2_builtins();
         let descriptor = registry.resolve_tool("worklist:rank").unwrap();
@@ -3910,6 +3923,96 @@ OUT
             "input.json"
         )
         .is_file());
+    }
+
+    #[test]
+    fn sast_empirical_verification_uses_proof_tool_and_gates_patch_on_exploitability() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/db.ts"),
+            "const query = req.query.q;\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join(".gitignore"),
+            ".kuzushi/credentials.json\n",
+        )
+        .unwrap();
+        init_git_repo(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let prepared = registry
+            .prepare_dispatch_input(
+                "sast:scan",
+                json!({
+                    "taskMode": "manual",
+                    "tasks": ["agentic"],
+                    "verify": true,
+                    "pocExecution": true,
+                    "autoPatch": true
+                }),
+                &ctx,
+                None,
+            )
+            .unwrap();
+        let delegated_tools = sast_scan_delegated_tools(prepared.value());
+        let prepared =
+            prepared.authorize_explicit_headless_with_delegated_tools(&delegated_tools);
+
+        let result = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/verification/verified")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/patch/patched")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
+        let phases = result
+            .pointer("/data/phaseStages")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .filter_map(|stage| stage["phase"].as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(phases, vec!["scan", "review", "prove"]);
+
+        let verify_log = result
+            .pointer("/data/artifacts/verifyJsonl")
+            .and_then(Value::as_str)
+            .map(fs::read_to_string)
+            .unwrap()
+            .unwrap();
+        assert!(verify_log.contains(r#""exploitable":false"#));
+        assert!(verify_log.contains(r#""kind":"verification-outcome""#));
+        let patch_log = result
+            .pointer("/data/artifacts/patchJsonl")
+            .and_then(Value::as_str)
+            .map(fs::read_to_string)
+            .unwrap()
+            .unwrap();
+        assert!(patch_log.trim().is_empty(), "{patch_log}");
     }
 
     #[test]

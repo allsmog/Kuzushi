@@ -17412,6 +17412,43 @@ fn sast_auto_patch_requires_confirmation_for_delegated_target_write() {
 }
 
 #[test]
+fn sast_empirical_proof_requires_confirmation_for_repository_execution() {
+    let request = confirm_gate_for_tool(
+        "sast:scan",
+        &serde_json::json!({"verify": true, "pocExecution": true}),
+        &std::collections::BTreeSet::new(),
+    )
+    .expect("pocExecution must confirm its nested repository execution");
+
+    assert_eq!(request.kind, ConfirmKind::DescriptorEffect);
+    assert_eq!(request.tool, "sast:scan");
+    assert_eq!(request.target, "verify:exploit");
+    assert!(request
+        .rationale
+        .as_deref()
+        .is_some_and(|text| text.contains("isolated sandbox")));
+}
+
+#[test]
+fn sast_fix_confirmation_discloses_proof_and_patch_effects() {
+    let request = confirm_gate_for_tool(
+        "sast:scan",
+        &serde_json::json!({
+            "verify": true,
+            "pocExecution": true,
+            "autoPatch": true
+        }),
+        &std::collections::BTreeSet::new(),
+    )
+    .expect("fix profile must disclose both nested effects");
+
+    assert_eq!(request.target, "verify:exploit → patch:finding");
+    let rationale = request.rationale.expect("effect rationale");
+    assert!(rationale.contains("proof harnesses"));
+    assert!(rationale.contains("patch generation"));
+}
+
+#[test]
 fn confirm_gate_skips_network_when_allowlisted() {
     let mut allow = std::collections::BTreeSet::new();
     allow.insert("sandbox:run https://refund.acme/api".to_string());
