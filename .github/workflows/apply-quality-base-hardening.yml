@@ -1,0 +1,108 @@
+name: Apply quality base hardening
+
+on:
+  push:
+    branches:
+      - ci/2026-08-04-full-private-product
+    paths:
+      - '.github/workflows/apply-quality-base-hardening.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/ci/2026-08-04-full-private-product'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ci/2026-08-04-full-private-product
+          fetch-depth: 1
+      - name: Wire one explicit base through reusable and release CI
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          ci = Path('.github/workflows/ci.yml')
+          text = ci.read_text()
+          dispatch = '''      private_cpg:
+                  description: Run the credentialed full-workspace CPG, package, and e2e gates
+                  required: false
+                  type: boolean
+                  default: true
+                workflow_call:
+          '''.replace('        ', '')
+          dispatch_replacement = '''      private_cpg:
+                  description: Run the credentialed full-workspace CPG, package, and e2e gates
+                  required: false
+                  type: boolean
+                  default: true
+                quality_base_ref:
+                  description: Explicit Git base for changed-code quality gates
+                  required: false
+                  type: string
+                  default: ''
+                workflow_call:
+          '''.replace('        ', '')
+          call = '''      private_cpg:
+                  description: Run the credentialed full-workspace CPG, package, and e2e gates
+                  required: false
+                  type: boolean
+                  default: true
+                secrets:
+          '''.replace('        ', '')
+          call_replacement = '''      private_cpg:
+                  description: Run the credentialed full-workspace CPG, package, and e2e gates
+                  required: false
+                  type: boolean
+                  default: true
+                quality_base_ref:
+                  description: Explicit Git base for changed-code quality gates
+                  required: false
+                  type: string
+                  default: ''
+                secrets:
+          '''.replace('        ', '')
+          for old, new, label in (
+              (dispatch, dispatch_replacement, 'workflow_dispatch input'),
+              (call, call_replacement, 'workflow_call input'),
+          ):
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one {label} anchor')
+              text = text.replace(old, new)
+          old_base = "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
+          new_base = "${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}"
+          if text.count(old_base) != 3:
+              raise SystemExit(f'expected three changed-code base expressions, found {text.count(old_base)}')
+          text = text.replace(old_base, new_base)
+          ci.write_text(text)
+
+          release = Path('.github/workflows/release.yml')
+          text = release.read_text()
+          old = '''  ci:
+              uses: ./.github/workflows/full-product-ci.yml
+              secrets:
+          '''.replace('      ', '')
+          new = '''  ci:
+              uses: ./.github/workflows/full-product-ci.yml
+              with:
+                quality_base_ref: HEAD^
+              secrets:
+          '''.replace('      ', '')
+          if text.count(old) != 1:
+              raise SystemExit('expected one release full-product caller')
+          release.write_text(text.replace(old, new))
+          PY
+          git diff --check
+          git diff -- .github/workflows/ci.yml .github/workflows/release.yml
+      - name: Commit explicit quality-base wiring
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/workflows/ci.yml .github/workflows/release.yml
+          git commit -m 'ci: pass an explicit changed-code base through release validation'
+          git push origin HEAD:ci/2026-08-04-full-private-product
