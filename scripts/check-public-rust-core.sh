@@ -22,13 +22,26 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+# The shared setup-rust cache contains the complete private/full workspace and
+# can expand to nearly the entire hosted-runner disk. This lane deliberately
+# proves a clean public boundary, so discard that target cache in CI and keep
+# all new artifacts inside the disposable scratch directory. Local callers keep
+# their ordinary target directory untouched unless they explicitly override it.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  rm -rf "${repo_root}/target"
+fi
+export CARGO_TARGET_DIR="${KUZUSHI_PUBLIC_CORE_TARGET_DIR:-${scratch_root}/target}"
+# Debug symbols are irrelevant to check/Clippy/contract tests and more than
+# double the disk required by the large core graph on hosted runners.
+export CARGO_PROFILE_DEV_DEBUG=0
+export CARGO_PROFILE_TEST_DEBUG=0
+
 git -C "${repo_root}" worktree add --detach "${worktree}" HEAD
 node "${repo_root}/scripts/public-core-workspace.mjs" "${worktree}" "${stubs}"
 node --test \
   "${repo_root}/scripts/public-core-cargo-lock.test.mjs" \
   "${repo_root}/scripts/public-core-workspace.test.mjs"
 
-export CARGO_TARGET_DIR="${KUZUSHI_PUBLIC_CORE_TARGET_DIR:-${repo_root}/target/public-core}"
 cd "${worktree}"
 
 # The first metadata resolution is intentionally unlocked: it replaces only
