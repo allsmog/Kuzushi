@@ -8,11 +8,24 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+[features]
+default = ["private-engine"]
+# The implementation lives in the private oxidized-joern repository. This
+# feature isolates compilation and preserves the default shipped product, but
+# Cargo still resolves optional Git manifests before feature selection. The
+# credential-free CI contract therefore also uses an isolated resolver overlay.
+private-engine = [
+  "dep:cpg-analysis",
+  "dep:cpg-cli",
+  "dep:cpg-core",
+  "dep:cpg-incremental",
+]
+
 [dependencies]
-cpg-analysis.workspace = true
-cpg-cli.workspace = true
-cpg-core.workspace = true
-cpg-incremental.workspace = true
+cpg-analysis = { workspace = true, optional = true }
+cpg-cli = { workspace = true, optional = true }
+cpg-core = { workspace = true, optional = true }
+cpg-incremental = { workspace = true, optional = true }
 regex = "1"
 
 [dev-dependencies]
