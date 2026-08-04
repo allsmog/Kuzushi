@@ -10,9 +10,10 @@ repository.workspace = true
 
 [features]
 default = ["private-engine"]
-# The implementation lives in the private oxidized-joern repository. Keeping
-# it behind one explicit feature gives clean environments a credential-free
-# compile contract without changing the default shipped product.
+# The implementation lives in the private oxidized-joern repository. This
+# feature isolates compilation and preserves the default shipped product, but
+# Cargo still resolves optional Git manifests before feature selection. The
+# credential-free CI contract therefore also uses an isolated resolver overlay.
 private-engine = [
   "dep:cpg-analysis",
   "dep:cpg-cli",
