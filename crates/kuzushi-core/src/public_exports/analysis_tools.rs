@@ -1,5 +1,7 @@
 pub use kuzushi_cpg::{
     artifact_dir as cpg_artifact_dir, artifact_langs as cpg_artifact_langs,
+    engine_available as cpg_engine_available,
+    engine_unavailable_message as cpg_engine_unavailable_message,
     has_artifacts as cpg_has_artifacts, supported_languages as cpg_supported_languages,
     GRAPH_SHAPE_VERSION as CPG_GRAPH_SHAPE_VERSION,
 };
