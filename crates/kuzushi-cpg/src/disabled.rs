@@ -16,8 +16,15 @@ fn unavailable() -> String {
     crate::engine_unavailable_message().to_string()
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Project;
+/// Opaque engine handle retained only for API compatibility.
+///
+/// The private field deliberately prevents callers from manufacturing a
+/// validation-only `Project` and obtaining an empty, success-shaped taint
+/// result. The only engine entry points that could return one refuse below.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Project {
+    _private: (),
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Step {
@@ -253,8 +260,7 @@ mod tests {
     fn credential_free_adapter_fails_engine_operations_closed() {
         let temp = tempfile::tempdir().unwrap();
         let scope = BuildScope::whole(temp.path());
-        let error = ensure_project_in(&scope, "rust", &BuildLimits::default())
-            .unwrap_err();
+        let error = ensure_project_in(&scope, "rust", &BuildLimits::default()).unwrap_err();
 
         assert!(error.contains("not compiled"), "{error}");
         assert!(open_project_in(&scope, "rust").is_none());
