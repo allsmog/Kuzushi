@@ -4,6 +4,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      OXIDIZED_JOERN_TOKEN:
+        description: Read-only token scoped only to allsmog/oxidized-joern contents
+        required: true
 
 concurrency:
   group: full-product-${{ github.workflow }}-${{ github.ref }}
@@ -14,12 +19,13 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PRIVATE_CPG_REV: 9ab43859f0c3342c734ff38ea6366711d216c8fd
 
 jobs:
   private-source-contract:
     name: private-source-contract
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -43,12 +49,13 @@ jobs:
           set -euo pipefail
           metadata="${RUNNER_TEMP}/cargo-metadata.json"
           cargo metadata --format-version 1 --locked > "${metadata}"
-          python3 - "${metadata}" <<'PY'
+          python3 - "${metadata}" "${PRIVATE_CPG_REV}" <<'PY'
           import json
           import sys
 
-          expected = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#"
-          packages = json.load(open(sys.argv[1], encoding="utf-8"))["packages"]
+          metadata_path, revision = sys.argv[1:]
+          expected = f"git+https://github.com/allsmog/oxidized-joern.git?rev={revision}#"
+          packages = json.load(open(metadata_path, encoding="utf-8"))["packages"]
           required = {"cpg-analysis", "cpg-cli", "cpg-core", "cpg-incremental"}
           seen = {
               package["name"]
@@ -58,7 +65,95 @@ jobs:
           missing = sorted(required - seen)
           if missing:
               raise SystemExit(f"private CPG metadata missing exact pinned packages: {missing}")
+          unexpected = sorted(
+              package["name"]
+              for package in packages
+              if "github.com/allsmog/oxidized-joern.git" in package.get("source", "")
+              and not package.get("source", "").startswith(expected)
+          )
+          if unexpected:
+              raise SystemExit(f"private CPG metadata contains an unexpected revision: {unexpected}")
           print(f"resolved exact private CPG packages: {', '.join(sorted(seen))}")
           PY
-      - name: Compile the real default-feature CPG adapter
-        run: cargo check --package kuzushi-cpg --all-targets --locked
+
+  complete-private-product:
+    name: complete-private-product
+    needs: private-source-contract
+    uses: ./.github/workflows/ci.yml
+    with:
+      private_cpg: true
+    secrets: inherit
+
+  private-cpg-compatibility:
+    name: private-cpg-compatibility
+    needs: private-source-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Prove adapter API and witnessed-flow semantics
+        run: cargo test --package kuzushi-cpg --test private_engine_compatibility --locked
+      - name: Prove the private MCP server contract
+        run: cargo test --package kuzushi-mcp-cpg --locked
+
+  private-product-benchmarks:
+    name: private-product-benchmarks
+    needs: private-source-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Execute the deterministic SBOM inventory benchmark
+        env:
+          KUZUSHI_BENCH_ITERATIONS: "25"
+        run: cargo bench --package kuzushi-core --bench sbom_inventory --locked
+
+  full-product-gauntlet:
+    name: full-product-gauntlet
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    needs:
+      - private-source-contract
+      - complete-private-product
+      - private-cpg-compatibility
+      - private-product-benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every full-product contract
+        env:
+          SOURCE: ${{ needs.private-source-contract.result }}
+          PRODUCT: ${{ needs.complete-private-product.result }}
+          COMPATIBILITY: ${{ needs.private-cpg-compatibility.result }}
+          BENCHMARKS: ${{ needs.private-product-benchmarks.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for gate in SOURCE PRODUCT COMPATIBILITY BENCHMARKS; do
+            result="${!gate}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::${gate} ended ${result}"
+              failed=1
+            fi
+          done
+          exit "${failed}"
