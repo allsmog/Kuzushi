@@ -30,6 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .generated-workflows
+          git rev-parse 'HEAD^{tree}' > .generated-workflows/base-tree-sha.txt
           python3 - <<'PY'
           from pathlib import Path
 
@@ -76,14 +77,13 @@ jobs:
               raise SystemExit(f'expected one release caller anchor, found {text.count(old)}')
           Path('.generated-workflows/release.yml').write_text(text.replace(old, new))
           PY
-          git diff --no-index --check /dev/null .generated-workflows/ci.yml || true
-          git diff --no-index --check /dev/null .generated-workflows/release.yml || true
           sha256sum .generated-workflows/ci.yml .generated-workflows/release.yml
+          cat .generated-workflows/base-tree-sha.txt
       - name: Commit generated blobs outside protected workflow paths
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .generated-workflows/ci.yml .generated-workflows/release.yml
-          git commit -m 'ci: stage generated full-product workflow blobs'
+          git add .generated-workflows/ci.yml .generated-workflows/release.yml .generated-workflows/base-tree-sha.txt
+          git commit -m 'ci: stage generated workflow tree inputs'
           git push origin HEAD:ci/2026-08-04-full-private-product
