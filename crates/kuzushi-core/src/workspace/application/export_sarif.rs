@@ -4,7 +4,9 @@
 //! 300-line per-file limit enforced by the CRAP-risk gate.
 
 use super::export_metadata::workspace_export_metadata_value;
-use super::export_projection_model::WorkspaceFindingExportRecord;
+use super::export_projection_model::{
+    WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
+};
 use super::*;
 use std::collections::BTreeMap;
 
@@ -176,15 +178,7 @@ fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
         "level": sarif_level(&record.severity),
         "message": { "text": record.message },
         "fingerprints": { "kuzushi/v1": record.fingerprint },
-        "locations": [{
-            "physicalLocation": {
-                "artifactLocation": {
-                    "uri": record.location.file,
-                    "uriBaseId": "WORKSPACE_ROOT",
-                },
-                "region": sarif_region(record),
-            }
-        }],
+        "locations": [{ "physicalLocation": sarif_physical_location(&record.location) }],
         "rank": sarif_rank(&record.proof_confidence),
         "properties": sarif_properties(record),
     });
@@ -238,12 +232,51 @@ fn sarif_rank(proof_confidence: &str) -> f64 {
     }
 }
 
-fn sarif_region(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
-    let mut region = json!({ "startLine": record.location.start_line.max(1) });
-    if let Some(end_line) = record.location.end_line {
-        region["endLine"] = json!(end_line.max(record.location.start_line));
+fn sarif_physical_location(location: &WorkspaceFindingExportLocation) -> serde_json::Value {
+    let mut physical_location = json!({
+        "artifactLocation": sarif_artifact_location(&location.file),
+    });
+    if let Some(region) = sarif_region(location) {
+        physical_location["region"] = region;
     }
-    region
+    physical_location
+}
+
+/// SARIF 2.1.0 §3.4.4 forbids pairing `uriBaseId` with a `uri` that is already
+/// an absolute URI: consumers either reject the result or resolve the URL
+/// against the workspace root. HTTP-capture imports (HAR/Burp) anchor findings
+/// at request URLs rather than repository paths.
+fn sarif_artifact_location(file: &str) -> serde_json::Value {
+    if has_uri_scheme(file) {
+        return json!({ "uri": file });
+    }
+    json!({ "uri": file, "uriBaseId": "WORKSPACE_ROOT" })
+}
+
+fn has_uri_scheme(file: &str) -> bool {
+    let Some((scheme, _)) = file.split_once("://") else {
+        return false;
+    };
+    // Two characters minimum so a Windows drive letter is never read as a
+    // scheme; anything containing `/`, `?`, or `#` fails the character class.
+    scheme.len() >= 2
+        && scheme.starts_with(|first: char| first.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+}
+
+/// `start_line == 0` means the detector reported no line. Omitting the region
+/// keeps the location at artifact granularity instead of asserting line 1.
+fn sarif_region(location: &WorkspaceFindingExportLocation) -> Option<serde_json::Value> {
+    if location.start_line == 0 {
+        return None;
+    }
+    let mut region = json!({ "startLine": location.start_line });
+    if let Some(end_line) = location.end_line {
+        region["endLine"] = json!(end_line.max(location.start_line));
+    }
+    Some(region)
 }
 
 fn sarif_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
@@ -355,3 +388,7 @@ fn sarif_level(severity: &str) -> &'static str {
         _ => "note",
     }
 }
+
+#[cfg(test)]
+#[path = "tests/export_sarif.rs"]
+mod tests;
