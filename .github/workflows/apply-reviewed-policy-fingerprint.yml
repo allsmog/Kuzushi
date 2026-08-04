@@ -12,9 +12,7 @@ permissions:
 
 jobs:
   apply:
-    if: >-
-      github.actor == github.repository_owner &&
-      github.ref == 'refs/heads/ci/2026-08-04-full-private-product'
+    if: github.ref == 'refs/heads/ci/2026-08-04-full-private-product'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
