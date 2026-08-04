@@ -221,7 +221,10 @@ create table if not exists review_decisions (
   author text not null,
   created_at text not null,
   dismiss_reason text,
-  dismissed_by text
+  dismissed_by text,
+  decision_event_seq integer,
+  decision_event_hash text,
+  decision_read_watermark integer
 );
 create index if not exists idx_review_decisions_finding
   on review_decisions(finding_id, created_at desc, id desc);

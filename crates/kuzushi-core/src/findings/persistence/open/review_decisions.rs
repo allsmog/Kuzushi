@@ -15,9 +15,12 @@ with requested as (
            decisions.decision_verdict, decisions.triage_verdict,
            decisions.confidence, decisions.rationale, decisions.author,
            decisions.created_at, decisions.dismiss_reason, decisions.dismissed_by,
+           decisions.decision_event_seq, decisions.decision_event_hash,
+           decisions.decision_read_watermark,
            row_number() over (
                partition by requested.lookup_key
-               order by decisions.created_at desc, decisions.id desc
+               order by decisions.decision_event_seq desc,
+                        decisions.created_at desc, decisions.id desc
            ) as decision_rank
       from requested
       join review_decisions as decisions
@@ -26,7 +29,8 @@ with requested as (
      where ?2 = 0 or decisions.author = 'human'
 )
 select id, finding_id, identity_id, decision_verdict, triage_verdict,
-       confidence, rationale, author, created_at, dismiss_reason, dismissed_by, lookup_key
+       confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+       decision_event_seq, decision_event_hash, decision_read_watermark, lookup_key
   from ranked
  where decision_rank = 1
 "#;
@@ -40,16 +44,19 @@ with requested as (
     select distinct decisions.id, decisions.finding_id, decisions.identity_id,
            decisions.decision_verdict, decisions.triage_verdict,
            decisions.confidence, decisions.rationale, decisions.author,
-           decisions.created_at, decisions.dismiss_reason, decisions.dismissed_by
+           decisions.created_at, decisions.dismiss_reason, decisions.dismissed_by,
+           decisions.decision_event_seq, decisions.decision_event_hash,
+           decisions.decision_read_watermark
       from requested
       join review_decisions as decisions
         on (requested.identity_id is not null and decisions.identity_id = requested.identity_id)
         or (requested.identity_id is null and decisions.finding_id = requested.finding_id)
 )
 select id, finding_id, identity_id, decision_verdict, triage_verdict,
-       confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+       confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+       decision_event_seq, decision_event_hash, decision_read_watermark
   from matched
- order by created_at asc, id asc
+ order by decision_event_seq asc, created_at asc, id asc
 "#;
 
 impl FindingStore {
@@ -69,7 +76,7 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(LATEST_REVIEW_DECISIONS_SQL)?;
         let rows = stmt.query_map(params![requested, human_only as i64], |row| {
             Ok((
-                row.get::<_, String>(11)?,
+                row.get::<_, String>(14)?,
                 review_decision_record_from_row(row)?.decision,
             ))
         })?;
@@ -99,10 +106,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1
-             order by created_at asc, id asc
+             order by decision_event_seq asc, created_at asc, id asc
             "#,
         )?;
         let rows = stmt.query_map(params![finding_id], review_decision_record_from_row)?;
@@ -117,10 +125,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1
-             order by created_at asc, id asc
+             order by decision_event_seq asc, created_at asc, id asc
             "#,
         )?;
         let rows = stmt.query_map(params![identity_id], review_decision_record_from_row)?;
@@ -142,10 +151,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1
-             order by created_at desc, id desc
+             order by decision_event_seq desc, created_at desc, id desc
              limit 1
             "#,
         )?;
@@ -161,10 +171,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1
-             order by created_at desc, id desc
+             order by decision_event_seq desc, created_at desc, id desc
              limit 1
             "#,
         )?;
@@ -204,10 +215,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1 and author = 'human'
-             order by created_at desc, id desc
+             order by decision_event_seq desc, created_at desc, id desc
              limit 1
             "#,
         )?;
@@ -223,10 +235,11 @@ impl FindingStore {
         let mut stmt = self.conn.prepare(
             r#"
             select id, finding_id, identity_id, decision_verdict, triage_verdict,
-                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by
+                   confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
+                   decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1 and author = 'human'
-             order by created_at desc, id desc
+             order by decision_event_seq desc, created_at desc, id desc
              limit 1
             "#,
         )?;
@@ -394,6 +407,28 @@ fn confidence_millis(confidence: f32) -> u16 {
     (confidence.clamp(0.0, 1.0) * 1000.0).round() as u16
 }
 
+fn review_decision_provenance_from_row(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<Option<ReviewDecisionProvenance>> {
+    let event_seq: Option<i64> = row.get(11)?;
+    let event_hash: Option<String> = row.get(12)?;
+    let (Some(event_seq), Some(event_hash)) = (event_seq, event_hash) else {
+        return Ok(None);
+    };
+    let read_watermark: Option<i64> = row.get(13)?;
+    Ok(Some(ReviewDecisionProvenance {
+        event_seq: sql_row_u64(event_seq, "decision event seq")?,
+        event_hash,
+        read_watermark: read_watermark
+            .map(|value| sql_row_u64(value, "decision read watermark"))
+            .transpose()?,
+    }))
+}
+
+fn sql_row_u64(value: i64, label: &str) -> rusqlite::Result<u64> {
+    u64::try_from(value).map_err(|_| to_sql_error(anyhow::anyhow!("negative {label}: {value}")))
+}
+
 fn review_decision_record_from_row(
     row: &rusqlite::Row<'_>,
 ) -> rusqlite::Result<ReviewDecisionRecord> {
@@ -426,5 +461,6 @@ fn review_decision_record_from_row(
             .transpose()
             .map_err(to_sql_error)?,
         created_at: row.get(8)?,
+        provenance: review_decision_provenance_from_row(row)?,
     })
 }

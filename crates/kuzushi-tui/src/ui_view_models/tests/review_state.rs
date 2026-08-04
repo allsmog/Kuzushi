@@ -120,6 +120,7 @@ fn effective_review_index_prefers_loaded_append_only_decisions() {
         },
         triage_verdict: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
+        provenance: None,
     };
 
     let index = EffectiveReviewStateIndex::from_findings_and_decisions(

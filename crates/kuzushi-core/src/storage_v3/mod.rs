@@ -381,6 +381,7 @@ fn configure_projection_connection(conn: &Connection) -> Result<()> {
 pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTION_SCHEMA)?;
     migrate_review_decision_dismissal_columns(conn)?;
+    migrate_review_decision_provenance_columns(conn)?;
     migrate_verification_provenance_columns(conn)?;
     migrate_patch_cost_columns(conn)?;
     migrate_patch_lifecycle_columns(conn)?;
@@ -452,6 +453,86 @@ fn migrate_review_decision_dismissal_columns(conn: &Connection) -> Result<()> {
 
 fn review_decisions_has_column(conn: &Connection, column: &str) -> Result<bool> {
     table_has_column(conn, "review_decisions", column)
+}
+
+/// Idempotent, additive migration that retains each decision's exact event
+/// provenance (`seq`, `event_hash`, payload `readWatermark`). Pre-existing
+/// rows are backfilled once from `finding_events`, where the full decision
+/// payload already survives; rows whose event cannot be recovered keep null
+/// provenance instead of a fabricated one.
+fn migrate_review_decision_provenance_columns(conn: &Connection) -> Result<()> {
+    let mut added = false;
+    for (column, kind) in [
+        ("decision_event_seq", "integer"),
+        ("decision_event_hash", "text"),
+        ("decision_read_watermark", "integer"),
+    ] {
+        if !review_decisions_has_column(conn, column)? {
+            conn.execute_batch(&format!(
+                "alter table review_decisions add column {column} {kind}"
+            ))?;
+            added = true;
+        }
+    }
+    if added {
+        backfill_review_decision_provenance(conn)?;
+    }
+    // Created here rather than in PROJECTION_SCHEMA because on a legacy DB
+    // these columns only exist after the alters above.
+    conn.execute_batch(
+        r#"
+        create unique index if not exists idx_review_decisions_event_hash
+          on review_decisions(decision_event_hash)
+          where decision_event_hash is not null;
+        create index if not exists idx_review_decisions_finding_seq
+          on review_decisions(finding_id, decision_event_seq);
+        create index if not exists idx_review_decisions_identity_seq
+          on review_decisions(identity_id, decision_event_seq)
+          where identity_id is not null;
+        "#,
+    )?;
+    Ok(())
+}
+
+/// One-shot backfill run when the provenance columns are first added. The
+/// projector inserts one `review_decisions` row per qualifying decision event
+/// in event order, so rank-matching by position recovers the pairing; the
+/// join additionally requires the finding id and timestamp to agree so a
+/// diverged event store leaves nulls rather than misattributed provenance.
+fn backfill_review_decision_provenance(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        r#"
+        update review_decisions
+           set decision_event_seq = matched.seq,
+               decision_event_hash = matched.event_hash,
+               decision_read_watermark = matched.read_watermark
+          from (
+            select ranked_decisions.id as decision_id,
+                   ranked_events.seq,
+                   ranked_events.event_hash,
+                   ranked_events.read_watermark
+              from (
+                select id, finding_id, created_at,
+                       row_number() over (order by id asc) as rn
+                  from review_decisions
+              ) as ranked_decisions
+              join (
+                select seq, event_hash, created_at,
+                       json_extract(payload_json, '$.findingId') as finding_id,
+                       json_extract(payload_json, '$.readWatermark') as read_watermark,
+                       row_number() over (order by seq asc) as rn
+                  from finding_events
+                 where event_kind in ('triage-decided', 'suppression-added')
+                   and json_type(payload_json, '$.findingId') = 'integer'
+              ) as ranked_events
+                on ranked_events.rn = ranked_decisions.rn
+               and ranked_events.finding_id = ranked_decisions.finding_id
+               and ranked_events.created_at = ranked_decisions.created_at
+          ) as matched
+         where review_decisions.id = matched.decision_id
+        "#,
+    )?;
+    Ok(())
 }
 
 fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool> {

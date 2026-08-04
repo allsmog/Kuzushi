@@ -31,8 +31,9 @@ pub use domain::{
     PatchLifecycleState, PatchProvenance, PatchResult, PatchReverificationCaseKind,
     PatchReverificationFileHash, PatchReverificationReceipt, PatchReverificationStep,
     PatchReverificationTarget, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision, ReviewDecisionRecord,
-    ReviewDecisionVerdict, Severity, StableLifecycleStatus, StaticProofState,
+    PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision,
+    ReviewDecisionProvenance, ReviewDecisionRecord, ReviewDecisionVerdict, Severity,
+    StableLifecycleStatus, StaticProofState,
     StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VerificationProvenance,
     VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
 };

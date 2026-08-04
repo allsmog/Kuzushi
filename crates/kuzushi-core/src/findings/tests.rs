@@ -2038,6 +2038,82 @@ mod tests {
     }
 
     #[test]
+    fn review_decisions_retain_event_provenance_and_order_by_event_seq() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        store
+            .record_run_started("run-provenance", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.provenance",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::Medium,
+            "provenance fixture",
+        );
+        let finding_id = store.insert_finding("run-provenance", &finding).unwrap();
+        for (verdict, rationale) in [
+            (ReviewDecisionVerdict::Confirmed, "confirmed on first pass"),
+            (
+                ReviewDecisionVerdict::RejectedFalsePositive,
+                "second look found a sanitizer",
+            ),
+        ] {
+            store
+                .append_user_review_decision(
+                    finding_id,
+                    &ReviewDecision {
+                        verdict,
+                        author: TriageAuthor::Human,
+                        confidence: 1.0,
+                        rationale: rationale.to_string(),
+                        dismiss_reason: None,
+                        actor: None,
+                    },
+                )
+                .unwrap();
+        }
+
+        let records = store
+            .list_review_decisions_for_finding_identity(finding_id)
+            .unwrap();
+        assert_eq!(records.len(), 2);
+        let first = records[0].provenance.as_ref().expect("first provenance");
+        let second = records[1].provenance.as_ref().expect("second provenance");
+        assert!(first.event_seq < second.event_seq);
+        assert!(!second.event_hash.is_empty());
+        let watermark = second.read_watermark.expect("read watermark retained");
+        assert!(watermark < second.event_seq);
+
+        // Event sequence is authoritative: a wall-clock inversion (skew or
+        // same-second writes) must not reorder replayed decisions.
+        rusqlite::Connection::open(&db_path)
+            .unwrap()
+            .execute(
+                "update review_decisions set created_at = '2099-01-01T00:00:00Z' where id = ?1",
+                rusqlite::params![records[0].id],
+            )
+            .unwrap();
+        let reordered = store
+            .list_review_decisions_for_finding_identity(finding_id)
+            .unwrap();
+        assert_eq!(
+            reordered[0].decision.verdict,
+            ReviewDecisionVerdict::Confirmed
+        );
+        let latest = store
+            .latest_review_decision_for_finding_identity(finding_id)
+            .unwrap()
+            .expect("latest decision");
+        assert_eq!(
+            latest.decision.verdict,
+            ReviewDecisionVerdict::RejectedFalsePositive
+        );
+    }
+
+    #[test]
     fn user_review_decision_rejects_automated_author() {
         let store = FindingStore::open_in_memory().unwrap();
         store

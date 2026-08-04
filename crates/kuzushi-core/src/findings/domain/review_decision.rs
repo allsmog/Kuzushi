@@ -175,6 +175,19 @@ impl ReviewDecision {
     }
 }
 
+/// Exact event-log provenance of a persisted review decision. `event_seq` is
+/// the authoritative causal order (timestamps are display metadata and can
+/// collide); `read_watermark` is the highest event sequence the decider had
+/// observed before deciding, absent on legacy events that predate it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDecisionProvenance {
+    pub event_seq: u64,
+    pub event_hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_watermark: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewDecisionRecord {
@@ -186,4 +199,8 @@ pub struct ReviewDecisionRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triage_verdict: Option<TriageVerdict>,
     pub created_at: String,
+    /// `None` only for legacy projection rows whose decision event could not
+    /// be recovered from the projected event store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ReviewDecisionProvenance>,
 }
