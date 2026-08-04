@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Result};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use super::rows::{decision_row, observation_row, DecisionRow, ObservationMeta};
 use crate::findings::FindingStore;
@@ -101,17 +101,20 @@ impl ReviewYieldProjectionReader {
         Ok(u32::try_from(count).unwrap_or(u32::MAX))
     }
 
+    /// `None` means no target snapshot has been recorded yet, which the caller
+    /// may legitimately fall back from. A failed read is an error, not an empty
+    /// result: silently recomputing the fingerprint would mask a broken
+    /// projection.
     pub fn latest_workspace_root_fingerprint(&self) -> Result<Option<String>> {
-        let fingerprint = self
-            .conn
+        self.conn
             .query_row(
                 "select workspace_root_fingerprint from target_snapshots
                   order by created_at desc, rowid desc limit 1",
                 [],
                 |row| row.get::<_, String>(0),
             )
-            .ok();
-        Ok(fingerprint)
+            .optional()
+            .context("could not read the latest recorded target snapshot")
     }
 
     pub fn distinct_repository_count(&self) -> Result<u64> {
