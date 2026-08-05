@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -94,6 +94,49 @@ test("Read returns the content of an in-root file", async () => {
   try {
     const result = await tools.get("Read").invoke({ file_path: "inside.txt" });
     assert.match(result, /INSIDE_TOKEN/);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Glob reports an in-root symlink by its matched path, not its realpath target", async () => {
+  const { base, tools } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  symlinkSync(join(wsRoot, "inside.txt"), join(wsRoot, "link.txt"));
+  try {
+    const result = await tools.get("Glob").invoke({ pattern: "link.txt" });
+    // The path that matched the pattern must be echoed back, not the resolved target.
+    assert.match(result, /^link\.txt$/m);
+    assert.equal(result.includes("inside.txt"), false);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Grep cites an in-root symlink by its matched path and reads through it", async () => {
+  const { base, tools } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  symlinkSync(join(wsRoot, "inside.txt"), join(wsRoot, "link.txt"));
+  try {
+    const result = await tools.get("Grep").invoke({ pattern: "INSIDE_TOKEN", glob: "link.txt" });
+    assert.match(result, /^link\.txt:1:INSIDE_TOKEN$/m);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Glob and Grep drop an in-root symlink whose target escapes the roots", async () => {
+  const { base, tools } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  symlinkSync(join(base, "outside.txt"), join(wsRoot, "escape.txt"));
+  try {
+    // The pattern equals the escaping path, so the no-match sentence echoes it;
+    // assert exact equality — a leak would instead emit a bare `escape.txt`
+    // match line (Glob) or an `escape.txt:1:…` hit line (Grep).
+    const globbed = await tools.get("Glob").invoke({ pattern: "escape.txt" });
+    assert.equal(globbed, "no files match escape.txt");
+    const grepped = await tools.get("Grep").invoke({ pattern: "OUTSIDE_SECRET", glob: "escape.txt" });
+    assert.equal(grepped, "no matches for OUTSIDE_SECRET");
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

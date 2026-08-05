@@ -65,6 +65,20 @@ function confineToRoots(absolute, roots) {
     : null;
 }
 
+// Confine a glob match by its canonical target but return the ORIGINAL matched
+// path, so a symlink inside a root is reported as the workspace path that
+// matched the pattern rather than its realpath target. `confineToRoots` still
+// resolves symlinks for the containment decision, so an in-root link pointing
+// outside the roots is rejected.
+function confinedMatchPath(base, match, roots) {
+  const absolute = resolve(base, match);
+  return confineToRoots(absolute, roots) === null ? null : absolute;
+}
+
+function workspaceRelative(absolute, base) {
+  return absolute.startsWith(`${base}${sep}`) ? absolute.slice(base.length + 1) : absolute;
+}
+
 function authorizedPath(candidate, roots) {
   const base = roots[0];
   const absolute = isAbsolute(candidate) ? candidate : resolve(base, candidate);
@@ -145,9 +159,9 @@ function globTool(roots) {
 
 function renderGlob(pattern, base, roots) {
   const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) })
-    .map((match) => confineToRoots(resolve(base, match), roots))
-    .filter((canonical) => canonical !== null)
-    .map((canonical) => (canonical.startsWith(`${base}${sep}`) ? canonical.slice(base.length + 1) : canonical))
+    .map((match) => confinedMatchPath(base, match, roots))
+    .filter((absolute) => absolute !== null)
+    .map((absolute) => workspaceRelative(absolute, base))
     .sort();
   const shown = matches.slice(0, GLOB_MAX_RESULTS);
   if (matches.length > shown.length) shown.push(`… ${matches.length - shown.length} more matches omitted`);
@@ -206,8 +220,8 @@ function grepCandidateFiles(base, roots, glob) {
   });
   const files = [];
   for (const match of matches.slice(0, GREP_MAX_FILES)) {
-    const canonical = confineToRoots(resolve(base, match), roots);
-    if (canonical !== null) files.push(canonical);
+    const absolute = confinedMatchPath(base, match, roots);
+    if (absolute !== null) files.push(absolute);
   }
   return { files, truncatedWalk: matches.length > GREP_MAX_FILES };
 }
