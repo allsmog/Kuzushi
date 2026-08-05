@@ -243,9 +243,8 @@ fn sarif_physical_location(location: &WorkspaceFindingExportLocation) -> serde_j
 }
 
 /// SARIF 2.1.0 §3.4.4 forbids pairing `uriBaseId` with a `uri` that is already
-/// an absolute URI: consumers either reject the result or resolve the URL
-/// against the workspace root. HTTP-capture imports (HAR/Burp) anchor findings
-/// at request URLs rather than repository paths.
+/// absolute. Findings may be anchored to hierarchical URLs or opaque URI
+/// identifiers; both must stay independent of `WORKSPACE_ROOT`.
 fn sarif_artifact_location(file: &str) -> serde_json::Value {
     if has_uri_scheme(file) {
         return json!({ "uri": file });
@@ -254,16 +253,23 @@ fn sarif_artifact_location(file: &str) -> serde_json::Value {
 }
 
 fn has_uri_scheme(file: &str) -> bool {
-    let Some((scheme, _)) = file.split_once("://") else {
+    if is_windows_drive_path(file) {
+        return false;
+    }
+    let Some((scheme, _)) = file.split_once(':') else {
         return false;
     };
-    // Two characters minimum so a Windows drive letter is never read as a
-    // scheme; anything containing `/`, `?`, or `#` fails the character class.
-    scheme.len() >= 2
-        && scheme.starts_with(|first: char| first.is_ascii_alphabetic())
-        && scheme
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+    let mut chars = scheme.chars();
+    matches!(chars.next(), Some(first) if first.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+}
+
+fn is_windows_drive_path(file: &str) -> bool {
+    let bytes = file.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\' || file[2..].contains('\\'))
 }
 
 /// `start_line == 0` means the detector reported no line. Omitting the region
