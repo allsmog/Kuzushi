@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/review-yield.dataset-manifest.schema.json",
+  "title": "Kuzushi Review Yield Dataset Manifest V1",
+  "description": "Canonical structural schema for the `<dataset>.manifest.json` sidecar written next to a review-yield JSONL dataset. Carries the label policy, the frozen feature vocabulary, the census that explains every exclusion, and a digest over the manifest plus every row.",
+  "$comment": "Draft-07 validates the wire shape only. The Rust serialization in crates/kuzushi-core/src/review_yield/domain/manifest.rs is authoritative. The manifest deliberately carries no wall-clock timestamp so two exports of an unchanged projection are byte-identical.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "exporterVersion",
+    "featureSchemaId",
+    "labelPolicyId",
+    "labelPolicy",
+    "featureFields",
+    "ruleFamilyPattern",
+    "categoricalVocabulary",
+    "source",
+    "census",
+    "rowCount",
+    "datasetDigest"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "taskId": { "const": "review_yield_predecision_v1" },
+    "exporterVersion": { "type": "string", "minLength": 1 },
+    "featureSchemaId": { "const": "kuzushi-review-yield-features-v1" },
+    "labelPolicyId": { "const": "kuzushi-review-yield-labels-v1" },
+    "labelPolicy": { "$ref": "#/definitions/labelPolicy" },
+    "featureFields": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "ruleFamilyPattern": { "type": "string", "minLength": 1 },
+    "categoricalVocabulary": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 }
+      }
+    },
+    "source": { "$ref": "#/definitions/source" },
+    "census": { "$ref": "#/definitions/census" },
+    "rowCount": { "$ref": "#/definitions/count" },
+    "datasetDigest": { "$ref": "#/definitions/blake3Digest" }
+  },
+  "definitions": {
+    "blake3Digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" },
+    "bareDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "countMap": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/count" }
+    },
+    "labelPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "positive",
+        "negative",
+        "excluded",
+        "includedAuthors",
+        "excludedAuthors",
+        "identityRule",
+        "conflictRule",
+        "cutoffRule",
+        "exportedCutoffQuality"
+      ],
+      "properties": {
+        "id": { "const": "kuzushi-review-yield-labels-v1" },
+        "positive": { "const": ["confirmed", "to_fix"] },
+        "negative": { "const": ["rejected_false_positive"] },
+        "excluded": {
+          "const": ["accepted_risk", "suppressed", "deferred", "needs_review"]
+        },
+        "includedAuthors": { "const": ["human"] },
+        "excludedAuthors": { "const": ["auto", "imported", "other"] },
+        "identityRule": { "type": "string", "minLength": 1 },
+        "conflictRule": { "type": "string", "minLength": 1 },
+        "cutoffRule": { "type": "string", "minLength": 1 },
+        "exportedCutoffQuality": {
+          "const": ["tui_read_watermark", "barrier_at_head"]
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["eventLogHeadSeq", "projectionAppliedSeq", "projectionGeneration"],
+      "properties": {
+        "eventLogHeadSeq": { "$ref": "#/definitions/count" },
+        "eventLogHeadHash": { "$ref": "#/definitions/bareDigest" },
+        "projectionAppliedSeq": { "$ref": "#/definitions/count" },
+        "projectionGeneration": { "$ref": "#/definitions/count" }
+      }
+    },
+    "census": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskId",
+        "featureSchemaId",
+        "labelPolicyId",
+        "decisionEvents",
+        "humanDecisionEvents",
+        "byAuthor",
+        "byVerdict",
+        "byDismissReason",
+        "cutoffQuality",
+        "adjudicatedIdentities",
+        "eligibleIdentities",
+        "positive",
+        "negative",
+        "conflicted",
+        "policyTransitions",
+        "noEligibleLabel",
+        "missingExactCutoff",
+        "missingDurableIdentity",
+        "missingPreCutoffObservation",
+        "distinctRepositories",
+        "distinctToolFamilies",
+        "distinctRuleFamilies",
+        "distinctLanguageFamilies",
+        "eventLogHeadSeq",
+        "projectionAppliedSeq",
+        "projectionGeneration"
+      ],
+      "properties": {
+        "taskId": { "const": "review_yield_predecision_v1" },
+        "featureSchemaId": { "const": "kuzushi-review-yield-features-v1" },
+        "labelPolicyId": { "const": "kuzushi-review-yield-labels-v1" },
+        "decisionEvents": { "$ref": "#/definitions/count" },
+        "humanDecisionEvents": { "$ref": "#/definitions/count" },
+        "byAuthor": { "$ref": "#/definitions/countMap" },
+        "byVerdict": { "$ref": "#/definitions/countMap" },
+        "byDismissReason": { "$ref": "#/definitions/countMap" },
+        "cutoffQuality": { "$ref": "#/definitions/countMap" },
+        "adjudicatedIdentities": { "$ref": "#/definitions/count" },
+        "eligibleIdentities": { "$ref": "#/definitions/count" },
+        "positive": { "$ref": "#/definitions/count" },
+        "negative": { "$ref": "#/definitions/count" },
+        "conflicted": { "$ref": "#/definitions/count" },
+        "policyTransitions": { "$ref": "#/definitions/count" },
+        "noEligibleLabel": { "$ref": "#/definitions/count" },
+        "missingExactCutoff": { "$ref": "#/definitions/count" },
+        "missingDurableIdentity": { "$ref": "#/definitions/count" },
+        "missingPreCutoffObservation": { "$ref": "#/definitions/count" },
+        "distinctRepositories": { "$ref": "#/definitions/count" },
+        "distinctToolFamilies": { "$ref": "#/definitions/count" },
+        "distinctRuleFamilies": { "$ref": "#/definitions/count" },
+        "distinctLanguageFamilies": { "$ref": "#/definitions/count" },
+        "earliestLabelEventSeq": { "type": ["integer", "null"], "minimum": 0 },
+        "latestLabelEventSeq": { "type": ["integer", "null"], "minimum": 0 },
+        "eventLogHeadSeq": { "$ref": "#/definitions/count" },
+        "projectionAppliedSeq": { "$ref": "#/definitions/count" },
+        "projectionGeneration": { "$ref": "#/definitions/count" }
+      }
+    }
+  }
+}

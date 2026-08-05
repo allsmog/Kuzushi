@@ -63,6 +63,12 @@ const rules = [
       /\b(crate::(?:scan|scanners|runtime|modules|verification)|std::process|Command::new|ratatui|crossterm)\b/,
   },
   {
+    name: "review yield extracts labels and features without presentation, proof, or runtime dependencies",
+    roots: ["crates/kuzushi-core/src/review_yield"],
+    forbidden:
+      /\b(crate::(?:findings::presentation|evidence::static_evidence|static_evidence|scan|scanners|runtime|modules|verification|verify|triage|remediation|patch|report)|ProofConfidence|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
+  },
+  {
     name: "proof validates claims without scanner runtime dispatch or presentation dependencies",
     roots: ["crates/kuzushi-core/src/proof"],
     forbidden:

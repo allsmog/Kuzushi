@@ -11,6 +11,7 @@ mod tests {
     use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
     use crate::application::config::{config_command, ensure_config_init_allowed};
     use crate::application::review_decisions::decision_command;
+    use crate::application::review_yield::review_yield_command;
     use crate::application::run_tool::{
         apply_option_override, output_with_cli_run_artifacts, parse_option_override,
         run_tool_command, start_cli_tool_run_with_loaded_modules,
@@ -24,13 +25,15 @@ mod tests {
         suppressions_plain_lines,
     };
     use crate::command::{
-        Command, ConfigCommand, McpBackend, ScanModeArg, SessionExportFormat, SessionsCommand,
+        Command, ConfigCommand, McpBackend, ReviewYieldCommand, ScanModeArg, SessionExportFormat,
+        SessionsCommand,
     };
     use crate::doctor::{
         check_auth_env, check_model_config, check_treesitter_grammars,
         deterministic_capability_checks, DoctorStatus,
     };
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
+    use crate::presentation::review_yield_census_output;
     use crate::presentation::{
         ci_line, format_duration, plain_output_requested, scan_json_output,
         scan_plain_artifact_footer, scan_started_body, shell_startup_progress_messages,
@@ -1886,6 +1889,117 @@ mod tests {
 
         let list_error = suppressions_command(None, false).unwrap_err().to_string();
         assert!(list_error.contains("suppressions needs a target"));
+    }
+
+    #[test]
+    fn review_yield_census_output_reports_cutoff_split_without_jargon() {
+        let mut report = kuzushi_core::review_yield::domain::CensusReport::default();
+        report.decision_events = 4;
+        report.human_decision_events = 3;
+        report.eligible_identities = 2;
+        report.positive = 1;
+        report.negative = 1;
+        report.by_author.insert("human".to_string(), 3);
+        report.by_author.insert("auto".to_string(), 1);
+        report
+            .cutoff_quality
+            .insert("barrier_at_head".to_string(), 3);
+
+        let plain = review_yield_census_output(&report, false).unwrap();
+
+        assert!(plain.contains("Head-barrier cutoff           3"), "{plain}");
+        assert!(plain.contains("Decisions by author"), "{plain}");
+        assert!(plain.contains("review-yield export --out"), "{plain}");
+        assert!(!plain.to_lowercase().contains("watermark"), "{plain}");
+
+        let json = review_yield_census_output(&report, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["cutoffQuality"]["barrier_at_head"], 3);
+        assert_eq!(parsed["taskId"], "review_yield_predecision_v1");
+    }
+
+    #[test]
+    fn review_yield_empty_census_points_at_the_review_surface() {
+        let report = kuzushi_core::review_yield::domain::CensusReport::default();
+
+        let plain = review_yield_census_output(&report, false).unwrap();
+
+        assert!(plain.contains("Next: adjudicate findings"), "{plain}");
+    }
+
+    #[test]
+    fn review_yield_commands_require_explicit_target() {
+        let census = review_yield_command(ReviewYieldCommand::Census { json: false }, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            census.contains("review-yield census needs a target"),
+            "{census}"
+        );
+
+        let export = review_yield_command(
+            ReviewYieldCommand::Export {
+                output: PathBuf::from("dataset.jsonl"),
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            export.contains("review-yield export needs a target"),
+            "{export}"
+        );
+    }
+
+    #[test]
+    fn review_yield_export_requires_recorded_findings() {
+        let tmp = tempfile::tempdir().unwrap();
+        let error = review_yield_command(
+            ReviewYieldCommand::Census { json: true },
+            Some(tmp.path().to_path_buf()),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("No recorded findings database"), "{error}");
+        assert!(!tmp.path().join(".kuzushi").exists());
+    }
+
+    #[test]
+    fn review_yield_cli_parses_census_and_export() {
+        let census = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "--target",
+            "/tmp/project",
+            "review-yield",
+            "census",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Command::ReviewYield {
+            command: ReviewYieldCommand::Census { json },
+        }) = census.command
+        else {
+            panic!("expected review-yield census command");
+        };
+        assert!(json);
+        assert_eq!(census.target, Some(PathBuf::from("/tmp/project")));
+
+        let export = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "review-yield",
+            "export",
+            "--out",
+            "review-yield.jsonl",
+        ])
+        .unwrap();
+        let Some(Command::ReviewYield {
+            command: ReviewYieldCommand::Export { output },
+        }) = export.command
+        else {
+            panic!("expected review-yield export command");
+        };
+        assert_eq!(output, PathBuf::from("review-yield.jsonl"));
     }
 
     #[test]

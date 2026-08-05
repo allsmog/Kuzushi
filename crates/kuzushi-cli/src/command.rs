@@ -8,7 +8,7 @@ pub(crate) use investigate_args::InvestigateArgs;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
     AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
-    RunsCommand, ScanModeArg, SessionExportFormat, SessionsCommand,
+    ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat, SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -164,6 +164,11 @@ pub(crate) enum Command {
     Runs {
         #[command(subcommand)]
         command: RunsCommand,
+    },
+    /// Review-yield adjudication census and leakage-safe dataset export.
+    ReviewYield {
+        #[command(subcommand)]
+        command: ReviewYieldCommand,
     },
     /// Inspect and manage global shell session transcripts.
     Sessions {

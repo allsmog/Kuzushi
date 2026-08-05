@@ -1,0 +1,236 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/review-yield.training-example.schema.json",
+  "title": "Kuzushi Review Yield Training Example V1",
+  "description": "Canonical structural schema for each JSON line emitted by `kuzushi review-yield export --out <file>`. One line describes exactly one durable finding identity, labeled by the first eligible human review decision, with features read only from finding snapshots that existed at or before the decider's read cutoff.",
+  "$comment": "Draft-07 validates the wire shape only. The Rust serialization in crates/kuzushi-core/src/review_yield/domain is authoritative, including the label policy, the feature whitelist, and the anchor <= cutoff < label ordering invariant.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "exampleId",
+    "identityGroup",
+    "repositoryGroup",
+    "featureSchemaId",
+    "labelPolicyId",
+    "featureCutoffSeq",
+    "anchorObservation",
+    "labelEvent",
+    "features",
+    "quality",
+    "labelConflict"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "taskId": { "const": "review_yield_predecision_v1" },
+    "exampleId": { "$ref": "#/definitions/blake3Digest" },
+    "identityGroup": { "$ref": "#/definitions/blake3Digest" },
+    "repositoryGroup": { "$ref": "#/definitions/blake3Digest" },
+    "featureSchemaId": { "const": "kuzushi-review-yield-features-v1" },
+    "labelPolicyId": { "const": "kuzushi-review-yield-labels-v1" },
+    "featureCutoffSeq": { "type": "integer", "minimum": 0 },
+    "anchorObservation": { "$ref": "#/definitions/anchorObservation" },
+    "labelEvent": { "$ref": "#/definitions/labelEvent" },
+    "features": { "$ref": "#/definitions/features" },
+    "quality": { "$ref": "#/definitions/quality" },
+    "labelConflict": { "const": false }
+  },
+  "definitions": {
+    "blake3Digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" },
+    "bareDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "prefixedDigest": { "type": "string", "pattern": "^([a-z0-9]+_)?[0-9a-f]{64}$" },
+    "count": { "type": "integer", "minimum": 0 },
+    "anchorObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "observationHash", "snapshotHash"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 0 },
+        "observationHash": { "$ref": "#/definitions/prefixedDigest" },
+        "snapshotHash": { "$ref": "#/definitions/prefixedDigest" }
+      }
+    },
+    "labelEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "eventHash", "verdict", "class"],
+      "properties": {
+        "seq": { "type": "integer", "minimum": 1 },
+        "eventHash": { "$ref": "#/definitions/bareDigest" },
+        "verdict": {
+          "type": "string",
+          "enum": ["confirmed", "to_fix", "rejected_false_positive"]
+        },
+        "class": { "type": "integer", "enum": [0, 1] }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cutoffQuality", "identityQuality", "forbiddenFieldCheck"],
+      "properties": {
+        "cutoffQuality": {
+          "type": "string",
+          "enum": ["tui_read_watermark", "barrier_at_head"],
+          "$comment": "`missing` is a real classification but is never exported: it means the decision carries no usable read cutoff."
+        },
+        "identityQuality": { "const": "durable" },
+        "forbiddenFieldCheck": { "const": "passed" }
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "severityRank",
+        "staticProofState",
+        "vulnSource",
+        "toolFamily",
+        "ruleFamily",
+        "pathBucket",
+        "languageFamily",
+        "identityMatchTier",
+        "groundingStatus",
+        "isAttackChain",
+        "evidenceCount",
+        "distinctEvidenceKinds",
+        "maxEvidenceConfidence",
+        "meanEvidenceConfidenceMillis",
+        "hasSourceEvidence",
+        "hasSinkEvidence",
+        "hasSanitizerEvidence",
+        "hasCallPathEvidence",
+        "sourceSinkLinked",
+        "sanitizerChecked",
+        "hasExploitScenario",
+        "preconditionCount",
+        "sourceCount",
+        "distinctToolCount",
+        "corroborationCount",
+        "observationCount",
+        "runCount",
+        "reopenedCount",
+        "hasRemediation"
+      ],
+      "properties": {
+        "severityRank": { "type": "integer", "minimum": 0, "maximum": 5 },
+        "staticProofState": {
+          "type": "string",
+          "enum": [
+            "signal_only",
+            "code_cited",
+            "source_sink_linked",
+            "sanitizer_checked",
+            "statically_confirmed",
+            "statically_rejected",
+            "needs_runtime_evidence",
+            "missing"
+          ]
+        },
+        "vulnSource": {
+          "type": "string",
+          "enum": [
+            "sarif",
+            "analysis",
+            "analysis-multi",
+            "diff-analyzer",
+            "infer",
+            "fuzzing",
+            "unknown"
+          ]
+        },
+        "toolFamily": {
+          "type": "string",
+          "enum": [
+            "semgrep",
+            "codeql",
+            "secret-scan",
+            "iac-scan",
+            "dep-hygiene",
+            "govulncheck",
+            "infer",
+            "systems-hunt",
+            "carlini-threat-hunt",
+            "full-mode-multi",
+            "variant-ndiff",
+            "chains",
+            "other"
+          ]
+        },
+        "ruleFamily": {
+          "type": "string",
+          "pattern": "^(cwe-[0-9]+|[a-z_]+)$",
+          "$comment": "Either a CWE-derived token or one of the closed keyword families listed in the dataset manifest's categoricalVocabulary. Never a raw rule id."
+        },
+        "pathBucket": {
+          "type": "string",
+          "enum": [
+            "application",
+            "test",
+            "generated",
+            "vendor",
+            "example",
+            "config",
+            "docs",
+            "unknown"
+          ]
+        },
+        "languageFamily": {
+          "type": "string",
+          "pattern": "^[a-z0-9+#._-]+$",
+          "$comment": "Lowercased language name from the workspace inventory table, or `unknown`."
+        },
+        "identityMatchTier": {
+          "type": "string",
+          "enum": [
+            "stable_fp",
+            "dedup_collision",
+            "dedup_key_cross_run",
+            "model_dedupe",
+            "unknown"
+          ]
+        },
+        "groundingStatus": {
+          "type": "string",
+          "enum": [
+            "grounded",
+            "line_drift",
+            "file_missing",
+            "not_applicable",
+            "native_or_unspecified"
+          ]
+        },
+        "isAttackChain": { "type": "boolean" },
+        "evidenceCount": { "$ref": "#/definitions/count" },
+        "distinctEvidenceKinds": { "$ref": "#/definitions/count" },
+        "maxEvidenceConfidence": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 255,
+          "$comment": "null when the finding carries no evidence; absence is never imputed as zero."
+        },
+        "meanEvidenceConfidenceMillis": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 2550
+        },
+        "hasSourceEvidence": { "type": "boolean" },
+        "hasSinkEvidence": { "type": "boolean" },
+        "hasSanitizerEvidence": { "type": "boolean" },
+        "hasCallPathEvidence": { "type": "boolean" },
+        "sourceSinkLinked": { "type": "boolean" },
+        "sanitizerChecked": { "type": "boolean" },
+        "hasExploitScenario": { "type": "boolean" },
+        "preconditionCount": { "$ref": "#/definitions/count" },
+        "sourceCount": { "$ref": "#/definitions/count" },
+        "distinctToolCount": { "$ref": "#/definitions/count" },
+        "corroborationCount": { "$ref": "#/definitions/count" },
+        "observationCount": { "type": "integer", "minimum": 1 },
+        "runCount": { "type": "integer", "minimum": 1 },
+        "reopenedCount": { "$ref": "#/definitions/count" },
+        "hasRemediation": { "type": "boolean" }
+      }
+    }
+  }
+}

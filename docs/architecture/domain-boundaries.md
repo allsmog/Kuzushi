@@ -45,6 +45,48 @@ selection, proof-state labels.
 Belongs elsewhere:
 running Semgrep, selecting scan tasks, prompting a model, applying patches.
 
+## Review Yield Domain
+
+Owner files:
+`crates/kuzushi-core/src/review_yield/`, plus the CLI census/export paths in
+`crates/kuzushi-cli/src/application/review_yield.rs` and
+`crates/kuzushi-cli/src/presentation/review_yield_output.rs`.
+
+Vocabulary:
+label policy, label class, read cutoff, cutoff quality, feature whitelist,
+anchor observation, identity group, repository group, dataset digest.
+
+Invariants:
+one row per durable identity; only the first eligible human decision labels it;
+policy outcomes (accepted risk, suppressed, deferred, needs review) and
+auto/imported authors are counted and excluded; conflicting human reversals are
+marked and excluded; features come only from finding snapshots at or before the
+decision's read cutoff (`anchor <= cutoff < label`); no raw path, snippet,
+message, rationale, reviewer identity, or triage/verification outcome ever
+reaches an exported row.
+
+Allowed dependencies:
+reads the findings projection and the event log; consumes findings domain types
+(`Severity`, `StaticProofState`, `ReviewDecisionVerdict`, `GroundingStatus`).
+
+Forbidden dependencies:
+never imports `findings::presentation` (proof ladder / `ProofConfidence`) or the
+static-evidence store; never calls scanners, LLM runtimes, renderers, or
+subprocesses. The whitelist deserialization in
+`review_yield/application/anchor_snapshot.rs` is the enforcement mechanism for
+the leakage boundary, not a convention.
+
+Extension points:
+add a feature by extending `ReviewYieldFeaturesV1`, its normalizer table, the
+published JSON schema, and the frozen field list together.
+
+Belongs here:
+label eligibility, cutoff classification, feature normalization, census
+counting, dataset digest.
+
+Belongs elsewhere:
+recording review decisions, presenting findings, training or scoring a model.
+
 ## Module / Tool Domain
 
 Owner files:
