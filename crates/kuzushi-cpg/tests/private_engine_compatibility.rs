@@ -8,8 +8,14 @@ use kuzushi_cpg::{
 
 #[test]
 fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
-    assert!(engine_available(), "default builds must contain the private engine");
-    assert!(GRAPH_SHAPE_VERSION > 0, "the real engine must expose a versioned graph shape");
+    assert!(
+        engine_available(),
+        "default builds must contain the private engine"
+    );
+    assert!(
+        GRAPH_SHAPE_VERSION > 0,
+        "the real engine must expose a versioned graph shape"
+    );
     assert_eq!(canonical_language("ts"), Some("typescript"));
     assert!(supported_languages().contains(&"typescript"));
 
@@ -26,9 +32,18 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
 
     assert!(!first.reused_cache);
     assert_eq!(first.source_files, 1);
-    assert!(first.methods > 0, "private graph must contain methods: {first:?}");
-    assert!(first.calls > 0, "private graph must contain calls: {first:?}");
-    assert!(first.nodes > 0, "private graph must contain nodes: {first:?}");
+    assert!(
+        first.methods > 0,
+        "private graph must contain methods: {first:?}"
+    );
+    assert!(
+        first.calls > 0,
+        "private graph must contain calls: {first:?}"
+    );
+    assert!(
+        first.nodes > 0,
+        "private graph must contain nodes: {first:?}"
+    );
     assert_eq!(first.cpg_path, artifact_path(target.path(), "typescript"));
     validate_graph_artifact(&first.cpg_path).expect("engine-produced graph must validate");
 
@@ -40,19 +55,33 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
         sanitizers: &[],
     };
     let harvested = harvest_spec(&project, &spec);
-    assert!(harvested.source_call_matches > 0, "source harvest: {harvested:?}");
-    assert!(harvested.sink_call_matches > 0, "sink harvest: {harvested:?}");
+    assert!(
+        harvested.source_call_matches > 0,
+        "source harvest: {harvested:?}"
+    );
+    assert!(
+        harvested.sink_call_matches > 0,
+        "sink harvest: {harvested:?}"
+    );
 
     let (findings, stats) = run_taint_query(&project, &harvested);
-    assert!(stats.flow_count > 0, "private engine returned no flow: {stats:?}");
-    let flow = findings.first().expect("flow count must have a first finding");
+    assert!(
+        stats.flow_count > 0,
+        "private engine returned no flow: {stats:?}"
+    );
+    let flow = findings
+        .first()
+        .expect("flow count must have a first finding");
     assert!(
         flow.sink_file
             .as_deref()
             .is_some_and(|path| path.ends_with("users.ts")),
         "flow must retain its source artifact: {flow:?}"
     );
-    assert!(!flow.path.is_empty(), "flow must carry a witnessed path: {flow:?}");
+    assert!(
+        !flow.path.is_empty(),
+        "flow must carry a witnessed path: {flow:?}"
+    );
 
     drop(project);
     let reopened = open_project_in(&scope, "typescript")
@@ -61,7 +90,10 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
 
     let (_, second) = ensure_project_in(&scope, "typescript", &BuildLimits::default())
         .expect("a second build must reopen the compatible graph");
-    assert!(second.reused_cache, "the compatible artifact must be reusable");
+    assert!(
+        second.reused_cache,
+        "the compatible artifact must be reusable"
+    );
     assert_eq!(second.methods, first.methods);
     assert_eq!(second.calls, first.calls);
     assert_eq!(second.nodes, first.nodes);
