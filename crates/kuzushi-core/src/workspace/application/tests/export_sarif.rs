@@ -36,6 +36,15 @@ fn absolute_url_location_drops_uri_base_id_and_unknown_line_region() {
 }
 
 #[test]
+fn opaque_absolute_uri_drops_uri_base_id() {
+    let physical = physical_location_of("urn:cwe:79", 0, None);
+
+    assert_eq!(physical["artifactLocation"]["uri"], "urn:cwe:79");
+    assert!(physical["artifactLocation"].get("uriBaseId").is_none());
+    assert!(physical.get("region").is_none());
+}
+
+#[test]
 fn absolute_url_location_with_known_line_keeps_region_but_drops_uri_base_id() {
     let physical = physical_location_of("https://api.lab.test/orders", 7, None);
 
@@ -82,11 +91,24 @@ fn known_line_range_keeps_region_and_workspace_root() {
 }
 
 #[test]
-fn uri_scheme_detection_ignores_relative_and_windows_paths() {
+fn uri_scheme_detection_accepts_hierarchical_and_opaque_uris() {
     assert!(has_uri_scheme("https://api.lab.test/orders"));
     assert!(has_uri_scheme("ws://localhost:8080/socket"));
+    assert!(has_uri_scheme("urn:cwe:79"));
+    assert!(has_uri_scheme("data:text/plain,hello"));
+    assert!(has_uri_scheme("file:/tmp/report"));
+    assert!(has_uri_scheme("x:opaque"));
+}
+
+#[test]
+fn uri_scheme_detection_ignores_relative_invalid_and_windows_paths() {
     assert!(!has_uri_scheme("src/main.rs"));
     assert!(!has_uri_scheme("C:\\Users\\dev\\app.rs"));
     assert!(!has_uri_scheme("C://Users/dev/app.rs"));
+    assert!(!has_uri_scheme("C:/Users/dev/app.rs"));
+    assert!(!has_uri_scheme("C:Users\\dev\\app.rs"));
     assert!(!has_uri_scheme("docs/notes?q=a://b"));
+    assert!(!has_uri_scheme("1bad:value"));
+    assert!(!has_uri_scheme(":missing"));
+    assert!(!has_uri_scheme("bad_scheme:value"));
 }
