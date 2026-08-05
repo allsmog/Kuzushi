@@ -1,5 +1,5 @@
 import { globSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -53,11 +53,23 @@ function readRootsFor(request) {
   return [...new Set(roots)];
 }
 
+function confineToRoots(absolute, roots) {
+  let canonical;
+  try {
+    canonical = realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  return roots.some((root) => canonical === root || canonical.startsWith(`${root}${sep}`))
+    ? canonical
+    : null;
+}
+
 function authorizedPath(candidate, roots) {
   const base = roots[0];
   const absolute = isAbsolute(candidate) ? candidate : resolve(base, candidate);
-  const canonical = realpathSync(absolute);
-  if (!roots.some((root) => canonical === root || canonical.startsWith(`${root}${sep}`))) {
+  const canonical = confineToRoots(absolute, roots);
+  if (canonical === null) {
     throw new Error(`path is outside the workspace read roots: ${candidate}`);
   }
   return canonical;
@@ -118,7 +130,7 @@ function renderDirectory(path) {
 
 function globTool(roots) {
   return tool(
-    ({ pattern, path }) => renderGlob(pattern, authorizedPath(path ?? roots[0], roots)),
+    ({ pattern, path }) => renderGlob(pattern, authorizedPath(path ?? roots[0], roots), roots),
     {
       name: "Glob",
       description:
@@ -131,8 +143,12 @@ function globTool(roots) {
   );
 }
 
-function renderGlob(pattern, base) {
-  const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) }).sort();
+function renderGlob(pattern, base, roots) {
+  const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) })
+    .map((match) => confineToRoots(resolve(base, match), roots))
+    .filter((canonical) => canonical !== null)
+    .map((canonical) => (canonical.startsWith(`${base}${sep}`) ? canonical.slice(base.length + 1) : canonical))
+    .sort();
   const shown = matches.slice(0, GLOB_MAX_RESULTS);
   if (matches.length > shown.length) shown.push(`… ${matches.length - shown.length} more matches omitted`);
   return shown.join("\n") || `no files match ${pattern}`;
@@ -140,7 +156,7 @@ function renderGlob(pattern, base) {
 
 function grepTool(roots) {
   return tool(
-    ({ pattern, path, glob }) => renderGrep(pattern, authorizedPath(path ?? roots[0], roots), glob),
+    ({ pattern, path, glob }) => renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob),
     {
       name: "Grep",
       description:
@@ -154,30 +170,45 @@ function grepTool(roots) {
   );
 }
 
-function renderGrep(pattern, base, glob) {
+function renderGrep(pattern, base, roots, glob) {
   const regex = new RegExp(pattern);
-  const { files, truncatedWalk } = grepCandidateFiles(base, glob);
-  const out = [];
+  const { files, truncatedWalk } = grepCandidateFiles(base, roots, glob);
+  const { lines, scanned } = collectGrepMatches(files, base, regex);
+  const truncated = truncatedWalk || scanned < files.length;
+  const note = grepScanNote(lines.length, scanned, truncated);
+  if (note) lines.push(note);
+  return lines.join("\n") || `no matches for ${pattern}`;
+}
+
+function collectGrepMatches(files, base, regex) {
+  const lines = [];
   let scanned = 0;
   for (const file of files) {
     scanned += 1;
-    appendFileMatches(out, file, base, regex);
-    if (out.length >= GREP_MAX_MATCHES) break;
+    appendFileMatches(lines, file, base, regex);
+    if (lines.length >= GREP_MAX_MATCHES) break;
   }
-  const notes = [];
-  if (out.length >= GREP_MAX_MATCHES) notes.push(`match limit ${GREP_MAX_MATCHES} reached`);
-  if (truncatedWalk || scanned < files.length) notes.push(`scan truncated after ${scanned} file(s) — narrow with path/glob`);
-  if (notes.length > 0) out.push(`… ${notes.join("; ")}`);
-  return out.join("\n") || `no matches for ${pattern}`;
+  return { lines, scanned };
 }
 
-function grepCandidateFiles(base, glob) {
+function grepScanNote(matchCount, scanned, truncated) {
+  const notes = [];
+  if (matchCount >= GREP_MAX_MATCHES) notes.push(`match limit ${GREP_MAX_MATCHES} reached`);
+  if (truncated) notes.push(`scan truncated after ${scanned} file(s) — narrow with path/glob`);
+  return notes.length > 0 ? `… ${notes.join("; ")}` : "";
+}
+
+function grepCandidateFiles(base, roots, glob) {
   if (statSync(base).isFile()) return { files: [base], truncatedWalk: false };
   const matches = globSync(glob ?? "**/*", {
     cwd: base,
     exclude: (name) => SKIPPED_DIRS.has(name),
   });
-  const files = matches.slice(0, GREP_MAX_FILES).map((match) => join(base, match));
+  const files = [];
+  for (const match of matches.slice(0, GREP_MAX_FILES)) {
+    const canonical = confineToRoots(resolve(base, match), roots);
+    if (canonical !== null) files.push(canonical);
+  }
   return { files, truncatedWalk: matches.length > GREP_MAX_FILES };
 }
 
