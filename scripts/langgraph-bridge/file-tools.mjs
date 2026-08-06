@@ -65,14 +65,14 @@ function confineToRoots(absolute, roots) {
     : null;
 }
 
-// Confine a glob match by its canonical target but return the ORIGINAL matched
-// path, so a symlink inside a root is reported as the workspace path that
-// matched the pattern rather than its realpath target. `confineToRoots` still
-// resolves symlinks for the containment decision, so an in-root link pointing
-// outside the roots is rejected.
-function confinedMatchPath(base, match, roots) {
-  const absolute = resolve(base, match);
-  return confineToRoots(absolute, roots) === null ? null : absolute;
+// Confine a glob match by its canonical target while retaining the ORIGINAL
+// matched path for operator-visible citations. Reads must use `canonicalPath`:
+// reopening `matchedPath` after validation would create a symlink-swap window
+// in which an untrusted workspace could redirect Grep outside the read roots.
+function confinedMatch(base, match, roots) {
+  const matchedPath = resolve(base, match);
+  const canonicalPath = confineToRoots(matchedPath, roots);
+  return canonicalPath === null ? null : { canonicalPath, matchedPath };
 }
 
 function workspaceRelative(absolute, base) {
@@ -159,9 +159,9 @@ function globTool(roots) {
 
 function renderGlob(pattern, base, roots) {
   const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) })
-    .map((match) => confinedMatchPath(base, match, roots))
-    .filter((absolute) => absolute !== null)
-    .map((absolute) => workspaceRelative(absolute, base))
+    .map((match) => confinedMatch(base, match, roots))
+    .filter((candidate) => candidate !== null)
+    .map((candidate) => workspaceRelative(candidate.matchedPath, base))
     .sort();
   const shown = matches.slice(0, GLOB_MAX_RESULTS);
   if (matches.length > shown.length) shown.push(`… ${matches.length - shown.length} more matches omitted`);
@@ -213,30 +213,44 @@ function grepScanNote(matchCount, scanned, truncated) {
 }
 
 function grepCandidateFiles(base, roots, glob) {
-  if (statSync(base).isFile()) return { files: [base], truncatedWalk: false };
+  if (statSync(base).isFile()) {
+    return {
+      files: [{ canonicalPath: base, matchedPath: base }],
+      truncatedWalk: false,
+    };
+  }
   const matches = globSync(glob ?? "**/*", {
     cwd: base,
     exclude: (name) => SKIPPED_DIRS.has(name),
   });
   const files = [];
-  for (const match of matches.slice(0, GREP_MAX_FILES)) {
-    const absolute = confinedMatchPath(base, match, roots);
-    if (absolute !== null) files.push(absolute);
+  let truncatedWalk = false;
+  for (const match of matches) {
+    const candidate = confinedMatch(base, match, roots);
+    if (candidate === null) continue;
+    if (files.length >= GREP_MAX_FILES) {
+      truncatedWalk = true;
+      break;
+    }
+    files.push(candidate);
   }
-  return { files, truncatedWalk: matches.length > GREP_MAX_FILES };
+  return { files, truncatedWalk };
 }
 
-function appendFileMatches(out, file, base, regex) {
+function appendFileMatches(out, candidate, base, regex) {
+  const { canonicalPath, matchedPath } = candidate;
   let text;
   try {
-    if (!statSync(file).isFile() || statSync(file).size > GREP_MAX_FILE_BYTES) return;
-    text = readFileSync(file, "utf8");
+    if (!statSync(canonicalPath).isFile() || statSync(canonicalPath).size > GREP_MAX_FILE_BYTES) return;
+    text = readFileSync(canonicalPath, "utf8");
   } catch {
     return;
   }
   if (text.includes("\u0000")) return;
   const lines = text.split("\n");
-  const relative = file.startsWith(`${base}${sep}`) ? file.slice(base.length + 1) : file;
+  const relative = matchedPath.startsWith(`${base}${sep}`)
+    ? matchedPath.slice(base.length + 1)
+    : matchedPath;
   for (let index = 0; index < lines.length && out.length < GREP_MAX_MATCHES; index += 1) {
     if (regex.test(lines[index])) {
       out.push(`${relative}:${index + 1}:${lines[index].slice(0, READ_MAX_LINE_CHARS)}`);
