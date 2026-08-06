@@ -4,6 +4,10 @@ use crate::ui_view_models::{SeverityTone, ThreatScopeTone};
 pub(super) fn append_scope_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let model = crate::ui_view_models::threat_scope_model(app);
     lines.push(section_header_line(&model.header, area.width));
+    if let Some(hint) = &model.empty_hint {
+        lines.push(empty_hint_line(hint));
+        return;
+    }
     for bucket in &model.buckets {
         append_scope_bucket(bucket, lines);
     }

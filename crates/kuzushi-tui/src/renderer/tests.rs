@@ -1282,7 +1282,7 @@ fn renders_threat_view_navigation() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("STRIDE"));
-    assert!(rendered.contains("Spoofing"));
+    assert!(rendered.contains("build or import a threat model"));
 }
 
 #[test]
@@ -1875,7 +1875,7 @@ fn threat_scope_model_from_doc_groups_by_impact() {
 }
 
 #[test]
-fn threats_stories_view_renders_attacker_story_cards() {
+fn threats_stories_view_without_an_artifact_names_the_missing_model() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1886,16 +1886,14 @@ fn threats_stories_view_renders_attacker_story_cards() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("ATTACKER STORIES"));
-    assert!(rendered.contains("T-001"));
-    assert!(rendered.contains("CRITICAL"));
-    assert!(rendered.contains("attack"));
-    assert!(rendered.contains("loc"));
-    // Old placeholder gone
-    assert!(!rendered.contains("malicious input reaches a sink"));
+    assert!(rendered.contains("build or import a threat model"));
+    // No invented story may read as target reality.
+    assert!(!rendered.contains("order_id concatenation"));
+    assert!(!rendered.contains("apps/api/orders.rs"));
 }
 
 #[test]
-fn threats_scope_view_renders_criticality_buckets() {
+fn threats_scope_view_without_an_artifact_names_the_missing_model() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1905,15 +1903,12 @@ fn threats_scope_view_renders_criticality_buckets() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(
-        rendered.contains("SCOPE · 11 ISSUES"),
-        "expected SCOPE · 11 ISSUES in: {rendered}"
-    );
-    assert!(rendered.contains("CRITICAL · 2"));
-    assert!(rendered.contains("HIGH · 3"));
-    assert!(rendered.contains("OUT OF SCOPE"));
-    // Old placeholders gone
-    assert!(!rendered.contains("auth, request parsing"));
+    assert!(rendered.contains("SCOPE"));
+    assert!(rendered.contains("build or import a threat model"));
+    // No invented bucket count or item may read as target reality.
+    assert!(!rendered.contains("SCOPE · 11 ISSUES"), "{rendered}");
+    assert!(!rendered.contains("CRITICAL · 2"), "{rendered}");
+    assert!(!rendered.contains("order_id concatenation"), "{rendered}");
 }
 
 #[test]
@@ -2027,7 +2022,7 @@ fn threats_summary_unknown_state_does_not_invent_data() {
 }
 
 #[test]
-fn threats_stride_view_renders_design_rollup() {
+fn threats_stride_view_without_an_artifact_names_the_missing_model() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -2041,15 +2036,11 @@ fn threats_stride_view_renders_design_rollup() {
         rendered.contains("STRIDE ROLLUP"),
         "expected STRIDE ROLLUP header in: {rendered}"
     );
-    assert!(rendered.contains("Spoofing"));
-    assert!(rendered.contains("Tampering"));
-    assert!(rendered.contains("Repudiation"));
-    assert!(rendered.contains("Info-disclosure"));
-    assert!(rendered.contains("DoS"));
-    assert!(rendered.contains("Elev-of-priv"));
-    // Old hardcoded content must be gone.
-    assert!(!rendered.contains("entrypoints"));
-    assert!(!rendered.contains("scanners"));
+    assert!(rendered.contains("build or import a threat model"));
+    // No category row may claim a count the target never produced.
+    assert!(!rendered.contains("Spoofing"), "{rendered}");
+    assert!(!rendered.contains("Info-disclosure"), "{rendered}");
+    assert!(!rendered.contains("aud-claim"), "{rendered}");
 }
 
 #[test]

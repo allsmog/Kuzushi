@@ -4,6 +4,10 @@ use crate::ui_view_models::{SeverityTone, ThreatStrideMember, ThreatStrideRow, T
 pub(super) fn append_stride_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let rollup = crate::ui_view_models::threat_stride_rollup(app);
     lines.push(section_header_line(&rollup.header, area.width));
+    if let Some(hint) = &rollup.empty_hint {
+        lines.push(empty_hint_line(hint));
+        return;
+    }
     for row in &rollup.rows {
         lines.push(stride_row(row, area.width));
         for member in &row.members {

@@ -1,49 +1,14 @@
+use super::threat_model::THREAT_MODEL_EMPTY_HINT;
 use crate::ShellApp;
 use kuzushi_core::Severity;
-
-type StorySpec = (
-    &'static str,
-    Severity,
-    &'static str,
-    &'static str,
-    &'static str,
-);
-
-const CANONICAL_STORIES: [StorySpec; 4] = [
-    (
-        "T-001",
-        Severity::Critical,
-        "sql injection via order_id concatenation",
-        "POST /orders/<id>",
-        "apps/api/orders.rs:142",
-    ),
-    (
-        "T-002",
-        Severity::Critical,
-        "prompt injection sink reads user body",
-        "user message → llm context",
-        "apps/web/agents/concierge.ts:88",
-    ),
-    (
-        "T-003",
-        Severity::High,
-        "jwt verify accepts alg=none",
-        "forged Authorization header",
-        "apps/api/auth/jwt.rs:54",
-    ),
-    (
-        "T-004",
-        Severity::High,
-        "shell exec from cron payload",
-        "scheduled job pulls untrusted task",
-        "jobs/worker.py:213",
-    ),
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatStoryModel {
     pub(crate) header: String,
     pub(crate) rows: Vec<ThreatStoryRow>,
+    /// Set only when no threat model backs the view; the list then names the
+    /// missing artifact instead of inventing attacker stories.
+    pub(crate) empty_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +62,7 @@ pub(crate) fn threat_story_model(app: &ShellApp) -> ThreatStoryModel {
     super::threat_model_doc(app)
         .as_ref()
         .and_then(threat_story_model_from_doc)
-        .unwrap_or_else(canonical_story_model)
+        .unwrap_or_else(empty_story_model)
 }
 
 pub(crate) fn threat_story_model_from_doc(doc: &serde_json::Value) -> Option<ThreatStoryModel> {
@@ -191,20 +156,12 @@ fn format_affected_file(file: &serde_json::Value) -> String {
     }
 }
 
-fn canonical_story_model() -> ThreatStoryModel {
-    let rows = CANONICAL_STORIES
-        .into_iter()
-        .map(|(id, severity, title, attack, location)| {
-            threat_story_row(
-                id.to_string(),
-                severity,
-                title.to_string(),
-                attack.to_string(),
-                location.to_string(),
-            )
-        })
-        .collect();
-    threat_story_model_from_rows(rows)
+fn empty_story_model() -> ThreatStoryModel {
+    ThreatStoryModel {
+        header: "ATTACKER STORIES".to_string(),
+        rows: Vec::new(),
+        empty_hint: Some(THREAT_MODEL_EMPTY_HINT.to_string()),
+    }
 }
 
 fn threat_story_model_from_rows(rows: Vec<ThreatStoryRow>) -> ThreatStoryModel {
@@ -213,6 +170,7 @@ fn threat_story_model_from_rows(rows: Vec<ThreatStoryRow>) -> ThreatStoryModel {
     ThreatStoryModel {
         header: format!("ATTACKER STORIES · {}", rows.len()),
         rows,
+        empty_hint: None,
     }
 }
 
@@ -346,6 +304,17 @@ mod tests {
                 .any(|detail| detail.value == "tm-abc"),
             "stableId disclosed for cross-referencing the artifact"
         );
+    }
+
+    #[test]
+    fn threat_story_model_without_a_doc_is_empty_with_a_hint() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        let model = threat_story_model(&app);
+
+        assert_eq!(model.header, "ATTACKER STORIES");
+        assert!(model.rows.is_empty(), "no doc means no attacker story");
+        assert_eq!(model.empty_hint.as_deref(), Some(THREAT_MODEL_EMPTY_HINT));
     }
 
     #[test]

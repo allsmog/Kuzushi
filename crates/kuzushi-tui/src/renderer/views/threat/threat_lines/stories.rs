@@ -4,6 +4,10 @@ use crate::ui_view_models::{SeverityTone, ThreatStoryTone};
 pub(super) fn append_story_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let model = crate::ui_view_models::threat_story_model(app);
     lines.push(section_header_line(&model.header, area.width));
+    if let Some(hint) = &model.empty_hint {
+        lines.push(empty_hint_line(hint));
+        return;
+    }
     for story in model.rows {
         let [id, severity, title] = story.cells;
         lines.push(Line::from(vec![

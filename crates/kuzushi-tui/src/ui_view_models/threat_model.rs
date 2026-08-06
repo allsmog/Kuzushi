@@ -2,6 +2,9 @@ use crate::app::JsonFileState;
 use crate::{ShellApp, ThreatPatch, ViewDataState};
 use std::path::PathBuf;
 
+pub(crate) const THREAT_MODEL_EMPTY_HINT: &str =
+    "build or import a threat model to populate this view";
+
 pub(crate) fn threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
     match read_threat_model_artifact(app) {
         ThreatModelArtifact::Present(doc) if !doc.is_null() => Some(doc),
@@ -75,7 +78,7 @@ impl ThreatSummaryReview {
     fn unknown(patch: Option<&ThreatPatch>) -> Self {
         Self {
             status: "no threat model artifact".to_string(),
-            summary: "build or import a threat model to populate this view".to_string(),
+            summary: THREAT_MODEL_EMPTY_HINT.to_string(),
             threats: "—".to_string(),
             assets: "—".to_string(),
             nodes: "—".to_string(),

@@ -321,7 +321,7 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
     lines.extend(model.project.rows.iter().take(8).map(|row| {
         Line::from(vec![
             Span::styled(
-                format!("{} {:<14}", row.origin.glyph(), row.section),
+                format!("{} {:<14} ", row.origin.glyph(), row.section),
                 origin_style(row.origin),
             ),
             Span::styled(fit(&row.summary, width.saturating_sub(17)), theme::muted()),
@@ -802,6 +802,22 @@ mod next_scan_tests {
             crate::ui_view_models::PhaseCockpitBody::Map(map) => map,
             _ => panic!("map body expected"),
         }
+    }
+
+    #[test]
+    fn context_rows_separate_a_full_width_section_from_its_summary() {
+        let map = map_fixture();
+        assert!(
+            map.project
+                .rows
+                .iter()
+                .any(|row| row.section == "review surface"),
+            "fixture must carry the widest section label"
+        );
+
+        let rendered = text(&context_lines(&map, 100));
+
+        assert!(rendered.contains("review surface 0 items"), "{rendered}");
     }
 
     #[test]

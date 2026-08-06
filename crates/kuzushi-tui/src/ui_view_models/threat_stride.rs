@@ -1,51 +1,14 @@
+use super::threat_model::THREAT_MODEL_EMPTY_HINT;
 use crate::ShellApp;
 use kuzushi_core::Severity;
-
-type StrideSpec = (&'static str, Severity, &'static str, usize, &'static str);
-
-const CANONICAL_STRIDE_ROWS: [StrideSpec; 6] = [
-    (
-        "S",
-        Severity::High,
-        "Spoofing",
-        2,
-        "jwt without aud-claim, mailgun cname dangling",
-    ),
-    (
-        "T",
-        Severity::Medium,
-        "Tampering",
-        1,
-        "worker pool reads unsigned amqp messages",
-    ),
-    ("R", Severity::Low, "Repudiation", 0, ""),
-    (
-        "I",
-        Severity::Critical,
-        "Info-disclosure",
-        3,
-        "plaintext PII at db→s3 boundary, debug logs",
-    ),
-    (
-        "D",
-        Severity::Medium,
-        "DoS",
-        1,
-        "no rate-limit on /checkout/confirm",
-    ),
-    (
-        "E",
-        Severity::High,
-        "Elev-of-priv",
-        1,
-        "admin subdomain shares jwt secret with api",
-    ),
-];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatStrideModel {
     pub(crate) header: String,
     pub(crate) rows: Vec<ThreatStrideRow>,
+    /// Set only when no threat model backs the view; the rollup then names the
+    /// missing artifact instead of showing categories it cannot measure.
+    pub(crate) empty_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +57,7 @@ pub(crate) fn threat_stride_rollup(app: &ShellApp) -> ThreatStrideModel {
     super::threat_model_doc(app)
         .as_ref()
         .and_then(threat_stride_rollup_from_doc)
-        .unwrap_or_else(canonical_stride_rollup)
+        .unwrap_or_else(empty_stride_rollup)
 }
 
 pub(crate) fn threat_stride_rollup_from_doc(doc: &serde_json::Value) -> Option<ThreatStrideModel> {
@@ -207,18 +170,12 @@ fn threat_impact(threat: &serde_json::Value) -> Option<Severity> {
         .map(super::threat_impact::impact_to_severity)
 }
 
-fn canonical_stride_rollup() -> ThreatStrideModel {
-    let rows = CANONICAL_STRIDE_ROWS
-        .into_iter()
-        .map(threat_stride_row_from_spec)
-        .collect();
-    threat_stride_model(rows)
-}
-
-fn threat_stride_row_from_spec(
-    (letter, severity, category, count, description): StrideSpec,
-) -> ThreatStrideRow {
-    threat_stride_row(letter, severity, category, count, description.to_string())
+fn empty_stride_rollup() -> ThreatStrideModel {
+    ThreatStrideModel {
+        header: "STRIDE ROLLUP".to_string(),
+        rows: Vec::new(),
+        empty_hint: Some(THREAT_MODEL_EMPTY_HINT.to_string()),
+    }
 }
 
 fn threat_stride_row(
@@ -255,6 +212,7 @@ fn threat_stride_model(rows: Vec<ThreatStrideRow>) -> ThreatStrideModel {
     ThreatStrideModel {
         header: format!("STRIDE ROLLUP · {issue_count} issues"),
         rows,
+        empty_hint: None,
     }
 }
 
@@ -300,6 +258,17 @@ mod tests {
         assert!(threat_stride_rollup_from_doc(&json!({})).is_none());
         assert!(threat_stride_rollup_from_doc(&json!({"threats": []})).is_none());
         assert!(threat_stride_rollup_from_doc(&json!({"threats": null})).is_none());
+    }
+
+    #[test]
+    fn threat_stride_rollup_without_a_doc_is_empty_with_a_hint() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        let rollup = threat_stride_rollup(&app);
+
+        assert_eq!(rollup.header, "STRIDE ROLLUP");
+        assert!(rollup.rows.is_empty(), "no doc means no measured category");
+        assert_eq!(rollup.empty_hint.as_deref(), Some(THREAT_MODEL_EMPTY_HINT));
     }
 
     #[test]

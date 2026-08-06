@@ -225,7 +225,7 @@ fn prereq_step_detail_rows(step: &PrereqPromptStepModel, width: usize) -> Vec<Li
 }
 
 fn prereq_field_line(label: &str, value: &str, width: usize, value_style: Style) -> Line<'static> {
-    let full_prefix = format!("  {label:<11}");
+    let full_prefix = format!("  {label:<11} ");
     let prefix = if width >= display_width(&full_prefix) + 4 {
         full_prefix
     } else {
@@ -421,6 +421,16 @@ mod tests {
                 assert!(row_text(&rows[2]).contains("+1"), "width {width}: {rows:?}");
             }
         }
+    }
+
+    #[test]
+    fn recommended_field_separates_its_label_from_the_decision() {
+        let rows = prereq_detail_rows(&prompt_with_step(), 60);
+
+        assert!(
+            row_text(&rows[0]).contains("recommended approve"),
+            "{rows:?}"
+        );
     }
 
     fn prompt_with_step() -> PrereqPromptModel {

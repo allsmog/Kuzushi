@@ -1,0 +1,9 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+---
+KUZUSHI shell route · view:threats:stride · target:none · model:unconfigured · context not built · cost:$0.00 (no...
+
+1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
+
+ -- STRIDE ROLLUP ------------------------------------------------------------------------------------------------------
+   build or import a threat model to populate this view

@@ -12,7 +12,7 @@ KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not bui
 │./failure-target · rev:checking…
 │checking durable map artifacts…
 │context:missing · Next: context build
-│○ scope tree    no persisted nested scopes yet; run `next` to map project boundaries
+│○ scope tree     no persisted nested scopes yet; run `next` to map project boundaries
 
           ┌ MAP · RESULT READY ──────────────────────────────────────────────────────────────────────────────┐
           │MAP returned partial evidence. Review it and choose a recovery action.                            │

@@ -229,9 +229,19 @@ fn threat_model_row(threat: &super::ThreatSummaryReview) -> ProjectModelRow {
             "{} · threats {} · assumptions {}",
             threat.summary,
             threat.threats,
-            threat.assumptions.len()
+            assumption_count_label(threat, present)
         ),
         action: "threats summary",
+    }
+}
+
+/// Without a persisted model the review's assumption list carries guidance
+/// copy, not measured assumptions, so the row reports an em-dash instead.
+fn assumption_count_label(threat: &super::ThreatSummaryReview, present: bool) -> String {
+    if present {
+        threat.assumptions.len().to_string()
+    } else {
+        "—".to_string()
     }
 }
 

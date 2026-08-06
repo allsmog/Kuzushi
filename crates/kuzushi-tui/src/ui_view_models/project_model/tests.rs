@@ -20,6 +20,27 @@ fn project_model_without_target_projects_missing_state() {
 }
 
 #[test]
+fn threat_model_row_without_an_artifact_counts_no_assumptions() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+
+    let model = project_model(&app);
+    let row = model
+        .rows
+        .iter()
+        .find(|row| row.section == "threat model")
+        .expect("threat model row");
+
+    assert_eq!(row.state, "missing");
+    assert!(
+        row.summary.ends_with("assumptions —"),
+        "guidance copy must not read as a measured count: {}",
+        row.summary
+    );
+}
+
+#[test]
 fn project_model_origin_labels_are_stable() {
     assert_eq!(ProjectModelOrigin::Local.glyph(), "◆");
     assert_eq!(ProjectModelOrigin::Local.label(), "local");
@@ -80,6 +101,7 @@ fn project_model_aggregates_context_threat_dfd_and_findings() {
         row.section == "threat model"
             && row.origin == ProjectModelOrigin::Local
             && row.summary.contains("demo summary")
+            && row.summary.ends_with("assumptions 1")
     }));
     assert!(model.rows.iter().any(|row| {
         row.section == "data flow"

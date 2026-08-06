@@ -7,6 +7,14 @@ mod stride;
 mod summary;
 mod versions;
 
+/// One muted guidance line for a panel whose backing artifact does not exist.
+fn empty_hint_line(hint: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("   "),
+        Span::styled(hint.to_string(), theme::muted()),
+    ])
+}
+
 pub(crate) fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());

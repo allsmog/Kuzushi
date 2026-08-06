@@ -1,46 +1,15 @@
+use super::threat_model::THREAT_MODEL_EMPTY_HINT;
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
 const SCOPE_ITEM_LIMIT: usize = 4;
 
-type ScopeSpec = (Severity, &'static str, &'static [&'static str]);
-
-const CANONICAL_SCOPE_BUCKETS: [ScopeSpec; 4] = [
-    (
-        Severity::Critical,
-        "critical",
-        &[
-            "sql injection via order_id concatenation",
-            "prompt injection sink reads user body",
-        ],
-    ),
-    (
-        Severity::High,
-        "high",
-        &[
-            "jwt verify accepts alg=none",
-            "shell exec from cron payload",
-            "path traversal in /assets/<file>",
-        ],
-    ),
-    (
-        Severity::Medium,
-        "medium",
-        &[
-            "open redirect on /login?next=",
-            "csrf token not bound to session",
-            "unbounded regex on /search",
-        ],
-    ),
-    (
-        Severity::Low,
-        "low",
-        &[
-            "cors allows null origin",
-            "cookie set without SameSite",
-            "console.log of req.body in handler",
-        ],
-    ),
+/// Bucket order and labels for real threats; the counts come from the doc.
+const SCOPE_BUCKET_LABELS: [(Severity, &str); 4] = [
+    (Severity::Critical, "critical"),
+    (Severity::High, "high"),
+    (Severity::Medium, "medium"),
+    (Severity::Low, "low"),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +25,9 @@ pub(crate) struct ThreatScopeBucket {
 pub(crate) struct ThreatScopeModel {
     pub(crate) header: String,
     pub(crate) buckets: Vec<ThreatScopeBucket>,
+    /// Set only when no threat model backs the view; the buckets then name the
+    /// missing artifact instead of inventing scoped issues.
+    pub(crate) empty_hint: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,7 +57,7 @@ pub(crate) fn threat_scope_model(app: &ShellApp) -> ThreatScopeModel {
     super::threat_model_doc(app)
         .as_ref()
         .and_then(threat_scope_model_from_doc)
-        .unwrap_or_else(canonical_scope_model)
+        .unwrap_or_else(empty_scope_model)
 }
 
 pub(crate) fn threat_scope_model_from_doc(doc: &serde_json::Value) -> Option<ThreatScopeModel> {
@@ -110,9 +82,9 @@ fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
 }
 
 fn empty_scope_buckets() -> Vec<ThreatScopeBucket> {
-    CANONICAL_SCOPE_BUCKETS
+    SCOPE_BUCKET_LABELS
         .iter()
-        .map(|(severity, label, _)| threat_scope_bucket(*severity, label, Vec::new()))
+        .map(|(severity, label)| threat_scope_bucket(*severity, label, Vec::new()))
         .collect()
 }
 
@@ -140,21 +112,12 @@ fn threat_title(threat: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn canonical_scope_buckets() -> Vec<ThreatScopeBucket> {
-    CANONICAL_SCOPE_BUCKETS
-        .iter()
-        .map(|(severity, label, items)| {
-            threat_scope_bucket(
-                *severity,
-                label,
-                items.iter().map(ToString::to_string).collect(),
-            )
-        })
-        .collect()
-}
-
-fn canonical_scope_model() -> ThreatScopeModel {
-    threat_scope_model_from_buckets(canonical_scope_buckets())
+fn empty_scope_model() -> ThreatScopeModel {
+    ThreatScopeModel {
+        header: "SCOPE".to_string(),
+        buckets: Vec::new(),
+        empty_hint: Some(THREAT_MODEL_EMPTY_HINT.to_string()),
+    }
 }
 
 fn threat_scope_model_from_buckets(buckets: Vec<ThreatScopeBucket>) -> ThreatScopeModel {
@@ -165,6 +128,7 @@ fn threat_scope_model_from_buckets(buckets: Vec<ThreatScopeBucket>) -> ThreatSco
             .into_iter()
             .filter(|bucket| bucket.item_count > 0)
             .collect(),
+        empty_hint: None,
     }
 }
 
@@ -231,6 +195,17 @@ mod tests {
         assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
         assert_eq!(buckets[2].tone, ThreatScopeTone::Medium);
         assert_eq!(buckets[2].item_count, 1);
+    }
+
+    #[test]
+    fn threat_scope_model_without_a_doc_is_empty_with_a_hint() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        let model = threat_scope_model(&app);
+
+        assert_eq!(model.header, "SCOPE");
+        assert!(model.buckets.is_empty(), "no doc means no scoped issue");
+        assert_eq!(model.empty_hint.as_deref(), Some(THREAT_MODEL_EMPTY_HINT));
     }
 
     #[test]

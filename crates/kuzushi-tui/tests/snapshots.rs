@@ -255,24 +255,24 @@ fn recommend_view_with_artifact() {
 }
 
 #[test]
-fn threat_stories_view_with_canonical_fixture() {
+fn threat_stories_view_without_artifact() {
     let mut app = fresh_app();
     app.open_threat_view_for_test(ThreatView::Stories);
-    assert_plain_snapshot("threat_stories_canonical", &render_at_120(&mut app));
+    assert_plain_snapshot("threat_stories_empty", &render_at_120(&mut app));
 }
 
 #[test]
-fn threat_scope_view_with_canonical_fixture() {
+fn threat_scope_view_without_artifact() {
     let mut app = fresh_app();
     app.open_threat_view_for_test(ThreatView::Scope);
-    assert_plain_snapshot("threat_scope_canonical", &render_at_120(&mut app));
+    assert_plain_snapshot("threat_scope_empty", &render_at_120(&mut app));
 }
 
 #[test]
-fn threat_stride_view_with_canonical_fixture() {
+fn threat_stride_view_without_artifact() {
     let mut app = fresh_app();
     app.open_threat_view_for_test(ThreatView::Stride);
-    assert_plain_snapshot("threat_stride_canonical", &render_at_120(&mut app));
+    assert_plain_snapshot("threat_stride_empty", &render_at_120(&mut app));
 }
 
 #[test]
