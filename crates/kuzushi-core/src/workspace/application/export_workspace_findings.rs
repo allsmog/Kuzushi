@@ -769,25 +769,37 @@ fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
 }
 
 /// Guard CSV cells against spreadsheet formula/injection (CWE-1236).
-/// Excel, Google Sheets, and LibreOffice interpret a cell whose first
-/// character is `=`, `+`, `-`, or `@` as a formula; leading control bytes
-/// (tab, carriage return, line feed) are neutralized in the same family
-/// because some importers strip them before parsing. Kuzushi exports
-/// findings whose text (titles, rule ids, file paths, model reasoning) can
-/// originate from an untrusted scan target, so a crafted finding could
-/// execute a formula when an analyst opens the CSV. Prefix any such value
-/// with a single quote, matching the OWASP mitigation. Values that do not
-/// begin with a dangerous character are returned unchanged. Matching on the
-/// leading byte is sufficient: every dangerous character is ASCII, and a
-/// multibyte UTF-8 character always leads with a byte >= 0x80.
+/// Spreadsheet applications may interpret cells whose first character is
+/// `=`, `+`, `-`, or `@` as formulas. Leading tab, carriage return, and line
+/// feed are neutralized because importers may strip them before formula
+/// parsing. Full-width variants (`＝`, `＋`, `－`, `＠`) are guarded as well:
+/// current OWASP guidance records locale/application combinations that treat
+/// those Unicode prefixes as formula starters. Kuzushi exports target- and
+/// model-influenced text, so every field passes this single write boundary.
+/// Prefixing a dangerous field with a single quote follows the existing CSV
+/// export contract; benign values remain byte-for-byte unchanged.
 pub(crate) fn sanitize_csv_field(value: &str) -> String {
     if matches!(
-        value.as_bytes().first(),
-        Some(b'=' | b'+' | b'-' | b'@' | b'\t' | b'\r' | b'\n')
+        value.chars().next(),
+        Some('=' | '+' | '-' | '@' | '\t' | '\r' | '\n' | '＝' | '＋' | '－' | '＠')
     ) {
         format!("'{value}")
     } else {
         value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod csv_sanitization_tests {
+    use super::sanitize_csv_field;
+
+    #[test]
+    fn guards_full_width_formula_prefixes_without_touching_other_unicode() {
+        for dangerous in ["＝1+1", "＋1", "－1", "＠SUM(A1)"] {
+            assert_eq!(sanitize_csv_field(dangerous), format!("'{dangerous}"));
+        }
+        assert_eq!(sanitize_csv_field("é=mc2"), "é=mc2");
+        assert_eq!(sanitize_csv_field("日本語"), "日本語");
     }
 }
 
