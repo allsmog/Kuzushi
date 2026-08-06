@@ -768,6 +768,41 @@ fn write_csv_header(writer: &mut csv::Writer<Vec<u8>>) -> Result<()> {
     Ok(())
 }
 
+/// Guard CSV cells against spreadsheet formula/injection (CWE-1236).
+/// Spreadsheet applications may interpret cells whose first character is
+/// `=`, `+`, `-`, or `@` as formulas. Leading tab, carriage return, and line
+/// feed are neutralized because importers may strip them before formula
+/// parsing. Full-width variants (`＝`, `＋`, `－`, `＠`) are guarded as well:
+/// current OWASP guidance records locale/application combinations that treat
+/// those Unicode prefixes as formula starters. Kuzushi exports target- and
+/// model-influenced text, so every field passes this single write boundary.
+/// Prefixing a dangerous field with a single quote follows the existing CSV
+/// export contract; benign values remain byte-for-byte unchanged.
+pub(crate) fn sanitize_csv_field(value: &str) -> String {
+    if matches!(
+        value.chars().next(),
+        Some('=' | '+' | '-' | '@' | '\t' | '\r' | '\n' | '＝' | '＋' | '－' | '＠')
+    ) {
+        format!("'{value}")
+    } else {
+        value.to_string()
+    }
+}
+
+#[cfg(test)]
+mod csv_sanitization_tests {
+    use super::sanitize_csv_field;
+
+    #[test]
+    fn guards_full_width_formula_prefixes_without_touching_other_unicode() {
+        for dangerous in ["＝1+1", "＋1", "－1", "＠SUM(A1)"] {
+            assert_eq!(sanitize_csv_field(dangerous), format!("'{dangerous}"));
+        }
+        assert_eq!(sanitize_csv_field("é=mc2"), "é=mc2");
+        assert_eq!(sanitize_csv_field("日本語"), "日本語");
+    }
+}
+
 fn write_csv_rows(
     writer: &mut csv::Writer<Vec<u8>>,
     records: &[WorkspaceFindingExportRecord],
@@ -776,7 +811,11 @@ fn write_csv_rows(
 ) -> Result<()> {
     let metadata = csv_metadata_fields(records.len(), total_count, options);
     for record in records {
-        writer.write_record(csv_finding_row(record, &metadata))?;
+        let guarded: Vec<String> = csv_finding_row(record, &metadata)
+            .iter()
+            .map(|field| sanitize_csv_field(field))
+            .collect();
+        writer.write_record(&guarded)?;
     }
     Ok(())
 }

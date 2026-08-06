@@ -36,6 +36,8 @@ pub use export_workspace_findings::{
     export_workspace_findings, export_workspace_findings_with_options,
     preview_workspace_findings_export, WorkspaceFindingsExportPreview,
 };
+#[cfg(test)]
+pub(crate) use export_workspace_findings::sanitize_csv_field;
 pub use load_program_scope::{load_program_scope, write_program_scope_scaffold};
 pub use nested_scope::{
     discover_and_save_nested_project_scopes, discover_nested_project_scopes,
