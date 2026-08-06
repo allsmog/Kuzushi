@@ -390,20 +390,13 @@ fn finding_dedupe_key(finding: &Finding) -> String {
 fn scan_run_export_contexts(
     workspace: &WorkspaceTarget,
     findings: &[Finding],
-    run_ids: &[String],
+    _run_ids: &[String],
 ) -> HashMap<String, WorkspaceRunExportContext> {
-    let mut contexts = workspace_run_export_contexts(workspace, findings);
-    let fallback = run_ids.iter().find_map(|run_id| {
-        load_run_summary(workspace.root(), run_id)
-            .ok()
-            .map(|summary| WorkspaceRunExportContext::from_summary(&summary))
-    });
-    if let Some(fallback) = fallback {
-        for run_id in finding_run_ids(findings) {
-            contexts.entry(run_id).or_insert_with(|| fallback.clone());
-        }
-    }
-    contexts
+    // Run ids select findings and benchmark scope; they are not interchangeable
+    // provenance. If one finding's run summary is absent or malformed, leave
+    // its optional metadata absent rather than borrowing another run's model,
+    // version, platform, or terminal status.
+    workspace_run_export_contexts(workspace, findings)
 }
 
 fn workspace_run_export_contexts(
