@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { fileToolsForRequest } from "./file-tools.mjs";
+import { confinedCandidates, fileToolsForRequest } from "./file-tools.mjs";
 
 function setupWorkspace() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), "kuzushi-filetools-")));
@@ -158,6 +158,37 @@ test("Glob and Grep drop an in-root symlink whose target escapes the roots", asy
     assert.equal(globbed, "no files match escape.txt");
     const grepped = await tools.get("Grep").invoke({ pattern: "OUTSIDE_SECRET", glob: "escape.txt" });
     assert.equal(grepped, "no matches for OUTSIDE_SECRET");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("confinement work stays bounded when every candidate is rejected", () => {
+  const { base } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const roots = [realpathSync(wsRoot)];
+  // 25,001 nonexistent candidates all fail realpath and are rejected; the
+  // inspection cap must stop the walk instead of paying for every entry.
+  const matches = Array.from({ length: 25_001 }, (_, index) => `missing-${index}.txt`);
+  try {
+    const { kept, truncated } = confinedCandidates(matches, wsRoot, roots, 5000);
+    assert.equal(kept.length, 0);
+    assert.equal(truncated, true);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("an authorized candidate inside the inspection cap is still kept", () => {
+  const { base } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const roots = [realpathSync(wsRoot)];
+  const matches = ["inside.txt", ...Array.from({ length: 25_000 }, (_, index) => `missing-${index}.txt`)];
+  try {
+    const { kept, truncated } = confinedCandidates(matches, wsRoot, roots, 5000);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].matchedPath, join(wsRoot, "inside.txt"));
+    assert.equal(truncated, true);
   } finally {
     rmSync(base, { recursive: true, force: true });
   }

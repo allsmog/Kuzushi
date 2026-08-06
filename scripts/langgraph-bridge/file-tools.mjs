@@ -9,6 +9,7 @@ const READ_MAX_LINE_CHARS = 500;
 const LS_MAX_ENTRIES = 500;
 const GLOB_MAX_RESULTS = 200;
 const GREP_MAX_FILES = 5000;
+const CONFINE_MAX_CANDIDATES = 25_000;
 const GREP_MAX_MATCHES = 100;
 const GREP_MAX_FILE_BYTES = 1_000_000;
 const SKIPPED_DIRS = new Set([".git", "node_modules", "target", ".kuzushi"]);
@@ -73,6 +74,24 @@ function confinedMatch(base, match, roots) {
   const matchedPath = resolve(base, match);
   const canonicalPath = confineToRoots(matchedPath, roots);
   return canonicalPath === null ? null : { canonicalPath, matchedPath };
+}
+
+// Bound confinement work itself, not just accepted results: every inspected
+// candidate costs a realpath call, so an untrusted workspace stuffed with
+// escaping symlinks must not buy unbounded synchronous work with entries that
+// are all rejected. Rejected candidates still never consume `quota`.
+export function confinedCandidates(matches, base, roots, quota) {
+  const kept = [];
+  let inspected = 0;
+  for (const match of matches) {
+    if (inspected >= CONFINE_MAX_CANDIDATES) return { kept, truncated: true };
+    inspected += 1;
+    const candidate = confinedMatch(base, match, roots);
+    if (candidate === null) continue;
+    if (kept.length >= quota) return { kept, truncated: true };
+    kept.push(candidate);
+  }
+  return { kept, truncated: false };
 }
 
 function workspaceRelative(absolute, base) {
@@ -158,13 +177,12 @@ function globTool(roots) {
 }
 
 function renderGlob(pattern, base, roots) {
-  const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) })
-    .map((match) => confinedMatch(base, match, roots))
-    .filter((candidate) => candidate !== null)
-    .map((candidate) => workspaceRelative(candidate.matchedPath, base))
-    .sort();
+  const raw = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) });
+  const { kept, truncated } = confinedCandidates(raw, base, roots, Infinity);
+  const matches = kept.map((candidate) => workspaceRelative(candidate.matchedPath, base)).sort();
   const shown = matches.slice(0, GLOB_MAX_RESULTS);
   if (matches.length > shown.length) shown.push(`… ${matches.length - shown.length} more matches omitted`);
+  if (truncated) shown.push(`… inspection stopped after ${CONFINE_MAX_CANDIDATES} candidates — narrow the pattern`);
   return shown.join("\n") || `no files match ${pattern}`;
 }
 
@@ -227,14 +245,8 @@ function grepCandidateFiles(base, roots, glob) {
 }
 
 function confinedGrepCandidates(matches, base, roots) {
-  const files = [];
-  for (const match of matches) {
-    const candidate = confinedMatch(base, match, roots);
-    if (candidate === null) continue;
-    if (files.length >= GREP_MAX_FILES) return { files, truncatedWalk: true };
-    files.push(candidate);
-  }
-  return { files, truncatedWalk: false };
+  const { kept, truncated } = confinedCandidates(matches, base, roots, GREP_MAX_FILES);
+  return { files: kept, truncatedWalk: truncated };
 }
 
 function appendFileMatches(out, candidate, base, regex) {
