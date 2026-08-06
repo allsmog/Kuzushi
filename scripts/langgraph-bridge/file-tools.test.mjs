@@ -35,6 +35,27 @@ test("Grep cannot read outside content via a `..` glob filter", async () => {
   }
 });
 
+test("escaping symlink matches cannot consume Grep's authorized-file budget", async () => {
+  const { base, tools } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  const outside = join(base, "outside.txt");
+  writeFileSync(join(wsRoot, "zzzz.budget.txt"), "AUTHORIZED_BUDGET_TOKEN\n");
+  // The old implementation sliced the first 5,000 raw glob matches before
+  // confinement. An untrusted repository could therefore fill that prefix
+  // with escaping symlinks and make an authorized finding disappear.
+  for (let index = 0; index < 5000; index += 1) {
+    symlinkSync(outside, join(wsRoot, `${String(index).padStart(4, "0")}.budget.txt`));
+  }
+  try {
+    const result = await tools
+      .get("Grep")
+      .invoke({ pattern: "AUTHORIZED_BUDGET_TOKEN", glob: "*.budget.txt" });
+    assert.match(result, /^zzzz\.budget\.txt:1:AUTHORIZED_BUDGET_TOKEN$/m);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("Grep matches content inside the workspace root", async () => {
   const { base, tools } = setupWorkspace();
   try {
