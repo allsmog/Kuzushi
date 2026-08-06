@@ -81,17 +81,20 @@ function confinedMatch(base, match, roots) {
 // escaping symlinks must not buy unbounded synchronous work with entries that
 // are all rejected. Rejected candidates still never consume `quota`.
 export function confinedCandidates(matches, base, roots, quota) {
+  const inspected = matches.slice(0, CONFINE_MAX_CANDIDATES);
+  const { kept, overQuota } = admitCandidates(inspected, base, roots, quota);
+  return { kept, truncated: overQuota || inspected.length < matches.length };
+}
+
+function admitCandidates(matches, base, roots, quota) {
   const kept = [];
-  let inspected = 0;
   for (const match of matches) {
-    if (inspected >= CONFINE_MAX_CANDIDATES) return { kept, truncated: true };
-    inspected += 1;
     const candidate = confinedMatch(base, match, roots);
     if (candidate === null) continue;
-    if (kept.length >= quota) return { kept, truncated: true };
+    if (kept.length >= quota) return { kept, overQuota: true };
     kept.push(candidate);
   }
-  return { kept, truncated: false };
+  return { kept, overQuota: false };
 }
 
 function workspaceRelative(absolute, base) {
