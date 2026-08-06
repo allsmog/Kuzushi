@@ -223,37 +223,44 @@ function grepCandidateFiles(base, roots, glob) {
     cwd: base,
     exclude: (name) => SKIPPED_DIRS.has(name),
   });
+  return confinedGrepCandidates(matches, base, roots);
+}
+
+function confinedGrepCandidates(matches, base, roots) {
   const files = [];
-  let truncatedWalk = false;
   for (const match of matches) {
     const candidate = confinedMatch(base, match, roots);
     if (candidate === null) continue;
-    if (files.length >= GREP_MAX_FILES) {
-      truncatedWalk = true;
-      break;
-    }
+    if (files.length >= GREP_MAX_FILES) return { files, truncatedWalk: true };
     files.push(candidate);
   }
-  return { files, truncatedWalk };
+  return { files, truncatedWalk: false };
 }
 
 function appendFileMatches(out, candidate, base, regex) {
-  const { canonicalPath, matchedPath } = candidate;
-  let text;
-  try {
-    if (!statSync(canonicalPath).isFile() || statSync(canonicalPath).size > GREP_MAX_FILE_BYTES) return;
-    text = readFileSync(canonicalPath, "utf8");
-  } catch {
-    return;
-  }
-  if (text.includes("\u0000")) return;
-  const lines = text.split("\n");
-  const relative = matchedPath.startsWith(`${base}${sep}`)
-    ? matchedPath.slice(base.length + 1)
-    : matchedPath;
+  const lines = grepTextLines(candidate.canonicalPath);
+  const relative = workspaceRelative(candidate.matchedPath, base);
   for (let index = 0; index < lines.length && out.length < GREP_MAX_MATCHES; index += 1) {
     if (regex.test(lines[index])) {
       out.push(`${relative}:${index + 1}:${lines[index].slice(0, READ_MAX_LINE_CHARS)}`);
     }
+  }
+}
+
+function grepTextLines(path) {
+  const text = readGrepText(path);
+  if (text === null) return [];
+  if (text.includes("\u0000")) return [];
+  return text.split("\n");
+}
+
+function readGrepText(path) {
+  try {
+    const stats = statSync(path);
+    if (!stats.isFile()) return null;
+    if (stats.size > GREP_MAX_FILE_BYTES) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
   }
 }
