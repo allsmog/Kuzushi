@@ -35,13 +35,14 @@ pub(crate) fn verify_threat_model_adapter(
         save_persistent_threat_model(root, &document, true)?;
     }
     let output = format!(
-        "threat-model:verify — {} ({} cited paths, {} missing; {} link errors; coverage {}/{})",
+        "threat-model:verify — {} ({} cited paths, {} missing; {} link errors; coverage {}/{}){}",
         verification.verdict,
         verification.checked_paths,
         verification.missing_count,
         verification.link_error_count,
         verification.coverage_considered - verification.coverage_gaps,
         verification.coverage_considered,
+        degraded_grounding_note(verification.grounding_degraded.as_deref()),
     );
     Ok(crate::module_result::completed_output_result(
         output.clone(),
@@ -51,6 +52,15 @@ pub(crate) fn verify_threat_model_adapter(
             "written": write,
         }),
     ))
+}
+
+/// A verdict measured without the entry-point catalog says so on the same
+/// line the operator reads the verdict from.
+fn degraded_grounding_note(disclosure: Option<&str>) -> String {
+    match disclosure {
+        Some(disclosure) => format!(" — degraded grounding: {disclosure}"),
+        None => String::new(),
+    }
 }
 
 pub(crate) fn import_threat_model_adapter(

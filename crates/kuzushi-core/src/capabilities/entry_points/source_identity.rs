@@ -3,6 +3,41 @@ use super::persistence::read_context_snapshot;
 use anyhow::{Context, Result};
 use std::path::Path;
 
+/// The context snapshot still parses, but it no longer describes the current
+/// target. Producers (`entry-points:extract`, `threat-model:build`) refuse on
+/// it; verification recognizes it and degrades to an ungrounded surface scan
+/// instead of dying. Genuine I/O or corruption never carries this type.
+#[derive(Debug)]
+pub(super) struct StaleContextSnapshotSource(String);
+
+impl StaleContextSnapshotSource {
+    fn error(message: impl Into<String>) -> anyhow::Error {
+        anyhow::Error::new(Self(message.into()))
+    }
+}
+
+impl std::fmt::Display for StaleContextSnapshotSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for StaleContextSnapshotSource {}
+
+/// The stale-source disclosure behind an error, when there is one.
+pub(super) fn stale_source_disclosure(error: &anyhow::Error) -> Option<String> {
+    error
+        .downcast_ref::<StaleContextSnapshotSource>()
+        .map(StaleContextSnapshotSource::to_string)
+}
+
+fn stale_unless(is_current: bool, message: &str) -> Result<()> {
+    if is_current {
+        return Ok(());
+    }
+    Err(StaleContextSnapshotSource::error(message))
+}
+
 pub(super) fn validate_current_source_identity(
     target: &Path,
     snapshot: &ContextSnapshotIdentity,
@@ -35,35 +70,41 @@ fn validate_current_git_identity(
     current: Option<&crate::run_artifacts::RunTargetGitMetadata>,
 ) -> Result<()> {
     match (snapshot.revision.as_deref(), current) {
-        (Some(revision), Some(current)) => {
-            anyhow::ensure!(revision == current.sha, "context snapshot revision is stale");
-            anyhow::ensure!(
-                snapshot.revision_dirty == Some(current.dirty),
-                "context snapshot dirty state is stale"
-            );
-        }
-        (None, None) => anyhow::ensure!(
+        (Some(revision), Some(current)) => validate_matched_git_identity(snapshot, revision, current),
+        (None, None) => stale_unless(
             snapshot.revision_dirty.is_none(),
-            "context snapshot repository identity is stale"
+            "context snapshot repository identity is stale",
         ),
-        _ => anyhow::bail!(
-            "context snapshot repository identity is unavailable or stale; run `context:build`"
-        ),
+        _ => Err(StaleContextSnapshotSource::error(
+            "context snapshot repository identity is unavailable or stale; run `context:build`",
+        )),
     }
-    Ok(())
+}
+
+fn validate_matched_git_identity(
+    snapshot: &ContextSnapshotIdentity,
+    revision: &str,
+    current: &crate::run_artifacts::RunTargetGitMetadata,
+) -> Result<()> {
+    stale_unless(revision == current.sha, "context snapshot revision is stale")?;
+    stale_unless(
+        snapshot.revision_dirty == Some(current.dirty),
+        "context snapshot dirty state is stale",
+    )
 }
 
 fn validate_current_tree_identity(
     target: &Path,
     snapshot: &ContextSnapshotIdentity,
 ) -> Result<()> {
-    let expected = snapshot.tree_hash.as_deref().with_context(|| {
-        "dirty or non-Git context snapshot has no treeHash; run `context:build`"
-    })?;
+    let Some(expected) = snapshot.tree_hash.as_deref() else {
+        return Err(StaleContextSnapshotSource::error(
+            "dirty or non-Git context snapshot has no treeHash; run `context:build`",
+        ));
+    };
     let current = crate::incremental_index::current_workspace_tree_hash(target)
         .context("Could not authenticate the current target tree")?;
-    anyhow::ensure!(expected == current, "context snapshot tree identity is stale");
-    Ok(())
+    stale_unless(expected == current, "context snapshot tree identity is stale")
 }
 
 pub(super) fn revalidate_snapshot_source(

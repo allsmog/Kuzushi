@@ -376,8 +376,12 @@ diff mining in `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`,
 target: every cited path must exist with a sane line number, the
 documented `provenance.revision` is compared to HEAD — tri-state, a
 non-git target is unknown rather than failed — and coverage is
-re-measured against fresh grounding surfaces; the
-`verified`/`stale`/`failed` verdict is stamped onto the document, and
+re-measured against fresh grounding surfaces; when the context snapshot
+the entry-point catalog derives from no longer describes the target,
+coverage falls back to the current surface scan, `groundingSource`
+becomes `noncatalog`, `groundingDegraded` records why, and the verdict
+is at best `stale` instead of an error; the `verified`/`stale`/`failed`
+verdict is stamped onto the document, and
 `write=false` reports without saving), `threat-model:import` (the
 explicit front door for externally-authored documents: `path` or an
 inline `document` is normalized, verified, stamped with `import`

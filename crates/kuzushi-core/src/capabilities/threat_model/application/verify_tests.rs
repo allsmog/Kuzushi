@@ -204,6 +204,23 @@ fn cover_current_grounding(mut document: Value, target: &Path) -> Value {
     document
 }
 
+/// A snapshot that parsed fine when it was written but names a revision the
+/// target has since moved past — the ordinary "one more commit" state.
+fn write_stale_context_snapshot(target: &Path) {
+    let path = crate::context::context_snapshot_path(target);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let snapshot = json!({
+        "target": target.canonicalize().unwrap().display().to_string(),
+        "timestamp": 9,
+        "provenance": {
+            "revision": "0000000000000000000000000000000000000000",
+            "revisionDirty": false,
+        },
+        "attackSurfaceMap": {"surfaces": []},
+    });
+    std::fs::write(&path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
+}
+
 #[test]
 fn path_refs_cover_affected_files_evidence_strings_and_anchors() {
     let refs = cited_path_refs(&document(&["src/app.py"]));
@@ -482,4 +499,60 @@ fn verification_uses_fixed_current_noncatalog_scope() {
     assert_eq!(verification.coverage_considered, expected.len());
     assert_eq!(verification.coverage_gaps, 0);
     assert_eq!(verification.verdict, "verified");
+}
+
+#[test]
+fn stale_context_snapshot_degrades_grounding_instead_of_failing_verification() {
+    let target = fixture_target();
+    initialize_git(target.path());
+    write_stale_context_snapshot(target.path());
+    let doc = cover_current_grounding(document(&["src/app.py"]), target.path());
+
+    let verification = verify_threat_model_document(&doc, target.path()).unwrap();
+
+    assert_eq!(verification.verdict, "stale");
+    assert_eq!(verification.grounding_source, "noncatalog");
+    let disclosure = verification.grounding_degraded.unwrap();
+    assert!(
+        disclosure.contains("context snapshot revision is stale"),
+        "{disclosure}"
+    );
+    assert!(disclosure.contains("context:build"), "{disclosure}");
+}
+
+#[test]
+fn degraded_grounding_warns_every_consumer_of_the_stamped_document() {
+    let target = fixture_target();
+    initialize_git(target.path());
+    write_stale_context_snapshot(target.path());
+    let mut doc = cover_current_grounding(document(&["src/app.py"]), target.path());
+    let verification = verify_threat_model_document(&doc, target.path()).unwrap();
+    stamp_verification(&mut doc, &verification);
+
+    let warning = verification_warning(&doc, target.path()).unwrap();
+
+    assert!(
+        warning.contains("could not use the entry-point catalog"),
+        "{warning}"
+    );
+}
+
+#[test]
+fn absent_and_stale_context_snapshots_ground_verification_the_same_way() {
+    let target = fixture_target();
+    initialize_git(target.path());
+    let doc = cover_current_grounding(document(&["src/app.py"]), target.path());
+
+    let absent = verify_threat_model_document(&doc, target.path()).unwrap();
+    write_stale_context_snapshot(target.path());
+    let stale = verify_threat_model_document(&doc, target.path()).unwrap();
+
+    assert_eq!(absent.grounding_source, "noncatalog");
+    assert_eq!(stale.grounding_source, "noncatalog");
+    assert_eq!(absent.coverage_considered, stale.coverage_considered);
+    assert_eq!(absent.coverage_gaps, stale.coverage_gaps);
+    assert_eq!(absent.verdict, "verified");
+    assert!(absent.grounding_degraded.is_none());
+    assert_eq!(stale.verdict, "stale", "degraded grounding is never a pass");
+    assert!(stale.grounding_degraded.is_some());
 }

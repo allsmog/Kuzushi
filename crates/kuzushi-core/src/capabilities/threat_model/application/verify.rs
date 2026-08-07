@@ -8,11 +8,24 @@
 //! re-measured against fresh grounding surfaces. Dirty and non-Git targets
 //! additionally require a matching content-tree identity. The verdict is
 //! stamped on the document; consumers warn, they never drop.
+//!
+//! Grounding itself is tri-state, and staleness never costs the operator a
+//! verdict. When the target has moved past the context snapshot the
+//! entry-point catalog was derived from, verification does not fail: it
+//! falls back to the same current surface scan an uncatalogued target uses,
+//! reports `groundingSource = "noncatalog"`, records why in
+//! `groundingDegraded`, and grades the document at best `stale`. A catalog
+//! that is present but does not authenticate, and every genuine I/O or
+//! corruption failure, is still a hard error.
 
 use super::*;
+use crate::capabilities::entry_points::VerificationCatalogGrounding;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
+
+const CATALOG_GROUNDING: &str = "catalog";
+const NONCATALOG_GROUNDING: &str = "noncatalog";
 
 const MAX_CHECKED_PATH_REFS: usize = 500;
 const MAX_LISTED_MISSING: usize = 12;
@@ -22,7 +35,8 @@ const VERIFY_COVERAGE_MAX_ELEMENTS: usize = 40;
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreatModelVerification {
-    /// `verified` | `stale` (revision drift) | `failed` (evidence, links, or coverage).
+    /// `verified` | `stale` (revision drift or degraded grounding) |
+    /// `failed` (evidence, links, or coverage).
     pub verdict: String,
     pub checked_paths: usize,
     pub missing_count: usize,
@@ -34,6 +48,12 @@ pub struct ThreatModelVerification {
     pub revision: RevisionCheck,
     pub coverage_considered: usize,
     pub coverage_gaps: usize,
+    /// `catalog` when the authenticated entry-point catalog scoped this
+    /// coverage check, `noncatalog` when the current surface scan did.
+    pub grounding_source: String,
+    /// Why the catalog could not scope this run, when it could not. A
+    /// degraded run always carries its reason; it is never silently absent.
+    pub grounding_degraded: Option<String>,
     pub verified_at_ms: u64,
 }
 
@@ -55,15 +75,9 @@ pub fn verify_threat_model_document(
     let missing = missing_citations(target, &refs);
     let links = security_context_link_report(document);
     let revision = revision_check(document, target);
-    let coverage = coverage_check(document, target)?;
-    let verdict = if !missing.is_empty() || !links.is_complete() || !coverage.invariant_satisfied()
-    {
-        "failed"
-    } else if revision.matches == Some(false) {
-        "stale"
-    } else {
-        "verified"
-    };
+    let grounding = verification_grounding_surfaces(document, target)?;
+    let coverage = check_coverage(document, &grounding.surfaces);
+    let verdict = verdict_for(&missing, &links, &coverage, &revision, &grounding);
     Ok(ThreatModelVerification {
         verdict: verdict.to_string(),
         checked_paths: refs.len(),
@@ -74,8 +88,28 @@ pub fn verify_threat_model_document(
         revision,
         coverage_considered: coverage.considered,
         coverage_gaps: coverage.gaps.len(),
+        grounding_source: grounding.source.to_string(),
+        grounding_degraded: grounding.degraded,
         verified_at_ms: epoch_ms_now(),
     })
+}
+
+/// Evidence problems fail outright; revision drift and grounding that could
+/// not use the catalog are both honest staleness, never a silent pass.
+fn verdict_for(
+    missing: &[String],
+    links: &SecurityContextLinkReport,
+    coverage: &CoverageReport,
+    revision: &RevisionCheck,
+    grounding: &VerificationGrounding,
+) -> &'static str {
+    if !missing.is_empty() || !links.is_complete() || !coverage.invariant_satisfied() {
+        return "failed";
+    }
+    if revision.matches == Some(false) || grounding.degraded.is_some() {
+        return "stale";
+    }
+    "verified"
 }
 
 /// Merge the verification block into the document (replacing any prior one).
@@ -88,17 +122,37 @@ pub fn stamp_verification(document: &mut Value, verification: &ThreatModelVerifi
     }
 }
 
-/// Cheap consumption warning: revision drift or a stamped non-verified
-/// verdict. Never blocks — consumers prepend it and proceed.
+/// Cheap consumption warning: revision drift, grounding that could not use
+/// the entry-point catalog, or a stamped non-verified verdict. Never blocks —
+/// consumers prepend it and proceed.
 pub fn verification_warning(document: &Value, target: &Path) -> Option<String> {
+    revision_drift_warning(document, target)
+        .or_else(|| degraded_grounding_warning(document))
+        .or_else(|| stamped_verdict_warning(document))
+}
+
+fn revision_drift_warning(document: &Value, target: &Path) -> Option<String> {
     let revision = revision_check(document, target);
-    if revision.matches == Some(false) {
-        return Some(format!(
-            "threat-model warning: document was built at revision {} but the target is now at {} — cited paths and lines may be stale (run threat-model:verify)",
-            short_sha(revision.documented.as_deref()),
-            short_sha(revision.current.as_deref()),
-        ));
+    if revision.matches != Some(false) {
+        return None;
     }
+    Some(format!(
+        "threat-model warning: document was built at revision {} but the target is now at {} — cited paths and lines may be stale (run threat-model:verify)",
+        short_sha(revision.documented.as_deref()),
+        short_sha(revision.current.as_deref()),
+    ))
+}
+
+fn degraded_grounding_warning(document: &Value) -> Option<String> {
+    let disclosure = document
+        .pointer("/verification/groundingDegraded")
+        .and_then(Value::as_str)?;
+    Some(format!(
+        "threat-model warning: the last verification could not use the entry-point catalog — {disclosure}"
+    ))
+}
+
+fn stamped_verdict_warning(document: &Value) -> Option<String> {
     match document.pointer("/verification/verdict").and_then(Value::as_str) {
         Some("failed") => Some(
             "threat-model warning: the last verification failed evidence, security-context-link, or entry-point coverage checks — treat this model as incomplete or unreliable".to_string(),
@@ -251,9 +305,37 @@ fn revision_check(document: &Value, target: &Path) -> RevisionCheck {
     }
 }
 
-fn coverage_check(document: &Value, target: &Path) -> Result<CoverageReport> {
-    let surfaces = verification_grounding_surfaces(document, target)?;
-    Ok(check_coverage(document, &surfaces))
+/// The surfaces coverage was measured against, plus how they were obtained.
+struct VerificationGrounding {
+    surfaces: Vec<crate::attack_surface::AttackSurface>,
+    source: &'static str,
+    degraded: Option<String>,
+}
+
+impl VerificationGrounding {
+    fn catalog(surfaces: Vec<crate::attack_surface::AttackSurface>) -> Self {
+        Self {
+            surfaces,
+            source: CATALOG_GROUNDING,
+            degraded: None,
+        }
+    }
+
+    fn noncatalog(surfaces: Vec<crate::attack_surface::AttackSurface>) -> Self {
+        Self {
+            surfaces,
+            source: NONCATALOG_GROUNDING,
+            degraded: None,
+        }
+    }
+
+    fn degraded(surfaces: Vec<crate::attack_surface::AttackSurface>, disclosure: String) -> Self {
+        Self {
+            surfaces,
+            source: NONCATALOG_GROUNDING,
+            degraded: Some(disclosure),
+        }
+    }
 }
 
 struct CatalogCoverageReceipt {
@@ -275,23 +357,62 @@ impl CatalogCoverageReceipt {
 fn verification_grounding_surfaces(
     document: &Value,
     target: &Path,
-) -> Result<Vec<crate::attack_surface::AttackSurface>> {
+) -> Result<VerificationGrounding> {
     let receipt = catalog_coverage_receipt(document)?;
-    let catalog = crate::capabilities::entry_points::resolve_entry_point_catalog_for_verification(
-        target,
-    )?;
-    if let Some(catalog) = catalog {
-        if let Some(receipt) = receipt.as_ref().filter(|receipt| !receipt.is_unavailable()) {
-            authenticate_receipt_catalog(receipt, &catalog)?;
+    let grounding =
+        crate::capabilities::entry_points::resolve_entry_point_catalog_for_verification(target)?;
+    match grounding {
+        VerificationCatalogGrounding::Catalog(catalog) => {
+            authenticated_catalog_grounding(target, &catalog, receipt.as_ref())
         }
-        return full_catalog_verification_surfaces(target, &catalog);
+        VerificationCatalogGrounding::StaleContext(disclosure) => {
+            degraded_grounding(target, &disclosure)
+        }
+        VerificationCatalogGrounding::Absent => {
+            unbacked_grounding(document, target, receipt.as_ref())
+        }
     }
+}
+
+fn authenticated_catalog_grounding(
+    target: &Path,
+    catalog: &crate::capabilities::entry_points::EntryPointCatalog,
+    receipt: Option<&CatalogCoverageReceipt>,
+) -> Result<VerificationGrounding> {
+    if let Some(receipt) = receipt.filter(|receipt| !receipt.is_unavailable()) {
+        authenticate_receipt_catalog(receipt, catalog)?;
+    }
+    Ok(VerificationGrounding::catalog(
+        full_catalog_verification_surfaces(target, catalog)?,
+    ))
+}
+
+/// The context snapshot no longer describes the target, so no catalog can be
+/// authenticated against it. Measure the current surface scan instead and say
+/// so — the operator gets a verdict plus the reason, never a dead end.
+fn degraded_grounding(target: &Path, disclosure: &str) -> Result<VerificationGrounding> {
+    Ok(VerificationGrounding::degraded(
+        noncatalog_verification_surfaces(target)?,
+        format!(
+            "{disclosure} — coverage was re-measured against the current attack-surface scan; \
+             run `context:build` and re-verify for catalog-grounded coverage"
+        ),
+    ))
+}
+
+fn unbacked_grounding(
+    document: &Value,
+    target: &Path,
+    receipt: Option<&CatalogCoverageReceipt>,
+) -> Result<VerificationGrounding> {
     anyhow::ensure!(
-        receipt.as_ref().is_none_or(CatalogCoverageReceipt::is_unavailable),
+        receipt.is_none_or(CatalogCoverageReceipt::is_unavailable),
         "catalog-backed threat model cannot be verified without its authenticated entry-point catalog"
     );
-    validate_unbacked_source(document, target, receipt.as_ref())?;
-    noncatalog_verification_surfaces(target)
+    validate_unbacked_source(document, target, receipt)?;
+    Ok(VerificationGrounding::noncatalog(
+        noncatalog_verification_surfaces(target)?,
+    ))
 }
 
 fn catalog_coverage_receipt(document: &Value) -> Result<Option<CatalogCoverageReceipt>> {

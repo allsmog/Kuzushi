@@ -160,6 +160,46 @@ mod version_tests {
         assert_eq!(live, recorded);
     }
 
+    /// A snapshot whose recorded repository identity no longer resolves
+    /// against the target it describes.
+    fn write_stale_context_snapshot(workspace: &Path) {
+        let path = crate::context::context_snapshot_path(workspace);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let snapshot = json!({
+            "target": workspace.canonicalize().unwrap().display().to_string(),
+            "timestamp": 9,
+            "provenance": {
+                "revision": "0000000000000000000000000000000000000000",
+                "revisionDirty": false,
+            },
+            "attackSurfaceMap": {"surfaces": []},
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&snapshot).unwrap()).unwrap();
+    }
+
+    #[test]
+    fn restore_survives_a_stale_context_snapshot_and_discloses_it() {
+        let workspace = tempfile::tempdir().unwrap();
+        let stored = document("stored");
+        let id = record_threat_model_version(workspace.path(), &stored, "build", None)
+            .unwrap()
+            .unwrap();
+        write_stale_context_snapshot(workspace.path());
+
+        restore_threat_model_version(workspace.path(), id).unwrap();
+
+        let live = load_persistent_threat_model(workspace.path()).unwrap();
+        let verification = live.pointer("/verification").unwrap();
+        assert_eq!(verification.pointer("/groundingSource").unwrap(), "noncatalog");
+        assert!(
+            verification
+                .pointer("/groundingDegraded")
+                .and_then(Value::as_str)
+                .is_some_and(|disclosure| disclosure.contains("context:build")),
+            "restore must disclose why the catalog did not ground it: {verification}"
+        );
+    }
+
     #[test]
     fn restore_of_unknown_version_fails_without_touching_live_model() {
         let workspace = tempfile::tempdir().unwrap();

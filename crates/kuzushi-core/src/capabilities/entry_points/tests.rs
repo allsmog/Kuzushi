@@ -344,3 +344,38 @@ fn writer_rejects_a_symlinked_catalog() {
     assert!(error.to_string().contains("symlink"));
     assert_eq!(std::fs::read_to_string(outside.path()).unwrap(), "outside");
 }
+
+#[test]
+fn verification_degrades_on_the_stale_snapshot_producers_still_refuse() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["provenance"]["revision"] = json!("0000000000000000000000000000000000000000");
+    write_snapshot(target.path(), &value);
+
+    let extract = refresh_entry_point_catalog(target.path()).unwrap_err();
+    let ensured = ensure_current_entry_point_catalog(target.path()).unwrap_err();
+    let verification = resolve_entry_point_catalog_for_verification(target.path()).unwrap();
+
+    let stale = "repository identity is unavailable or stale";
+    assert!(extract.to_string().contains(stale), "{extract:#}");
+    assert!(ensured.to_string().contains(stale), "{ensured:#}");
+    let VerificationCatalogGrounding::StaleContext(disclosure) = verification else {
+        panic!("a stale context snapshot must degrade verification, not blank it");
+    };
+    assert!(disclosure.contains(stale), "{disclosure}");
+}
+
+#[test]
+fn verification_still_fails_on_an_incomplete_snapshot() {
+    let target = tempfile::tempdir().unwrap();
+    let mut value = snapshot(target.path());
+    value["repositoryInventory"] = json!({"truncation": {"reason": "snapshot byte budget"}});
+    write_snapshot(target.path(), &value);
+
+    let error = resolve_entry_point_catalog_for_verification(target.path()).unwrap_err();
+
+    assert!(
+        error.to_string().contains("repository inventory is truncated"),
+        "only stale source identity degrades: {error:#}"
+    );
+}
