@@ -8,7 +8,6 @@ pub(crate) fn resolve_model_selector(selector: &str) -> Option<&'static ModelCho
         "3" | "openai-oauth:gpt-5.4" | "oauth:gpt-5.4" => MODEL_CHOICES.get(2),
         "4"
         | "spark"
-        | "codex-monorepo"
         | "gpt-5.3-codex-spark"
         | "openai-oauth:gpt-5.3-codex-spark"
         | "oauth:gpt-5.3-codex-spark" => MODEL_CHOICES.get(3),
