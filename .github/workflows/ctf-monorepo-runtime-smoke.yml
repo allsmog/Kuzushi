@@ -1,0 +1,58 @@
+name: CTF Monorepo runtime smoke artifact
+
+on:
+  push:
+    branches:
+      - agent/ctf-monorepo-runtime-smoke
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "26.3.1"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  build-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${OXIDIZED_JOERN_TOKEN:-}"
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Build current main runtime
+        run: |
+          set -euo pipefail
+          cargo build --workspace --locked
+          node scripts/build-native-runtime.mjs
+      - name: Package OAuth-capable runtime
+        run: |
+          set -euo pipefail
+          mkdir -p ctf-runtime/scripts
+          cp -R native ctf-runtime/
+          cp scripts/langgraph-bridge.mjs ctf-runtime/scripts/
+          cp -R scripts/langgraph-bridge ctf-runtime/scripts/
+          cp scripts/kuzushi-dynamic-module-host.mjs ctf-runtime/scripts/
+          cp -R node_modules ctf-runtime/
+          cp package.json ctf-runtime/
+          tar -C ctf-runtime -czf ctf-monorepo-runtime-linux-x64.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ctf-monorepo-runtime-linux-x64
+          path: ctf-monorepo-runtime-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 1
