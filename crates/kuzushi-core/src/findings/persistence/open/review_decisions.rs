@@ -3,12 +3,15 @@ use crate::storage_v3::writer_actor::{
     ControlCommand, DecisionCommand, DecisionWrite, StorageWriterActor, WriterCommand,
 };
 
-// `decision_event_seq` is nullable: the provenance backfill leaves it NULL for
-// legacy rows it cannot attribute. SQLite sorts NULL below every value, so a
-// bare `order by decision_event_seq` would rank an un-backfilled row as oldest
-// (desc) or replay it first (asc). The `(decision_event_seq is null)` guard
-// sorts NULL rows as newest, matching the review-yield reader and keeping the
-// two readers of this table consistent.
+// Order decision reads by the projected row `id`, not `decision_event_seq`.
+// The projection inserts decision rows in event-sequence order, so `id` is
+// monotonic with `decision_event_seq` for backfilled rows yet is never NULL.
+// Ordering by `id` therefore keeps sequenced decisions authoritative over
+// wall-clock skew (as the event seq is) while still letting a later decision
+// supersede a legacy row whose provenance backfill left `decision_event_seq`
+// NULL. A leading `decision_event_seq` key cannot: SQLite sorts NULL below
+// every value, so it would pin every NULL-provenance row to one extreme —
+// permanently oldest (desc) or first (asc) — regardless of when it was recorded.
 const LATEST_REVIEW_DECISIONS_SQL: &str = r#"
 with requested as (
     select json_extract(value, '$.key') as lookup_key,
@@ -25,9 +28,7 @@ with requested as (
            decisions.decision_read_watermark,
            row_number() over (
                partition by requested.lookup_key
-               order by (decisions.decision_event_seq is null) desc,
-                        decisions.decision_event_seq desc,
-                        decisions.created_at desc, decisions.id desc
+               order by decisions.id desc
            ) as decision_rank
       from requested
       join review_decisions as decisions
@@ -63,7 +64,7 @@ select id, finding_id, identity_id, decision_verdict, triage_verdict,
        confidence, rationale, author, created_at, dismiss_reason, dismissed_by,
        decision_event_seq, decision_event_hash, decision_read_watermark
   from matched
- order by (decision_event_seq is null), decision_event_seq asc, created_at asc, id asc
+ order by id asc
 "#;
 
 impl FindingStore {
@@ -117,7 +118,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1
-             order by (decision_event_seq is null), decision_event_seq asc, created_at asc, id asc
+             order by id asc
             "#,
         )?;
         let rows = stmt.query_map(params![finding_id], review_decision_record_from_row)?;
@@ -136,7 +137,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1
-             order by (decision_event_seq is null), decision_event_seq asc, created_at asc, id asc
+             order by id asc
             "#,
         )?;
         let rows = stmt.query_map(params![identity_id], review_decision_record_from_row)?;
@@ -162,7 +163,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1
-             order by (decision_event_seq is null) desc, decision_event_seq desc, created_at desc, id desc
+             order by id desc
              limit 1
             "#,
         )?;
@@ -182,7 +183,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1
-             order by (decision_event_seq is null) desc, decision_event_seq desc, created_at desc, id desc
+             order by id desc
              limit 1
             "#,
         )?;
@@ -226,7 +227,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where finding_id = ?1 and author = 'human'
-             order by (decision_event_seq is null) desc, decision_event_seq desc, created_at desc, id desc
+             order by id desc
              limit 1
             "#,
         )?;
@@ -246,7 +247,7 @@ impl FindingStore {
                    decision_event_seq, decision_event_hash, decision_read_watermark
               from review_decisions
              where identity_id = ?1 and author = 'human'
-             order by (decision_event_seq is null) desc, decision_event_seq desc, created_at desc, id desc
+             order by id desc
              limit 1
             "#,
         )?;

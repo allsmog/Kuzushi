@@ -2113,16 +2113,20 @@ mod tests {
         );
     }
 
-    #[test]
-    fn review_decision_reads_treat_null_provenance_rows_as_newest() {
-        // A legacy decision whose provenance could not be backfilled has a NULL
-        // decision_event_seq. It must not be misordered against backfilled
-        // siblings: newest in latest-first reads, last in ascending history.
-        let temp = tempfile::tempdir().unwrap();
-        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+    // Append three human decisions in the given verdict order and clear the
+    // provenance columns of the rows at `null_positions` (0-based), simulating
+    // legacy decisions the backfill could not attribute. Returns the store, the
+    // finding id, and the projected decision ids in recording order.
+    fn store_with_null_provenance_decisions(
+        db_dir: &std::path::Path,
+        run: &str,
+        verdicts: [ReviewDecisionVerdict; 3],
+        null_positions: &[usize],
+    ) -> (FindingStore, i64, Vec<i64>) {
+        let db_path = db_dir.join(".kuzushi/v3/index.sqlite3");
         let store = FindingStore::open(&db_path).unwrap();
         store
-            .record_run_started("run-null-prov", Path::new("/tmp/repo"), "running")
+            .record_run_started(run, Path::new("/tmp/repo"), "running")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.null-provenance",
@@ -2132,15 +2136,12 @@ mod tests {
             Severity::Medium,
             "null provenance ordering fixture",
         );
-        let finding_id = store.insert_finding("run-null-prov", &finding).unwrap();
+        let finding_id = store.insert_finding(run, &finding).unwrap();
 
-        let mut ids = Vec::new();
-        for (verdict, rationale) in [
-            (ReviewDecisionVerdict::Confirmed, "confirmed first"),
-            (ReviewDecisionVerdict::RejectedFalsePositive, "rejected next"),
-            (ReviewDecisionVerdict::Deferred, "deferred last"),
-        ] {
-            ids.push(
+        let ids: Vec<i64> = verdicts
+            .into_iter()
+            .enumerate()
+            .map(|(index, verdict)| {
                 store
                     .append_user_review_decision(
                         finding_id,
@@ -2148,48 +2149,54 @@ mod tests {
                             verdict,
                             author: TriageAuthor::Human,
                             confidence: 1.0,
-                            rationale: rationale.to_string(),
+                            rationale: format!("decision {index}"),
                             dismiss_reason: None,
                             actor: None,
                         },
                     )
-                    .unwrap(),
-            );
-        }
+                    .unwrap()
+            })
+            .collect();
 
-        // Pin an honest chronological order via created_at, then simulate a
-        // legacy newest row by clearing its provenance (the state the backfill
-        // leaves when it cannot attribute an event to a decision).
         let raw = rusqlite::Connection::open(&db_path).unwrap();
-        for (id, created_at) in [
-            (ids[0], "2026-01-01T00:00:00Z"),
-            (ids[1], "2026-01-02T00:00:00Z"),
-            (ids[2], "2026-01-03T00:00:00Z"),
-        ] {
+        for &position in null_positions {
             raw.execute(
-                "update review_decisions set created_at = ?2 where id = ?1",
-                rusqlite::params![id, created_at],
+                "update review_decisions
+                    set decision_event_seq = null,
+                        decision_event_hash = null,
+                        decision_read_watermark = null
+                  where id = ?1",
+                rusqlite::params![ids[position]],
             )
             .unwrap();
         }
-        raw.execute(
-            "update review_decisions
-                set decision_event_seq = null,
-                    decision_event_hash = null,
-                    decision_read_watermark = null
-              where id = ?1",
-            rusqlite::params![ids[2]],
-        )
-        .unwrap();
+        (store, finding_id, ids)
+    }
 
-        // Latest-first read: the NULL-provenance row is the newest decision.
+    #[test]
+    fn review_decision_latest_reflects_recording_order_when_newest_is_null_provenance() {
+        // The newest decision is a legacy row the backfill left with a NULL
+        // sequence. It must still win latest-first reads and sort last in the
+        // ascending history — reproducing the pre-fix bug where NULL sorted
+        // below every sequence value and the newest decision was dropped.
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding_id, _ids) = store_with_null_provenance_decisions(
+            temp.path(),
+            "run-newest-null",
+            [
+                ReviewDecisionVerdict::Confirmed,
+                ReviewDecisionVerdict::RejectedFalsePositive,
+                ReviewDecisionVerdict::Deferred,
+            ],
+            &[2],
+        );
+
         let latest = store
             .latest_review_decision(finding_id)
             .unwrap()
             .expect("latest review decision");
         assert_eq!(latest.decision.verdict, ReviewDecisionVerdict::Deferred);
 
-        // Ascending history: the NULL-provenance row sorts last, not first.
         let history: Vec<ReviewDecisionVerdict> = store
             .list_review_decisions(finding_id)
             .unwrap()
@@ -2202,6 +2209,50 @@ mod tests {
                 ReviewDecisionVerdict::Confirmed,
                 ReviewDecisionVerdict::RejectedFalsePositive,
                 ReviewDecisionVerdict::Deferred,
+            ]
+        );
+    }
+
+    #[test]
+    fn review_decision_sequenced_decision_supersedes_older_null_provenance() {
+        // A migrated workspace can hold an old legacy decision with NULL
+        // provenance followed by newer sequenced decisions. NULL marks unknown
+        // provenance, not "newest": a later sequenced decision must supersede
+        // the older NULL row rather than be pinned behind it forever.
+        let temp = tempfile::tempdir().unwrap();
+        let (store, finding_id, _ids) = store_with_null_provenance_decisions(
+            temp.path(),
+            "run-older-null",
+            [
+                ReviewDecisionVerdict::Deferred,
+                ReviewDecisionVerdict::Confirmed,
+                ReviewDecisionVerdict::RejectedFalsePositive,
+            ],
+            &[0],
+        );
+
+        let latest = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("latest review decision");
+        assert_eq!(
+            latest.decision.verdict,
+            ReviewDecisionVerdict::RejectedFalsePositive,
+            "a sequenced decision must supersede an older NULL-provenance row"
+        );
+
+        let history: Vec<ReviewDecisionVerdict> = store
+            .list_review_decisions(finding_id)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.decision.verdict)
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                ReviewDecisionVerdict::Deferred,
+                ReviewDecisionVerdict::Confirmed,
+                ReviewDecisionVerdict::RejectedFalsePositive,
             ]
         );
     }
