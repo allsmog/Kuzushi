@@ -321,7 +321,7 @@ fn context_lines(model: &MapPhaseModel, width: usize) -> Vec<Line<'static>> {
     lines.extend(model.project.rows.iter().take(8).map(|row| {
         Line::from(vec![
             Span::styled(
-                format!("{} {:<14}", row.origin.glyph(), row.section),
+                format!("{} {:<15}", row.origin.glyph(), row.section),
                 origin_style(row.origin),
             ),
             Span::styled(fit(&row.summary, width.saturating_sub(17)), theme::muted()),
@@ -840,6 +840,20 @@ mod next_scan_tests {
         );
         assert!(rendered.contains("3 files below threshold"), "{rendered}");
         assert!(!rendered.contains("context:build"), "{rendered}");
+    }
+
+    #[test]
+    fn review_surface_label_keeps_gap_before_summary() {
+        let rendered = text(&context_lines(&map_fixture(), 100));
+
+        assert!(
+            rendered.contains("review surface "),
+            "label must be followed by a separating space: {rendered}"
+        );
+        assert!(
+            !rendered.contains("review surface0"),
+            "label must not abut a summary beginning with a digit: {rendered}"
+        );
     }
 
     #[test]

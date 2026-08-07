@@ -225,7 +225,7 @@ fn prereq_step_detail_rows(step: &PrereqPromptStepModel, width: usize) -> Vec<Li
 }
 
 fn prereq_field_line(label: &str, value: &str, width: usize, value_style: Style) -> Line<'static> {
-    let full_prefix = format!("  {label:<11}");
+    let full_prefix = format!("  {label:<12}");
     let prefix = if width >= display_width(&full_prefix) + 4 {
         full_prefix
     } else {
@@ -421,6 +421,21 @@ mod tests {
                 assert!(row_text(&rows[2]).contains("+1"), "width {width}: {rows:?}");
             }
         }
+    }
+
+    #[test]
+    fn recommended_field_keeps_gap_before_value() {
+        let line = prereq_field_line("recommended", "approve", 40, theme::success());
+        let rendered = row_text(&line);
+
+        assert!(
+            rendered.contains("recommended approve"),
+            "eleven-char label must keep a separating space: {rendered}"
+        );
+        assert!(
+            !rendered.contains("recommendedapprove"),
+            "label must not abut its value: {rendered}"
+        );
     }
 
     fn prompt_with_step() -> PrereqPromptModel {
