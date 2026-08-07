@@ -6,4 +6,4 @@ KUZUSHI shell route · view:threats:stories · target:none · model:unconfigured
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
 
  -- ATTACKER STORIES ---------------------------------------------------------------------------------------------------
-   build or import a threat model to populate this view
+   select a target before loading threat-model artifacts

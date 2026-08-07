@@ -1,4 +1,4 @@
-use super::threat_model::THREAT_MODEL_EMPTY_HINT;
+use super::threat_model::threat_model_absence_hint;
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
@@ -57,7 +57,7 @@ pub(crate) fn threat_scope_model(app: &ShellApp) -> ThreatScopeModel {
     super::threat_model_doc(app)
         .as_ref()
         .and_then(threat_scope_model_from_doc)
-        .unwrap_or_else(empty_scope_model)
+        .unwrap_or_else(|| empty_scope_model(app))
 }
 
 pub(crate) fn threat_scope_model_from_doc(doc: &serde_json::Value) -> Option<ThreatScopeModel> {
@@ -112,11 +112,11 @@ fn threat_title(threat: &serde_json::Value) -> String {
         .to_string()
 }
 
-fn empty_scope_model() -> ThreatScopeModel {
+fn empty_scope_model(app: &ShellApp) -> ThreatScopeModel {
     ThreatScopeModel {
         header: "SCOPE".to_string(),
         buckets: Vec::new(),
-        empty_hint: Some(THREAT_MODEL_EMPTY_HINT.to_string()),
+        empty_hint: Some(threat_model_absence_hint(app)),
     }
 }
 
@@ -165,6 +165,9 @@ fn overflow_label(item_count: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::threat_model::{
+        app_with_threat_model_json, THREAT_MODEL_NO_THREATS_HINT, THREAT_MODEL_TARGETLESS_HINT,
+    };
     use super::*;
     use serde_json::json;
 
@@ -198,14 +201,36 @@ mod tests {
     }
 
     #[test]
-    fn threat_scope_model_without_a_doc_is_empty_with_a_hint() {
+    fn threat_scope_model_without_a_target_is_empty_with_a_targetless_hint() {
         let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
 
         let model = threat_scope_model(&app);
 
         assert_eq!(model.header, "SCOPE");
         assert!(model.buckets.is_empty(), "no doc means no scoped issue");
-        assert_eq!(model.empty_hint.as_deref(), Some(THREAT_MODEL_EMPTY_HINT));
+        assert_eq!(
+            model.empty_hint.as_deref(),
+            Some(THREAT_MODEL_TARGETLESS_HINT)
+        );
+    }
+
+    #[test]
+    fn threat_scope_model_with_a_zero_threat_model_does_not_claim_the_model_is_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = app_with_threat_model_json(&temp, r#"{"threats": []}"#);
+
+        let model = threat_scope_model(&app);
+
+        assert_eq!(model.header, "SCOPE");
+        assert!(model.buckets.is_empty(), "no threat means no scoped issue");
+        assert_eq!(
+            model.empty_hint.as_deref(),
+            Some(THREAT_MODEL_NO_THREATS_HINT)
+        );
+        assert!(
+            !model.empty_hint.unwrap().contains("build or import"),
+            "a persisted model must not read as an absent artifact"
+        );
     }
 
     #[test]

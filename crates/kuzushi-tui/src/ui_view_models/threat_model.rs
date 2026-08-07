@@ -4,12 +4,31 @@ use std::path::PathBuf;
 
 pub(crate) const THREAT_MODEL_EMPTY_HINT: &str =
     "build or import a threat model to populate this view";
+pub(crate) const THREAT_MODEL_NO_THREATS_HINT: &str = "current threat model records no threats";
+pub(crate) const THREAT_MODEL_MALFORMED_HINT: &str = "threat-model artifact could not be parsed";
+pub(crate) const THREAT_MODEL_NON_FILE_HINT: &str = "threat-model artifact path is not a file";
+pub(crate) const THREAT_MODEL_TARGETLESS_HINT: &str =
+    "select a target before loading threat-model artifacts";
 
 pub(crate) fn threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
     match read_threat_model_artifact(app) {
         ThreatModelArtifact::Present(doc) if !doc.is_null() => Some(doc),
         _ => None,
     }
+}
+
+/// Why a threat-derived view has nothing to project. A `Present` artifact only
+/// reaches here when its `threats` array is empty, so the hint must not claim
+/// the model is missing.
+pub(crate) fn threat_model_absence_hint(app: &ShellApp) -> String {
+    match read_threat_model_artifact(app) {
+        ThreatModelArtifact::Present(_) => THREAT_MODEL_NO_THREATS_HINT,
+        ThreatModelArtifact::Malformed => THREAT_MODEL_MALFORMED_HINT,
+        ThreatModelArtifact::NonFile => THREAT_MODEL_NON_FILE_HINT,
+        ThreatModelArtifact::Targetless => THREAT_MODEL_TARGETLESS_HINT,
+        ThreatModelArtifact::Missing => THREAT_MODEL_EMPTY_HINT,
+    }
+    .to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,7 +116,7 @@ impl ThreatSummaryReview {
     fn targetless(patch: Option<&ThreatPatch>) -> Self {
         Self {
             status: "no target selected".to_string(),
-            summary: "select a target before loading threat-model artifacts".to_string(),
+            summary: THREAT_MODEL_TARGETLESS_HINT.to_string(),
             threats: "—".to_string(),
             assets: "—".to_string(),
             nodes: "—".to_string(),
@@ -121,7 +140,7 @@ impl ThreatSummaryReview {
             actors: "unknown".to_string(),
             flows: "unknown".to_string(),
             trust_boundaries: "unknown".to_string(),
-            assumptions: vec!["threat-model artifact could not be parsed".to_string()],
+            assumptions: vec![THREAT_MODEL_MALFORMED_HINT.to_string()],
             missing_inputs: vec![format!("valid {}", threat_model_file_name())],
             proposed_changes: proposed_changes(patch),
             limitations: vec![
@@ -140,7 +159,7 @@ impl ThreatSummaryReview {
             actors: "unknown".to_string(),
             flows: "unknown".to_string(),
             trust_boundaries: "unknown".to_string(),
-            assumptions: vec!["threat-model artifact path is not a file".to_string()],
+            assumptions: vec![THREAT_MODEL_NON_FILE_HINT.to_string()],
             missing_inputs: vec![format!("valid {} file", threat_model_file_name())],
             proposed_changes: proposed_changes(patch),
             limitations: vec![
@@ -167,6 +186,19 @@ fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
         | ViewDataState::NotRequested
         | ViewDataState::Loading => ThreatModelArtifact::Missing,
     }
+}
+
+/// Materializes a target whose persisted threat-model artifact holds
+/// `contents`, hydrated so the workbench cache serves it.
+#[cfg(test)]
+pub(crate) fn app_with_threat_model_json(temp: &tempfile::TempDir, contents: &str) -> ShellApp {
+    let artifact_path = threat_model_artifact_path(temp.path());
+    std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+    std::fs::write(artifact_path, contents).unwrap();
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.hydrate_all_view_data_for_test();
+    app
 }
 
 fn threat_model_artifact_path(root: impl AsRef<std::path::Path>) -> PathBuf {
@@ -383,12 +415,7 @@ mod tests {
     #[test]
     fn threat_summary_review_surfaces_malformed_persistent_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_path = threat_model_artifact_path(temp.path());
-        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
-        std::fs::write(artifact_path, "{not-json").unwrap();
-        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.set_target(Some(temp.path().to_path_buf()));
-        app.hydrate_all_view_data_for_test();
+        let app = app_with_threat_model_json(&temp, "{not-json");
 
         let review = threat_summary_review(&app);
 
@@ -410,12 +437,7 @@ mod tests {
     #[test]
     fn threat_summary_review_surfaces_non_object_persistent_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_path = threat_model_artifact_path(temp.path());
-        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
-        std::fs::write(artifact_path, "[]").unwrap();
-        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.set_target(Some(temp.path().to_path_buf()));
-        app.hydrate_all_view_data_for_test();
+        let app = app_with_threat_model_json(&temp, "[]");
 
         let review = threat_summary_review(&app);
 
@@ -465,6 +487,45 @@ mod tests {
             threat_model_artifact_path(root),
             kuzushi_core::capabilities::persistent_threat_model_path(root)
         );
+    }
+
+    #[test]
+    fn threat_model_absence_hint_names_the_targetless_state() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+
+        assert_eq!(
+            threat_model_absence_hint(&app),
+            THREAT_MODEL_TARGETLESS_HINT
+        );
+    }
+
+    #[test]
+    fn threat_model_absence_hint_names_a_missing_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+        app.hydrate_all_view_data_for_test();
+
+        assert_eq!(threat_model_absence_hint(&app), THREAT_MODEL_EMPTY_HINT);
+    }
+
+    #[test]
+    fn threat_model_absence_hint_keeps_a_zero_threat_model_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = app_with_threat_model_json(&temp, r#"{"threats": []}"#);
+
+        assert_eq!(
+            threat_model_absence_hint(&app),
+            THREAT_MODEL_NO_THREATS_HINT
+        );
+    }
+
+    #[test]
+    fn threat_model_absence_hint_names_a_malformed_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let app = app_with_threat_model_json(&temp, "{not-json");
+
+        assert_eq!(threat_model_absence_hint(&app), THREAT_MODEL_MALFORMED_HINT);
     }
 
     #[test]

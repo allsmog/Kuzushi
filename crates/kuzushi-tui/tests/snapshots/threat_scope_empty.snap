@@ -6,4 +6,4 @@ source: crates/kuzushi-tui/tests/snapshots.rs
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY  5 VERSIONS
 
  -- SCOPE --------------------------------------------------------------------------------------------------------------
-   build or import a threat model to populate this view
+   select a target before loading threat-model artifacts

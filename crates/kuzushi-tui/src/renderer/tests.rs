@@ -1282,7 +1282,7 @@ fn renders_threat_view_navigation() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("STRIDE"));
-    assert!(rendered.contains("build or import a threat model"));
+    assert!(rendered.contains("select a target before loading threat-model artifacts"));
 }
 
 #[test]
@@ -1875,7 +1875,7 @@ fn threat_scope_model_from_doc_groups_by_impact() {
 }
 
 #[test]
-fn threats_stories_view_without_an_artifact_names_the_missing_model() {
+fn threats_stories_view_without_a_target_names_the_targetless_state() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1886,14 +1886,14 @@ fn threats_stories_view_without_an_artifact_names_the_missing_model() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("ATTACKER STORIES"));
-    assert!(rendered.contains("build or import a threat model"));
+    assert!(rendered.contains("select a target before loading threat-model artifacts"));
     // No invented story may read as target reality.
     assert!(!rendered.contains("order_id concatenation"));
     assert!(!rendered.contains("apps/api/orders.rs"));
 }
 
 #[test]
-fn threats_scope_view_without_an_artifact_names_the_missing_model() {
+fn threats_scope_view_without_a_target_names_the_targetless_state() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1904,7 +1904,7 @@ fn threats_scope_view_without_an_artifact_names_the_missing_model() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("SCOPE"));
-    assert!(rendered.contains("build or import a threat model"));
+    assert!(rendered.contains("select a target before loading threat-model artifacts"));
     // No invented bucket count or item may read as target reality.
     assert!(!rendered.contains("SCOPE · 11 ISSUES"), "{rendered}");
     assert!(!rendered.contains("CRITICAL · 2"), "{rendered}");
@@ -2022,7 +2022,7 @@ fn threats_summary_unknown_state_does_not_invent_data() {
 }
 
 #[test]
-fn threats_stride_view_without_an_artifact_names_the_missing_model() {
+fn threats_stride_view_without_a_target_names_the_targetless_state() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -2036,7 +2036,7 @@ fn threats_stride_view_without_an_artifact_names_the_missing_model() {
         rendered.contains("STRIDE ROLLUP"),
         "expected STRIDE ROLLUP header in: {rendered}"
     );
-    assert!(rendered.contains("build or import a threat model"));
+    assert!(rendered.contains("select a target before loading threat-model artifacts"));
     // No category row may claim a count the target never produced.
     assert!(!rendered.contains("Spoofing"), "{rendered}");
     assert!(!rendered.contains("Info-disclosure"), "{rendered}");
