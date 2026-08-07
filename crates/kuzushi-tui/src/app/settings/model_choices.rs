@@ -36,6 +36,14 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
         thinking_level: "xhigh",
     },
     ModelChoice {
+        index: 4,
+        id: "openai-codex:gpt-5.3-codex-spark",
+        label: "OpenAI OAuth GPT-5.3 Codex Spark",
+        provider: "openai-codex",
+        auth: "OAuth (ChatGPT Pro preview access)",
+        thinking_level: "high",
+    },
+    ModelChoice {
         index: 5,
         id: "anthropic:claude-sonnet-4-6",
         label: "Claude Sonnet 4.6",
@@ -78,6 +86,7 @@ pub(crate) fn visible_model_choices(configured_model: Option<&str>) -> Vec<&'sta
 
 fn visible_primary_openai_choice(configured_model: Option<&str>) -> usize {
     match configured_model {
+        Some("openai-codex:gpt-5.3-codex-spark") => 3,
         Some("openai-codex:gpt-5.4") => 2,
         Some("openai:gpt-5.5") => 0,
         _ if auth_ready_for_provider("openai-codex") => 2,

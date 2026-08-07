@@ -11,7 +11,7 @@ mod tests {
                 true,
                 true
             ),
-            4
+            5
         );
         assert_eq!(
             preferred_model_choice_index_for_state(None, true, true, true),
@@ -23,7 +23,7 @@ mod tests {
         );
         assert_eq!(
             preferred_model_choice_index_for_state(None, false, false, true),
-            3
+            4
         );
         assert_eq!(
             preferred_model_choice_index_for_state(Some("unknown:model"), false, false, false),
@@ -37,6 +37,7 @@ mod tests {
             "openai:gpt-5.5",
             "openai:gpt-5.5-mini",
             "openai-codex:gpt-5.4",
+            "openai-codex:gpt-5.3-codex-spark",
             "anthropic:claude-sonnet-4-6",
             "anthropic:claude-opus-4-7",
         ] {
@@ -69,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_codex_shorthands_are_not_public_selectors() {
+    fn codex_oauth_selectors_expose_gpt_5_4_and_spark_without_legacy_provider_aliases() {
         assert!(normalize_auth_provider("codex").is_err());
         assert!(normalize_auth_provider("openai-codex").is_err());
         assert!(resolve_model_selector("codex:gpt-5.5").is_none());
@@ -78,6 +79,14 @@ mod tests {
         assert_eq!(
             resolve_model_selector("openai-oauth:gpt-5.4").map(|choice| choice.index),
             Some(3)
+        );
+        assert_eq!(
+            resolve_model_selector("spark").map(|choice| choice.index),
+            Some(4)
+        );
+        assert_eq!(
+            resolve_model_selector("openai-oauth:gpt-5.3-codex-spark").map(|choice| choice.id),
+            Some("openai-codex:gpt-5.3-codex-spark")
         );
     }
 
