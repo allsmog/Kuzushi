@@ -2114,6 +2114,99 @@ mod tests {
     }
 
     #[test]
+    fn review_decision_reads_treat_null_provenance_rows_as_newest() {
+        // A legacy decision whose provenance could not be backfilled has a NULL
+        // decision_event_seq. It must not be misordered against backfilled
+        // siblings: newest in latest-first reads, last in ascending history.
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        store
+            .record_run_started("run-null-prov", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.null-provenance",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::Medium,
+            "null provenance ordering fixture",
+        );
+        let finding_id = store.insert_finding("run-null-prov", &finding).unwrap();
+
+        let mut ids = Vec::new();
+        for (verdict, rationale) in [
+            (ReviewDecisionVerdict::Confirmed, "confirmed first"),
+            (ReviewDecisionVerdict::RejectedFalsePositive, "rejected next"),
+            (ReviewDecisionVerdict::Deferred, "deferred last"),
+        ] {
+            ids.push(
+                store
+                    .append_user_review_decision(
+                        finding_id,
+                        &ReviewDecision {
+                            verdict,
+                            author: TriageAuthor::Human,
+                            confidence: 1.0,
+                            rationale: rationale.to_string(),
+                            dismiss_reason: None,
+                            actor: None,
+                        },
+                    )
+                    .unwrap(),
+            );
+        }
+
+        // Pin an honest chronological order via created_at, then simulate a
+        // legacy newest row by clearing its provenance (the state the backfill
+        // leaves when it cannot attribute an event to a decision).
+        let raw = rusqlite::Connection::open(&db_path).unwrap();
+        for (id, created_at) in [
+            (ids[0], "2026-01-01T00:00:00Z"),
+            (ids[1], "2026-01-02T00:00:00Z"),
+            (ids[2], "2026-01-03T00:00:00Z"),
+        ] {
+            raw.execute(
+                "update review_decisions set created_at = ?2 where id = ?1",
+                rusqlite::params![id, created_at],
+            )
+            .unwrap();
+        }
+        raw.execute(
+            "update review_decisions
+                set decision_event_seq = null,
+                    decision_event_hash = null,
+                    decision_read_watermark = null
+              where id = ?1",
+            rusqlite::params![ids[2]],
+        )
+        .unwrap();
+
+        // Latest-first read: the NULL-provenance row is the newest decision.
+        let latest = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("latest review decision");
+        assert_eq!(latest.decision.verdict, ReviewDecisionVerdict::Deferred);
+
+        // Ascending history: the NULL-provenance row sorts last, not first.
+        let history: Vec<ReviewDecisionVerdict> = store
+            .list_review_decisions(finding_id)
+            .unwrap()
+            .into_iter()
+            .map(|record| record.decision.verdict)
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                ReviewDecisionVerdict::Confirmed,
+                ReviewDecisionVerdict::RejectedFalsePositive,
+                ReviewDecisionVerdict::Deferred,
+            ]
+        );
+    }
+
+    #[test]
     fn user_review_decision_rejects_automated_author() {
         let store = FindingStore::open_in_memory().unwrap();
         store
