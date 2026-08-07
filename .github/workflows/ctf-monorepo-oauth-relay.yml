@@ -1,0 +1,40 @@
+name: CTF Monorepo encrypted OAuth relay
+
+on:
+  push:
+    branches:
+      - agent/ctf-monorepo-oauth-relay
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  NODE_VERSION: "26.3.1"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  oauth-bridge-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run encrypted OAuth bridge smoke
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELAY_ISSUE: "152"
+        run: node .github/scripts/ctf-monorepo-oauth-relay.mjs
+      - name: Upload sanitized Monorepo result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: monorepo-ctf-analysis
+          path: monorepo-ctf-analysis.json
+          if-no-files-found: warn
+          retention-days: 1
