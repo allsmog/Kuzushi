@@ -1,5 +1,5 @@
 import { globSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { isAbsolute, resolve, sep } from "node:path";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -9,6 +9,7 @@ const READ_MAX_LINE_CHARS = 500;
 const LS_MAX_ENTRIES = 500;
 const GLOB_MAX_RESULTS = 200;
 const GREP_MAX_FILES = 5000;
+const CONFINE_MAX_CANDIDATES = 25_000;
 const GREP_MAX_MATCHES = 100;
 const GREP_MAX_FILE_BYTES = 1_000_000;
 const SKIPPED_DIRS = new Set([".git", "node_modules", "target", ".kuzushi"]);
@@ -53,11 +54,58 @@ function readRootsFor(request) {
   return [...new Set(roots)];
 }
 
+function confineToRoots(absolute, roots) {
+  let canonical;
+  try {
+    canonical = realpathSync(absolute);
+  } catch {
+    return null;
+  }
+  return roots.some((root) => canonical === root || canonical.startsWith(`${root}${sep}`))
+    ? canonical
+    : null;
+}
+
+// Confine a glob match by its canonical target while retaining the ORIGINAL
+// matched path for operator-visible citations. Reads must use `canonicalPath`:
+// reopening `matchedPath` after validation would create a symlink-swap window
+// in which an untrusted workspace could redirect Grep outside the read roots.
+function confinedMatch(base, match, roots) {
+  const matchedPath = resolve(base, match);
+  const canonicalPath = confineToRoots(matchedPath, roots);
+  return canonicalPath === null ? null : { canonicalPath, matchedPath };
+}
+
+// Bound confinement work itself, not just accepted results: every inspected
+// candidate costs a realpath call, so an untrusted workspace stuffed with
+// escaping symlinks must not buy unbounded synchronous work with entries that
+// are all rejected. Rejected candidates still never consume `quota`.
+export function confinedCandidates(matches, base, roots, quota) {
+  const inspected = matches.slice(0, CONFINE_MAX_CANDIDATES);
+  const { kept, overQuota } = admitCandidates(inspected, base, roots, quota);
+  return { kept, truncated: overQuota || inspected.length < matches.length };
+}
+
+function admitCandidates(matches, base, roots, quota) {
+  const kept = [];
+  for (const match of matches) {
+    const candidate = confinedMatch(base, match, roots);
+    if (candidate === null) continue;
+    if (kept.length >= quota) return { kept, overQuota: true };
+    kept.push(candidate);
+  }
+  return { kept, overQuota: false };
+}
+
+function workspaceRelative(absolute, base) {
+  return absolute.startsWith(`${base}${sep}`) ? absolute.slice(base.length + 1) : absolute;
+}
+
 function authorizedPath(candidate, roots) {
   const base = roots[0];
   const absolute = isAbsolute(candidate) ? candidate : resolve(base, candidate);
-  const canonical = realpathSync(absolute);
-  if (!roots.some((root) => canonical === root || canonical.startsWith(`${root}${sep}`))) {
+  const canonical = confineToRoots(absolute, roots);
+  if (canonical === null) {
     throw new Error(`path is outside the workspace read roots: ${candidate}`);
   }
   return canonical;
@@ -118,7 +166,7 @@ function renderDirectory(path) {
 
 function globTool(roots) {
   return tool(
-    ({ pattern, path }) => renderGlob(pattern, authorizedPath(path ?? roots[0], roots)),
+    ({ pattern, path }) => renderGlob(pattern, authorizedPath(path ?? roots[0], roots), roots),
     {
       name: "Glob",
       description:
@@ -131,16 +179,19 @@ function globTool(roots) {
   );
 }
 
-function renderGlob(pattern, base) {
-  const matches = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) }).sort();
+function renderGlob(pattern, base, roots) {
+  const raw = globSync(pattern, { cwd: base, exclude: (name) => SKIPPED_DIRS.has(name) });
+  const { kept, truncated } = confinedCandidates(raw, base, roots, Infinity);
+  const matches = kept.map((candidate) => workspaceRelative(candidate.matchedPath, base)).sort();
   const shown = matches.slice(0, GLOB_MAX_RESULTS);
   if (matches.length > shown.length) shown.push(`… ${matches.length - shown.length} more matches omitted`);
+  if (truncated) shown.push(`… inspection stopped after ${CONFINE_MAX_CANDIDATES} candidates — narrow the pattern`);
   return shown.join("\n") || `no files match ${pattern}`;
 }
 
 function grepTool(roots) {
   return tool(
-    ({ pattern, path, glob }) => renderGrep(pattern, authorizedPath(path ?? roots[0], roots), glob),
+    ({ pattern, path, glob }) => renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob),
     {
       name: "Grep",
       description:
@@ -154,47 +205,77 @@ function grepTool(roots) {
   );
 }
 
-function renderGrep(pattern, base, glob) {
+function renderGrep(pattern, base, roots, glob) {
   const regex = new RegExp(pattern);
-  const { files, truncatedWalk } = grepCandidateFiles(base, glob);
-  const out = [];
+  const { files, truncatedWalk } = grepCandidateFiles(base, roots, glob);
+  const { lines, scanned } = collectGrepMatches(files, base, regex);
+  const truncated = truncatedWalk || scanned < files.length;
+  const note = grepScanNote(lines.length, scanned, truncated);
+  if (note) lines.push(note);
+  return lines.join("\n") || `no matches for ${pattern}`;
+}
+
+function collectGrepMatches(files, base, regex) {
+  const lines = [];
   let scanned = 0;
   for (const file of files) {
     scanned += 1;
-    appendFileMatches(out, file, base, regex);
-    if (out.length >= GREP_MAX_MATCHES) break;
+    appendFileMatches(lines, file, base, regex);
+    if (lines.length >= GREP_MAX_MATCHES) break;
   }
-  const notes = [];
-  if (out.length >= GREP_MAX_MATCHES) notes.push(`match limit ${GREP_MAX_MATCHES} reached`);
-  if (truncatedWalk || scanned < files.length) notes.push(`scan truncated after ${scanned} file(s) — narrow with path/glob`);
-  if (notes.length > 0) out.push(`… ${notes.join("; ")}`);
-  return out.join("\n") || `no matches for ${pattern}`;
+  return { lines, scanned };
 }
 
-function grepCandidateFiles(base, glob) {
-  if (statSync(base).isFile()) return { files: [base], truncatedWalk: false };
+function grepScanNote(matchCount, scanned, truncated) {
+  const notes = [];
+  if (matchCount >= GREP_MAX_MATCHES) notes.push(`match limit ${GREP_MAX_MATCHES} reached`);
+  if (truncated) notes.push(`scan truncated after ${scanned} file(s) — narrow with path/glob`);
+  return notes.length > 0 ? `… ${notes.join("; ")}` : "";
+}
+
+function grepCandidateFiles(base, roots, glob) {
+  if (statSync(base).isFile()) {
+    return {
+      files: [{ canonicalPath: base, matchedPath: base }],
+      truncatedWalk: false,
+    };
+  }
   const matches = globSync(glob ?? "**/*", {
     cwd: base,
     exclude: (name) => SKIPPED_DIRS.has(name),
   });
-  const files = matches.slice(0, GREP_MAX_FILES).map((match) => join(base, match));
-  return { files, truncatedWalk: matches.length > GREP_MAX_FILES };
+  return confinedGrepCandidates(matches, base, roots);
 }
 
-function appendFileMatches(out, file, base, regex) {
-  let text;
-  try {
-    if (!statSync(file).isFile() || statSync(file).size > GREP_MAX_FILE_BYTES) return;
-    text = readFileSync(file, "utf8");
-  } catch {
-    return;
-  }
-  if (text.includes("\u0000")) return;
-  const lines = text.split("\n");
-  const relative = file.startsWith(`${base}${sep}`) ? file.slice(base.length + 1) : file;
+function confinedGrepCandidates(matches, base, roots) {
+  const { kept, truncated } = confinedCandidates(matches, base, roots, GREP_MAX_FILES);
+  return { files: kept, truncatedWalk: truncated };
+}
+
+function appendFileMatches(out, candidate, base, regex) {
+  const lines = grepTextLines(candidate.canonicalPath);
+  const relative = workspaceRelative(candidate.matchedPath, base);
   for (let index = 0; index < lines.length && out.length < GREP_MAX_MATCHES; index += 1) {
     if (regex.test(lines[index])) {
       out.push(`${relative}:${index + 1}:${lines[index].slice(0, READ_MAX_LINE_CHARS)}`);
     }
+  }
+}
+
+function grepTextLines(path) {
+  const text = readGrepText(path);
+  if (text === null) return [];
+  if (text.includes("\u0000")) return [];
+  return text.split("\n");
+}
+
+function readGrepText(path) {
+  try {
+    const stats = statSync(path);
+    if (!stats.isFile()) return null;
+    if (stats.size > GREP_MAX_FILE_BYTES) return null;
+    return readFileSync(path, "utf8");
+  } catch {
+    return null;
   }
 }
