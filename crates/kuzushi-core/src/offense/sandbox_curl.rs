@@ -24,8 +24,9 @@ impl SandboxCurlTransport {
         }
     }
 
-    /// Pick an isolating backend off PATH (bwrap/podman); falls back to
-    /// `Plain` only if neither is present.
+    /// Pick an isolating backend off PATH (bwrap/podman). Backend detection can
+    /// still return `Plain` when neither is installed, but sends to non-loopback
+    /// targets fail closed before any process or network activity occurs.
     pub fn detect(timeout_ms: u64) -> Self {
         Self::new(detect_backend(None), timeout_ms)
     }
@@ -37,6 +38,7 @@ impl SandboxCurlTransport {
 
 impl PlayTransport for SandboxCurlTransport {
     fn send(&self, target: &ScopeTarget, request: &PlayRequest) -> Result<PlayResponse, String> {
+        ensure_transport_isolation(self.backend, target)?;
         let options = SandboxExecOptions {
             cmd: build_curl_argv(target, request, self.timeout_ms),
             stdin: None,
@@ -50,6 +52,32 @@ impl PlayTransport for SandboxCurlTransport {
         };
         let result = block_on_sandbox_exec(self.backend, options)?;
         parse_curl_response(&result.stdout, result.duration_ms)
+    }
+}
+
+/// The `Plain` backend executes directly on the operator host. It remains
+/// useful for loopback labs, but live traffic to any other target must have an
+/// isolating backend so a missing local dependency cannot silently weaken the
+/// offense boundary.
+fn ensure_transport_isolation(
+    backend: SandboxBackend,
+    target: &ScopeTarget,
+) -> Result<(), String> {
+    if backend != SandboxBackend::Plain || is_loopback_target(target) {
+        return Ok(());
+    }
+    Err(format!(
+        "offense transport refused {target}: no isolating sandbox backend is available; install bwrap or podman before sending live traffic to a non-loopback target"
+    ))
+}
+
+fn is_loopback_target(target: &ScopeTarget) -> bool {
+    match target {
+        ScopeTarget::Ip(ip) => ip.is_loopback(),
+        ScopeTarget::Host(host) => {
+            host.eq_ignore_ascii_case("localhost")
+                || host.to_ascii_lowercase().ends_with(".localhost")
+        }
     }
 }
 
@@ -205,6 +233,33 @@ mod tests {
         assert_eq!(argv.last().unwrap(), "https://box.htb/login");
         // 5000ms rounds to a 5s curl timeout.
         assert!(argv.contains(&"5".to_string()));
+    }
+
+    #[test]
+    fn plain_backend_refuses_non_loopback_before_process_or_network_activity() {
+        let transport = SandboxCurlTransport::new(SandboxBackend::Plain, 5_000);
+        let result = transport.send(&target(), &PlayRequest::get("/admin"));
+        assert!(result.is_err());
+        let error = result.err().unwrap();
+        assert!(error.contains("offense transport refused box.htb"));
+        assert!(error.contains("install bwrap or podman"));
+    }
+
+    #[test]
+    fn plain_backend_allows_loopback_identity() {
+        for raw in ["127.0.0.1", "::1", "localhost", "lab.localhost"] {
+            assert!(
+                ensure_transport_isolation(SandboxBackend::Plain, &ScopeTarget::parse(raw)).is_ok(),
+                "{raw} should remain usable for a local lab"
+            );
+        }
+    }
+
+    #[test]
+    fn isolating_backends_allow_remote_identity() {
+        for backend in [SandboxBackend::Bwrap, SandboxBackend::Podman] {
+            assert!(ensure_transport_isolation(backend, &target()).is_ok());
+        }
     }
 
     #[test]
