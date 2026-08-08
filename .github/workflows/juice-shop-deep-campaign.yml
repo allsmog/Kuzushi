@@ -17,6 +17,7 @@ permissions:
 env:
   NODE_VERSION: "26.3.1"
   PYTHON_VERSION: "3.12"
+  RUST_VERSION: "1.96.1"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   KUZUSHI_REPO: ${{ github.workspace }}
   CAMPAIGN_ROOT: ${{ github.workspace }}/.campaign/${{ github.run_id }}
@@ -57,6 +58,35 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
+      - name: Reclaim and verify runner disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            /usr/local/share/chromium \
+            /usr/local/share/vcpkg \
+            /usr/local/lib/heroku \
+            /usr/local/aws-cli \
+            /opt/microsoft \
+            /usr/lib/jvm || true
+          sudo apt-get clean
+          docker system prune --all --force || true
+          echo "Disk after cleanup:"
+          df -h /
+          available_gib=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
+          if [[ -z "$available_gib" || "$available_gib" -lt 35 ]]; then
+            echo "::error::Deep campaign requires at least 35 GiB free after runner cleanup; found ${available_gib:-unknown} GiB."
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
@@ -68,9 +98,19 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - uses: moonrepo/setup-rust@v1
-        with:
-          inherit-toolchain: true
+      - name: Install minimal pinned Rust toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set profile minimal
+          rustup toolchain install "$RUST_VERSION" \
+            --component clippy \
+            --component rustfmt \
+            --component llvm-tools-preview
+          rustup default "$RUST_VERSION"
+          rustc -Vv
+          cargo -V
+          df -h /
 
       - name: Validate orchestration source before accepting private material
         shell: bash
