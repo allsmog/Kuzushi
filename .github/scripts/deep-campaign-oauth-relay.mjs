@@ -15,6 +15,10 @@ const TOKEN_URL = "https://auth.openai.com/oauth/token";
 const REDIRECT_URI = "http://localhost:1455/auth/callback";
 const POLL_INTERVAL_MS = 5_000;
 const RELAY_DEADLINE_MS = 20 * 60 * 1_000;
+const RSA_MODULUS_BYTES = 3072 / 8;
+const AES_KEY_BYTES = 32;
+const GCM_IV_BYTES = 12;
+const GCM_TAG_BYTES = 16;
 
 const repository = requiredEnv("GITHUB_REPOSITORY");
 const githubToken = requiredEnv("GITHUB_TOKEN");
@@ -25,7 +29,7 @@ const [owner, repo] = repository.split("/");
 
 try {
   const relay = await establishEncryptedRelay();
-  const redirectUrl = await receiveEncryptedRedirect(relay.privateKey);
+  const redirectUrl = await receiveEncryptedRedirect(relay);
   const credential = await exchangeRedirect(redirectUrl, relay);
   writeCredentialBag(credential);
   await postIssueComment(
@@ -45,6 +49,7 @@ async function establishEncryptedRelay() {
   const verifier = base64url(randomBytes(64));
   const challenge = base64url(createHash("sha256").update(verifier).digest());
   const state = base64url(randomBytes(32));
+  const nonce = base64url(randomBytes(32));
   const { publicKey, privateKey } = generateKeyPairSync("rsa", {
     modulusLength: 3072,
     publicKeyEncoding: { type: "spki", format: "pem" },
@@ -65,6 +70,7 @@ async function establishEncryptedRelay() {
     [
       `<!-- kuzushi-deep-campaign-oauth:${runId} -->`,
       `KUZUSHI_DEEP_CAMPAIGN_OAUTH_READY ${runId}`,
+      `Relay nonce: ${nonce}`,
       "",
       "Open the authorization URL below, approve access, then copy the full localhost redirect URL from the browser address bar.",
       "",
@@ -74,62 +80,109 @@ async function establishEncryptedRelay() {
       publicKeyB64,
       "",
       `Submit one encrypted envelope as: KUZUSHI_DEEP_CAMPAIGN_OAUTH_PAYLOAD ${runId} <base64-envelope-json>`,
+      "The encrypted plaintext must be JSON with redirectUrl and relayNonce fields.",
       "The matching private key and PKCE verifier exist only in this running job.",
     ].join("\n"),
   );
-  return { verifier, state, privateKey };
+  return { verifier, state, nonce, privateKey };
 }
 
-async function receiveEncryptedRedirect(privateKey) {
+async function receiveEncryptedRedirect(relay) {
   const deadline = Date.now() + RELAY_DEADLINE_MS;
   const marker = `KUZUSHI_DEEP_CAMPAIGN_OAUTH_PAYLOAD ${runId} `;
+  let lastInvalidPayload;
   while (Date.now() < deadline) {
     const comments = await githubJson(
       `/repos/${owner}/${repo}/issues/${issueNumber}/comments?per_page=100`,
     );
-    const comment = comments.find((entry) => String(entry.body ?? "").startsWith(marker));
-    if (comment) {
+    const candidates = comments
+      .filter((entry) => String(entry.body ?? "").startsWith(marker))
+      .sort((left, right) => Number(right.id) - Number(left.id));
+    for (const comment of candidates) {
       const encodedEnvelope = String(comment.body).slice(marker.length).trim();
-      const redirectUrl = decryptEnvelope(encodedEnvelope, privateKey);
-      await githubRequest(`/repos/${owner}/${repo}/issues/comments/${comment.id}`, {
-        method: "DELETE",
-      }).catch(() => {});
-      return redirectUrl;
+      try {
+        return decryptEnvelope(encodedEnvelope, relay.privateKey, relay.nonce);
+      } catch (error) {
+        lastInvalidPayload = error;
+        console.error(`Ignoring invalid encrypted OAuth payload ${comment.id}: ${publicError(error)}`);
+      } finally {
+        await githubRequest(`/repos/${owner}/${repo}/issues/comments/${comment.id}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
     }
     await sleep(POLL_INTERVAL_MS);
+  }
+  if (lastInvalidPayload) {
+    throw new Error(
+      `authorization payloads were received but none passed relay validation: ${publicError(lastInvalidPayload)}`,
+    );
   }
   throw new Error("authorization payload was not received before the relay deadline");
 }
 
-function decryptEnvelope(encodedEnvelope, privateKey) {
-  const envelope = JSON.parse(Buffer.from(encodedEnvelope, "base64").toString("utf8"));
+function decryptEnvelope(encodedEnvelope, privateKey, expectedNonce) {
+  const envelope = parseBase64Json(encodedEnvelope, "encrypted envelope");
+  const encryptedKey = decodeBase64Field(envelope, "encryptedKey");
+  const iv = decodeBase64Field(envelope, "iv");
+  const authTag = decodeBase64Field(envelope, "authTag");
+  const ciphertext = decodeBase64Field(envelope, "ciphertext");
+  if (encryptedKey.length !== RSA_MODULUS_BYTES) {
+    throw new Error(
+      `encryptedKey length ${encryptedKey.length} did not match the 3072-bit relay key`,
+    );
+  }
+  if (iv.length !== GCM_IV_BYTES) throw new Error("AES-GCM iv must be exactly 12 bytes");
+  if (authTag.length !== GCM_TAG_BYTES) {
+    throw new Error("AES-GCM authTag must be exactly 16 bytes");
+  }
+  if (ciphertext.length === 0) throw new Error("AES-GCM ciphertext must not be empty");
+
   const aesKey = privateDecrypt(
     {
       key: privateKey,
       padding: constants.RSA_PKCS1_OAEP_PADDING,
       oaepHash: "sha256",
     },
-    Buffer.from(envelope.encryptedKey, "base64"),
+    encryptedKey,
   );
-  const decipher = createDecipheriv(
-    "aes-256-gcm",
-    aesKey,
-    Buffer.from(envelope.iv, "base64"),
-  );
-  decipher.setAuthTag(Buffer.from(envelope.authTag, "base64"));
+  if (aesKey.length !== AES_KEY_BYTES) throw new Error("decrypted AES key was not 32 bytes");
+  const decipher = createDecipheriv("aes-256-gcm", aesKey, iv);
+  decipher.setAuthTag(authTag);
   const plaintext = Buffer.concat([
-    decipher.update(Buffer.from(envelope.ciphertext, "base64")),
+    decipher.update(ciphertext),
     decipher.final(),
   ]).toString("utf8");
   const payload = JSON.parse(plaintext);
+  if (payload.relayNonce !== expectedNonce) throw new Error("encrypted relay nonce mismatch");
   if (typeof payload.redirectUrl !== "string" || !payload.redirectUrl.trim()) {
     throw new Error("encrypted relay payload did not contain redirectUrl");
   }
   return payload.redirectUrl.trim();
 }
 
+function parseBase64Json(encoded, label) {
+  if (typeof encoded !== "string" || !encoded.trim()) throw new Error(`${label} was empty`);
+  try {
+    return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  } catch {
+    throw new Error(`${label} was not valid base64 JSON`);
+  }
+}
+
+function decodeBase64Field(object, field) {
+  const raw = object?.[field];
+  if (typeof raw !== "string" || !raw.trim()) throw new Error(`${field} was missing`);
+  const decoded = Buffer.from(raw, "base64");
+  if (decoded.length === 0) throw new Error(`${field} decoded to zero bytes`);
+  return decoded;
+}
+
 async function exchangeRedirect(redirectUrl, relay) {
   const parsed = new URL(redirectUrl);
+  if (parsed.origin !== "http://localhost:1455" || parsed.pathname !== "/auth/callback") {
+    throw new Error("authorization redirect URL did not match the registered localhost callback");
+  }
   const code = parsed.searchParams.get("code");
   const returnedState = parsed.searchParams.get("state");
   if (!code) throw new Error("authorization redirect did not contain a code");
@@ -215,14 +268,19 @@ async function githubRequest(apiPath, init = {}) {
     },
   });
   if (!response.ok) {
-    throw new Error(`GitHub relay API ${init.method ?? "GET"} ${apiPath} failed with HTTP ${response.status}`);
+    throw new Error(
+      `GitHub relay API ${init.method ?? "GET"} ${apiPath} failed with HTTP ${response.status}`,
+    );
   }
   return response;
 }
 
 function publicError(error) {
   const message = error instanceof Error ? error.message : String(error);
-  return message.replace(/[\r\n]+/g, " ").slice(0, 500);
+  return message
+    .replace(/https?:\/\/\S+/g, "[url redacted]")
+    .replace(/[\r\n]+/g, " ")
+    .slice(0, 500);
 }
 
 function requiredEnv(name) {
