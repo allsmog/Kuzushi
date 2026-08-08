@@ -1,0 +1,222 @@
+{
+  "schemaVersion": 1,
+  "modelId": "juice-shop-adversary-model-v1",
+  "title": "OWASP Juice Shop Adversary and Trust-Boundary Model",
+  "scope": {
+    "repository": "allsmog/juice-shop",
+    "targetCommit": "640d727a94e5aaaca37d36d8a690bce074b80369",
+    "baselineCommit": "bd2611f6cac491bb80c9fe54e954fd945c3ab5ba",
+    "deployment": "ephemeral single-tenant Docker instance on an internal GitHub Actions network",
+    "excluded": [
+      "public Juice Shop deployments",
+      "third-party production services",
+      "credential attacks against real users",
+      "source mutation or automated patch application"
+    ]
+  },
+  "system": {
+    "summary": "An Express and TypeScript application with an Angular client, REST and B2B APIs, Sequelize-backed persistence, JWT-bearing authentication, file and structured-data ingestion, outbound URL handling, administrative and commerce workflows, and intentionally vulnerable challenge surfaces. The campaign must distinguish intentional challenge behavior from accidental regressions or exploit chains that escape the intended boundary.",
+    "securityPosture": "Treat every HTTP request, uploaded object, route parameter, token claim, browser-controlled value, database record, serialized document, filesystem path, redirect target, and dependency response as attacker-controlled until a concrete guard proves otherwise. Treat model findings as hypotheses until corroborated by source, CPG, scanner, or isolated runtime evidence."
+  },
+  "actors": [
+    {
+      "id": "anonymous-internet-client",
+      "capabilities": [
+        "send arbitrary HTTP methods, headers, bodies, encodings, and request sequences",
+        "control browser-rendered content and cross-origin navigation",
+        "repeat requests concurrently and exploit timing or state transitions"
+      ]
+    },
+    {
+      "id": "authenticated-low-privilege-user",
+      "capabilities": [
+        "hold a valid JWT and ordinary account state",
+        "modify object identifiers, ownership fields, prices, quantities, roles, and workflow order",
+        "create content later consumed by privileged users or background logic"
+      ]
+    },
+    {
+      "id": "malicious-file-or-document-supplier",
+      "capabilities": [
+        "upload archives, XML, YAML, images, and polyglot files",
+        "control filenames, MIME declarations, parser depth, references, compression ratios, and embedded URLs"
+      ]
+    },
+    {
+      "id": "compromised-or-confused-client",
+      "capabilities": [
+        "tamper with Angular state, local storage, DOM, source maps, API calls, and client-enforced workflow assumptions",
+        "replay or transplant tokens and browser-generated identifiers"
+      ]
+    }
+  ],
+  "assets": [
+    "credentials, password-reset state, TOTP secrets, JWTs, cookies, and session-to-user binding",
+    "roles, deluxe and administrative entitlements, wallet balances, baskets, orders, reviews, memories, and privacy exports",
+    "database integrity and confidentiality",
+    "server filesystem, uploaded files, logs, keys, source snippets, and process environment",
+    "server-side network reachability and redirect authority",
+    "browser origin integrity, rendered DOM, and client-held secrets",
+    "availability of the Node process, database, disk, memory, CPU, and worker queues",
+    "provenance separating intentional challenge vulnerabilities from unintended product defects"
+  ],
+  "trustBoundaries": [
+    {
+      "id": "B1-http-parser",
+      "from": "untrusted network bytes",
+      "to": "Express request objects and body-parser or multer outputs",
+      "questions": [
+        "Are content types, duplicate keys, scalar-versus-object shapes, encodings, sizes, and parser errors handled consistently?",
+        "Can middleware ordering create a route that sees a less-validated representation than later guards expect?"
+      ]
+    },
+    {
+      "id": "B2-authentication-session",
+      "from": "credentials, token material, and browser state",
+      "to": "authenticated principal, authorization context, basket binding, and privileged routes",
+      "questions": [
+        "Does every failure mode remain fail-closed?",
+        "Can an attacker confuse primary authentication, second factor, token verification, or user lookup into authenticating a different identity?"
+      ]
+    },
+    {
+      "id": "B3-data-interpreter",
+      "from": "request-derived strings and structured values",
+      "to": "SQL or ORM queries, templates, regular expressions, command-like interpreters, HTML or DOM sinks, and deserializers",
+      "questions": [
+        "Is data ever concatenated into a language rather than bound as data?",
+        "Can type confusion, coercion, prototype mutation, or parser differentials bypass the intended validation?"
+      ]
+    },
+    {
+      "id": "B4-object-authorization",
+      "from": "authenticated identity plus attacker-selected object identifiers",
+      "to": "reads and mutations of users, baskets, orders, wallets, reviews, memories, files, and administrative state",
+      "questions": [
+        "Is ownership derived from trusted identity rather than request fields?",
+        "Are read, write, transition, and bulk-operation permissions checked at the actual data access?"
+      ]
+    },
+    {
+      "id": "B5-file-parser-filesystem-network",
+      "from": "uploaded or remotely referenced content",
+      "to": "archive extraction, XML or YAML parsers, image handling, filesystem paths, redirects, and outbound HTTP",
+      "questions": [
+        "Can content escape its intended directory, parser feature set, protocol allowlist, or resource budget?",
+        "Are redirects, DNS changes, alternate IP encodings, symlinks, and nested formats handled safely?"
+      ]
+    },
+    {
+      "id": "B6-server-client",
+      "from": "server responses, stored content, configuration, and API data",
+      "to": "Angular templates, browser DOM, local storage, navigation, and cross-origin requests",
+      "questions": [
+        "What security decisions are enforced only in the client?",
+        "Can stored or reflected data become script, URL, CSS, HTML, or trusted framework metadata?"
+      ]
+    }
+  ],
+  "securityInvariants": [
+    "A rejected credential, malformed token, failed second factor, or unavailable identity lookup never produces an authenticated principal.",
+    "Authorization is checked at every sensitive object read or mutation using server-derived identity and current server-side state.",
+    "Untrusted data reaches interpreters only through context-correct binding, escaping, parsing, and allowlisting.",
+    "Uploads, archives, parsers, redirects, and outbound requests remain inside explicit path, protocol, host, size, depth, time, CPU, memory, and concurrency budgets.",
+    "Client-side state is advisory; price, role, ownership, workflow order, and entitlement decisions are recomputed server-side.",
+    "A security claim is confirmed only when source reachability and an attacker-controlled input path are demonstrated; runtime claims require isolated execution evidence.",
+    "Intentional challenge behavior is not automatically dismissed: the campaign must identify unintended cross-challenge composition, boundary escape, new reachability, or regression in the patched login path."
+  ],
+  "analysisRules": [
+    "Search from attacker-controlled sources to security-sensitive sinks, then prove sanitizers and guards on the exact path rather than inferring safety from nearby code.",
+    "Model output is a candidate signal, never proof. Preserve disagreement and mark unsupported claims needs_review.",
+    "Prefer findings with a concrete request sequence, principal, object, precondition, affected asset, and expected-versus-observed invariant violation.",
+    "Actively seek counterevidence: framework guarantees, middleware order, parameter binding, transaction boundaries, ownership checks, encoding behavior, and unreachable code.",
+    "Do not suppress a valid off-focus finding. Each threat lens changes search order, not the acceptance criteria."
+  ],
+  "threats": [
+    {
+      "id": "T1-identity-session-state",
+      "title": "Identity, authentication, second-factor, and session-state confusion",
+      "severity": "critical",
+      "relatedCwe": [
+        "CWE-287",
+        "CWE-288",
+        "CWE-290",
+        "CWE-294",
+        "CWE-306",
+        "CWE-307",
+        "CWE-384",
+        "CWE-613",
+        "CWE-640"
+      ],
+      "description": "Trace every route and helper that turns credentials, reset state, TOTP state, JWT claims, cookies, headers, or client storage into a principal or privilege. Hunt for fail-open error paths, credential or account enumeration, login-query regressions, token algorithm or key confusion, missing audience or expiry checks, session fixation and replay, second-factor state desynchronization, basket-to-user mixups, and identity derived from request-controlled fields. Require an end-to-end path from attacker input to an authenticated or mis-bound principal. Core invariants: a wrong password never authenticates; second factor cannot be skipped or replayed; a token identifies exactly one current user; logout, reset, and privilege changes invalidate obsolete authority; and authentication failure cannot fall through into privileged behavior. Test malformed scalar, array, object, duplicate-key, Unicode, null-byte, oversized, and concurrent credential submissions as well as cross-account request sequences."
+    },
+    {
+      "id": "T2-interpreter-dataflow-injection",
+      "title": "Interpreter injection, unsafe dataflow, and parser differential",
+      "severity": "critical",
+      "relatedCwe": [
+        "CWE-20",
+        "CWE-74",
+        "CWE-78",
+        "CWE-79",
+        "CWE-89",
+        "CWE-94",
+        "CWE-1333",
+        "CWE-1321"
+      ],
+      "description": "Follow request bodies, query and route parameters, headers, uploaded metadata, database values, and browser-controlled strings into raw SQL, ORM literals, dynamic property access, regular expressions, template or HTML sinks, URL construction, command-like APIs, deserialization, and JavaScript object merging. Distinguish parameter binding from string construction and context-correct encoding from generic escaping. Probe type coercion, duplicate keys, prototype keys, nested objects, encoded delimiters, Unicode normalization, alternate content types, second-order stored payloads, and middleware representations that differ from route assumptions. Confirm both source reachability and the absence or bypass of the exact guard on that path. Treat denial-of-service from attacker-amplified regex or parser behavior as a separate, testable outcome rather than relabeling it code execution."
+    },
+    {
+      "id": "T3-object-authorization-business-logic",
+      "title": "Object authorization, mass assignment, and business-state invariant failure",
+      "severity": "critical",
+      "relatedCwe": [
+        "CWE-200",
+        "CWE-284",
+        "CWE-285",
+        "CWE-639",
+        "CWE-841",
+        "CWE-862",
+        "CWE-863",
+        "CWE-915"
+      ],
+      "description": "Map every user, basket, basket item, order, wallet, address, card, review, memory, privacy request, deluxe membership, administrative object, and downloadable resource to its authoritative owner and allowed state transitions. Hunt for IDOR/BOLA, function-level authorization gaps, mass assignment, role or ownership fields accepted from the client, inconsistent checks across list/detail/update/delete paths, bulk-operation bypasses, stale-state or time-of-check/time-of-use races, negative or overflowed amounts, coupon and price trust, sequence skipping, and cross-account object transplantation. A valid finding must name the attacker principal, victim object, operation, server-derived authorization fact that should have been checked, and impact. Exercise multi-step and concurrent sequences because individual endpoints may appear safe while their composition violates an invariant."
+    },
+    {
+      "id": "T4-file-parser-network-resource",
+      "title": "File, archive, structured-parser, redirect, outbound-network, and resource-boundary escape",
+      "severity": "high",
+      "relatedCwe": [
+        "CWE-22",
+        "CWE-23",
+        "CWE-400",
+        "CWE-409",
+        "CWE-434",
+        "CWE-502",
+        "CWE-601",
+        "CWE-611",
+        "CWE-918"
+      ],
+      "description": "Analyze upload and download routes, archive extraction, XML and YAML handling, image ingestion, filename and MIME validation, quarantine and log serving, redirects, profile-image URL fetching, and every outbound request. Hunt for traversal, absolute paths, symlink or hard-link escape, Zip Slip, parser entity expansion, unsafe tags or object construction, decompression bombs, polyglot and extension confusion, open redirect, SSRF through redirects or DNS rebinding, alternative IP and URL encodings, local-file or cloud-metadata access, and missing size, depth, time, CPU, memory, disk, or concurrency limits. Verify the complete parser and filesystem configuration actually used at runtime. Tests must remain inside the ephemeral container and internal Docker network and use synthetic local destinations only."
+    },
+    {
+      "id": "T5-client-trust-secrets-supply-chain",
+      "title": "Browser trust, cross-origin behavior, secret exposure, and dependency-mediated compromise",
+      "severity": "high",
+      "relatedCwe": [
+        "CWE-79",
+        "CWE-200",
+        "CWE-312",
+        "CWE-319",
+        "CWE-345",
+        "CWE-346",
+        "CWE-352",
+        "CWE-522",
+        "CWE-829",
+        "CWE-942",
+        "CWE-1104"
+      ],
+      "description": "Treat the Angular client, DOM, local and session storage, source maps, configuration endpoints, CORS behavior, redirects, cached content, rendered reviews and memories, third-party packages, and build artifacts as hostile boundaries rather than trusted enforcement. Hunt for reflected, stored, and DOM XSS; unsafe URL, HTML, style, or framework trust bypasses; CSRF on state-changing routes; permissive cross-origin credential exposure; secrets, keys, logs, source snippets, or tokens delivered to unauthorized clients; client-only role, price, ownership, or workflow checks; cache or content-type confusion; dependency confusion and vulnerable or abandoned packages on a reachable path. Separate inventory risk from exploitable reachability, and require a concrete browser or server path plus the security decision it defeats."
+    }
+  ]
+}
