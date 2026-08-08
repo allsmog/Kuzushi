@@ -22,7 +22,8 @@ env:
   CAMPAIGN_ROOT: ${{ github.workspace }}/.campaign/${{ github.run_id }}
   TARGET_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/juice-shop
   AFE_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/agentic-fuzz-engine
-  OXIDIZED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern
+  OXIDIZED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern/latest
+  OXIDIZED_PINNED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern/pinned
   REPORT_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/reports
   VENV_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/venv
   CAMPAIGN_HOME: /tmp/juice-shop-deep-${{ github.run_id }}/home
@@ -31,6 +32,7 @@ env:
   TARGET_BASE_SHA: bd2611f6cac491bb80c9fe54e954fd945c3ab5ba
   AFE_SHA: d480b9429c7889b9692ccb062ee624dd23ba36ec
   OXIDIZED_SHA: f74c237c236971ee4df03e5f82375469b91ca9af
+  OXIDIZED_PINNED_SHA: 9ab43859f0c3342c734ff38ea6366711d216c8fd
   KUZUSHI_MODEL: openai-codex:gpt-5.3-codex-spark
   RELAY_ISSUE: "153"
 
@@ -46,17 +48,6 @@ jobs:
           fetch-depth: 2
           persist-credentials: false
 
-      - name: Require cross-repository read credential
-        shell: bash
-        env:
-          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${CROSS_REPO_TOKEN:-}" ]]; then
-            echo "::error::CROSS_REPO_READ_TOKEN or OXIDIZED_JOERN_TOKEN is required to clone the two private integration repositories."
-            exit 1
-          fi
-
       - name: Check out exact Juice Shop PR commit
         uses: actions/checkout@v7
         with:
@@ -64,26 +55,6 @@ jobs:
           ref: ${{ env.TARGET_SHA }}
           path: .campaign/${{ github.run_id }}/juice-shop
           fetch-depth: 2
-          persist-credentials: false
-
-      - name: Check out exact Agentic Fuzz Engine commit
-        uses: actions/checkout@v7
-        with:
-          repository: allsmog/agentic-fuzz-engine
-          ref: ${{ env.AFE_SHA }}
-          token: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
-          path: .campaign/${{ github.run_id }}/agentic-fuzz-engine
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Check out exact Oxidized Joern commit
-        uses: actions/checkout@v7
-        with:
-          repository: allsmog/oxidized-joern
-          ref: ${{ env.OXIDIZED_SHA }}
-          token: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
-          path: .campaign/${{ github.run_id }}/oxidized-joern
-          fetch-depth: 1
           persist-credentials: false
 
       - uses: pnpm/action-setup@v6
@@ -101,14 +72,21 @@ jobs:
         with:
           inherit-toolchain: true
 
-      - name: Validate orchestration source before authorization
+      - name: Validate orchestration source before accepting private material
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$REPORT_DIR" "$CAMPAIGN_HOME/.kuzushi"
+          mkdir -p "$REPORT_DIR" "$CAMPAIGN_HOME/.kuzushi" "$CAMPAIGN_ROOT"
           bash -n .github/scripts/build-juice-shop-deep-campaign.sh
           bash -n .github/scripts/juice-shop-deep-campaign.sh
+          node --check .github/scripts/deep-campaign-bundle-relay.mjs
           node --check .github/scripts/deep-campaign-oauth-relay.mjs
+
+      - name: Receive checksum-verified private source bundles
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/deep-campaign-bundle-relay.mjs
 
       - name: Authorize the ephemeral GPT-5.3 Codex Monorepo bridge
         shell: bash
@@ -118,21 +96,7 @@ jobs:
 
       - name: Build integrated Kuzushi, AFE, and CPG toolchain
         shell: bash
-        env:
-          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config --global \
-            url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf \
-            "https://github.com/"
-          set +e
-          bash .github/scripts/build-juice-shop-deep-campaign.sh
-          code=$?
-          set -e
-          git config --global --unset-all \
-            url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf || true
-          unset CROSS_REPO_TOKEN
-          exit "$code"
+        run: bash .github/scripts/build-juice-shop-deep-campaign.sh
 
       - name: Run isolated full campaign
         shell: bash
@@ -172,7 +136,7 @@ jobs:
               `Deep Juice Shop campaign **${status}** for run ${context.runId}.`,
               `CPG integration mode: \`${cpg}\`.`,
               `Run and evidence artifact: ${run}`,
-              `No OAuth credentials, cross-repository token, or local Juice Shop token was persisted.`,
+              `No OAuth credentials, private artifact URL, or local Juice Shop token was persisted.`,
             ].join('\n\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
