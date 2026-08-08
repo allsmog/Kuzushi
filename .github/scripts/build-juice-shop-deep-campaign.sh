@@ -7,11 +7,12 @@ umask 077
 : "${AFE_SHA:?AFE_SHA is required}"
 : "${OXIDIZED_DIR:?OXIDIZED_DIR is required}"
 : "${OXIDIZED_SHA:?OXIDIZED_SHA is required}"
+: "${OXIDIZED_PINNED_DIR:?OXIDIZED_PINNED_DIR is required}"
+: "${OXIDIZED_PINNED_SHA:?OXIDIZED_PINNED_SHA is required}"
 : "${TARGET_DIR:?TARGET_DIR is required}"
 : "${TARGET_SHA:?TARGET_SHA is required}"
 : "${VENV_DIR:?VENV_DIR is required}"
 : "${REPORT_DIR:?REPORT_DIR is required}"
-: "${CROSS_REPO_TOKEN:?CROSS_REPO_TOKEN is required}"
 
 mkdir -p "$REPORT_DIR/logs" "$REPORT_DIR/provenance" "$VENV_DIR"
 
@@ -26,8 +27,23 @@ verify_sha() {
   fi
 }
 
+append_oxidized_patch() {
+  local source_root="$1"
+  cat >>Cargo.toml <<EOF
+
+# Ephemeral deep-campaign override. This exists only in the Actions worktree
+# and binds Kuzushi to an exact, checksum-verified Oxidized Joern source tree.
+[patch."https://github.com/allsmog/oxidized-joern.git"]
+cpg-analysis = { path = "$source_root/cpg-rs/cpg-analysis" }
+cpg-cli = { path = "$source_root/cpg-rs/cpg-cli" }
+cpg-core = { path = "$source_root/cpg-rs/cpg-core" }
+cpg-incremental = { path = "$source_root/cpg-rs/cpg-incremental" }
+EOF
+}
+
 verify_sha "$AFE_DIR" "$AFE_SHA"
 verify_sha "$OXIDIZED_DIR" "$OXIDIZED_SHA"
+verify_sha "$OXIDIZED_PINNED_DIR" "$OXIDIZED_PINNED_SHA"
 verify_sha "$TARGET_DIR" "$TARGET_SHA"
 
 python3 -m venv "$VENV_DIR"
@@ -50,18 +66,8 @@ ORIGINAL_CARGO_LOCK=$(mktemp)
 cp Cargo.toml "$ORIGINAL_CARGO_TOML"
 cp Cargo.lock "$ORIGINAL_CARGO_LOCK"
 
-cat >>Cargo.toml <<EOF
-
-# Ephemeral deep-campaign override: compile against the exact checked-out
-# Oxidized Joern commit first. This change exists only in the Actions worktree.
-[patch."https://github.com/allsmog/oxidized-joern.git"]
-cpg-analysis = { path = "$OXIDIZED_DIR/cpg-rs/cpg-analysis" }
-cpg-cli = { path = "$OXIDIZED_DIR/cpg-rs/cpg-cli" }
-cpg-core = { path = "$OXIDIZED_DIR/cpg-rs/cpg-core" }
-cpg-incremental = { path = "$OXIDIZED_DIR/cpg-rs/cpg-incremental" }
-EOF
-
-git diff -- Cargo.toml >"$REPORT_DIR/provenance/oxidized-local-override.diff"
+append_oxidized_patch "$OXIDIZED_DIR"
+git diff -- Cargo.toml >"$REPORT_DIR/provenance/oxidized-latest-local-override.diff"
 
 set +e
 cargo build --release --workspace \
@@ -74,27 +80,24 @@ if [[ $LATEST_BUILD_CODE -eq 0 ]]; then
   CPG_BUILD_SHA="$OXIDIZED_SHA"
   CPG_BUILD_LOG="cargo-build-latest-oxidized.log"
 else
-  echo "Latest Oxidized Joern integration did not compile; recording the failure and rebuilding with Kuzushi's pinned dependency." >&2
+  echo "Latest Oxidized Joern integration did not compile; recording the failure and rebuilding from the bundled Kuzushi-pinned source." >&2
   cp "$ORIGINAL_CARGO_TOML" Cargo.toml
   cp "$ORIGINAL_CARGO_LOCK" Cargo.lock
-  git config --global \
-    url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf \
-    "https://github.com/"
+  append_oxidized_patch "$OXIDIZED_PINNED_DIR"
+  git diff -- Cargo.toml >"$REPORT_DIR/provenance/oxidized-pinned-local-override.diff"
   set +e
-  cargo build --release --workspace --locked \
+  cargo build --release --workspace \
     >"$REPORT_DIR/logs/cargo-build-pinned-oxidized.log" 2>&1
   PINNED_BUILD_CODE=$?
   set -e
-  git config --global --unset-all \
-    url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf || true
   if [[ $PINNED_BUILD_CODE -ne 0 ]]; then
     echo "Both latest-local and pinned-compatible Kuzushi builds failed." >&2
     cat "$REPORT_DIR/logs/cargo-build-latest-oxidized.log" >&2
     cat "$REPORT_DIR/logs/cargo-build-pinned-oxidized.log" >&2
     exit "$PINNED_BUILD_CODE"
   fi
-  CPG_MODE="pinned-compatible-fallback"
-  CPG_BUILD_SHA="9ab43859f0c3342c734ff38ea6366711d216c8fd"
+  CPG_MODE="pinned-compatible-local-fallback"
+  CPG_BUILD_SHA="$OXIDIZED_PINNED_SHA"
   CPG_BUILD_LOG="cargo-build-pinned-oxidized.log"
 fi
 
@@ -114,11 +117,13 @@ import pathlib
 import sys
 
 result = {
-    "requestedCheckout": "$OXIDIZED_SHA",
+    "requestedLatestCheckout": "$OXIDIZED_SHA",
+    "availablePinnedCheckout": "$OXIDIZED_PINNED_SHA",
     "effectiveMode": "$CPG_MODE",
     "effectiveCommit": "$CPG_BUILD_SHA",
     "buildLog": "$CPG_BUILD_LOG",
     "latestCheckoutCompiled": "$LATEST_BUILD_CODE" == "0",
+    "fallbackWasExplicit": "$CPG_MODE" != "latest-local-override",
     "kuzushiBinary": "$KUZUSHI_BIN",
     "cargoLockSha256": hashlib.sha256(pathlib.Path("$KUZUSHI_REPO/Cargo.lock").read_bytes()).hexdigest(),
 }
@@ -128,11 +133,12 @@ with open(sys.argv[1], "w", encoding="utf-8") as handle:
 PY
 
 chmod +x \
+  "$KUZUSHI_REPO/.github/scripts/deep-campaign-bundle-relay.mjs" \
   "$KUZUSHI_REPO/.github/scripts/deep-campaign-oauth-relay.mjs" \
   "$KUZUSHI_REPO/.github/scripts/juice-shop-deep-campaign.sh"
 
 # Pull scanner images while the job still has ordinary network access. They are
-# later run on an --internal Docker network that only contains the local target.
+# later run on an --internal Docker network containing only the local target.
 docker pull ghcr.io/schemathesis/schemathesis:stable \
   >"$REPORT_DIR/logs/docker-pull-schemathesis.log" 2>&1
 docker pull ghcr.io/zaproxy/zaproxy:stable \
