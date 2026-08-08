@@ -15,7 +15,6 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -42,8 +41,8 @@ const relayRoot = path.join(campaignRoot, `.source-relay-${runId}`);
 
 try {
   const relay = await establishEncryptedRelay();
-  const payload = await receiveEncryptedPayload(relay.privateKey);
-  validatePayload(payload);
+  const payload = await receiveEncryptedPayload(relay);
+  validatePayload(payload, relay.nonce);
   mkdirSync(relayRoot, { recursive: true, mode: 0o700 });
 
   const afeReceipt = await consumeArtifact({
@@ -51,16 +50,16 @@ try {
     url: payload.afeUrl,
     expectedZipDigest: payload.afeDigest,
     maxBytes: MAX_AFE_ZIP_BYTES,
-    destination: afeDir,
     validate: validateAfeBundle,
+    install: installAfeBundle,
   });
   const oxidizedReceipt = await consumeArtifact({
     label: "oxidized-joern",
     url: payload.oxidizedUrl,
     expectedZipDigest: payload.oxidizedDigest,
     maxBytes: MAX_OXIDIZED_ZIP_BYTES,
-    destination: path.dirname(oxidizedDir),
     validate: validateOxidizedBundle,
+    install: installOxidizedBundle,
   });
 
   mkdirSync(path.join(reportDir, "provenance"), { recursive: true, mode: 0o700 });
@@ -116,7 +115,7 @@ async function establishEncryptedRelay() {
   return { privateKey, nonce };
 }
 
-async function receiveEncryptedPayload(privateKey) {
+async function receiveEncryptedPayload(relay) {
   const deadline = Date.now() + RELAY_DEADLINE_MS;
   const marker = `KUZUSHI_DEEP_CAMPAIGN_BUNDLE_PAYLOAD ${runId} `;
   while (Date.now() < deadline) {
@@ -126,10 +125,14 @@ async function receiveEncryptedPayload(privateKey) {
     const comment = comments.find((entry) => String(entry.body ?? "").startsWith(marker));
     if (comment) {
       const encodedEnvelope = String(comment.body).slice(marker.length).trim();
-      const payload = decryptEnvelope(encodedEnvelope, privateKey);
-      await githubRequest(`/repos/${owner}/${repo}/issues/comments/${comment.id}`, {
-        method: "DELETE",
-      }).catch(() => {});
+      let payload;
+      try {
+        payload = decryptEnvelope(encodedEnvelope, relay.privateKey);
+      } finally {
+        await githubRequest(`/repos/${owner}/${repo}/issues/comments/${comment.id}`, {
+          method: "DELETE",
+        }).catch(() => {});
+      }
       return payload;
     }
     await sleep(POLL_INTERVAL_MS);
@@ -160,8 +163,9 @@ function decryptEnvelope(encodedEnvelope, privateKey) {
   return JSON.parse(plaintext);
 }
 
-function validatePayload(payload) {
+function validatePayload(payload, nonce) {
   if (!payload || typeof payload !== "object") throw new Error("bundle payload is not an object");
+  if (payload.nonce !== nonce) throw new Error("bundle relay nonce mismatch");
   validateSignedUrl(payload.afeUrl, "afeUrl");
   validateSignedUrl(payload.oxidizedUrl, "oxidizedUrl");
   validateDigest(payload.afeDigest, "afeDigest");
@@ -182,7 +186,7 @@ function validateDigest(raw, label) {
   }
 }
 
-async function consumeArtifact({ label, url, expectedZipDigest, maxBytes, destination, validate }) {
+async function consumeArtifact({ label, url, expectedZipDigest, maxBytes, validate, install }) {
   const work = path.join(relayRoot, label);
   const zipPath = path.join(work, `${label}.zip`);
   const unzipDir = path.join(work, "zip");
@@ -219,7 +223,7 @@ async function consumeArtifact({ label, url, expectedZipDigest, maxBytes, destin
   ensureArchivePaths(tarEntries, `${label} tar`);
   run("tar", ["-xzf", tarFiles[0], "-C", extractDir]);
   const receipt = validate(extractDir);
-  installValidatedBundle(label, extractDir, destination);
+  install(extractDir);
   return {
     repository: receipt.repository,
     requestedSha: receipt.requestedSha,
@@ -280,6 +284,32 @@ function validateOxidizedBundle(root) {
   };
 }
 
+function installAfeBundle(root) {
+  installDirectory(path.join(root, "source"), afeDir);
+}
+
+function installOxidizedBundle(root) {
+  const destinationRoot = path.dirname(oxidizedDir);
+  if (path.dirname(oxidizedPinnedDir) !== destinationRoot) {
+    throw new Error("Oxidized Joern destinations must share one parent");
+  }
+  rmSync(destinationRoot, { recursive: true, force: true });
+  mkdirSync(destinationRoot, { recursive: true, mode: 0o700 });
+  installDirectory(path.join(root, "latest"), oxidizedDir);
+  installDirectory(path.join(root, "pinned"), oxidizedPinnedDir);
+}
+
+function installDirectory(source, destination) {
+  rmSync(destination, { recursive: true, force: true });
+  mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
+  try {
+    renameSync(source, destination);
+  } catch {
+    cpSync(source, destination, { recursive: true, errorOnExist: true, preserveTimestamps: true });
+    rmSync(source, { recursive: true, force: true });
+  }
+}
+
 function readManifest(root) {
   const manifestPath = path.join(root, "bundle-manifest.json");
   if (!existsSync(manifestPath)) throw new Error("bundle-manifest.json is missing");
@@ -293,29 +323,6 @@ function verifyGitCommit(directory, expected, label) {
   });
   if (result.status !== 0 || result.stdout.trim() !== expected) {
     throw new Error(`${label} extracted Git commit mismatch`);
-  }
-}
-
-function installValidatedBundle(label, extractDir, destination) {
-  rmSync(destination, { recursive: true, force: true });
-  mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-  if (label === "agentic-fuzz-engine") {
-    renameOrCopy(path.join(extractDir, "source"), destination);
-    return;
-  }
-  const destinationRoot = path.dirname(destination);
-  rmSync(destinationRoot, { recursive: true, force: true });
-  mkdirSync(destinationRoot, { recursive: true, mode: 0o700 });
-  renameOrCopy(path.join(extractDir, "latest"), oxidizedDir);
-  renameOrCopy(path.join(extractDir, "pinned"), oxidizedPinnedDir);
-}
-
-function renameOrCopy(source, destination) {
-  try {
-    renameSync(source, destination);
-  } catch {
-    cpSync(source, destination, { recursive: true, errorOnExist: true, preserveTimestamps: true });
-    rmSync(source, { recursive: true, force: true });
   }
 }
 
