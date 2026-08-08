@@ -304,7 +304,7 @@ fn finish_outcome(
     mut warnings: Vec<String>,
 ) -> Value {
     match persistence {
-        Ok(finding_id) => outcome_result(outcome, finding_id, warnings, false),
+        Ok(finding_id) => success(outcome, finding_id, warnings),
         Err(_) => {
             warnings.push(PERSISTENCE_WARNING.to_string());
             outcome_result(outcome, None, warnings, true)
