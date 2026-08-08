@@ -1,4 +1,4 @@
-name: Juice Shop deep Kuzushi campaign
+name: Juice Shop 20x Kuzushi campaign
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: juice-shop-deep-${{ github.ref }}
+  group: juice-shop-20x-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -25,10 +25,10 @@ env:
   AFE_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/agentic-fuzz-engine
   OXIDIZED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern/latest
   OXIDIZED_PINNED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern/pinned
-  REPORT_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/reports
-  VENV_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/venv
-  CAMPAIGN_HOME: /tmp/juice-shop-deep-${{ github.run_id }}/home
-  KUZUSHI_OAUTH_CREDENTIALS: /tmp/juice-shop-deep-${{ github.run_id }}/home/.kuzushi/oauth-credentials.json
+  REPORT_DIR: /tmp/juice-shop-20x-${{ github.run_id }}/reports
+  VENV_DIR: /tmp/juice-shop-20x-${{ github.run_id }}/venv
+  CAMPAIGN_HOME: /tmp/juice-shop-20x-${{ github.run_id }}/home
+  KUZUSHI_OAUTH_CREDENTIALS: /tmp/juice-shop-20x-${{ github.run_id }}/home/.kuzushi/oauth-credentials.json
   TARGET_SHA: 640d727a94e5aaaca37d36d8a690bce074b80369
   TARGET_BASE_SHA: bd2611f6cac491bb80c9fe54e954fd945c3ab5ba
   AFE_SHA: d480b9429c7889b9692ccb062ee624dd23ba36ec
@@ -38,10 +38,10 @@ env:
   RELAY_ISSUE: "153"
 
 jobs:
-  deep-campaign:
-    name: isolated full campaign
+  campaign:
+    name: 20 independent scans, triage, and verification
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 360
     steps:
       - name: Check out Kuzushi campaign branch
         uses: actions/checkout@v7
@@ -83,7 +83,7 @@ jobs:
           df -h /
           available_gib=$(df --output=avail -BG / | tail -1 | tr -dc '0-9')
           if [[ -z "$available_gib" || "$available_gib" -lt 35 ]]; then
-            echo "::error::Deep campaign requires at least 35 GiB free after runner cleanup; found ${available_gib:-unknown} GiB."
+            echo "::error::Campaign requires at least 35 GiB free after cleanup; found ${available_gib:-unknown} GiB."
             exit 1
           fi
 
@@ -112,15 +112,39 @@ jobs:
           cargo -V
           df -h /
 
-      - name: Validate orchestration source before accepting private material
+      - name: Validate campaign source before accepting private material
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$REPORT_DIR" "$CAMPAIGN_HOME/.kuzushi" "$CAMPAIGN_ROOT"
           bash -n .github/scripts/build-juice-shop-deep-campaign.sh
-          bash -n .github/scripts/juice-shop-deep-campaign.sh
+          bash -n .github/scripts/juice-shop-20x-campaign.sh
           node --check .github/scripts/deep-campaign-bundle-relay.mjs
           node --check .github/scripts/deep-campaign-oauth-relay.mjs
+          node --check .github/scripts/juice-shop-runtime-probes.mjs
+          python3 -m py_compile \
+            .github/scripts/prepare-juice-shop-20x-plan.py \
+            .github/scripts/select-juice-shop-verification.py
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          model = json.loads(
+              Path(".github/campaign/juice-shop-threat-model.json").read_text(encoding="utf-8")
+          )
+          threats = model.get("threats")
+          if not isinstance(threats, list) or len(threats) != 5:
+              raise SystemExit("threat model must contain exactly five threats")
+          ids = [row.get("id") for row in threats]
+          if len(set(ids)) != 5 or any(not value for value in ids):
+              raise SystemExit("threat ids must be five unique non-empty values")
+          for prompt in (
+              ".github/campaign/juice-shop-triage-prompt.md",
+              ".github/campaign/juice-shop-verify-prompt.md",
+          ):
+              if len(Path(prompt).read_text(encoding="utf-8").strip()) < 500:
+                  raise SystemExit(f"{prompt} is unexpectedly short")
+          PY
 
       - name: Receive checksum-verified private source bundles
         shell: bash
@@ -128,7 +152,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node .github/scripts/deep-campaign-bundle-relay.mjs
 
-      - name: Authorize the ephemeral GPT-5.3 Codex Monorepo bridge
+      - name: Authorize ephemeral GPT-5.3 Codex Monorepo bridge
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -138,26 +162,24 @@ jobs:
         shell: bash
         run: bash .github/scripts/build-juice-shop-deep-campaign.sh
 
-      - name: Run isolated full campaign
+      - name: Run 20-scan campaign, triage, and verification
         shell: bash
         env:
           HOME: ${{ env.CAMPAIGN_HOME }}
           XDG_CONFIG_HOME: ${{ env.CAMPAIGN_HOME }}/.config
           XDG_DATA_HOME: ${{ env.CAMPAIGN_HOME }}/.local/share
           XDG_CACHE_HOME: ${{ env.CAMPAIGN_HOME }}/.cache
-        run: bash .github/scripts/juice-shop-deep-campaign.sh
+        run: bash .github/scripts/juice-shop-20x-campaign.sh
 
       - name: Upload complete evidence bundle
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: juice-shop-deep-kuzushi-${{ github.run_id }}
-          path: |
-            ${{ env.REPORT_DIR }}
-            ${{ env.TARGET_DIR }}/.kuzushi
+          name: juice-shop-20x-kuzushi-${{ github.run_id }}
+          path: ${{ env.REPORT_DIR }}
           if-no-files-found: warn
           include-hidden-files: true
-          retention-days: 3
+          retention-days: 7
           compression-level: 6
 
       - name: Publish campaign outcome to relay issue
@@ -172,11 +194,12 @@ jobs:
             const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const cpg = process.env.CPG_MODE || 'not reached';
             const body = [
-              `<!-- juice-shop-deep-campaign-result:${context.runId} -->`,
-              `Deep Juice Shop campaign **${status}** for run ${context.runId}.`,
+              `<!-- juice-shop-20x-campaign-result:${context.runId} -->`,
+              `Juice Shop 20× campaign **${status}** for run ${context.runId}.`,
+              `Requested workload: 20 independent Monorepo scans, cross-run dedupe, five-vote deep triage, model verification, and bounded empirical testing.`,
               `CPG integration mode: \`${cpg}\`.`,
               `Run and evidence artifact: ${run}`,
-              `No OAuth credentials, private artifact URL, or local Juice Shop token was persisted.`,
+              `No OAuth credentials, private artifact URL, local Juice Shop token, or target source mutation was persisted.`,
             ].join('\n\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -192,6 +215,6 @@ jobs:
           set +e
           rm -f "$KUZUSHI_OAUTH_CREDENTIALS"
           rm -rf "$CAMPAIGN_HOME" "$VENV_DIR" "$CAMPAIGN_ROOT"
-          docker ps -aq --filter 'name=juice-shop-deep-' | xargs -r docker rm --force
-          docker network ls --format '{{.Name}}' | grep '^juice-shop-deep-' | xargs -r docker network rm
+          docker ps -aq --filter 'name=juice-shop-20x-' | xargs -r docker rm --force
+          docker network ls --format '{{.Name}}' | grep '^juice-shop-20x-' | xargs -r docker network rm
           exit 0
