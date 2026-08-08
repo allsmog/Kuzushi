@@ -1,0 +1,2 @@
+Fresh-run marker for the Juice Shop 20x Kuzushi campaign.
+Reason: isolate ephemeral bundle/OAuth relays under a new GitHub Actions run ID after a same-run rerun encountered a stale ciphertext marker.
