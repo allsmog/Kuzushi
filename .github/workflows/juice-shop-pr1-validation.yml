@@ -62,10 +62,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node <<'NODE'
-          const fs = require('node:fs')
-          const endpoint = 'http://127.0.0.1:3000/rest/user/login'
+          node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs'
 
+          const endpoint = 'http://127.0.0.1:3000/rest/user/login'
           const cases = [
             { name: 'admin-valid', email: 'admin@juice-sh.op', password: 'admin123', expected: 200 },
             { name: 'jim-valid', email: 'jim@juice-sh.op', password: 'ncc-1701', expected: 200 },
@@ -99,7 +99,7 @@ jobs:
             results.push({ name: testCase.name, status: response.status, passed: true })
           }
 
-          fs.writeFileSync('juice-shop-validation.json', JSON.stringify({
+          writeFileSync('juice-shop-validation.json', JSON.stringify({
             repository: process.env.TARGET_REPOSITORY,
             commit: process.env.TARGET_COMMIT,
             cases: results
