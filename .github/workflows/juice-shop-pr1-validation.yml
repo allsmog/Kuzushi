@@ -1,0 +1,126 @@
+name: Juice Shop PR 1 validation
+
+on:
+  push:
+    branches:
+      - agent/juice-shop-pr1-validation
+
+permissions:
+  contents: read
+
+env:
+  TARGET_REPOSITORY: allsmog/juice-shop
+  TARGET_COMMIT: 640d727a94e5aaaca37d36d8a690bce074b80369
+
+jobs:
+  validate-login-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out exact Juice Shop PR commit
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.TARGET_REPOSITORY }}
+          ref: ${{ env.TARGET_COMMIT }}
+          path: juice-shop
+          fetch-depth: 2
+
+      - name: Verify exact commit and one-file scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd juice-shop
+          test "$(git rev-parse HEAD)" = "${TARGET_COMMIT}"
+          changed="$(git diff --name-only HEAD^ HEAD)"
+          test "${changed}" = "routes/login.ts"
+          grep -Fq "email = :email AND password = :password" routes/login.ts
+          grep -Fq "replacements: { email, password }" routes/login.ts
+
+      - name: Build patched Juice Shop image
+        shell: bash
+        run: docker build --pull=false --tag juice-shop-pr1:validation juice-shop
+
+      - name: Start patched application
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --detach --name juice-shop-pr1 --publish 3000:3000 juice-shop-pr1:validation
+          ready=0
+          for attempt in $(seq 1 120); do
+            if curl --fail --silent --show-error http://127.0.0.1:3000/ >/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "${ready}" -ne 1 ]; then
+            docker logs juice-shop-pr1 || true
+            exit 1
+          fi
+
+      - name: Exercise legitimate and injection-shaped login requests
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs = require('node:fs')
+          const endpoint = 'http://127.0.0.1:3000/rest/user/login'
+
+          const cases = [
+            { name: 'admin-valid', email: 'admin@juice-sh.op', password: 'admin123', expected: 200 },
+            { name: 'jim-valid', email: 'jim@juice-sh.op', password: 'ncc-1701', expected: 200 },
+            { name: 'bender-valid', email: 'bender@juice-sh.op', password: 'OhG0dPlease1nsertLiquor!', expected: 200 },
+            { name: 'admin-injection-rejected', email: "admin@juice-sh.op'-- ", password: 'not-the-password', expected: 401 },
+            { name: 'jim-injection-rejected', email: "jim@juice-sh.op'-- ", password: 'not-the-password', expected: 401 },
+            { name: 'bender-injection-rejected', email: "bender@juice-sh.op'-- ", password: 'not-the-password', expected: 401 },
+            { name: 'deleted-chris-injection-rejected', email: "chris.pike@juice-sh.op'-- ", password: 'not-the-password', expected: 401 }
+          ]
+
+          const results = []
+          for (const testCase of cases) {
+            const response = await fetch(endpoint, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ email: testCase.email, password: testCase.password })
+            })
+            const text = await response.text()
+            let body
+            try { body = JSON.parse(text) } catch { body = text }
+
+            if (response.status !== testCase.expected) {
+              throw new Error(`${testCase.name}: expected HTTP ${testCase.expected}, got ${response.status}: ${text.slice(0, 500)}`)
+            }
+            if (testCase.expected === 200 && !body?.authentication?.token) {
+              throw new Error(`${testCase.name}: successful login did not return an authentication token`)
+            }
+            if (testCase.expected === 401 && body?.authentication) {
+              throw new Error(`${testCase.name}: rejected login unexpectedly returned authentication data`)
+            }
+            results.push({ name: testCase.name, status: response.status, passed: true })
+          }
+
+          fs.writeFileSync('juice-shop-validation.json', JSON.stringify({
+            repository: process.env.TARGET_REPOSITORY,
+            commit: process.env.TARGET_COMMIT,
+            cases: results
+          }, null, 2) + '\n')
+          console.log(JSON.stringify(results, null, 2))
+          NODE
+
+      - name: Upload validation evidence
+        uses: actions/upload-artifact@v7
+        with:
+          name: juice-shop-pr1-validation
+          path: juice-shop-validation.json
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Application logs
+        if: always()
+        shell: bash
+        run: docker logs juice-shop-pr1 || true
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: docker rm --force juice-shop-pr1 || true
