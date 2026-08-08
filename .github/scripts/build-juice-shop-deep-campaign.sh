@@ -113,13 +113,12 @@ import json
 import pathlib
 import sys
 
-root = pathlib.Path("$OXIDIZED_DIR")
 result = {
     "requestedCheckout": "$OXIDIZED_SHA",
     "effectiveMode": "$CPG_MODE",
     "effectiveCommit": "$CPG_BUILD_SHA",
     "buildLog": "$CPG_BUILD_LOG",
-    "latestCheckoutCompiled": $([ "$LATEST_BUILD_CODE" -eq 0 ] && echo true || echo false),
+    "latestCheckoutCompiled": "$LATEST_BUILD_CODE" == "0",
     "kuzushiBinary": "$KUZUSHI_BIN",
     "cargoLockSha256": hashlib.sha256(pathlib.Path("$KUZUSHI_REPO/Cargo.lock").read_bytes()).hexdigest(),
 }
