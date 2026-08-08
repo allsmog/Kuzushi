@@ -141,10 +141,6 @@ afe_put() {
     "$AFE_BIN" --data-root "$AFE_DATA" artifact-put "$AFE_RUN_ID" "$name" --file "$file"
 }
 
-json_value() {
-  python3 -c 'import json,sys; print(json.load(sys.stdin)'"$1"')'
-}
-
 cat >"$REPORT_DIR/README.md" <<EOF
 # Juice Shop deep Kuzushi campaign
 
@@ -156,6 +152,7 @@ cat >"$REPORT_DIR/README.md" <<EOF
 - Oxidized Joern checkout: \`$OXIDIZED_SHA\`
 - Scope: local Docker target only; no public Juice Shop instance is contacted.
 - Mutation policy: no auto-patching. Scanner/model outputs are evidence candidates, not source changes.
+- Budget policy: one one-token auth preflight, then a hard \`$16\` model campaign ceiling; \`$3.50\` graceful tool budget and \`$4.50\` hard backstop per job.
 - Proof policy: runtime receipts and deterministic CPG/scanner artifacts are authoritative; model assessments remain advisory.
 EOF
 
@@ -234,9 +231,6 @@ run_required "kuzushi-secret-scan" \
   "$KUZUSHI_BIN" --target "$TARGET_DIR" run secret-scan:scan --input '{}'
 run_optional "kuzushi-semgrep" \
   "$KUZUSHI_BIN" --target "$TARGET_DIR" run semgrep:scan --input '{"config":"p/owasp-top-ten"}'
-run_optional "kuzushi-taint-cpg" \
-  "$KUZUSHI_BIN" --target "$TARGET_DIR" run taint-iris-next:hunt \
-    --input "{\"backend\":\"cpg-rs\",\"model\":\"$KUZUSHI_MODEL\",\"maxCatalogEntries\":12,\"maxCandidatesPerCwe\":12,\"maxEvidencePerCwe\":8}"
 
 run_required "docker-build-target" docker build --pull=false --tag "$APP_IMAGE" "$TARGET_DIR"
 run_required "docker-network" docker network create --internal "$NETWORK"
@@ -275,12 +269,11 @@ timeout --signal=TERM 900s docker run --rm \
   --network "$NETWORK" \
   -v "$TARGET_DIR/swagger.yml:/app/openapi.yml:ro" \
   -v "$REPORT_DIR/dynamic/schemathesis-run:/app/schemathesis-report:rw" \
-  -e "API_TOKEN=$ADMIN_TOKEN" \
   -e SCHEMATHESIS_COVERAGE_REPORT_HTML_PATH=/app/schemathesis-report/schema-coverage.html \
   ghcr.io/schemathesis/schemathesis:stable \
   --no-color run -w 4 /app/openapi.yml \
     --url http://juice-shop-campaign:3000/b2b/v2 \
-    --header 'Authorization: Bearer ${API_TOKEN}' \
+    --header "Authorization: Bearer $ADMIN_TOKEN" \
     --mode all \
     --max-examples 250 \
     --continue-on-failure \
@@ -299,11 +292,10 @@ timeout --signal=TERM 300s docker run --rm \
   --network "$NETWORK" \
   -v "$TARGET_DIR/swagger.yml:/app/openapi.yml:ro" \
   -v "$REPORT_DIR/dynamic/schemathesis-fuzz:/app/schemathesis-report:rw" \
-  -e "API_TOKEN=$ADMIN_TOKEN" \
   ghcr.io/schemathesis/schemathesis:stable \
   --no-color fuzz /app/openapi.yml \
     --url http://juice-shop-campaign:3000/b2b/v2 \
-    --header 'Authorization: Bearer ${API_TOKEN}' \
+    --header "Authorization: Bearer $ADMIN_TOKEN" \
     --mode all \
     --max-time 240 \
     --continue-on-failure \
@@ -749,6 +741,7 @@ summary = {
     },
     "findingCount": len(findings),
     "findingSeverities": {},
+    "findingStateCaveat": "Export includes scanner candidates, model judgments, imported runtime observations, and human decisions as distinct fields; count is not a confirmed-vulnerability count.",
     "proofPolicy": {
         "deterministicAndRuntimeEvidenceAuthoritative": True,
         "modelOutputAdvisory": True,
@@ -762,9 +755,9 @@ for finding in findings:
 (root / "campaign-summary.json").write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
+record_lane campaign-bundle completed 0 "$REPORT_DIR/campaign-summary.json"
 find "$REPORT_DIR" -type f ! -name SHA256SUMS -print0 \
   | sort -z \
   | xargs -0 sha256sum >"$REPORT_DIR/SHA256SUMS"
 
-record_lane campaign-bundle completed 0 "$REPORT_DIR/campaign-summary.json"
 echo "Deep campaign complete: $REPORT_DIR"
