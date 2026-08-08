@@ -23,7 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PLAY_TIMEOUT_MS: u64 = 15_000;
 const DEFAULT_MAX_PLANNED_STEPS: u32 = 8;
-const PERSISTENCE_WARNING: &str = "live chain evidence was not recorded in the findings store; this result is partial and has no durable finding/proof record";
+const PERSISTENCE_WARNING: &str = "live chain persistence did not complete cleanly; this result is partial and durable finding/proof state is unconfirmed";
 
 /// Run `offense:chain` with the default sandbox-routed curl transport,
 /// persisting a landed chain into `store` when one is available.
@@ -257,8 +257,9 @@ fn run_offense_chain(
 }
 
 /// Persist the outcome when a store is present. A persistence failure is part
-/// of the operator-visible terminal state: live evidence that did not reach the
-/// durable findings/proof store must never be reported as a complete result.
+/// of the operator-visible terminal state: live evidence whose durable
+/// finding/proof closure could not be confirmed must never be reported as a
+/// complete result.
 fn persist_outcome(
     store: Option<&FindingStore>,
     workspace_root: &Path,
