@@ -1,5 +1,6 @@
 name: CTF Monorepo encrypted OAuth relay
 
+# relay restart nonce: 2026-08-07-02
 on:
   push:
     branches:
