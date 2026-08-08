@@ -23,6 +23,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PLAY_TIMEOUT_MS: u64 = 15_000;
 const DEFAULT_MAX_PLANNED_STEPS: u32 = 8;
+const PERSISTENCE_WARNING: &str = "live chain evidence was not recorded in the findings store; this result is partial and has no durable finding/proof record";
 
 /// Run `offense:chain` with the default sandbox-routed curl transport,
 /// persisting a landed chain into `store` when one is available.
@@ -179,7 +180,7 @@ fn finish_planned_run(
 ) -> Value {
     match result {
         Ok(outcome) => {
-            let finding_id = persist_outcome(
+            let persistence = persist_outcome(
                 run.store,
                 run.workspace_root,
                 target_host,
@@ -188,7 +189,7 @@ fn finish_planned_run(
                 run.verification_run_id.as_deref(),
             );
             let warnings = isolation_warnings(run.backend, target_host);
-            success(outcome, finding_id, warnings)
+            finish_outcome(outcome, persistence, warnings)
         }
         Err(err) => failure("offense:chain planning failed", err.to_string()),
     }
@@ -243,7 +244,7 @@ fn run_offense_chain(
         Ok(outcome) => outcome,
         Err(reason) => return failure("offense:chain refused or failed", reason),
     };
-    let finding_id = persist_outcome(
+    let persistence = persist_outcome(
         store,
         workspace_root,
         &prepared.target_host,
@@ -252,11 +253,12 @@ fn run_offense_chain(
         verification_run_id,
     );
     let warnings = isolation_warnings(backend, &prepared.target_host);
-    success(outcome, finding_id, warnings)
+    finish_outcome(outcome, persistence, warnings)
 }
 
-/// Persist the outcome when a store is present; a persistence failure must not
-/// lose the chain result, so it is recorded as a note rather than an error.
+/// Persist the outcome when a store is present. A persistence failure is part
+/// of the operator-visible terminal state: live evidence that did not reach the
+/// durable findings/proof store must never be reported as a complete result.
 fn persist_outcome(
     store: Option<&FindingStore>,
     workspace_root: &Path,
@@ -264,8 +266,10 @@ fn persist_outcome(
     backend: PersistedSandboxBackend,
     outcome: &ChainOutcome,
     verification_run_id: Option<&str>,
-) -> Option<i64> {
-    let store = store?;
+) -> anyhow::Result<Option<i64>> {
+    let Some(store) = store else {
+        return Ok(None);
+    };
     persist_chain_finding_for_run(
         store,
         workspace_root,
@@ -274,7 +278,6 @@ fn persist_outcome(
         outcome,
         verification_run_id,
     )
-    .unwrap_or_default()
 }
 
 fn run_prepared(
@@ -295,7 +298,30 @@ fn run_prepared(
     )
 }
 
+fn finish_outcome(
+    outcome: ChainOutcome,
+    persistence: anyhow::Result<Option<i64>>,
+    mut warnings: Vec<String>,
+) -> Value {
+    match persistence {
+        Ok(finding_id) => outcome_result(outcome, finding_id, warnings, false),
+        Err(_) => {
+            warnings.push(PERSISTENCE_WARNING.to_string());
+            outcome_result(outcome, None, warnings, true)
+        }
+    }
+}
+
 fn success(outcome: ChainOutcome, finding_id: Option<i64>, warnings: Vec<String>) -> Value {
+    outcome_result(outcome, finding_id, warnings, false)
+}
+
+fn outcome_result(
+    outcome: ChainOutcome,
+    finding_id: Option<i64>,
+    warnings: Vec<String>,
+    partial: bool,
+) -> Value {
     let observed = crate::runtime::RuntimeCost::from_usd(
         outcome.cost_usd,
         "offense chain outcome cost",
@@ -311,7 +337,16 @@ fn success(outcome: ChainOutcome, finding_id: Option<i64>, warnings: Vec<String>
         output.push_str(&format!("\n[!] {warning}"));
     }
     let data = success_data(outcome, finding_id, &warnings);
-    let mut result = crate::module_result::completed_output_result(output.clone(), output, data);
+    let mut result = if partial {
+        crate::module_result::partial_output_result(
+            output.clone(),
+            output,
+            warnings.iter().map(|warning| json!(warning)).collect(),
+            data,
+        )
+    } else {
+        crate::module_result::completed_output_result(output.clone(), output, data)
+    };
     crate::module_result::apply_runtime_cost_report(&mut result, cost);
     result
 }
@@ -473,6 +508,21 @@ mod tests {
         )
     }
 
+    fn landed_outcome() -> ChainOutcome {
+        ChainOutcome {
+            chain: "probe".to_string(),
+            target: "10.0.0.5".to_string(),
+            steps: vec![crate::offense::PlayOutcome::new("admin", "10.0.0.5").exploited(
+                "root shell".to_string(),
+                vec!["root".to_string()],
+            )],
+            completed: true,
+            summary: "chain complete".to_string(),
+            cost_usd: 0.0,
+            cost_usd_exact: true,
+        }
+    }
+
     #[test]
     fn completed_chain_returns_a_completed_envelope() {
         let transport = StubTransport {
@@ -483,6 +533,37 @@ mod tests {
         assert_eq!(result["status"], json!("completed"));
         assert_eq!(result["data"]["completed"], json!(true));
         assert_eq!(result["data"]["chain"], json!("probe"));
+    }
+
+    #[test]
+    fn persistence_failure_marks_landed_chain_partial_and_visible() {
+        let result = finish_outcome(
+            landed_outcome(),
+            Err(anyhow::anyhow!("sqlite failure at /secret/operator/path")),
+            Vec::new(),
+        );
+
+        assert_eq!(result["ok"], json!(true));
+        assert_eq!(result["status"], json!("partial"));
+        assert_eq!(result["data"]["completed"], json!(true));
+        assert!(result["data"]["findingId"].is_null());
+        assert_eq!(result["warnings"], json!([PERSISTENCE_WARNING]));
+        assert_eq!(result["data"]["warnings"], json!([PERSISTENCE_WARNING]));
+        assert!(result["output"].as_str().unwrap().contains(PERSISTENCE_WARNING));
+    }
+
+    #[test]
+    fn persistence_failure_does_not_echo_backend_error_details() {
+        let secret_marker = "do-not-leak-this-path-or-token";
+        let result = finish_outcome(
+            landed_outcome(),
+            Err(anyhow::anyhow!(secret_marker)),
+            Vec::new(),
+        );
+        let encoded = serde_json::to_string(&result).unwrap();
+
+        assert!(!encoded.contains(secret_marker), "{encoded}");
+        assert!(encoded.contains(PERSISTENCE_WARNING));
     }
 
     #[test]
