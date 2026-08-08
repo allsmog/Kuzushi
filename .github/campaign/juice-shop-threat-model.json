@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "title": "OWASP Juice Shop adversarial trust-boundary model",
+  "target": {
+    "repository": "allsmog/juice-shop",
+    "commit": "640d727a94e5aaaca37d36d8a690bce074b80369",
+    "deployment": "single isolated Docker container with loopback-only host publication",
+    "applicationShape": "Express and TypeScript backend, Sequelize persistence, Angular client, file and parser surfaces, REST and B2B APIs, challenge instrumentation, JWT-bearing sessions"
+  },
+  "mission": "Find security failures that survive source inspection, cross-tool deduplication, adversarial triage, and safe empirical testing. The model must prioritize broken invariants and end-to-end exploit paths over keyword matches. Every claim must identify attacker-controlled input, the trust boundary crossed, the sensitive state or sink reached, and the missing or bypassed control. Known intentionally vulnerable training code is still treated as untrusted evidence: do not assume a challenge annotation proves exploitability, and do not assume the absence of an annotation proves safety.",
+  "actors": [
+    {
+      "id": "anonymous-remote",
+      "capabilities": ["send arbitrary HTTP requests", "control headers, bodies, encodings, cookies and timing", "observe public responses and side effects"],
+      "constraints": ["no filesystem or shell access", "no privileged network position"]
+    },
+    {
+      "id": "authenticated-customer",
+      "capabilities": ["hold a legitimate low-privilege JWT", "create normal application state", "submit files, profile content, orders and reviews"],
+      "constraints": ["must not access another user's objects or administrative actions"]
+    },
+    {
+      "id": "malicious-content-producer",
+      "capabilities": ["supply files, URLs, XML, YAML, JSON, text, images and browser-rendered content", "shape parser edge cases and metadata"],
+      "constraints": ["content is delivered only through documented application surfaces"]
+    }
+  ],
+  "assets": [
+    "authentication secrets, password hashes, reset material and second factors",
+    "JWT integrity, session-to-user binding and deleted-account state",
+    "user identity, baskets, orders, addresses, cards, wallets, memories and privacy exports",
+    "administrative capabilities and challenge/score integrity",
+    "server filesystem, process integrity, outbound network authority and parser availability",
+    "browser origin integrity, DOM execution boundary and user-visible data",
+    "availability of the Node process, database and request workers"
+  ],
+  "trustBoundaries": [
+    {
+      "id": "http-to-express",
+      "invariant": "All headers, paths, query values, body shapes, encodings and multipart metadata remain attacker-controlled until schema and authorization checks complete. JavaScript type coercion is not validation."
+    },
+    {
+      "id": "express-to-identity",
+      "invariant": "Authentication establishes exactly one active, non-deleted identity; authorization is recomputed for every object and action rather than inferred from client-provided IDs or stale session state."
+    },
+    {
+      "id": "application-to-interpreter",
+      "invariant": "Untrusted data never becomes SQL, shell, template, regular-expression, path, parser directive, redirect target or outbound-request authority through string construction or unsafe evaluation."
+    },
+    {
+      "id": "server-to-browser",
+      "invariant": "Stored and reflected content cannot cross into executable DOM, script, URL, style or navigation contexts without context-correct encoding and policy enforcement."
+    },
+    {
+      "id": "application-to-files-and-network",
+      "invariant": "Uploads, archive members, parser entities, profile-image URLs and download paths are bounded, canonicalized, content-validated and prevented from reaching unintended local or remote resources."
+    }
+  ],
+  "evidencePolicy": {
+    "confirmed": "A complete source-to-sink or authorization path plus a reproducible local runtime receipt, or two independent strong source proofs when runtime execution is structurally unsupported.",
+    "likely": "A complete source path with one unresolved environmental precondition and no contradictory runtime evidence.",
+    "needsReview": "A suspicious sink, control gap or model hypothesis without a complete attacker-to-impact path.",
+    "rejected": "The claimed input is not attacker-controlled, a dominating validation/authorization control blocks the path, the sink is unreachable, or safe local testing contradicts the exploit claim.",
+    "falsePositiveTraps": [
+      "challenge names and vuln-code comments are hints, not proof",
+      "test fixtures, disabled code and unreachable routes do not establish production reachability",
+      "a dangerous API is not a finding without attacker influence and impact",
+      "a 500 response is not automatically exploitable",
+      "client-side checks are not server-side controls",
+      "ORM use is not automatically parameterization",
+      "authentication success is not authorization success"
+    ]
+  },
+  "threats": [
+    {
+      "id": "TM-IDENTITY-SESSION",
+      "title": "Identity, session and account-state boundary collapse",
+      "severity": "critical",
+      "relatedCwe": ["CWE-287", "CWE-306", "CWE-384", "CWE-613", "CWE-639", "CWE-862", "CWE-863"],
+      "description": "Hunt for paths where anonymous or low-privilege input can become another active identity, retain authority after account deletion or state transition, bypass second-factor or reset requirements, or act on an object belonging to another user. Trace login, JWT creation and verification, password reset/change, 2FA, current-user helpers, user-id propagation, basket/address/card/order/wallet access, administrative gates and any route that trusts body, query, path or token claims. Distinguish authentication from authorization. Required proof identifies the attacker-controlled identity or object selector, the exact state transition or missing ownership check, and the privileged data or action reached. Test invariants include: an incorrect secret never yields a token; a deleted user never authenticates; a valid customer token cannot substitute another user or object identifier; token parsing and authorization use one canonical identity; reset and 2FA transitions cannot be skipped, replayed or confused; privilege decisions are not made solely in the browser. Prefer multi-step chains where a modest disclosure, stale token, predictable identifier or confused-deputy helper enables account takeover or cross-tenant impact. Reject findings when a dominating server-side ownership check binds the resource to the authenticated principal on every path."
+    },
+    {
+      "id": "TM-INTERPRETER-INJECTION",
+      "title": "Untrusted data crosses into SQL, templates, commands, regexes or evaluators",
+      "severity": "critical",
+      "relatedCwe": ["CWE-78", "CWE-89", "CWE-94", "CWE-95", "CWE-1333", "CWE-1336"],
+      "description": "Model every transition from HTTP-controlled strings or shapes into an interpreter-like sink: raw Sequelize queries, dynamically assembled predicates, template rendering, command/process execution, unsafe deserialization or evaluation, user-controlled regular expressions, parser directives and code-like configuration. Search beyond obvious concatenation: coercion, array/object-to-string conversion, encoded delimiters, comment syntax, alternate quoting, nested JSON strings, second-order storage and values recovered from database state can all carry attacker influence. A report must show the source, transformations, sink, grammar boundary and resulting security effect; a mere dangerous call is insufficient. For SQL, verify whether parameter binding covers values and whether identifiers or fragments remain dynamic. For templates and browser/server evaluators, identify the execution context and escaping mismatch. For regexes, establish attacker control over the pattern or catastrophic input and a measurable availability effect. Runtime tests should use bounded payload families, compare normal and adversarial responses, and record authentication, authorization, data, timing or process-health changes without targeting any system outside the local container. Reject hypotheses where values remain data through native parameterization, context-correct encoding or a strict allowlist that dominates the sink."
+    },
+    {
+      "id": "TM-AUTHZ-BUSINESS-LOGIC",
+      "title": "Object authorization, workflow and business-invariant abuse",
+      "severity": "high",
+      "relatedCwe": ["CWE-285", "CWE-639", "CWE-841", "CWE-862", "CWE-863", "CWE-915", "CWE-20"],
+      "description": "Treat every multi-step workflow and mutable domain object as a state machine whose transitions must be authorized and internally consistent. Inspect baskets, quantities, coupons, orders, deliveries, addresses, cards, wallets, reviews, deluxe membership, privacy requests, memories, recycling, challenge completion and administrative operations. Look for mass assignment, client-selected ownership, duplicate or reordered actions, negative or extreme quantities, stale-state reuse, missing idempotency, arithmetic boundary failures, inconsistent validation between REST and alternate endpoints, and helpers that infer authority from mutable client data. Build attack chains rather than isolated anomalies: for example, object discovery plus identifier substitution plus an under-checked mutation; or a price/quantity inconsistency that becomes unauthorized value transfer. Evidence must name the invariant, legal states, attacker-controlled transition and observable impact. Safe tests should create disposable local state, perform a baseline action, mutate one variable or ordering assumption, and compare resulting ownership, balance, inventory, privilege or disclosure. Reject findings that rely only on a client-side display inconsistency when the server preserves authoritative state, and do not call an intentionally permissive training feature a vulnerability without showing a violated security boundary."
+    },
+    {
+      "id": "TM-FILES-PARSERS-SSRF",
+      "title": "Files, archives, parsers, paths and outbound-request authority escape containment",
+      "severity": "critical",
+      "relatedCwe": ["CWE-22", "CWE-23", "CWE-73", "CWE-434", "CWE-502", "CWE-611", "CWE-918", "CWE-400", "CWE-770"],
+      "description": "Follow uploaded bytes, filenames, archive entries, MIME and extension metadata, XML/YAML/JSON structures, profile-image URLs, download parameters, log and support paths, encryption-key access and any server-side fetch into filesystem, parser, decompressor or network sinks. Canonicalization must occur before authorization and after decoding; extension checks must not substitute for content validation; archive extraction must reject traversal, links and expansion bombs; XML/YAML features must not resolve external entities or instantiate unsafe types; outbound requests must not reach loopback, link-local, private, metadata or non-HTTP schemes through redirects, DNS changes or alternate address encodings. Establish hard size, recursion, file-count, time and memory bounds. Evidence must identify the initial untrusted field, each decoding/canonicalization step, the final resource authority and the confidentiality, integrity or availability effect. Runtime probes stay within the local Docker network, use tiny bounded fixtures, never access cloud metadata or third-party hosts, and record both application and container health. Reject reports where a validated canonical path remains under an intended root, parser capabilities are disabled, outbound destinations are strictly normalized and allowlisted, or the alleged sink is inaccessible from the route."
+    },
+    {
+      "id": "TM-BROWSER-PRIVACY-ABUSE",
+      "title": "Browser trust, privacy leakage, navigation abuse and resource-exhaustion chains",
+      "severity": "high",
+      "relatedCwe": ["CWE-79", "CWE-200", "CWE-352", "CWE-359", "CWE-400", "CWE-601", "CWE-770", "CWE-942"],
+      "description": "Analyze data crossing from requests or stored application state into HTML, DOM, URLs, redirects, WebSocket events, downloadable exports, logs, metrics, error messages and cross-origin responses. Separate reflected, stored and DOM-based execution contexts; trace whether Angular sanitization is bypassed by direct DOM APIs, trust-marking helpers, URL schemes, markdown/template transformations or server-generated content. Examine open redirects and navigation as chain enablers, CORS and credential behavior, CSRF assumptions for state-changing endpoints, sensitive data in support logs or exports, enumeration via response differences, and unbounded input or request patterns that degrade availability. A valid finding names the origin or privacy boundary, attacker-controlled value, execution or disclosure context, and user/server impact. Favor chains such as stored content plus privileged viewer, redirect plus token exposure, permissive cross-origin read plus sensitive endpoint, or low-cost input causing disproportionate CPU, memory, log or database work. Tests must be bounded and local: use inert canary strings instead of harmful scripts, compare headers and serialized output, cap request counts and payload sizes, and stop on container health degradation. Reject claims when context-correct sanitization dominates all paths, credentials cannot accompany the cross-origin request, the redirect target is canonicalized to a safe relative path, or exposed data is intentionally public and non-sensitive."
+    }
+  ]
+}
