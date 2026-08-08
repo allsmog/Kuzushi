@@ -33,7 +33,6 @@ env:
   OXIDIZED_SHA: f74c237c236971ee4df03e5f82375469b91ca9af
   KUZUSHI_MODEL: openai-codex:gpt-5.3-codex-spark
   RELAY_ISSUE: "153"
-  CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
 
 jobs:
   deep-campaign:
@@ -49,6 +48,8 @@ jobs:
 
       - name: Require cross-repository read credential
         shell: bash
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${CROSS_REPO_TOKEN:-}" ]]; then
@@ -70,7 +71,7 @@ jobs:
         with:
           repository: allsmog/agentic-fuzz-engine
           ref: ${{ env.AFE_SHA }}
-          token: ${{ env.CROSS_REPO_TOKEN }}
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
           path: .campaign/${{ github.run_id }}/agentic-fuzz-engine
           fetch-depth: 1
           persist-credentials: false
@@ -80,17 +81,17 @@ jobs:
         with:
           repository: allsmog/oxidized-joern
           ref: ${{ env.OXIDIZED_SHA }}
-          token: ${{ env.CROSS_REPO_TOKEN }}
+          token: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
           path: .campaign/${{ github.run_id }}/oxidized-joern
           fetch-depth: 1
           persist-credentials: false
+
+      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
-
-      - uses: pnpm/action-setup@v6
 
       - uses: actions/setup-python@v6
         with:
@@ -117,6 +118,8 @@ jobs:
 
       - name: Build integrated Kuzushi, AFE, and CPG toolchain
         shell: bash
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_READ_TOKEN || secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
           set -euo pipefail
           git config --global \
@@ -128,6 +131,7 @@ jobs:
           set -e
           git config --global --unset-all \
             url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf || true
+          unset CROSS_REPO_TOKEN
           exit "$code"
 
       - name: Run isolated full campaign
@@ -168,7 +172,7 @@ jobs:
               `Deep Juice Shop campaign **${status}** for run ${context.runId}.`,
               `CPG integration mode: \`${cpg}\`.`,
               `Run and evidence artifact: ${run}`,
-              `No OAuth credentials or local Juice Shop tokens were persisted.`,
+              `No OAuth credentials, cross-repository token, or local Juice Shop token was persisted.`,
             ].join('\n\n');
             await github.rest.issues.createComment({
               owner: context.repo.owner,
@@ -184,8 +188,6 @@ jobs:
           set +e
           rm -f "$KUZUSHI_OAUTH_CREDENTIALS"
           rm -rf "$CAMPAIGN_HOME" "$VENV_DIR" "$CAMPAIGN_ROOT"
-          git config --global --unset-all \
-            url."https://x-access-token:${CROSS_REPO_TOKEN}@github.com/".insteadOf 2>/dev/null || true
           docker ps -aq --filter 'name=juice-shop-deep-' | xargs -r docker rm --force
           docker network ls --format '{{.Name}}' | grep '^juice-shop-deep-' | xargs -r docker network rm
           exit 0
