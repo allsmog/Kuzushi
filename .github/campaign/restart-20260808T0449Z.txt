@@ -1,2 +1,3 @@
 Fresh-run marker for the Juice Shop 20x Kuzushi campaign.
-Reason: isolate ephemeral bundle/OAuth relays under a new GitHub Actions run ID after a same-run rerun encountered a stale ciphertext marker.
+Reason: isolate ephemeral bundle/OAuth relays under a new GitHub Actions run ID after earlier relay-envelope failures.
+Crypto handoff now uses locally self-tested RSA-OAEP-SHA256 + AES-256-GCM with a verified 384-byte RSA ciphertext.
