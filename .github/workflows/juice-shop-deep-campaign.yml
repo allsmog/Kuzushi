@@ -23,10 +23,10 @@ env:
   TARGET_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/juice-shop
   AFE_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/agentic-fuzz-engine
   OXIDIZED_DIR: ${{ github.workspace }}/.campaign/${{ github.run_id }}/oxidized-joern
-  REPORT_DIR: ${{ runner.temp }}/juice-shop-deep-${{ github.run_id }}/reports
-  VENV_DIR: ${{ runner.temp }}/juice-shop-deep-${{ github.run_id }}/venv
-  CAMPAIGN_HOME: ${{ runner.temp }}/juice-shop-deep-${{ github.run_id }}/home
-  KUZUSHI_OAUTH_CREDENTIALS: ${{ runner.temp }}/juice-shop-deep-${{ github.run_id }}/home/.kuzushi/oauth-credentials.json
+  REPORT_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/reports
+  VENV_DIR: /tmp/juice-shop-deep-${{ github.run_id }}/venv
+  CAMPAIGN_HOME: /tmp/juice-shop-deep-${{ github.run_id }}/home
+  KUZUSHI_OAUTH_CREDENTIALS: /tmp/juice-shop-deep-${{ github.run_id }}/home/.kuzushi/oauth-credentials.json
   TARGET_SHA: 640d727a94e5aaaca37d36d8a690bce074b80369
   TARGET_BASE_SHA: bd2611f6cac491bb80c9fe54e954fd945c3ab5ba
   AFE_SHA: d480b9429c7889b9692ccb062ee624dd23ba36ec
