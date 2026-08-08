@@ -236,7 +236,8 @@ def command_prepare_plan(args: argparse.Namespace) -> int:
                 handle.write(
                     "\n\n## Independent scan contract\n\n"
                     f"Independent scan ordinal: {sequence:02d} of {args.expected}. "
-                    f"Cell: {job.get('shard')} × {job.get('threatId')}.\n\n"
+                    f"Cell: {job.get('shard')} × {job.get('threatId')}. "
+                    f"Campaign nonce: {plan.get('campaignId')}-{sequence:02d}.\n\n"
                     "Generate hypotheses independently from other campaign cells. Do not assume another pass will inspect this path. "
                     "Vary candidate ordering and actively search for counterexamples before returning. "
                     "A finding requires a concrete attacker-controlled source, reachable sink or invariant violation, exact code evidence, preconditions, impact, and a stated falsification test. "
