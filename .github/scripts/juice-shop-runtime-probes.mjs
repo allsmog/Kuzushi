@@ -28,9 +28,11 @@ writeFileSync(
     2,
   )}\n`,
 );
+const publicFindings = findings.map(({ _key, ...finding }) => finding);
 writeFileSync(
   findingsPath,
-  findings.map((finding) => JSON.stringify(finding)).join("\n") + (findings.length ? "\n" : ""),
+  publicFindings.map((finding) => JSON.stringify(finding)).join("\n") +
+    (publicFindings.length ? "\n" : ""),
 );
 console.log(JSON.stringify({ ok: true, cases: results.length, anomalies: findings.length }));
 
@@ -268,7 +270,3 @@ function requiredEnv(name) {
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
-
-process.on("exit", () => {
-  for (const finding of findings) delete finding._key;
-});
