@@ -55,8 +55,9 @@ impl FindingStore {
     }
 
     pub fn record_run_finished(&self, id: &str, status: &str, findings_count: usize) -> Result<()> {
+        let event_kind = terminal_run_event_kind(status)?;
         self.record_v3_run_lifecycle(RunLifecycleWrite {
-            event_kind: completed_run_event_kind(status),
+            event_kind,
             run_id: id.to_string(),
             target: None,
             status: status.to_string(),
@@ -116,10 +117,38 @@ impl FindingStore {
     }
 }
 
-fn completed_run_event_kind(status: &str) -> EventKind {
-    if status == "failed" {
-        EventKind::RunFailed
-    } else {
-        EventKind::RunCompleted
+fn terminal_run_event_kind(status: &str) -> Result<EventKind> {
+    match status {
+        "completed" => Ok(EventKind::RunCompleted),
+        "failed" => Ok(EventKind::RunFailed),
+        _ => anyhow::bail!(
+            "unsupported terminal run status {status:?}; expected \"completed\" or \"failed\""
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_run_event_kind_matches_persisted_status() {
+        assert_eq!(
+            terminal_run_event_kind("completed").unwrap(),
+            EventKind::RunCompleted
+        );
+        assert_eq!(
+            terminal_run_event_kind("failed").unwrap(),
+            EventKind::RunFailed
+        );
+    }
+
+    #[test]
+    fn unsupported_terminal_statuses_fail_closed() {
+        for status in ["partial", "canceled", "interrupted", "blocked", "skipped"] {
+            let error = terminal_run_event_kind(status).unwrap_err().to_string();
+            assert!(error.contains("unsupported terminal run status"), "{error}");
+            assert!(error.contains(status), "{error}");
+        }
     }
 }
