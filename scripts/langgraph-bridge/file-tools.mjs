@@ -1,5 +1,6 @@
 import { globSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
+import { GREP_MAX_PATTERN_CHARS, scanBoundedRegex } from "./grep-regex-runner.mjs";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
@@ -191,13 +192,18 @@ function renderGlob(pattern, base, roots) {
 
 function grepTool(roots) {
   return tool(
-    ({ pattern, path, glob }) => renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob),
+    async ({ pattern, path, glob }) =>
+      renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob),
     {
       name: "Grep",
       description:
         "Search workspace file contents with a regular expression. Scope the search with path and/or a glob filter — an unscoped search over a huge workspace is truncated.",
       schema: z.object({
-        pattern: z.string().describe("Regular expression to search for"),
+        pattern: z
+          .string()
+          .min(1)
+          .max(GREP_MAX_PATTERN_CHARS)
+          .describe("Regular expression to search for"),
         path: z.string().optional().describe("File or directory to search; defaults to the workspace root"),
         glob: z.string().optional().describe('Glob filter for files to search, e.g. "**/*.scala"'),
       }),
@@ -205,25 +211,33 @@ function grepTool(roots) {
   );
 }
 
-function renderGrep(pattern, base, roots, glob) {
-  const regex = new RegExp(pattern);
+async function renderGrep(pattern, base, roots, glob) {
   const { files, truncatedWalk } = grepCandidateFiles(base, roots, glob);
-  const { lines, scanned } = collectGrepMatches(files, base, regex);
+  const { lines, scanned } = await collectGrepMatches(files, base, pattern);
   const truncated = truncatedWalk || scanned < files.length;
   const note = grepScanNote(lines.length, scanned, truncated);
   if (note) lines.push(note);
   return lines.join("\n") || `no matches for ${pattern}`;
 }
 
-function collectGrepMatches(files, base, regex) {
-  const lines = [];
-  let scanned = 0;
-  for (const file of files) {
-    scanned += 1;
-    appendFileMatches(lines, file, base, regex);
-    if (lines.length >= GREP_MAX_MATCHES) break;
-  }
+async function collectGrepMatches(files, base, pattern) {
+  const { matches, scanned } = await scanBoundedRegex({
+    pattern,
+    files,
+    maxMatches: GREP_MAX_MATCHES,
+    readText: grepCandidateText,
+  });
+  const lines = matches.map(({ fileIndex, line, preview }) => {
+    const relative = workspaceRelative(files[fileIndex].matchedPath, base);
+    return `${relative}:${line}:${preview}`;
+  });
   return { lines, scanned };
+}
+
+function grepCandidateText(candidate) {
+  const text = readGrepText(candidate.canonicalPath);
+  if (text === null || text.includes("\u0000")) return null;
+  return text;
 }
 
 function grepScanNote(matchCount, scanned, truncated) {
@@ -250,23 +264,6 @@ function grepCandidateFiles(base, roots, glob) {
 function confinedGrepCandidates(matches, base, roots) {
   const { kept, truncated } = confinedCandidates(matches, base, roots, GREP_MAX_FILES);
   return { files: kept, truncatedWalk: truncated };
-}
-
-function appendFileMatches(out, candidate, base, regex) {
-  const lines = grepTextLines(candidate.canonicalPath);
-  const relative = workspaceRelative(candidate.matchedPath, base);
-  for (let index = 0; index < lines.length && out.length < GREP_MAX_MATCHES; index += 1) {
-    if (regex.test(lines[index])) {
-      out.push(`${relative}:${index + 1}:${lines[index].slice(0, READ_MAX_LINE_CHARS)}`);
-    }
-  }
-}
-
-function grepTextLines(path) {
-  const text = readGrepText(path);
-  if (text === null) return [];
-  if (text.includes("\u0000")) return [];
-  return text.split("\n");
 }
 
 function readGrepText(path) {

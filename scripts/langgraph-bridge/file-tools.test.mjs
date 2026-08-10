@@ -78,6 +78,48 @@ test("Grep reaches nested in-root files while staying confined", async () => {
   }
 });
 
+test("Grep terminates catastrophic regular expressions within a fixed budget", async () => {
+  const { base, tools } = setupWorkspace();
+  const wsRoot = join(base, "ws");
+  writeFileSync(join(wsRoot, "slow.txt"), `${"a".repeat(30_000)}!\n`);
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      () => tools.get("Grep").invoke({ pattern: "^(a+)+$", path: "slow.txt" }),
+      /regular-expression evaluation exceeded its time budget/,
+    );
+    assert.ok(Date.now() - started < 5000, "catastrophic regex must not monopolize the bridge");
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Grep rejects invalid regular expressions without echoing the pattern", async () => {
+  const { base, tools } = setupWorkspace();
+  const invalid = "[operator-secret";
+  try {
+    await assert.rejects(
+      () => tools.get("Grep").invoke({ pattern: invalid, path: "inside.txt" }),
+      (error) => {
+        assert.equal(error.message, "Grep pattern is not a valid regular expression");
+        assert.equal(error.message.includes(invalid), false);
+        return true;
+      },
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Grep rejects oversized patterns before worker execution", async () => {
+  const { base, tools } = setupWorkspace();
+  try {
+    await assert.rejects(() => tools.get("Grep").invoke({ pattern: "a".repeat(4097) }));
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("Glob cannot list outside files via a `..` pattern", async () => {
   const { base, tools } = setupWorkspace();
   try {
