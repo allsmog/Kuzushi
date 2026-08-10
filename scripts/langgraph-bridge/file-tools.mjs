@@ -1,8 +1,8 @@
 import { globSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
-import { GREP_MAX_PATTERN_CHARS, scanBoundedRegex } from "./grep-regex-runner.mjs";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { GREP_MAX_PATTERN_CHARS, scanBoundedRegex } from "./grep-regex-runner.mjs";
 
 const READ_MAX_LINES = 2000;
 const READ_DEFAULT_LINES = 250;
