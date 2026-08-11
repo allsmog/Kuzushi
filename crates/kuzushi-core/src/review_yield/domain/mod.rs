@@ -1,16 +1,29 @@
 mod canonical_json;
 mod census_report;
+mod feature_lookup;
 mod feature_schema;
 mod grouping;
 mod label_policy;
 mod manifest;
+mod model;
 mod normalizers;
 mod path_bucket;
+mod prediction;
 mod training_example;
 
 pub use canonical_json::{canonical_json_bytes, canonical_json_bytes_without_key};
 pub use census_report::CensusReport;
+pub use feature_lookup::{FeatureLookup, FeatureValue};
 pub use feature_schema::{categorical_vocabulary, ReviewYieldFeaturesV1, FEATURE_FIELD_NAMES};
+pub(crate) use model::{collect_vocabularies, LeafStats, MissingDirection, ModelNode};
+pub use model::{
+    ValidatedReviewYieldModel, MAX_CATEGORICAL_BRANCHES, MAX_MODEL_COUNT, MAX_MODEL_DEPTH,
+    MAX_MODEL_FILE_BYTES, MAX_MODEL_NODES, MAX_MODEL_STRING_LEN, MODEL_DIGEST_DOMAIN,
+    MODEL_KIND_DECISION_TREE,
+};
+pub use prediction::{
+    format_threshold, PathBranch, ReviewYieldEligibility, ReviewYieldPathStep, ReviewYieldSignal,
+};
 pub use grouping::{dataset_digest, example_id, identity_group, repository_group};
 pub use label_policy::{
     author_bucket, classify_cutoff, is_human_author, label_class, label_policy_manifest,

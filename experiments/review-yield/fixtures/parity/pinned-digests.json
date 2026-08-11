@@ -1,0 +1,21 @@
+{
+  "artifacts": {
+    "model-mixed-depth3.json": {
+      "canonicalBytesLength": 1678,
+      "fileBytesLength": 1762,
+      "modelId": "blake3:e27942a594da273cb23dcd3a9fc17193537f8b1d0df01056a62f25a83c1a1ee5"
+    },
+    "model-numeric-small.json": {
+      "canonicalBytesLength": 1054,
+      "fileBytesLength": 1138,
+      "modelId": "blake3:18655b7ee138903ea277aeefbd926ec771f2a3c9024228302d99e86a5b61df1d"
+    },
+    "model-tampered-hash.json": {
+      "declaredModelId": "blake3:18655b7ee138903ea277aeefbd926ec771f2a3c9024228302d99e86a5b61df10",
+      "expectedModelId": "blake3:18655b7ee138903ea277aeefbd926ec771f2a3c9024228302d99e86a5b61df1d",
+      "note": "one flipped hex character; must fail closed as a hash mismatch"
+    }
+  },
+  "domain": "kuzushi-review-yield-model-v1",
+  "framing": "blake3(u64_be(10)||'kuzushi:v3'||u64_be(len(domain))||domain||u64_be(len(canonical))||canonical)"
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/review-yield.model.schema.json",
+  "title": "Kuzushi Review Yield Model V1",
+  "description": "Canonical structural schema for a review-yield decision-tree artifact: the tree itself, the training provenance that produced it, the eligibility floors that decide when a leaf may be shown, and the display bands. The artifact is advisory; it never reorders or filters a review queue.",
+  "$comment": "Draft-07 validates the wire shape only. The Rust loader in crates/kuzushi-core/src/review_yield/persistence/model_artifact.rs is authoritative for every semantic invariant this schema cannot state: the BLAKE3 digest over the canonical form with `modelId` removed, node ids equal to their index, in-bounds children, single-parent reachability (no cycles, no shared children), a measured depth of at most 6, and the frozen feature schema id. A file that satisfies this schema may still be refused, and a refusal is never downgraded to a warning.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "modelId",
+    "modelKind",
+    "taskId",
+    "featureSchemaId",
+    "labelPolicyId",
+    "training",
+    "eligibility",
+    "displayBands",
+    "evaluation",
+    "nodes"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "modelId": { "$ref": "#/definitions/blake3Digest" },
+    "modelKind": { "const": "decision_tree" },
+    "taskId": { "const": "review_yield_predecision_v1" },
+    "featureSchemaId": { "const": "kuzushi-review-yield-features-v1" },
+    "labelPolicyId": { "$ref": "#/definitions/boundedName" },
+    "training": { "$ref": "#/definitions/training" },
+    "eligibility": { "$ref": "#/definitions/eligibility" },
+    "displayBands": { "$ref": "#/definitions/displayBands" },
+    "evaluation": { "$ref": "#/definitions/evaluation" },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 127,
+      "items": { "$ref": "#/definitions/node" }
+    }
+  },
+  "definitions": {
+    "blake3Digest": { "type": "string", "pattern": "^blake3:[0-9a-f]{64}$" },
+    "boundedName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[\\x20-\\x7e]+$"
+    },
+    "count": { "type": "integer", "minimum": 0, "maximum": 1000000000 },
+    "nodeIndex": { "type": "integer", "minimum": 0, "maximum": 126 },
+    "unitInterval": { "type": "number", "minimum": 0, "maximum": 1 },
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "criterion",
+        "datasetDigest",
+        "maxDepth",
+        "minSamplesLeaf",
+        "randomSeed",
+        "trainingCutoffSeq"
+      ],
+      "properties": {
+        "criterion": { "$ref": "#/definitions/boundedName" },
+        "datasetDigest": { "$ref": "#/definitions/blake3Digest" },
+        "maxDepth": { "type": "integer", "minimum": 1, "maximum": 6 },
+        "minSamplesLeaf": { "type": "integer", "minimum": 1 },
+        "randomSeed": { "type": "integer", "minimum": 0 },
+        "trainingCutoffSeq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimumLeafSupport", "maximumUnknownCategories"],
+      "properties": {
+        "minimumLeafSupport": { "type": "integer", "minimum": 1 },
+        "maximumUnknownCategories": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "displayBands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["highMinimum", "mediumMinimum"],
+      "properties": {
+        "highMinimum": { "$ref": "#/definitions/unitInterval" },
+        "mediumMinimum": { "$ref": "#/definitions/unitInterval" }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brier", "prAuc", "precisionAt20", "recallAt20"],
+      "properties": {
+        "brier": { "$ref": "#/definitions/unitInterval" },
+        "prAuc": { "$ref": "#/definitions/unitInterval" },
+        "precisionAt20": { "$ref": "#/definitions/unitInterval" },
+        "recallAt20": { "$ref": "#/definitions/unitInterval" }
+      }
+    },
+    "node": {
+      "oneOf": [
+        { "$ref": "#/definitions/numericNode" },
+        { "$ref": "#/definitions/categoricalNode" },
+        { "$ref": "#/definitions/leafNode" }
+      ]
+    },
+    "numericNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeType",
+        "id",
+        "feature",
+        "threshold",
+        "left",
+        "right",
+        "missingDirection"
+      ],
+      "properties": {
+        "nodeType": { "const": "numeric" },
+        "id": { "$ref": "#/definitions/nodeIndex" },
+        "feature": { "$ref": "#/definitions/boundedName" },
+        "threshold": { "type": "number" },
+        "left": { "$ref": "#/definitions/nodeIndex" },
+        "right": { "$ref": "#/definitions/nodeIndex" },
+        "missingDirection": { "enum": ["left", "right", "ineligible"] }
+      }
+    },
+    "categoricalNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nodeType", "id", "feature", "branches", "missingDirection"],
+      "properties": {
+        "nodeType": { "const": "categorical" },
+        "id": { "$ref": "#/definitions/nodeIndex" },
+        "feature": { "$ref": "#/definitions/boundedName" },
+        "branches": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "propertyNames": { "$ref": "#/definitions/boundedName" },
+          "additionalProperties": { "$ref": "#/definitions/nodeIndex" }
+        },
+        "missingDirection": { "const": "ineligible" }
+      }
+    },
+    "leafNode": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nodeType",
+        "id",
+        "positiveCount",
+        "negativeCount",
+        "smoothedPositiveRate",
+        "entropyBits",
+        "credibleInterval95"
+      ],
+      "properties": {
+        "nodeType": { "const": "leaf" },
+        "id": { "$ref": "#/definitions/nodeIndex" },
+        "positiveCount": { "$ref": "#/definitions/count" },
+        "negativeCount": { "$ref": "#/definitions/count" },
+        "smoothedPositiveRate": { "$ref": "#/definitions/unitInterval" },
+        "entropyBits": { "$ref": "#/definitions/unitInterval" },
+        "credibleInterval95": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": { "$ref": "#/definitions/unitInterval" }
+        }
+      }
+    }
+  }
+}

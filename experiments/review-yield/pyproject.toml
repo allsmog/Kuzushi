@@ -1,0 +1,19 @@
+[project]
+name = "kuzushi-review-yield"
+version = "0.1.0"
+description = "Offline Weeks 9-11 review-yield experiment: from-scratch entropy, ID3, and temporal evaluation"
+requires-python = ">=3.12"
+dependencies = []
+
+# Extras only. The core learner, the model exporter, and the entire test suite
+# are stdlib-only and run with zero installs:
+#   PYTHONPATH=src python3 -m unittest discover -s tests
+[project.optional-dependencies]
+compare = [
+  "scikit-learn",  # library comparison tree only
+  "blake3",        # cross-check on the stdlib BLAKE3 in src/.../blake3_pure.py
+]
+
+[tool.kuzushi]
+offline-only = true
+excluded-from-ci = "ADR-1: training is offline; see README"

@@ -1,0 +1,199 @@
+{
+  "cases": [
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 2,
+        "negativeCount": 6,
+        "path": [
+          "0:evidenceCount<=2.5:right"
+        ],
+        "positiveCount": 31,
+        "smoothedPositiveRate": 0.828947
+      },
+      "features": {
+        "evidenceCount": 5
+      },
+      "model": "model-numeric-small.json",
+      "name": "eligible high leaf"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 1,
+        "negativeCount": 44,
+        "path": [
+          "0:evidenceCount<=2.5:left"
+        ],
+        "positiveCount": 12,
+        "smoothedPositiveRate": 0.219298
+      },
+      "features": {
+        "evidenceCount": 1
+      },
+      "model": "model-numeric-small.json",
+      "name": "eligible low leaf"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 1,
+        "negativeCount": 44,
+        "path": [
+          "0:evidenceCount<=2.5:left"
+        ],
+        "positiveCount": 12,
+        "smoothedPositiveRate": 0.219298
+      },
+      "features": {
+        "evidenceCount": 2.5
+      },
+      "model": "model-numeric-small.json",
+      "name": "threshold boundary goes left"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "feature": "evidenceCount",
+          "kind": "missingRequiredFeature"
+        },
+        "leafId": null,
+        "negativeCount": null,
+        "path": [],
+        "positiveCount": null,
+        "smoothedPositiveRate": null
+      },
+      "features": {
+        "evidenceCount": null
+      },
+      "model": "model-numeric-small.json",
+      "name": "missing routed ineligible"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "feature": "evidenceCount",
+          "kind": "missingRequiredFeature"
+        },
+        "leafId": null,
+        "negativeCount": null,
+        "path": [],
+        "positiveCount": null,
+        "smoothedPositiveRate": null
+      },
+      "features": {},
+      "model": "model-numeric-small.json",
+      "name": "feature absent from vector"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 3,
+        "negativeCount": 51,
+        "path": [
+          "0:staticProofState==code_cited",
+          "1:evidenceCount:missing-left"
+        ],
+        "positiveCount": 9,
+        "smoothedPositiveRate": 0.155738
+      },
+      "features": {
+        "evidenceCount": null,
+        "staticProofState": "code_cited"
+      },
+      "model": "model-mixed-depth3.json",
+      "name": "missing numeric routed left"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 4,
+        "negativeCount": 11,
+        "path": [
+          "0:staticProofState==source_sink_linked",
+          "1:evidenceCount<=3.5:right"
+        ],
+        "positiveCount": 40,
+        "smoothedPositiveRate": 0.778846
+      },
+      "features": {
+        "evidenceCount": 7,
+        "staticProofState": "source_sink_linked"
+      },
+      "model": "model-mixed-depth3.json",
+      "name": "categorical branch then numeric right"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "insufficientLeafSupport",
+          "support": 12
+        },
+        "leafId": 5,
+        "negativeCount": 9,
+        "path": [
+          "0:staticProofState==signal_only",
+          "2:maxEvidenceConfidence<=200.0:left"
+        ],
+        "positiveCount": 3,
+        "smoothedPositiveRate": 0.269231
+      },
+      "features": {
+        "maxEvidenceConfidence": 120,
+        "staticProofState": "signal_only"
+      },
+      "model": "model-mixed-depth3.json",
+      "name": "under-support leaf"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "feature": "staticProofState",
+          "kind": "unknownCategory",
+          "value": "needs_runtime_evidence"
+        },
+        "leafId": null,
+        "negativeCount": null,
+        "path": [],
+        "positiveCount": null,
+        "smoothedPositiveRate": null
+      },
+      "features": {
+        "staticProofState": "needs_runtime_evidence"
+      },
+      "model": "model-mixed-depth3.json",
+      "name": "unknown category"
+    },
+    {
+      "expected": {
+        "eligibility": {
+          "kind": "eligible"
+        },
+        "leafId": 6,
+        "negativeCount": 14,
+        "path": [
+          "0:staticProofState==statically_confirmed",
+          "2:maxEvidenceConfidence<=200.0:right"
+        ],
+        "positiveCount": 55,
+        "smoothedPositiveRate": 0.792857
+      },
+      "features": {
+        "maxEvidenceConfidence": 220,
+        "staticProofState": "statically_confirmed"
+      },
+      "model": "model-mixed-depth3.json",
+      "name": "confirmed branch then numeric right"
+    }
+  ]
+}

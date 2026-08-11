@@ -226,6 +226,33 @@ finding snapshots that existed at or before the decision's read cutoff, so a
 row can never contain the verdict it is supposed to predict. Paths, snippets,
 messages, rationales, and reviewer identities never leave the workspace.
 
+## 5.2 Review-yield model artifacts
+
+A trained model is a single JSON file described by
+`schemas/review-yield.model.schema.json`. The model path is always explicit —
+there is no default location, no environment variable, and no auto-discovery.
+
+```sh
+kuzushi review-yield validate-model --model model.json          # plus --json
+kuzushi --target <repo> review-yield score --model model.json   # plus --json
+```
+
+Loading fails closed. A missing or oversized file, malformed JSON, an
+unsupported `schemaVersion`, a digest that does not match the artifact's own
+bytes, an unknown key or node kind, an out-of-range rate, a child index out of
+bounds, a cycle, a shared child, more than 127 nodes, a depth over 6, or a
+feature schema this build does not read — each is an error with a named reason
+and a nonzero exit, never a warning and never a substituted model. `score`
+opens the artifact before the findings store, so a refused model never reaches
+your data.
+
+`score` is advisory. It prints one line per finding with the leaf's smoothed
+positive rate, its 95% credible interval, its support, its entropy, and the
+decision path that produced it — or the reason the finding could not be scored
+(a missing feature, a category outside the training vocabulary, or a leaf below
+the artifact's support floor). It does not reorder, filter, or hide anything in
+your review queue, and it writes nothing.
+
 ## 6. The CI gate
 
 `kuzushi ci` is deterministic: it reads the findings ledger, applies

@@ -2002,6 +2002,167 @@ mod tests {
         assert_eq!(output, PathBuf::from("review-yield.jsonl"));
     }
 
+    fn parity_model(name: &str) -> PathBuf {
+        PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../experiments/review-yield/fixtures/parity"
+        ))
+        .join(name)
+    }
+
+    #[test]
+    fn validate_model_reports_metadata_json() {
+        let model = kuzushi_core::review_yield::persistence::load_model_artifact(&parity_model(
+            "model-mixed-depth3.json",
+        ))
+        .expect("the parity model loads");
+
+        let rendered = crate::presentation::review_yield_model_output(&model, true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(parsed["nodeCount"], 7);
+        assert_eq!(parsed["depth"], 2);
+        assert_eq!(parsed["taskId"], "review_yield_predecision_v1");
+        assert_eq!(parsed["minimumLeafSupport"], 20);
+
+        let plain = crate::presentation::review_yield_model_output(&model, false).unwrap();
+        assert!(plain.contains("Review-yield model"), "{plain}");
+        assert!(plain.contains("blake3:"), "{plain}");
+    }
+
+    /// A refused artifact must surface as a nonzero-exit error carrying both
+    /// the reason and the eligibility kind, never a warning.
+    #[test]
+    fn validate_model_fails_on_tampered_artifact() {
+        let error = review_yield_command(
+            ReviewYieldCommand::ValidateModel {
+                model: parity_model("model-tampered-hash.json"),
+                json: false,
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("digest mismatch"), "{error}");
+        assert!(error.contains("invalidModelHash"), "{error}");
+    }
+
+    #[test]
+    fn validate_model_fails_on_an_absent_artifact() {
+        let error = review_yield_command(
+            ReviewYieldCommand::ValidateModel {
+                model: PathBuf::from("/tmp/kuzushi-no-such-review-yield-model.json"),
+                json: true,
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("unreadable"), "{error}");
+        assert!(error.contains("unsupportedModelSchema"), "{error}");
+    }
+
+    #[test]
+    fn score_requires_explicit_target() {
+        let error = review_yield_command(
+            ReviewYieldCommand::Score {
+                model: parity_model("model-numeric-small.json"),
+                json: false,
+            },
+            None,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            error.contains("review-yield score needs a target"),
+            "{error}"
+        );
+    }
+
+    /// The artifact is opened before the store, so a refused model never
+    /// reaches the findings database.
+    #[test]
+    fn score_rejects_a_bad_model_before_reading_findings() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let error = review_yield_command(
+            ReviewYieldCommand::Score {
+                model: parity_model("model-tampered-hash.json"),
+                json: false,
+            },
+            Some(tmp.path().to_path_buf()),
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("digest mismatch"), "{error}");
+        assert!(!tmp.path().join(".kuzushi").exists());
+    }
+
+    #[test]
+    fn review_yield_subcommands_parse() {
+        let checked = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "review-yield",
+            "validate-model",
+            "--model",
+            "model.json",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Command::ReviewYield {
+            command: ReviewYieldCommand::ValidateModel { model, json },
+        }) = checked.command
+        else {
+            panic!("expected review-yield validate-model command");
+        };
+        assert_eq!(model, PathBuf::from("model.json"));
+        assert!(json);
+
+        let scored = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "--target",
+            "/tmp/project",
+            "review-yield",
+            "score",
+            "--model",
+            "model.json",
+        ])
+        .unwrap();
+        let Some(Command::ReviewYield {
+            command: ReviewYieldCommand::Score { model, json },
+        }) = scored.command
+        else {
+            panic!("expected review-yield score command");
+        };
+        assert_eq!(model, PathBuf::from("model.json"));
+        assert!(!json);
+        assert_eq!(scored.target, Some(PathBuf::from("/tmp/project")));
+    }
+
+    #[test]
+    fn score_output_labels_itself_advisory() {
+        let model = kuzushi_core::review_yield::persistence::load_model_artifact(&parity_model(
+            "model-numeric-small.json",
+        ))
+        .unwrap();
+
+        let plain = crate::presentation::review_yield_score_output(&model, &[], false).unwrap();
+        let encoded = crate::presentation::review_yield_score_output(&model, &[], true).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+
+        assert!(plain.contains("does not change review order"), "{plain}");
+        assert!(plain.contains("Next: run a scan"), "{plain}");
+        assert_eq!(
+            parsed["advisory"],
+            "advisory signal; does not change review order"
+        );
+        assert_eq!(parsed["scores"].as_array().unwrap().len(), 0);
+    }
+
     #[test]
     fn decision_command_requires_explicit_target() {
         let error = decision_command(

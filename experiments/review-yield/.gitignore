@@ -1,0 +1,9 @@
+# Optional extras only (scikit-learn comparison + the blake3 binding).
+.venv/
+__pycache__/
+*.py[cod]
+
+# Run outputs are reproducible from the dataset digest and the config digest;
+# only the hand-maintained history is tracked.
+reports/*
+!reports/HISTORY.md

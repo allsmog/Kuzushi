@@ -1,3 +1,7 @@
+mod model_artifact;
+mod model_scoring;
+mod parity;
+
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -811,4 +815,57 @@ fn published_schemas_match_the_rust_feature_and_census_contracts() {
         .map(String::as_str)
         .collect();
     assert_eq!(census_keys, report_keys);
+}
+
+// ------------------------------------------------------- scoring end to end
+
+/// The batch scorer reads the store once and then evaluates in memory. This
+/// is the only test that puts a real projection behind the evaluator.
+#[test]
+fn scoring_current_findings_reads_the_store_once_and_scores_every_identity() {
+    let fixture = fixture();
+    fixture.insert("sql-injection", "src/api/orders.rs");
+    fixture.insert("sql-injection", "src/api/users.rs");
+    let model = crate::review_yield::persistence::load_model_artifact(
+        &parity::parity_fixture_path("model-mixed-depth3.json"),
+    )
+    .unwrap();
+    let reader = ReviewYieldProjectionReader::open(&fixture.workspace).unwrap();
+
+    let scores =
+        crate::review_yield::application::score_current_findings(&reader, &model).unwrap();
+
+    assert_eq!(scores.len(), 2);
+    for scored in &scores {
+        assert!(!scored.identity_id.is_empty());
+        assert_eq!(
+            scored.signal.eligibility,
+            crate::review_yield::domain::ReviewYieldEligibility::Eligible,
+            "{}",
+            scored.identity_id
+        );
+        assert_eq!(scored.signal.leaf_id, Some(3));
+        assert_eq!(
+            scored.signal.rendered_path(),
+            vec![
+                "0:staticProofState==source_sink_linked",
+                "1:evidenceCount<=3.5:left"
+            ]
+        );
+    }
+}
+
+#[test]
+fn scoring_a_target_with_no_findings_returns_an_empty_table_not_an_error() {
+    let fixture = fixture();
+    let model = crate::review_yield::persistence::load_model_artifact(
+        &parity::parity_fixture_path("model-numeric-small.json"),
+    )
+    .unwrap();
+    let reader = ReviewYieldProjectionReader::open(&fixture.workspace).unwrap();
+
+    let scores =
+        crate::review_yield::application::score_current_findings(&reader, &model).unwrap();
+
+    assert!(scores.is_empty());
 }

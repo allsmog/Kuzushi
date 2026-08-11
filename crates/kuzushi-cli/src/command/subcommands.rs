@@ -237,6 +237,25 @@ pub(crate) enum ReviewYieldCommand {
         #[arg(long = "out")]
         output: PathBuf,
     },
+    /// Check a model artifact against every bound and print its metadata.
+    ValidateModel {
+        /// Path to the model artifact JSON. Always explicit: there is no
+        /// default path, no environment variable, and no auto-discovery.
+        #[arg(long)]
+        model: PathBuf,
+        /// Emit the report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Score this target's current findings with a model artifact.
+    Score {
+        /// Path to the model artifact JSON.
+        #[arg(long)]
+        model: PathBuf,
+        /// Emit the scores as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

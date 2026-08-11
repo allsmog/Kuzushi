@@ -31,6 +31,24 @@ select count(*)
    and event.event_kind = 'finding-reopened'
    and event.seq <= ?2";
 
+/// Every stored snapshot in identity then sequence order, so the caller can
+/// keep the last row per identity without a per-identity query.
+const HEAD_SNAPSHOT_QUERY: &str = "\
+select coalesce(nullif(json_extract(finding_json, '$.identityId'), ''), '') as identity_id,
+       finding_json
+  from finding_observations
+ where finding_json is not null
+   and coalesce(nullif(json_extract(finding_json, '$.identityId'), ''), '') != ''
+ order by identity_id asc, created_seq asc";
+
+const REOPENED_TOTALS_QUERY: &str = "\
+select fingerprint.identity_id, count(*)
+  from finding_events as event
+  join finding_identity_fingerprints as fingerprint
+    on event.stable_fp = fingerprint.fingerprint
+ where event.event_kind = 'finding-reopened'
+ group by fingerprint.identity_id";
+
 /// Read-only view of the findings projection, scoped to exactly the tables the
 /// review-yield export is allowed to touch.
 pub struct ReviewYieldProjectionReader {
@@ -90,6 +108,35 @@ impl ReviewYieldProjectionReader {
             )
             .context("could not read the anchor observation snapshot")?
             .with_context(|| format!("observation {observation_hash} has no stored snapshot"))
+    }
+
+    /// The newest stored snapshot of every durable identity, in one query.
+    /// Runtime scoring reads the whole set once instead of per finding.
+    pub fn head_snapshots(&self) -> Result<BTreeMap<String, String>> {
+        let mut statement = self.conn.prepare(HEAD_SNAPSHOT_QUERY)?;
+        let mut heads: BTreeMap<String, String> = BTreeMap::new();
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in rows {
+            let (identity_id, finding_json) = row.context("could not read a finding snapshot")?;
+            heads.insert(identity_id, finding_json);
+        }
+        Ok(heads)
+    }
+
+    /// Reopen counts for every identity, in one query. Identities with no
+    /// reopen event are absent rather than zero-valued rows.
+    pub fn reopened_counts(&self) -> Result<BTreeMap<String, u32>> {
+        let mut statement = self.conn.prepare(REOPENED_TOTALS_QUERY)?;
+        let mut counts: BTreeMap<String, u32> = BTreeMap::new();
+        let rows = statement
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        for row in rows {
+            let (identity_id, count) = row.context("could not read a reopen count")?;
+            counts.insert(identity_id, u32::try_from(count).unwrap_or(u32::MAX));
+        }
+        Ok(counts)
     }
 
     pub fn reopened_count_before(&self, identity_id: &str, cutoff: u64) -> Result<u32> {
