@@ -194,11 +194,17 @@ function openAiToolCallsFromEvent(event, safeToOriginal = new Map()) {
 }
 
 function parseArguments(value) {
+  if (typeof value !== "string" || !value.trim()) throw invalidProviderResponseError();
+  let parsed;
   try {
-    return value ? JSON.parse(value) : {};
+    parsed = JSON.parse(value);
   } catch {
-    return {};
+    throw invalidProviderResponseError();
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw invalidProviderResponseError();
+  }
+  return parsed;
 }
 
 function anthropicMessages(messages) {
