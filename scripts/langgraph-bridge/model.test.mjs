@@ -7,7 +7,7 @@ import {
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
 } from "./model.mjs";
-import { openAiOauthHeaders } from "./oauth-models.mjs";
+import { oauthModelForRequest, openAiOauthHeaders } from "./oauth-models.mjs";
 
 test("forced conclusions remain structured but are marked truncated", () => {
   const result = bridgeQueryResult(
@@ -77,6 +77,60 @@ test("OpenAI OAuth requests include the account header only when known", () => {
     "content-type": "application/json",
   });
 });
+
+test("OpenAI OAuth rejects malformed tool-call arguments instead of defaulting to an empty object", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => oauthSseResponse('{"path":'));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  await assertInvalidProviderResponse(() => model.invoke([]));
+});
+
+test("OpenAI OAuth requires tool-call arguments to decode to an object", async (t) => {
+  let argumentsJson = "null";
+  t.mock.method(globalThis, "fetch", async () => oauthSseResponse(argumentsJson));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  for (const invalid of ["null", "[]", '"path"', "1", "true", ""]) {
+    argumentsJson = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("OpenAI OAuth preserves a valid empty-object tool call", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => oauthSseResponse("{}"));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  const message = await model.invoke([]);
+
+  assert.equal(message.tool_calls.length, 1);
+  assert.equal(message.tool_calls[0].name, "Read");
+  assert.deepEqual(message.tool_calls[0].args, {});
+});
+
+async function assertInvalidProviderResponse(invoke) {
+  await assert.rejects(invoke, (error) => {
+    assert.equal(error?.name, "BridgePublicError");
+    assert.equal(error?.errorClass, "provider_response_invalid");
+    assert.equal(error?.message, "Provider returned an invalid response.");
+    return true;
+  });
+}
+
+function oauthSseResponse(argumentsJson) {
+  const event = {
+    type: "response.output_item.done",
+    item: {
+      type: "function_call",
+      call_id: "call-1",
+      name: "Read",
+      arguments: argumentsJson,
+    },
+  };
+  return {
+    ok: true,
+    text: async () => `data: ${JSON.stringify(event)}\n\n`,
+  };
+}
 
 function jwt(claims) {
   const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
