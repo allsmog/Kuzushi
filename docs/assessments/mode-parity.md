@@ -77,6 +77,26 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
 
 ## Intentional Asymmetries
 
+- **Review-yield `within-band` and `learn` ordering is shell-only.** The `[review_yield]`
+  section is ordinary global operator config that every mode loads, but only
+  the interactive shell consumes it: it measures and explains interactive
+  review, which `kuzushi scan` and `kuzushi run` do not perform. The ordering
+  is applied in the confidence-first *display* path
+  (`ui_view_models::findings::within_band_display_order`), which the review
+  queue and plain output both inherit. `within-band` ranks a band by historical
+  yield and `learn` by the model's knowledge gap (leaf entropy, then leaf
+  support); both share one band walk and one eligibility rule, so neither
+  crosses a proof-confidence or severity band, both freeze any band holding a
+  row that lacks their own key, and both return the byte-identical baseline in
+  every other mode. Learn's queue chip and detail explanation render through
+  the same view models as every other pane, so plain output carries them
+  verbatim; both are absent whenever no band is actually ranked. Two orderings are deliberately
+  excluded: the backlog preset (worst-severity-first is its whole promise) and
+  every export/CLI alias ordering (severity-major, unchanged in all modes).
+  Exports disclose the session's mode and model id under
+  `metadata.reviewYield` without claiming their rows were reordered. Protected
+  by `app::review_session::tests::within_band::*` and
+  `workspace::tests::export_metadata_*`.
 - **The Cockpit Spine is shell-only presentation.** The route is
   `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
   Focus → Fix ↔ Run Focus → Report`. Canonical persisted phases are
@@ -242,6 +262,24 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   retain their existing target-scoped run artifacts and do not create a shell
   session. Transcript events link to those artifacts by `runId` rather than
   copying their payloads.
+- **Review yield is shell-only.** A review session records that an operator
+  opened a finding to review it, so it can only be observed where interactive
+  review happens, and the advisory explanation only means anything beside the
+  finding it describes. `[review_yield]` is ordinary global operator config
+  that `kuzushi run` and `kuzushi scan` load like any other section and then
+  ignore; decisions they persist carry `reviewSessionId: null`. The event kind, the
+  `review_sessions` projection table, and the
+  `review_decisions.review_session_id` link are shared storage, readable by any
+  mode. Neither `shadow` nor `visible` changes review order — proved
+  byte-for-byte on the confidence-first path and the backlog bypass by
+  `shadow_model_preserves_review_queue_order_byte_for_byte`,
+  `shadow_model_preserves_backlog_order_byte_for_byte`, and
+  `visible_mode_keeps_projected_order_byte_for_byte`; shell-only emission is
+  proved by `no_model_configured_emits_no_session_and_null_session_on_decision`.
+  `visible` is *not* an interactive-only rendering: the section is built from
+  one view model and rendered through the shared detail-pane line path, so
+  plain and scripted shells carry the same text with styles stripped
+  (`visible_mode_renders_the_scored_state_in_styled_and_plain_output`).
 - **Verification replay is shell-only presentation over shared provenance.**
   The proof sidecar replays `verification_run_id`, never the finding's discovery
   `scan_id`, and labels proof inherited by a later scan as requiring

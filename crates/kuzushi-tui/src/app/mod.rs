@@ -32,6 +32,7 @@ pub(crate) use prereq_chain::*;
 pub(crate) use project_scope_discovery::*;
 pub(crate) use prompts::*;
 pub(crate) use pwn::*;
+pub(crate) use review_yield::*;
 pub(crate) use run_reference::*;
 pub(crate) use runtime::*;
 pub(crate) use runtime_keymap::*;
@@ -126,6 +127,8 @@ fn demo_fixture_test_lock() -> std::sync::MutexGuard<'static, ()> {
 
 mod onboarding;
 mod prompts;
+mod review_session;
+mod review_yield;
 mod run_reference;
 mod runtime;
 mod runtime_keymap;

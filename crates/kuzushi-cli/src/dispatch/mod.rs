@@ -25,9 +25,15 @@ pub(crate) async fn dispatch_command(
     reject_session_persistence_flag_for_command(&command, no_session_persistence)?;
     reject_dynamic_load_for_command(&command, &load)?;
     match command {
-        Command::Shell {} => {
-            dispatch_shell_command(default_target, plain, load, no_session_persistence, argv)
-        }
+        Command::Shell {} => dispatch_shell_command(
+            default_target,
+            plain,
+            load,
+            ShellSessionFlags {
+                no_session_persistence,
+                argv,
+            },
+        ),
         scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
         investigate @ Command::Investigate(_) => {
             dispatch_investigate_command(investigate, default_target).await
@@ -298,12 +304,17 @@ mod tests {
     }
 }
 
+/// The launch flags only the interactive shell accepts.
+pub(crate) struct ShellSessionFlags {
+    pub(crate) no_session_persistence: bool,
+    pub(crate) argv: Vec<String>,
+}
+
 fn dispatch_shell_command(
     default_target: Option<PathBuf>,
     plain: bool,
     load: Vec<String>,
-    no_session_persistence: bool,
-    argv: Vec<String>,
+    flags: ShellSessionFlags,
 ) -> Result<()> {
     let target_source = shell_target_source(default_target.as_ref());
     let target = resolve_cli_target(None, default_target)?;
@@ -329,9 +340,9 @@ fn dispatch_shell_command(
         plain,
         registry,
         ShellLaunchContext {
-            argv,
+            argv: flags.argv,
             target_source,
-            session_persistence: !no_session_persistence,
+            session_persistence: !flags.no_session_persistence,
         },
         loaded_config.diagnostics,
     )

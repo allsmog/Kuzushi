@@ -1,8 +1,9 @@
 use super::{
     AbortReason, JobHub, ProjectScopeDiscoveryResult, ProjectScopeDiscoveryRuntime,
-    StampedTargetCandidateFacts, TargetCandidateDiscoveryResult, TargetCandidateDiscoveryRuntime,
-    TargetFactsRuntime, TerminalLoopWake, ToolRunState, ViewArtifactReader, ViewHydrationDrain,
-    ViewHydrationKey, ViewHydrationRuntime, WorkerHandleRegistry,
+    ReviewYieldState, StampedTargetCandidateFacts, TargetCandidateDiscoveryResult,
+    TargetCandidateDiscoveryRuntime, TargetFactsRuntime, TerminalLoopWake, ToolRunState,
+    ViewArtifactReader, ViewHydrationDrain, ViewHydrationKey, ViewHydrationRuntime,
+    WorkerHandleRegistry,
 };
 use kuzushi_core::ScanCancellation;
 use std::path::PathBuf;
@@ -23,6 +24,10 @@ pub(crate) struct RuntimeState {
     target_candidate_discovery: TargetCandidateDiscoveryRuntime,
     active_target_facts: TargetFactsRuntime,
     view_hydration: ViewHydrationRuntime,
+    /// Review-yield mode, model, sessions, and memoized scores. Off unless an
+    /// operator supplied a model artifact at launch, and never consulted by an
+    /// ordering function in any mode.
+    review_yield: ReviewYieldState,
     /// Handle of the campaign dispatcher THIS shell launched. Held so the
     /// deck can reap it (no zombie) and so kill targets a verified-live pid
     /// instead of a possibly recycled one.
@@ -44,6 +49,14 @@ impl RuntimeState {
 
     pub(crate) fn worker_handles_mut(&mut self) -> &mut WorkerHandleRegistry {
         &mut self.worker_handles
+    }
+
+    pub(crate) fn review_yield(&self) -> &ReviewYieldState {
+        &self.review_yield
+    }
+
+    pub(crate) fn review_yield_mut(&mut self) -> &mut ReviewYieldState {
+        &mut self.review_yield
     }
 
     pub(crate) fn set_loop_wake(&mut self, wake: Option<TerminalLoopWake>) {

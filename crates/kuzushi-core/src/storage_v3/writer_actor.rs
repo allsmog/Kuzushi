@@ -20,7 +20,8 @@ pub use lifecycle::{WriterActorState, WriterLifecycle};
 pub use writes::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
     FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, PatchLifecycleWrite,
-    RekeyWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta, VerificationWrite,
+    RekeyWrite, ReviewSessionWrite, RunLifecycleWrite, SnapshotWrite, SuppressionEventMeta,
+    VerificationWrite,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +72,21 @@ impl StorageWriter {
             None,
             None,
             decision.payload(),
+        )?;
+        self.apply_appended_event(&event)
+    }
+
+    /// A session is an observation, not a verdict, so there is no staleness
+    /// forwarding here: it records what the queue looked like, and a queue that
+    /// moved afterwards does not make the observation wrong.
+    fn record_review_session(&mut self, session: ReviewSessionWrite) -> Result<WriteReceipt> {
+        require_state(self.lifecycle.state(), WriterActorState::Live)?;
+        let event = self.log.append(
+            EventKind::ReviewSessionStarted,
+            session.actor.clone(),
+            None,
+            None,
+            session.payload(),
         )?;
         self.apply_appended_event(&event)
     }

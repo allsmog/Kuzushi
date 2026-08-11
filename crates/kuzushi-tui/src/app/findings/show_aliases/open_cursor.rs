@@ -1,13 +1,18 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn open_finding_at_cursor(&mut self) {
+    /// Enter on the review queue. This is a substantive open — it selects the
+    /// finding and moves focus to its detail — so it starts a review session.
+    /// Moving the cursor does not come through here.
+    pub(crate) fn open_finding_at_cursor(&mut self) -> Vec<ShellEffect> {
         let Some((alias, finding)) = self.selected_visible_finding_at_cursor() else {
-            return;
+            return Vec::new();
         };
         *self.selected_finding_mut() = Some(finding.clone());
         self.focus_workbench_details_for_opened_finding();
+        let effects = self.review_session_start_effects(&finding);
         self.log_cursor_finding_opened(&alias, finding);
+        effects
     }
 
     fn selected_visible_finding_at_cursor(&mut self) -> Option<(String, Finding)> {

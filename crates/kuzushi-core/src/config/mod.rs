@@ -43,6 +43,8 @@ pub use config_model::KeybindingOverrideConfig;
 pub use config_model::McpMountConfig;
 pub use config_model::McpMountToolConfig;
 pub use config_model::PhaseTemplateConfig;
+pub use config_model::ReviewYieldConfig;
+pub use config_model::ReviewYieldMode;
 pub use config_model::RuntimeConfig;
 pub use config_model::RuntimeKind;
 pub use config_model::V2Config;

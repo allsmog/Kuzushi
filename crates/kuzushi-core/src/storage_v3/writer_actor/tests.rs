@@ -1,5 +1,6 @@
 use super::*;
 use crate::event_log::EventEnvelope;
+use crate::review_yield::domain::RankObjective;
 
 fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
     DecisionWrite {
@@ -16,6 +17,7 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         triage_cost_usd_exact: true,
         dismiss_reason: None,
         dismissed_by: None,
+        review_session_id: None,
     }
 }
 
@@ -221,6 +223,148 @@ fn storage_writer_records_decision_event_and_projection_watermark() {
     let events = log.read_all().unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].event_kind, EventKind::TriageDecided);
+}
+
+fn review_session(review_session_id: &str) -> ReviewSessionWrite {
+    ReviewSessionWrite {
+        review_session_id: review_session_id.to_string(),
+        stable_fp: "fp3_session".to_string(),
+        identity_id: Some("fi_session".to_string()),
+        finding_id: Some(7),
+        feature_schema_id: "kuzushi-review-yield-features-v1".to_string(),
+        feature_snapshot_hash: Some("blake3:feature".to_string()),
+        feature_cutoff_seq: 12_000,
+        model_id: "blake3:model".to_string(),
+        eligibility: "eligible".to_string(),
+        baseline_rank: 17,
+        shadow_rank: Some(5),
+        shadow_rank_objective: Some(RankObjective::Yield),
+        queue_size: 133,
+        proof_band: "likely".to_string(),
+        severity: "high".to_string(),
+        actor: "operator".to_string(),
+    }
+}
+
+#[test]
+fn review_session_write_appends_review_session_started_event() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut writer =
+        StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
+
+    let receipt = writer.record_review_session(review_session("session-1")).unwrap();
+
+    assert_eq!(receipt.committed_seq, 1);
+    assert_eq!(writer.current_watermark().unwrap(), 1);
+    let log = EventLog::open(tmp.path().join("log")).unwrap();
+    let events = log.read_all().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].event_kind, EventKind::ReviewSessionStarted);
+    assert_eq!(events[0].actor, "operator");
+    log.verify_chain().unwrap();
+}
+
+/// The operator's own open records a session against the finding they are
+/// about to decide. That observation must not read as "the finding changed",
+/// or every armed-mode verdict would be rejected by the staleness guard.
+#[test]
+fn review_session_start_does_not_make_the_verdict_it_precedes_stale() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut writer =
+        StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
+    writer
+        .record_review_session(review_session("session-1"))
+        .unwrap();
+
+    let receipt = writer
+        .record_review_decision(decision("fp3_session", 0))
+        .unwrap();
+
+    assert_eq!(receipt.committed_seq, 2);
+}
+
+/// A real change to the same finding still rejects a decision read from before
+/// it, session or no session.
+#[test]
+fn review_session_start_does_not_mask_a_real_intervening_change() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut writer =
+        StorageWriter::open(tmp.path().join("log"), tmp.path().join("index.sqlite3")).unwrap();
+    writer
+        .record_review_decision(decision("fp3_session", 0))
+        .unwrap();
+    writer
+        .record_review_session(review_session("session-1"))
+        .unwrap();
+
+    let error = writer
+        .record_review_decision(decision("fp3_session", 0))
+        .unwrap_err();
+
+    assert!(error.to_string().contains("changed after read watermark 0"));
+}
+
+/// The objective labels the rank beside it. A session that recorded no rank
+/// names no objective, because a key with nothing to key would describe a
+/// measurement that was never taken.
+#[test]
+fn review_session_payload_names_the_objective_only_beside_a_rank() {
+    let ranked = review_session("session-1").payload();
+    assert_eq!(ranked["shadowRankObjective"], serde_json::json!("yield"));
+
+    let mut unranked = review_session("session-2");
+    unranked.shadow_rank = None;
+
+    let payload = unranked.payload();
+
+    assert!(payload.get("shadowRankObjective").is_none());
+    assert_eq!(payload["shadowRank"], serde_json::Value::Null);
+}
+
+/// The payload is a closed set. A key added here without a decision to record
+/// it is how a feature value would reach the durable log.
+#[test]
+fn review_session_payload_key_whitelist() {
+    let payload = review_session("session-1").payload();
+
+    let mut keys: Vec<&str> = payload
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec![
+            "baselineRank",
+            "eligibility",
+            "featureCutoffSeq",
+            "featureSchemaId",
+            "featureSnapshotHash",
+            "findingId",
+            "identityId",
+            "modelId",
+            "proofBand",
+            "queueSize",
+            "reviewSessionId",
+            "severity",
+            "shadowRank",
+            "shadowRankObjective",
+            "stableFp",
+        ]
+    );
+
+    // No payload key may be a feature name: the session records a digest of the
+    // feature vector, never a value from it.
+    let feature_names: Vec<&str> =
+        crate::review_yield::domain::FEATURE_FIELD_NAMES.to_vec();
+    for key in keys {
+        assert!(
+            !feature_names.contains(&key),
+            "payload key {key} is a feature field name"
+        );
+    }
 }
 
 #[test]

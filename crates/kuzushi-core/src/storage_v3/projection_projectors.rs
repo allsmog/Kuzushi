@@ -8,7 +8,7 @@ use super::projection_observations::project_finding_observation;
 use super::projection_patch_lifecycle::project_patch_lifecycle_event;
 use super::projection_payload::{payload_str, require_payload_f64, require_payload_str};
 use super::projection_proof::{project_patch_attempt_event, project_verification_event};
-use super::projection_review::project_review_decision;
+use super::projection_review::{project_review_decision, project_review_session};
 use super::projection_runs::project_run_lifecycle_event;
 use super::sql_seq;
 use super::ProjectionApplyReceipt;
@@ -35,6 +35,7 @@ pub(super) fn apply_projection_event(
     project_patch_lifecycle_event(tx, event)?;
     project_audit_event(tx, event)?;
     let review_decision_id = project_review_decision(tx, event)?;
+    project_review_session(tx, event)?;
     Ok(ProjectionApplyReceipt {
         review_decision_id,
         finding_id,

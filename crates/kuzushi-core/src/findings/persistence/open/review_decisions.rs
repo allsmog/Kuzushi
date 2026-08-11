@@ -110,6 +110,29 @@ impl FindingStore {
             .context("Could not batch review decisions")
     }
 
+    /// The prospective review session a recorded verdict concluded, joined
+    /// back to the session row that measured it.
+    ///
+    /// `None` when the verdict carried no session — the mode was off, or the
+    /// decision predates session recording — and also when the id it carries
+    /// matches no session row, because an unmatched id is not a measurement.
+    pub fn joined_review_session_id(&self, decision_id: i64) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                r#"
+                select sessions.review_session_id
+                  from review_decisions as decisions
+                  join review_sessions as sessions
+                    on sessions.review_session_id = decisions.review_session_id
+                 where decisions.id = ?1
+                "#,
+                params![decision_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not join a review decision to its session")
+    }
+
     pub fn list_review_decisions(&self, finding_id: i64) -> Result<Vec<ReviewDecisionRecord>> {
         let mut stmt = self.conn.prepare(
             r#"
@@ -350,6 +373,9 @@ impl FindingStore {
                 .dismiss_reason
                 .map(|reason| reason.as_str().to_string()),
             dismissed_by: decision.actor.clone(),
+            // Store-level decisions are not interactive review: there is no
+            // session to attach, and none is invented.
+            review_session_id: None,
         };
         commit_review_decision(target.event_log_dir, target.db_path, write)
     }

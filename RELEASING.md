@@ -321,3 +321,34 @@ in-process cpg-rs engine (git-pinned `oxidized-joern` crates) — no Java, no
 - Language coverage change: Kotlin, C#, PHP, Swift, and bytecode targets have
   no cpg-rs frontend yet and fall back to codeql/structural evidence. cpg-rs
   covers c, cpp, go, java, javascript, python, ruby, rust, scala, typescript.
+
+## Review-session recording (unreleased)
+
+Prospective review sessions are recorded so a later evaluation can ask whether
+a trained model would have helped. All three changes are additive; a workspace
+that never sets `--review-yield-shadow-model` produces none of them.
+
+- New event kind `review-session-started`. Old readers ignore unknown kinds, so
+  a log containing it replays unchanged on an earlier build; a build that has
+  the kind but no `review_sessions` table simply projects nothing.
+- New projection table `review_sessions`, created by
+  `create_projection_schema` on every open (`create table if not exists`), so
+  legacy databases gain it without a `migrate_*` step. Projection is keyed by
+  `event_hash` and is replay-idempotent.
+- New additive column `review_decisions.review_session_id`, added by
+  `migrate_review_decision_session_column`. Deliberately **not** backfilled:
+  decisions taken before sessions existed genuinely have none, and inventing a
+  link would fabricate the measurement the column exists to make.
+- `DecisionWrite` gains `review_session_id: Option<String>`, emitted as
+  `reviewSessionId` in the `triage-decided` payload. Existing projectors read
+  named keys, so old and new events coexist.
+- `--review-yield-model <path>` and `--review-yield-mode <shadow|visible>` are
+  an interim operator mechanism and a stopgap. They replace the earlier
+  `--review-yield-shadow-model`, which was never released; there is no
+  compatibility alias, because a flag that implied a mode is exactly the
+  guess this pair exists to refuse. Both are shell-only, both are required
+  together, and both will be replaced by a `[review_yield]` config section
+  with no compatibility shim.
+- `--review-yield-mode visible` adds one advisory section to the finding
+  detail. It changes no ordering, no filter, no stored artifact, and no other
+  displayed value; `shadow` remains silent.

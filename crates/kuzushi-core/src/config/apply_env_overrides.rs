@@ -67,6 +67,29 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     validate_runtime(&config.runtime)?;
     validate_operator(&config.operator)?;
     validate_phases(&config.phases)?;
+    validate_review_yield(&config.review_yield)?;
+    Ok(())
+}
+
+/// Review-yield policy is checked without touching the filesystem: whether the
+/// named artifact loads, hashes, and matches the feature schema is the model
+/// loader's fail-closed job, not the config parser's.
+fn validate_review_yield(review_yield: &ReviewYieldConfig) -> Result<()> {
+    if review_yield.mode == ReviewYieldMode::Off {
+        return Ok(());
+    }
+    let Some(model_path) = review_yield.model_path.as_ref() else {
+        anyhow::bail!(
+            "review_yield.mode = \"{}\" requires review_yield.model_path — there is no default \
+             model path and no artifact is downloaded automatically. Name the artifact, or set \
+             review_yield.mode = \"off\".",
+            review_yield.mode.label()
+        );
+    };
+    anyhow::ensure!(
+        !model_path.to_string_lossy().trim().is_empty(),
+        "review_yield.model_path must not be empty"
+    );
     Ok(())
 }
 

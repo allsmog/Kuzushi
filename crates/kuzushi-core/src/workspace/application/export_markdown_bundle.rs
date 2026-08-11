@@ -28,7 +28,7 @@ pub(crate) fn write_markdown_bundle(
     findings: &[Finding],
     records: &[WorkspaceFindingExportRecord],
     output_dir: &Path,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<()> {
     fs::create_dir_all(output_dir)
@@ -54,7 +54,7 @@ fn write_bundle_readme(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
     output_dir: &Path,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<BundleFileEntry> {
     let readme = render_bundle_readme_markdown(workspace, records, options, total_count);
@@ -65,7 +65,7 @@ fn write_bundle_readme(
 fn render_bundle_readme_markdown(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> String {
     let mut out = String::new();
@@ -79,7 +79,7 @@ fn push_readme_header(
     out: &mut String,
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) {
     out.push_str("# Kuzushi findings bundle\n\n");
@@ -458,7 +458,7 @@ fn write_bundle_manifest(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
     output_dir: &Path,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
     readme_file: &BundleFileEntry,
     finding_files: &[BundleFindingFile],

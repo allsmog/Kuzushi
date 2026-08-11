@@ -2202,6 +2202,8 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         | ShellEffect::RecordScanRun(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::RecordReviewSessionStart(_)
+        | ShellEffect::ScoreReviewYieldQueue(_)
         | ShellEffect::RecordProofDeferral(_)
         | ShellEffect::RecordSuppression(_)
         | ShellEffect::ResetHouseRules(_)
@@ -2368,6 +2370,8 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
         | ShellEffect::RecordScanRun(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::RecordReviewSessionStart(_)
+        | ShellEffect::ScoreReviewYieldQueue(_)
         | ShellEffect::RecordProofDeferral(_)
         | ShellEffect::RecordSuppression(_)
         | ShellEffect::ResetHouseRules(_)
@@ -2475,6 +2479,8 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::RecordScanRun(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::RecordReviewSessionStart(_)
+        | ShellEffect::ScoreReviewYieldQueue(_)
         | ShellEffect::RecordProofDeferral(_)
         | ShellEffect::RecordSuppression(_)
         | ShellEffect::ResetHouseRules(_)
@@ -2565,6 +2571,8 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::RecordScanRun(_)
         | ShellEffect::RecordToolRun(_)
         | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::RecordReviewSessionStart(_)
+        | ShellEffect::ScoreReviewYieldQueue(_)
         | ShellEffect::RecordProofDeferral(_)
         | ShellEffect::RecordSuppression(_)
         | ShellEffect::ResetHouseRules(_)
@@ -3992,6 +4000,8 @@ enum EffectKind {
     RecordScanRun,
     RecordToolRun,
     RecordReviewDecision,
+    RecordReviewSessionStart,
+    ScoreReviewYieldQueue,
     RecordProofDeferral,
     RecordSuppression,
     FinalizeJob,
@@ -4078,6 +4088,8 @@ fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
         ShellEffect::RecordScanRun(_) => EffectKind::RecordScanRun,
         ShellEffect::RecordToolRun(_) => EffectKind::RecordToolRun,
         ShellEffect::RecordReviewDecision(_) => EffectKind::RecordReviewDecision,
+        ShellEffect::RecordReviewSessionStart(_) => EffectKind::RecordReviewSessionStart,
+        ShellEffect::ScoreReviewYieldQueue(_) => EffectKind::ScoreReviewYieldQueue,
         ShellEffect::RecordProofDeferral(_) => EffectKind::RecordProofDeferral,
         ShellEffect::RecordSuppression(_) => EffectKind::RecordSuppression,
         ShellEffect::ResetHouseRules(_) => EffectKind::ResetHouseRules,

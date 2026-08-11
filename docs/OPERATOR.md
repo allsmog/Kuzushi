@@ -253,6 +253,73 @@ decision path that produced it — or the reason the finding could not be scored
 the artifact's support floor). It does not reorder, filter, or hide anything in
 your review queue, and it writes nothing.
 
+## 5.3 Review yield in the shell (experimental)
+
+Whether a trained model would have helped is only answerable if Kuzushi knows
+what the queue looked like when you started reviewing something. The shell can
+record that, explain what the model saw, and — if you ask it to — order the
+queue by what the model knows. There is no flag and no environment variable:
+this is operator-owned global config, because the section names a model file
+and a scanned repository must not choose which model scores its own findings.
+
+```toml
+# $HOME/.kuzushi/v3/config.toml
+[review_yield]
+mode = "shadow"                          # off | shadow | visible | within-band | learn
+model_path = "/models/review-tree.json"  # required whenever mode != off
+```
+
+In every mode but `off`, opening a finding for review — Enter on the review queue, or
+`open <ref>` — appends one `review-session-started` event carrying the
+finding's identity, the position it held in the queue you actually saw, the
+position it would have held under the model, the queue size, its proof band and
+severity, the model's digest, and a digest of the feature vector. The verdict
+you later record links back to that session. Nothing else is written: no
+feature values, no paths, no snippets, no rationale, no reviewer identity.
+
+`visible` adds one section to the finding detail, and nothing else. It shows
+the historical positive rate for findings that reached the same leaf, how many
+prior reviewed examples that leaf holds and how they split, the 95% interval,
+the outcome entropy, the model, and the comparisons the model made to get
+there. When there is no signal, the section says which fact stopped it — a
+missing input, a category the model never saw in training, a leaf below the
+artifact's evidence floor, a finding with no durable identity — rather than
+leaving a blank or a placeholder number.
+
+Read it as what it says it is: an advisory historical reviewer-outcome signal.
+It describes how reviewers ruled on findings that looked like this one. It is
+not proof that this finding is exploitable, and it is not a decision. Yours is
+the only verdict recorded.
+
+Neither `shadow` nor `visible` changes anything else you see. The queue order,
+the sort, the filters, and every other displayed value are identical with the
+signal armed and off; tests compare the full ordered queue byte for byte on
+both ordering paths to keep it that way. There is no score in the queue, no new
+column, and no glyph that could be mistaken for a ranking cue. Moving the
+cursor is not a session, and re-opening a finding you have not decided on is
+the same session, not a second one.
+
+Two further modes do move rows, and only ever *inside* one proof-confidence and
+severity band. `within-band` puts the highest historical yield first.
+`learn` puts the widest model knowledge gap first — the findings whose prior
+reviewed examples are fewest and most mixed — so reviewing from the top
+teaches the model the most. Read `learn` for exactly what it says: it ranks
+what the *model* does not know, never how likely a finding is to be real. In
+both, a band reorders only when every row in it carries the key that mode ranks
+on; one row without it leaves the whole band in baseline order. While `learn` is
+actually ranking a band on screen the queue shows one chip, `learn mode - model
+knowledge-gap review`, and the finding detail explains the ordering beside the
+numbers it uses; both disappear when nothing is being ordered. Setting `mode`
+back to `off`, `shadow`, or `visible` returns the byte-identical baseline list.
+
+The section is consumed only by the interactive shell — `run` and `scan` load
+it like any other config and ignore it — and it fails closed in every
+direction. A mode other than `off` with no `model_path` is a config load error,
+not a silent downgrade. A model artifact that does not load leaves review yield
+off with a stated reason; it is never partially applied and no other path is
+tried. With `mode = "off"`, none of this runs: no model is loaded, no session is
+recorded, no section is drawn, and decisions carry no session link.
+
 ## 6. The CI gate
 
 `kuzushi ci` is deterministic: it reads the findings ledger, applies

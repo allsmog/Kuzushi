@@ -8,6 +8,7 @@ mod label_selection;
 mod row_assembly;
 mod score_current_findings;
 mod score_findings;
+mod score_queue_shadow;
 
 pub use build_dataset::{build_review_yield_dataset, DatasetBuild};
 pub use census::run_census;
@@ -16,3 +17,4 @@ pub use extract_features::{extract_review_yield_features, FeatureCutoff, ReviewF
 pub use label_selection::{select_identity_label, IdentityOutcome, LabelSelection};
 pub use score_current_findings::{score_current_findings, ScoredIdentity};
 pub use score_findings::score_review_yield;
+pub use score_queue_shadow::{score_review_queue_shadow, ShadowQueueScore, UnscorableReason};

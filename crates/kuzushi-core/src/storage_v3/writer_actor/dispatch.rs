@@ -31,6 +31,7 @@ impl StorageWriter {
     fn execute_decision_command(&mut self, command: DecisionCommand) -> Result<WriteReceipt> {
         match command {
             DecisionCommand::ReviewDecision(decision) => self.record_review_decision(decision),
+            DecisionCommand::ReviewSessionStarted(session) => self.record_review_session(session),
             DecisionCommand::RecordVerification(verification) => {
                 self.record_verification(verification)
             }

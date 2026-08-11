@@ -19,11 +19,37 @@ pub fn record_user_review_decision_for_finding_at_watermark(
     decision: &ReviewDecision,
     read_watermark: Option<u64>,
 ) -> Result<i64> {
+    record_user_review_decision_for_finding_with_session(
+        workspace,
+        finding,
+        decision,
+        read_watermark,
+        None,
+    )
+}
+
+/// Records a verdict and, when one exists, the prospective review session it
+/// concluded. The session id is carried, never derived: a decision taken
+/// without a recorded session keeps `None` rather than being attached to the
+/// nearest one.
+pub fn record_user_review_decision_for_finding_with_session(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+    decision: &ReviewDecision,
+    read_watermark: Option<u64>,
+    review_session_id: Option<String>,
+) -> Result<i64> {
     let finding_id = finding
         .id
         .context("review decision target has no persisted finding id")?;
     let read_watermark = resolve_read_watermark(workspace, read_watermark)?;
-    let write = review_decision_write(finding, decision, finding_id, read_watermark);
+    let write = review_decision_write(
+        finding,
+        decision,
+        finding_id,
+        read_watermark,
+        review_session_id,
+    );
     let receipt = StorageWriterActor::commit_blocking(
         workspace.event_log_dir(),
         workspace.findings_db_path(),
@@ -51,6 +77,7 @@ fn review_decision_write(
     decision: &ReviewDecision,
     finding_id: i64,
     read_watermark: u64,
+    review_session_id: Option<String>,
 ) -> DecisionWrite {
     DecisionWrite {
         stable_fp: finding
@@ -71,5 +98,6 @@ fn review_decision_write(
             .dismiss_reason
             .map(|reason| reason.as_str().to_string()),
         dismissed_by: decision.actor.clone(),
+        review_session_id,
     }
 }

@@ -40,6 +40,10 @@ pub enum EventKind {
     DiagnosticRecorded,
     ProjectionCheckpointed,
     CompactionCompleted,
+    /// A reviewer opened a finding for substantive review. Recorded before any
+    /// verdict exists, so a later decision — or its absence — can be read
+    /// against what was knowable at the moment review began.
+    ReviewSessionStarted,
 }
 
 impl EventKind {
@@ -68,6 +72,7 @@ impl EventKind {
             Self::DiagnosticRecorded => "diagnostic-recorded",
             Self::ProjectionCheckpointed => "projection-checkpointed",
             Self::CompactionCompleted => "compaction-completed",
+            Self::ReviewSessionStarted => "review-session-started",
         }
     }
 }

@@ -165,6 +165,7 @@ impl ShellApp {
         let (mut option_store, option_store_error) = persistent_option_store(Some(&workspace));
         option_store.merge_store(session_options);
         self.domain_mut().reset_for_target(&workspace);
+        self.reset_review_sessions_for_target();
         self.engagement.reset_for_target();
         self.router.findings_mut().reset_for_target();
         self.router.workbench_mut().reset_for_target();

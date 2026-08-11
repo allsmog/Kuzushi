@@ -155,12 +155,14 @@ impl ShellApp {
             .review()
             .read_watermark_for(finding_stable_fp(&finding))
             .or_else(|| self.findings_read_watermark_for(&finding));
+        let review_session_id = self.open_review_session_id(&finding);
         ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
             decision,
             finding,
             read_watermark,
             target: self.target_owned(),
+            review_session_id,
         })
     }
 
@@ -268,12 +270,14 @@ impl ShellApp {
             .workbench()
             .review()
             .read_watermark_for(finding_stable_fp(&finding));
+        let review_session_id = self.open_review_session_id(&finding);
         vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
             decision,
             finding,
             read_watermark,
             target: self.target_owned(),
+            review_session_id,
         })]
     }
 

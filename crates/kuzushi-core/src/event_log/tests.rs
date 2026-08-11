@@ -273,3 +273,103 @@ fn garbage_complete_line_is_still_hard_corruption() {
 
     assert!(error.contains("Invalid event log line"), "{error}");
 }
+
+/// Every `EventKind`, listed once. The exhaustive match below is what keeps
+/// this list honest: adding a variant fails to compile here rather than
+/// silently escaping the serde/`as_str` lockstep check.
+fn all_event_kinds() -> Vec<EventKind> {
+    let kinds = vec![
+        EventKind::RunStarted,
+        EventKind::RunCompleted,
+        EventKind::RunFailed,
+        EventKind::SnapshotIndexed,
+        EventKind::FileIndexed,
+        EventKind::FileDeleted,
+        EventKind::AttackSurfaceIndexed,
+        EventKind::FindingObserved,
+        EventKind::FindingDisappeared,
+        EventKind::FindingReopened,
+        EventKind::FindingRekeyed,
+        EventKind::TriageDecided,
+        EventKind::SuppressionAdded,
+        EventKind::SuppressionExpired,
+        EventKind::SuppressionRemoved,
+        EventKind::VerificationRecorded,
+        EventKind::PatchAttemptRecorded,
+        EventKind::PatchLifecycleRecorded,
+        EventKind::ModelCallRecorded,
+        EventKind::PluginInvocationRecorded,
+        EventKind::DiagnosticRecorded,
+        EventKind::ProjectionCheckpointed,
+        EventKind::CompactionCompleted,
+        EventKind::ReviewSessionStarted,
+    ];
+    for kind in &kinds {
+        match kind {
+            EventKind::RunStarted
+            | EventKind::RunCompleted
+            | EventKind::RunFailed
+            | EventKind::SnapshotIndexed
+            | EventKind::FileIndexed
+            | EventKind::FileDeleted
+            | EventKind::AttackSurfaceIndexed
+            | EventKind::FindingObserved
+            | EventKind::FindingDisappeared
+            | EventKind::FindingReopened
+            | EventKind::FindingRekeyed
+            | EventKind::TriageDecided
+            | EventKind::SuppressionAdded
+            | EventKind::SuppressionExpired
+            | EventKind::SuppressionRemoved
+            | EventKind::VerificationRecorded
+            | EventKind::PatchAttemptRecorded
+            | EventKind::PatchLifecycleRecorded
+            | EventKind::ModelCallRecorded
+            | EventKind::PluginInvocationRecorded
+            | EventKind::DiagnosticRecorded
+            | EventKind::ProjectionCheckpointed
+            | EventKind::CompactionCompleted
+            | EventKind::ReviewSessionStarted => {}
+        }
+    }
+    kinds
+}
+
+/// The serialized name and `as_str` are one contract. A variant whose two
+/// spellings drift writes events no reader can find.
+#[test]
+fn review_session_started_serde_matches_as_str() {
+    let kinds = all_event_kinds();
+    assert_eq!(kinds.len(), 24);
+    for kind in kinds {
+        let serialized = serde_json::to_value(kind).unwrap();
+        assert_eq!(serialized.as_str(), Some(kind.as_str()), "{kind:?}");
+        let round_tripped: EventKind = serde_json::from_value(serialized).unwrap();
+        assert_eq!(round_tripped, kind);
+    }
+    assert_eq!(EventKind::ReviewSessionStarted.as_str(), "review-session-started");
+}
+
+/// A recorded session is an appended, chain-linked event like any other.
+#[test]
+fn review_session_started_appends_to_the_hash_chain() {
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+
+    let first = log
+        .append(EventKind::RunStarted, "test", None, None, json!({}))
+        .unwrap();
+    let session = log
+        .append(
+            EventKind::ReviewSessionStarted,
+            "operator",
+            None,
+            None,
+            json!({"reviewSessionId": "session-1"}),
+        )
+        .unwrap();
+
+    assert_eq!(session.event_kind, EventKind::ReviewSessionStarted);
+    assert_eq!(session.prev_event_hash.as_ref(), Some(&first.event_hash));
+    log.verify_chain().unwrap();
+}

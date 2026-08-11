@@ -10,6 +10,7 @@ mod tests {
     };
     use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
     use crate::application::config::{config_command, ensure_config_init_allowed};
+    use crate::application::findings::findings_command;
     use crate::application::review_decisions::decision_command;
     use crate::application::review_yield::review_yield_command;
     use crate::application::run_tool::{
@@ -1949,6 +1950,55 @@ mod tests {
             export.contains("review-yield export needs a target"),
             "{export}"
         );
+    }
+
+    /// `findings` reads persisted state and loads no config, so a scanned
+    /// repository's own `[review_yield]` section neither arms the feature nor
+    /// stops the listing. The config-loading surfaces reject the same file
+    /// loudly — that asymmetry is deliberate and pinned here so neither half
+    /// drifts into the other.
+    #[test]
+    fn findings_cli_ignores_a_project_local_review_yield_section() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("scan-1", workspace.root(), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "scan-1",
+                &kuzushi_core::Finding::new_semgrep(
+                    "demo.rule",
+                    "src/app.rs",
+                    1,
+                    None,
+                    kuzushi_core::Severity::High,
+                    "listed finding",
+                ),
+            )
+            .unwrap();
+        let project_config = tmp.path().join(".kuzushi/v3/config.toml");
+        std::fs::create_dir_all(project_config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &project_config,
+            "[review_yield]\nmode = \"within-band\"\nmodel_path = \"/models/tree.json\"\n",
+        )
+        .unwrap();
+
+        // The config-loading surfaces (shell, scan) refuse the section.
+        let rejection = kuzushi_core::load_config_for_target(Some(tmp.path()))
+            .unwrap_err()
+            .to_string();
+        assert!(rejection.contains("review_yield"), "{rejection}");
+
+        // `findings` proceeds over the same target without reading it.
+        findings_command(
+            Some(tmp.path().to_path_buf()),
+            kuzushi_core::FindingListFilter::with_limit(kuzushi_core::FindingListFilter::MAX_LIMIT),
+            true,
+        )
+        .unwrap();
     }
 
     #[test]

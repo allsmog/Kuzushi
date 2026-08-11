@@ -5,14 +5,20 @@ use super::review_state::{
     effective_review_decision_label, evidence_state_label, lifecycle_status_label,
     EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
+use super::review_yield::{review_yield_detail_for, ReviewYieldDetailModel};
 use super::workspace::findings_db_relative_path;
 use super::FindingSearch;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
+use crate::app::{
+    finding_stable_fp, ranks_any_band, shadow_ranked_order, RankObjective, ShadowRankRow,
+};
 use crate::{
     ScannedSnippetWindow, ShellApp, ViewDataState, VisibleFindingProjection,
     VisibleFindingsCacheKey,
 };
 use kuzushi_core::findings::{DataflowEvidenceRow, FindingSource, ReviewDecision, VulnSource};
+use kuzushi_core::review_yield::application::ShadowQueueScore;
+use kuzushi_core::review_yield::domain::severity_rank as review_yield_severity_rank;
 use kuzushi_core::{
     compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
     finding_source_label, project_finding, runtime_validation_summary, static_proof_summary,
@@ -159,6 +165,9 @@ pub(crate) struct FindingDetailModel {
     pub(crate) dataflow_overflow: usize,
     pub(crate) triage: Option<TriageSummaryModel>,
     pub(crate) source_snippet: Option<SourceSnippetModel>,
+    /// Advisory review-yield explanation. `None` — the default — means the
+    /// operator did not turn the signal on, and the section does not render.
+    pub(crate) review_yield: Option<ReviewYieldDetailModel>,
 }
 
 /// On-disk source context around the finding's `file_path:start_line`,
@@ -424,6 +433,7 @@ pub(crate) fn finding_detail_model_for_projection(
     let (dataflow, dataflow_overflow) = dataflow_evidence_for_detail(app, finding);
     detail.dataflow_evidence = dataflow;
     detail.dataflow_overflow = dataflow_overflow;
+    detail.review_yield = review_yield_detail_for(app, finding);
     detail
 }
 
@@ -748,23 +758,139 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
 }
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
-    let visible = visible_finding_alias_indices_before_search(app);
+    let visible = visible_finding_alias_indices_before_search(app, WithinBandOrdering::Apply);
     search_filtered_finding_alias_indices(app, visible)
 }
 
-fn visible_finding_alias_indices_before_search(app: &ShellApp) -> Vec<(String, usize)> {
+/// The same visible queue with the review-yield reordering left out.
+///
+/// This is what a session record means by "baseline rank": the position a row
+/// would hold with no model in play. Recording the displayed position instead
+/// would make baseline and advisory rank agree by construction in
+/// `within-band` mode, which would quietly destroy the comparison the record
+/// exists to preserve.
+pub(crate) fn baseline_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
+    let visible = visible_finding_alias_indices_before_search(app, WithinBandOrdering::Skip);
+    search_filtered_finding_alias_indices(app, visible)
+}
+
+/// Whether this projection is the one the operator looks at, or the baseline
+/// it is measured against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WithinBandOrdering {
+    Apply,
+    Skip,
+}
+
+fn visible_finding_alias_indices_before_search(
+    app: &ShellApp,
+    within_band: WithinBandOrdering,
+) -> Vec<(String, usize)> {
     let sorted = cached_sorted_finding_alias_indices(app);
     // The backlog preset keeps the severity-major base order (skipping the
     // confidence-first display reorder) so an operator can burn down the
-    // untriaged queue worst-severity-first. Explicit toggle only.
+    // untriaged queue worst-severity-first. Explicit toggle only. It is also
+    // the one queue review yield never touches, in any mode: the preset's
+    // whole promise is worst-severity-first, and an advisory rate reordering
+    // it would break that promise for a signal the operator did not ask to
+    // steer this list.
     let display_ordered = if review_backlog_active(app) {
         sorted
     } else {
-        confidence_first_display_order(app, sorted)
+        within_band_display_order(
+            app,
+            confidence_first_display_order(app, sorted),
+            within_band,
+        )
     };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
     let filtered = active_filter_finding_alias_indices(app, component_filtered);
     backlog_open_only_finding_alias_indices(app, filtered)
+}
+
+/// Reorder rows inside a complete, fully scored proof-and-severity band.
+///
+/// Returns `display_ordered` untouched in every mode but the two ordering
+/// ones, and whenever the memoized scores do not describe this queue — so the
+/// rollback from `within-band` or `learn` to any other mode is the
+/// byte-identical baseline list. This is a pure read of already-computed
+/// scores; nothing here scores, loads, or touches the filesystem.
+fn within_band_display_order(
+    app: &ShellApp,
+    display_ordered: Vec<(String, usize)>,
+    within_band: WithinBandOrdering,
+) -> Vec<(String, usize)> {
+    if within_band == WithinBandOrdering::Skip {
+        return display_ordered;
+    }
+    let Some((objective, rows)) = rank_rows_for_queue(app, &display_ordered) else {
+        return display_ordered;
+    };
+    shadow_ranked_order(&rows, objective)
+        .into_iter()
+        .map(|index| display_ordered[index].clone())
+        .collect()
+}
+
+/// This queue as the band comparator sees it, with the objective the armed
+/// mode ranks by.
+///
+/// `None` whenever nothing may reorder: no ordering mode, no memoized scores,
+/// or a queue row the findings list no longer holds.
+fn rank_rows_for_queue(
+    app: &ShellApp,
+    display_ordered: &[(String, usize)],
+) -> Option<(RankObjective, Vec<ShadowRankRow>)> {
+    let objective = app.review_yield_rank_objective()?;
+    let scores = app.within_band_scores()?;
+    let findings = app.findings();
+    let rows: Vec<ShadowRankRow> = display_ordered
+        .iter()
+        .filter_map(|(_, index)| findings.get(*index))
+        .map(|finding| within_band_rank_row(finding, scores))
+        .collect();
+    (rows.len() == display_ordered.len()).then_some((objective, rows))
+}
+
+/// Whether the armed mode's Learn objective actually ranks a band of the queue
+/// on screen.
+///
+/// The queue chrome's one claim rests on this: a mode that is armed but whose
+/// every band is frozen leaves the baseline order on screen, and saying
+/// otherwise would be a signifier for a state that does not exist. Costs
+/// nothing outside `learn`, which returns at the first line.
+pub(crate) fn learn_ordering_ranks_queue(app: &ShellApp) -> bool {
+    if app.review_yield_rank_objective() != Some(RankObjective::Learn) {
+        return false;
+    }
+    // The backlog preset is never model-ordered, in any mode.
+    if review_backlog_active(app) {
+        return false;
+    }
+    let sorted = cached_sorted_finding_alias_indices(app);
+    let display_ordered = confidence_first_display_order(app, sorted);
+    let Some((objective, rows)) = rank_rows_for_queue(app, &display_ordered) else {
+        return false;
+    };
+    ranks_any_band(&rows, objective)
+}
+
+/// One queue row as the band comparator sees it. A finding with no memoized
+/// score carries neither key, which freezes its whole band — the same
+/// fail-closed rule the recorded shadow ranking uses.
+fn within_band_rank_row(
+    finding: &Finding,
+    scores: &std::collections::HashMap<String, ShadowQueueScore>,
+) -> ShadowRankRow {
+    let proof = ProofConfidence::classify(finding);
+    let score = scores.get(finding_stable_fp(finding));
+    ShadowRankRow {
+        proof_rank: proof.rank(),
+        severity_rank: review_yield_severity_rank(finding.severity),
+        rate: score.and_then(ShadowQueueScore::eligible_rate),
+        knowledge_gap: score.and_then(ShadowQueueScore::eligible_knowledge_gap),
+        fingerprint: finding.fingerprint.clone(),
+    }
 }
 
 /// Item 13: the Review query narrows the shared TTY/plain projection through
@@ -965,8 +1091,11 @@ pub(crate) fn projected_visible_findings(app: &ShellApp) -> Arc<[ProjectedFindin
     if let Some(cached) = app.workbench_cache().borrow().visible_findings(&key) {
         return cached;
     }
-    let before_search: Arc<[ProjectedFinding]> =
-        engagement_projected_findings(app, visible_finding_alias_indices_before_search(app)).into();
+    let before_search: Arc<[ProjectedFinding]> = engagement_projected_findings(
+        app,
+        visible_finding_alias_indices_before_search(app, WithinBandOrdering::Apply),
+    )
+    .into();
     let projected = search_projected_findings(app, &before_search);
     app.workbench_cache().borrow_mut().cache_visible_findings(
         key,

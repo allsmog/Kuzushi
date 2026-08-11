@@ -207,18 +207,19 @@ pub(crate) fn run_plain_shell(
     stdin: &mut io::Stdin,
     stdin_is_terminal: bool,
     registry: ModuleRegistry,
-    transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
-    transcript_warning: Option<String>,
-    config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
+    startup: ShellStartup,
 ) -> Result<()> {
-    let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
-    for diagnostic in &config_diagnostics {
+    let mut app =
+        ShellApp::with_registry_and_transcript(config, target, registry, startup.transcript);
+    for diagnostic in &startup.config_diagnostics {
         eprintln!("{diagnostic}"); // terminal-output: plain-mode
     }
-    app.log_config_diagnostics(&config_diagnostics);
-    if let Some(warning) = transcript_warning {
+    app.log_config_diagnostics(&startup.config_diagnostics);
+    if let Some(warning) = startup.transcript_warning {
         app.surface_session_start_warning(warning);
     }
+    let armed = app.arm_review_yield_from_config();
+    EffectRuntime::execute(&mut app, armed);
     apply_launch_start_view(&mut app);
     let result = run_plain_shell_session(&mut app, stdin, stdin_is_terminal);
     let reason = if result.is_ok() {

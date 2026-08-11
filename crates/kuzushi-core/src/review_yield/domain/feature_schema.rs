@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use super::canonical_json::canonical_json_bytes;
+use super::label_policy::FEATURE_SCHEMA_ID;
 use super::normalizers::{
     rule_family_keyword_tokens, EVIDENCE_KINDS, GROUNDING_STATUSES, IDENTITY_MATCH_TIERS,
     STATIC_PROOF_STATES, TOOL_FAMILIES, VULN_SOURCES,
@@ -87,6 +90,25 @@ pub const FEATURE_FIELD_NAMES: &[&str] = &[
     "reopenedCount",
     "hasRemediation",
 ];
+
+/// Domain separator for the feature-snapshot digest. Distinct from the model
+/// digest domain so a feature vector and a model artifact can never produce the
+/// same hash from the same bytes.
+pub const FEATURE_SNAPSHOT_DOMAIN: &str = "kuzushi-review-yield-feature-snapshot-v1";
+
+/// `blake3:<hex>` over the canonical feature vector.
+///
+/// This is what a recorded review session carries instead of the features
+/// themselves: an evaluator can regenerate the vector from the same cutoff and
+/// check the digest, while the event log never stores a feature value.
+pub fn feature_snapshot_hash(features: &ReviewYieldFeaturesV1) -> Result<String> {
+    let canonical = canonical_json_bytes(features)?;
+    let digest = crate::identity::hash_parts(
+        FEATURE_SNAPSHOT_DOMAIN,
+        &[FEATURE_SCHEMA_ID.as_bytes(), &canonical],
+    );
+    Ok(format!("blake3:{digest}"))
+}
 
 /// The closed vocabulary of every categorical feature, recorded in the dataset
 /// manifest so a consumer can encode the categories without re-deriving them.

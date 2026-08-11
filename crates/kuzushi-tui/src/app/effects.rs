@@ -67,6 +67,8 @@ pub(crate) enum ShellEffect {
     Quit,
     FinishShellQuit,
     RecordReviewDecision(ReviewDecisionApply),
+    RecordReviewSessionStart(ReviewSessionApply),
+    ScoreReviewYieldQueue(ReviewYieldScoreApply),
     RecordProofDeferral(ProofDeferralApply),
     RecordSuppression(SuppressionApply),
     UpdatePromptMutationStatus(PromptMutationStatusUpdate),
@@ -176,6 +178,47 @@ pub(crate) struct ReviewDecisionApply {
     pub(crate) finding: Finding,
     pub(crate) read_watermark: Option<u64>,
     pub(crate) target: Option<PathBuf>,
+    /// The prospective review session this verdict concludes, when shadow
+    /// recording opened one. Absent otherwise; never inferred.
+    pub(crate) review_session_id: Option<String>,
+}
+
+/// Everything the reducer knows at the moment substantive review begins.
+/// Scoring, digesting, and the durable write all happen in the effect handler.
+pub(crate) struct ReviewSessionApply {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) finding: Finding,
+    pub(crate) review_session_id: String,
+    pub(crate) feature_cutoff_seq: u64,
+    /// The review queue exactly as the operator sees it, in visible order.
+    pub(crate) queue: Vec<ReviewQueueRow>,
+    /// 0-based position of the opened finding within `queue`.
+    pub(crate) baseline_index: usize,
+    /// The objective the recorded advisory rank is measured under, stored
+    /// beside the rank so a reader never has to guess its key.
+    pub(crate) objective: RankObjective,
+}
+
+/// A request to refresh the memoized advisory scores for the queue on screen,
+/// recording nothing. Only `Visible` mode asks for this, and only when the
+/// scores it would otherwise display no longer describe the current queue.
+pub(crate) struct ReviewYieldScoreApply {
+    pub(crate) target: Option<PathBuf>,
+    pub(crate) feature_cutoff_seq: u64,
+    pub(crate) queue: Vec<ReviewQueueRow>,
+}
+
+/// One visible queue row, reduced to what the advisory comparator may see.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ReviewQueueRow {
+    pub(crate) stable_fp: String,
+    pub(crate) fingerprint: String,
+    pub(crate) identity_id: Option<String>,
+    pub(crate) proof_rank: u8,
+    pub(crate) proof_band: String,
+    pub(crate) severity_rank: u8,
+    pub(crate) severity: String,
+    pub(crate) finding_id: Option<i64>,
 }
 
 pub(crate) struct ProofDeferralApply {
@@ -564,6 +607,7 @@ impl ShellApp {
             export.format.as_deref(),
             export.completeness.as_deref(),
             export.allow_empty,
+            self.review_yield_export_provenance(),
         ) {
             Ok(report) => {
                 let workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
@@ -597,6 +641,7 @@ impl ShellApp {
             Some(export.format.as_str()),
             Some(export.completeness.as_str()),
             true,
+            self.review_yield_export_provenance(),
         );
         let receipt = match result {
             Ok(report) => ReportReceipt {
@@ -708,6 +753,9 @@ impl ShellApp {
         };
         match record_review_decision_in_workspace(&workspace, &apply) {
             Ok(decision_id) => {
+                // The verdict closes the review session it concluded, so the
+                // next open of this finding is measured as a new one.
+                self.close_review_session(&apply.finding);
                 self.clear_review_decision_conflict();
                 let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
                 self.log_saved_review_decision(decision_id, apply.decision.verdict, &label);
@@ -1088,21 +1136,13 @@ fn record_review_decision_in_workspace(
     workspace: &WorkspaceTarget,
     apply: &ReviewDecisionApply,
 ) -> anyhow::Result<i64> {
-    match apply.read_watermark {
-        Some(read_watermark) => {
-            kuzushi_core::workspace::record_user_review_decision_for_finding_at_watermark(
-                workspace,
-                &apply.finding,
-                &apply.decision,
-                Some(read_watermark),
-            )
-        }
-        None => kuzushi_core::workspace::record_user_review_decision_for_finding(
-            workspace,
-            &apply.finding,
-            &apply.decision,
-        ),
-    }
+    kuzushi_core::workspace::record_user_review_decision_for_finding_with_session(
+        workspace,
+        &apply.finding,
+        &apply.decision,
+        apply.read_watermark,
+        apply.review_session_id.clone(),
+    )
 }
 
 fn applied_patch_message(

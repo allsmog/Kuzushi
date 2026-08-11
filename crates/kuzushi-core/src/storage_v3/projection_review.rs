@@ -48,9 +48,10 @@ fn insert_review_decision_row(
         insert into review_decisions(
           finding_id, identity_id, decision_verdict, triage_verdict, confidence,
           rationale, author, created_at, dismiss_reason, dismissed_by,
-          decision_event_seq, decision_event_hash, decision_read_watermark
+          decision_event_seq, decision_event_hash, decision_read_watermark,
+          review_session_id
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
         "#,
         params![
             finding_id,
@@ -66,9 +67,59 @@ fn insert_review_decision_row(
             sql_seq(event.seq)?,
             event.event_hash.as_str(),
             read_watermark,
+            payload_str(&event.payload, "reviewSessionId"),
         ],
     )?;
     Ok(tx.last_insert_rowid())
+}
+
+fn sql_rank(value: u64) -> Result<i64> {
+    i64::try_from(value)
+        .map_err(|_| anyhow::anyhow!("review session rank exceeds SQLite INTEGER range: {value}"))
+}
+
+/// Projects one prospective review session. Replay-idempotent through the
+/// event hash, so rebuilding the projection reproduces exactly one row per
+/// recorded session.
+pub(super) fn project_review_session(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {
+    if event.event_kind != EventKind::ReviewSessionStarted {
+        return Ok(());
+    }
+    tx.execute(
+        r#"
+        insert into review_sessions(
+          event_hash, seq, review_session_id, stable_fp, identity_id, finding_id,
+          feature_schema_id, feature_snapshot_hash, feature_cutoff_seq, model_id,
+          eligibility, baseline_rank, shadow_rank, shadow_rank_objective,
+          queue_size, proof_band, severity, created_at
+        )
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)
+        on conflict(event_hash) do nothing
+        "#,
+        params![
+            event.event_hash.as_str(),
+            sql_seq(event.seq)?,
+            require_payload_str(&event.payload, "reviewSessionId")?,
+            require_payload_str(&event.payload, "stableFp")?,
+            payload_str(&event.payload, "identityId"),
+            payload_i64(&event.payload, "findingId"),
+            require_payload_str(&event.payload, "featureSchemaId")?,
+            payload_str(&event.payload, "featureSnapshotHash"),
+            sql_seq(require_payload_u64(&event.payload, "featureCutoffSeq")?)?,
+            require_payload_str(&event.payload, "modelId")?,
+            require_payload_str(&event.payload, "eligibility")?,
+            sql_rank(require_payload_u64(&event.payload, "baselineRank")?)?,
+            payload_u64(&event.payload, "shadowRank")
+                .map(sql_rank)
+                .transpose()?,
+            payload_str(&event.payload, "shadowRankObjective"),
+            sql_rank(require_payload_u64(&event.payload, "queueSize")?)?,
+            require_payload_str(&event.payload, "proofBand")?,
+            require_payload_str(&event.payload, "severity")?,
+            event.created_at,
+        ],
+    )?;
+    Ok(())
 }
 
 fn project_finding_triage_json(

@@ -528,6 +528,76 @@ Semgrep `nosemgrep` semantics: the finding is still emitted, then marked
 suppressed; malformed comments suppress nothing and are surfaced by
 `suppress:list`.
 
+## Review-yield ordering
+
+The review-yield signal is an advisory, historical reviewer-outcome rate. It is
+off by default and configured entirely through the operator-owned global config
+— there is no flag and no environment variable.
+
+```toml
+# $HOME/.kuzushi/v3/config.toml
+[review_yield]
+mode = "within-band"                     # off | shadow | visible | within-band | learn
+model_path = "/models/review-tree.json"  # required whenever mode != off
+```
+
+| Mode | What it does |
+| --- | --- |
+| `off` (default) | Nothing is loaded, scored, recorded, or shown. |
+| `shadow` | Scores and records what a prospective ranking would have been. The operator sees nothing and review order is unchanged. |
+| `visible` | Also explains the signal in the finding detail. Review order is still unchanged. |
+| `within-band` | Also orders review rows *inside* a proof-confidence and severity band, highest historical yield first. |
+| `learn` | The same band-bound ordering, keyed on the model's knowledge gap instead: findings the model has least evidence about first — widest leaf entropy, then fewer prior examples. |
+
+`within-band` and `learn` are the only modes that move a row, and neither moves
+anything across a band. They differ only in what they rank a complete band by.
+A band reorders only when every row in it carries the key that mode ranks on;
+one row without it leaves that whole band in baseline order, because ranking a
+scored row against an unscored one would assert a comparison the evidence does
+not support. Setting `mode` back to `off`, `shadow`, or `visible` restores the
+byte-identical baseline order.
+
+`learn` is advisory emphasis for building the review corpus, not a claim about
+the findings it lifts. A row near the top is one the model knows little about —
+its prior reviewed examples are few and mixed — which is a fact about the
+model, never about whether the finding is exploitable. Rows below the
+artifact's evidence floor are ineligible and freeze their band rather than
+sorting to the front. Its v1 score is leaf entropy and leaf support only;
+under-represented tool families and languages, unseen or drifting categories,
+and baseline-versus-tree disagreement are deferred until census data shows the
+corpus can support them. While Learn is actually ranking a band of the queue on
+screen, the review queue carries one chip — `learn mode - model knowledge-gap
+review` — and the finding detail explains the ordering beside the two numbers
+it uses. An armed mode whose every band is frozen shows neither, because
+nothing is being ordered.
+
+Rules that keep this honest:
+
+- **Global config only.** A project's `<target>/.kuzushi/v3/config.toml` that
+  sets `[review_yield]` — either field — fails to load and names the file. The
+  section points at a model artifact, so a scanned repository that could set it
+  would choose which model scores its own findings. Same trust rationale as
+  `model`, `runtime`, and `phases`. Commands that only read persisted state —
+  `kuzushi findings`, `kuzushi finding`, `kuzushi runs` — load no target config
+  at all, so that file neither arms them nor stops them; the rejection above is
+  what the config-loading surfaces do.
+- **No default artifact.** `model_path` is required whenever `mode` is not
+  `off`, and nothing is ever downloaded or substituted. A mode without a path
+  is a config load error, not a silent downgrade to `off`.
+- **No silent fallback.** If the named artifact fails to load, hash, or match
+  the feature schema, the shell reports the rejection and runs with review
+  yield off. It never falls back to a different mode or a different artifact.
+- **Shell only.** The section is consumed by the interactive shell, which is
+  where interactive review happens. `kuzushi scan` and `kuzushi run` load the
+  config like any other command and ignore it.
+- **The backlog preset is never model-ordered.** Its promise is
+  worst-severity-first; review yield does not touch it in any mode.
+- **Exports are never model-ordered.** Export row order is the severity-major
+  alias order in every mode. An export from a session with the signal armed
+  carries a `metadata.reviewYield` block naming the mode and the loaded model
+  id, so a reader can tell what the operator reviewed under. `modelId` is
+  absent when no artifact loaded.
+
 ## Environment Variables
 
 Environment variables remain appropriate for secrets and process integration:

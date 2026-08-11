@@ -30,6 +30,13 @@ pub(crate) struct PartialOperatorConfig {
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub(crate) struct PartialReviewYieldConfig {
+    pub(crate) mode: Option<ReviewYieldMode>,
+    pub(crate) model_path: Option<Option<PathBuf>>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct PartialGuidedPhaseConfig {
     pub(crate) stop_after: Option<Option<GuidedPhase>>,
@@ -332,6 +339,11 @@ fn forbidden_project_fields(patch: &PartialConfig) -> Vec<&'static str> {
     if patch.phases.is_some() {
         fields.push("phases");
     }
+    // Whole-section rejection, like `phases`: a scanned repository must not be
+    // able to arm review yield or aim it at a model artifact it ships.
+    if patch.review_yield.is_some() {
+        fields.push("review_yield");
+    }
     fields.extend(forbidden_runtime_fields(patch.runtime.as_ref()));
     fields.extend(forbidden_operator_fields(patch.operator.as_ref()));
     fields
@@ -406,15 +418,43 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
 
 pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
     apply_patch_field(&mut config.model, patch.model);
-    if let Some(runtime) = patch.runtime {
+    merge_execution_sections(config, patch.runtime, patch.operator);
+    merge_workflow_sections(config, patch.phases, patch.review_yield);
+}
+
+/// How work runs: the agent runtime and the operator's spend, trust, and
+/// process settings.
+fn merge_execution_sections(
+    config: &mut V2Config,
+    runtime: Option<PartialRuntimeConfig>,
+    operator: Option<PartialOperatorConfig>,
+) {
+    if let Some(runtime) = runtime {
         merge_runtime_config(&mut config.runtime, runtime);
     }
-    if let Some(operator) = patch.operator {
+    if let Some(operator) = operator {
         merge_operator_config(&mut config.operator, operator);
     }
-    if let Some(phases) = patch.phases {
+}
+
+/// What the operator is steered through: guided phase policy and the
+/// review-yield signal.
+fn merge_workflow_sections(
+    config: &mut V2Config,
+    phases: Option<PartialGuidedPhaseConfig>,
+    review_yield: Option<PartialReviewYieldConfig>,
+) {
+    if let Some(phases) = phases {
         merge_guided_phase_config(&mut config.phases, phases);
     }
+    if let Some(review_yield) = review_yield {
+        merge_review_yield_config(&mut config.review_yield, review_yield);
+    }
+}
+
+fn merge_review_yield_config(config: &mut ReviewYieldConfig, patch: PartialReviewYieldConfig) {
+    apply_patch_field(&mut config.mode, patch.mode);
+    apply_patch_field(&mut config.model_path, patch.model_path);
 }
 
 fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig) {

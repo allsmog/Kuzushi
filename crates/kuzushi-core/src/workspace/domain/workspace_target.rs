@@ -239,13 +239,31 @@ impl WorkspaceExportCompleteness {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceExportOptions {
     pub format: Option<WorkspaceExportFormat>,
     pub completeness: WorkspaceExportCompleteness,
     #[serde(default = "default_allow_empty_export")]
     pub allow_empty: bool,
+    /// The review-yield posture the exporting session actually ran under.
+    ///
+    /// `#[serde(skip)]`, like `V2Config::autonomy`: this is a fact the host
+    /// process observed, so tool input must not be able to assert it. A caller
+    /// that could set this from JSON could stamp an export with a model id no
+    /// model ever produced.
+    #[serde(skip)]
+    pub review_yield: Option<ReviewYieldExportProvenance>,
+}
+
+/// What the exporting session's review-yield signal was doing, recorded so a
+/// reader of the export can tell whether a model was involved at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewYieldExportProvenance {
+    pub mode: crate::config::ReviewYieldMode,
+    /// The id of the model actually loaded, or `None` when none was. Never a
+    /// placeholder: an absent id means no artifact was in play.
+    pub model_id: Option<String>,
 }
 
 impl Default for WorkspaceExportOptions {
@@ -254,6 +272,7 @@ impl Default for WorkspaceExportOptions {
             format: None,
             completeness: WorkspaceExportCompleteness::All,
             allow_empty: default_allow_empty_export(),
+            review_yield: None,
         }
     }
 }
@@ -273,6 +292,11 @@ impl WorkspaceExportOptions {
 
     pub fn with_allow_empty(mut self, allow_empty: bool) -> Self {
         self.allow_empty = allow_empty;
+        self
+    }
+
+    pub fn with_review_yield(mut self, review_yield: Option<ReviewYieldExportProvenance>) -> Self {
+        self.review_yield = review_yield;
         self
     }
 }

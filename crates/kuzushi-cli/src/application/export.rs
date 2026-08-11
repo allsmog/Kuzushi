@@ -21,11 +21,11 @@ pub(crate) fn export_command(
         .with_completeness(completeness)
         .with_allow_empty(allow_empty);
     if preview {
-        return preview_export_command(&workspace, format, options);
+        return preview_export_command(&workspace, format, &options);
     }
     let output = kuzushi_core::workspace::resolve_contained_output_path(workspace.root(), &output)
         .context("export output must resolve inside the workspace root")?;
-    let report = export_workspace_findings_with_options(&workspace, &output, options)?;
+    let report = export_workspace_findings_with_options(&workspace, &output, &options)?;
     println!(
         "exported {} finding(s) to {} ({}, completeness:{})",
         report.count,
@@ -39,7 +39,7 @@ pub(crate) fn export_command(
 fn preview_export_command(
     workspace: &WorkspaceTarget,
     format: WorkspaceExportFormat,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<()> {
     let preview = preview_workspace_findings_export(workspace, format, options)?;
     print!("{}", preview.body);

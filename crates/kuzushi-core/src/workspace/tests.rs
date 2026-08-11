@@ -335,7 +335,7 @@ mod tests {
         let options =
             WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
-        let error = export_workspace_findings_with_options(&workspace, &output, options)
+        let error = export_workspace_findings_with_options(&workspace, &output, &options)
             .unwrap_err()
             .to_string();
 
@@ -345,7 +345,7 @@ mod tests {
         let report = export_workspace_findings_with_options(
             &workspace,
             &output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(true),
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(true),
         )
         .unwrap();
         assert_eq!(report.count, 0);
@@ -354,6 +354,109 @@ mod tests {
         assert_eq!(exported["count"], serde_json::json!(0));
         assert_eq!(exported["metadata"]["includedCount"], 0);
         assert_eq!(exported["metadata"]["totalCount"], 0);
+    }
+
+
+    /// Export provenance: the block appears only when a session actually ran
+    /// with the signal armed, and it never claims these rows were reordered —
+    /// export order is the severity-major alias order in every mode.
+    #[test]
+    fn export_metadata_records_review_yield_mode_and_model_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        let output = workspace.root().join("exports/armed.json");
+        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            .with_allow_empty(true)
+            .with_review_yield(Some(ReviewYieldExportProvenance {
+                mode: crate::config::ReviewYieldMode::WithinBand,
+                model_id: Some("blake3:abc123".to_string()),
+            }));
+
+        export_workspace_findings_with_options(&workspace, &output, &options).unwrap();
+        let exported: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+
+        assert_eq!(exported["metadata"]["reviewYield"]["mode"], "within-band");
+        assert_eq!(
+            exported["metadata"]["reviewYield"]["modelId"],
+            "blake3:abc123"
+        );
+        assert_eq!(
+            exported["metadata"]["reviewYield"]["orderingInfluence"],
+            "review-display-only"
+        );
+    }
+
+    /// A mode that never moved a row says so, rather than leaving a reader to
+    /// assume the export was ranked.
+    #[test]
+    fn export_metadata_reports_no_ordering_influence_for_non_ordering_modes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        let output = workspace.root().join("exports/shadow.json");
+        let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            .with_allow_empty(true)
+            .with_review_yield(Some(ReviewYieldExportProvenance {
+                mode: crate::config::ReviewYieldMode::Shadow,
+                model_id: None,
+            }));
+
+        export_workspace_findings_with_options(&workspace, &output, &options).unwrap();
+        let exported: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+
+        assert_eq!(exported["metadata"]["reviewYield"]["mode"], "shadow");
+        assert!(exported["metadata"]["reviewYield"]["modelId"].is_null());
+        assert_eq!(
+            exported["metadata"]["reviewYield"]["orderingInfluence"],
+            "none"
+        );
+    }
+
+    /// An unarmed session carries no block at all. An empty one would suggest
+    /// a model was in play and declined to identify itself.
+    #[test]
+    fn export_metadata_omits_review_yield_when_off() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+
+        for provenance in [
+            None,
+            Some(ReviewYieldExportProvenance {
+                mode: crate::config::ReviewYieldMode::Off,
+                model_id: None,
+            }),
+        ] {
+            let output = workspace.root().join("exports/off.json");
+            let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+                .with_allow_empty(true)
+                .with_review_yield(provenance);
+
+            export_workspace_findings_with_options(&workspace, &output, &options).unwrap();
+            let exported: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+
+            assert!(exported["metadata"].get("reviewYield").is_none());
+        }
+    }
+
+    /// The provenance is a fact the host observed, so tool input must not be
+    /// able to assert it. A caller that could would stamp an export with a
+    /// model id no model ever produced.
+    #[test]
+    fn review_yield_provenance_cannot_be_supplied_as_tool_input() {
+        let options: WorkspaceExportOptions = serde_json::from_value(serde_json::json!({
+            "format": "json",
+            "completeness": "all",
+            "allowEmpty": true,
+            "reviewYield": { "mode": "within-band", "modelId": "blake3:forged" },
+        }))
+        .expect("an unknown-to-serde field is ignored, not honored");
+
+        assert_eq!(options.review_yield, None);
     }
 
     #[test]
@@ -420,10 +523,10 @@ mod tests {
             let options = WorkspaceExportOptions::new(Some(format))
                 .with_completeness(WorkspaceExportCompleteness::Open);
 
-            let preview = preview_workspace_findings_export(&workspace, format, options).unwrap();
+            let preview = preview_workspace_findings_export(&workspace, format, &options).unwrap();
             let output = tmp.path().join(format!("preview-equivalent.{extension}"));
             let report =
-                export_workspace_findings_with_options(&workspace, &output, options).unwrap();
+                export_workspace_findings_with_options(&workspace, &output, &options).unwrap();
 
             assert_eq!(
                 preview.body,
@@ -446,7 +549,7 @@ mod tests {
             WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(false);
 
         let error =
-            preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, options)
+            preview_workspace_findings_export(&workspace, WorkspaceExportFormat::Json, &options)
                 .unwrap_err()
                 .to_string();
 
@@ -455,7 +558,7 @@ mod tests {
         let preview = preview_workspace_findings_export(
             &workspace,
             WorkspaceExportFormat::Json,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(true),
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json)).with_allow_empty(true),
         )
         .unwrap();
         assert_eq!(preview.count, 0);
@@ -474,7 +577,7 @@ mod tests {
         let error = preview_workspace_findings_export(
             &workspace,
             WorkspaceExportFormat::MarkdownBundle,
-            options,
+            &options,
         )
         .unwrap_err()
         .to_string();
@@ -831,7 +934,7 @@ mod tests {
         export_workspace_findings_with_options(
             &workspace,
             &output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Sarif)).with_allow_empty(true),
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Sarif)).with_allow_empty(true),
         )
         .unwrap();
 
@@ -1511,7 +1614,7 @@ mod tests {
         let complete = export_workspace_findings_with_options(
             &workspace,
             &complete_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -1527,7 +1630,7 @@ mod tests {
         let open = export_workspace_findings_with_options(
             &workspace,
             &open_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Csv))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Csv))
                 .with_completeness(WorkspaceExportCompleteness::Open),
         )
         .unwrap();
@@ -1595,7 +1698,7 @@ mod tests {
         export_workspace_findings_with_options(
             &workspace,
             &open_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Open),
         )
         .unwrap();
@@ -1608,7 +1711,7 @@ mod tests {
         export_workspace_findings_with_options(
             &workspace,
             &complete_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -1631,7 +1734,7 @@ mod tests {
         export_workspace_findings_with_options(
             &workspace,
             &bundle,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::MarkdownBundle))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::MarkdownBundle))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -1692,7 +1795,7 @@ mod tests {
         let complete = export_workspace_findings_with_options(
             &workspace,
             &complete_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -1717,7 +1820,7 @@ mod tests {
         let open = export_workspace_findings_with_options(
             &workspace,
             &open_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Csv))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Csv))
                 .with_completeness(WorkspaceExportCompleteness::Open),
         )
         .unwrap();
@@ -1761,7 +1864,7 @@ mod tests {
         let complete = export_workspace_findings_with_options(
             &workspace,
             &complete_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -1771,7 +1874,7 @@ mod tests {
         let open = export_workspace_findings_with_options(
             &workspace,
             &open_output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Open),
         )
         .unwrap();
@@ -1884,7 +1987,7 @@ mod tests {
         let report = export_workspace_findings_with_options(
             &workspace,
             &output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::MarkdownBundle))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::MarkdownBundle))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();
@@ -2007,7 +2110,7 @@ mod tests {
         export_workspace_findings_with_options(
             &workspace,
             &output,
-            WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
+            &WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Json))
                 .with_completeness(WorkspaceExportCompleteness::Complete),
         )
         .unwrap();

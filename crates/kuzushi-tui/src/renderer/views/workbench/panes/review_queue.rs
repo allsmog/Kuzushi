@@ -91,6 +91,12 @@ fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
     for chip in &model.active_filter_chips {
         append_or_wrap(&mut lines, &format!("[{chip}]"), width);
     }
+    // Its own line, never wrapped in beside a filter chip: what ordered the
+    // list is a different claim from what narrowed it, and half of this one
+    // sharing a clipped line would read as a filter the operator did not set.
+    if let Some(indicator) = model.ordering_indicator {
+        lines.push(format!("[{indicator}]"));
+    }
     lines
 }
 
@@ -511,6 +517,7 @@ mod tests {
             facet_groups: Vec::new().into(),
             filter_label: "completeness:all".to_string(),
             completeness_mode: "all",
+            ordering_indicator: None,
             header: format!("REVIEW QUEUE - showing {} of {}", rows.len(), rows.len()),
             empty_reason: None,
             rows: rows.into(),
@@ -697,6 +704,40 @@ mod tests {
         assert!(text.contains("[severity:high]"), "{text}");
     }
 
+    /// The ordering chip renders as its own bracketed line: what ordered the
+    /// list is a different claim from what narrowed it, and a chip sharing a
+    /// clipped line with a filter would read as a filter.
+    #[test]
+    fn the_ordering_indicator_renders_on_its_own_chip_line() {
+        let mut model = review_model(vec![review_row()]);
+        model.active_filter_chips = vec!["severity:high".to_string()];
+        model.ordering_indicator = Some(crate::ui_view_models::LEARN_ORDERING_INDICATOR);
+
+        let text = lines_text(populated_review_queue_pane_lines(
+            &model,
+            Rect::new(0, 0, 120, 12),
+        ));
+
+        let chip = format!("[{}]", crate::ui_view_models::LEARN_ORDERING_INDICATOR);
+        let line = text
+            .lines()
+            .find(|line| line.contains(&chip))
+            .unwrap_or_else(|| panic!("no ordering chip line in:\n{text}"));
+        assert!(!line.contains("severity:high"), "{line}");
+    }
+
+    /// Absent by default: an ordering nobody asked for must leave no trace on
+    /// the pane.
+    #[test]
+    fn no_ordering_indicator_renders_without_one() {
+        let text = lines_text(populated_review_queue_pane_lines(
+            &review_model(vec![review_row()]),
+            Rect::new(0, 0, 120, 12),
+        ));
+
+        assert!(!text.contains("knowledge-gap"), "{text}");
+    }
+
     #[test]
     fn compact_prompt_mode_does_not_claim_enter_is_immediately_active() {
         let mut model = review_model(vec![review_row()]);
@@ -724,6 +765,7 @@ mod tests {
             facet_groups: Vec::new().into(),
             filter_label: "completeness:open".to_string(),
             completeness_mode: "open",
+            ordering_indicator: None,
             header: "REVIEW QUEUE - showing 0 of 2 - 0 open - 2 complete".to_string(),
             empty_reason: Some("all visible findings have terminal decisions".to_string()),
             rows: Vec::new().into(),

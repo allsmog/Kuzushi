@@ -1035,4 +1035,257 @@ spend_hard_ceiling_usd = -1.0
             .to_string()
             .contains("operator.session_retention_days"));
     }
+
+    // ---- [review_yield] --------------------------------------------------
+    //
+    // Operator-owned, global-only, and off unless the operator says otherwise.
+    // The section names a model artifact, which is why a scanned repository
+    // must never be able to set it.
+
+    #[test]
+    fn review_yield_defaults_to_off_with_no_model_path() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.review_yield.mode, ReviewYieldMode::Off);
+        assert_eq!(config.review_yield.model_path, None);
+    }
+
+    /// Kebab is canonical, and the design document's snake spelling is
+    /// accepted so a config written from the spec still loads.
+    #[test]
+    fn review_yield_within_band_parses_from_either_spelling() {
+        for spelling in ["within-band", "within_band"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let home = tmp.path().join("home");
+            fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+            fs::write(
+                home.join(".kuzushi/v3/config.toml"),
+                format!(
+                    "[review_yield]\nmode = \"{spelling}\"\nmodel_path = \"/models/tree.json\"\n"
+                ),
+            )
+            .unwrap();
+
+            let config = load_config(ConfigPaths {
+                home_dir: home,
+                target_dir: None,
+            })
+            .unwrap();
+
+            assert_eq!(config.review_yield.mode, ReviewYieldMode::WithinBand);
+            assert_eq!(
+                config.review_yield.model_path,
+                Some(PathBuf::from("/models/tree.json"))
+            );
+        }
+    }
+
+    #[test]
+    fn review_yield_mode_serializes_in_canonical_kebab_case() {
+        let body = toml::to_string(&ReviewYieldConfig {
+            mode: ReviewYieldMode::WithinBand,
+            model_path: Some(PathBuf::from("/models/tree.json")),
+        })
+        .unwrap();
+
+        assert!(body.contains("within-band"), "{body}");
+        assert!(!body.contains("within_band"), "{body}");
+    }
+
+    /// `learn` is an ordinary mode value of the same operator-only section:
+    /// spelled in kebab-case, requiring the same explicit artifact.
+    #[test]
+    fn review_yield_learn_mode_round_trips_through_the_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[review_yield]\nmode = \"learn\"\nmodel_path = \"/models/tree.json\"\n",
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.review_yield.mode, ReviewYieldMode::Learn);
+        let body = toml::to_string(&config.review_yield).unwrap();
+        assert!(body.contains("\"learn\""), "{body}");
+    }
+
+    /// The two mode predicates, pinned together: every ordering mode also
+    /// explains itself, and no non-ordering mode acquires either capability by
+    /// being added to the enum.
+    #[test]
+    fn learn_mode_explains_the_signal_and_orders_rows() {
+        assert!(ReviewYieldMode::Learn.shows_signal());
+        assert!(ReviewYieldMode::Learn.orders_rows());
+
+        assert!(ReviewYieldMode::WithinBand.shows_signal());
+        assert!(ReviewYieldMode::WithinBand.orders_rows());
+
+        assert!(ReviewYieldMode::Visible.shows_signal());
+        assert!(!ReviewYieldMode::Visible.orders_rows());
+
+        for mode in [ReviewYieldMode::Off, ReviewYieldMode::Shadow] {
+            assert!(!mode.shows_signal(), "{mode:?}");
+            assert!(!mode.orders_rows(), "{mode:?}");
+        }
+    }
+
+    /// There is no default artifact and none is downloaded, so a mode without
+    /// a path names work the shell cannot do. Failing at load is the only
+    /// honest answer: silently dropping to `off` would leave an operator
+    /// believing the signal was armed.
+    #[test]
+    fn review_yield_mode_without_a_model_path_is_rejected() {
+        for mode in ["shadow", "visible", "within-band", "learn"] {
+            let tmp = tempfile::tempdir().unwrap();
+            let home = tmp.path().join("home");
+            fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+            fs::write(
+                home.join(".kuzushi/v3/config.toml"),
+                format!("[review_yield]\nmode = \"{mode}\"\n"),
+            )
+            .unwrap();
+
+            let error = load_config(ConfigPaths {
+                home_dir: home,
+                target_dir: None,
+            })
+            .unwrap_err();
+            let message = format!("{error:#}");
+
+            assert!(message.contains("review_yield.model_path"), "{message}");
+            assert!(message.contains(mode), "{message}");
+        }
+    }
+
+    #[test]
+    fn review_yield_model_path_must_not_be_blank() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[review_yield]\nmode = \"shadow\"\nmodel_path = \"   \"\n",
+        )
+        .unwrap();
+
+        let error = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains("review_yield.model_path must not be empty"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn review_yield_rejects_unknown_keys() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[review_yield]\nmode = \"shadow\"\nmodel = \"/models/tree.json\"\n",
+        )
+        .unwrap();
+
+        assert!(load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .is_err());
+    }
+
+    /// The whole section is operator-only, like `phases`. A scanned repository
+    /// that could set `model_path` would choose which artifact scores its own
+    /// findings.
+    #[test]
+    fn project_config_cannot_set_review_yield() {
+        for body in [
+            "[review_yield]\nmode = \"within-band\"\n",
+            "[review_yield]\nmode = \"learn\"\n",
+            "[review_yield]\nmodel_path = \"/evil/tree.json\"\n",
+        ] {
+            let tmp = tempfile::tempdir().unwrap();
+            let home = tmp.path().join("home");
+            let target = tmp.path().join("evil-target");
+            fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+            fs::write(target.join(".kuzushi/v3/config.toml"), body).unwrap();
+
+            let error = load_config(ConfigPaths {
+                home_dir: home,
+                target_dir: Some(target.clone()),
+            })
+            .unwrap_err();
+            let message = format!("{error:#}");
+
+            assert!(message.contains("review_yield"), "{message}");
+            assert!(message.contains(&target.display().to_string()), "{message}");
+        }
+    }
+
+    /// The same body the project config refuses is accepted from the global
+    /// config: the rejection is about who wrote it, not what it says.
+    #[test]
+    fn global_config_accepts_the_review_yield_body_a_project_may_not_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("repo");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[review_yield]\nmode = \"shadow\"\nmodel_path = \"/models/tree.json\"\n",
+        )
+        .unwrap();
+        fs::write(target.join(".kuzushi/v3/config.toml"), "").unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap();
+
+        assert_eq!(config.review_yield.mode, ReviewYieldMode::Shadow);
+        assert_eq!(
+            config.review_yield.model_path,
+            Some(PathBuf::from("/models/tree.json"))
+        );
+    }
+
+    /// Review yield is config-only. It had two CLI flags during development
+    /// and never had an environment variable; this pins that neither comes
+    /// back as a side door around the project-config trust gate.
+    #[test]
+    fn review_yield_env_vars_do_not_arm_the_signal() {
+        let _env = crate::test_env::config_env_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let _mode = crate::test_env::ScopedEnv::set("KUZUSHI_REVIEW_YIELD_MODE", "within-band");
+        let _path =
+            crate::test_env::ScopedEnv::set("KUZUSHI_REVIEW_YIELD_MODEL_PATH", "/models/tree.json");
+
+        let config = load_config(ConfigPaths {
+            home_dir: tmp.path().join("home"),
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.review_yield.mode, ReviewYieldMode::Off);
+        assert_eq!(config.review_yield.model_path, None);
+    }
 }

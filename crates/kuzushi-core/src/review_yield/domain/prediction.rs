@@ -22,9 +22,35 @@ pub struct ReviewYieldSignal {
     pub eligibility: ReviewYieldEligibility,
 }
 
+/// How little the model knows about findings like this one, as the two numbers
+/// the leaf measured: how mixed the prior outcomes were, and how many there
+/// were. Both come from the same leaf, so they are carried together or not at
+/// all.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LeafKnowledgeGap {
+    pub entropy_bits: f64,
+    pub support: u32,
+}
+
 impl ReviewYieldSignal {
     pub fn is_eligible(&self) -> bool {
         self.eligibility == ReviewYieldEligibility::Eligible
+    }
+
+    /// The knowledge-gap key, present only for an eligible score whose leaf
+    /// supplied both statistics.
+    ///
+    /// An absent number is never filled in with a zero: zero entropy and zero
+    /// support are both strong claims, and a row that cannot make them has no
+    /// key rather than a flattering one.
+    pub fn leaf_knowledge_gap(&self) -> Option<LeafKnowledgeGap> {
+        if !self.is_eligible() {
+            return None;
+        }
+        Some(LeafKnowledgeGap {
+            entropy_bits: self.leaf_entropy_bits?,
+            support: self.positive_count?.saturating_add(self.negative_count?),
+        })
     }
 
     /// The decision path in the cross-language rendering both the Rust and the

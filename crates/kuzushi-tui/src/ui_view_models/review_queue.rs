@@ -64,6 +64,9 @@ pub(crate) struct ReviewQueueModel {
     pub(crate) facet_groups: Arc<[ReviewFacetGroup]>,
     pub(crate) filter_label: String,
     pub(crate) completeness_mode: &'static str,
+    /// Present only while the review-yield Learn objective is actually
+    /// ranking a band of this queue — see `learn_ordering_indicator`.
+    pub(crate) ordering_indicator: Option<&'static str>,
     pub(crate) header: String,
     pub(crate) empty_reason: Option<String>,
     pub(crate) rows: Arc<[ReviewQueueRow]>,
@@ -151,6 +154,7 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         facet_groups,
         filter_label: review_queue_filter_label(app, mode),
         completeness_mode: if backlog { "backlog" } else { mode.label() },
+        ordering_indicator: learn_ordering_indicator(app),
         header,
         empty_reason: review_queue_empty_reason(
             total_count,
@@ -166,6 +170,19 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
 
 fn review_search_active(review: &crate::app::WorkbenchReviewState) -> bool {
     !review.search_query.trim().is_empty()
+}
+
+/// What the queue says about itself when Learn mode is moving rows.
+///
+/// The gap is the *model's*, never the finding's: a row near the top is one
+/// the model has little evidence about, not one more likely to be a real
+/// vulnerability. Absent whenever the objective ranks nothing — an armed mode
+/// whose every band is frozen leaves the baseline order on screen, and a chip
+/// claiming otherwise would name a state that does not exist.
+pub(crate) const LEARN_ORDERING_INDICATOR: &str = "learn mode - model knowledge-gap review";
+
+fn learn_ordering_indicator(app: &ShellApp) -> Option<&'static str> {
+    super::findings::learn_ordering_ranks_queue(app).then_some(LEARN_ORDERING_INDICATOR)
 }
 
 /// The backlog projection already dropped decided findings, so the header

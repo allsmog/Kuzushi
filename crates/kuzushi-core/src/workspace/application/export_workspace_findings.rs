@@ -36,7 +36,7 @@ pub fn export_workspace_findings(
     export_workspace_findings_with_options(
         workspace,
         output_path,
-        WorkspaceExportOptions::new(format),
+        &WorkspaceExportOptions::new(format),
     )
 }
 
@@ -74,8 +74,8 @@ fn export_scan_findings_sarif_inner(
     validate_workspace_findings_output_path(output_path, WorkspaceExportFormat::Sarif)?;
     reconcile_suppressions_for_export(workspace)?;
     let options = WorkspaceExportOptions::new(Some(WorkspaceExportFormat::Sarif));
-    let prepared = prepare_scan_findings_export(workspace, run_ids, options)?;
-    ensure_empty_export_is_allowed(&prepared.records, options)?;
+    let prepared = prepare_scan_findings_export(workspace, run_ids, &options)?;
+    ensure_empty_export_is_allowed(&prepared.records, &options)?;
     ensure_workspace_export_parent(output_path)?;
     let benchmark_spend = aggregate_run_id
         .map(|run_id| benchmark_spend_for_scan(workspace, run_ids, run_id))
@@ -84,7 +84,7 @@ fn export_scan_findings_sarif_inner(
     let body = findings_to_sarif_with_benchmark_spend(
         workspace,
         &prepared.records,
-        options,
+        &options,
         prepared.total_count,
         benchmark_spend.as_ref(),
         aggregate_run_id,
@@ -212,7 +212,7 @@ fn ensure_terminal_benchmark_summary(summary: &crate::run_artifacts::RunSummary)
 pub fn export_workspace_findings_with_options(
     workspace: &WorkspaceTarget,
     output_path: impl AsRef<Path>,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<WorkspaceFindingsExport> {
     let output_path = output_path.as_ref();
     if output_path.as_os_str().is_empty() {
@@ -222,8 +222,8 @@ pub fn export_workspace_findings_with_options(
     validate_workspace_findings_output_path(output_path, format)?;
 
     reconcile_suppressions_for_export(workspace)?;
-    let prepared = prepare_workspace_findings_export(workspace, options)?;
-    ensure_empty_export_is_allowed(&prepared.records, options)?;
+    let prepared = prepare_workspace_findings_export(workspace, &options)?;
+    ensure_empty_export_is_allowed(&prepared.records, &options)?;
     ensure_workspace_export_parent(output_path)?;
     write_workspace_findings_export(
         workspace,
@@ -255,7 +255,7 @@ pub struct WorkspaceFindingsExportPreview {
 pub fn preview_workspace_findings_export(
     workspace: &WorkspaceTarget,
     format: WorkspaceExportFormat,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<WorkspaceFindingsExportPreview> {
     if format == WorkspaceExportFormat::MarkdownBundle {
         anyhow::bail!(
@@ -264,16 +264,15 @@ pub fn preview_workspace_findings_export(
     }
     let options = WorkspaceExportOptions {
         format: Some(format),
-        completeness: options.completeness,
-        allow_empty: options.allow_empty,
+        ..options.clone()
     };
-    let prepared = prepare_workspace_findings_export(workspace, options)?;
-    ensure_empty_export_is_allowed(&prepared.records, options)?;
+    let prepared = prepare_workspace_findings_export(workspace, &options)?;
+    ensure_empty_export_is_allowed(&prepared.records, &options)?;
     let body = render_workspace_findings_export(
         workspace,
         &prepared.records,
         format,
-        options,
+        &options,
         prepared.total_count,
     )?;
     Ok(WorkspaceFindingsExportPreview {
@@ -300,7 +299,7 @@ struct FilteredWorkspaceFindings {
 
 fn prepare_workspace_findings_export(
     workspace: &WorkspaceTarget,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings = store.list_all_findings()?;
@@ -327,7 +326,7 @@ fn prepare_workspace_findings_export(
 fn prepare_scan_findings_export(
     workspace: &WorkspaceTarget,
     run_ids: &[String],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<PreparedWorkspaceFindingsExport> {
     let store = FindingStore::open(workspace.findings_db_path())?;
     let all_findings = findings_for_run_ids(&store, run_ids)?;
@@ -436,7 +435,7 @@ fn validate_workspace_findings_output_path(
 
 fn ensure_empty_export_is_allowed(
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> Result<()> {
     if !records.is_empty() || options.allow_empty {
         return Ok(());
@@ -504,7 +503,7 @@ fn write_workspace_findings_export(
     records: &[WorkspaceFindingExportRecord],
     format: WorkspaceExportFormat,
     output_path: &Path,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<()> {
     if format == WorkspaceExportFormat::MarkdownBundle {
@@ -526,7 +525,7 @@ fn render_workspace_findings_export(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
     format: WorkspaceExportFormat,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
     match format {
@@ -548,7 +547,7 @@ fn render_workspace_findings_export(
 fn workspace_findings_to_json(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
     Ok(serde_json::to_string_pretty(&json!({
@@ -670,7 +669,7 @@ fn has_terminal_review_decision(
 
 pub(crate) fn findings_to_jsonl(
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
     let mut lines = String::new();
@@ -693,7 +692,7 @@ pub(crate) fn findings_to_jsonl(
 
 pub(crate) fn findings_to_csv(
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
     let mut writer = csv::Writer::from_writer(Vec::<u8>::new());
@@ -799,7 +798,7 @@ mod csv_sanitization_tests {
 fn write_csv_rows(
     writer: &mut csv::Writer<Vec<u8>>,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<()> {
     let metadata = csv_metadata_fields(records.len(), total_count, options);
@@ -823,7 +822,7 @@ fn finalize_csv_writer(writer: csv::Writer<Vec<u8>>) -> Result<String> {
 fn csv_metadata_fields(
     included_count: usize,
     total_count: usize,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
 ) -> [String; 4] {
     [
         options.completeness.as_str().to_string(),

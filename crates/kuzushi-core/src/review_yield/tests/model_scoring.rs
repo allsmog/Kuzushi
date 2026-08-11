@@ -495,3 +495,36 @@ fn signal_serializes_with_camel_case_keys_for_json_output() {
     assert_eq!(encoded["decisionPath"][0]["nodeId"], 0);
     assert_eq!(encoded["featureSchemaId"], "kuzushi-review-yield-features-v1");
 }
+
+/// The Learn-mode ordering key comes off the same leaf as the rate, and only
+/// for an eligible score: entropy plus the two outcome counts, never a
+/// zero-filled stand-in.
+#[test]
+fn an_eligible_leaf_reports_its_knowledge_gap() {
+    let model = model("model-numeric-small.json");
+
+    let signal = score_review_yield(&model, &features(json!({"evidenceCount": 9})));
+    let gap = signal.leaf_knowledge_gap().expect("an eligible leaf has one");
+
+    assert_eq!(gap.entropy_bits, signal.leaf_entropy_bits.unwrap());
+    assert_eq!(
+        gap.support,
+        signal.positive_count.unwrap() + signal.negative_count.unwrap()
+    );
+}
+
+/// A leaf below the artifact's evidence floor is ineligible, so it carries no
+/// key at all — Learn cannot rank it, and its band freezes instead.
+#[test]
+fn a_leaf_below_the_evidence_floor_reports_no_knowledge_gap() {
+    let model = model("model-mixed-depth3.json");
+
+    let signal = score_review_yield(
+        &model,
+        &features(json!({"staticProofState": "signal_only", "maxEvidenceConfidence": 120})),
+    );
+
+    assert!(!signal.is_eligible());
+    assert!(signal.leaf_entropy_bits.is_some(), "the leaf reported bits");
+    assert_eq!(signal.leaf_knowledge_gap(), None);
+}

@@ -1,4 +1,4 @@
-use crate::event_log::EventEnvelope;
+use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeSet;
@@ -27,6 +27,21 @@ use projection_rekey::{
     forwarded_rekey_target, reject_rekey_cycle, rekey_event_hash_after, ProjectionEventRow,
 };
 use projection_schema::{FTS_SCHEMA, PROJECTION_SCHEMA};
+
+/// Events that record *looking at* a finding rather than changing it.
+///
+/// The decision staleness guard reads this list: a prospective review session
+/// is an observation of the queue at the moment review began, so the session
+/// the operator's own open recorded must not reject the verdict that open led
+/// to. Every other event kind is a change a reviewer read against and so still
+/// invalidates a stale decision.
+const OBSERVATION_ONLY_EVENT_KINDS: &[EventKind] = &[EventKind::ReviewSessionStarted];
+
+fn changes_finding_under_review(event_kind: &str) -> bool {
+    !OBSERVATION_ONLY_EVENT_KINDS
+        .iter()
+        .any(|kind| kind.as_str() == event_kind)
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectionMeta {
@@ -178,15 +193,21 @@ impl ProjectionDb {
         watermark: u64,
     ) -> Result<Vec<u64>> {
         let mut stmt = self.conn.prepare(
-            "select seq from finding_events
+            "select seq, event_kind from finding_events
               where stable_fp = ?1 and seq > ?2
               order by seq asc",
         )?;
         let rows = stmt.query_map(params![stable_fp, sql_watermark(watermark)?], |row| {
-            sqlite_seq(row, 0)
+            Ok((sqlite_seq(row, 0)?, row.get::<_, String>(1)?))
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not load intervening finding events")
+        let rows = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load intervening finding events")?;
+        Ok(rows
+            .into_iter()
+            .filter(|(_, event_kind)| changes_finding_under_review(event_kind))
+            .map(|(seq, _)| seq)
+            .collect())
     }
 
     pub fn safe_rekey_target_after(
@@ -222,8 +243,13 @@ impl ProjectionDb {
                 event_kind: row.get(1)?,
             })
         })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not load intervening finding event rows")
+        let rows = rows
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not load intervening finding event rows")?;
+        Ok(rows
+            .into_iter()
+            .filter(|row| changes_finding_under_review(&row.event_kind))
+            .collect())
     }
 
     fn safe_rekey_target_for_event(&self, event_hash: &str, old_fp: &str) -> Result<String> {
@@ -382,6 +408,8 @@ pub(crate) fn create_projection_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(PROJECTION_SCHEMA)?;
     migrate_review_decision_dismissal_columns(conn)?;
     migrate_review_decision_provenance_columns(conn)?;
+    migrate_review_decision_session_column(conn)?;
+    migrate_review_session_rank_objective_column(conn)?;
     migrate_verification_provenance_columns(conn)?;
     migrate_patch_cost_columns(conn)?;
     migrate_patch_lifecycle_columns(conn)?;
@@ -453,6 +481,29 @@ fn migrate_review_decision_dismissal_columns(conn: &Connection) -> Result<()> {
 
 fn review_decisions_has_column(conn: &Connection, column: &str) -> Result<bool> {
     table_has_column(conn, "review_decisions", column)
+}
+
+/// Idempotent, additive migration linking a decision to the prospective review
+/// session it concluded. Deliberately unbackfilled: decisions taken before
+/// sessions existed genuinely have none, and inventing one would fabricate the
+/// very measurement this column exists to make.
+fn migrate_review_decision_session_column(conn: &Connection) -> Result<()> {
+    if !review_decisions_has_column(conn, "review_session_id")? {
+        conn.execute_batch("alter table review_decisions add column review_session_id text")?;
+    }
+    Ok(())
+}
+
+/// Idempotent, additive migration naming what objective a session's
+/// `shadow_rank` ranks by. Deliberately unbackfilled: rows written before the
+/// column existed carry a yield ranking, but stamping that on them after the
+/// fact would assert a provenance the record never had. A null objective reads
+/// as "this row does not say".
+fn migrate_review_session_rank_objective_column(conn: &Connection) -> Result<()> {
+    if !table_has_column(conn, "review_sessions", "shadow_rank_objective")? {
+        conn.execute_batch("alter table review_sessions add column shadow_rank_objective text")?;
+    }
+    Ok(())
 }
 
 /// Idempotent, additive migration that retains each decision's exact event

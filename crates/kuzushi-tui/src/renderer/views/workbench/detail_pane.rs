@@ -1,7 +1,10 @@
 //! Finding detail line builder for the Workbench DETAILS pane.
 
 use super::*;
-use crate::ui_view_models::{FindingDetailModel, FindingEvidenceRow, ProofTier};
+use crate::ui_view_models::{
+    FindingDetailModel, FindingEvidenceRow, ProofTier, ReviewYieldDetailModel,
+    ReviewYieldSignalViewModel, REVIEW_YIELD_ADVISORY_LINE_1, REVIEW_YIELD_ADVISORY_LINE_2,
+};
 use kuzushi_core::findings::DataflowEvidenceRow;
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Style;
@@ -47,6 +50,7 @@ fn detail_lines_for_model(
         budget,
     );
     push_verification_section(&mut lines, detail, budget);
+    push_review_yield_section(&mut lines, detail.review_yield.as_ref(), budget);
     push_analysis_section(&mut lines, detail, budget);
     push_claim_section(&mut lines, detail, budget);
     push_fix_section(&mut lines, detail, budget);
@@ -399,6 +403,107 @@ fn push_dataflow_section(
     push_overflow_notice(lines, overflow, "dataflow row");
 }
 
+/// The advisory review-yield explanation, below verification truth and above
+/// the analysis narrative — it describes how reviewers ruled on findings like
+/// this one, never what is true about this one.
+///
+/// `None` renders nothing, header included: an operator who did not turn the
+/// signal on must not see a section implying one is being withheld. Both
+/// states carry the same two advisory lines, because the numbers and the
+/// message are equally easy to over-read.
+fn push_review_yield_section(
+    lines: &mut Vec<Line<'static>>,
+    review_yield: Option<&ReviewYieldDetailModel>,
+    budget: usize,
+) {
+    let Some(review_yield) = review_yield else {
+        return;
+    };
+    push_section_header(lines, "REVIEW YIELD");
+    match review_yield {
+        ReviewYieldDetailModel::Signal(signal) => push_review_yield_signal(lines, signal, budget),
+        ReviewYieldDetailModel::Unavailable { message } => {
+            push_wrapped(lines, message, budget, "  ", theme::muted());
+        }
+    }
+    push_wrapped(
+        lines,
+        REVIEW_YIELD_ADVISORY_LINE_1,
+        budget,
+        "  ",
+        theme::muted(),
+    );
+    push_wrapped(
+        lines,
+        REVIEW_YIELD_ADVISORY_LINE_2,
+        budget,
+        "  ",
+        theme::muted(),
+    );
+}
+
+fn push_review_yield_signal(
+    lines: &mut Vec<Line<'static>>,
+    signal: &ReviewYieldSignalViewModel,
+    budget: usize,
+) {
+    push_review_yield_row(
+        lines,
+        "historical positive rate",
+        &signal.rate_label,
+        budget,
+    );
+    push_review_yield_row(
+        lines,
+        "prior reviewed examples",
+        &signal.support_label,
+        budget,
+    );
+    push_review_yield_row(lines, "95% interval", &signal.interval_label, budget);
+    push_review_yield_row(lines, "outcome entropy", &signal.entropy_label, budget);
+    // Directly under the two numbers it orders by, so the claim is read next
+    // to its evidence rather than as a headline over the whole section.
+    if let Some(context) = signal.learn_context {
+        push_wrapped(lines, context, budget, "  ", theme::muted());
+    }
+    push_review_yield_row(lines, "model", &signal.model_label, budget);
+    push_review_yield_path(lines, &signal.path_steps, budget);
+}
+
+/// The splits the finding took. An empty path is a root leaf: the model made
+/// no comparison at all, and saying so beats an empty list.
+fn push_review_yield_path(lines: &mut Vec<Line<'static>>, path_steps: &[String], budget: usize) {
+    if path_steps.is_empty() {
+        push_wrapped(
+            lines,
+            "decision path: none — the model split on nothing",
+            budget,
+            "  ",
+            theme::muted(),
+        );
+        return;
+    }
+    push_wrapped(lines, "decision path", budget, "  ", theme::muted());
+    for step in path_steps {
+        push_wrapped(lines, step, budget, "    ", theme::muted());
+    }
+}
+
+fn push_review_yield_row(
+    lines: &mut Vec<Line<'static>>,
+    key: &'static str,
+    value: &str,
+    budget: usize,
+) {
+    push_wrapped(
+        lines,
+        &format!("{key}: {value}"),
+        budget,
+        "  ",
+        theme::muted(),
+    );
+}
+
 fn push_overflow_notice(lines: &mut Vec<Line<'static>>, hidden: usize, noun: &'static str) {
     if hidden == 0 {
         return;
@@ -669,7 +774,7 @@ mod tests {
         detail_text_for_width(&detail(), 80, report_command)
     }
 
-    fn detail_text_for_width(
+    pub(super) fn detail_text_for_width(
         detail: &FindingDetailModel,
         width: usize,
         report_command: Option<&'static str>,
@@ -940,6 +1045,277 @@ mod tests {
                 .find(section)
                 .unwrap_or_else(|| panic!("missing section {section} in:\n{text}"));
             start += offset + section.len();
+        }
+    }
+}
+
+#[cfg(test)]
+mod review_yield_tests {
+    use super::tests::detail_text_for_width;
+    use super::*;
+    use crate::renderer::surface_lints::{
+        lint_duplication, lint_jargon, lint_separators_and_truncation, SurfaceLine,
+    };
+    use crate::ui_view_models::{FindingDetailModel, ReviewYieldSignalViewModel};
+
+    fn signal_view() -> ReviewYieldSignalViewModel {
+        ReviewYieldSignalViewModel {
+            rate_label: "74%".to_string(),
+            support_label: "42 (31 confirmed · 11 rejected)".to_string(),
+            interval_label: "59%–85%".to_string(),
+            entropy_label: "0.83 bits".to_string(),
+            model_label: "blake3:18655b7ee138…".to_string(),
+            learn_context: None,
+            path_steps: vec![
+                "static_proof = source_sink_linked".to_string(),
+                "distinct_tools > 1".to_string(),
+            ],
+        }
+    }
+
+    fn detail_with(review_yield: Option<ReviewYieldDetailModel>) -> FindingDetailModel {
+        FindingDetailModel {
+            review_yield,
+            ..FindingDetailModel::default()
+        }
+    }
+
+    fn text_of(review_yield: Option<ReviewYieldDetailModel>) -> String {
+        detail_text_for_width(&detail_with(review_yield), 80, None)
+    }
+
+    /// Every rendering of the section an operator can reach, so the copy
+    /// checks below cover the whole surface rather than one happy case.
+    fn every_rendered_variant() -> Vec<String> {
+        let mut variants = vec![
+            text_of(Some(ReviewYieldDetailModel::Signal(signal_view()))),
+            text_of(Some(ReviewYieldDetailModel::Signal(
+                ReviewYieldSignalViewModel {
+                    path_steps: Vec::new(),
+                    ..signal_view()
+                },
+            ))),
+            text_of(Some(ReviewYieldDetailModel::Signal(
+                ReviewYieldSignalViewModel {
+                    learn_context: Some(crate::ui_view_models::REVIEW_YIELD_LEARN_CONTEXT),
+                    ..signal_view()
+                },
+            ))),
+        ];
+        for message in [
+            "not scored yet — open this finding from the review queue to compute its signal",
+            "the signal is turned off for this session",
+            "no model is configured — nothing was scored",
+            "the model file failed its integrity check — signal unavailable",
+            "the model file format is not supported — signal unavailable",
+            "the model expects a different set of inputs — signal unavailable",
+            "this finding lacks a required input (distinct_tools) — signal unavailable",
+            "tool_family is novel, which the model never saw in training — signal unavailable",
+            "only 3 prior reviewed examples match this finding, below this model's evidence floor — no rate is shown",
+            "this finding is outside the model's known data (depth guard exceeded) — signal unavailable",
+            "this finding has no durable identity, so no review history joins to it",
+            "no stored record of this finding exists yet — rescan the target to create one",
+            "this finding's stored record could not be read — signal unavailable",
+        ] {
+            variants.push(text_of(Some(ReviewYieldDetailModel::Unavailable {
+                message: message.to_string(),
+            })));
+        }
+        variants
+    }
+
+    /// The numbers and their labels, plus the two sentences that keep them
+    /// from being read as a verdict.
+    #[test]
+    fn review_yield_section_renders_signal_with_required_advisory() {
+        let text = text_of(Some(ReviewYieldDetailModel::Signal(signal_view())));
+
+        assert!(text.contains("REVIEW YIELD"), "{text}");
+        assert!(text.contains("historical positive rate: 74%"), "{text}");
+        assert!(
+            text.contains("prior reviewed examples: 42 (31 confirmed · 11 rejected)"),
+            "{text}"
+        );
+        assert!(text.contains("95% interval: 59%–85%"), "{text}");
+        assert!(text.contains("outcome entropy: 0.83 bits"), "{text}");
+        assert!(text.contains("model: blake3:18655b7ee138…"), "{text}");
+        assert!(text.contains("decision path"), "{text}");
+        assert!(text.contains("static_proof = source_sink_linked"), "{text}");
+        assert!(text.contains("distinct_tools > 1"), "{text}");
+        assert!(text.contains(REVIEW_YIELD_ADVISORY_LINE_1), "{text}");
+        assert!(text.contains(REVIEW_YIELD_ADVISORY_LINE_2), "{text}");
+    }
+
+    /// The refusal is as easy to over-read as a number, so it carries the same
+    /// two sentences.
+    #[test]
+    fn review_yield_unavailable_state_renders_message_with_advisory() {
+        let text = text_of(Some(ReviewYieldDetailModel::Unavailable {
+            message: "no model is configured — nothing was scored".to_string(),
+        }));
+
+        assert!(text.contains("REVIEW YIELD"), "{text}");
+        assert!(
+            text.contains("no model is configured — nothing was scored"),
+            "{text}"
+        );
+        assert!(text.contains(REVIEW_YIELD_ADVISORY_LINE_1), "{text}");
+        assert!(text.contains(REVIEW_YIELD_ADVISORY_LINE_2), "{text}");
+    }
+
+    /// An operator who did not turn the signal on must not learn it exists
+    /// from an empty section implying a number is being withheld.
+    #[test]
+    fn review_yield_section_is_absent_when_the_signal_is_off() {
+        let text = text_of(None);
+
+        assert!(!text.contains("REVIEW YIELD"), "{text}");
+        assert!(!text.contains(REVIEW_YIELD_ADVISORY_LINE_1), "{text}");
+    }
+
+    /// A root leaf split on nothing. An empty list under "decision path" would
+    /// read as a truncation.
+    #[test]
+    fn an_empty_decision_path_says_the_model_split_on_nothing() {
+        let text = text_of(Some(ReviewYieldDetailModel::Signal(
+            ReviewYieldSignalViewModel {
+                path_steps: Vec::new(),
+                ..signal_view()
+            },
+        )));
+
+        assert!(
+            text.contains("decision path: none — the model split on nothing"),
+            "{text}"
+        );
+    }
+
+    /// The standing rendered-surface lints, run over every variant of this
+    /// section rather than only the ones the seeded plain corpus happens to
+    /// reach.
+    #[test]
+    fn review_yield_copy_passes_rendered_surface_lints() {
+        for (index, text) in every_rendered_variant().into_iter().enumerate() {
+            let corpus: Vec<SurfaceLine> = text
+                .lines()
+                .enumerate()
+                .map(|(number, line)| SurfaceLine {
+                    source: format!("review-yield:{index}"),
+                    number: number + 1,
+                    text: line.to_string(),
+                })
+                .collect();
+            let mut violations = lint_jargon(&corpus);
+            violations.extend(lint_duplication(&corpus));
+            violations.extend(lint_separators_and_truncation(&corpus));
+            assert!(
+                violations.is_empty(),
+                "{}",
+                violations
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+        }
+    }
+
+    /// The two claims this feature must never make. A historical reviewer
+    /// outcome is not a probability that the code is vulnerable, and a model
+    /// confirms nothing.
+    #[test]
+    fn review_yield_copy_never_claims_probability_or_model_confirmation() {
+        for text in every_rendered_variant() {
+            let lower = text.to_lowercase();
+            assert!(!lower.contains("vulnerability probability"), "{text}");
+            assert!(!lower.contains("confirmed by model"), "{text}");
+            assert!(!lower.contains("probability"), "{text}");
+            assert!(!lower.contains("watermark"), "{text}");
+        }
+    }
+
+    /// Learn mode adds one sentence, directly under the two numbers it orders
+    /// by, and it names the *model's* gap rather than doubt about the finding.
+    /// The advisory pair still closes the section.
+    #[test]
+    fn learn_context_renders_under_the_numbers_it_explains() {
+        let text = text_of(Some(ReviewYieldDetailModel::Signal(
+            ReviewYieldSignalViewModel {
+                learn_context: Some(crate::ui_view_models::REVIEW_YIELD_LEARN_CONTEXT),
+                ..signal_view()
+            },
+        )));
+
+        let body = section_body(&text);
+        let entropy = body
+            .iter()
+            .position(|line| line.contains("outcome entropy"))
+            .expect("the entropy row renders");
+        let context = body
+            .iter()
+            .position(|line| line.contains("least evidence about"))
+            .unwrap_or_else(|| panic!("no learn line in:\n{text}"));
+        let model = body
+            .iter()
+            .position(|line| line.contains("model: blake3"))
+            .expect("the model row renders");
+
+        assert!(entropy < context && context < model, "{text}");
+        assert!(
+            text.contains("the model has least evidence about"),
+            "{text}"
+        );
+    }
+
+    /// The section's content lines, between the shared `── REVIEW YIELD ──`
+    /// rule and the blank line that separates the next section header.
+    fn section_body(text: &str) -> Vec<String> {
+        text.lines()
+            .skip_while(|line| !line.contains("REVIEW YIELD"))
+            .skip(1)
+            .take_while(|line| !line.contains("──"))
+            .filter(|line| !line.trim().is_empty())
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    /// Plain output strips styles and nothing else. A body whose meaning
+    /// depended on colour or box drawing would go silent on a scripted shell,
+    /// so every label and number is plain text.
+    #[test]
+    fn review_yield_body_carries_no_style_only_or_box_drawing_meaning() {
+        for text in every_rendered_variant() {
+            let body = section_body(&text);
+            assert!(!body.is_empty(), "{text}");
+            for line in body {
+                assert!(!line.contains('\u{1b}'), "{line}");
+                for glyph in ['│', '─', '╭', '╮', '╰', '╯', '▶', '▼'] {
+                    assert!(!line.contains(glyph), "{glyph} in {line}");
+                }
+            }
+        }
+    }
+
+    /// The advisory sentences close the section in every state, so they are
+    /// never separated from the number or message they qualify.
+    #[test]
+    fn both_advisory_lines_close_every_rendering_of_the_section() {
+        for text in every_rendered_variant() {
+            let body = section_body(&text);
+            let tail: Vec<String> = body
+                .iter()
+                .rev()
+                .take(2)
+                .map(|line| line.trim().to_string())
+                .collect();
+            assert_eq!(
+                tail,
+                vec![
+                    REVIEW_YIELD_ADVISORY_LINE_2.to_string(),
+                    REVIEW_YIELD_ADVISORY_LINE_1.to_string()
+                ],
+                "{text}"
+            );
         }
     }
 }

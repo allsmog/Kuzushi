@@ -43,7 +43,7 @@ pub(in crate::modules) fn export_workspace_findings_tool(
     ))?;
     let request = workspace_export_tool_request(&input, workspace.root())?;
     let report =
-        export_workspace_findings_with_options(workspace, &request.output_path, request.options)?;
+        export_workspace_findings_with_options(workspace, &request.output_path, &request.options)?;
     let output = workspace_export_tool_message(&report, request.completeness, request.allow_empty);
     let data = workspace_export_tool_data(&report, request.completeness, request.allow_empty);
     Ok(crate::module_result::completed_output_result(

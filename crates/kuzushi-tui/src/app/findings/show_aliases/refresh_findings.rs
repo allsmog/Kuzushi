@@ -2,6 +2,19 @@ use super::*;
 use std::collections::BTreeMap;
 
 impl ShellApp {
+    /// Reload findings, then keep the advisory queue scores current for the
+    /// generation just loaded. The reload is the only place the queue changes,
+    /// so it is the one place scoring has to be re-requested.
+    pub(crate) fn refresh_findings_effect(&mut self, refresh: FindingsRefresh) -> Vec<ShellEffect> {
+        match refresh.filter {
+            Some(expression) => self.refresh_findings_filtered(&expression),
+            // `None` means reload the current projection. The explicit
+            // `findings` command clears route state before issuing it.
+            None => self.refresh_findings_preserving_active_filter(refresh.announce),
+        }
+        self.review_yield_queue_scoring_effects()
+    }
+
     /// Reload findings without changing the operator's active projection.
     /// Call `refresh_findings` only when the caller explicitly wants the
     /// unfiltered ledger and has intentionally cleared the filter.

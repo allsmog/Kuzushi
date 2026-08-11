@@ -1,7 +1,7 @@
 use super::{
     AttackSurfaceWrite, AuditWrite, CandidateObservationWrite, DecisionWrite, FileDeletedWrite,
     FileFactWrite, FindingLifecycleWrite, ObservationWrite, PatchAttemptWrite, PatchLifecycleWrite,
-    RekeyWrite, RunLifecycleWrite, SnapshotWrite, VerificationWrite,
+    RekeyWrite, ReviewSessionWrite, RunLifecycleWrite, SnapshotWrite, VerificationWrite,
 };
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -31,6 +31,9 @@ pub enum ControlCommand {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DecisionCommand {
     ReviewDecision(DecisionWrite),
+    /// Ordered with decisions on purpose: a session and the verdict it
+    /// precedes are one causal chain of operator review.
+    ReviewSessionStarted(ReviewSessionWrite),
     RecordVerification(VerificationWrite),
     RecordPatchAttempt(PatchAttemptWrite),
     RecordPatchLifecycle(PatchLifecycleWrite),

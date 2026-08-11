@@ -224,13 +224,37 @@ create table if not exists review_decisions (
   dismissed_by text,
   decision_event_seq integer,
   decision_event_hash text,
-  decision_read_watermark integer
+  decision_read_watermark integer,
+  review_session_id text
 );
 create index if not exists idx_review_decisions_finding
   on review_decisions(finding_id, created_at desc, id desc);
 create index if not exists idx_review_decisions_identity
   on review_decisions(identity_id, created_at desc, id desc)
   where identity_id is not null;
+
+create table if not exists review_sessions (
+  event_hash text primary key,
+  seq integer not null unique,
+  review_session_id text not null unique,
+  stable_fp text not null,
+  identity_id text,
+  finding_id integer,
+  feature_schema_id text not null,
+  feature_snapshot_hash text,
+  feature_cutoff_seq integer not null,
+  model_id text not null,
+  eligibility text not null,
+  baseline_rank integer not null,
+  shadow_rank integer,
+  shadow_rank_objective text,
+  queue_size integer not null,
+  proof_band text not null,
+  severity text not null,
+  created_at text not null
+);
+create index if not exists idx_review_sessions_stable_fp
+  on review_sessions(stable_fp, seq);
 
 create table if not exists verification_events (
   event_hash text primary key,

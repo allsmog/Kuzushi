@@ -62,7 +62,6 @@ impl ShellApp {
                 self.open_workbench_focused_viz()
             }
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
-            ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
             ViewHotkeyAction::WorkbenchPageNext => {
                 let current = crate::ui_view_models::active_workbench_page(self);
                 let page =
@@ -91,6 +90,9 @@ impl ShellApp {
     /// one-key decisions), split from the unit-returning navigation arms.
     fn apply_workbench_draft_hotkey(&mut self, action: ViewHotkeyAction) -> Option<InputUpdate> {
         let update = match action {
+            ViewHotkeyAction::WorkbenchOpen => {
+                InputUpdate::handled_with_effects(self.workbench_open_focused())
+            }
             ViewHotkeyAction::WorkbenchValidate => self.draft_workbench_validation(),
             ViewHotkeyAction::WorkbenchInvestigationBoundary => {
                 self.toggle_workbench_investigation_boundary()
@@ -278,32 +280,38 @@ impl ShellApp {
         }
     }
 
-    fn workbench_open_focused(&mut self) {
+    fn workbench_open_focused(&mut self) -> Vec<ShellEffect> {
         use crate::ui_view_models::PhaseSurfaceId;
         let page = crate::ui_view_models::active_workbench_page(self);
         match self.normalize_workbench_focus() {
             PhaseSurfaceId::ReviewQueue if page == WorkbenchPage::Review => {
-                let can_open = crate::ui_view_models::visible_finding_at_cursor(self).is_some();
-                if can_open {
-                    self.set_workbench_page(WorkbenchPage::Prove);
-                }
-                // Open after the page transition so finding detail remains
-                // focused; otherwise `set_workbench_page` resets focus to the
-                // Confirm composition's primary Evidence surface.
-                self.open_workbench_finding_or_log();
+                return self.open_review_queue_finding()
             }
             PhaseSurfaceId::MapReadiness => self.draft_map_action_card_command(),
             PhaseSurfaceId::ReviewNextPlan => self.draft_review_next_plan_command(),
             PhaseSurfaceId::ProveInvestigation => self.start_investigation_from_card(),
             PhaseSurfaceId::ReviewChains => self.open_chain_constituent(),
             PhaseSurfaceId::ProveTrace => self.draft_trace_expansion_command(),
-            focus if focus == page.findings_surface() => self.open_workbench_finding_or_log(),
+            focus if focus == page.findings_surface() => {
+                return self.open_workbench_finding_or_log()
+            }
             PhaseSurfaceId::MapAttackSurface
             | PhaseSurfaceId::ScanEngines
             | PhaseSurfaceId::ProveEvidence
             | PhaseSurfaceId::FixAttackTree => self.open_workbench_focused_viz(),
             _ => {}
         }
+        Vec::new()
+    }
+
+    fn open_review_queue_finding(&mut self) -> Vec<ShellEffect> {
+        if crate::ui_view_models::visible_finding_at_cursor(self).is_some() {
+            self.set_workbench_page(WorkbenchPage::Prove);
+        }
+        // Open after the page transition so finding detail remains focused;
+        // otherwise `set_workbench_page` resets focus to the Confirm
+        // composition's primary Evidence surface.
+        self.open_workbench_finding_or_log()
     }
 
     /// Enter on an artifact action opens the Map planner with the relevant
@@ -391,12 +399,12 @@ impl ShellApp {
         );
     }
 
-    fn open_workbench_finding_or_log(&mut self) {
+    fn open_workbench_finding_or_log(&mut self) -> Vec<ShellEffect> {
         if self.findings().is_empty() {
             self.log("findings", "no findings yet — run `scan` first");
-            return;
+            return Vec::new();
         }
-        self.open_finding_at_cursor();
+        self.open_finding_at_cursor()
     }
 
     /// `v` toggles the bounded investigation plan card. Kuzushi lays out the

@@ -869,3 +869,215 @@ fn scoring_a_target_with_no_findings_returns_an_empty_table_not_an_error() {
 
     assert!(scores.is_empty());
 }
+
+// ------------------------------------------------ silent shadow queue scoring
+
+fn shadow_model() -> crate::review_yield::domain::ValidatedReviewYieldModel {
+    crate::review_yield::persistence::load_model_artifact(&parity::parity_fixture_path(
+        "model-mixed-depth3.json",
+    ))
+    .unwrap()
+}
+
+fn scorable_identities(fixture: &Fixture, model: &crate::review_yield::domain::ValidatedReviewYieldModel) -> Vec<String> {
+    let reader = ReviewYieldProjectionReader::open(&fixture.workspace).unwrap();
+    crate::review_yield::application::score_current_findings(&reader, model)
+        .unwrap()
+        .into_iter()
+        .map(|scored| scored.identity_id)
+        .collect()
+}
+
+/// The shadow scorer answers positionally. It is handed the queue in the order
+/// the operator sees it and returns one answer per row in that same order —
+/// there is no sorted collection for a caller to mistake for a new queue.
+#[test]
+fn shadow_scoring_answers_positionally_without_reordering_the_queue() {
+    let fixture = fixture();
+    fixture.insert("sql-injection", "src/api/orders.rs");
+    fixture.insert("sql-injection", "src/api/users.rs");
+    let model = shadow_model();
+    let identities = scorable_identities(&fixture, &model);
+    assert_eq!(identities.len(), 2);
+    // An unscorable row sits between two scorable ones, so a positional slip
+    // would show up as a misplaced answer rather than a missing one.
+    let queue = vec![
+        Some(identities[0].clone()),
+        None,
+        Some(identities[1].clone()),
+    ];
+
+    let scores = crate::review_yield::application::score_review_queue_shadow(
+        &fixture.workspace,
+        &queue,
+        u64::MAX,
+        &model,
+    )
+    .unwrap();
+
+    assert_eq!(scores.len(), 3);
+    assert_eq!(scores[0].eligibility_kind(), "eligible");
+    assert_eq!(scores[1].eligibility_kind(), "noDurableIdentity");
+    assert_eq!(scores[2].eligibility_kind(), "eligible");
+    assert!(scores[0]
+        .feature_snapshot_hash()
+        .unwrap()
+        .starts_with("blake3:"));
+    assert_eq!(scores[1].feature_snapshot_hash(), None);
+    assert_eq!(scores[1].eligible_rate(), None);
+    assert!(scores[0].eligible_rate().is_some());
+}
+
+/// An identity the projection has never seen is reported as unscorable, not
+/// scored from whatever the neighbouring rows happened to contain.
+#[test]
+fn shadow_scoring_reports_an_unstored_identity_instead_of_guessing() {
+    let fixture = fixture();
+    fixture.insert("sql-injection", "src/api/orders.rs");
+    let model = shadow_model();
+    let queue = vec![Some("fi_not_in_this_projection".to_string())];
+
+    let scores = crate::review_yield::application::score_review_queue_shadow(
+        &fixture.workspace,
+        &queue,
+        u64::MAX,
+        &model,
+    )
+    .unwrap();
+
+    assert_eq!(scores.len(), 1);
+    assert_eq!(scores[0].eligibility_kind(), "noStoredSnapshot");
+    assert_eq!(scores[0].eligible_rate(), None);
+}
+
+#[test]
+fn shadow_scoring_an_empty_queue_returns_an_empty_table_not_an_error() {
+    let fixture = fixture();
+    let model = shadow_model();
+
+    let scores = crate::review_yield::application::score_review_queue_shadow(
+        &fixture.workspace,
+        &[],
+        u64::MAX,
+        &model,
+    )
+    .unwrap();
+
+    assert!(scores.is_empty());
+}
+
+// ------------------------------------------------------ feature snapshot hash
+
+fn snapshot_features() -> crate::review_yield::domain::ReviewYieldFeaturesV1 {
+    crate::review_yield::domain::ReviewYieldFeaturesV1 {
+        severity_rank: 1,
+        static_proof_state: "code_cited".into(),
+        vuln_source: "sast".into(),
+        tool_family: "semgrep".into(),
+        rule_family: "injection".into(),
+        path_bucket: "src".into(),
+        language_family: "rust".into(),
+        identity_match_tier: "stable_fp".into(),
+        grounding_status: "grounded".into(),
+        is_attack_chain: false,
+        evidence_count: 4,
+        distinct_evidence_kinds: 2,
+        max_evidence_confidence: Some(80),
+        mean_evidence_confidence_millis: None,
+        has_source_evidence: true,
+        has_sink_evidence: true,
+        has_sanitizer_evidence: false,
+        has_call_path_evidence: false,
+        source_sink_linked: true,
+        sanitizer_checked: false,
+        has_exploit_scenario: true,
+        precondition_count: 1,
+        source_count: 2,
+        distinct_tool_count: 1,
+        corroboration_count: 0,
+        observation_count: 3,
+        run_count: 2,
+        reopened_count: 0,
+        has_remediation: false,
+    }
+}
+
+/// The digest is what a recorded session carries instead of the features. It
+/// has to be reproducible from an identical vector and has to move when any
+/// single field moves — otherwise "regenerate and check" proves nothing.
+#[test]
+fn feature_snapshot_hash_is_stable_for_equal_features_and_differs_on_any_field() {
+    use crate::review_yield::domain::feature_snapshot_hash;
+
+    let base = snapshot_features();
+    let baseline = feature_snapshot_hash(&base).unwrap();
+
+    assert!(baseline.starts_with("blake3:"));
+    assert_eq!(baseline.len(), "blake3:".len() + 64);
+    assert_eq!(feature_snapshot_hash(&snapshot_features()).unwrap(), baseline);
+
+    let mutations: Vec<Box<dyn Fn(&mut crate::review_yield::domain::ReviewYieldFeaturesV1)>> = vec![
+        Box::new(|f| f.severity_rank = 2),
+        Box::new(|f| f.static_proof_state = "reasoned".into()),
+        Box::new(|f| f.vuln_source = "dast".into()),
+        Box::new(|f| f.tool_family = "codeql".into()),
+        Box::new(|f| f.rule_family = "traversal".into()),
+        Box::new(|f| f.path_bucket = "test".into()),
+        Box::new(|f| f.language_family = "python".into()),
+        Box::new(|f| f.identity_match_tier = "model_dedupe".into()),
+        Box::new(|f| f.grounding_status = "ungrounded".into()),
+        Box::new(|f| f.is_attack_chain = true),
+        Box::new(|f| f.evidence_count = 5),
+        Box::new(|f| f.distinct_evidence_kinds = 3),
+        Box::new(|f| f.max_evidence_confidence = None),
+        Box::new(|f| f.mean_evidence_confidence_millis = Some(0)),
+        Box::new(|f| f.has_source_evidence = false),
+        Box::new(|f| f.has_sink_evidence = false),
+        Box::new(|f| f.has_sanitizer_evidence = true),
+        Box::new(|f| f.has_call_path_evidence = true),
+        Box::new(|f| f.source_sink_linked = false),
+        Box::new(|f| f.sanitizer_checked = true),
+        Box::new(|f| f.has_exploit_scenario = false),
+        Box::new(|f| f.precondition_count = 2),
+        Box::new(|f| f.source_count = 3),
+        Box::new(|f| f.distinct_tool_count = 2),
+        Box::new(|f| f.corroboration_count = 1),
+        Box::new(|f| f.observation_count = 4),
+        Box::new(|f| f.run_count = 3),
+        Box::new(|f| f.reopened_count = 1),
+        Box::new(|f| f.has_remediation = true),
+    ];
+    assert_eq!(
+        mutations.len(),
+        FEATURE_FIELD_NAMES.len(),
+        "every schema field must be exercised"
+    );
+
+    let mut seen = BTreeSet::new();
+    seen.insert(baseline.clone());
+    for (index, mutate) in mutations.iter().enumerate() {
+        let mut mutated = snapshot_features();
+        mutate(&mut mutated);
+        let hash = feature_snapshot_hash(&mutated).unwrap();
+        assert!(
+            seen.insert(hash),
+            "field {} ({}) did not move the digest",
+            index,
+            FEATURE_FIELD_NAMES[index]
+        );
+    }
+}
+
+/// A feature digest and a model digest are different things. Domain separation
+/// is what keeps them from ever colliding on the same bytes.
+#[test]
+fn feature_snapshot_domain_is_distinct_from_the_model_domain() {
+    assert_eq!(
+        crate::review_yield::domain::FEATURE_SNAPSHOT_DOMAIN,
+        "kuzushi-review-yield-feature-snapshot-v1"
+    );
+    assert_ne!(
+        crate::review_yield::domain::FEATURE_SNAPSHOT_DOMAIN,
+        crate::review_yield::domain::MODEL_DIGEST_DOMAIN
+    );
+}

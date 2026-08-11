@@ -30,7 +30,7 @@ mod plain_parity;
 mod render_app;
 mod section_slot;
 #[cfg(test)]
-mod surface_lints;
+pub(crate) mod surface_lints;
 #[cfg(test)]
 mod tests;
 pub use plain::{render_plain_app, render_plain_command_result};

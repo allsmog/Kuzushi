@@ -10,6 +10,7 @@ pub struct V2Config {
     pub runtime: RuntimeConfig,
     pub operator: OperatorConfig,
     pub phases: GuidedPhaseConfig,
+    pub review_yield: ReviewYieldConfig,
     /// Live operator autonomy posture — the always-visible authorization
     /// ceiling the tool-dispatch gate enforces. This is an *in-process*
     /// session field: it is `#[serde(skip)]` so it never persists to
@@ -29,8 +30,75 @@ impl Default for V2Config {
             runtime: RuntimeConfig::default(),
             operator: OperatorConfig::default(),
             phases: GuidedPhaseConfig::default(),
+            review_yield: ReviewYieldConfig::default(),
             autonomy: crate::modules::AutonomyPosture::default(),
         }
+    }
+}
+
+/// Operator policy for the review-yield signal: what the shell does with the
+/// advisory reviewer-outcome scores, and which artifact produces them.
+///
+/// Operator-owned and global-only. A scanned repository must not be able to
+/// point the shell at a model file it ships, so the project config rejects this
+/// whole section (`forbidden_project_fields`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct ReviewYieldConfig {
+    pub mode: ReviewYieldMode,
+    /// The model artifact to score with. There is no default path and nothing
+    /// is downloaded: any mode but `off` requires the operator to name a file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<PathBuf>,
+}
+
+/// What a shell session does with review-yield scores.
+///
+/// `Off` is the default and the fail-closed landing state: a rejected artifact
+/// leaves the session off rather than degraded. Only `WithinBand` and `Learn`
+/// move a row, and only inside its own proof-confidence and severity band —
+/// they differ in what they order a band *by*, never in what they may cross.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReviewYieldMode {
+    #[default]
+    Off,
+    /// Score and record silently. The operator sees nothing.
+    Shadow,
+    /// Score, record, and explain the signal in the finding detail. Review
+    /// order is unchanged from `Off`.
+    Visible,
+    /// Everything `Visible` does, and additionally order rows *within* a
+    /// complete, fully scored proof-and-severity band, by historical yield.
+    #[serde(alias = "within_band")]
+    WithinBand,
+    /// The same band-bound ordering, keyed on where the model's evidence is
+    /// thinnest rather than where its yield is highest: the findings the model
+    /// knows least about come first, so reviewing them teaches it the most.
+    Learn,
+}
+
+impl ReviewYieldMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Shadow => "shadow",
+            Self::Visible => "visible",
+            Self::WithinBand => "within-band",
+            Self::Learn => "learn",
+        }
+    }
+
+    /// Whether the finding detail may explain the signal. Every ordering mode
+    /// explains: a mode that moved a row without saying why would be the one
+    /// unexplained ranking cue this feature exists to avoid.
+    pub fn shows_signal(self) -> bool {
+        matches!(self, Self::Visible | Self::WithinBand | Self::Learn)
+    }
+
+    /// Whether the mode may reorder rows inside a band.
+    pub fn orders_rows(self) -> bool {
+        matches!(self, Self::WithinBand | Self::Learn)
     }
 }
 
@@ -325,4 +393,5 @@ pub(crate) struct PartialConfig {
     pub(crate) runtime: Option<PartialRuntimeConfig>,
     pub(crate) operator: Option<PartialOperatorConfig>,
     pub(crate) phases: Option<PartialGuidedPhaseConfig>,
+    pub(crate) review_yield: Option<PartialReviewYieldConfig>,
 }

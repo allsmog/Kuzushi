@@ -4,8 +4,8 @@ use kuzushi_core::workspace::write_program_scope_scaffold;
 use kuzushi_core::{
     export_workspace_findings_with_options,
     incremental_index::{WorkspaceChange, WorkspaceIndexUpdate},
-    workspace_status_for_target, WorkspaceExportCompleteness, WorkspaceExportFormat,
-    WorkspaceExportOptions, WorkspaceFindingsExport, WorkspaceStatus,
+    workspace_status_for_target, ReviewYieldExportProvenance, WorkspaceExportCompleteness,
+    WorkspaceExportFormat, WorkspaceExportOptions, WorkspaceFindingsExport, WorkspaceStatus,
 };
 
 pub(crate) fn workspace_for_target(target: Option<&PathBuf>) -> Result<WorkspaceTarget> {
@@ -32,6 +32,7 @@ pub(crate) fn export_findings_for_target(
     format: Option<&str>,
     completeness: Option<&str>,
     allow_empty: bool,
+    review_yield: Option<ReviewYieldExportProvenance>,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
     let output = workspace_output_path(&workspace, output)?;
@@ -42,8 +43,9 @@ pub(crate) fn export_findings_for_target(
         .unwrap_or_default();
     let options = WorkspaceExportOptions::new(format)
         .with_completeness(completeness)
-        .with_allow_empty(allow_empty);
-    export_workspace_findings_with_options(&workspace, &output, options)
+        .with_allow_empty(allow_empty)
+        .with_review_yield(review_yield);
+    export_workspace_findings_with_options(&workspace, &output, &options)
 }
 
 pub(crate) fn init_scope_for_target(target: Option<&PathBuf>) -> Result<PathBuf> {

@@ -1,5 +1,6 @@
 use crate::event_log::EventKind;
 use crate::findings::PatchLifecycleRecord;
+use crate::review_yield::domain::RankObjective;
 use serde_json::{json, Value};
 
 mod observations;
@@ -26,6 +27,10 @@ pub struct DecisionWrite {
     pub dismiss_reason: Option<String>,
     /// Resolved operator name for a dismissal (labeling default, not a role).
     pub dismissed_by: Option<String>,
+    /// The prospective review session this verdict concludes, when one was
+    /// recorded. `None` for headless decisions and for every decision taken
+    /// without shadow recording active.
+    pub review_session_id: Option<String>,
 }
 
 impl DecisionWrite {
@@ -52,6 +57,81 @@ impl DecisionWrite {
             "triageCostUsdExact": self.triage_cost_usd_exact,
             "dismissReason": self.dismiss_reason,
             "dismissedBy": self.dismissed_by,
+            "reviewSessionId": self.review_session_id,
+        })
+    }
+}
+
+/// One prospective review session: a reviewer opened a finding, and this is
+/// everything that was knowable about the queue at that instant.
+///
+/// The payload carries no feature values, paths, snippets, rationales, or
+/// reviewer identity — only `feature_snapshot_hash`, which binds the session to
+/// a feature vector that can be regenerated from the same cutoff and checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewSessionWrite {
+    pub review_session_id: String,
+    /// `identity_id` when the finding has a durable identity, else fingerprint
+    /// (the `DecisionWrite` precedent).
+    pub stable_fp: String,
+    pub identity_id: Option<String>,
+    pub finding_id: Option<i64>,
+    pub feature_schema_id: String,
+    /// `blake3:<hex>` over the canonical feature vector, absent when no
+    /// snapshot could be built for this finding at the cutoff.
+    pub feature_snapshot_hash: Option<String>,
+    pub feature_cutoff_seq: u64,
+    pub model_id: String,
+    /// Why this finding did or did not receive a score, as the eligibility
+    /// discriminant only. Details are omitted because they can name a
+    /// categorical feature value.
+    pub eligibility: String,
+    /// 1-based position in the review queue the operator actually sees.
+    pub baseline_rank: u32,
+    /// 1-based position under the advisory comparator, held in memory only and
+    /// recorded only when the score was eligible.
+    pub shadow_rank: Option<u32>,
+    /// Which objective `shadow_rank` ranks by. Present exactly when a rank is,
+    /// because a rank without its key does not say what it measured.
+    pub shadow_rank_objective: Option<RankObjective>,
+    pub queue_size: u32,
+    pub proof_band: String,
+    pub severity: String,
+    pub actor: String,
+}
+
+impl ReviewSessionWrite {
+    pub(super) fn payload(&self) -> Value {
+        let mut payload = self.ranked_payload();
+        if let (Some(objective), Some(map)) = (self.recorded_objective(), payload.as_object_mut()) {
+            map.insert("shadowRankObjective".to_string(), json!(objective));
+        }
+        payload
+    }
+
+    /// The objective label, only when this session actually recorded a rank.
+    /// A session with no rank names no objective rather than implying one.
+    fn recorded_objective(&self) -> Option<&'static str> {
+        self.shadow_rank?;
+        self.shadow_rank_objective.map(RankObjective::as_str)
+    }
+
+    fn ranked_payload(&self) -> Value {
+        json!({
+            "reviewSessionId": self.review_session_id,
+            "stableFp": self.stable_fp,
+            "identityId": self.identity_id,
+            "findingId": self.finding_id,
+            "featureSchemaId": self.feature_schema_id,
+            "featureSnapshotHash": self.feature_snapshot_hash,
+            "featureCutoffSeq": self.feature_cutoff_seq,
+            "modelId": self.model_id,
+            "eligibility": self.eligibility,
+            "baselineRank": self.baseline_rank,
+            "shadowRank": self.shadow_rank,
+            "queueSize": self.queue_size,
+            "proofBand": self.proof_band,
+            "severity": self.severity,
         })
     }
 }

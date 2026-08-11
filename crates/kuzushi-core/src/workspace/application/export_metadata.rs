@@ -2,11 +2,11 @@ use super::*;
 
 pub(in crate::workspace::application) fn workspace_export_metadata_value(
     format: WorkspaceExportFormat,
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     included_count: usize,
     total_count: usize,
 ) -> serde_json::Value {
-    json!({
+    let mut metadata = json!({
         "format": format.as_str(),
         "projection": "WorkspaceFindingExportRecord",
         "kuzushiVersion": env!("CARGO_PKG_VERSION"),
@@ -14,7 +14,40 @@ pub(in crate::workspace::application) fn workspace_export_metadata_value(
         "includedCount": included_count,
         "totalCount": total_count,
         "omittedFields": workspace_export_omitted_fields(format),
-    })
+    });
+    if let Some(review_yield) = review_yield_metadata_value(options.review_yield.as_ref()) {
+        metadata["reviewYield"] = review_yield;
+    }
+    metadata
+}
+
+/// The review-yield block, present only when a session actually ran with the
+/// signal armed.
+///
+/// `orderingInfluence` is stated because it is easy to misread: export row
+/// order is keyed off the severity-major alias order and is never model-ordered,
+/// in any mode. What the block discloses is the posture the operator reviewed
+/// under, not a claim about these rows.
+fn review_yield_metadata_value(
+    provenance: Option<&ReviewYieldExportProvenance>,
+) -> Option<serde_json::Value> {
+    let provenance = provenance?;
+    if provenance.mode == crate::config::ReviewYieldMode::Off {
+        return None;
+    }
+    Some(json!({
+        "mode": provenance.mode.label(),
+        "modelId": provenance.model_id,
+        "orderingInfluence": ordering_influence(provenance.mode),
+    }))
+}
+
+fn ordering_influence(mode: crate::config::ReviewYieldMode) -> &'static str {
+    if mode.orders_rows() {
+        "review-display-only"
+    } else {
+        "none"
+    }
 }
 
 const VULN_FINDINGS_OMITTED: &[&str] = &[

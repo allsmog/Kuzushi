@@ -49,7 +49,11 @@ impl EffectRuntime {
                 | ShellEffect::OpenFinding(_)
                 | ShellEffect::OpenGuidedScan(_)
                 | ShellEffect::RecordScanRun(_)
+                | ShellEffect::RefreshFindings(_)
                 | ShellEffect::RecordReviewDecision(_)
+                | ShellEffect::FinalizeOpenFinding(_)
+                | ShellEffect::RecordReviewSessionStart(_)
+                | ShellEffect::ScoreReviewYieldQueue(_)
                 | ShellEffect::RecordProofDeferral(_)
                 | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
@@ -81,6 +85,7 @@ impl EffectRuntime {
                 Vec::new()
             }
             ShellEffect::OpenFinding(open) => app.resolve_open_finding_effect(open),
+            ShellEffect::RefreshFindings(refresh) => app.refresh_findings_effect(refresh),
             ShellEffect::OpenGuidedScan(open) => app.open_guided_scan(open.target),
             ShellEffect::RecordScanRun(record) => app.record_scan_run_effect(record),
             remaining => Self::execute_remaining_chained_effect(app, remaining),
@@ -96,6 +101,15 @@ impl EffectRuntime {
                 app.fire_next_approved_strategy_effect(fire)
             }
             ShellEffect::RecordReviewDecision(apply) => app.record_review_decision_effect(apply),
+            ShellEffect::FinalizeOpenFinding(open) => app.finalize_open_finding_effect(open),
+            ShellEffect::RecordReviewSessionStart(apply) => {
+                app.record_review_session_effect(apply);
+                Vec::new()
+            }
+            ShellEffect::ScoreReviewYieldQueue(apply) => {
+                app.score_review_yield_queue_effect(apply);
+                Vec::new()
+            }
             ShellEffect::RecordProofDeferral(apply) => app.record_proof_deferral_effect(apply),
             ShellEffect::RecordSuppression(apply) => app.record_suppression_effect(apply),
             ShellEffect::RecordStrategyCorrection(record) => {
@@ -241,10 +255,8 @@ impl EffectRuntime {
     fn execute_secondary_shell_effect(app: &mut ShellApp, effect: ShellEffect) {
         match effect {
             effect @ (ShellEffect::RefreshContextView
-            | ShellEffect::RefreshFindings(_)
             | ShellEffect::ReportFilteredFindingMovement(_)
             | ShellEffect::FinalizeWorkbenchOpen(_)
-            | ShellEffect::FinalizeOpenFinding(_)
             | ShellEffect::FinalizeSastTaskCommand(_)
             | ShellEffect::HydrateSceneSnapshots(_)
             | ShellEffect::FinalizeScanCompletion(_)
@@ -284,17 +296,10 @@ impl EffectRuntime {
             ShellEffect::RefreshContextView => {
                 let _ = app.refresh_context_view();
             }
-            ShellEffect::RefreshFindings(refresh) => match refresh.filter {
-                Some(expression) => app.refresh_findings_filtered(&expression),
-                // `None` means reload the current projection. The explicit
-                // `findings` command clears route state before issuing it.
-                None => app.refresh_findings_preserving_active_filter(refresh.announce),
-            },
             ShellEffect::ReportFilteredFindingMovement(notice) => {
                 app.report_filtered_finding_movement_effect(notice)
             }
             ShellEffect::FinalizeWorkbenchOpen(open) => app.finalize_workbench_open_effect(open),
-            ShellEffect::FinalizeOpenFinding(open) => app.finalize_open_finding_effect(open),
             ShellEffect::FinalizeSastTaskCommand(finalize) => {
                 app.finalize_sast_task_command_effect(finalize)
             }

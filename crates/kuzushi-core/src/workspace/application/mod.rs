@@ -18,6 +18,7 @@ mod load_program_scope;
 mod nested_scope;
 mod project_model;
 mod record_review_decision;
+mod record_review_session;
 mod since_filter;
 mod status;
 
@@ -50,7 +51,9 @@ pub use project_model::{
 };
 pub use record_review_decision::{
     record_user_review_decision_for_finding, record_user_review_decision_for_finding_at_watermark,
+    record_user_review_decision_for_finding_with_session,
 };
+pub use record_review_session::record_review_session_started;
 pub use since_filter::findings_since_filter_expression;
 pub use status::{workspace_status_for_target, WorkspaceStatus};
 

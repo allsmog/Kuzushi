@@ -70,6 +70,7 @@ mod retry_card;
 mod review_conflicts;
 mod review_queue;
 mod review_state;
+mod review_yield;
 mod routing;
 mod run_diff;
 mod run_paths;
@@ -166,8 +167,9 @@ pub(crate) use finding_summary::{
 #[cfg(test)]
 pub(crate) use findings::projected_visible_finding_pairs;
 pub(crate) use findings::{
-    current_finding_for_detail, finding_detail_model_for_projection, findings_model,
-    review_backlog_active, selected_finding_detail_model, selected_finding_out_of_window_notice,
+    baseline_sorted_finding_alias_indices, current_finding_for_detail,
+    finding_detail_model_for_projection, findings_model, review_backlog_active,
+    selected_finding_detail_model, selected_finding_out_of_window_notice,
     visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
     visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
     FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
@@ -280,7 +282,11 @@ pub(crate) use report_preview::{
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use review_queue::{
     review_queue_model, ReviewFacetCount, ReviewFacetGroup, ReviewQueueMode, ReviewQueueModel,
-    ReviewQueueRow, ReviewWorkflowGroup,
+    ReviewQueueRow, ReviewWorkflowGroup, LEARN_ORDERING_INDICATOR,
+};
+pub(crate) use review_yield::{
+    review_yield_detail_for, ReviewYieldDetailModel, ReviewYieldSignalViewModel,
+    REVIEW_YIELD_ADVISORY_LINE_1, REVIEW_YIELD_ADVISORY_LINE_2, REVIEW_YIELD_LEARN_CONTEXT,
 };
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,

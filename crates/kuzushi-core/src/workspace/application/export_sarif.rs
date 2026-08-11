@@ -15,7 +15,7 @@ const KUZUSHI_INFORMATION_URI: &str = "https://github.com/allsmog/Kuzushi";
 pub(crate) fn findings_to_sarif(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
 ) -> Result<String> {
     findings_to_sarif_with_benchmark_spend(workspace, records, options, total_count, None, None)
@@ -33,7 +33,7 @@ pub(in crate::workspace::application) struct SarifBenchmarkSpend {
 pub(in crate::workspace::application) fn findings_to_sarif_with_benchmark_spend(
     workspace: &WorkspaceTarget,
     records: &[WorkspaceFindingExportRecord],
-    options: WorkspaceExportOptions,
+    options: &WorkspaceExportOptions,
     total_count: usize,
     benchmark_spend: Option<&SarifBenchmarkSpend>,
     scan_run_id: Option<&str>,

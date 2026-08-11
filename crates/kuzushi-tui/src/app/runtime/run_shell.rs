@@ -100,6 +100,11 @@ pub fn run_shell_with_context_and_config_diagnostics(
     let shell_mode = shell_mode_label(plain, stdin_is_terminal);
     let (transcript, transcript_warning) =
         prepare_session_transcript(&config, target, &launch, shell_mode);
+    let startup = ShellStartup {
+        transcript,
+        transcript_warning,
+        config_diagnostics,
+    };
     if plain {
         return run_plain_shell(
             config,
@@ -107,20 +112,18 @@ pub fn run_shell_with_context_and_config_diagnostics(
             &mut stdin,
             stdin_is_terminal,
             registry,
-            transcript,
-            transcript_warning,
-            config_diagnostics,
+            startup,
         );
     }
 
-    run_terminal_shell(
-        config,
-        target,
-        registry,
-        transcript,
-        transcript_warning,
-        config_diagnostics,
-    )
+    run_terminal_shell(config, target, registry, startup)
+}
+
+/// The launch-time inputs a constructed `ShellApp` still needs applied.
+pub(crate) struct ShellStartup {
+    pub(crate) transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
+    pub(crate) transcript_warning: Option<String>,
+    pub(crate) config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
 }
 
 pub(crate) fn shell_mode_label(plain: bool, stdin_is_terminal: bool) -> &'static str {
@@ -186,15 +189,16 @@ pub(crate) fn run_terminal_shell(
     config: V2Config,
     target: Option<&WorkspaceTarget>,
     registry: ModuleRegistry,
-    transcript: Option<kuzushi_core::session_transcript::SessionRecorder>,
-    transcript_warning: Option<String>,
-    config_diagnostics: Vec<kuzushi_core::ConfigDiagnostic>,
+    startup: ShellStartup,
 ) -> Result<()> {
-    let mut app = ShellApp::with_registry_and_transcript(config, target, registry, transcript);
-    app.log_config_diagnostics(&config_diagnostics);
-    if let Some(warning) = transcript_warning {
+    let mut app =
+        ShellApp::with_registry_and_transcript(config, target, registry, startup.transcript);
+    app.log_config_diagnostics(&startup.config_diagnostics);
+    if let Some(warning) = startup.transcript_warning {
         app.surface_session_start_warning(warning);
     }
+    let armed = app.arm_review_yield_from_config();
+    EffectRuntime::execute(&mut app, armed);
     if let Ok((columns, rows)) = crossterm::terminal::size() {
         apply_initial_terminal_size(&mut app, columns, rows);
     }

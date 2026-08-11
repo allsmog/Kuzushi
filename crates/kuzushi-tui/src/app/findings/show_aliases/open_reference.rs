@@ -26,10 +26,13 @@ impl ShellApp {
         )]
     }
 
-    pub(crate) fn finalize_open_finding_effect(&mut self, open: OpenFindingFinalize) {
+    pub(crate) fn finalize_open_finding_effect(
+        &mut self,
+        open: OpenFindingFinalize,
+    ) -> Vec<ShellEffect> {
         match open.outcome {
+            OpenFindingOutcome::Found(finding) => return self.apply_found_finding(finding),
             OpenFindingOutcome::ChainAlias(chain) => self.log_opened_chain_alias(&chain),
-            OpenFindingOutcome::Found(finding) => self.apply_found_finding(finding),
             OpenFindingOutcome::Missing => self.log_missing_finding(&open.reference),
             OpenFindingOutcome::MissingChainAlias { alias } => self.log_missing_chain_alias(alias),
             OpenFindingOutcome::MissingFindingAlias { alias } => {
@@ -37,6 +40,7 @@ impl ShellApp {
             }
             OpenFindingOutcome::Error(error) => self.log_open_finding_error(error),
         }
+        Vec::new()
     }
 
     fn resolve_open_finding(&self, reference: String) -> OpenFindingFinalize {
@@ -88,7 +92,9 @@ impl ShellApp {
         }
     }
 
-    fn apply_found_finding(&mut self, finding: Finding) {
+    /// `open <ref>` resolved to a finding. Like Enter on the queue, this is a
+    /// substantive open and starts a review session.
+    fn apply_found_finding(&mut self, finding: Finding) -> Vec<ShellEffect> {
         *self.selected_finding_mut() = Some(finding.clone());
         self.sync_findings_cursor_to_selected();
         self.set_shell_view(ShellView::Workbench);
@@ -102,7 +108,9 @@ impl ShellApp {
             .workbench_mut()
             .scroll_mut()
             .set(crate::ui_view_models::PhaseSurfaceId::ReviewDetail, 0);
+        let effects = self.review_session_start_effects(&finding);
         self.log_opened_finding(&finding);
+        effects
     }
 
     fn log_opened_chain_alias(&mut self, chain: &ExploitChain) {
