@@ -1,6 +1,6 @@
 use super::scan_cancellation::{
-    scan_terminal_exit_error, settle_scan_cancellation_observed,
-    settle_scan_cancellation_settled, ScanSignalWatcher,
+    scan_terminal_exit_error, settle_scan_cancellation_observed, settle_scan_cancellation_settled,
+    ScanSignalWatcher,
 };
 use super::scan_gate::{apply_scan_gate_policy, ScanGatePolicy};
 use super::scan_prepare::{
@@ -122,11 +122,7 @@ struct ScanInvocation<'a> {
 }
 
 impl ScanInvocation<'_> {
-    fn execute(
-        self,
-        prepared: PreparedScanCommand,
-        cancellation: &ScanCancellation,
-    ) -> Result<()> {
+    fn execute(self, prepared: PreparedScanCommand, cancellation: &ScanCancellation) -> Result<()> {
         let PreparedScanCommand {
             workspace,
             config,
@@ -453,13 +449,7 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
     let runtime = execution
         .runtime
         .map(|runtime| runtime as &dyn AgentRuntime);
-    match dispatch_scan_tool(
-        &execution,
-        &failure_input,
-        prepared,
-        &observation,
-        runtime,
-    )? {
+    match dispatch_scan_tool(&execution, &failure_input, prepared, &observation, runtime)? {
         ScanDispatchResolution::Observed(outcome) => settle_scan_dispatch(
             execution.workspace,
             execution.run_id,
@@ -479,7 +469,12 @@ fn settle_scan_if_canceled(
         return Ok(None);
     };
     settle_scan_cancellation_observed(
-        ToolRunRecord::new(execution.workspace.root(), execution.run_id, "scan", SCAN_TOOL),
+        ToolRunRecord::new(
+            execution.workspace.root(),
+            execution.run_id,
+            "scan",
+            SCAN_TOOL,
+        ),
         disposition,
         observation,
     )
@@ -547,12 +542,9 @@ fn settle_scan_dispatch(
 ) -> Result<serde_json::Value> {
     let record = ToolRunRecord::new(workspace.root(), run_id, "scan", SCAN_TOOL);
     match cancellation.disposition() {
-        Some(disposition) => settle_scan_cancellation_settled(
-            record,
-            disposition,
-            observation,
-            outcome.completion,
-        ),
+        Some(disposition) => {
+            settle_scan_cancellation_settled(record, disposition, observation, outcome.completion)
+        }
         None => match outcome.execution {
             Ok(output) => {
                 try_record_tool_run_complete_settled(
@@ -832,11 +824,7 @@ fn execute_apk_scan(
     let record = apk_scan_record(scan);
     record_apk_scan_started(record, &scan.input, &scan.config, &scan.registry)?;
     if let Some(disposition) = cancellation.disposition() {
-        return settle_scan_cancellation_observed(
-            record,
-            disposition,
-            Some(&scan.observation),
-        );
+        return settle_scan_cancellation_observed(record, disposition, Some(&scan.observation));
     }
     mark_apk_scan_running(&scan.observation)?;
     match dispatch_apk_scan(
@@ -849,12 +837,7 @@ fn execute_apk_scan(
         cancellation,
     ) {
         Ok(outcome) => settle_apk_scan(record, &scan.observation, outcome, cancellation),
-        Err(error) => settle_apk_dispatch_error(
-            record,
-            &scan.observation,
-            cancellation,
-            error,
-        ),
+        Err(error) => settle_apk_dispatch_error(record, &scan.observation, cancellation, error),
     }
 }
 
@@ -982,12 +965,9 @@ fn settle_apk_scan(
     cancellation: &ScanCancellation,
 ) -> Result<serde_json::Value> {
     match cancellation.disposition() {
-        Some(disposition) => settle_scan_cancellation_settled(
-            record,
-            disposition,
-            observation,
-            outcome.completion,
-        ),
+        Some(disposition) => {
+            settle_scan_cancellation_settled(record, disposition, observation, outcome.completion)
+        }
         None => match outcome.execution {
             Ok(output) => {
                 try_record_tool_run_complete_settled(
@@ -1184,21 +1164,13 @@ mod tests {
         let run_id = "scan-cancel-settlement";
         let input = serde_json::json!({"runId": run_id});
         let record = ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan");
-        try_record_tool_run_started_with_reproducibility(
-            record,
-            &input,
-            None,
-            None,
-            Vec::new(),
-        )
-        .unwrap();
-        let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(
-            target.path(),
-            run_id,
-        )
-        .unwrap()
-        .start_root_task("Run the accepted Scan plan")
-        .unwrap();
+        try_record_tool_run_started_with_reproducibility(record, &input, None, None, Vec::new())
+            .unwrap();
+        let observation =
+            kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target.path(), run_id)
+                .unwrap()
+                .start_root_task("Run the accepted Scan plan")
+                .unwrap();
         observation
             .task_handle()
             .unwrap()
