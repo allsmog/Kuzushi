@@ -152,11 +152,7 @@ mod tests {
 
         assert_eq!(output["status"], "canceled");
         assert_eq!(output["ok"], false);
-        assert_terminal_truth(
-            target.path(),
-            "scan-canceled",
-            RunItemStatus::Canceled,
-        );
+        assert_terminal_truth(target.path(), "scan-canceled", RunItemStatus::Canceled);
     }
 
     #[test]
@@ -166,14 +162,9 @@ mod tests {
         let tool = "sast:scan";
         let (record, observation) = started_scan(target.path(), run_id, tool);
         let input = serde_json::json!({"runId": run_id});
-        let call = kuzushi_core::ApplicationToolCall::start(
-            observation.clone(),
-            tool,
-            &input,
-            None,
-            None,
-        )
-        .unwrap();
+        let call =
+            kuzushi_core::ApplicationToolCall::start(observation.clone(), tool, &input, None, None)
+                .unwrap();
         let execution: anyhow::Result<serde_json::Value> = Ok(serde_json::json!({
             "ok": true,
             "status": "completed",
@@ -220,11 +211,8 @@ mod tests {
             let (record, observation) = started_scan(target.path(), run_id, "sast:scan");
             settle_scan_cancellation_observed(record, disposition, Some(&observation)).unwrap();
 
-            let error = scan_terminal_exit_error(
-                target.path(),
-                run_id,
-                anyhow::anyhow!("terminal scan"),
-            );
+            let error =
+                scan_terminal_exit_error(target.path(), run_id, anyhow::anyhow!("terminal scan"));
             let exit = error
                 .downcast::<RunCommandExit>()
                 .expect("persisted cancellation must carry a typed batch exit");
