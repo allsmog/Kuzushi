@@ -122,7 +122,11 @@ struct ScanInvocation<'a> {
 }
 
 impl ScanInvocation<'_> {
-    fn execute(self, prepared: PreparedScanCommand, cancellation: &ScanCancellation) -> Result<()> {
+    fn execute(
+        self,
+        prepared: PreparedScanCommand,
+        cancellation: &ScanCancellation,
+    ) -> Result<()> {
         let PreparedScanCommand {
             workspace,
             config,
@@ -430,28 +434,69 @@ struct ScanToolExecution<'a> {
     cancellation: &'a ScanCancellation,
 }
 
+enum ScanDispatchResolution {
+    Observed(kuzushi_core::ObservedDispatchOutcome),
+    Settled(serde_json::Value),
+}
+
 fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Value> {
     let failure_input = execution.input.clone();
+    let initial_observation = execution.ctx.run_observation();
+    if let Some(output) = settle_scan_if_canceled(&execution, initial_observation.as_ref())? {
+        return Ok(output);
+    }
+    let prepared = prepare_scan_for_dispatch(&execution, &failure_input)?;
+    let observation = running_scan_observation(&execution)?;
     let runtime = execution
         .runtime
         .map(|runtime| runtime as &dyn AgentRuntime);
-    if let Some(disposition) = execution.cancellation.disposition() {
-        let observation = execution
-            .ctx
-            .run_observation()
-            .context("canceled scan dispatch lacks its semantic observation")?;
-        return settle_scan_cancellation_observed(
-            ToolRunRecord::new(execution.workspace.root(), execution.run_id, "scan", SCAN_TOOL),
-            disposition,
-            Some(&observation),
-        );
+    match dispatch_scan_tool(
+        &execution,
+        &failure_input,
+        prepared,
+        &observation,
+        runtime,
+    )? {
+        ScanDispatchResolution::Observed(outcome) => settle_scan_dispatch(
+            execution.workspace,
+            execution.run_id,
+            &observation,
+            outcome,
+            execution.cancellation,
+        ),
+        ScanDispatchResolution::Settled(output) => Ok(output),
     }
+}
+
+fn settle_scan_if_canceled(
+    execution: &ScanToolExecution<'_>,
+    observation: Option<&RunObservationHandle>,
+) -> Result<Option<serde_json::Value>> {
+    let Some(disposition) = execution.cancellation.disposition() else {
+        return Ok(None);
+    };
+    settle_scan_cancellation_observed(
+        ToolRunRecord::new(execution.workspace.root(), execution.run_id, "scan", SCAN_TOOL),
+        disposition,
+        observation,
+    )
+    .map(Some)
+}
+
+fn prepare_scan_for_dispatch(
+    execution: &ScanToolExecution<'_>,
+    failure_input: &serde_json::Value,
+) -> Result<PreparedToolInput> {
     let prepared = execution
         .registry
         .prepare_dispatch_input(SCAN_TOOL, execution.input.clone(), execution.ctx, None)
-        .map_err(|error| recorded_pre_execution_scan_error(&execution, &failure_input, error))?;
+        .map_err(|error| recorded_pre_execution_scan_error(execution, failure_input, error))?;
     emit_scan_patch_validation_disclosure(execution.workspace, prepared.value())
-        .map_err(|error| recorded_pre_execution_scan_error(&execution, &failure_input, error))?;
+        .map_err(|error| recorded_pre_execution_scan_error(execution, failure_input, error))?;
+    Ok(prepared)
+}
+
+fn running_scan_observation(execution: &ScanToolExecution<'_>) -> Result<RunObservationHandle> {
     let observation = execution
         .ctx
         .run_observation()
@@ -459,7 +504,17 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
     observation
         .task_handle()
         .context("scan dispatch lacks its semantic task")?
-        .update_and_flush(kuzushi_core::run_lifecycle::RunItemStatus::Running, None)?;
+        .update_and_flush(RunItemStatus::Running, None)?;
+    Ok(observation)
+}
+
+fn dispatch_scan_tool(
+    execution: &ScanToolExecution<'_>,
+    failure_input: &serde_json::Value,
+    prepared: PreparedToolInput,
+    observation: &RunObservationHandle,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<ScanDispatchResolution> {
     let dispatched = execution
         .registry
         .dispatch_prepared_input_observed_with_runtime(
@@ -467,35 +522,17 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
             execution.ctx,
             runtime,
         );
-    let outcome = match dispatched {
-        Ok(outcome) => outcome,
-        Err(dispatch_error) => {
-            if let Some(disposition) = execution.cancellation.disposition() {
-                return settle_scan_cancellation_observed(
-                    ToolRunRecord::new(
-                        execution.workspace.root(),
-                        execution.run_id,
-                        "scan",
-                        SCAN_TOOL,
-                    ),
-                    disposition,
-                    Some(&observation),
-                );
-            }
-            return Err(recorded_pre_execution_scan_error(
-                &execution,
-                &failure_input,
-                dispatch_error,
-            ));
-        }
-    };
-    settle_scan_dispatch(
-        execution.workspace,
-        execution.run_id,
-        &observation,
-        outcome,
-        execution.cancellation,
-    )
+    match dispatched {
+        Ok(outcome) => Ok(ScanDispatchResolution::Observed(outcome)),
+        Err(error) => match settle_scan_if_canceled(execution, Some(observation))? {
+            Some(output) => Ok(ScanDispatchResolution::Settled(output)),
+            None => Err(recorded_pre_execution_scan_error(
+                execution,
+                failure_input,
+                error,
+            )),
+        },
+    }
 }
 
 fn settle_scan_dispatch(
@@ -718,6 +755,17 @@ fn is_apk_file(target: &Path) -> bool {
         .unwrap_or(false)
 }
 
+struct PreparedApkScan {
+    workspace: WorkspaceTarget,
+    config: kuzushi_core::V2Config,
+    store: FindingStore,
+    registry: ModuleRegistry,
+    run_id: String,
+    observation: RunObservationHandle,
+    trace: TraceHandle,
+    input: serde_json::Value,
+}
+
 async fn scan_apk_command(
     apk: PathBuf,
     json: bool,
@@ -725,16 +773,35 @@ async fn scan_apk_command(
     gate: ScanGatePolicy,
     cancellation: &ScanCancellation,
 ) -> Result<()> {
-    let workspace_dir = apk_workspace_dir(&apk)?;
+    let scan = prepare_apk_scan(&apk)?;
+    let started = std::time::Instant::now();
+    emit_scan_ci_start(ci, started, &apk, &scan.config, &[]);
+    let result = execute_apk_scan(&scan, cancellation);
+    finish_scan_execution(
+        ScanFinish {
+            workspace: &scan.workspace,
+            store: &scan.store,
+            fallback_run_id: &scan.run_id,
+            json,
+            ci,
+            started,
+            gate: &gate,
+        },
+        result,
+    )
+}
+
+fn prepare_apk_scan(apk: &Path) -> Result<PreparedApkScan> {
+    let workspace_dir = apk_workspace_dir(apk)?;
     let workspace = WorkspaceTarget::new(&workspace_dir)?;
     let config = super::config_diagnostics::load_cli_config(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
     let run_id = new_run_id("scan");
-    let observation = start_apk_scan_observation(&workspace, &run_id, &apk)?;
+    let observation = start_apk_scan_observation(&workspace, &run_id, apk)?;
     let trace = observation.trace_handle();
     let input = prepare_apk_scan_input(
-        &apk,
+        apk,
         &workspace_dir,
         &workspace,
         &config,
@@ -743,42 +810,72 @@ async fn scan_apk_command(
         &run_id,
         &trace,
     )?;
-    let started = std::time::Instant::now();
-    emit_scan_ci_start(ci, started, &apk, &config, &[]);
-    let record = ToolRunRecord::new(workspace.root(), &run_id, "scan", "android-apk:scan");
-    record_apk_scan_started(record, &input, &config, &registry)?;
-    mark_apk_scan_running(&observation)?;
-    let result = match dispatch_apk_scan(
-        &workspace,
-        &store,
-        &config,
-        &registry,
+    Ok(PreparedApkScan {
+        workspace,
+        config,
+        store,
+        registry,
+        run_id,
+        observation,
+        trace,
         input,
-        &trace,
+    })
+}
+
+fn execute_apk_scan(
+    scan: &PreparedApkScan,
+    cancellation: &ScanCancellation,
+) -> Result<serde_json::Value> {
+    let record = apk_scan_record(scan);
+    record_apk_scan_started(record, &scan.input, &scan.config, &scan.registry)?;
+    if let Some(disposition) = cancellation.disposition() {
+        return settle_scan_cancellation_observed(
+            record,
+            disposition,
+            Some(&scan.observation),
+        );
+    }
+    mark_apk_scan_running(&scan.observation)?;
+    match dispatch_apk_scan(
+        &scan.workspace,
+        &scan.store,
+        &scan.config,
+        &scan.registry,
+        scan.input.clone(),
+        &scan.trace,
         cancellation,
     ) {
-        Ok(outcome) => settle_apk_scan(record, &observation, outcome, cancellation),
-        Err(error) => match cancellation.disposition() {
-            Some(disposition) => settle_scan_cancellation_observed(
-                record,
-                disposition,
-                Some(&observation),
-            ),
-            None => Err(error),
-        },
-    };
-    finish_scan_execution(
-        ScanFinish {
-            workspace: &workspace,
-            store: &store,
-            fallback_run_id: &run_id,
-            json,
-            ci,
-            started,
-            gate: &gate,
-        },
-        result,
+        Ok(outcome) => settle_apk_scan(record, &scan.observation, outcome, cancellation),
+        Err(error) => settle_apk_dispatch_error(
+            record,
+            &scan.observation,
+            cancellation,
+            error,
+        ),
+    }
+}
+
+fn apk_scan_record(scan: &PreparedApkScan) -> ToolRunRecord<'_> {
+    ToolRunRecord::new(
+        scan.workspace.root(),
+        &scan.run_id,
+        "scan",
+        "android-apk:scan",
     )
+}
+
+fn settle_apk_dispatch_error(
+    record: ToolRunRecord<'_>,
+    observation: &RunObservationHandle,
+    cancellation: &ScanCancellation,
+    error: anyhow::Error,
+) -> Result<serde_json::Value> {
+    match cancellation.disposition() {
+        Some(disposition) => {
+            settle_scan_cancellation_observed(record, disposition, Some(observation))
+        }
+        None => Err(error),
+    }
 }
 
 fn start_apk_scan_observation(
