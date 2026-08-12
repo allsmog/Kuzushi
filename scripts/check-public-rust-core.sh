@@ -81,4 +81,60 @@ cargo test \
   --test public_core_validation \
   --locked
 
+# The CLI reaches kuzushi-core and kuzushi-cpg through several default-feature
+# edges. Disable those edges only in this disposable worktree so the changed
+# headless orchestration can be compiled and tested without resolving or
+# pretending to provide the private engine.
+disable_dependency_defaults() {
+  local manifest="$1"
+  local dependency="$2"
+  local dependency_path="$3"
+  node --input-type=module - "${manifest}" "${dependency}" "${dependency_path}" <<'NODE'
+import { readFileSync, writeFileSync } from "node:fs";
+
+const [manifest, dependency, dependencyPath] = process.argv.slice(2);
+const enabled = `${dependency} = { path = "${dependencyPath}" }`;
+const disabled = `${dependency} = { path = "${dependencyPath}", default-features = false }`;
+const contents = readFileSync(manifest, "utf8");
+const matches = contents.split(enabled).length - 1;
+if (matches !== 1) {
+  throw new Error(
+    `expected one default-enabled ${dependency} dependency in ${manifest}, found ${matches}`,
+  );
+}
+writeFileSync(manifest, contents.replace(enabled, disabled));
+NODE
+}
+
+disable_dependency_defaults \
+  "crates/kuzushi-cli/Cargo.toml" \
+  "kuzushi-core" \
+  "../kuzushi-core"
+disable_dependency_defaults \
+  "crates/kuzushi-cli/Cargo.toml" \
+  "kuzushi-cpg" \
+  "../kuzushi-cpg"
+disable_dependency_defaults \
+  "crates/kuzushi-openai/Cargo.toml" \
+  "kuzushi-core" \
+  "../kuzushi-core"
+disable_dependency_defaults \
+  "crates/kuzushi-tui/Cargo.toml" \
+  "kuzushi-core" \
+  "../kuzushi-core"
+
+cargo test \
+  --package kuzushi-cli \
+  --lib \
+  --no-default-features \
+  --locked \
+  "application::scan_cancellation::tests::"
+
+cargo test \
+  --package kuzushi-cli \
+  --lib \
+  --no-default-features \
+  --locked \
+  "application::scan::tests::canceled_scan_dispatch_cannot_be_persisted_as_completed"
+
 cargo fmt --all --check
