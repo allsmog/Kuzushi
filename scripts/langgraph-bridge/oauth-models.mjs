@@ -156,19 +156,37 @@ function aiMessage(content, toolCalls, usage, finishReason) {
 
 function sseJsonEvents(text) {
   return text
-    .split(/\n\n+/)
-    .map((chunk) => chunk.split("\n").find((line) => line.startsWith("data: "))?.slice(6))
-    .filter(Boolean)
+    .split(/\r?\n\r?\n+/)
+    .map(sseDataPayload)
+    .filter((payload) => payload !== undefined)
     .map(parseJsonEvent)
     .filter(Boolean);
 }
 
+function sseDataPayload(chunk) {
+  const dataLines = chunk
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => {
+      const value = line.slice(5);
+      return value.startsWith(" ") ? value.slice(1) : value;
+    });
+  return dataLines.length ? dataLines.join("\n") : undefined;
+}
+
 function parseJsonEvent(raw) {
+  const trimmed = raw.trim();
+  if (trimmed === "[DONE]") return undefined;
+  let parsed;
   try {
-    return JSON.parse(raw);
+    parsed = JSON.parse(trimmed);
   } catch {
-    return undefined;
+    throw invalidProviderResponseError();
   }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw invalidProviderResponseError();
+  }
+  return parsed;
 }
 
 function outputTextFromEvents(events) {

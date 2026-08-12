@@ -107,6 +107,75 @@ test("OpenAI OAuth preserves a valid empty-object tool call", async (t) => {
   assert.deepEqual(message.tool_calls[0].args, {});
 });
 
+test("OpenAI OAuth rejects malformed SSE JSON instead of dropping a corrupted event", async (t) => {
+  const valid = JSON.stringify({ type: "response.output_text.done", text: "trusted-prefix" });
+  const raw = `data: ${valid}\n\ndata: {"type":"response.output_text.delta","delta":\n\n`;
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(raw));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  await assertInvalidProviderResponse(() => model.invoke([]));
+});
+
+test("OpenAI OAuth rejects malformed no-space SSE data fields", async (t) => {
+  const raw = 'data:{"type":"response.output_text.delta","delta":\n\n';
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(raw));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  await assertInvalidProviderResponse(() => model.invoke([]));
+});
+
+test("OpenAI OAuth requires SSE JSON payloads to decode to event objects", async (t) => {
+  let payload = "null";
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(`data: ${payload}\n\n`));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  for (const invalid of ["null", "[]", '"event"', "1", "true"]) {
+    payload = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("OpenAI OAuth joins multi-line SSE data fields before JSON parsing", async (t) => {
+  const raw = 'data: {"type":"response.output_text.done",\ndata: "text":"complete"}\n\n';
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(raw));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  const message = await model.invoke([]);
+
+  assert.equal(message.content, "complete");
+  assert.equal(message.tool_calls.length, 0);
+});
+
+test("OpenAI OAuth accepts no-space SSE data fields and CRLF framing", async (t) => {
+  const event = JSON.stringify({ type: "response.output_text.done", text: "complete" });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => oauthRawSseResponse(`data:${event}\r\n\r\ndata:[DONE]\r\n\r\n`),
+  );
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  const message = await model.invoke([]);
+
+  assert.equal(message.content, "complete");
+  assert.equal(message.tool_calls.length, 0);
+});
+
+test("OpenAI OAuth accepts the SSE done sentinel after a valid JSON event", async (t) => {
+  const event = JSON.stringify({ type: "response.output_text.done", text: "complete" });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => oauthRawSseResponse(`data: ${event}\n\ndata: [DONE]\n\n`),
+  );
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  const message = await model.invoke([]);
+
+  assert.equal(message.content, "complete");
+  assert.equal(message.tool_calls.length, 0);
+});
+
 async function assertInvalidProviderResponse(invoke) {
   await assert.rejects(invoke, (error) => {
     assert.equal(error?.name, "BridgePublicError");
@@ -126,9 +195,13 @@ function oauthSseResponse(argumentsJson) {
       arguments: argumentsJson,
     },
   };
+  return oauthRawSseResponse(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function oauthRawSseResponse(text) {
   return {
     ok: true,
-    text: async () => `data: ${JSON.stringify(event)}\n\n`,
+    text: async () => text,
   };
 }
 
