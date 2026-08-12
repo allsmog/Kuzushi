@@ -232,6 +232,19 @@ mod tests {
         }
     }
 
+    #[test]
+    fn cancellation_wording_without_host_terminal_truth_cannot_select_exit_130() {
+        let target = tempfile::tempdir().unwrap();
+        let error = scan_terminal_exit_error(
+            target.path(),
+            "unpersisted-model-output",
+            anyhow::anyhow!("model claimed status=canceled"),
+        );
+
+        assert!(error.downcast_ref::<RunCommandExit>().is_none());
+        assert_eq!(error.to_string(), "model claimed status=canceled");
+    }
+
     fn started_scan<'a>(
         target: &'a Path,
         run_id: &'a str,
