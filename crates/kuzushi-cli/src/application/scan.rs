@@ -446,6 +446,9 @@ fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Val
         return Ok(output);
     }
     let prepared = prepare_scan_for_dispatch(&execution, &failure_input)?;
+    if let Some(output) = settle_scan_if_canceled(&execution, initial_observation.as_ref())? {
+        return Ok(output);
+    }
     let observation = running_scan_observation(&execution)?;
     let runtime = execution
         .runtime
