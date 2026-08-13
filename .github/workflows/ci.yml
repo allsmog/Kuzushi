@@ -13,6 +13,11 @@ on:
         required: false
         type: boolean
         default: true
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       private_cpg:
@@ -20,6 +25,11 @@ on:
         required: false
         type: boolean
         default: true
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
     secrets:
       OXIDIZED_JOERN_TOKEN:
         description: Read-only token for the pinned private oxidized-joern dependency
@@ -81,7 +91,7 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
       - name: Check CRAP risk across the complete change
         env:
-          KUZUSHI_CRAP_RISK_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm quality:crap-risk
       - run: pnpm quality:identity
       - run: pnpm quality:architecture
@@ -111,6 +121,10 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          # This lane writes to a disposable target directory and deliberately
+          # ignores the full private-workspace cache, so restoring it only burns
+          # time and disk before the isolation script removes it.
+          cache: false
       - run: bash scripts/check-public-rust-core.sh
 
   # ── Full Rust lint: private CPG + clippy as a hard release gate ──────────
@@ -149,7 +163,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Configure pinned private Rust dependency
+      - name: Require pinned private Rust dependency credential
         env:
           OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
         run: |
@@ -158,9 +172,12 @@ jobs:
             echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
             exit 1
           fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      # cargo-deny-action is a Docker action, so the host runner's global Git
+      # configuration is not visible inside it. Feed the same read-only token
+      # through the action's credential-helper input instead.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
+          credentials: ${{ format('https://x-access-token:{0}@github.com', secrets.OXIDIZED_JOERN_TOKEN) }}
           command: check advisories licenses bans sources
 
   # ── Full Rust CLI build + tests ──────────────────────────────────────────
@@ -307,7 +324,7 @@ jobs:
           sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
       - name: Enforce measured coverage
         env:
-          KUZUSHI_QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm test:coverage
       - uses: actions/upload-artifact@v7
         if: always()
@@ -350,7 +367,7 @@ jobs:
         run: cargo install cargo-mutants --version 27.1.0 --locked
       - name: Require sampled changed mutants to be caught
         env:
-          KUZUSHI_QUALITY_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: pnpm test:mutations
       - uses: actions/upload-artifact@v7
         if: always()

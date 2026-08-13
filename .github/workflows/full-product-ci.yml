@@ -1,0 +1,215 @@
+name: Full product CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ''
+    secrets:
+      OXIDIZED_JOERN_TOKEN:
+        description: Read-only token scoped only to allsmog/oxidized-joern contents
+        required: true
+
+concurrency:
+  group: full-product-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  PRIVATE_CPG_REV: 9ab43859f0c3342c734ff38ea6366711d216c8fd
+
+jobs:
+  # Never let an untrusted invocation look green merely because every secret
+  # consumer was skipped. This gate runs unconditionally and fails closed.
+  trigger-policy:
+    name: trigger-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require an owner-triggered trusted source ref
+        env:
+          ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [[ "${ACTOR}" != "${OWNER}" ]]; then
+            echo "::error::full-product CI requires the repository owner as the triggering actor"
+            exit 1
+          fi
+          if [[ "${EVENT_NAME}" == "pull_request" && "${HEAD_REPOSITORY}" != "${REPOSITORY}" ]]; then
+            echo "::error::full-product CI refuses fork pull requests because it consumes a private dependency credential"
+            exit 1
+          fi
+
+  private-source-contract:
+    name: private-source-contract
+    needs: trigger-policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require least-privilege private dependency credential
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${OXIDIZED_JOERN_TOKEN:-}" ]]; then
+            echo "::error::OXIDIZED_JOERN_TOKEN is missing. Configure a read-only fine-grained token scoped only to allsmog/oxidized-joern contents."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - name: Configure private dependency access
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Verify exact private source resolution
+        run: |
+          set -euo pipefail
+          metadata="${RUNNER_TEMP}/cargo-metadata.json"
+          cargo metadata --format-version 1 --locked > "${metadata}"
+          python3 - "${metadata}" "${PRIVATE_CPG_REV}" <<'PY'
+          import json
+          import sys
+
+          metadata_path, revision = sys.argv[1:]
+          expected_source = (
+              "git+https://github.com/allsmog/oxidized-joern.git"
+              f"?rev={revision}#{revision}"
+          )
+          packages = json.load(open(metadata_path, encoding="utf-8"))["packages"]
+          required = {
+              "cpg-analysis",
+              "cpg-cli",
+              "cpg-core",
+              "cpg-frontend",
+              "cpg-incremental",
+              "cpg-lang-c",
+              "cpg-lang-python",
+              "cpg-lang-ts",
+          }
+          exact = [package for package in packages if package.get("source") == expected_source]
+          counts = {
+              name: sum(package["name"] == name for package in exact)
+              for name in required
+          }
+          wrong_counts = {name: count for name, count in counts.items() if count != 1}
+          if wrong_counts:
+              raise SystemExit(
+                  f"private CPG metadata must contain every pinned package exactly once: {wrong_counts}"
+              )
+          unexpected = sorted(
+              (package["name"], package.get("source"))
+              for package in packages
+              if "github.com/allsmog/oxidized-joern.git" in (package.get("source") or "")
+              and package.get("source") != expected_source
+          )
+          if unexpected:
+              raise SystemExit(f"private CPG metadata contains an unexpected source: {unexpected}")
+          print(f"resolved exact private CPG packages: {', '.join(sorted(counts))}")
+          PY
+
+  complete-private-product:
+    name: complete-private-product
+    needs: private-source-contract
+    uses: ./.github/workflows/ci.yml
+    with:
+      private_cpg: true
+      quality_base_ref: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+    secrets:
+      OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+
+  private-cpg-compatibility:
+    name: private-cpg-compatibility
+    needs: private-source-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Prove adapter API and witnessed-flow semantics
+        run: cargo test --package kuzushi-cpg --test private_engine_compatibility --locked
+      - name: Prove the private MCP server contract
+        run: cargo test --package kuzushi-mcp-cpg --locked
+
+  private-product-benchmarks:
+    name: private-product-benchmarks
+    needs: private-source-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+      - name: Configure pinned private Rust dependency
+        env:
+          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
+      - name: Execute the deterministic SBOM inventory benchmark
+        env:
+          KUZUSHI_BENCH_ITERATIONS: "25"
+        run: cargo bench --package kuzushi-core --bench sbom_inventory --locked
+
+  full-product-gauntlet:
+    name: full-product-gauntlet
+    if: always()
+    needs:
+      - trigger-policy
+      - private-source-contract
+      - complete-private-product
+      - private-cpg-compatibility
+      - private-product-benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every full-product contract
+        env:
+          TRIGGER: ${{ needs.trigger-policy.result }}
+          SOURCE: ${{ needs.private-source-contract.result }}
+          PRODUCT: ${{ needs.complete-private-product.result }}
+          COMPATIBILITY: ${{ needs.private-cpg-compatibility.result }}
+          BENCHMARKS: ${{ needs.private-product-benchmarks.result }}
+        run: |
+          set -euo pipefail
+          failed=0
+          for gate in TRIGGER SOURCE PRODUCT COMPATIBILITY BENCHMARKS; do
+            result="${!gate}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::${gate} ended ${result}"
+              failed=1
+            fi
+          done
+          exit "${failed}"

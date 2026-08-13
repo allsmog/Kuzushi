@@ -81,4 +81,15 @@ cargo test \
   --test public_core_validation \
   --locked
 
+# The complete private suite also runs this test, but it depends only on the
+# public module registry. Keep its security-policy inventory current even when
+# the cross-repository engine credential is unavailable.
+cargo test \
+  --package kuzushi-core \
+  --no-default-features \
+  builtin_dispatch_policy_inventory_is_reviewed_as_one_contract \
+  --locked \
+  -- \
+  --nocapture
+
 cargo fmt --all --check
