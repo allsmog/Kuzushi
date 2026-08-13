@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
+const ERROR_TARGET_ID_CHARS: usize = 96;
+
 /// One-screen fleet scorecard: per target, what the per-target stores and
 /// the derived corpus can prove — never more.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35,7 +37,7 @@ pub fn fleet_status(fleet_dir: &Path, targets: &[FleetTarget]) -> Result<FleetSt
     let statuses = targets
         .iter()
         .map(|target| target_status(target, &corpus))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
     Ok(FleetStatusReport {
         targets: statuses,
         corpus_rows: corpus.rows,
@@ -103,17 +105,17 @@ fn target_counts_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<(TargetCo
     ))
 }
 
-fn target_status(target: &FleetTarget, corpus: &CorpusCounts) -> FleetTargetStatus {
+fn target_status(target: &FleetTarget, corpus: &CorpusCounts) -> Result<FleetTargetStatus> {
     let counts = corpus
         .by_target
         .iter()
         .find(|counts| counts.target_id == target.id);
-    let baselines = target_baselines(&target.path);
+    let baselines = target_baselines(target)?;
     let latest_scan = baselines
         .iter()
         .filter(|row| row.phase == crate::modules::WorkflowPhase::Scan)
         .max_by_key(|row| row.ts_unix);
-    FleetTargetStatus {
+    Ok(FleetTargetStatus {
         target_id: target.id.clone(),
         path: target.path.display().to_string(),
         reachable: target.path.is_dir(),
@@ -124,13 +126,32 @@ fn target_status(target: &FleetTarget, corpus: &CorpusCounts) -> FleetTargetStat
         critical_open: counts.map(|counts| counts.critical).unwrap_or(0),
         high_open: counts.map(|counts| counts.high).unwrap_or(0),
         quality_flags: counts.map(|counts| counts.quality_flags).unwrap_or(0),
-    }
+    })
 }
 
-fn target_baselines(path: &Path) -> Vec<crate::workspace::coverage_ledger::BaselineRow> {
-    CoverageLedger::open_if_exists(path)
-        .ok()
-        .flatten()
-        .and_then(|ledger| ledger.latest_baselines().ok())
-        .unwrap_or_default()
+fn target_baselines(
+    target: &FleetTarget,
+) -> Result<Vec<crate::workspace::coverage_ledger::BaselineRow>> {
+    let ledger = CoverageLedger::open_if_exists(&target.path)
+        .map_err(|_| target_ledger_read_error(&target.id))?;
+    let Some(ledger) = ledger else {
+        return Ok(Vec::new());
+    };
+    ledger
+        .latest_baselines()
+        .map_err(|_| target_ledger_read_error(&target.id))
+}
+
+fn target_ledger_read_error(target_id: &str) -> anyhow::Error {
+    let mut chars = target_id.chars();
+    let mut bounded = chars
+        .by_ref()
+        .take(ERROR_TARGET_ID_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        bounded.push_str("...");
+    }
+    anyhow::anyhow!(
+        "fleet:status could not read coverage ledger for target {bounded:?}"
+    )
 }
