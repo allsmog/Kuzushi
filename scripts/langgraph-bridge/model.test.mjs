@@ -96,6 +96,34 @@ test("OpenAI OAuth requires tool-call arguments to decode to an object", async (
   }
 });
 
+test("OpenAI OAuth requires the provider call_id instead of substituting another identity", async (t) => {
+  let itemOverrides = { call_id: undefined, id: "item-only" };
+  t.mock.method(globalThis, "fetch", async () => oauthSseResponse("{}", itemOverrides));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  for (const invalid of [
+    { call_id: undefined, id: "item-only" },
+    { call_id: undefined },
+    { call_id: "" },
+    { call_id: "   " },
+    { call_id: 42 },
+  ]) {
+    itemOverrides = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("OpenAI OAuth requires a nonempty provider tool name", async (t) => {
+  let itemOverrides = { name: undefined };
+  t.mock.method(globalThis, "fetch", async () => oauthSseResponse("{}", itemOverrides));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  for (const invalid of [{ name: undefined }, { name: "" }, { name: "   " }, { name: 42 }]) {
+    itemOverrides = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
 test("OpenAI OAuth preserves a valid empty-object tool call", async (t) => {
   t.mock.method(globalThis, "fetch", async () => oauthSseResponse("{}"));
   const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
@@ -103,6 +131,7 @@ test("OpenAI OAuth preserves a valid empty-object tool call", async (t) => {
   const message = await model.invoke([]);
 
   assert.equal(message.tool_calls.length, 1);
+  assert.equal(message.tool_calls[0].id, "call-1");
   assert.equal(message.tool_calls[0].name, "Read");
   assert.deepEqual(message.tool_calls[0].args, {});
 });
@@ -185,7 +214,7 @@ async function assertInvalidProviderResponse(invoke) {
   });
 }
 
-function oauthSseResponse(argumentsJson) {
+function oauthSseResponse(argumentsJson, itemOverrides = {}) {
   const event = {
     type: "response.output_item.done",
     item: {
@@ -193,6 +222,7 @@ function oauthSseResponse(argumentsJson) {
       call_id: "call-1",
       name: "Read",
       arguments: argumentsJson,
+      ...itemOverrides,
     },
   };
   return oauthRawSseResponse(`data: ${JSON.stringify(event)}\n\n`);
