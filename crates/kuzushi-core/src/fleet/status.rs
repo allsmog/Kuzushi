@@ -5,6 +5,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use std::path::Path;
 
+const ERROR_TARGET_ID_CHARS: usize = 96;
+
 /// One-screen fleet scorecard: per target, what the per-target stores and
 /// the derived corpus can prove — never more.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -141,7 +143,15 @@ fn target_baselines(
 }
 
 fn target_ledger_read_error(target_id: &str) -> anyhow::Error {
+    let mut chars = target_id.chars();
+    let mut bounded = chars
+        .by_ref()
+        .take(ERROR_TARGET_ID_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        bounded.push_str("...");
+    }
     anyhow::anyhow!(
-        "fleet:status could not read coverage ledger for target {target_id:?}"
+        "fleet:status could not read coverage ledger for target {bounded:?}"
     )
 }
