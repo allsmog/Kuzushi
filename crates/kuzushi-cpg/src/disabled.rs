@@ -1,6 +1,6 @@
-//! Credential-free compile surface for `kuzushi-cpg`.
+//! Engine-disabled compile surface for `kuzushi-cpg`.
 //!
-//! This module intentionally does not emulate the private engine. It keeps the
+//! This module intentionally does not emulate the engine. It keeps the
 //! adapter's public types available so `kuzushi-core` can be checked in a clean
 //! environment, while every engine operation fails closed and every readiness
 //! probe reports unavailable.
@@ -244,7 +244,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn credential_free_adapter_never_claims_engine_or_artifact_readiness() {
+    fn engine_disabled_adapter_never_claims_engine_or_artifact_readiness() {
         let temp = tempfile::tempdir().unwrap();
         let fake = artifact_dir(temp.path());
         std::fs::create_dir_all(&fake).unwrap();
@@ -257,7 +257,7 @@ mod tests {
     }
 
     #[test]
-    fn credential_free_adapter_fails_engine_operations_closed() {
+    fn engine_disabled_adapter_fails_engine_operations_closed() {
         let temp = tempfile::tempdir().unwrap();
         let scope = BuildScope::whole(temp.path());
         let error = ensure_project_in(&scope, "rust", &BuildLimits::default()).unwrap_err();

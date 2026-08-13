@@ -7,10 +7,10 @@ use kuzushi_cpg::{
 };
 
 #[test]
-fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
+fn public_engine_builds_reopens_and_witnesses_a_taint_path() {
     assert!(
         engine_available(),
-        "default builds must contain the private engine"
+        "default builds must contain the public engine"
     );
     assert!(
         GRAPH_SHAPE_VERSION > 0,
@@ -19,7 +19,7 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
     assert_eq!(canonical_language("ts"), Some("typescript"));
     assert!(supported_languages().contains(&"typescript"));
 
-    let target = tempfile::tempdir().expect("create private-engine compatibility target");
+    let target = tempfile::tempdir().expect("create engine compatibility target");
     std::fs::write(
         target.path().join("users.ts"),
         "function list(req, res) {\n  const id = req.query.id;\n  db.query(\"SELECT \" + id);\n}\n",
@@ -28,21 +28,21 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
 
     let scope = BuildScope::whole(target.path());
     let (project, first) = ensure_project_in(&scope, "typescript", &BuildLimits::default())
-        .expect("the pinned private engine must build a TypeScript graph");
+        .expect("the pinned public engine must build a TypeScript graph");
 
     assert!(!first.reused_cache);
     assert_eq!(first.source_files, 1);
     assert!(
         first.methods > 0,
-        "private graph must contain methods: {first:?}"
+        "public graph must contain methods: {first:?}"
     );
     assert!(
         first.calls > 0,
-        "private graph must contain calls: {first:?}"
+        "public graph must contain calls: {first:?}"
     );
     assert!(
         first.nodes > 0,
-        "private graph must contain nodes: {first:?}"
+        "public graph must contain nodes: {first:?}"
     );
     assert_eq!(first.cpg_path, artifact_path(target.path(), "typescript"));
     validate_graph_artifact(&first.cpg_path).expect("engine-produced graph must validate");
@@ -67,7 +67,7 @@ fn real_private_engine_builds_reopens_and_witnesses_a_taint_path() {
     let (findings, stats) = run_taint_query(&project, &harvested);
     assert!(
         stats.flow_count > 0,
-        "private engine returned no flow: {stats:?}"
+        "public engine returned no flow: {stats:?}"
     );
     let flow = findings
         .first()

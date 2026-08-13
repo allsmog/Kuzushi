@@ -7,11 +7,10 @@
 //! - translation of kuzushi's literal catalog signals (`req.query`,
 //!   `.execute(`) into an engine taint specification.
 //!
-//! The default build enables the private engine. The repository's public-core
-//! validation contract first removes private Git resolution in a disposable
-//! workspace, then builds with `--no-default-features`; that mode preserves the
-//! public adapter types while every engine operation fails closed and artifact
-//! readiness is false.
+//! The default build enables the public engine. The feature name
+//! `private-engine` is retained for compatibility. Building with
+//! `--no-default-features` preserves the adapter types while every engine
+//! operation fails closed and artifact readiness is false.
 
 #[cfg(feature = "private-engine")]
 mod artifacts;
@@ -53,7 +52,7 @@ pub use cpg_incremental::Project;
 #[cfg(not(feature = "private-engine"))]
 pub use disabled::*;
 
-/// Whether this build contains the private in-process CPG implementation.
+/// Whether this build contains the in-process CPG implementation.
 ///
 /// This is a compile-time fact, not a runtime probe. Consumers use it to keep
 /// validation-only builds from advertising engine-backed capability.
@@ -63,5 +62,5 @@ pub const fn engine_available() -> bool {
 
 /// Stable operator-facing explanation for a deliberately omitted engine.
 pub const fn engine_unavailable_message() -> &'static str {
-    "the private CPG engine is not compiled into this credential-free validation build; use the default `private-engine` feature and provide read access to allsmog/oxidized-joern"
+    "the CPG engine is not compiled into this feature-disabled build; use the default `private-engine` compatibility feature"
 }

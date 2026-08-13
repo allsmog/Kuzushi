@@ -30,31 +30,25 @@ automatically. pnpm is pinned via `packageManager` in `package.json` and
 activated by `pnpm setup` through corepack — you don't need to install
 pnpm yourself.
 
-### Credential-free Rust core validation
+### Engine-disabled Rust core validation
 
-The default product includes the private `oxidized-joern` CPG engine. Cargo
-resolves optional Git dependency manifests before feature selection, so
-`--no-default-features` alone cannot make the canonical workspace
-credential-free. Use the repository contract instead:
+The default product includes the public `oxidized-joern` CPG engine at the
+revision pinned in the workspace manifest and lockfile. Ordinary setup, CI,
+fork PRs, and release builds resolve it anonymously over HTTPS and exercise the
+complete product without a cross-repository secret.
+
+Embedding consumers may still disable the historical `private-cpg` feature
+name. Use the repository contract to validate that fail-closed surface:
 
 ```sh
 bash scripts/check-public-rust-core.sh
 ```
 
-The command requires a clean checkout, creates a detached disposable worktree,
-and replaces only the four pinned private source declarations there with
-version-matched local resolver stubs. It validates that the generated lockfile
-contains no private source and introduces no external dependency drift before
-running core check, Clippy, tests, and rustfmt with the private CPG feature
-disabled. The stubs are resolver-only and are never presented as an engine; the
-fail-closed adapter reports no supported languages or graph readiness. The
-canonical checkout and `Cargo.lock` remain unchanged.
-
-This contract validates the public `kuzushi-core` source boundary, not the
-private CPG implementation, the complete native package, or release archives.
-The reusable release CI lane keeps the real pinned Git dependencies, requires
-the read-only `OXIDIZED_JOERN_TOKEN`, and fails before full validation when that
-credential is absent.
+The command resolves the same pinned public source, then runs core check,
+Clippy, focused tests, and rustfmt with the CPG feature disabled. The adapter
+reports no supported languages or graph readiness instead of manufacturing an
+empty success. The default CI lanes separately compile, test, package, and run
+the real engine-backed product.
 
 Using VS Code / Codespaces? Open the repo and "Reopen in Container"; the
 `.devcontainer/` definition runs bootstrap + installs semgrep + python for you.

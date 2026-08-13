@@ -117,13 +117,10 @@ while_let_on_iterator = "allow"
 
 [workspace.dependencies]
 anyhow = "1.0"
-# cpg-rs: in-process CPG engine from the oxidized-joern fork (private repo).
-# Fetched over HTTPS so token-based credentials work everywhere: the committed
-# .cargo/config.toml sets git-fetch-with-cli, so the system git credential
-# helper is used (gh CLI locally; GITHUB_TOKEN/PAT in CI). SSH-key-only
-# contributors can add their own `url."ssh://git@github.com/".insteadOf
-# "https://github.com/"` if they prefer SSH. Pin ritual: bump `rev` + rerun the
-# e2e verification list in docs. NOTE: cpg-lang crates pull tree-sitter grammar
+# cpg-rs: in-process CPG engine from the public oxidized-joern repository.
+# The exact revision keeps source builds and release artifacts reproducible.
+# Pin ritual: bump `rev` + rerun the e2e verification list in docs. NOTE:
+# cpg-lang crates pull tree-sitter grammar
 # crates at different majors than kuzushi-mcp-treesitter's — safe while that
 # crate stays a standalone binary; linking both into one binary would collide on
 # the grammar C symbols (tree_sitter_c etc.).

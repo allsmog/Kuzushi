@@ -19,13 +19,11 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ── Gate: require the complete private/default product contract ──────────
+  # ── Gate: require the complete default product contract ──────────────────
   ci:
-    uses: ./.github/workflows/full-product-ci.yml
+    uses: ./.github/workflows/ci.yml
     with:
       quality_base_ref: HEAD^
-    secrets:
-      OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
     permissions:
       contents: read
 
@@ -124,17 +122,6 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v7
-      - name: Configure pinned private Rust dependency
-        shell: bash
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${OXIDIZED_JOERN_TOKEN:-}" ]]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for release-native compilation"
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true

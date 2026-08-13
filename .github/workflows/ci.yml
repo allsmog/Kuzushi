@@ -8,11 +8,6 @@ on:
   merge_group:
   workflow_dispatch:
     inputs:
-      private_cpg:
-        description: Run the credentialed full-workspace CPG, package, and e2e gates
-        required: false
-        type: boolean
-        default: true
       quality_base_ref:
         description: Explicit Git base for changed-code quality gates
         required: false
@@ -20,20 +15,11 @@ on:
         default: ''
   workflow_call:
     inputs:
-      private_cpg:
-        description: Run the credentialed full-workspace CPG, package, and e2e gates
-        required: false
-        type: boolean
-        default: true
       quality_base_ref:
         description: Explicit Git base for changed-code quality gates
         required: false
         type: string
         default: ''
-    secrets:
-      OXIDIZED_JOERN_TOKEN:
-        description: Read-only token for the pinned private oxidized-joern dependency
-        required: false
 
 # Cancel in-progress CI runs on the same PR branch; keep main pushes running.
 concurrency:
@@ -102,37 +88,27 @@ jobs:
       - run: pnpm check:docs
       - run: pnpm check
 
-  # ── Credential-free public/core Rust contract ────────────────────────────
-  # Direct push/PR CI always runs this lane. It compiles every kuzushi-core
-  # target with the private engine feature disabled and executes the explicit
-  # fail-closed adapter tests, without reading any cross-repository secret.
+  # ── Engine-disabled core compatibility contract ──────────────────────────
+  # The default product is exercised below. This lane additionally keeps the
+  # explicit fail-closed adapter surface healthy when the engine feature is
+  # disabled by an embedding consumer.
   rust-core:
     name: rust-core
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      # The guard scripts (public-core-workspace.mjs, public-core-cargo-lock.mjs)
-      # import only node: builtins, so this lane needs a pinned Node runtime but
-      # no pnpm store or workspace install.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-          # This lane writes to a disposable target directory and deliberately
-          # ignores the full private-workspace cache, so restoring it only burns
-          # time and disk before the isolation script removes it.
+          # This feature-disabled lane must not restore the much larger
+          # default-product target cache into a separate hosted runner.
           cache: false
       - run: bash scripts/check-public-rust-core.sh
 
-  # ── Full Rust lint: private CPG + clippy as a hard release gate ──────────
-  # Reusable release CI and an explicit workflow dispatch opt into this lane.
-  # Missing private credentials still fail before any full-workspace claim.
+  # ── Full Rust lint: default product + clippy ──────────────────────────────
   rust-lint:
     name: rust-lint
-    if: ${{ inputs.private_cpg }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -140,16 +116,6 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-      - name: Configure pinned private Rust dependency
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - run: cargo check --workspace --all-targets --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
@@ -158,32 +124,17 @@ jobs:
   # ── Dependency advisories, license policy, duplicate bans ────────────────
   cargo-deny:
     name: cargo-deny
-    if: ${{ inputs.private_cpg }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Require pinned private Rust dependency credential
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
-            exit 1
-          fi
-      # cargo-deny-action is a Docker action, so the host runner's global Git
-      # configuration is not visible inside it. Feed the same read-only token
-      # through the action's credential-helper input instead.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          credentials: ${{ format('https://x-access-token:{0}@github.com', secrets.OXIDIZED_JOERN_TOKEN) }}
           command: check advisories licenses bans sources
 
   # ── Full Rust CLI build + tests ──────────────────────────────────────────
   rust-cli:
     name: rust-cli
-    if: ${{ inputs.private_cpg }}
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -198,16 +149,6 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-      - name: Configure pinned private Rust dependency
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install patch-validation sandbox
         run: |
           sudo apt-get update
@@ -280,7 +221,6 @@ jobs:
   # ── Measured coverage: direct Node boundaries + changed executable Rust ──
   coverage:
     name: coverage
-    if: ${{ inputs.private_cpg }}
     needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -297,16 +237,6 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-      - name: Configure pinned private Rust dependency
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.8.7 --locked
       - name: Install patch-validation sandbox
@@ -353,16 +283,6 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-      - name: Configure pinned private Rust dependency
-        env:
-          OXIDIZED_JOERN_TOKEN: ${{ secrets.OXIDIZED_JOERN_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "${OXIDIZED_JOERN_TOKEN:-}" ]; then
-            echo "::error::OXIDIZED_JOERN_TOKEN is required for the pinned private CPG dependency"
-            exit 1
-          fi
-          git config --global url."https://x-access-token:${OXIDIZED_JOERN_TOKEN}@github.com/".insteadOf "https://github.com/"
       - name: Install mutation tool
         run: cargo install cargo-mutants --version 27.1.0 --locked
       - name: Require sampled changed mutants to be caught
@@ -455,9 +375,8 @@ jobs:
           KUZUSHI_CMD: node bin/kuzushi-rs.mjs
         run: pnpm test:e2e
 
-  # One stable branch-protection context. Direct PR/push CI requires the
-  # credential-free core contract. Reusable release/manual full mode also
-  # requires every private CPG, package, coverage, mutation, and e2e gate.
+  # One stable branch-protection context over the complete default product and
+  # the engine-disabled compatibility contract.
   quality-gauntlet:
     name: quality-gauntlet
     if: always()
@@ -478,7 +397,6 @@ jobs:
     steps:
       - name: Require every applicable quality gate
         env:
-          PRIVATE_CPG: ${{ inputs.private_cpg }}
           LINT: ${{ needs.lint.result }}
           RUST_CORE: ${{ needs.rust-core.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
@@ -493,30 +411,13 @@ jobs:
         run: |
           set -euo pipefail
           failed=0
-          for gate in LINT RUST_CORE NODE_TESTS; do
+          for gate in \
+            LINT RUST_CORE RUST_LINT CARGO_DENY RUST_CLI NODE22 NODE_TESTS \
+            COVERAGE MUTATION PACK E2E; do
             result="${!gate}"
             if [ "${result}" != "success" ]; then
               echo "::error::${gate} ended ${result}"
               failed=1
             fi
           done
-
-          private_gates=(RUST_LINT CARGO_DENY RUST_CLI NODE22 COVERAGE MUTATION PACK E2E)
-          if [ "${PRIVATE_CPG:-false}" = "true" ]; then
-            for gate in "${private_gates[@]}"; do
-              result="${!gate}"
-              if [ "${result}" != "success" ]; then
-                echo "::error::${gate} ended ${result} in required private-CPG mode"
-                failed=1
-              fi
-            done
-          else
-            for gate in "${private_gates[@]}"; do
-              result="${!gate}"
-              if [ "${result}" != "skipped" ]; then
-                echo "::error::${gate} unexpectedly ended ${result} in public-core mode"
-                failed=1
-              fi
-            done
-          fi
           exit "${failed}"
