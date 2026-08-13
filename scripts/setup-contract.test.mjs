@@ -52,3 +52,15 @@ test("devcontainer and doctor share the exact Semgrep dependency pin", () => {
   assert.match(doctor, /PINNED_SEMGREP_VERSION=/);
   assert.match(doctor, /SEMGREP_VERSION.*PINNED_SEMGREP_VERSION/);
 });
+
+test("rust-core CI installs the toolchain without restoring the shared Cargo cache", () => {
+  const workflow = readFileSync(resolve(repoRoot, ".github/workflows/ci.yml"), "utf8");
+  const rustCore = workflow.match(/^ {2}rust-core:\n([\s\S]*?)(?=^ {2}[\w-]+:|(?![\s\S]))/m)?.[1];
+
+  assert.ok(rustCore, "CI must define the credential-free rust-core job");
+  assert.match(
+    rustCore,
+    /- uses: moonrepo\/setup-rust@v1\n\s+with:\n\s+inherit-toolchain: true\n(?:\s+#.*\n)*\s+cache: false/m,
+    "rust-core must disable setup-rust caching before its disposable target setup runs",
+  );
+});

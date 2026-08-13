@@ -111,6 +111,9 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          # This lane creates a disposable public-core target after setup.
+          # Restoring the shared full-workspace target cache can exhaust the runner first.
+          cache: false
       - run: bash scripts/check-public-rust-core.sh
 
   # ── Full Rust lint: private CPG + clippy as a hard release gate ──────────
