@@ -201,14 +201,21 @@ function outputTextFromEvents(events) {
 function openAiToolCallsFromEvent(event, safeToOriginal = new Map()) {
   const item = event?.item;
   if (event?.type !== "response.output_item.done" || item?.type !== "function_call") return [];
+  const callId = requiredProviderIdentifier(item.call_id);
+  const providerName = requiredProviderIdentifier(item.name);
   return [
     {
-      id: item.call_id ?? item.id ?? `call_${Date.now()}`,
-      name: safeToOriginal.get(item.name) ?? item.name,
+      id: callId,
+      name: safeToOriginal.get(providerName) ?? providerName,
       args: parseArguments(item.arguments),
       type: "tool_call",
     },
   ];
+}
+
+function requiredProviderIdentifier(value) {
+  if (typeof value !== "string" || !value.trim()) throw invalidProviderResponseError();
+  return value;
 }
 
 function parseArguments(value) {
