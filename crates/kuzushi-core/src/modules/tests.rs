@@ -3748,6 +3748,7 @@ OUT
         assert_eq!(store.list_findings(10).unwrap()[0].tool, "systems-hunt");
     }
 
+    #[cfg(unix)]
     #[test]
     fn sast_scan_runs_verify_patch_and_writes_run_artifacts() {
         let temp = tempdir().unwrap();
@@ -3925,6 +3926,7 @@ OUT
         .is_file());
     }
 
+    #[cfg(unix)]
     #[test]
     fn sast_empirical_verification_uses_proof_tool_and_gates_patch_on_exploitability() {
         let temp = tempdir().unwrap();
