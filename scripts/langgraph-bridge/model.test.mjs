@@ -78,6 +78,64 @@ test("OpenAI OAuth requests include the account header only when known", () => {
   });
 });
 
+test("Anthropic OAuth requires a provider content array", async (t) => {
+  let payload = {};
+  t.mock.method(globalThis, "fetch", async () => anthropicOauthResponse(payload));
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  for (const invalid of [null, [], {}, { content: null }, { content: {} }, { content: "text" }]) {
+    payload = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("Anthropic OAuth requires provider tool-use identities", async (t) => {
+  let block = { type: "tool_use", id: undefined, name: "read_file", input: {} };
+  t.mock.method(globalThis, "fetch", async () => anthropicOauthResponse({ content: [block] }));
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  for (const invalid of [undefined, "", "   ", 42]) {
+    block = { type: "tool_use", id: invalid, name: "read_file", input: {} };
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+  for (const invalid of [undefined, "", "   ", 42]) {
+    block = { type: "tool_use", id: "tool-1", name: invalid, input: {} };
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("Anthropic OAuth requires tool input to be an explicit object", async (t) => {
+  let input;
+  t.mock.method(globalThis, "fetch", async () =>
+    anthropicOauthResponse({
+      content: [{ type: "tool_use", id: "tool-1", name: "read_file", input }],
+    }),
+  );
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  for (const invalid of [undefined, null, [], "path", 1, true]) {
+    input = invalid;
+    await assertInvalidProviderResponse(() => model.invoke([]));
+  }
+});
+
+test("Anthropic OAuth preserves valid tool-use identity and empty-object input", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    anthropicOauthResponse({
+      content: [{ type: "tool_use", id: "tool-provider-1", name: "read_file", input: {} }],
+      stop_reason: "tool_use",
+    }),
+  );
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  const message = await model.invoke([]);
+
+  assert.equal(message.tool_calls.length, 1);
+  assert.equal(message.tool_calls[0].id, "tool-provider-1");
+  assert.equal(message.tool_calls[0].name, "read_file");
+  assert.deepEqual(message.tool_calls[0].args, {});
+});
+
 test("OpenAI OAuth rejects malformed tool-call arguments instead of defaulting to an empty object", async (t) => {
   t.mock.method(globalThis, "fetch", async () => oauthSseResponse('{"path":'));
   const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
@@ -212,6 +270,13 @@ async function assertInvalidProviderResponse(invoke) {
     assert.equal(error?.message, "Provider returned an invalid response.");
     return true;
   });
+}
+
+function anthropicOauthResponse(payload) {
+  return {
+    ok: true,
+    text: async () => JSON.stringify(payload),
+  };
 }
 
 function oauthSseResponse(argumentsJson, itemOverrides = {}) {

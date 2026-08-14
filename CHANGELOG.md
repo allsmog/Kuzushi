@@ -5,6 +5,32 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.11 — Windows-native release repair
+
+**Security and reliability:**
+
+- Anthropic OAuth responses now fail closed when the provider omits the
+  content array or returns malformed tool-call identities or arguments, so
+  invalid provider output cannot enter tool execution as an empty call.
+- Campaign job children retain whole-tree supervision on Windows, and detached
+  shell dispatchers use explicit platform process groups with tested direct-kill
+  fallback behavior.
+
+**Fixed:**
+
+- Windows-native builds now keep `OsStrExt` in scope where paths are encoded
+  for atomic run-history publication.
+- JSONL path/handle verification on Windows reuses Kuzushi's stable Win32 file
+  identity adapter instead of unstable standard-library metadata methods,
+  preserving replacement detection without weakening the security boundary.
+- Required CI now compiles the complete Windows workspace and runs the focused
+  JSONL contract before a release tag, so Windows-only source regressions fail
+  the quality gauntlet during pull-request validation.
+- Mutation CI now emits auditable receipts for Rust-free changes, excludes
+  compiler-inactive platform adapters by explicit platform names, and protects
+  the campaign log-tail, process-group, termination-fallback, and workspace
+  identity contracts with focused tests.
+
 ## v0.24.0-alpha.10 — public CPG, durable cancellation, complete release gates
 
 **Additive:**

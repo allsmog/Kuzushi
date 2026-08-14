@@ -119,7 +119,6 @@ pub(super) fn publish_replacement(source: &Path, destination: &Path) -> std::io:
 
 #[cfg(windows)]
 pub(super) fn publish_replacement(source: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
@@ -135,6 +134,8 @@ pub(super) fn publish_replacement(source: &Path, destination: &Path) -> std::io:
 
 #[cfg(windows)]
 fn wide_path(path: &Path) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
     path.as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))

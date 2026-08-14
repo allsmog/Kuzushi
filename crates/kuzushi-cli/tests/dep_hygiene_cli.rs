@@ -1,8 +1,9 @@
 use std::process::Command;
 
+#[cfg(unix)]
+use kuzushi_core::ReconWorkspaceStore;
 use kuzushi_core::{
-    Finding, FindingStore, ReconWorkspaceStore, Severity, TriageOutcome, TriageVerdict,
-    WorkspaceTarget,
+    Finding, FindingStore, Severity, TriageOutcome, TriageVerdict, WorkspaceTarget,
 };
 use serde_json::Value;
 
@@ -2021,6 +2022,7 @@ fn run_systems_hunt_without_model_fails_without_silent_fallback() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn run_taint_iris_without_model_fails_without_silent_fallback() {
     let temp = tempfile::tempdir().unwrap();
@@ -3183,6 +3185,7 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
     finding
 }
 
+#[cfg(unix)]
 fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str) {
     let record = kuzushi_core::run_artifacts::ToolRunRecord::new(repo, run_id, "tool", tool);
     kuzushi_core::run_artifacts::record_tool_run_started(
@@ -3195,6 +3198,7 @@ fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str)
     );
 }
 
+#[cfg(unix)]
 fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path, home: &std::path::Path) {
     // Build through the real promotion boundary so the optional CodeQL MCP
     // attachment carries current source provenance and an operator receipt.

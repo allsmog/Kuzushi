@@ -28,18 +28,18 @@ pub(crate) struct WorkspaceWatcherRuntime {
 /// open store files with write-capable handles, so closing them emits
 /// close-write events without changing the file — each refresh then re-emits
 /// events for the very files it read, and the shell invalidates forever.
-/// Comparing (len, mtime, inode) drops those phantom reports.
+/// Comparing (len, mtime, platform file identity) drops those phantom reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StateFingerprint {
     len: u64,
     modified: Option<std::time::SystemTime>,
-    inode: u64,
+    file_identity: u64,
     is_dir: bool,
 }
 
 fn state_fingerprint(target: &Path, relative: &Path) -> Option<StateFingerprint> {
-    use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::symlink_metadata(target.join(relative)).ok()?;
+    let file_identity = state_artifact_file_identity(&metadata);
     // A directory's size/mtime churn on every child create/delete — including
     // the sqlite -wal/-shm side files kuzushi's own store reads create and
     // remove — while every real artifact change reports through the child's
@@ -48,16 +48,40 @@ fn state_fingerprint(target: &Path, relative: &Path) -> Option<StateFingerprint>
         return Some(StateFingerprint {
             len: 0,
             modified: None,
-            inode: metadata.ino(),
+            file_identity,
             is_dir: true,
         });
     }
     Some(StateFingerprint {
         len: metadata.len(),
         modified: metadata.modified().ok(),
-        inode: metadata.ino(),
+        file_identity,
         is_dir: false,
     })
+}
+
+#[cfg(unix)]
+use unix_state_artifact_file_identity as state_artifact_file_identity;
+#[cfg(not(any(unix, windows)))]
+use unsupported_platform_state_artifact_file_identity as state_artifact_file_identity;
+#[cfg(windows)]
+use windows_state_artifact_file_identity as state_artifact_file_identity;
+
+#[cfg(unix)]
+fn unix_state_artifact_file_identity(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    metadata.ino()
+}
+
+#[cfg(windows)]
+fn windows_state_artifact_file_identity(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::windows::fs::MetadataExt;
+    metadata.creation_time()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn unsupported_platform_state_artifact_file_identity(_metadata: &std::fs::Metadata) -> u64 {
+    0
 }
 
 /// Recursive watch registration walks every directory under the target —
@@ -446,6 +470,28 @@ fn overflow_marker(overflowed: &AtomicBool) -> WorkspaceWatcherBatch {
 mod tests {
     use super::*;
     use kuzushi_core::{incremental_index::ReindexPlan, V2Config};
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn state_artifact_identity_comes_from_platform_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("artifact.json");
+        std::fs::write(&path, "{}").unwrap();
+        let metadata = std::fs::metadata(path).unwrap();
+        #[cfg(unix)]
+        let expected = {
+            use std::os::unix::fs::MetadataExt;
+            metadata.ino()
+        };
+        #[cfg(windows)]
+        let expected = {
+            use std::os::windows::fs::MetadataExt;
+            metadata.creation_time()
+        };
+
+        assert!(expected > 1, "test filesystem returned no stable identity");
+        assert_eq!(state_artifact_file_identity(&metadata), expected);
+    }
 
     #[test]
     fn watcher_messages_apply_workspace_stale_state() {

@@ -35,6 +35,18 @@ diff_input="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-diff.XXXXXX")"
 mutant_list="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-list.XXXXXX")"
 trap 'rm -f "${diff_input}" "${mutant_list}"' EXIT
 
+write_empty_receipt() {
+  local status="$1"
+  cp "${diff_input}" target/mutation/change.diff
+  {
+    printf 'status=%s\n' "${status}"
+    printf 'eligible_mutants=0\n'
+    printf 'selected_mutants=0\n'
+    printf 'selection_hash=%s\n' "$(git hash-object "${mutant_list}")"
+    printf 'diff_hash=%s\n' "$(git hash-object "${diff_input}")"
+  } > target/mutation/sample.txt
+}
+
 write_change_diff() {
   local output="$1"
   git diff --no-color "${base}" -- '*.rs' > "${output}"
@@ -52,15 +64,16 @@ write_change_diff() {
 write_change_diff "${diff_input}"
 if [[ ! -s "${diff_input}" ]]; then
   echo "mutation gate: no Rust changes"
+  write_empty_receipt "no-rust-changes"
   exit 0
 fi
 
 max_mutants=12
 platform_args=()
 case "$(uname -s)" in
-  Darwin) platform_args+=(--exclude-re '(linux|windows)_|trusted_bwrap') ;;
-  Linux) platform_args+=(--exclude-re '(macos|windows)_|sandbox_exec') ;;
-  *) platform_args+=(--exclude-re '(linux|macos)_|trusted_bwrap|sandbox_exec') ;;
+  Darwin) platform_args+=(--exclude-re '(linux|windows|unsupported_platform)_|trusted_bwrap') ;;
+  Linux) platform_args+=(--exclude-re '(macos|windows|unsupported_platform)_|sandbox_exec') ;;
+  *) platform_args+=(--exclude-re '(linux|macos|windows|unsupported_platform)_|trusted_bwrap|sandbox_exec') ;;
 esac
 filter_args=(
   # A whole-function no-op here leaves modal tests waiting forever; retain its branch mutants.
@@ -77,6 +90,7 @@ cargo mutants \
 mutant_count="$(wc -l < "${mutant_list}" | tr -d '[:space:]')"
 if [[ "${mutant_count}" -eq 0 ]]; then
   echo "mutation gate: no eligible Rust mutants"
+  write_empty_receipt "no-eligible-mutants"
   exit 0
 fi
 
@@ -113,6 +127,7 @@ set -e
 mkdir -p target/mutation
 cp "${diff_input}" target/mutation/change.diff
 {
+  printf 'status=tested\n'
   printf 'eligible_mutants=%s\n' "${mutant_count}"
   printf 'selected_mutants=%s\n' "${selected_count}"
   printf 'shard=%s/%s\n' "${shard_index}" "${shard_count}"

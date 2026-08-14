@@ -1,6 +1,7 @@
 use super::DoctorCheck;
 use kuzushi_openai::LangGraphRuntime;
 use std::env;
+#[cfg(unix)]
 use std::fs;
 use std::path::{Path, PathBuf};
 

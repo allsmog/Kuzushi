@@ -65,6 +65,16 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    #[cfg(unix)]
+    fn symlink_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+        std::os::unix::fs::symlink(source, destination)
+    }
+
+    #[cfg(windows)]
+    fn symlink_file(source: &Path, destination: &Path) -> std::io::Result<()> {
+        std::os::windows::fs::symlink_file(source, destination)
+    }
+
     #[test]
     fn relative_path_resolves_inside_root() {
         let tmp = tempdir().unwrap();
@@ -117,7 +127,7 @@ mod tests {
         fs::write(&outside_file, "private").unwrap();
 
         let inside = tmp.path().join("link.txt");
-        if std::os::unix::fs::symlink(&outside_file, &inside).is_err() {
+        if symlink_file(&outside_file, &inside).is_err() {
             return;
         }
 
