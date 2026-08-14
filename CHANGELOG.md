@@ -17,6 +17,13 @@ Notable changes to Kuzushi. Release procedure lives in
   five-platform assembly requirement.
 - Platform-specific imports no longer produce an unused-import warning during
   the Windows native build.
+- Terminal Run Focus now exposes and honors its real Back binding from both
+  Prompt and Navigate state, including reopened background runs, while live
+  runs keep their existing mode-toggle and cancellation behavior.
+- Map no longer advertises Tab before its embedded gallery owns that key.
+- Linux DevEx receipts now capture stable octal path modes without filesystem
+  counters, and the real-target J25 journey accepts the truthful locked-Scan
+  disclosure.
 
 ## v0.24.0-alpha.11 — Windows-native release repair
 
