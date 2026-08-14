@@ -27,7 +27,7 @@ pnpm verify:pack
 
 # 2. Consistently bump package.json, Cargo.toml, Cargo.lock workspace entries,
 #    and the dynamic-module host protocol version.
-node scripts/bump-release-version.mjs 0.24.0-alpha.11
+node scripts/bump-release-version.mjs 0.24.0-alpha.12
 pnpm check:release
 
 # 3. Commit every source updated by the bump, plus the changelog, and tag

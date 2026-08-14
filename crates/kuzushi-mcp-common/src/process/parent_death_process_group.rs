@@ -1,4 +1,6 @@
-use anyhow::{Context, Result};
+#[cfg(unix)]
+use anyhow::Context;
+use anyhow::Result;
 use tokio::process::{Child, Command};
 
 /// Owns a process group that cannot outlive the process holding this value.

@@ -5,6 +5,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.12 — complete cross-platform release
+
+**Fixed:**
+
+- Native release jobs now allow enough time for Windows to compile and execute
+  the platform-specific process and atomic-write contracts before packaging.
+- Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64 are all
+  hard-blocking release targets; npm and GitHub publication cannot proceed
+  with a missing supported archive, and release-contract checks preserve that
+  five-platform assembly requirement.
+- Platform-specific imports no longer produce an unused-import warning during
+  the Windows native build.
+
 ## v0.24.0-alpha.11 — Windows-native release repair
 
 **Security and reliability:**

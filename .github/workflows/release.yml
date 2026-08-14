@@ -92,9 +92,7 @@ jobs:
 
   # ── Cross-platform native binaries for the GitHub Release ───────────────
   # Each leg builds natively on its own runner arch (no cross toolchains).
-  # linux-x64 is proven by CI on every push; the other platforms are
-  # best-effort until they have produced a green tag build — promote them
-  # to hard-blocking by removing `continue-on-error` once they have.
+  # Every supported archive is required before npm or GitHub publication.
   native-binaries:
     needs: ci
     strategy:
@@ -103,23 +101,17 @@ jobs:
         include:
           - os: ubuntu-latest
             slug: linux-x64
-            required: true
           - os: ubuntu-24.04-arm
             slug: linux-arm64
-            required: false
           - os: macos-15-intel
             slug: darwin-x64
-            required: false
           - os: macos-14
             slug: darwin-arm64
-            required: true
           - os: windows-latest
             slug: win32-x64
-            required: false
     name: native-${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ !matrix.required }}
-    timeout-minutes: 40
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: moonrepo/setup-rust@v1
