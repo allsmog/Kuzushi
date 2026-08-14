@@ -15628,6 +15628,26 @@ fn terminal_run_focus_esc_leaves_instead_of_toggling_the_composer() {
     assert_eq!(app.input_mode(), InputMode::Navigate);
 }
 
+/// Run Focus never renders a composer, even when the shared editor state still
+/// says Prompt. The advertised leave key must therefore leave in one press
+/// from that state too, rather than performing an invisible mode transition.
+#[test]
+fn terminal_run_focus_prompt_mode_esc_leaves_in_one_press() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session(
+        "run-failed-prompt-esc",
+    )));
+    app.set_input_mode(InputMode::Prompt);
+
+    assert!(run_focus_footer_hints(&app).contains("Esc leave"));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+}
+
 /// A live run keeps today's contract exactly: Ctrl+C cancels, `b` backgrounds,
 /// and Esc stays the composer-mode toggle.
 #[test]
