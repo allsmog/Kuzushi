@@ -624,10 +624,33 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if self.handle_input_mode_key(key, modifiers) {
+        if let Some(update) = self.handle_terminal_run_focus_leave_key(key) {
+            return update;
+        }
+        if self.composer_mode_toggle_is_visible() && self.handle_input_mode_key(key, modifiers) {
             return InputUpdate::handled();
         }
         self.handle_control_key(key, modifiers)
+    }
+
+    fn handle_terminal_run_focus_leave_key(&mut self, key: KeyEvent) -> Option<InputUpdate> {
+        if self.composer_mode_toggle_is_visible() {
+            return None;
+        }
+        let back = self
+            .view_keybindings()
+            .into_iter()
+            .find(|binding| binding.action == ViewHotkeyAction::Back && binding.matches(key))?;
+        Some(self.apply_view_hotkey(back.action))
+    }
+
+    /// Terminal Run Focus renders no composer row, so its mode toggle is
+    /// invisible in both stored input modes. Its configured Back key leaves
+    /// directly; a live run keeps the toggle while `Ctrl+C` cancels and `b`
+    /// backgrounds it.
+    fn composer_mode_toggle_is_visible(&self) -> bool {
+        self.shell_view() != ShellView::Activity
+            || !crate::ui_view_models::run_focus_is_terminal(self)
     }
 
     fn reduce_navigation_or_text_key(

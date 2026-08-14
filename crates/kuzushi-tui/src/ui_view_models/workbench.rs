@@ -157,8 +157,10 @@ static PROVE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint("findings", "reveal queue"),
 ];
 
+const MAP_GALLERY_CYCLE_VERB: &str = "Tab";
+
 static MAP_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
-    hint("Tab", "cycle map views"),
+    hint(MAP_GALLERY_CYCLE_VERB, "cycle map views"),
     hint("z", "zoom selected view"),
     hint("next", "continue to Scan"),
     hint("jobs", "inspect Map runs"),
@@ -345,7 +347,7 @@ fn command_bar_hints(
     has_detail: bool,
     finding_reference: Option<&str>,
 ) -> Vec<WorkbenchHint> {
-    let mut hints = page_command_bar_hint_slice(page).to_vec();
+    let mut hints = page_command_bar_hints(app, page);
     customize_phase_hints(&mut hints, app, page, finding_reference);
     if page == WorkbenchPage::Prove && !has_detail {
         hints[0] = hint("2", "choose a finding in Review");
@@ -466,6 +468,20 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], finding_reference: Option<&st
         return;
     };
     hint.verb = Cow::Owned(format!("patch {reference}"));
+}
+
+/// `Tab` cycles the Map projection only while the embedded gallery owns keys.
+/// A Map that still requires action consumes `Tab` nowhere, so the hint row
+/// must not name it; the remaining Map hints stay true in both states.
+fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchHint> {
+    let hints = page_command_bar_hint_slice(page).to_vec();
+    if page != WorkbenchPage::Map || super::map_gallery_is_primary(app) {
+        return hints;
+    }
+    hints
+        .into_iter()
+        .filter(|hint| hint.verb != MAP_GALLERY_CYCLE_VERB)
+        .collect()
 }
 
 fn page_command_bar_hint_slice(page: WorkbenchPage) -> &'static [WorkbenchHint] {

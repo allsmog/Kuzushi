@@ -28,6 +28,17 @@ impl ShellApp {
         self.ui.apply_keymap_overrides(view, binds)
     }
 
+    /// The key the composed keymap dispatches `Back` from in `view` — the same
+    /// list `handle_view_hotkey` searches — so a footer can advertise the real
+    /// binding instead of a hardcoded literal. `None` when the view owns Esc
+    /// itself and therefore offers no back affordance.
+    pub(crate) fn view_back_key(&self, view: ShellView) -> Option<String> {
+        self.view_keybindings_for_view(view)
+            .into_iter()
+            .find(|binding| binding.action == ViewHotkeyAction::Back)
+            .map(|binding| binding.hint)
+    }
+
     pub(crate) fn workbench_view_keybindings_for_plan(
         &self,
         plan: Option<&crate::ui_view_models::PhasePresentationPlan>,
