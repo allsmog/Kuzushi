@@ -6,7 +6,8 @@ use super::activity_feed_rows::{
     activity_feed_pane_rows, activity_feed_viewport_rows, ActivityFeedPaneRow,
 };
 use super::activity_footer::{
-    activity_footer_model, resolve_activity_footer_bindings, ActivityFooterModel,
+    activity_footer_model, push_run_focus_leave_hint, resolve_activity_footer_bindings,
+    ActivityFooterModel,
 };
 use super::activity_header::{
     activity_header_model_with_queue, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
@@ -84,6 +85,23 @@ fn active_dag_task_eta_secs(app: &ShellApp, session: &ActivitySession) -> Option
     let estimate = app.estimate_task_duration_secs(&row.task_id)?;
     let elapsed = row.started_at?.elapsed().as_secs();
     Some(estimate.saturating_sub(elapsed))
+}
+
+/// True when the foreground Run Focus run reached the same terminal outcome
+/// the header reports, so the run can no longer change on its own. A run
+/// still waiting on an operator answer is not terminal, and a backgrounded
+/// session keeps the live contract.
+pub(crate) fn run_focus_is_terminal(app: &ShellApp) -> bool {
+    app.activity().is_some_and(|session| {
+        !session.run_focus_backgrounded && activity_outcome_is_terminal(app, session)
+    })
+}
+
+fn activity_outcome_is_terminal(app: &ShellApp, session: &ActivitySession) -> bool {
+    matches!(
+        activity_run_outcome(app, session),
+        Some(ActivityRunOutcome::Terminal { .. } | ActivityRunOutcome::Failed { .. })
+    )
 }
 
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
@@ -351,7 +369,7 @@ impl<'a> RunFocusModel<'a> {
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
-        let footer = activity_footer_model(
+        let mut footer = activity_footer_model(
             self.session,
             self.route,
             width,
@@ -359,6 +377,9 @@ impl<'a> RunFocusModel<'a> {
             activity_abort_pending(self.app),
             self.app.input_mode(),
         );
+        if run_focus_is_terminal(self.app) {
+            push_run_focus_leave_hint(&mut footer);
+        }
         let footer = resolve_activity_footer_bindings(footer, self.app, width);
         if self.operator_question().is_some() {
             return operator_question_owned_footer(footer, width);

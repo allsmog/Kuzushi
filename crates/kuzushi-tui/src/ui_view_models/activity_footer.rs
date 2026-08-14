@@ -223,6 +223,15 @@ fn footer_hints(session: &ActivitySession) -> Vec<ActivityFooterHint> {
         .collect()
 }
 
+/// A terminal run can no longer change on its own, so Esc leaves Run Focus
+/// instead of toggling the composer mode this view never shows. Rows are
+/// rewrapped by `resolve_activity_footer_bindings`.
+pub(crate) fn push_run_focus_leave_hint(model: &mut ActivityFooterModel) {
+    model
+        .hints
+        .push(ActivityFooterHint::new("Esc", "leave", None));
+}
+
 fn fit(value: &str, width: usize) -> String {
     let len = value.chars().count();
     if len <= width {

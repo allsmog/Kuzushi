@@ -624,10 +624,20 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if self.handle_input_mode_key(key, modifiers) {
+        if self.composer_mode_toggle_is_visible() && self.handle_input_mode_key(key, modifiers) {
             return InputUpdate::handled();
         }
         self.handle_control_key(key, modifiers)
+    }
+
+    /// Foreground Run Focus renders no composer row, so its mode toggle is
+    /// invisible. Once the run is terminal, Esc must fall through to the
+    /// view's back binding instead of trapping the operator. A live run keeps
+    /// the toggle: `Ctrl+C` cancels and `b` backgrounds it.
+    fn composer_mode_toggle_is_visible(&self) -> bool {
+        self.shell_view() != ShellView::Activity
+            || self.input_mode() != InputMode::Navigate
+            || !crate::ui_view_models::run_focus_is_terminal(self)
     }
 
     fn reduce_navigation_or_text_key(
