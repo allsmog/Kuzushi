@@ -131,7 +131,10 @@ async function providerJson(response) {
 }
 
 function anthropicMessageFromResponse(parsed) {
-  const blocks = Array.isArray(parsed.content) ? parsed.content : [];
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed) || !Array.isArray(parsed.content)) {
+    throw invalidProviderResponseError();
+  }
+  const blocks = parsed.content;
   const toolCalls = blocks.filter(isAnthropicToolUse).map(anthropicToolCall);
   const text = blocks.filter(isAnthropicText).map((block) => block.text).join("");
   return aiMessage(text, toolCalls, anthropicUsage(parsed.usage), parsed.stop_reason);
@@ -218,6 +221,13 @@ function requiredProviderIdentifier(value) {
   return value;
 }
 
+function requiredProviderObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw invalidProviderResponseError();
+  }
+  return value;
+}
+
 function parseArguments(value) {
   if (typeof value !== "string" || !value.trim()) throw invalidProviderResponseError();
   let parsed;
@@ -226,10 +236,7 @@ function parseArguments(value) {
   } catch {
     throw invalidProviderResponseError();
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw invalidProviderResponseError();
-  }
-  return parsed;
+  return requiredProviderObject(parsed);
 }
 
 function anthropicMessages(messages) {
@@ -400,7 +407,12 @@ function isAnthropicText(block) {
 }
 
 function anthropicToolCall(block) {
-  return { id: block.id, name: block.name, args: block.input ?? {}, type: "tool_call" };
+  return {
+    id: requiredProviderIdentifier(block.id),
+    name: requiredProviderIdentifier(block.name),
+    args: requiredProviderObject(block.input),
+    type: "tool_call",
+  };
 }
 
 function anthropicUsage(usage) {
