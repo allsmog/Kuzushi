@@ -114,7 +114,7 @@ pub(crate) use activity_layout::{
 pub(crate) use activity_observability::{ActivityHeartbeatModel, ActivityHeartbeatTone};
 pub(crate) use activity_pane_chrome::{ActivityPaneChromeModel, ActivityPaneTitle};
 pub(crate) use activity_view::{
-    activity_execution_model_label, activity_view_model, ActivityViewModel,
+    activity_execution_model_label, activity_view_model, run_focus_is_terminal, ActivityViewModel,
     OperatorQuestionKeyHints, RunFocusModel,
 };
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};

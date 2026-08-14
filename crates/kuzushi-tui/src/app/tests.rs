@@ -15578,6 +15578,170 @@ fn activity_view_offers_back_binding() {
     );
 }
 
+fn failed_terminal_activity_session(run_id: &str) -> ActivitySession {
+    use kuzushi_core::run_lifecycle::{
+        RunId, RunItemEnvelopeV1, RunItemId, RunItemSource, RunItemStatus, RunItemV1, SafeText,
+        WorkflowContinuation,
+    };
+
+    let mut session = ActivitySession::new(run_id);
+    let item = RunItemEnvelopeV1::new(
+        1,
+        RunId::parse(run_id).unwrap(),
+        RunItemId::new(),
+        RunItemSource::Workflow,
+        RunItemV1::TerminalOutcome {
+            status: RunItemStatus::Failed,
+            summary: SafeText::operator_visible("no model configured"),
+            cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
+            continuation: WorkflowContinuation::NoFurtherAction {
+                reason: SafeText::operator_visible("select a model first"),
+            },
+        },
+        None,
+    )
+    .unwrap();
+    session.apply_run_item(item).unwrap();
+    session
+}
+
+/// Foreground Run Focus renders no composer row, so a terminal run must not
+/// keep Esc for the invisible Prompt/Navigate toggle — the operator would have
+/// no way out of a run that can no longer change.
+#[test]
+fn terminal_run_focus_esc_leaves_instead_of_toggling_the_composer() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session("run-failed-esc")));
+    app.set_input_mode(InputMode::Navigate);
+    app.set_error_notice("run", "threat-model:build failed — no model configured");
+
+    // A visible notice still owns the first Esc.
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert_eq!(app.shell_view(), ShellView::Activity);
+    assert!(app.advisory().notice.is_none());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+/// Run Focus never renders a composer, even when the shared editor state still
+/// says Prompt. The advertised leave key must therefore leave in one press
+/// from that state too, rather than performing an invisible mode transition.
+#[test]
+fn terminal_run_focus_prompt_mode_esc_leaves_in_one_press() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session(
+        "run-failed-prompt-esc",
+    )));
+    app.set_input_mode(InputMode::Prompt);
+
+    assert!(run_focus_footer_hints(&app).contains("Esc leave"));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+}
+
+/// A live run keeps today's contract exactly: Ctrl+C cancels, `b` backgrounds,
+/// and Esc stays the composer-mode toggle.
+#[test]
+fn live_run_focus_esc_keeps_the_composer_mode_toggle() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(ActivitySession::new("run-live-esc")));
+    app.set_running_tool_for_test("threat-model:build");
+    app.set_input_mode(InputMode::Navigate);
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Activity);
+    assert_eq!(app.input_mode(), InputMode::Prompt);
+}
+
+/// `b` leaves the session flagged backgrounded and `activity` reopens that
+/// same session in the foreground. A run that reached its terminal outcome
+/// meanwhile must still let Esc leave: `run_focus_backgrounded` governs
+/// completion auto-return, not the Esc contract of the view being viewed.
+#[test]
+fn reopened_backgrounded_terminal_run_focus_esc_leaves_and_advertises_it() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session("run-bg-esc")));
+    app.set_input_mode(InputMode::Navigate);
+
+    app.background_handoff();
+    assert!(app
+        .activity()
+        .is_some_and(|session| session.run_focus_backgrounded));
+
+    run_command(&mut app, ShellCommand::Activity);
+
+    assert_eq!(app.shell_view(), ShellView::Activity);
+    assert!(app
+        .activity()
+        .is_some_and(|session| session.run_focus_backgrounded));
+    assert!(run_focus_footer_hints(&app).contains("Esc leave"));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+/// The advertised leave key is read from the composed Activity keymap — the
+/// list `handle_view_hotkey` dispatches from — so footer and dispatch cannot
+/// drift apart.
+#[test]
+fn run_focus_leave_hint_key_comes_from_the_dispatched_back_binding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session("run-leave-key")));
+
+    let back_key = app
+        .view_back_key(ShellView::Activity)
+        .expect("Activity offers a back binding");
+
+    assert!(run_focus_footer_hints(&app).contains(&format!("{back_key} leave")));
+}
+
+#[test]
+fn run_focus_footer_advertises_leave_only_after_the_run_is_terminal() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(ActivitySession::new("run-live-footer")));
+    app.set_running_tool_for_test("threat-model:build");
+
+    assert!(!run_focus_footer_hints(&app).contains("Esc leave"));
+
+    app.clear_running_tool_for_test();
+    app.set_activity(Some(failed_terminal_activity_session("run-failed-footer")));
+
+    assert!(run_focus_footer_hints(&app).contains("Esc leave"));
+}
+
+fn run_focus_footer_hints(app: &ShellApp) -> String {
+    let crate::ui_view_models::ActivityViewModel::Active(model) =
+        crate::ui_view_models::activity_view_model(app)
+    else {
+        panic!("expected an active Run Focus model");
+    };
+    model
+        .footer(120)
+        .hints
+        .iter()
+        .map(|hint| format!("{} {}", hint.plain_key_text, hint.plain_hint_text))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 #[test]
 fn taskless_activity_task_keys_log_why_they_do_not_focus() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -18701,12 +18865,11 @@ fn gallery_cycle_skips_pages_without_backing_artifacts() {
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
 }
 
-#[test]
-fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
-    use crate::scene3d::VizPage;
-    let target = tempfile::tempdir().unwrap();
+/// An accepted Map with a persisted threat model: the state where the
+/// embedded gallery owns the Map body and its keys.
+fn seed_ready_map_target(target: &Path, run_id: &str) {
     kuzushi_core::capabilities::save_persistent_threat_model(
-        target.path(),
+        target,
         &serde_json::json!({
             "systemContext": "Operators use Sample to review local records.",
             "dfd": {
@@ -18726,8 +18889,54 @@ fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
         true,
     )
     .unwrap();
-    persist_adequate_test_map_result(target.path(), "map-gallery");
-    persist_selected_test_phase_attempt(target.path(), WorkflowPhase::Map, "map-gallery");
+    persist_adequate_test_map_result(target, run_id);
+    persist_selected_test_phase_attempt(target, WorkflowPhase::Map, run_id);
+}
+
+/// Item: the Map command bar may only name `Tab` while the embedded gallery
+/// owns keys. On an action-required Map, Tab reaches no handler.
+#[test]
+fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
+    let pre_ready_target = tempfile::tempdir().unwrap();
+    let mut pre_ready = ShellApp::new(V2Config::default(), None);
+    pre_ready.set_target(Some(pre_ready_target.path().to_path_buf()));
+    pre_ready.hydrate_all_view_data_for_test();
+    pre_ready.set_workbench_page(WorkbenchPage::Map);
+
+    assert!(!crate::ui_view_models::map_gallery_is_primary(&pre_ready));
+    let hints = map_command_bar_hints(&pre_ready);
+    assert!(!hints.contains("Tab cycle map views"), "{hints}");
+    assert!(hints.contains("z zoom selected view"), "{hints}");
+    assert!(hints.contains("jobs inspect Map runs"), "{hints}");
+
+    let target = tempfile::tempdir().unwrap();
+    seed_ready_map_target(target.path(), "map-hints");
+    let mut ready = ShellApp::new(V2Config::default(), None);
+    ready.set_target(Some(target.path().to_path_buf()));
+    ready.refresh_phase_attempt_projection();
+    ready.hydrate_all_view_data_for_test();
+    ready.set_workbench_page(WorkbenchPage::Map);
+
+    assert!(crate::ui_view_models::map_gallery_is_primary(&ready));
+    let hints = map_command_bar_hints(&ready);
+    assert!(hints.contains("Tab cycle map views"), "{hints}");
+}
+
+fn map_command_bar_hints(app: &ShellApp) -> String {
+    crate::ui_view_models::workbench_presentation_snapshot(app)
+        .chrome
+        .command_bar_hints
+        .iter()
+        .map(|hint| format!("{} {}", hint.verb, hint.label))
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+#[test]
+fn ready_map_embeds_its_gallery_and_zoom_keeps_the_map_tab_scope() {
+    use crate::scene3d::VizPage;
+    let target = tempfile::tempdir().unwrap();
+    seed_ready_map_target(target.path(), "map-gallery");
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.path().to_path_buf()));
