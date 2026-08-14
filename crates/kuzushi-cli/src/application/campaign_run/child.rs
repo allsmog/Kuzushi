@@ -151,7 +151,7 @@ fn log_tail(path: &Path) -> String {
     String::from_utf8_lossy(&bytes[skip..]).to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
