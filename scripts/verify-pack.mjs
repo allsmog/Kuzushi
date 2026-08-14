@@ -25,7 +25,13 @@ const packageOptionalDependencies = recordOrEmpty(manifest.optionalDependencies)
 const packageExports = recordOrEmpty(manifest.exports);
 const omitNative = process.env.KUZUSHI_VERIFY_PACK_OMIT_NATIVE === "1";
 const verifyReleaseAssembly = process.env.KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY === "1";
-const requiredReleaseNativeDirs = ["native/linux-x64", "native/darwin-arm64"];
+const requiredReleaseNativeDirs = [
+  "native/linux-x64",
+  "native/linux-arm64",
+  "native/darwin-x64",
+  "native/darwin-arm64",
+  "native/win32-x64",
+];
 const includes = entries.filter((entry) => !entry.startsWith("!")).filter(isIncludedEntry);
 const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
 const requiredPackageFiles = [

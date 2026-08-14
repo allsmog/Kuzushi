@@ -118,7 +118,7 @@ function checkWorkspaceLockVersions() {
 function checkReleaseInstructions() {
   const instructions = readText("RELEASING.md");
   const staged =
-    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md";
+    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md";
   if (!instructions.includes(staged)) {
     failures.push("RELEASING.md must stage every release-version source and CHANGELOG.md");
   }
@@ -139,19 +139,63 @@ function checkNativeReleaseSmoke() {
 function checkReleaseAssemblyGate() {
   const workflow = readText(".github/workflows/release.yml");
   const packVerifier = readText("scripts/verify-pack.mjs");
-  for (const token of [
-    "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
-    "native/linux-x64",
-    "native/darwin-arm64",
-  ]) {
-    if (!workflow.includes(token) && !packVerifier.includes(token)) {
-      failures.push(`release assembly gate must mention ${token}`);
-    }
+  failures.push(
+    ...releaseAssemblyActivationFailures(workflow),
+    ...nativeReleaseMatrixFailures(workflow),
+    ...requiredReleaseNativeDirFailures(packVerifier),
+  );
+}
+
+function releaseAssemblyActivationFailures(workflow) {
+  const activationFailures = [];
+  if (!workflow.includes("KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY")) {
+    activationFailures.push("release workflow must enable the pack release assembly gate");
   }
   const gatedVerifySteps = workflow.match(/KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY/g)?.length ?? 0;
   if (gatedVerifySteps < 2) {
-    failures.push("npm and GitHub release assembly must both enable the pack release gate");
+    activationFailures.push(
+      "npm and GitHub release assembly must both enable the pack release gate",
+    );
   }
+  return activationFailures;
+}
+
+function requiredReleaseNativeDirFailures(packVerifier) {
+  return [
+    "native/linux-x64",
+    "native/linux-arm64",
+    "native/darwin-x64",
+    "native/darwin-arm64",
+    "native/win32-x64",
+  ]
+    .filter((nativeDir) => !packVerifier.includes(nativeDir))
+    .map((nativeDir) => `release assembly gate must require ${nativeDir}`);
+}
+
+function nativeReleaseMatrixFailures(workflow) {
+  const matrixFailures = [];
+  if (!workflow.includes("timeout-minutes: 90")) {
+    matrixFailures.push("native release jobs must allow the 90-minute cross-platform build budget");
+  }
+  if (workflow.includes("continue-on-error")) {
+    matrixFailures.push("release jobs must not allow supported platform failures");
+  }
+  return [...matrixFailures, ...requiredNativeReleaseMatrixEntryFailures(workflow)];
+}
+
+function requiredNativeReleaseMatrixEntryFailures(workflow) {
+  return [
+    { runner: "ubuntu-latest", slug: "linux-x64" },
+    { runner: "ubuntu-24.04-arm", slug: "linux-arm64" },
+    { runner: "macos-15-intel", slug: "darwin-x64" },
+    { runner: "macos-14", slug: "darwin-arm64" },
+    { runner: "windows-latest", slug: "win32-x64" },
+  ]
+    .filter(
+      ({ runner, slug }) =>
+        !workflow.includes(`          - os: ${runner}\n            slug: ${slug}`),
+    )
+    .map(({ runner, slug }) => `release matrix must include ${slug} on ${runner}`);
 }
 
 function nativePackageFailures() {
