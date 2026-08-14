@@ -87,14 +87,15 @@ fn active_dag_task_eta_secs(app: &ShellApp, session: &ActivitySession) -> Option
     Some(estimate.saturating_sub(elapsed))
 }
 
-/// True when the foreground Run Focus run reached the same terminal outcome
-/// the header reports, so the run can no longer change on its own. A run
-/// still waiting on an operator answer is not terminal, and a backgrounded
-/// session keeps the live contract.
+/// True when the Run Focus run reached the same terminal outcome the header
+/// reports, so the run can no longer change on its own. A run still waiting on
+/// an operator answer is not terminal. Backgrounding is deliberately not part
+/// of this predicate: `run_focus_backgrounded` governs completion auto-return
+/// and focus ownership, and a run the operator is looking at in Run Focus is
+/// terminal whether or not it was ever handed to the background.
 pub(crate) fn run_focus_is_terminal(app: &ShellApp) -> bool {
-    app.activity().is_some_and(|session| {
-        !session.run_focus_backgrounded && activity_outcome_is_terminal(app, session)
-    })
+    app.activity()
+        .is_some_and(|session| activity_outcome_is_terminal(app, session))
 }
 
 fn activity_outcome_is_terminal(app: &ShellApp, session: &ActivitySession) -> bool {
@@ -378,7 +379,7 @@ impl<'a> RunFocusModel<'a> {
             self.app.input_mode(),
         );
         if run_focus_is_terminal(self.app) {
-            push_run_focus_leave_hint(&mut footer);
+            push_run_focus_leave_hint(&mut footer, self.app);
         }
         let footer = resolve_activity_footer_bindings(footer, self.app, width);
         if self.operator_question().is_some() {

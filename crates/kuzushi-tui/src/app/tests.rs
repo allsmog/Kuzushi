@@ -15645,6 +15645,53 @@ fn live_run_focus_esc_keeps_the_composer_mode_toggle() {
     assert_eq!(app.input_mode(), InputMode::Prompt);
 }
 
+/// `b` leaves the session flagged backgrounded and `activity` reopens that
+/// same session in the foreground. A run that reached its terminal outcome
+/// meanwhile must still let Esc leave: `run_focus_backgrounded` governs
+/// completion auto-return, not the Esc contract of the view being viewed.
+#[test]
+fn reopened_backgrounded_terminal_run_focus_esc_leaves_and_advertises_it() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session("run-bg-esc")));
+    app.set_input_mode(InputMode::Navigate);
+
+    app.background_handoff();
+    assert!(app
+        .activity()
+        .is_some_and(|session| session.run_focus_backgrounded));
+
+    run_command(&mut app, ShellCommand::Activity);
+
+    assert_eq!(app.shell_view(), ShellView::Activity);
+    assert!(app
+        .activity()
+        .is_some_and(|session| session.run_focus_backgrounded));
+    assert!(run_focus_footer_hints(&app).contains("Esc leave"));
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+/// The advertised leave key is read from the composed Activity keymap — the
+/// list `handle_view_hotkey` dispatches from — so footer and dispatch cannot
+/// drift apart.
+#[test]
+fn run_focus_leave_hint_key_comes_from_the_dispatched_back_binding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Activity);
+    app.set_activity(Some(failed_terminal_activity_session("run-leave-key")));
+
+    let back_key = app
+        .view_back_key(ShellView::Activity)
+        .expect("Activity offers a back binding");
+
+    assert!(run_focus_footer_hints(&app).contains(&format!("{back_key} leave")));
+}
+
 #[test]
 fn run_focus_footer_advertises_leave_only_after_the_run_is_terminal() {
     let mut app = ShellApp::new(V2Config::default(), None);

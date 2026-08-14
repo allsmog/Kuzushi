@@ -226,10 +226,21 @@ fn footer_hints(session: &ActivitySession) -> Vec<ActivityFooterHint> {
 /// A terminal run can no longer change on its own, so Esc leaves Run Focus
 /// instead of toggling the composer mode this view never shows. Rows are
 /// rewrapped by `resolve_activity_footer_bindings`.
-pub(crate) fn push_run_focus_leave_hint(model: &mut ActivityFooterModel) {
+///
+/// The advertised key is read from the composed Activity keymap — the exact
+/// list `handle_view_hotkey` dispatches through — so footer and dispatch
+/// cannot disagree. The hint therefore carries no `action_id`: the `run_focus`
+/// keymap context exposes no `back` action, so
+/// `keymap_binding_labels("run_focus", …)` has nothing to resolve, and the
+/// composed keymap already carries any override applied to `Back`. A view that
+/// owns Esc itself has no leave key to advertise.
+pub(crate) fn push_run_focus_leave_hint(model: &mut ActivityFooterModel, app: &ShellApp) {
+    let Some(key) = app.view_back_key(crate::ShellView::Activity) else {
+        return;
+    };
     model
         .hints
-        .push(ActivityFooterHint::new("Esc", "leave", None));
+        .push(ActivityFooterHint::new(key, "leave", None));
 }
 
 fn fit(value: &str, width: usize) -> String {
