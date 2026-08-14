@@ -56,16 +56,30 @@ mod tests {
         trace.step("tool", "scan", "started").emit();
         trace.run_observation().unwrap().flush().unwrap();
 
-        let delivered = hub
-            .drain(32)
-            .into_iter()
-            .find(|event| matches!(event, ShellEvent::RunItem(_)))
-            .expect("typed lifecycle item should be delivered live");
+        let delivered = wait_for_live_run_item(&mut hub);
         let items_path =
             kuzushi_core::run_artifacts::run_dir(temp.path(), "scan-trace").join("items.jsonl");
         let persisted = std::fs::read_to_string(items_path).unwrap();
 
         assert!(matches!(delivered, ShellEvent::RunItem(_)));
         assert!(persisted.contains("diagnostic_notice"), "{persisted}");
+    }
+
+    fn wait_for_live_run_item(hub: &mut JobHub) -> ShellEvent {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(event) = hub
+                .drain(32)
+                .into_iter()
+                .find(|event| matches!(event, ShellEvent::RunItem(_)))
+            {
+                return event;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "typed lifecycle item should be delivered live"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
     }
 }

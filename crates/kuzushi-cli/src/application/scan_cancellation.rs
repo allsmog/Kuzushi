@@ -161,7 +161,14 @@ mod tests {
 
         assert_eq!(output["status"], "canceled");
         assert_eq!(output["ok"], false);
+        assert_eq!(output["summary"], "operator canceled headless scan");
         assert_terminal_truth(target.path(), "scan-canceled", RunItemStatus::Canceled);
+    }
+
+    #[tokio::test]
+    async fn signal_watcher_installs_when_runtime_is_available() {
+        let watcher = ScanSignalWatcher::install(ScanCancellation::default());
+        assert!(watcher.is_some());
     }
 
     #[test]

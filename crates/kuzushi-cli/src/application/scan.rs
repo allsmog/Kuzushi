@@ -1071,11 +1071,11 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        emit_scan_patch_validation_disclosure, execute_scan_tool, finish_completed_scan,
-        record_failed_scan_execution, scan_gate_ids, scan_scope_body, scan_semantic_error,
-        settle_apk_scan, settle_scan_cancellation_observed, settle_scan_dispatch,
-        write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish, ScanGatePolicy,
-        ScanToolExecution,
+        apply_semantic_failure_gate_policy, emit_scan_patch_validation_disclosure,
+        execute_scan_tool, finish_completed_scan, record_failed_scan_execution, scan_gate_ids,
+        scan_scope_body, scan_semantic_error, settle_apk_scan, settle_scan_cancellation_observed,
+        settle_scan_dispatch, write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish,
+        ScanGatePolicy, ScanToolExecution,
     };
     use crate::application::run_exit::RunCommandExit;
     use kuzushi_core::run_artifacts::{
@@ -1278,6 +1278,31 @@ mod tests {
             !sarif.exists(),
             "SARIF export must not run after cancellation"
         );
+    }
+
+    #[test]
+    fn semantic_failure_gate_attempts_requested_sarif_export() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let blocked_parent = target.path().join("not-a-directory");
+        std::fs::write(&blocked_parent, "blocks SARIF parent creation").unwrap();
+        let gate = ScanGatePolicy {
+            fail_on: None,
+            sarif: Some(blocked_parent.join("report.sarif")),
+        };
+        let finish = ScanFinish {
+            workspace: &workspace,
+            store: &store,
+            fallback_run_id: "semantic-failure",
+            json: true,
+            ci: false,
+            started: std::time::Instant::now(),
+            gate: &gate,
+        };
+
+        apply_semantic_failure_gate_policy(&finish, &["semantic-failure".to_string()])
+            .expect_err("semantic failure must still attempt requested SARIF export");
     }
 
     #[test]
