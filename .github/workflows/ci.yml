@@ -37,6 +37,11 @@ env:
   # Run JS-based actions on Node 24 ahead of the June 2026 default flip
   # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  # Full-workspace test binaries otherwise exhaust hosted-runner storage.
+  # Source-based LLVM coverage does not depend on DWARF debug symbols.
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   # ── Shared install: warms the pnpm store cache for dependent jobs ─────────
