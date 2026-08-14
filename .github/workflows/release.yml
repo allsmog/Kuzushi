@@ -21,7 +21,7 @@ env:
 jobs:
   # ── Gate: require the complete default product contract ──────────────────
   ci:
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/ci-full.yml
     with:
       quality_base_ref: HEAD^
     permissions:

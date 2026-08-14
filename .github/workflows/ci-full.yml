@@ -1,0 +1,299 @@
+name: Full CI
+
+on:
+  # One deliberate full run per week catches platform and deep-quality drift
+  # without charging every intermediate PR commit for the complete matrix.
+  schedule:
+    - cron: "17 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      quality_base_ref:
+        description: Explicit Git base for changed-code quality gates
+        required: false
+        type: string
+        default: ""
+
+# A full run is deliberate. Serialize it by ref without coupling it to the
+# lightweight PR workflow.
+concurrency:
+  group: ci-full-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "26.3.1"
+  PYTHON_VERSION: "3.12"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  # Fail fast before starting the expensive cross-platform fan-out.
+  quality-gauntlet:
+    name: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Lint GitHub Actions workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+      - name: Reject newly introduced Anthropic-shaped credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          pattern='sk-ant-(api|oat)[0-9]+-[A-Za-z0-9_-]{20,}'
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            matches=$(git diff origin/main..HEAD --unified=0 --no-color | \
+              grep -E '^\+' | grep -E "$pattern" || true)
+          else
+            matches=$(grep -rEn --color=never \
+              --exclude-dir=node_modules \
+              --exclude-dir=dist \
+              --exclude-dir=.git \
+              --exclude-dir=generated \
+              "$pattern" . || true)
+          fi
+          if [ -n "$matches" ]; then
+            echo "::error::Anthropic-shaped credential pattern found:"
+            echo "$matches"
+            exit 1
+          fi
+      - name: Configure upstream contract remote
+        run: |
+          git remote get-url upstream-codex >/dev/null 2>&1 || \
+            git remote add upstream-codex https://github.com/openai/codex.git
+      - name: Run quick repository contract
+        env:
+          KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm verify:quick:summary
+
+  # These jobs exist only in this full workflow, which cannot be triggered by
+  # pull_request or push events.
+  rust-core:
+    name: rust-core
+    needs: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - run: bash scripts/check-public-rust-core.sh
+
+  windows-compile:
+    name: windows-compile
+    needs: quality-gauntlet
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - run: cargo check --workspace --all-targets --locked
+      - run: "cargo test -p kuzushi-core worker_protocol::jsonl:: --locked"
+
+  cargo-deny:
+    name: cargo-deny
+    needs: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses bans sources
+
+  rust-cli:
+    name: rust-cli
+    needs: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - uses: ./.github/actions/install-patch-validation-sandbox
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - run: cargo test --workspace --locked
+      - run: pnpm test:performance
+      - run: cargo build --workspace --locked
+      - run: node scripts/build-native-runtime.mjs
+      - name: Upload native artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-linux-x64
+          path: native/
+          if-no-files-found: error
+          retention-days: 7
+
+  coverage:
+    name: coverage
+    needs: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - name: Install coverage tool
+        run: cargo install cargo-llvm-cov --version 0.8.7 --locked
+      - uses: ./.github/actions/install-patch-validation-sandbox
+      - name: Enforce measured coverage
+        env:
+          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm test:coverage
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: rust-coverage
+          path: target/llvm-cov/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  mutation:
+    name: mutation
+    needs: quality-gauntlet
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - uses: ./.github/actions/install-patch-validation-sandbox
+      - name: Install mutation tool
+        run: cargo install cargo-mutants --version 27.1.0 --locked
+      - name: Require sampled changed mutants to be caught
+        env:
+          KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
+        run: pnpm test:mutations
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mutation-results
+          path: target/mutation/
+          if-no-files-found: error
+          retention-days: 7
+
+  node22-compat:
+    name: node22-compat
+    needs: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.11.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+          path: native/
+      - run: chmod -R +x native/
+      - run: pnpm test
+      - run: pnpm verify:pack
+
+  verify-pack:
+    name: verify-pack
+    needs: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+          path: native/
+      - run: chmod -R +x native/
+      - run: pnpm verify:pack
+
+  e2e:
+    name: e2e
+    needs: rust-cli
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: .github/requirements-ci.txt
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install semgrep (pip, cached)
+        run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-linux-x64
+          path: native/
+      - name: Run smoke tests against native CLI
+        env:
+          KUZUSHI_CMD: node bin/kuzushi-rs.mjs
+        run: pnpm test:e2e

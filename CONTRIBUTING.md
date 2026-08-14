@@ -23,6 +23,22 @@ Linux bubblewrap/AppArmor setup, and artifact transfer are
 matrix/infrastructure checks and remain CI-only; the receipt lists those
 exceptions explicitly.
 
+Pull requests run one fail-fast Linux quality gauntlet when they are opened,
+reopened, or marked ready for review. Pushing more commits does not start more
+runs; use the manual command below when you deliberately need fresh results.
+Merge-queue candidates and pushes to `main` also get one quick pass. The quick
+workflow contains no cross-platform or deep-quality jobs, so ordinary PR events
+cannot instantiate that paid fan-out. The full suite runs weekly, before every
+tagged release, or when deliberately requested for a branch:
+
+```sh
+gh workflow run ci-full.yml --ref <branch>
+```
+
+Use a full run before merging platform, packaging, release, coverage-policy, or
+mutation-policy changes. For an ordinary PR, run the quick local contract after
+intermediate pushes; marking a draft ready requests the hosted quick gate once.
+
 Requires Rust 1.96.1 (including rustfmt and Clippy) and Node 22+. The repo has
 `rust-toolchain.toml`, `.nvmrc`, and `.tool-versions` so `rustup`, `nvm use`,
 `asdf install`, and `mise install` all pick up the right version

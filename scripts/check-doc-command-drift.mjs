@@ -413,7 +413,7 @@ function canonicalParityTestFailures() {
 
 function canonicalDependencyPolicyFailures() {
   const contributing = readFileSync(path.join(repo, "CONTRIBUTING.md"), "utf8");
-  const workflow = readFileSync(path.join(repo, ".github/workflows/ci.yml"), "utf8");
+  const workflow = readFileSync(path.join(repo, ".github/workflows/ci-full.yml"), "utf8");
   const policy = readFileSync(path.join(repo, "deny.toml"), "utf8");
   return [
     requiredDocTextFailure(
@@ -423,7 +423,7 @@ function canonicalDependencyPolicyFailures() {
       "complete dependency policy command",
     ),
     requiredDocTextFailure(
-      ".github/workflows/ci.yml",
+      ".github/workflows/ci-full.yml",
       workflow,
       "command: check advisories licenses bans sources",
       "complete dependency policy command",

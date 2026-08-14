@@ -11,7 +11,7 @@
 // verify-pack.mjs: those gates run directly in CI, and their own behavior is
 // the check. Package.json packaging policy lives in scripts/verify-pack.mjs.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const repo = process.cwd();
@@ -117,12 +117,23 @@ const rustArtifactSpecChecks = [
 
 // CI must stay wired to the gate entry points; the gates themselves are the
 // behavior check, so only the wiring is asserted here.
-const ciRequirements = [
-  "pnpm quality:crap-risk",
-  "pnpm quality:identity",
-  "pnpm quality:architecture",
-  "pnpm quality:model-safety",
-  "pnpm check:docs",
+const quickCiRequirements = [
+  "pnpm verify:quick:summary",
+  "rhysd/actionlint:1.7.12",
+  "quality-gauntlet:",
+  "types: [opened, reopened, ready_for_review]",
+  "github.event.pull_request.draft == false",
+  "workflow_call:",
+  "KUZUSHI_CRAP_RISK_BASE_REF",
+  "fetch-depth: 0",
+];
+
+const fullCiRequirements = [
+  "name: Full CI",
+  "schedule:",
+  "workflow_dispatch:",
+  "workflow_call:",
+  "pnpm verify:quick:summary",
   "pnpm test:coverage",
   "pnpm test:mutations",
   "rhysd/actionlint:1.7.12",
@@ -150,15 +161,45 @@ const releaseRequirements = [
   "npm pack --ignore-scripts",
   "node scripts/build-native-runtime.mjs",
   "moonrepo/setup-rust@v1",
+  "uses: ./.github/workflows/ci-full.yml",
+];
+
+const heavyCiJobs = [
+  "rust-core",
+  "windows-compile",
+  "cargo-deny",
+  "rust-cli",
+  "coverage",
+  "mutation",
+  "node22-compat",
+  "verify-pack",
+  "e2e",
+];
+
+const retiredStandaloneCiWorkflows = [
+  ".github/workflows/actionlint.yml",
+  ".github/workflows/secret-scan.yml",
 ];
 
 const failures = [
   ...checkUpstreamCodexRemote(),
   ...requiredDocs.flatMap(checkFileNeedles),
   ...rustArtifactSpecChecks.flatMap(checkFileNeedles),
-  ...checkNeedles(".github/workflows/ci.yml", ciRequirements),
+  ...checkNeedles(".github/workflows/ci.yml", quickCiRequirements),
+  ...checkNeedles(".github/workflows/ci-full.yml", fullCiRequirements),
   ...checkNeedles(".github/workflows/release.yml", releaseRequirements),
-  ...checkForbiddenNeedles(".github/workflows/ci.yml", ["**/*.md", "docs/**"]),
+  ...checkForbiddenNeedles(".github/workflows/ci.yml", [
+    "**/*.md",
+    "docs/**",
+    "schedule:",
+    "synchronize",
+    ...heavyCiJobs.map((job) => `  ${job}:\n`),
+  ]),
+  ...checkForbiddenNeedles(".github/workflows/ci-full.yml", ["pull_request:", "push:"]),
+  ...heavyCiJobs.flatMap((job) =>
+    checkWorkflowJobNeedles(".github/workflows/ci-full.yml", job, []),
+  ),
+  ...retiredStandaloneCiWorkflows.flatMap(checkFileAbsent),
   ...checkNoWholesaleCodexSubtree(),
 ];
 
@@ -201,6 +242,23 @@ function checkForbiddenNeedles(file, needles) {
   return needles
     .filter((needle) => source.includes(needle))
     .map((needle) => `${file} must not mention forbidden token ${needle}`);
+}
+
+function checkWorkflowJobNeedles(file, job, needles) {
+  const source = readFileSync(path.join(repo, file), "utf8");
+  const marker = `  ${job}:\n`;
+  const start = source.indexOf(marker);
+  if (start < 0) return [`${file} does not define job ${job}`];
+  const tail = source.slice(start + marker.length);
+  const nextJob = tail.search(/^ {2}[a-zA-Z0-9_-]+:\n/m);
+  const jobSource = nextJob < 0 ? tail : tail.slice(0, nextJob);
+  return needles
+    .filter((needle) => !jobSource.includes(needle))
+    .map((needle) => `${file} job ${job} does not mention ${needle}`);
+}
+
+function checkFileAbsent(file) {
+  return existsSync(path.join(repo, file)) ? [`${file} duplicates the default CI runner`] : [];
 }
 
 function checkNoWholesaleCodexSubtree() {
