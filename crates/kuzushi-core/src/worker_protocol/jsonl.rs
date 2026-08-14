@@ -116,7 +116,7 @@ pub(super) fn verified_jsonl_file_len(
     let path_metadata = fs::symlink_metadata(path).map_err(|error| read_error(path, error))?;
     ensure_regular_path(path, &path_metadata, limits)?;
     let handle_metadata = file.metadata().map_err(|error| read_error(path, error))?;
-    ensure_same_file(&path_metadata, &handle_metadata, limits)?;
+    ensure_same_file(path, &path_metadata, file, &handle_metadata, limits)?;
     ensure_file_size(handle_metadata.len(), limits)?;
     Ok(handle_metadata.len())
 }
@@ -148,11 +148,15 @@ fn ensure_file_size(bytes: u64, limits: JsonlLimits) -> Result<(), KwpError> {
 }
 
 fn ensure_same_file(
-    path: &Metadata,
-    handle: &Metadata,
+    path: &Path,
+    path_metadata: &Metadata,
+    handle: &File,
+    handle_metadata: &Metadata,
     limits: JsonlLimits,
 ) -> Result<(), KwpError> {
-    if file_identity(path) == file_identity(handle) {
+    let same_file = same_file(path, path_metadata, handle, handle_metadata)
+        .map_err(|error| read_error(path, error))?;
+    if same_file {
         Ok(())
     } else {
         Err(KwpError::denied(format!("{}.identity", limits.resource)))
@@ -160,20 +164,38 @@ fn ensure_same_file(
 }
 
 #[cfg(unix)]
-fn file_identity(metadata: &Metadata) -> (u64, u64) {
+fn same_file(
+    _path: &Path,
+    path_metadata: &Metadata,
+    _handle: &File,
+    handle_metadata: &Metadata,
+) -> std::io::Result<bool> {
     use std::os::unix::fs::MetadataExt;
-    (metadata.dev(), metadata.ino())
+    Ok((path_metadata.dev(), path_metadata.ino())
+        == (handle_metadata.dev(), handle_metadata.ino()))
 }
 
 #[cfg(windows)]
-fn file_identity(metadata: &Metadata) -> (Option<u32>, Option<u64>) {
-    use std::os::windows::fs::MetadataExt;
-    (metadata.volume_serial_number(), metadata.file_index())
+fn same_file(
+    path: &Path,
+    _path_metadata: &Metadata,
+    handle: &File,
+    _handle_metadata: &Metadata,
+) -> std::io::Result<bool> {
+    let path_file = super::open_fs_read_no_follow(path)?;
+    Ok(crate::file_lock::windows_file_identity(&path_file)?
+        == crate::file_lock::windows_file_identity(handle)?)
 }
 
 #[cfg(not(any(unix, windows)))]
-fn file_identity(metadata: &Metadata) -> (u64, Option<std::time::SystemTime>) {
-    (metadata.len(), metadata.modified().ok())
+fn same_file(
+    _path: &Path,
+    path_metadata: &Metadata,
+    _handle: &File,
+    handle_metadata: &Metadata,
+) -> std::io::Result<bool> {
+    Ok((path_metadata.len(), path_metadata.modified().ok())
+        == (handle_metadata.len(), handle_metadata.modified().ok()))
 }
 
 fn read_error(path: &Path, error: std::io::Error) -> KwpError {

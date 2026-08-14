@@ -61,7 +61,7 @@ fn open_bounded_jsonl(
     ensure_file_size(path_metadata.len(), limits)?;
     let file = open_fs_read_no_follow(path).map_err(|error| read_error(path, error))?;
     let handle_metadata = file.metadata().map_err(|error| read_error(path, error))?;
-    ensure_same_file(&path_metadata, &handle_metadata, limits)?;
+    ensure_same_file(path, &path_metadata, &file, &handle_metadata, limits)?;
     ensure_file_size(handle_metadata.len(), limits)?;
     Ok(Some(file))
 }

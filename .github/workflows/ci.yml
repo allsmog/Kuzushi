@@ -127,6 +127,22 @@ jobs:
       - name: rustfmt
         run: cargo fmt --all --check
 
+  # Windows-only std and filesystem APIs must compile before a release tag.
+  # The release matrix still executes the packaged runtime on Windows; this
+  # lane moves source compatibility into the ordinary required CI contract.
+  windows-compile:
+    name: windows-compile
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: moonrepo/setup-rust@v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - run: cargo check --workspace --all-targets --locked
+      - run: cargo test -p kuzushi-core worker_protocol::jsonl:: --locked
+
   # ── Dependency advisories, license policy, duplicate bans ────────────────
   cargo-deny:
     name: cargo-deny
@@ -367,6 +383,7 @@ jobs:
       - lint
       - rust-core
       - rust-lint
+      - windows-compile
       - cargo-deny
       - rust-cli
       - node22-compat
@@ -383,6 +400,7 @@ jobs:
           LINT: ${{ needs.lint.result }}
           RUST_CORE: ${{ needs.rust-core.result }}
           RUST_LINT: ${{ needs.rust-lint.result }}
+          WINDOWS_COMPILE: ${{ needs.windows-compile.result }}
           CARGO_DENY: ${{ needs.cargo-deny.result }}
           RUST_CLI: ${{ needs.rust-cli.result }}
           NODE22: ${{ needs.node22-compat.result }}
@@ -395,7 +413,7 @@ jobs:
           set -euo pipefail
           failed=0
           for gate in \
-            LINT RUST_CORE RUST_LINT CARGO_DENY RUST_CLI NODE22 NODE_TESTS \
+            LINT RUST_CORE RUST_LINT WINDOWS_COMPILE CARGO_DENY RUST_CLI NODE22 NODE_TESTS \
             COVERAGE MUTATION PACK E2E; do
             result="${!gate}"
             if [ "${result}" != "success" ]; then

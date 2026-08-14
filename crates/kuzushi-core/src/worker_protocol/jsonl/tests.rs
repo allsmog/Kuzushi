@@ -2,6 +2,23 @@ use super::*;
 use serde_json::{json, Value};
 
 #[test]
+fn verified_length_rejects_a_replaced_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("events.jsonl");
+    let displaced = temp.path().join("displaced.jsonl");
+    fs::write(&path, b"{}\n").unwrap();
+    let file = File::open(&path).unwrap();
+    fs::rename(&path, displaced).unwrap();
+    fs::write(&path, b"{}\n").unwrap();
+    let limits = JsonlLimits::testing("test.log", 8, 2, 4, 8);
+
+    assert_eq!(
+        verified_jsonl_file_len(&file, &path, limits).unwrap_err(),
+        KwpError::denied("test.log.identity")
+    );
+}
+
+#[test]
 fn exact_file_and_record_boundaries_succeed() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("events.jsonl");

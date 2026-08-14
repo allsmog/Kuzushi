@@ -5,6 +5,19 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.11 — Windows-native release repair
+
+**Fixed:**
+
+- Windows-native builds now keep `OsStrExt` in scope where paths are encoded
+  for atomic run-history publication.
+- JSONL path/handle verification on Windows reuses Kuzushi's stable Win32 file
+  identity adapter instead of unstable standard-library metadata methods,
+  preserving replacement detection without weakening the security boundary.
+- Required CI now compiles the complete Windows workspace and runs the focused
+  JSONL contract before a release tag, so Windows-only source regressions fail
+  the quality gauntlet during pull-request validation.
+
 ## v0.24.0-alpha.10 — public CPG, durable cancellation, complete release gates
 
 **Additive:**
