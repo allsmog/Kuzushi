@@ -1,17 +1,14 @@
 //! One campaign job = one bounded `kuzushi run` child process.
 //!
-//! Children run in a guarded process group (`PreparedProcessGroup`) so a
-//! per-job timeout (or a dispatcher shutdown) can kill the whole tree — a
-//! scanner subprocess must never outlive its job. The guard's lifeline pipe
-//! also covers abrupt dispatcher death: if the dispatcher is SIGKILLed, the
-//! kernel closes the pipe and the guard SIGKILLs the group, so job children
-//! are never orphaned. Because group membership detaches children from the
-//! terminal's Ctrl+C, the dispatcher forwards shutdown kills explicitly.
+//! Children run through the shared scan cancellation registry so a per-job
+//! timeout (or dispatcher shutdown) kills the whole tree. Unix uses a guarded
+//! process group with a parent-death lifeline; Windows uses a kill-on-close Job
+//! Object. A scanner subprocess must never outlive its campaign job.
 
 use super::budget::LiveSpendPoller;
 use super::policy::{budget_exhausted, JobOutcome};
 use anyhow::{Context, Result};
-use kuzushi_core::scan::PreparedProcessGroup;
+use kuzushi_core::scan::{PreparedProcessGroup, RegisteredChild, ScanCancellation};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -33,6 +30,7 @@ pub(super) struct ChildSpec {
 /// one model call costs cents to dollars, so second-scale polling bounds the
 /// overshoot to roughly one in-flight call.
 const BUDGET_POLL: Duration = Duration::from_secs(2);
+const CHILD_STATUS_POLL: Duration = Duration::from_millis(50);
 
 pub(super) struct ChildReport {
     pub(super) outcome: JobOutcome,
@@ -46,54 +44,19 @@ pub(super) struct ChildReport {
 /// child so no zombie survives the dispatcher.
 pub(super) async fn run_child(
     spec: &ChildSpec,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<ChildReport> {
     let log = std::fs::File::create(&spec.log_path)
         .with_context(|| format!("Could not create {}", spec.log_path.display()))?;
     let (mut command, group) = child_command(spec, log)?;
-    let mut child = command
+    let child = command
         .spawn()
         .with_context(|| format!("Could not spawn {}", spec.binary.display()))?;
-    let group_pid = group.process_group_id().or_else(|| child.id());
-    let timeout = tokio::time::sleep(spec.timeout);
-    tokio::pin!(timeout);
-    let mut spend_poller = LiveSpendPoller::new(&spec.target, &spec.run_id);
-    let mut poll = tokio::time::interval(BUDGET_POLL);
-    poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let outcome = loop {
-        tokio::select! {
-            status = child.wait() => {
-                let code = status.context("Could not reap job child")?.code();
-                break (JobOutcome::from_exit_code(code), code);
-            }
-            _ = &mut timeout => {
-                kill_process_group(group_pid).await;
-                let _ = child.wait().await;
-                break (JobOutcome::TimedOut, None);
-            }
-            _ = shutdown.changed() => {
-                kill_process_group(group_pid).await;
-                let _ = child.wait().await;
-                break (JobOutcome::Interrupted, None);
-            }
-            _ = poll.tick(), if spec.job_budget_usd.is_some() => {
-                let spent = spend_poller.poll();
-                if budget_exhausted(spent, spec.job_budget_usd) {
-                    eprintln!(
-                        "campaign: job run {} crossed its ${:.2} job budget (live spend ${spent:.2}) — stopping it",
-                        spec.run_id,
-                        spec.job_budget_usd.unwrap_or_default(),
-                    );
-                    kill_process_group(group_pid).await;
-                    let _ = child.wait().await;
-                    break (JobOutcome::OverBudget, None);
-                }
-            }
-        }
-    };
-    // Dropping the guard closes its lifeline and SIGKILLs the (now mostly
-    // empty) group, sweeping any scanner stragglers the job left behind.
-    drop(group);
+    let cancellation = ScanCancellation::default();
+    let child = cancellation
+        .register_prepared_child(child, group)
+        .context("Could not supervise campaign job child")?;
+    let outcome = supervise_child(&child, spec, shutdown).await?;
     Ok(ChildReport {
         outcome: outcome.0,
         exit_code: outcome.1,
@@ -101,10 +64,57 @@ pub(super) async fn run_child(
     })
 }
 
+async fn supervise_child(
+    child: &RegisteredChild,
+    spec: &ChildSpec,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Result<(JobOutcome, Option<i32>)> {
+    let timeout = tokio::time::sleep(spec.timeout);
+    tokio::pin!(timeout);
+    let mut spend_poller = LiveSpendPoller::new(&spec.target, &spec.run_id);
+    let mut spend_poll = tokio::time::interval(BUDGET_POLL);
+    spend_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut status_poll = tokio::time::interval(CHILD_STATUS_POLL);
+    loop {
+        tokio::select! {
+            _ = status_poll.tick() => {
+                if let Some(status) = child.try_wait().context("Could not poll job child")? {
+                    let code = status.code();
+                    return Ok((JobOutcome::from_exit_code(code), code));
+                }
+            }
+            _ = &mut timeout => {
+                return stop_child(child, JobOutcome::TimedOut);
+            }
+            _ = shutdown.changed() => {
+                return stop_child(child, JobOutcome::Interrupted);
+            }
+            _ = spend_poll.tick(), if spec.job_budget_usd.is_some() => {
+                let spent = spend_poller.poll();
+                if budget_exhausted(spent, spec.job_budget_usd) {
+                    eprintln!(
+                        "campaign: job run {} crossed its ${:.2} job budget (live spend ${spent:.2}) — stopping it",
+                        spec.run_id,
+                        spec.job_budget_usd.unwrap_or_default(),
+                    );
+                    return stop_child(child, JobOutcome::OverBudget);
+                }
+            }
+        }
+    }
+}
+
+fn stop_child(child: &RegisteredChild, outcome: JobOutcome) -> Result<(JobOutcome, Option<i32>)> {
+    child
+        .kill_and_wait()
+        .context("Could not stop campaign job child")?;
+    Ok((outcome, None))
+}
+
 fn child_command(
     spec: &ChildSpec,
     log: std::fs::File,
-) -> Result<(tokio::process::Command, PreparedProcessGroup)> {
+) -> Result<(std::process::Command, PreparedProcessGroup)> {
     let log_err = log.try_clone().context("Could not clone job log handle")?;
     let mut command = std::process::Command::new(&spec.binary);
     command
@@ -122,23 +132,7 @@ fn child_command(
         .stderr(Stdio::from(log_err));
     let group = PreparedProcessGroup::configure(&mut command)
         .context("Could not prepare the job process group guard")?;
-    let mut command = tokio::process::Command::from(command);
-    command.kill_on_drop(true);
     Ok((command, group))
-}
-
-/// SIGKILL the child's whole guarded process group (the guard's pid is the
-/// pgid). Uses /bin/kill so we need no signal-crate dependency.
-async fn kill_process_group(pid: Option<u32>) {
-    let Some(pid) = pid else {
-        return;
-    };
-    let _ = tokio::process::Command::new("kill")
-        .arg("-9")
-        .arg("--")
-        .arg(format!("-{pid}"))
-        .status()
-        .await;
 }
 
 const LOG_TAIL_BYTES: u64 = 16 * 1024;

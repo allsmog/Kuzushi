@@ -3185,6 +3185,7 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
     finding
 }
 
+#[cfg(unix)]
 fn seed_completed_detector_run(repo: &std::path::Path, run_id: &str, tool: &str) {
     let record = kuzushi_core::run_artifacts::ToolRunRecord::new(repo, run_id, "tool", tool);
     kuzushi_core::run_artifacts::record_tool_run_started(
