@@ -113,10 +113,9 @@ pub(super) fn verified_jsonl_file_len(
     path: &Path,
     limits: JsonlLimits,
 ) -> Result<u64, KwpError> {
-    let path_metadata = fs::symlink_metadata(path).map_err(|error| read_error(path, error))?;
-    ensure_regular_path(path, &path_metadata, limits)?;
     let handle_metadata = file.metadata().map_err(|error| read_error(path, error))?;
-    ensure_same_file(path, &path_metadata, file, &handle_metadata, limits)?;
+    ensure_regular_path(path, &handle_metadata, limits)?;
+    ensure_same_file(path, file, &handle_metadata, limits)?;
     ensure_file_size(handle_metadata.len(), limits)?;
     Ok(handle_metadata.len())
 }
@@ -149,13 +148,11 @@ fn ensure_file_size(bytes: u64, limits: JsonlLimits) -> Result<(), KwpError> {
 
 fn ensure_same_file(
     path: &Path,
-    path_metadata: &Metadata,
     handle: &File,
     handle_metadata: &Metadata,
     limits: JsonlLimits,
 ) -> Result<(), KwpError> {
-    let same_file = same_file(path, path_metadata, handle, handle_metadata)
-        .map_err(|error| read_error(path, error))?;
+    let same_file = same_file(path, handle, handle_metadata, limits)?;
     if same_file {
         Ok(())
     } else {
@@ -165,12 +162,15 @@ fn ensure_same_file(
 
 #[cfg(unix)]
 fn same_file(
-    _path: &Path,
-    path_metadata: &Metadata,
+    path: &Path,
     _handle: &File,
     handle_metadata: &Metadata,
-) -> std::io::Result<bool> {
+    limits: JsonlLimits,
+) -> Result<bool, KwpError> {
     use std::os::unix::fs::MetadataExt;
+
+    let path_metadata = fs::symlink_metadata(path).map_err(|error| read_error(path, error))?;
+    ensure_regular_path(path, &path_metadata, limits)?;
     Ok((path_metadata.dev(), path_metadata.ino())
         == (handle_metadata.dev(), handle_metadata.ino()))
 }
@@ -178,24 +178,58 @@ fn same_file(
 #[cfg(windows)]
 fn same_file(
     path: &Path,
-    _path_metadata: &Metadata,
     handle: &File,
     _handle_metadata: &Metadata,
-) -> std::io::Result<bool> {
-    let path_file = super::open_fs_read_no_follow(path)?;
-    Ok(crate::file_lock::windows_file_identity(&path_file)?
-        == crate::file_lock::windows_file_identity(handle)?)
+    limits: JsonlLimits,
+) -> Result<bool, KwpError> {
+    let path_file = open_jsonl_read_no_follow(path).map_err(|error| read_error(path, error))?;
+    let path_metadata = path_file
+        .metadata()
+        .map_err(|error| read_error(path, error))?;
+    ensure_regular_path(path, &path_metadata, limits)?;
+    Ok(crate::file_lock::windows_file_identity(&path_file)
+        .map_err(|error| read_error(path, error))?
+        == crate::file_lock::windows_file_identity(handle)
+            .map_err(|error| read_error(path, error))?)
 }
 
 #[cfg(not(any(unix, windows)))]
 fn same_file(
-    _path: &Path,
-    path_metadata: &Metadata,
+    path: &Path,
     _handle: &File,
     handle_metadata: &Metadata,
-) -> std::io::Result<bool> {
+    limits: JsonlLimits,
+) -> Result<bool, KwpError> {
+    let path_metadata = fs::symlink_metadata(path).map_err(|error| read_error(path, error))?;
+    ensure_regular_path(path, &path_metadata, limits)?;
     Ok((path_metadata.len(), path_metadata.modified().ok())
         == (handle_metadata.len(), handle_metadata.modified().ok()))
+}
+
+#[cfg(windows)]
+fn open_jsonl_read_no_follow(path: &Path) -> std::io::Result<File> {
+    use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+    };
+
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let attributes = file.metadata()?.file_attributes();
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "refusing to follow JSONL reparse point",
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(windows))]
+fn open_jsonl_read_no_follow(path: &Path) -> std::io::Result<File> {
+    super::open_fs_read_no_follow(path)
 }
 
 fn read_error(path: &Path, error: std::io::Error) -> KwpError {

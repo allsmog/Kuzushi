@@ -1,10 +1,10 @@
 use super::{
-    ensure_file_size, ensure_regular_path, ensure_same_file, read_error, JsonlLimits, KwpError,
+    ensure_file_size, ensure_regular_path, open_jsonl_read_no_follow, read_error, JsonlLimits,
+    KwpError,
 };
-use crate::worker_protocol::open_fs_read_no_follow;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
@@ -47,8 +47,11 @@ fn open_bounded_jsonl(
     limits: JsonlLimits,
     missing: MissingFile,
 ) -> Result<Option<File>, KwpError> {
-    let path_metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
+    // The opened handle is the validation boundary. Unix uses O_NOFOLLOW and
+    // Windows opens the reparse point itself before rejecting it, so no path
+    // metadata gathered before open is trusted to describe the bytes we read.
+    let file = match open_jsonl_read_no_follow(path) {
+        Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return match missing {
                 MissingFile::Empty => Ok(None),
@@ -57,11 +60,8 @@ fn open_bounded_jsonl(
         }
         Err(error) => return Err(read_error(path, error)),
     };
-    ensure_regular_path(path, &path_metadata, limits)?;
-    ensure_file_size(path_metadata.len(), limits)?;
-    let file = open_fs_read_no_follow(path).map_err(|error| read_error(path, error))?;
     let handle_metadata = file.metadata().map_err(|error| read_error(path, error))?;
-    ensure_same_file(path, &path_metadata, &file, &handle_metadata, limits)?;
+    ensure_regular_path(path, &handle_metadata, limits)?;
     ensure_file_size(handle_metadata.len(), limits)?;
     Ok(Some(file))
 }
@@ -212,5 +212,29 @@ fn add_decoded_size<T: Serialize>(
         Err(limits.quota("decoded.bytes"))
     } else {
         Ok(next)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn bounded_reader_stays_bound_to_the_handle_after_path_replacement() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("events.jsonl");
+        let displaced = temp.path().join("displaced.jsonl");
+        std::fs::write(&path, b"{\"source\":\"original\"}\n").unwrap();
+        let limits = JsonlLimits::testing("test.log", 64, 2, 32, 64);
+        let file = open_bounded_jsonl(&path, limits, MissingFile::Error)
+            .unwrap()
+            .unwrap();
+
+        std::fs::rename(&path, displaced).unwrap();
+        std::fs::write(&path, b"{\"source\":\"replacement\"}\n").unwrap();
+
+        let records = decode_jsonl::<Value>(file, &path, limits).unwrap();
+        assert_eq!(records, vec![json!({ "source": "original" })]);
     }
 }
