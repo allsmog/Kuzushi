@@ -24,6 +24,12 @@ if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
   exit 2
 fi
 
+# cargo-mutants runs tests from a source copy without `.git`. Preserve the
+# build identity that normal Cargo builds obtain through kuzushi-core/build.rs
+# so checkpoint and lifecycle tests exercise the same product contract.
+export KUZUSHI_GIT_SHA="$(git rev-parse --short=12 HEAD)"
+export KUZUSHI_GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
 mkdir -p target/mutation
 diff_input="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-diff.XXXXXX")"
 mutant_list="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-list.XXXXXX")"

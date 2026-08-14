@@ -52,3 +52,9 @@ test("devcontainer and doctor share the exact Semgrep dependency pin", () => {
   assert.match(doctor, /PINNED_SEMGREP_VERSION=/);
   assert.match(doctor, /SEMGREP_VERSION.*PINNED_SEMGREP_VERSION/);
 });
+
+test("mutation source copies retain the tested Git build identity", () => {
+  const mutation = readFileSync(resolve(repoRoot, "scripts/run-rust-mutations.sh"), "utf8");
+  assert.match(mutation, /export KUZUSHI_GIT_SHA="\$\(git rev-parse --short=12 HEAD\)"/);
+  assert.match(mutation, /export KUZUSHI_GIT_BRANCH="\$\(git rev-parse --abbrev-ref HEAD\)"/);
+});
