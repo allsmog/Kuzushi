@@ -1,6 +1,6 @@
 use super::*;
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -298,17 +298,15 @@ fn cpg_cli_lang_of(name: &str) -> String {
     parts.pop().unwrap_or_default().to_string()
 }
 
-const CPG_FILE_MAGIC: [u8; 4] = *b"CPG1";
-
 struct CpgImportSource {
     file: fs::File,
     bytes: u64,
 }
 
-/// A usable import source is an existing current-format regular file (symlinks
-/// are followed; the resolved file must still be regular). Returns its size.
+/// A usable import source is an existing engine-decodable regular file
+/// (symlinks are followed; the resolved file must still be regular).
 fn open_cpg_import_source(import_path: &Path) -> Result<CpgImportSource> {
-    let mut file = fs::File::open(import_path).with_context(|| {
+    let file = fs::File::open(import_path).with_context(|| {
         format!(
             "prebuilt CPG not found at {} — check importPath",
             import_path.display()
@@ -322,20 +320,7 @@ fn open_cpg_import_source(import_path: &Path) -> Result<CpgImportSource> {
         "prebuilt CPG {} is not a regular file",
         import_path.display()
     );
-    anyhow::ensure!(
-        metadata.len() >= CPG_FILE_MAGIC.len() as u64,
-        "prebuilt CPG {} is truncated",
-        import_path.display()
-    );
-    let mut magic = [0u8; CPG_FILE_MAGIC.len()];
-    file.read_exact(&mut magic)
-        .with_context(|| format!("Could not read prebuilt CPG header at {}", import_path.display()))?;
-    anyhow::ensure!(
-        magic == CPG_FILE_MAGIC,
-        "prebuilt CPG {} has invalid file magic",
-        import_path.display()
-    );
-    file.seek(SeekFrom::Start(0))?;
+    kuzushi_cpg::validate_graph_artifact(import_path).map_err(anyhow::Error::msg)?;
     Ok(CpgImportSource {
         file,
         bytes: metadata.len(),
@@ -531,7 +516,7 @@ mod cpg_build_tests {
     }
 
     #[test]
-    fn import_source_must_exist_and_have_current_magic() {
+    fn import_source_must_exist_and_decode() {
         let temp = tempfile::tempdir().unwrap();
         let missing = temp.path().join("absent.cpg");
         assert!(open_cpg_import_source(&missing).is_err());
@@ -548,9 +533,6 @@ mod cpg_build_tests {
         std::fs::write(&wrong, b"CPG\0payload").unwrap();
         assert!(open_cpg_import_source(&wrong).is_err());
 
-        let current = temp.path().join("current.cpg");
-        std::fs::write(&current, b"CPG1payload").unwrap();
-        assert_eq!(open_cpg_import_source(&current).unwrap().bytes, 11);
     }
 
     #[test]
@@ -574,13 +556,16 @@ mod cpg_build_tests {
     }
 
     #[test]
-    fn malformed_current_magic_is_not_published() {
+    fn malformed_graph_is_not_published_after_staging() {
         let temp = tempfile::tempdir().unwrap();
         let source_path = temp.path().join("go.v11.cpg");
         let output = temp.path().join("canonical.cpg");
-        std::fs::write(&source_path, b"CPG1payload").unwrap();
+        std::fs::write(&source_path, b"CPG2payload").unwrap();
 
-        let source = open_cpg_import_source(&source_path).unwrap();
+        let source = CpgImportSource {
+            file: fs::File::open(&source_path).unwrap(),
+            bytes: std::fs::metadata(&source_path).unwrap().len(),
+        };
         assert!(install_cpg_import(source, &output).is_err());
         assert!(!output.exists());
     }

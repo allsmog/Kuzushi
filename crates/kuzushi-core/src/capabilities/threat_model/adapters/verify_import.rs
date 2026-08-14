@@ -78,6 +78,7 @@ pub(crate) fn import_threat_model_adapter(
     let mut document = normalize_document(raw, &methodology)?;
     require_complete_security_context_links(&document)?;
     stamp_provenance(&mut document, root, "import");
+    bind_import_to_current_tree(&mut document, root)?;
     let verification = verify_threat_model_document(&document, root)?;
     stamp_verification(&mut document, &verification);
     persist_imported_document(root, &document, &input)?;
@@ -98,6 +99,21 @@ pub(crate) fn import_threat_model_adapter(
             "verification": verification,
         }),
     ))
+}
+
+fn bind_import_to_current_tree(document: &mut Value, root: &Path) -> Result<()> {
+    let tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
+        .context("Could not authenticate the imported threat model's target tree")?;
+    let object = document
+        .as_object_mut()
+        .context("normalized threat model must be an object")?;
+    let provenance = object
+        .entry("provenance")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .context("normalized threat-model provenance must be an object")?;
+    provenance.insert("treeHash".to_string(), json!(tree_hash));
+    Ok(())
 }
 
 fn persist_imported_document(root: &Path, document: &Value, input: &Value) -> Result<()> {
@@ -166,7 +182,24 @@ mod verify_import_tests {
         }
     }
 
-    fn hand_written_document() -> Value {
+    fn hand_written_document(root: &Path) -> Value {
+        let surfaces = grounding_surfaces(root, 40).unwrap();
+        let entry_point_ids = surfaces
+            .iter()
+            .map(|surface| surface.id.clone())
+            .collect::<Vec<_>>();
+        let entry_points = surfaces
+            .iter()
+            .map(|surface| {
+                json!({
+                    "id": surface.id,
+                    "name": surface.title,
+                    "path": surface.path,
+                    "evidence": surface.evidence,
+                    "targetElementIds": ["app"],
+                })
+            })
+            .collect::<Vec<_>>();
         json!({
             "methodology": "stride",
             "dfd": {
@@ -177,9 +210,11 @@ mod verify_import_tests {
             "threats": [{
                 "id": "T-001",
                 "targetElementIds": ["app"],
+                "entryPointIds": entry_point_ids,
                 "title": "download traversal",
                 "affectedFiles": ["src/app.py"],
             }],
+            "attackSurface": {"entryPoints": entry_points},
         })
     }
 
@@ -190,7 +225,10 @@ mod verify_import_tests {
         let ctx = ctx(&config, &workspace);
 
         let result =
-            import_threat_model_adapter(json!({"document": hand_written_document()}), &ctx)
+            import_threat_model_adapter(
+                json!({"document": hand_written_document(workspace.root())}),
+                &ctx,
+            )
                 .unwrap();
         assert_eq!(result["data"]["verification"]["verdict"], json!("verified"));
 
@@ -210,17 +248,20 @@ mod verify_import_tests {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
-        let mut edited = hand_written_document();
+        let mut edited = hand_written_document(workspace.root());
         edited["userEdited"] = json!(true);
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
 
         let refused =
-            import_threat_model_adapter(json!({"document": hand_written_document()}), &ctx)
-                .unwrap_err();
+            import_threat_model_adapter(
+                json!({"document": hand_written_document(workspace.root())}),
+                &ctx,
+            )
+            .unwrap_err();
         assert!(refused.to_string().contains("force=true"), "{refused:#}");
 
         import_threat_model_adapter(
-            json!({"document": hand_written_document(), "force": true}),
+            json!({"document": hand_written_document(workspace.root()), "force": true}),
             &ctx,
         )
         .unwrap();
@@ -231,9 +272,9 @@ mod verify_import_tests {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
-        let live = hand_written_document();
+        let live = hand_written_document(workspace.root());
         save_persistent_threat_model(workspace.root(), &live, true).unwrap();
-        let mut invalid = hand_written_document();
+        let mut invalid = hand_written_document(workspace.root());
         invalid["threats"][0]["targetElementIds"] = json!(["missing"]);
 
         let error = import_threat_model_adapter(json!({"document": invalid, "force": true}), &ctx)
@@ -251,8 +292,9 @@ mod verify_import_tests {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
-        let mut edited = hand_written_document();
+        let mut edited = hand_written_document(workspace.root());
         edited["userEdited"] = json!(true);
+        bind_import_to_current_tree(&mut edited, workspace.root()).unwrap();
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
 
         verify_threat_model_adapter(json!({}), &ctx).unwrap();

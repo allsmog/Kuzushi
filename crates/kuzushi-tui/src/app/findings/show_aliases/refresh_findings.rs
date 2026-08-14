@@ -1,5 +1,29 @@
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+
+fn finding_scope_key(finding: &Finding) -> &str {
+    finding
+        .identity_id
+        .as_deref()
+        .unwrap_or(finding.fingerprint.as_str())
+}
+
+fn finding_keys_for_runs(
+    store: &FindingStore,
+    run_refs: &[String],
+) -> anyhow::Result<BTreeSet<String>> {
+    let mut keys = BTreeSet::new();
+    for run_id in run_refs {
+        keys.extend(
+            store
+                .list_findings_for_scan_id(run_id)?
+                .iter()
+                .map(finding_scope_key)
+                .map(str::to_string),
+        );
+    }
+    Ok(keys)
+}
 
 impl ShellApp {
     /// Reload findings, then keep the advisory queue scores current for the
@@ -152,7 +176,7 @@ impl ShellApp {
         fallback_decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
         fallback_total: usize,
     ) -> FindingLedgerCounts {
-        match store.list_relevant_findings() {
+        match self.relevant_journey_findings(store) {
             Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
             Err(error) => {
                 self.log(
@@ -167,6 +191,29 @@ impl ShellApp {
                 )
             }
         }
+    }
+
+    fn relevant_journey_findings(&self, store: &FindingStore) -> anyhow::Result<Vec<Finding>> {
+        let mut findings = store.list_relevant_findings()?;
+        let Some(run_refs) = self.selected_current_scan_run_refs() else {
+            return Ok(findings);
+        };
+        let keys = finding_keys_for_runs(store, &run_refs)?;
+        findings.retain(|finding| keys.contains(finding_scope_key(finding)));
+        Ok(findings)
+    }
+
+    fn selected_current_scan_run_refs(&self) -> Option<Vec<String>> {
+        if !self
+            .engagement
+            .selected_attempt_completed_after(WorkflowPhase::Map, WorkflowPhase::Scan)
+        {
+            return None;
+        }
+        let attempt = self
+            .engagement
+            .selected_phase_attempt(WorkflowPhase::Scan)?;
+        Some(attempt.completed.run_refs.clone())
     }
 
     fn count_journey_findings(

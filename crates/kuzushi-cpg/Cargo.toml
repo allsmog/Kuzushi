@@ -10,10 +10,9 @@ repository.workspace = true
 
 [features]
 default = ["private-engine"]
-# The implementation lives in the private oxidized-joern repository. This
-# feature isolates compilation and preserves the default shipped product, but
-# Cargo still resolves optional Git manifests before feature selection. The
-# credential-free CI contract therefore also uses an isolated resolver overlay.
+# Historical feature name retained for compatibility. The implementation now
+# comes from the public oxidized-joern repository; disabling this feature keeps
+# the fail-closed adapter surface for embedding consumers.
 private-engine = [
   "dep:cpg-analysis",
   "dep:cpg-cli",

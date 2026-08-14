@@ -19,10 +19,11 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ── Gate: run the full CI suite and produce the tested native artifact ──
+  # ── Gate: require the complete default product contract ──────────────────
   ci:
     uses: ./.github/workflows/ci.yml
-    secrets: inherit
+    with:
+      quality_base_ref: HEAD^
     permissions:
       contents: read
 
@@ -124,7 +125,9 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
-          cache-target: release
+          # Restoring a multi-platform release target cache can exhaust the
+          # hosted runner before compilation begins.
+          cache: false
       - run: node scripts/build-native-runtime.mjs
       - name: Execute staged native runtime on its release platform
         run: node scripts/smoke-native-runtime.mjs

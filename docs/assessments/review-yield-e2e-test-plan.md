@@ -7,9 +7,9 @@ previous one's artifacts.
 
 ## Phase 0 — Preconditions (operator, one-time)
 
-1. **Fix CI**: set the `OXIDIZED_JOERN_TOKEN` secret in GitHub Actions → all five Rust
-   lanes must go green on the chain before merging anything. Until then all local gate
-   results (recorded in each PR body) are the only validation.
+1. **Require green CI**: oxidized-joern is public, so every Rust lane runs against the
+   real pinned engine without a cross-repository secret. All required lanes must be
+   green on the chain before merging anything.
 2. **Merge order**: the chain is stacked; merge bottom-up: #130 → #131 → #133 → #134 →
    #138 → #139 → #140 → PR 8. After each merge, retarget the next PR's base to main
    (GitHub does this automatically for stacked PRs on merge).

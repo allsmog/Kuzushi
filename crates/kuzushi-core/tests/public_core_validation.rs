@@ -1,7 +1,9 @@
 #![cfg(not(feature = "private-cpg"))]
 
 use kuzushi_core::findings::{Finding, FindingStore, Severity};
+use kuzushi_core::fleet::{fleet_status, FleetTarget};
 use kuzushi_core::run_artifacts::{write_run_summary, RunSummary};
+use kuzushi_core::workspace::coverage_ledger::workspace_coverage_db_path;
 use kuzushi_core::workspace::{export_scan_findings_sarif, WorkspaceTarget};
 use kuzushi_core::{
     cpg_artifact_langs, cpg_engine_available, cpg_engine_unavailable_message, cpg_has_artifacts,
@@ -9,7 +11,7 @@ use kuzushi_core::{
 };
 
 #[test]
-fn credential_free_core_discloses_private_engine_absence() {
+fn engine_disabled_core_discloses_engine_absence() {
     let target = tempfile::tempdir().unwrap();
     let artifact_dir = target.path().join(".kuzushi/cpg-rs");
     std::fs::create_dir_all(&artifact_dir).unwrap();
@@ -20,6 +22,38 @@ fn credential_free_core_discloses_private_engine_absence() {
     assert!(!cpg_has_artifacts(target.path()));
     assert!(cpg_artifact_langs(target.path()).is_empty());
     assert!(cpg_engine_unavailable_message().contains("not compiled"));
+}
+
+#[test]
+fn fleet_status_distinguishes_missing_ledger_from_unreadable_ledger() {
+    let fleet = tempfile::tempdir().unwrap();
+    let target = tempfile::tempdir().unwrap();
+    let registered = vec![FleetTarget {
+        id: "broken-ledger".to_string(),
+        path: target.path().to_path_buf(),
+        remote: None,
+        default_branch: Some("main".to_string()),
+        label: None,
+    }];
+
+    let clean = fleet_status(fleet.path(), &registered).unwrap();
+    assert_eq!(clean.targets[0].baseline_count, 0);
+    assert!(clean.targets[0].last_scan_sha.is_none());
+
+    let ledger_path = workspace_coverage_db_path(target.path());
+    std::fs::create_dir_all(ledger_path.parent().unwrap()).unwrap();
+    let private_marker = "private-sqlite-diagnostic-marker";
+    std::fs::write(&ledger_path, private_marker).unwrap();
+
+    let error = fleet_status(fleet.path(), &registered).unwrap_err();
+    let message = error.to_string();
+
+    assert_eq!(
+        message,
+        "fleet:status could not read coverage ledger for target \"broken-ledger\""
+    );
+    assert!(!message.contains(private_marker));
+    assert!(!message.contains(&target.path().display().to_string()));
 }
 
 #[test]

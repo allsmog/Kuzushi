@@ -12750,13 +12750,14 @@ mod tests {
     /// still reported `completed`. Entry points that name a surface without
     /// locating it are not usable attack surface, so the envelope must say so
     /// even when the coverage invariant itself is satisfied.
-    fn anchor_free_surface_document() -> Value {
+    fn anchor_free_surface_document(entry_point_id: &str) -> Value {
         let mut document = sample_document();
         document["threats"][0]["affectedFiles"] =
             json!([{"filePath": "src/admin.js", "startLine": 1}]);
+        document["threats"][0]["entryPointIds"] = json!([entry_point_id]);
         document["attackSurface"] = json!({
             "entryPoints": [
-                {"id": "AS-BUCKET-01", "name": "admin HTTP handlers", "targetElementIds": ["web"]},
+                {"id": entry_point_id, "name": "admin HTTP handlers", "targetElementIds": ["web"]},
                 {"id": "AS-BUCKET-02", "name": "whitebox os.system paths", "targetElementIds": ["web"]},
             ],
             "externalSinks": [],
@@ -12773,7 +12774,10 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
-        let runtime = MockThreatRuntime::new(json!({"document": anchor_free_surface_document()}));
+        let entry_point_id = express_route_surface_id(temp.path());
+        let runtime = MockThreatRuntime::new(json!({
+            "document": anchor_free_surface_document(&entry_point_id)
+        }));
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -12807,7 +12811,7 @@ mod tests {
             warnings
                 .iter()
                 .any(|warning| warning.as_str().is_some_and(|text| text
-                    == "attack surface: 2/2 entry points carry no path or evidence anchor")),
+                    == "attack surface: 1/2 entry points carry no path or evidence anchor")),
             "the anchor-free count must reach the operator verbatim: {warnings:?}"
         );
         assert!(
@@ -12943,6 +12947,16 @@ mod tests {
         temp
     }
 
+    fn express_route_surface_id(root: &Path) -> String {
+        crate::attack_surface::build_attack_surface_map(root)
+            .unwrap()
+            .surfaces
+            .into_iter()
+            .find(|surface| surface.path == "src/admin.js")
+            .expect("Express route surface")
+            .id
+    }
+
     fn staged_ctx<'a>(
         config: &'a V2Config,
         workspace: &'a WorkspaceTarget,
@@ -12957,11 +12971,12 @@ mod tests {
         }
     }
 
-    fn gap_covering_response() -> Value {
+    fn gap_covering_response(entry_point_id: &str) -> Value {
         json!({
             "threats": [{
                 "id": "T-GAP-1",
                 "targetElementIds": ["web"],
+                "entryPointIds": [entry_point_id],
                 "category": "elevation-of-privilege",
                 "title": "Debug route exposes admin state",
                 "surface": "GET /admin/debug",
@@ -12971,7 +12986,13 @@ mod tests {
                 "affectedFiles": [{"filePath": "src/admin.js", "startLine": 3}],
                 "evidence": [{"kind": "commit", "ref": "invented-by-model", "summary": "must be stripped"}]
             }],
-            "deprioritized": []
+            "deprioritized": [],
+            "entryPoints": [{
+                "id": entry_point_id,
+                "targetElementIds": ["web"],
+                "name": "GET /admin/debug",
+                "path": "src/admin.js"
+            }]
         })
     }
 
@@ -12982,6 +13003,7 @@ mod tests {
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
+        let entry_point_id = express_route_surface_id(temp.path());
         let runtime = MockThreatRuntime::responses(vec![
             AgentQueryResponse {
                 text: String::new(),
@@ -12990,7 +13012,7 @@ mod tests {
             },
             AgentQueryResponse {
                 text: String::new(),
-                structured: Some(gap_covering_response()),
+                structured: Some(gap_covering_response(&entry_point_id)),
                 ..Default::default()
             },
         ]);
@@ -13381,7 +13403,7 @@ mod tests {
     }
 
     #[test]
-    fn threat_model_dag_descriptors_remain_registered_for_scan_ordering() {
+    fn threat_model_dag_metadata_remains_registered() {
         let registry = ModuleRegistry::with_v2_builtins();
         let threat_model = registry
             .all_modules()
@@ -13390,7 +13412,7 @@ mod tests {
         assert!(threat_model.dag_nodes().iter().any(|node| {
             node.id == "threat-model:build"
                 && node.output_kind == "threat-model"
-                && node.depends_on == ["context:build"]
+                && node.depends_on == ["context:build", "entry-points:extract"]
         }));
 
         let randori = registry
