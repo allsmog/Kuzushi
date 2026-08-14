@@ -50,6 +50,22 @@ printf 'fn main() {}\n' > "$TARGET_FIXTURE/main.rs"
 git -C "$TARGET_FIXTURE" add main.rs
 git -C "$TARGET_FIXTURE" -c user.name=devex -c user.email=devex@kuzushi commit -qm seed
 
+# The source-tree receipt embeds one mode per entry, so a mode carrying the
+# volatile filesystem counters GNU `stat -f` prints (`Blocks: ... Free: ...`)
+# would forge TARGET DRIFT whenever any process writes to the same filesystem.
+for mode_path in "$TARGET_FIXTURE/main.rs" "$TARGET_FIXTURE"; do
+  path_mode=$(devex_path_mode "$mode_path")
+  case $path_mode in
+    ''|*[!0-7]*)
+      printf 'FAIL: devex_path_mode returned a non-octal mode for %s: %s\n' \
+        "$mode_path" "$path_mode" >&2
+      exit 1
+      ;;
+  esac
+  assert_eq 1 "$(printf '%s\n' "$path_mode" | wc -l | tr -d ' ')" \
+    "devex_path_mode returns a single line for $mode_path"
+done
+
 devex_capture_target_source_status "$TARGET_FIXTURE" "$TEST_ROOT/status-before"
 devex_capture_target_source_tree "$TARGET_FIXTURE" "$TEST_ROOT/tree-before"
 mkdir -p "$TARGET_FIXTURE/.kuzushi"

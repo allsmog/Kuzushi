@@ -37,8 +37,10 @@ expect-wide: 80 rev:
 ask: Map — with no accepted root scan baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
 ask: Map — are the repository facts on screen (target name, revision, scope names, counts) derived from the real checkout rather than hard-coded or fabricated?
 keys: 2
-wait-live-snap: 15 Viewing Scan | scan-initial
+wait-live-snap: 15 Viewing Scan || Scan is locked | scan-initial
 ask: Scan — are recorded receipts from the pre-existing engagement state clearly separated from live progress, and is scope-level scan guidance honestly gated when no root scan baseline exists?
+keys: Escape
+nav-mode:
 keys: 3
 wait-live-snap: 15 Viewing Review || Review is locked | review-initial
 ask: Review — if findings exist, do they surface with honest run/revision provenance; otherwise, does the shell explicitly explain why Review is locked?

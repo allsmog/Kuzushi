@@ -91,10 +91,30 @@ devex_stdin_sha256() {
   fi
 }
 
+devex_is_octal_mode() { # <candidate> — a lone octal token, nothing else
+  case $1 in
+    ''|*[!0-7]*) return 1;;
+    *) return 0;;
+  esac
+}
+
+# Octal permission bits of a path. GNU `stat -c` is tried FIRST because on
+# GNU, `stat -f '%Lp' <path>` means *filesystem* status: it rejects the format
+# as a missing operand (exit 1) yet still prints multi-line filesystem status —
+# including the volatile `Blocks: Free/Available` and `Inodes: Free` counters —
+# to stdout. Chained with `||` that noise landed in every source-tree receipt
+# entry, so any write anywhere on the same filesystem forged a TARGET DRIFT
+# failure. On BSD/macOS `stat -c` fails with a usage error and empty stdout, so
+# trying it first is safe there. Each attempt is captured separately and
+# accepted only when it validates, so a rejected attempt cannot leak into the
+# result; callers treat `unavailable` as a hard capture failure.
 devex_path_mode() {
-  stat -f '%Lp' "$1" 2>/dev/null \
-    || stat -c '%a' "$1" 2>/dev/null \
-    || printf '%s' unavailable
+  local mode
+  mode=$(stat -c '%a' "$1" 2>/dev/null) || mode=''
+  devex_is_octal_mode "$mode" && { printf '%s' "$mode"; return 0; }
+  mode=$(stat -f '%Lp' "$1" 2>/dev/null) || mode=''
+  devex_is_octal_mode "$mode" && { printf '%s' "$mode"; return 0; }
+  printf '%s' unavailable
 }
 
 devex_capture_target_source_status() { # <target> <receipt-path>
