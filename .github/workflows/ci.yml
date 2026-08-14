@@ -141,7 +141,8 @@ jobs:
           inherit-toolchain: true
           cache: false
       - run: cargo check --workspace --all-targets --locked
-      - run: cargo test -p kuzushi-core worker_protocol::jsonl:: --locked
+      - run: |
+          cargo test -p kuzushi-core worker_protocol::jsonl:: --locked
 
   # ── Dependency advisories, license policy, duplicate bans ────────────────
   cargo-deny:
