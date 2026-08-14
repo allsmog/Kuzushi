@@ -28,18 +28,18 @@ pub(crate) struct WorkspaceWatcherRuntime {
 /// open store files with write-capable handles, so closing them emits
 /// close-write events without changing the file — each refresh then re-emits
 /// events for the very files it read, and the shell invalidates forever.
-/// Comparing (len, mtime, inode) drops those phantom reports.
+/// Comparing (len, mtime, platform file identity) drops those phantom reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct StateFingerprint {
     len: u64,
     modified: Option<std::time::SystemTime>,
-    inode: u64,
+    file_identity: u64,
     is_dir: bool,
 }
 
 fn state_fingerprint(target: &Path, relative: &Path) -> Option<StateFingerprint> {
-    use std::os::unix::fs::MetadataExt;
     let metadata = std::fs::symlink_metadata(target.join(relative)).ok()?;
+    let file_identity = state_artifact_file_identity(&metadata);
     // A directory's size/mtime churn on every child create/delete — including
     // the sqlite -wal/-shm side files kuzushi's own store reads create and
     // remove — while every real artifact change reports through the child's
@@ -48,16 +48,33 @@ fn state_fingerprint(target: &Path, relative: &Path) -> Option<StateFingerprint>
         return Some(StateFingerprint {
             len: 0,
             modified: None,
-            inode: metadata.ino(),
+            file_identity,
             is_dir: true,
         });
     }
     Some(StateFingerprint {
         len: metadata.len(),
         modified: metadata.modified().ok(),
-        inode: metadata.ino(),
+        file_identity,
         is_dir: false,
     })
+}
+
+#[cfg(unix)]
+fn state_artifact_file_identity(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    metadata.ino()
+}
+
+#[cfg(windows)]
+fn state_artifact_file_identity(metadata: &std::fs::Metadata) -> u64 {
+    use std::os::windows::fs::MetadataExt;
+    metadata.creation_time()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn state_artifact_file_identity(_metadata: &std::fs::Metadata) -> u64 {
+    0
 }
 
 /// Recursive watch registration walks every directory under the target —

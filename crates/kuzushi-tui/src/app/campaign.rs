@@ -297,7 +297,6 @@ fn spawn_detached_dispatcher(
     campaign_id: &str,
     args: &[String],
 ) -> anyhow::Result<std::process::Child> {
-    use std::os::unix::process::CommandExt;
     let exe = std::env::current_exe().context("could not resolve the kuzushi binary")?;
     let logs_dir = campaign_dir(target, campaign_id).join("logs");
     std::fs::create_dir_all(&logs_dir)
@@ -305,15 +304,31 @@ fn spawn_detached_dispatcher(
     let log = std::fs::File::create(logs_dir.join("dispatcher.log"))
         .context("Could not open dispatcher.log")?;
     let stderr = log.try_clone().context("Could not clone dispatcher.log")?;
-    std::process::Command::new(exe)
+    let mut command = std::process::Command::new(exe);
+    configure_detached_dispatcher(&mut command);
+    command
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(log)
         .stderr(stderr)
-        .process_group(0)
         .spawn()
         .context("Could not spawn the campaign dispatcher")
 }
+
+#[cfg(unix)]
+fn configure_detached_dispatcher(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_detached_dispatcher(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(any(unix, windows)))]
+fn configure_detached_dispatcher(_command: &mut std::process::Command) {}
 
 /// Group-kill a verified-live dispatcher, then reap it. `try_wait` first so
 /// an already-exited dispatcher is collected without signalling anything.
@@ -321,17 +336,42 @@ fn kill_and_reap_dispatcher(mut child: std::process::Child, pid: u32) -> String 
     if let Ok(Some(status)) = child.try_wait() {
         return format!("dispatcher pid {pid} had already exited ({status})");
     }
-    let killed = std::process::Command::new("/bin/kill")
+    let killed = kill_dispatcher_process_tree(pid);
+    if !killed.as_ref().is_ok_and(std::process::ExitStatus::success) {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    match killed {
+        Ok(status) if status.success() => format!("killed dispatcher process tree {pid}"),
+        Ok(_) => format!("dispatcher process tree {pid} was already gone"),
+        Err(error) => format!("kill failed: {error}"),
+    }
+}
+
+#[cfg(unix)]
+fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("/bin/kill")
         .args(["-9", "--", &format!("-{pid}")])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
-    let _ = child.wait();
-    match killed {
-        Ok(status) if status.success() => format!("killed dispatcher process group {pid}"),
-        Ok(_) => format!("process group {pid} was already gone"),
-        Err(error) => format!("kill failed: {error}"),
-    }
+        .status()
+}
+
+#[cfg(windows)]
+fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
+    std::process::Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+}
+
+#[cfg(not(any(unix, windows)))]
+fn kill_dispatcher_process_tree(_pid: u32) -> std::io::Result<std::process::ExitStatus> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "process-tree termination is unsupported on this platform",
+    ))
 }
 
 #[cfg(test)]
@@ -422,6 +462,7 @@ mod tests {
         assert_eq!(trend.campaign_spend_usd, 0.25);
     }
 
+    #[cfg(unix)]
     #[test]
     fn kill_and_reap_collects_a_live_dispatcher_without_leaving_a_zombie() {
         use std::os::unix::process::CommandExt;
@@ -435,7 +476,7 @@ mod tests {
         let notice = kill_and_reap_dispatcher(child, pid);
 
         assert!(
-            notice.contains("killed dispatcher process group"),
+            notice.contains("killed dispatcher process tree"),
             "{notice}"
         );
         // Reaped: the pid slot is free or at least no longer our zombie.
@@ -490,6 +531,7 @@ mod tests {
     /// A second Launch while the deck's dispatcher runs would overwrite the
     /// held child handle: the first dispatcher becomes unreapable and `K`
     /// can no longer kill it. Launch must refuse instead.
+    #[cfg(unix)]
     #[test]
     fn launch_refuses_while_the_deck_dispatcher_is_still_running() {
         let (_temp, mut app) = deck_app();
