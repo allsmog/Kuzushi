@@ -71,9 +71,9 @@ fi
 max_mutants=12
 platform_args=()
 case "$(uname -s)" in
-  Darwin) platform_args+=(--exclude-re '(linux|windows)_|trusted_bwrap') ;;
-  Linux) platform_args+=(--exclude-re '(macos|windows)_|sandbox_exec') ;;
-  *) platform_args+=(--exclude-re '(linux|macos)_|trusted_bwrap|sandbox_exec') ;;
+  Darwin) platform_args+=(--exclude-re '(linux|windows|unsupported_platform)_|trusted_bwrap') ;;
+  Linux) platform_args+=(--exclude-re '(macos|windows|unsupported_platform)_|sandbox_exec') ;;
+  *) platform_args+=(--exclude-re '(linux|macos|windows|unsupported_platform)_|trusted_bwrap|sandbox_exec') ;;
 esac
 filter_args=(
   # A whole-function no-op here leaves modal tests waiting forever; retain its branch mutants.

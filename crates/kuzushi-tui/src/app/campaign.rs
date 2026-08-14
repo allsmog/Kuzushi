@@ -316,19 +316,26 @@ fn spawn_detached_dispatcher(
 }
 
 #[cfg(unix)]
-fn configure_detached_dispatcher(command: &mut std::process::Command) {
+use unix_configure_detached_dispatcher as configure_detached_dispatcher;
+#[cfg(not(any(unix, windows)))]
+use unsupported_platform_configure_detached_dispatcher as configure_detached_dispatcher;
+#[cfg(windows)]
+use windows_configure_detached_dispatcher as configure_detached_dispatcher;
+
+#[cfg(unix)]
+fn unix_configure_detached_dispatcher(command: &mut std::process::Command) {
     use std::os::unix::process::CommandExt;
     command.process_group(0);
 }
 
 #[cfg(windows)]
-fn configure_detached_dispatcher(command: &mut std::process::Command) {
+fn windows_configure_detached_dispatcher(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
     command.creation_flags(windows_sys::Win32::System::Threading::CREATE_NEW_PROCESS_GROUP);
 }
 
 #[cfg(not(any(unix, windows)))]
-fn configure_detached_dispatcher(_command: &mut std::process::Command) {}
+fn unsupported_platform_configure_detached_dispatcher(_command: &mut std::process::Command) {}
 
 /// Group-kill a verified-live dispatcher, then reap it. `try_wait` first so
 /// an already-exited dispatcher is collected without signalling anything.
@@ -349,7 +356,14 @@ fn kill_and_reap_dispatcher(mut child: std::process::Child, pid: u32) -> String 
 }
 
 #[cfg(unix)]
-fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
+use unix_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
+#[cfg(not(any(unix, windows)))]
+use unsupported_platform_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
+#[cfg(windows)]
+use windows_kill_dispatcher_process_tree as kill_dispatcher_process_tree;
+
+#[cfg(unix)]
+fn unix_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("/bin/kill")
         .args(["-9", "--", &format!("-{pid}")])
         .stdout(std::process::Stdio::null())
@@ -358,7 +372,7 @@ fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitS
 }
 
 #[cfg(windows)]
-fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
+fn windows_kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitStatus> {
     std::process::Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdout(std::process::Stdio::null())
@@ -367,7 +381,9 @@ fn kill_dispatcher_process_tree(pid: u32) -> std::io::Result<std::process::ExitS
 }
 
 #[cfg(not(any(unix, windows)))]
-fn kill_dispatcher_process_tree(_pid: u32) -> std::io::Result<std::process::ExitStatus> {
+fn unsupported_platform_kill_dispatcher_process_tree(
+    _pid: u32,
+) -> std::io::Result<std::process::ExitStatus> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "process-tree termination is unsupported on this platform",
@@ -467,14 +483,19 @@ mod tests {
     fn kill_and_reap_collects_a_live_dispatcher_without_leaving_a_zombie() {
         use std::os::unix::process::CommandExt;
         let child = std::process::Command::new("/bin/sleep")
-            .arg("60")
+            .arg("10")
             .process_group(0)
             .spawn()
             .unwrap();
         let pid = child.id();
+        let started = std::time::Instant::now();
 
         let notice = kill_and_reap_dispatcher(child, pid);
 
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "dispatcher process tree was not terminated promptly"
+        );
         assert!(
             notice.contains("killed dispatcher process tree"),
             "{notice}"
@@ -485,6 +506,48 @@ mod tests {
             stat.is_err() || !stat.unwrap().contains(") Z "),
             "dispatcher {pid} left a zombie"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kill_and_reap_falls_back_when_the_process_group_is_missing() {
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("10")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let started = std::time::Instant::now();
+
+        let notice = kill_and_reap_dispatcher(child, pid);
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "direct child termination did not replace the missing group kill"
+        );
+        assert!(notice.contains("already gone"), "{notice}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detached_dispatcher_starts_in_its_own_process_group() {
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.arg("10");
+        configure_detached_dispatcher(&mut command);
+        let child = command.spawn().unwrap();
+        let pid = child.id();
+        let output = std::process::Command::new("/bin/ps")
+            .args(["-o", "pgid=", "-p", &pid.to_string()])
+            .output()
+            .unwrap();
+        let process_group: u32 = String::from_utf8(output.stdout)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+
+        let _ = kill_and_reap_dispatcher(child, pid);
+
+        assert_eq!(process_group, pid);
     }
 
     #[test]

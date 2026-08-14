@@ -228,6 +228,19 @@ mod tests {
             .unwrap();
     }
 
+    #[test]
+    fn log_tail_keeps_exactly_the_last_sixteen_kibibytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("campaign.log");
+        let prefix = vec![b'x'; 2_048];
+        let expected_tail = vec![b'y'; 16_384];
+        std::fs::write(&path, [prefix, expected_tail.clone()].concat()).unwrap();
+
+        let tail = log_tail(&path);
+
+        assert_eq!(tail.as_bytes(), expected_tail);
+    }
+
     #[tokio::test]
     async fn a_running_child_over_its_job_budget_is_killed_and_reported_over_budget() {
         let tmp = tempfile::tempdir().unwrap();
