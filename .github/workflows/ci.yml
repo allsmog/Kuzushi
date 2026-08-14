@@ -156,22 +156,7 @@ jobs:
         with:
           inherit-toolchain: true
           cache: false
-      - name: Install patch-validation sandbox
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap
-          sudo tee /etc/apparmor.d/usr.bin.bwrap >/dev/null <<'APPARMOR'
-          abi <abi/4.0>,
-          include <tunables/global>
-
-          /usr/bin/bwrap flags=(unconfined) {
-            userns,
-          }
-          APPARMOR
-          sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
-          bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
-            --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
-            --proc /proc --dev /dev -- /bin/true
+      - uses: ./.github/actions/install-patch-validation-sandbox
       - run: cargo test --workspace --locked
       - run: pnpm test:performance
       - run: cargo build --workspace --locked
@@ -247,19 +232,7 @@ jobs:
           cache: false
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.8.7 --locked
-      - name: Install patch-validation sandbox
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends bubblewrap
-          sudo tee /etc/apparmor.d/usr.bin.bwrap >/dev/null <<'APPARMOR'
-          abi <abi/4.0>,
-          include <tunables/global>
-
-          /usr/bin/bwrap flags=(unconfined) {
-            userns,
-          }
-          APPARMOR
-          sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
+      - uses: ./.github/actions/install-patch-validation-sandbox
       - name: Enforce measured coverage
         env:
           KUZUSHI_QUALITY_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
@@ -292,6 +265,7 @@ jobs:
         with:
           inherit-toolchain: true
           cache: false
+      - uses: ./.github/actions/install-patch-validation-sandbox
       - name: Install mutation tool
         run: cargo install cargo-mutants --version 27.1.0 --locked
       - name: Require sampled changed mutants to be caught
