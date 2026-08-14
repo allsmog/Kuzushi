@@ -427,8 +427,8 @@ checksum = "773648b94d0e5d620f64f280777445740e61fe701025087ec8b57f45c791888b"
 
 [[package]]
 name = "cpg-analysis"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-core",
  "rayon",
@@ -438,9 +438,10 @@ dependencies = [
 
 [[package]]
 name = "cpg-cli"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
+ "blake3",
  "cpg-analysis",
  "cpg-core",
  "cpg-frontend",
@@ -448,27 +449,33 @@ dependencies = [
  "cpg-lang-c",
  "cpg-lang-python",
  "cpg-lang-ts",
+ "fs2",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
 name = "cpg-core"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
+dependencies = [
+ "crc32fast",
+ "tempfile",
+]
 
 [[package]]
 name = "cpg-frontend"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-core",
 ]
 
 [[package]]
 name = "cpg-incremental"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-analysis",
  "cpg-core",
@@ -478,8 +485,8 @@ dependencies = [
 
 [[package]]
 name = "cpg-lang-c"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
@@ -489,8 +496,8 @@ dependencies = [
 
 [[package]]
 name = "cpg-lang-python"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
@@ -500,8 +507,8 @@ dependencies = [
 
 [[package]]
 name = "cpg-lang-ts"
-version = "0.1.0"
-source = "git+https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd#9ab43859f0c3342c734ff38ea6366711d216c8fd"
+version = "0.1.1"
+source = "git+https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843#eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"
 dependencies = [
  "cpg-core",
  "cpg-frontend",
@@ -1234,6 +1241,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
+]
+
+[[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
 ]
 
 [[package]]

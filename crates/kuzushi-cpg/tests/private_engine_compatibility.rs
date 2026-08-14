@@ -6,15 +6,13 @@ use kuzushi_cpg::{
     BuildScope, SignalSpec, GRAPH_SHAPE_VERSION,
 };
 
+const _: () = assert!(GRAPH_SHAPE_VERSION > 0);
+
 #[test]
 fn public_engine_builds_reopens_and_witnesses_a_taint_path() {
     assert!(
         engine_available(),
         "default builds must contain the public engine"
-    );
-    assert!(
-        GRAPH_SHAPE_VERSION > 0,
-        "the real engine must expose a versioned graph shape"
     );
     assert_eq!(canonical_language("ts"), Some("typescript"));
     assert!(supported_languages().contains(&"typescript"));

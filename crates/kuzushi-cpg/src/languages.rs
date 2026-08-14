@@ -44,7 +44,9 @@ pub fn canonical_language(lang: &str) -> Option<&'static str> {
 /// Source-file extensions per canonical language, mirroring
 /// `cpg_cli::make_project`'s ownership so build and staleness agree.
 pub(crate) fn extensions_for(lang: &str) -> &'static [&'static str] {
-    cpg_cli::make_project(lang).1
+    cpg_cli::Language::parse(lang)
+        .map(cpg_cli::Language::extensions)
+        .unwrap_or(&[])
 }
 
 /// Languages present under `dir` that cpg-rs can build, ordered by source
