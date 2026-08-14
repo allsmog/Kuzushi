@@ -1,6 +1,6 @@
 use super::scan_cancellation::{
-    scan_terminal_exit_error, settle_scan_cancellation_observed, settle_scan_cancellation_settled,
-    ScanSignalWatcher,
+    persisted_scan_terminal_exit_error, scan_terminal_exit_error,
+    settle_scan_cancellation_observed, settle_scan_cancellation_settled, ScanSignalWatcher,
 };
 use super::scan_gate::{apply_scan_gate_policy, ScanGatePolicy};
 use super::scan_prepare::{
@@ -283,6 +283,7 @@ fn finish_completed_scan(
         finish.started,
         elapsed,
     )?;
+    return_persisted_scan_terminal_exit(&finish, &result)?;
     apply_scan_gate_policy(
         finish.workspace,
         finish.store,
@@ -316,21 +317,44 @@ fn finish_semantic_scan_failure(
             elapsed,
         )?;
     }
-    apply_scan_gate_policy(
-        finish.workspace,
-        finish.store,
-        &run_ids,
-        finish.fallback_run_id,
-        &ScanGatePolicy {
-            fail_on: None,
-            sarif: finish.gate.sarif.clone(),
-        },
-    )?;
+    return_persisted_scan_terminal_exit(&finish, &result)?;
+    apply_semantic_failure_gate_policy(&finish, &run_ids)?;
     Err(scan_terminal_exit_error(
         finish.workspace.root(),
         finish.fallback_run_id,
         error,
     ))
+}
+
+fn apply_semantic_failure_gate_policy(finish: &ScanFinish<'_>, run_ids: &[String]) -> Result<()> {
+    apply_scan_gate_policy(
+        finish.workspace,
+        finish.store,
+        run_ids,
+        finish.fallback_run_id,
+        &ScanGatePolicy {
+            fail_on: None,
+            sarif: finish.gate.sarif.clone(),
+        },
+    )
+}
+
+fn return_persisted_scan_terminal_exit(
+    finish: &ScanFinish<'_>,
+    result: &serde_json::Value,
+) -> Result<()> {
+    let message = result
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("headless scan did not complete");
+    match persisted_scan_terminal_exit_error(
+        finish.workspace.root(),
+        finish.fallback_run_id,
+        message,
+    ) {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
 }
 
 fn scan_semantic_error(result: &serde_json::Value) -> Option<anyhow::Error> {
@@ -1047,10 +1071,13 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        emit_scan_patch_validation_disclosure, execute_scan_tool, record_failed_scan_execution,
-        scan_gate_ids, scan_scope_body, scan_semantic_error, settle_apk_scan, settle_scan_dispatch,
-        write_scan_scope_file, ScanExecutionFailureRecord, ScanToolExecution,
+        emit_scan_patch_validation_disclosure, execute_scan_tool, finish_completed_scan,
+        record_failed_scan_execution, scan_gate_ids, scan_scope_body, scan_semantic_error,
+        settle_apk_scan, settle_scan_cancellation_observed, settle_scan_dispatch,
+        write_scan_scope_file, ScanExecutionFailureRecord, ScanFinish, ScanGatePolicy,
+        ScanToolExecution,
     };
+    use crate::application::run_exit::RunCommandExit;
     use kuzushi_core::run_artifacts::{
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
     };
@@ -1198,6 +1225,59 @@ mod tests {
         .unwrap();
 
         assert_eq!(output["status"], "canceled");
+    }
+
+    #[test]
+    fn persisted_cancellation_precedes_post_scan_gate_failures() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let run_id = "scan-canceled-before-gates";
+        let input = serde_json::json!({"runId": run_id});
+        let record = ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan");
+        try_record_tool_run_started_with_reproducibility(record, &input, None, None, Vec::new())
+            .unwrap();
+        let observation =
+            kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(target.path(), run_id)
+                .unwrap()
+                .start_root_task("Run the accepted Scan plan")
+                .unwrap();
+        let result = settle_scan_cancellation_observed(
+            record,
+            kuzushi_core::scan::CancellationDisposition::Canceled,
+            Some(&observation),
+        )
+        .unwrap();
+        let sarif = target.path().join("missing-parent").join("report.sarif");
+        let gate = ScanGatePolicy {
+            fail_on: None,
+            sarif: Some(sarif.clone()),
+        };
+
+        let error = finish_completed_scan(
+            ScanFinish {
+                workspace: &workspace,
+                store: &store,
+                fallback_run_id: run_id,
+                json: true,
+                ci: false,
+                started: std::time::Instant::now(),
+                gate: &gate,
+            },
+            result,
+            vec![run_id.to_string()],
+            std::time::Duration::ZERO,
+        )
+        .expect_err("persisted cancellation must stop before post-scan gates");
+
+        let exit = error
+            .downcast::<RunCommandExit>()
+            .expect("persisted cancellation must select a typed batch exit");
+        assert_eq!(exit.code(), 130);
+        assert!(
+            !sarif.exists(),
+            "SARIF export must not run after cancellation"
+        );
     }
 
     #[test]

@@ -90,19 +90,28 @@ pub(crate) fn scan_terminal_exit_error(
     run_id: &str,
     error: anyhow::Error,
 ) -> anyhow::Error {
+    let message = error.to_string();
+    persisted_scan_terminal_exit_error(target, run_id, &message).unwrap_or(error)
+}
+
+pub(crate) fn persisted_scan_terminal_exit_error(
+    target: &Path,
+    run_id: &str,
+    message: &str,
+) -> Option<anyhow::Error> {
     let Ok(persisted) = kuzushi_core::load_persisted_run_terminal_outcome(target, run_id) else {
-        return error;
+        return None;
     };
     if !matches!(
         persisted.status,
         RunItemStatus::Canceled | RunItemStatus::Interrupted
     ) {
-        return error;
+        return None;
     }
-    anyhow::Error::new(RunCommandExit::new(
+    Some(anyhow::Error::new(RunCommandExit::new(
         run_exit_code(persisted.status),
-        error.to_string(),
-    ))
+        message,
+    )))
 }
 
 fn persisted_cancellation_result(
