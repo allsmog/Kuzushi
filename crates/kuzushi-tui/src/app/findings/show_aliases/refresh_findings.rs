@@ -428,6 +428,18 @@ mod tests {
     use super::*;
     use kuzushi_core::{Severity, V2Config};
 
+    #[test]
+    fn finding_scope_key_prefers_identity_and_falls_back_to_fingerprint() {
+        let mut finding = Finding {
+            fingerprint: "legacy-fingerprint".to_string(),
+            ..Finding::default()
+        };
+        assert_eq!(finding_scope_key(&finding), "legacy-fingerprint");
+
+        finding.identity_id = Some("durable-identity".to_string());
+        assert_eq!(finding_scope_key(&finding), "durable-identity");
+    }
+
     fn filtered_workspace() -> (tempfile::TempDir, WorkspaceTarget) {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
