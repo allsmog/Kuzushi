@@ -12353,6 +12353,36 @@ fn app_with_findings(count: usize) -> ShellApp {
     app
 }
 
+fn app_with_findings_and_full_phase_access(count: usize) -> (tempfile::TempDir, ShellApp) {
+    let target = tempfile::tempdir().unwrap();
+    persist_review_ready_import(target.path(), "scan-current");
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_focus(PhaseSurfaceId::ReviewQueue);
+    *app.findings_mut() = (0..count)
+        .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
+        .collect();
+    app.domain_mut()
+        .set_finding_ledger_counts(FindingLedgerCounts {
+            total: count,
+            reviewed: count,
+            confirmed: count,
+            proven: count,
+            proof_deferred: 0,
+            proof_backed: count,
+            remediated: 0,
+            remediation_projection_complete: true,
+            durable_scan_evidence: count > 0,
+        });
+    (target, app)
+}
+
 fn app_with_module_run_scan(paused: bool) -> (ShellApp, ScanCancellation) {
     let mut app = ShellApp::new(V2Config::default(), None);
     let cancel = ScanCancellation::default();
@@ -14203,14 +14233,7 @@ fn pgdown_pgup_paginate_findings_cursor() {
 
 #[test]
 fn viewport_enter_opens_cursor_finding_from_visible_list() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_shell_view(ShellView::Workbench);
-    app.router
-        .workbench_mut()
-        .set_page(Some(WorkbenchPage::Review));
-    app.router
-        .workbench_mut()
-        .set_focus(PhaseSurfaceId::ReviewQueue);
+    let (_target, mut app) = app_with_findings_and_full_phase_access(2);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![
         make_finding(Severity::High, "fp-0000", "first"),
@@ -14236,14 +14259,7 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
 
 #[test]
 fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.set_shell_view(ShellView::Workbench);
-    app.router
-        .workbench_mut()
-        .set_page(Some(WorkbenchPage::Review));
-    app.router
-        .workbench_mut()
-        .set_focus(PhaseSurfaceId::ReviewQueue);
+    let (_target, mut app) = app_with_findings_and_full_phase_access(3);
     app.set_input_mode(crate::InputMode::Navigate);
     *app.findings_mut() = vec![
         make_projected_duplicate(Severity::Medium, "fp-duplicate-medium", "duplicate medium"),
@@ -14391,7 +14407,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
     }));
 
     for binding in advertised {
-        let mut app = app_with_findings(25);
+        let (_target, mut app) = app_with_findings_and_full_phase_access(25);
         app.set_input_mode(crate::InputMode::Navigate);
         match binding.action {
             ViewHotkeyAction::WorkbenchCyclePane => {
@@ -14757,7 +14773,7 @@ fn phase_page_navigation_does_not_pollute_the_operator_transcript() {
 
 #[test]
 fn shift_tab_cycles_workbench_modes_without_mutating_the_shared_draft() {
-    let mut app = app_with_findings(2);
+    let (_target, mut app) = app_with_findings_and_full_phase_access(2);
     app.set_input_mode(crate::InputMode::Prompt);
     app.set_input("scan only src/auth".to_string());
     app.set_cursor(4);
@@ -14785,7 +14801,7 @@ fn shift_tab_cycles_workbench_modes_without_mutating_the_shared_draft() {
 fn shift_tab_reported_as_shifted_tab_still_cycles_workbench_modes() {
     // Enhanced keyboard protocols (kitty CSI-u, modifyOtherKeys) deliver
     // Shift+Tab as Tab+SHIFT instead of the legacy BackTab sequence.
-    let mut app = app_with_findings(2);
+    let (_target, mut app) = app_with_findings_and_full_phase_access(2);
     app.set_input_mode(crate::InputMode::Prompt);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::SHIFT));
@@ -15660,9 +15676,17 @@ fn apply_pending_threat_patch_writes_to_disk() {
 fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
     let temp = tempfile::tempdir().unwrap();
     let target = temp.path().to_path_buf();
-    let original = serde_json::json!({"methodology": "stride", "threats": [{"id": "T-1", "title": "original"}]});
-    let newer =
-        serde_json::json!({"methodology": "stride", "threats": [{"id": "T-1", "title": "newer"}]});
+    let tree_hash = kuzushi_core::incremental_index::current_workspace_tree_hash(&target).unwrap();
+    let original = serde_json::json!({
+        "methodology": "stride",
+        "threats": [{"id": "T-1", "title": "original"}],
+        "provenance": {"treeHash": tree_hash.clone()},
+    });
+    let newer = serde_json::json!({
+        "methodology": "stride",
+        "threats": [{"id": "T-1", "title": "newer"}],
+        "provenance": {"treeHash": tree_hash},
+    });
     let original_id = kuzushi_core::record_threat_model_version(&target, &original, "build", None)
         .unwrap()
         .unwrap();
@@ -21953,6 +21977,7 @@ fn unresolved_partial_result_does_not_wedge_page_navigation() {
         PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
     };
     let target = tempfile::tempdir().unwrap();
+    persist_review_ready_import(target.path(), "scan-prior");
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
     let completed = PhaseAttemptCompleted::new(
         WorkflowPhase::Map,
@@ -21964,6 +21989,7 @@ fn unresolved_partial_result_does_not_wedge_page_navigation() {
         .unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.refresh_phase_attempt_projection();
+    *app.findings_mut() = vec![make_finding(Severity::High, "fp-prior", "prior candidate")];
     open_workbench_page_for_test(&mut app, WorkbenchPage::Map);
     app.set_input_mode(crate::InputMode::Navigate);
     assert!(app

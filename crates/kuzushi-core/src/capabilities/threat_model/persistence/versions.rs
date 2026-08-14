@@ -73,10 +73,12 @@ mod version_tests {
     use super::*;
     use serde_json::json;
 
-    fn document(title: &str) -> Value {
+    fn document(root: &Path, title: &str) -> Value {
+        let tree_hash = crate::incremental_index::current_workspace_tree_hash(root).unwrap();
         json!({
             "methodology": "stride",
             "threats": [{"id": "T-001", "title": title}],
+            "provenance": {"treeHash": tree_hash},
         })
     }
 
@@ -94,9 +96,14 @@ mod version_tests {
     fn record_then_list_round_trips_summaries() {
         let workspace = tempfile::tempdir().unwrap();
 
-        let id = record_threat_model_version(workspace.path(), &document("one"), "build", None)
-            .unwrap()
-            .unwrap();
+        let id = record_threat_model_version(
+            workspace.path(),
+            &document(workspace.path(), "one"),
+            "build",
+            None,
+        )
+        .unwrap()
+        .unwrap();
         let versions = list_threat_model_versions(workspace.path(), 10).unwrap();
 
         assert_eq!(versions.len(), 1);
@@ -108,8 +115,8 @@ mod version_tests {
     #[test]
     fn restore_makes_the_selected_version_live_and_keeps_history() {
         let workspace = tempfile::tempdir().unwrap();
-        let original = document("original");
-        let newer = document("newer");
+        let original = document(workspace.path(), "original");
+        let newer = document(workspace.path(), "newer");
         let original_id =
             record_threat_model_version(workspace.path(), &original, "build", None)
                 .unwrap()
@@ -140,12 +147,12 @@ mod version_tests {
     #[test]
     fn restore_snapshots_an_edited_live_document_first() {
         let workspace = tempfile::tempdir().unwrap();
-        let recorded = document("recorded");
+        let recorded = document(workspace.path(), "recorded");
         let id = record_threat_model_version(workspace.path(), &recorded, "build", None)
             .unwrap()
             .unwrap();
         // Live document diverged from the ledger (operator hand-edit).
-        let edited = document("hand-edited");
+        let edited = document(workspace.path(), "hand-edited");
         save_persistent_threat_model(workspace.path(), &edited, true).unwrap();
 
         restore_threat_model_version(workspace.path(), id).unwrap();
@@ -180,7 +187,7 @@ mod version_tests {
     #[test]
     fn restore_survives_a_stale_context_snapshot_and_discloses_it() {
         let workspace = tempfile::tempdir().unwrap();
-        let stored = document("stored");
+        let stored = document(workspace.path(), "stored");
         let id = record_threat_model_version(workspace.path(), &stored, "build", None)
             .unwrap()
             .unwrap();
@@ -203,7 +210,7 @@ mod version_tests {
     #[test]
     fn restore_of_unknown_version_fails_without_touching_live_model() {
         let workspace = tempfile::tempdir().unwrap();
-        let live = document("live");
+        let live = document(workspace.path(), "live");
         save_persistent_threat_model(workspace.path(), &live, true).unwrap();
 
         let error = restore_threat_model_version(workspace.path(), 42).unwrap_err();

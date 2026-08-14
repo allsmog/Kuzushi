@@ -9,6 +9,7 @@ use kuzushi_core::modules::OptionType;
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, PhaseAttemptCompleted, PhaseAttemptOutcome, PhaseTargetSnapshot,
 };
+use kuzushi_core::Severity;
 
 fn persist_adequate_map_result(target: &std::path::Path, run_id: &str) {
     crate::test_support::record_indexed_run(
@@ -49,6 +50,11 @@ fn persist_unresolved_scan_result(target: &std::path::Path, run_id: &str) -> Pha
         run_id,
         PhaseAttemptOutcome::Completed,
     )
+}
+
+fn persist_selected_scan_result(target: &std::path::Path, run_id: &str) {
+    let completed = persist_unresolved_scan_result(target, run_id);
+    crate::test_support::select_typed_attempt(target, &completed);
 }
 
 fn app_with_open_guided_other() -> ShellApp {
@@ -880,6 +886,7 @@ fn guided_attention_preserves_body_focus_and_scroll_from_mouse_input() {
 fn result_ready_attention_consumes_body_navigation_keys() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    persist_selected_scan_result(target.path(), "scan-prior");
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let completed = PhaseAttemptCompleted::new(
         WorkflowPhase::Map,
@@ -889,6 +896,14 @@ fn result_ready_attention_consumes_body_navigation_keys() {
     );
     append_phase_attempt_completed(target.path(), completed).unwrap();
     app.refresh_phase_attempt_projection();
+    *app.findings_mut() = vec![Finding::new_semgrep(
+        "prior.rule",
+        "src/lib.rs",
+        1,
+        None,
+        Severity::High,
+        "prior candidate",
+    )];
     app.show_guided_phase(WorkflowPhase::Map);
     app.set_input_mode(crate::InputMode::Navigate);
     app.router.workbench_mut().set_focus(PhaseSurfaceId::MapDfd);

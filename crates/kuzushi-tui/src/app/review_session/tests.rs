@@ -26,6 +26,13 @@ fn shadow_model_path() -> std::path::PathBuf {
     ))
 }
 
+#[test]
+fn learn_mode_notice_does_not_claim_ordering_before_scoring() {
+    let notice = armed_mode_notice(ReviewYieldMode::Learn);
+
+    assert!(notice.contains("once the queue is scored"), "{notice}");
+}
+
 fn queue_finding(index: usize, severity: Severity) -> Finding {
     let mut finding = Finding::new_semgrep(
         "demo.rule",
