@@ -3,6 +3,8 @@ mod reader;
 pub(super) use reader::{decode_bounded_jsonl_bytes, read_bounded_jsonl, MissingFile};
 
 use super::KwpError;
+#[cfg(windows)]
+use crate::file_lock::windows_file_identity;
 use serde::Serialize;
 use std::fs::{self, File, Metadata};
 use std::path::Path;
@@ -116,7 +118,7 @@ pub(super) fn verified_jsonl_file_len(
     let path_metadata = fs::symlink_metadata(path).map_err(|error| read_error(path, error))?;
     ensure_regular_path(path, &path_metadata, limits)?;
     let handle_metadata = file.metadata().map_err(|error| read_error(path, error))?;
-    ensure_same_file(&path_metadata, &handle_metadata, limits)?;
+    ensure_same_file(path, &path_metadata, file, &handle_metadata, limits)?;
     ensure_file_size(handle_metadata.len(), limits)?;
     Ok(handle_metadata.len())
 }
@@ -148,27 +150,42 @@ fn ensure_file_size(bytes: u64, limits: JsonlLimits) -> Result<(), KwpError> {
 }
 
 fn ensure_same_file(
-    path: &Metadata,
-    handle: &Metadata,
+    path: &Path,
+    path_metadata: &Metadata,
+    handle: &File,
+    handle_metadata: &Metadata,
     limits: JsonlLimits,
 ) -> Result<(), KwpError> {
-    if file_identity(path) == file_identity(handle) {
+    #[cfg(windows)]
+    let same_file = {
+        let _ = (path_metadata, handle_metadata);
+        same_windows_file(path, handle, limits)?
+    };
+    #[cfg(not(windows))]
+    let same_file = {
+        let _ = (path, handle);
+        file_identity(path_metadata) == file_identity(handle_metadata)
+    };
+    if same_file {
         Ok(())
     } else {
         Err(KwpError::denied(format!("{}.identity", limits.resource)))
     }
 }
 
+#[cfg(windows)]
+fn same_windows_file(path: &Path, handle: &File, limits: JsonlLimits) -> Result<bool, KwpError> {
+    let path_file = crate::bounded_file::open_regular_file(path)
+        .map_err(|error| read_error(path, error))?;
+    let path_identity = windows_file_identity(&path_file).map_err(|error| read_error(path, error))?;
+    let handle_identity = windows_file_identity(handle).map_err(|error| read_error(path, error))?;
+    Ok(path_identity == handle_identity)
+}
+
 #[cfg(unix)]
 fn file_identity(metadata: &Metadata) -> (u64, u64) {
     use std::os::unix::fs::MetadataExt;
     (metadata.dev(), metadata.ino())
-}
-
-#[cfg(windows)]
-fn file_identity(metadata: &Metadata) -> (Option<u32>, Option<u64>) {
-    use std::os::windows::fs::MetadataExt;
-    (metadata.volume_serial_number(), metadata.file_index())
 }
 
 #[cfg(not(any(unix, windows)))]
