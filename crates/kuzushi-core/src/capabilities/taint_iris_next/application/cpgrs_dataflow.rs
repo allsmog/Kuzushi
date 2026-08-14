@@ -161,11 +161,17 @@ fn cpgrs_witness_steps(finding: &kuzushi_cpg::Finding, file_path: &str) -> Vec<C
 }
 
 fn relative_to_scan_root(path: &str, scan_root: &str) -> String {
-    path.strip_prefix(scan_root)
-        .map(|rest| rest.trim_start_matches('/'))
-        .filter(|rest| !rest.is_empty())
+    let path = Path::new(path);
+    let scan_root = Path::new(scan_root);
+    let relative = path.strip_prefix(scan_root).ok().or_else(|| {
+        let canonical_root = std::fs::canonicalize(scan_root).ok()?;
+        path.strip_prefix(canonical_root).ok()
+    });
+    relative
+        .filter(|candidate| !candidate.as_os_str().is_empty())
         .unwrap_or(path)
-        .to_string()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Adapt cpg-rs flows into `TaintIrisNextLinkedStory` rows. Each flow has a

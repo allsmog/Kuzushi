@@ -5,6 +5,41 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.10 — public CPG, durable cancellation, complete release gates
+
+**Additive:**
+
+- The default product now builds and runs against the public Oxidized Joern
+  v0.1.1 graph engine, including persisted graph reopen and witnessed
+  TypeScript taint-path compatibility coverage.
+- Headless `kuzushi scan` now carries cooperative cancellation through normal,
+  requested-input, demo, and APK execution, with two-stage SIGINT handling and
+  deterministic canceled/interrupted batch exits backed by durable run truth.
+
+**Security and reliability:**
+
+- Ordinary CI and tag releases now require the complete default product—Rust
+  lint/tests, dependency policy, coverage, mutation, package verification,
+  Node 22 compatibility, and native E2E—without a private-source credential.
+- CPG source paths and persisted artifacts are authenticated against canonical
+  roots and the shared decoder; imported threat models are rebound to the
+  current workspace tree before verification.
+- Wasmtime 46.0.2 closes RustSec-2026-0222 and RustSec-2026-0223, while clean
+  runner cache/debug settings keep complete-product builds within hosted disk
+  limits.
+
+**Fixed:**
+
+- Review-yield schemas are part of the explicit package contract, so published
+  tarballs include the documented model, dataset, and training-example
+  surfaces without weakening fail-closed inventory checks.
+- The mutation gate uses cargo-mutants' zero-based shard contract and preserves
+  the tested Git build identity inside source copies, keeping lifecycle and
+  checkpoint tests valid before mutants run.
+- Current-attempt journey counts, deterministic coverage execution, stale
+  fixtures and snapshots, surface linting, and public-engine API semantics now
+  agree with the complete product gate.
+
 ## v0.24.0-alpha.9 — evidence-grounded cockpit and hardened analysis
 
 **Additive:**

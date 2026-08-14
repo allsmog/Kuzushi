@@ -126,7 +126,7 @@ const ciRequirements = [
   "pnpm test:coverage",
   "pnpm test:mutations",
   "rhysd/actionlint:1.7.12",
-  "OXIDIZED_JOERN_TOKEN",
+  "cargo test --workspace --locked",
   "quality-gauntlet:",
   "verify-pack:",
   "pnpm verify:pack",

@@ -36,6 +36,9 @@ const requiredPackageFiles = [
   "LICENSE",
   "schemas/module.manifest.schema.json",
   "schemas/kuzushi.lock.schema.json",
+  "schemas/review-yield.dataset-manifest.schema.json",
+  "schemas/review-yield.model.schema.json",
+  "schemas/review-yield.training-example.schema.json",
   ...canonicalRunSchemaFiles,
 ];
 const allowedPackageEntries = [

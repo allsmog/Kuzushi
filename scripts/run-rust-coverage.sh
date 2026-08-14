@@ -14,6 +14,12 @@ fi
 
 mkdir -p target/llvm-cov
 
+# Instrumented bridge tests spawn and terminate guarded process groups. Run
+# coverage serially so overlapping guard lifecycles cannot turn host process
+# pressure into unrelated SIGKILL or setpgid failures. Operators may override
+# this after proving a higher safe limit on their runner.
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+
 cargo llvm-cov \
   --workspace \
   --exclude kuzushi-bdd-tui \

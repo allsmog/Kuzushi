@@ -10,9 +10,9 @@ repository.workspace = true
 
 [features]
 default = ["private-cpg"]
-# Default product builds keep the in-process CPG engine. The public-core lane
-# disables this feature only after a disposable resolver overlay removes the
-# private Git source declarations from the copied workspace manifest.
+# Historical feature name retained for compatibility. Default product builds
+# keep the public in-process CPG engine; the engine-disabled CI lane verifies
+# the fail-closed adapter surface separately.
 private-cpg = ["kuzushi-cpg/private-engine"]
 
 [dependencies]
@@ -32,9 +32,9 @@ globset = "0.4"
 # ipnet powers CIDR-range matching in `.kuzushi/scope.toml`.
 ipnet = "2.10"
 kuzushi-codeindex = { path = "../kuzushi-codeindex" }
-# In-process cpg-rs engine adapter. Its private implementation is enabled by
-# the default `private-cpg` feature; disabling defaults keeps only a fail-closed
-# compile adapter once the public resolver overlay has removed Git resolution.
+# In-process cpg-rs engine adapter. The default `private-cpg` feature name is
+# retained for compatibility; disabling defaults keeps only a fail-closed
+# compile adapter.
 kuzushi-cpg = { path = "../kuzushi-cpg", default-features = false }
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }

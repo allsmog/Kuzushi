@@ -4884,8 +4884,8 @@ fn compact_model_picker_keeps_the_selected_model_visible() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("models 5-5 of 5"), "{rendered}");
-    assert!(rendered.contains("▸ Claude Opus"), "{rendered}");
+    assert!(rendered.contains("models 5-5 of 6"), "{rendered}");
+    assert!(rendered.contains("▸ Claude Sonnet"), "{rendered}");
     assert!(!rendered.contains("d demo"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
 }
@@ -6772,7 +6772,7 @@ fn narrow_model_picker_preserves_complete_action_atoms() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("credentials needed"), "{rendered}");
-    assert!(rendered.contains("auth required"), "{rendered}");
+    assert!(rendered.contains("OAuth login needed"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
     assert!(!rendered.contains("needs..."), "{rendered}");
 }
@@ -6816,7 +6816,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
         "un-hydrated Map shows the neutral placeholder, not an evidence verdict: {rendered}"
     );
     assert!(rendered.contains("context:missing"), "{rendered}");
-    assert!(rendered.contains("build context"), "{rendered}");
+    assert!(rendered.contains("context build"), "{rendered}");
 }
 
 fn rendered_buffer_rows(buffer: &Buffer) -> Vec<String> {

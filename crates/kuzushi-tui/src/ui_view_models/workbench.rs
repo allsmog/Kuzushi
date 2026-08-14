@@ -635,7 +635,7 @@ mod tests {
         let map = command_bar_hints(&prompt_app, WorkbenchPage::Map, None, false, None);
         assert!(map
             .iter()
-            .any(|hint| hint.verb == "jobs" && hint.label == "inspect prior runs"));
+            .any(|hint| hint.verb == "jobs" && hint.label == "inspect Map runs"));
     }
 
     #[test]

@@ -24,6 +24,12 @@ if ! git rev-parse --verify --quiet "${base}^{commit}" >/dev/null; then
   exit 2
 fi
 
+# cargo-mutants runs tests from a source copy without `.git`. Preserve the
+# build identity that normal Cargo builds obtain through kuzushi-core/build.rs
+# so checkpoint and lifecycle tests exercise the same product contract.
+export KUZUSHI_GIT_SHA="$(git rev-parse --short=12 HEAD)"
+export KUZUSHI_GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
 mkdir -p target/mutation
 diff_input="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-diff.XXXXXX")"
 mutant_list="$(mktemp "${TMPDIR:-/tmp}/kuzushi-mutation-list.XXXXXX")"
@@ -88,16 +94,15 @@ mutation_args=(
 mutation_args+=("${platform_args[@]}")
 mutation_args+=("${filter_args[@]}")
 
-shard_count=1
-shard_index=1
-if [[ "${mutant_count}" -gt "${max_mutants}" ]]; then
-  shard_count=$(((mutant_count + max_mutants - 1) / max_mutants))
-  selection_hash="$(git hash-object "${mutant_list}")"
-  shard_index=$((16#${selection_hash:0:8} % shard_count + 1))
+selection_hash="$(git hash-object "${mutant_list}")"
+shard_selection="$(
+  node scripts/rust-mutation-shard.mjs "${mutant_count}" "${max_mutants}" "${selection_hash}"
+)"
+read -r shard_index shard_count selected_count <<<"${shard_selection}"
+if [[ "${shard_count}" -gt 1 ]]; then
   mutation_args+=(--sharding round-robin --shard "${shard_index}/${shard_count}")
 fi
 
-selected_count=$(((mutant_count - shard_index) / shard_count + 1))
 echo "mutation gate: testing ${selected_count}/${mutant_count} changed-code mutants (round-robin shard ${shard_index}/${shard_count})"
 
 set +e
@@ -111,7 +116,7 @@ cp "${diff_input}" target/mutation/change.diff
   printf 'eligible_mutants=%s\n' "${mutant_count}"
   printf 'selected_mutants=%s\n' "${selected_count}"
   printf 'shard=%s/%s\n' "${shard_index}" "${shard_count}"
-  printf 'selection_hash=%s\n' "${selection_hash:-$(git hash-object "${mutant_list}")}"
+  printf 'selection_hash=%s\n' "${selection_hash}"
   printf 'diff_hash=%s\n' "$(git hash-object "${diff_input}")"
 } > target/mutation/sample.txt
 

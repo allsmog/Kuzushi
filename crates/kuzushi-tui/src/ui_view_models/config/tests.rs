@@ -32,12 +32,11 @@ fn config_model_summarizes_default_runtime_state() {
         ["", "#", "model", "effort", "auth"]
     );
     assert!(!model.model_table.rows.is_empty());
-    assert!(!model
+    assert!(model
         .model_table
         .rows
         .iter()
-        .flat_map(|row| row.cells.iter())
-        .any(|cell| cell.contains("openai-codex") || cell.contains("codex")));
+        .any(|row| row.cells[2] == "openai-oauth:gpt-5.4"));
     assert!(model.model_table.rows.iter().all(|row| row.cells[0] != ">"));
     assert_eq!(
         model.commands,
@@ -135,12 +134,11 @@ fn plain_config_model_projects_plain_summary_and_model_table() {
     assert_eq!(model.model_table.title, "MODELS");
     assert_eq!(model.model_table.headers, ["#", "model", "effort", "auth"]);
     assert!(!model.model_table.rows.is_empty());
-    assert!(!model
+    assert!(model
         .model_table
         .rows
         .iter()
-        .flat_map(|row| row.cells.iter())
-        .any(|cell| cell.contains("openai-codex") || cell.contains("codex")));
+        .any(|row| row.cells[1] == "openai-oauth:gpt-5.4"));
     assert_eq!(
         model.next_hint,
         "Next: model <n> [xhigh], auth login openai, auth login anthropic, cost"

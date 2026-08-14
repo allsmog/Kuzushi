@@ -11,7 +11,7 @@ use kuzushi_core::{
 };
 
 #[test]
-fn credential_free_core_discloses_private_engine_absence() {
+fn engine_disabled_core_discloses_engine_absence() {
     let target = tempfile::tempdir().unwrap();
     let artifact_dir = target.path().join(".kuzushi/cpg-rs");
     std::fs::create_dir_all(&artifact_dir).unwrap();

@@ -386,9 +386,6 @@ fn armed_mode_notice(mode: ReviewYieldMode) -> &'static str {
             "model loaded — review rows may reorder inside a proof and severity band; bands themselves never move"
         }
         ReviewYieldMode::Learn => {
-            "model loaded — review rows may reorder inside a proof and severity band, findings the model has least evidence about first; bands themselves never move"
-        }
-        ReviewYieldMode::Learn => {
             "model loaded — once the queue is scored, review rows may reorder inside a proof and severity band, findings the model has least evidence about first; bands themselves never move"
         }
         ReviewYieldMode::Visible => {

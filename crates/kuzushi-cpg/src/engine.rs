@@ -134,7 +134,7 @@ pub fn open_project_in(scope: &BuildScope, lang: &str) -> Option<Project> {
 fn load_project(cpg_path: &Path, lang: &str) -> Option<Project> {
     let path = cpg_path.to_string_lossy().into_owned();
     let cpg = std::panic::catch_unwind(|| Cpg::load(&path)).ok()?.ok()?;
-    let (mut project, _) = cpg_cli::make_project(lang);
+    let (mut project, _) = cpg_cli::make_project(lang).ok()?;
     project.reopen(cpg);
     Some(project)
 }
@@ -246,7 +246,7 @@ fn build_and_save(
         ));
     }
     let excludes = build_excludes(lang);
-    let project = cpg_cli::build_project_filtered(&scan_root.to_string_lossy(), lang, &excludes);
+    let project = cpg_cli::build_project_filtered(&scan_root.to_string_lossy(), lang, &excludes)?;
     if let Some(parent) = cpg_path.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;

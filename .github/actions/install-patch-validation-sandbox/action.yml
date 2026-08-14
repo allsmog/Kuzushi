@@ -1,0 +1,22 @@
+name: Install patch-validation sandbox
+description: Install and verify the trusted Bubblewrap backend used by repository-execution tests
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends bubblewrap
+        sudo tee /etc/apparmor.d/usr.bin.bwrap >/dev/null <<'APPARMOR'
+        abi <abi/4.0>,
+        include <tunables/global>
+
+        /usr/bin/bwrap flags=(unconfined) {
+          userns,
+        }
+        APPARMOR
+        sudo apparmor_parser --replace /etc/apparmor.d/usr.bin.bwrap
+        bwrap --unshare-all --ro-bind /usr /usr --ro-bind /bin /bin \
+          --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
+          --proc /proc --dev /dev -- /bin/true

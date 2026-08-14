@@ -134,6 +134,9 @@ impl ShellApp {
     pub(super) fn cycle_workbench_page_mode(&mut self) {
         let current = crate::ui_view_models::active_workbench_page(self);
         let page = crate::ui_view_models::adjacent_available_workbench_page(self, current, false);
+        if page == current {
+            return;
+        }
         self.set_workbench_page(page);
     }
 

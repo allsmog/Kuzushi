@@ -425,8 +425,8 @@ fn unbroken_long_token(text: &str) -> Option<String> {
         .flat_map(str::split_whitespace)
         .filter(|token| token.chars().count() >= 40)
         .find(|token| {
-            let has_words = token.chars().any(|c| c.is_ascii_alphanumeric());
-            has_words && !token.contains('/') && !token.contains('|')
+            let word_width = token.chars().filter(|c| c.is_ascii_alphanumeric()).count();
+            word_width >= 40 && !token.contains('/') && !token.contains('|')
         })
         .map(str::to_string)
 }
@@ -614,6 +614,11 @@ fn duplication_and_truncation_matchers_hit_their_shapes() {
         unbroken_long_token("run ────────────────────────────────────────────── done"),
         None,
         "repeated-char rules are decorative"
+    );
+    assert_eq!(
+        unbroken_long_token("SUMMARY────────────────────────────────────┐┌OVERALL"),
+        None,
+        "box borders joined to labels are decorative"
     );
     assert!(unbroken_long_token(
         "id kzfinding4f9a2c81b0e77d3aa91c4f2b8d6e5a0c1b2d3e4f5a6b7c8d9e0f1a2b"

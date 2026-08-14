@@ -78,4 +78,4 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://github.com/allsmog/oxidized-joern.git?rev=9ab43859f0c3342c734ff38ea6366711d216c8fd"]
+allow-git = ["https://github.com/allsmog/oxidized-joern.git?rev=eb69c9543356f3f1eddcb7fa5ded8ac5fde4d843"]
