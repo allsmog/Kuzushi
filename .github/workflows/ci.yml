@@ -248,7 +248,7 @@ jobs:
   # ── Deterministic changed-code mutation sample ───────────────────────────
   mutation:
     name: mutation
-    needs: [install, rust-cli]
+    needs: install
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
