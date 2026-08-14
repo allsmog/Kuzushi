@@ -1047,9 +1047,9 @@ pub(crate) fn scan_runtime(
 #[cfg(test)]
 mod tests {
     use super::{
-        emit_scan_patch_validation_disclosure, record_failed_scan_execution, scan_gate_ids,
-        scan_scope_body, scan_semantic_error, settle_apk_scan, settle_scan_dispatch,
-        write_scan_scope_file, ScanExecutionFailureRecord,
+        emit_scan_patch_validation_disclosure, execute_scan_tool, record_failed_scan_execution,
+        scan_gate_ids, scan_scope_body, scan_semantic_error, settle_apk_scan, settle_scan_dispatch,
+        write_scan_scope_file, ScanExecutionFailureRecord, ScanToolExecution,
     };
     use kuzushi_core::run_artifacts::{
         try_record_tool_run_started_with_reproducibility, ToolRunRecord,
@@ -1154,6 +1154,89 @@ mod tests {
         );
         assert!(
             scan_semantic_error(&serde_json::json!({"ok": true, "status": "skipped"})).is_none()
+        );
+    }
+
+    #[test]
+    fn cancellation_before_preparation_settles_without_dispatch() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let config = kuzushi_core::V2Config::default();
+        let cancellation = ScanCancellation::default();
+        cancellation.cancel();
+        let run_id = "scan-canceled-before-preparation";
+        let input = serde_json::json!({"runId": run_id});
+        try_record_tool_run_started_with_reproducibility(
+            ToolRunRecord::new(target.path(), run_id, "scan", "sast:scan"),
+            &input,
+            None,
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let ctx = kuzushi_core::ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: Some(&cancellation),
+            authorization: Default::default(),
+        };
+
+        let output = execute_scan_tool(ScanToolExecution {
+            registry: &registry,
+            input,
+            ctx: &ctx,
+            runtime: None,
+            workspace: &workspace,
+            run_id,
+            config: &config,
+            cancellation: &cancellation,
+        })
+        .unwrap();
+
+        assert_eq!(output["status"], "canceled");
+    }
+
+    #[test]
+    fn rejected_scan_input_persists_a_blocked_terminal_run() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let store = kuzushi_core::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let config = kuzushi_core::V2Config::default();
+        let cancellation = ScanCancellation::default();
+        let run_id = "scan-rejected-before-dispatch";
+        let input = serde_json::json!({"unknownOption": true});
+        let ctx = kuzushi_core::ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: Some(&cancellation),
+            authorization: Default::default(),
+        };
+
+        let error = execute_scan_tool(ScanToolExecution {
+            registry: &registry,
+            input,
+            ctx: &ctx,
+            runtime: None,
+            workspace: &workspace,
+            run_id,
+            config: &config,
+            cancellation: &cancellation,
+        })
+        .expect_err("unknown input must fail before dispatch");
+
+        assert!(error.to_string().contains("unknown option"));
+        assert_eq!(
+            kuzushi_core::load_run_summary(target.path(), run_id)
+                .unwrap()
+                .status,
+            "blocked"
         );
     }
 
