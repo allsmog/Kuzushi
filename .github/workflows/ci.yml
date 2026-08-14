@@ -116,6 +116,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          cache: false
       - run: cargo check --workspace --all-targets --locked
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: rustfmt
@@ -149,6 +150,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          cache: false
       - name: Install patch-validation sandbox
         run: |
           sudo apt-get update
@@ -237,6 +239,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          cache: false
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.8.7 --locked
       - name: Install patch-validation sandbox
@@ -283,6 +286,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           inherit-toolchain: true
+          cache: false
       - name: Install mutation tool
         run: cargo install cargo-mutants --version 27.1.0 --locked
       - name: Require sampled changed mutants to be caught
