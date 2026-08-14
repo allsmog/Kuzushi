@@ -118,7 +118,7 @@ function checkWorkspaceLockVersions() {
 function checkReleaseInstructions() {
   const instructions = readText("RELEASING.md");
   const staged =
-    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md";
+    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md";
   if (!instructions.includes(staged)) {
     failures.push("RELEASING.md must stage every release-version source and CHANGELOG.md");
   }
@@ -180,7 +180,22 @@ function nativeReleaseMatrixFailures(workflow) {
   if (workflow.includes("continue-on-error")) {
     matrixFailures.push("release jobs must not allow supported platform failures");
   }
-  return matrixFailures;
+  return [...matrixFailures, ...requiredNativeReleaseMatrixEntryFailures(workflow)];
+}
+
+function requiredNativeReleaseMatrixEntryFailures(workflow) {
+  return [
+    { runner: "ubuntu-latest", slug: "linux-x64" },
+    { runner: "ubuntu-24.04-arm", slug: "linux-arm64" },
+    { runner: "macos-15-intel", slug: "darwin-x64" },
+    { runner: "macos-14", slug: "darwin-arm64" },
+    { runner: "windows-latest", slug: "win32-x64" },
+  ]
+    .filter(
+      ({ runner, slug }) =>
+        !workflow.includes(`          - os: ${runner}\n            slug: ${slug}`),
+    )
+    .map(({ runner, slug }) => `release matrix must include ${slug} on ${runner}`);
 }
 
 function nativePackageFailures() {

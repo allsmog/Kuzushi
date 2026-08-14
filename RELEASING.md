@@ -31,7 +31,7 @@ node scripts/bump-release-version.mjs 0.24.0-alpha.12
 pnpm check:release
 
 # 3. Commit every source updated by the bump, plus the changelog, and tag
-git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md
+git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
 git tag "v$(node -p 'require("./package.json").version')"
 
@@ -41,8 +41,9 @@ git push origin main --tags
 
 Do not publish from the local package build. `pnpm publish:npm:go` fails
 closed by design because `pnpm build:native` stages only the current host.
-The tag-triggered workflow is the sole publishing path and requires both
-`linux-x64` and `darwin-arm64` payloads before `npm publish` can run.
+The tag-triggered workflow is the sole publishing path and requires
+`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, and `win32-x64`
+payloads before `npm publish` can run.
 
 ## Automated Release (via CI)
 
@@ -50,8 +51,8 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
 
 1. Runs the full reusable CI suite, including the hard-blocking e2e npm-wrapper smoke.
 2. Builds native binaries for linux-x64, linux-arm64, darwin-x64,
-   darwin-arm64, and win32-x64. Required legs block the release; best-effort
-   legs are staged when they build.
+   darwin-arm64, and win32-x64. Every platform blocks publication if its build,
+   platform contract, packaging, or artifact upload fails.
 3. Stages the CLI and every advertised MCP server from each green build into
    `native/<platform>-<arch>/`.
 4. Executes each platform's staged CLI plus every advertised MCP health check
