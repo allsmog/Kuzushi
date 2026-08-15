@@ -233,13 +233,17 @@ if [[ -f "$REPO_DIR/.gitmessage" ]]; then
   printf "  ✓ commit.template = .gitmessage (conventional commits)\n"
 fi
 # The upstream reference remote is diffing convenience, never fetched by a build,
-# so a failure here is reported rather than treated as a broken environment.
-if UPSTREAM_REMOTE_STATUS="$(cd "$REPO_DIR" && node scripts/ensure-upstream-remote.mjs)"; then
-  ok "$UPSTREAM_REMOTE_STATUS"
-else
-  warn "could not configure the upstream-codex remote."
-  hint "Run 'node scripts/ensure-upstream-remote.mjs' once git is usable in this clone."
-fi
+# so neither a failure nor a non-canonical URL is treated as a broken environment.
+# The script reports severity through its exit status; only 0 is a clean result.
+UPSTREAM_REMOTE_STATUS="$(cd "$REPO_DIR" && node scripts/ensure-upstream-remote.mjs)" \
+  && UPSTREAM_REMOTE_RC=0 || UPSTREAM_REMOTE_RC=$?
+case "$UPSTREAM_REMOTE_RC" in
+  0) ok "$UPSTREAM_REMOTE_STATUS" ;;
+  2) warn "$UPSTREAM_REMOTE_STATUS"
+     hint "Repoint it at https://github.com/openai/codex.git if that fork was not deliberate." ;;
+  *) warn "could not configure the upstream-codex remote."
+     hint "Run 'node scripts/ensure-upstream-remote.mjs' once git is usable in this clone." ;;
+esac
 
 # ─── Summary gate ───────────────────────────────────────────────────
 section "Summary"

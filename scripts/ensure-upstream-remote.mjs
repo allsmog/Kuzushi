@@ -63,9 +63,17 @@ export function describeUpstreamRemoteFailure(error) {
   return `could not configure ${UPSTREAM_REMOTE_NAME}: ${reason.split("\n")[0] || "unknown error"}`;
 }
 
+// Exit status is the severity, so callers do not parse the message:
+//   0  the remote is canonical (added or already correct)
+//   1  provisioning failed; the reason is on stderr
+//   2  the remote exists but points elsewhere and was left untouched
+export const DIVERGED_EXIT_CODE = 2;
+
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   try {
-    console.log(describeUpstreamRemotePlan(ensureUpstreamRemote()));
+    const plan = ensureUpstreamRemote();
+    console.log(describeUpstreamRemotePlan(plan));
+    if (plan.action === "diverged") process.exit(DIVERGED_EXIT_CODE);
   } catch (error) {
     console.error(describeUpstreamRemoteFailure(error));
     process.exit(1);

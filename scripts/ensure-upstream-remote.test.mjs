@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  DIVERGED_EXIT_CODE,
   describeUpstreamRemoteFailure,
   describeUpstreamRemotePlan,
   ensureUpstreamRemote,
@@ -83,6 +84,35 @@ test("setup provisions the remote so no gate probes local git configuration", ()
 
   const portContract = readFileSync(resolve(repoRoot, "scripts/check-port-contract.mjs"), "utf8");
   assert.doesNotMatch(portContract, /"remote"/);
+});
+
+test("exit status carries severity: canonical 0, diverged 2", () => {
+  const script = resolve(repoRoot, "scripts/ensure-upstream-remote.mjs");
+
+  const canonical = newGitWorkspace();
+  const clean = spawnSync(process.execPath, [script], { cwd: canonical, encoding: "utf8" });
+  assert.equal(clean.status, 0);
+  assert.match(clean.stdout, /added git remote upstream-codex/);
+
+  const forked = newGitWorkspace();
+  execFileSync("git", ["remote", "add", UPSTREAM_REMOTE_NAME, "https://example.invalid/fork.git"], {
+    cwd: forked,
+    stdio: "ignore",
+  });
+  const diverged = spawnSync(process.execPath, [script], { cwd: forked, encoding: "utf8" });
+  assert.equal(
+    diverged.status,
+    DIVERGED_EXIT_CODE,
+    "a non-canonical remote must not report success",
+  );
+  assert.match(diverged.stdout, /left git remote upstream-codex at https:\/\/example\.invalid/);
+  assert.equal(remoteUrl(forked), "https://example.invalid/fork.git");
+});
+
+test("bootstrap gives the diverged status its own non-success branch", () => {
+  const bootstrap = readFileSync(resolve(repoRoot, "scripts/bootstrap.sh"), "utf8");
+  assert.match(bootstrap, /case "\$UPSTREAM_REMOTE_RC" in/);
+  assert.match(bootstrap, /^\s*2\)\s*warn "\$UPSTREAM_REMOTE_STATUS"/m);
 });
 
 test("a git failure is reported by reason, not as a stack trace", () => {
