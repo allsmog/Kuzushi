@@ -487,11 +487,7 @@ mod tests {
             "{}",
         )
         .unwrap();
-        std::fs::write(
-            target.path().join(".kuzushi/v3/runs/run-1/items.jsonl"),
-            "",
-        )
-        .unwrap();
+        std::fs::write(target.path().join(".kuzushi/v3/runs/run-1/items.jsonl"), "").unwrap();
 
         let (target_files, target_capped) = bounded_file_count(target.path(), 100);
         let (state_files, state_capped) = bounded_file_count(&target.path().join(".kuzushi"), 100);
