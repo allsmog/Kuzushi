@@ -3,9 +3,12 @@
 // This gate checks the surfaces that keep the port honest:
 //   1. attribution documents stay present and truthful,
 //   2. no wholesale Codex subtree is ever committed,
-//   3. the upstream-codex remote exists for substrate diffing,
-//   4. CI and release workflows stay wired to the quality gates, and
-//   5. a few cross-language artifact-spec spot checks on Rust sources.
+//   3. CI and release workflows stay wired to the quality gates, and
+//   4. a few cross-language artifact-spec spot checks on Rust sources.
+//
+// Everything asserted here is committed repository content. The upstream-codex
+// diffing remote is contributor environment, so `pnpm setup` provisions it via
+// scripts/ensure-upstream-remote.mjs instead of a gate demanding it.
 //
 // It deliberately does NOT re-assert the contents of other gate scripts or of
 // verify-pack.mjs: those gates run directly in CI, and their own behavior is
@@ -182,7 +185,6 @@ const retiredStandaloneCiWorkflows = [
 ];
 
 const failures = [
-  ...checkUpstreamCodexRemote(),
   ...requiredDocs.flatMap(checkFileNeedles),
   ...rustArtifactSpecChecks.flatMap(checkFileNeedles),
   ...checkNeedles(".github/workflows/ci.yml", quickCiRequirements),
@@ -210,21 +212,6 @@ if (failures.length > 0) {
 }
 
 console.log("port contract check passed");
-
-function checkUpstreamCodexRemote() {
-  const expected = "https://github.com/openai/codex.git";
-  try {
-    const actual = execFileSync("git", ["remote", "get-url", "upstream-codex"], {
-      cwd: repo,
-      encoding: "utf8",
-    }).trim();
-    return actual === expected
-      ? []
-      : [`git remote upstream-codex must point at ${expected}; found ${actual}`];
-  } catch {
-    return [`git remote upstream-codex is missing; add ${expected}`];
-  }
-}
 
 function checkFileNeedles({ file, needles }) {
   return checkNeedles(file, needles);

@@ -80,10 +80,6 @@ jobs:
             echo "$matches"
             exit 1
           fi
-      - name: Configure upstream contract remote
-        run: |
-          git remote get-url upstream-codex >/dev/null 2>&1 || \
-            git remote add upstream-codex https://github.com/openai/codex.git
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}

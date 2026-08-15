@@ -14,6 +14,13 @@ pnpm doctor         # re-check the environment at any time (read-only)
 pnpm verify:quick    # Node tests, Rust format/check, architecture, docs, and policy gates
 ```
 
+`pnpm setup` also adds the `upstream-codex` git remote
+(`https://github.com/openai/codex.git`) so you can diff Kuzushi against the
+upstream substrate. Nothing in the build fetches it, so it is safe to skip, and
+a remote you have deliberately pointed at your own fork is left alone. Add it by
+hand with `node scripts/ensure-upstream-remote.mjs` in a clone that skipped
+setup.
+
 Before a release or when reproducing CI end to end, install the pinned
 `cargo-llvm-cov` and `cargo-mutants` versions printed by the commands, then run
 `pnpm verify:ci`. It runs the quick checks plus measured coverage, strict

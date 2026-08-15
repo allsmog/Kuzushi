@@ -221,6 +221,26 @@ else
   hint "Install: 'apt-get install sqlite3' / 'brew install sqlite'."
 fi
 
+# ─── Configure local git ────────────────────────────────────────────
+# Sits between the checks and the summary gate on purpose. It must precede the
+# gate so a warning here is counted by --strict, and precede the install gate so
+# --skip-install skips dependencies only. Repository settings are not
+# dependencies, and ensure-upstream-remote.mjs imports only Node builtins, so
+# nothing here needs node_modules.
+section "Configuring local git"
+if [[ -f "$REPO_DIR/.gitmessage" ]]; then
+  git -C "$REPO_DIR" config --local commit.template .gitmessage
+  printf "  ✓ commit.template = .gitmessage (conventional commits)\n"
+fi
+# The upstream reference remote is diffing convenience, never fetched by a build,
+# so a failure here is reported rather than treated as a broken environment.
+if UPSTREAM_REMOTE_STATUS="$(cd "$REPO_DIR" && node scripts/ensure-upstream-remote.mjs)"; then
+  ok "$UPSTREAM_REMOTE_STATUS"
+else
+  warn "could not configure the upstream-codex remote."
+  hint "Run 'node scripts/ensure-upstream-remote.mjs' once git is usable in this clone."
+fi
+
 # ─── Summary gate ───────────────────────────────────────────────────
 section "Summary"
 
@@ -252,12 +272,6 @@ if ! pnpm install --frozen-lockfile; then
   err "pnpm install failed."
   hint "If you're updating dependencies intentionally, run 'pnpm install' without --frozen-lockfile."
   exit 2
-fi
-
-section "Configuring local git"
-if [[ -f "$REPO_DIR/.gitmessage" ]]; then
-  git -C "$REPO_DIR" config --local commit.template .gitmessage
-  printf "  ✓ commit.template = .gitmessage (conventional commits)\n"
 fi
 
 section "Bootstrap complete"
