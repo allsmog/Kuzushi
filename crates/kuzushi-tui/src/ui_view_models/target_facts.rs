@@ -26,10 +26,7 @@ pub(crate) fn target_fact_detail_lines(facts: &TargetCandidateFacts) -> [String;
 
 pub(crate) fn target_fact_labels(facts: &TargetCandidateFacts) -> TargetFactLabels {
     TargetFactLabels {
-        branch: facts
-            .branch
-            .clone()
-            .unwrap_or_else(|| "detached/non-git".to_string()),
+        branch: branch_label(&facts.repository_kind, facts.branch.as_deref()),
         revision: facts
             .revision
             .as_deref()
@@ -51,6 +48,14 @@ pub(crate) fn target_fact_labels(facts: &TargetCandidateFacts) -> TargetFactLabe
     }
 }
 
+fn branch_label(repository_kind: &str, branch: Option<&str>) -> String {
+    match branch {
+        Some(branch) => branch.to_string(),
+        None if repository_kind == "git repository" => "detached HEAD".to_string(),
+        None => "non-git".to_string(),
+    }
+}
+
 fn joined_fact_label(label: &str, values: &[String], empty: &str) -> String {
     if values.is_empty() {
         format!("{label}: {empty}")
@@ -68,4 +73,16 @@ fn prior_artifact_label(facts: &TargetCandidateFacts) -> String {
         facts.prior_artifact_count,
         facts.prior_artifacts.join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn branch_label_distinguishes_detached_git_from_non_git() {
+        assert_eq!(branch_label("git repository", None), "detached HEAD");
+        assert_eq!(branch_label("source", None), "non-git");
+        assert_eq!(branch_label("git repository", Some("main")), "main");
+    }
 }
