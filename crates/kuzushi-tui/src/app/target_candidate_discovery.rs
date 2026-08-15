@@ -318,7 +318,7 @@ fn count_fact_entry(
 fn should_descend_for_facts(path: &std::path::Path) -> bool {
     !matches!(
         path.file_name().and_then(|name| name.to_str()),
-        Some(".git" | "target" | "node_modules")
+        Some(".git" | ".kuzushi" | "target" | "node_modules")
     )
 }
 
@@ -475,6 +475,32 @@ mod tests {
             .any(|scope| scope == "crates/demo"));
         assert!(facts.prior_artifact_count > 0);
         assert!(facts.prior_artifacts.contains(&"runs".to_string()));
+    }
+
+    #[test]
+    fn generated_kuzushi_state_does_not_inflate_target_file_count() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("app.rs"), "fn main() {}\n").unwrap();
+        std::fs::create_dir_all(target.path().join(".kuzushi/v3/runs/run-1")).unwrap();
+        std::fs::write(
+            target.path().join(".kuzushi/v3/runs/run-1/summary.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::write(
+            target.path().join(".kuzushi/v3/runs/run-1/items.jsonl"),
+            "",
+        )
+        .unwrap();
+
+        let (target_files, target_capped) = bounded_file_count(target.path(), 100);
+        let (state_files, state_capped) = bounded_file_count(&target.path().join(".kuzushi"), 100);
+
+        assert_eq!(target_files, 1);
+        assert!(!target_capped);
+        assert_eq!(state_files, 2);
+        assert!(!state_capped);
+        assert!(prior_artifact_categories(target.path()).contains(&"runs".to_string()));
     }
 
     #[test]
