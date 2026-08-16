@@ -315,7 +315,7 @@ impl ShellApp {
         }
     }
 
-    fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+    pub(crate) fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
         let Some(stop_after) = self.configured_stop_phase() else {
             return false;
         };
@@ -355,7 +355,7 @@ impl ShellApp {
         true
     }
 
-    fn configured_stop_phase(&self) -> Option<crate::app::WorkflowPhase> {
+    pub(crate) fn configured_stop_phase(&self) -> Option<crate::app::WorkflowPhase> {
         self.config()
             .phases
             .stop_after

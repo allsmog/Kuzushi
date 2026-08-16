@@ -68,7 +68,11 @@ pub(crate) fn setup_readiness_model(app: &ShellApp) -> SetupReadinessModel {
     );
     let first_blocker = rows.iter().position(|row| row.blocker.is_some());
     let can_start = first_blocker.is_none();
-    rows.push(start_row(&rows, first_blocker, selected_rows.len()));
+    rows.push(start_row(
+        &rows,
+        first_blocker,
+        empty_start_outcome(app, &selected_rows),
+    ));
     SetupReadinessModel {
         rows,
         first_blocker,
@@ -92,13 +96,13 @@ fn selected_setup_rows(app: &ShellApp) -> Vec<&crate::app::PlanningTaskRow> {
 fn start_row(
     rows: &[SetupReadinessRow],
     first_blocker: Option<usize>,
-    selected_tasks: usize,
+    empty_start: Option<EmptyStartOutcome>,
 ) -> SetupReadinessRow {
     let can_start = first_blocker.is_none();
     let detail = first_blocker
         .and_then(|index| rows.get(index))
         .and_then(|row| row.blocker.clone())
-        .unwrap_or_else(|| start_action_detail(selected_tasks));
+        .unwrap_or_else(|| start_action_detail(empty_start));
     SetupReadinessRow {
         id: SetupRowId::Start,
         label: "Start Map",
@@ -113,15 +117,43 @@ fn start_row(
     }
 }
 
-/// With nothing checked, Start Map launches no work: it records the explicit
-/// Map skip and advances the journey. Say that before it is pressed rather
-/// than promising a Run Focus that never opens.
-fn start_action_detail(selected_tasks: usize) -> String {
-    if selected_tasks == 0 {
-        return "no task will run — records the explicit Map skip and continues to Scan"
-            .to_string();
+/// Where Start Map lands when nothing is checked: Map's successor, or a hold
+/// at Map when `phases.stop_after` stops the journey there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EmptyStartOutcome {
+    Advances(kuzushi_core::WorkflowPhase),
+    HeldByStopAfter,
+}
+
+fn empty_start_outcome(
+    app: &ShellApp,
+    selected_rows: &[&crate::app::PlanningTaskRow],
+) -> Option<EmptyStartOutcome> {
+    if !selected_rows.is_empty() {
+        return None;
     }
-    "Commit this Map plan and open Run Focus".to_string()
+    let next = kuzushi_core::WorkflowPhase::Map.next()?;
+    Some(match app.configured_stop_phase() {
+        Some(stop) if next > stop => EmptyStartOutcome::HeldByStopAfter,
+        _ => EmptyStartOutcome::Advances(next),
+    })
+}
+
+/// With nothing checked, Start Map launches no work: it records the explicit
+/// Map skip and then either advances or stops where config says. Say that
+/// before it is pressed rather than promising a Run Focus that never opens.
+fn start_action_detail(empty_start: Option<EmptyStartOutcome>) -> String {
+    match empty_start {
+        Some(EmptyStartOutcome::Advances(next)) => format!(
+            "no task will run — records the explicit Map skip and continues to {}",
+            next.label()
+        ),
+        Some(EmptyStartOutcome::HeldByStopAfter) => {
+            "no task will run — records the explicit Map skip and holds at Map (phases.stop_after)"
+                .to_string()
+        }
+        None => "Commit this Map plan and open Run Focus".to_string(),
+    }
 }
 
 fn credential_readiness(app: &ShellApp, required: bool) -> CredentialReadiness {
@@ -308,6 +340,21 @@ mod tests {
         let start = model.rows.last().unwrap();
         assert_eq!(start.status, "READY");
         assert!(start.detail.contains("no task will run"), "{start:?}");
+    }
+
+    /// `phases.stop_after=map` holds the journey at Map, so the empty-plan
+    /// action must not promise Scan.
+    #[test]
+    fn an_empty_start_action_respects_stop_after() {
+        let mut config = V2Config::default();
+        config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+        let (_target, app) = app_with_reusable_map(config);
+
+        let model = setup_readiness_model(&app);
+
+        let start = model.rows.last().unwrap();
+        assert!(start.detail.contains("holds at Map"), "{start:?}");
+        assert!(!start.detail.contains("continues to"), "{start:?}");
     }
 
     /// Unchecking still-recommended work leaves real Map work unplanned, so the
