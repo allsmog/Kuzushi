@@ -8,6 +8,8 @@ const SOURCE_FILE_UNAVAILABLE_NOTE: &str =
     "citation-verification-unavailable: source file was unavailable within the target at insertion time";
 const UNSAFE_PATH_NOTE: &str =
     "citation-unverified: path was not a safe target-relative source path at insertion time";
+const LINE_OUT_OF_RANGE_NOTE: &str =
+    "citation-unverified: line was outside the source file at insertion time";
 const SNIPPET_MISMATCH_NOTE: &str =
     "citation-unverified: snippet was not found on disk at insertion time";
 const LIVE_CHAIN_STEP_KIND: &str = "live-chain-step";
@@ -29,6 +31,7 @@ enum CitationUnavailableReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CitationFailureReason {
     UnsafePath,
+    LineOutOfRange,
     SnippetMismatch,
 }
 
@@ -43,6 +46,7 @@ impl CitationVerification {
                 Some(SOURCE_FILE_UNAVAILABLE_NOTE)
             }
             Self::Failed(CitationFailureReason::UnsafePath) => Some(UNSAFE_PATH_NOTE),
+            Self::Failed(CitationFailureReason::LineOutOfRange) => Some(LINE_OUT_OF_RANGE_NOTE),
             Self::Failed(CitationFailureReason::SnippetMismatch) => Some(SNIPPET_MISMATCH_NOTE),
         }
     }
@@ -120,11 +124,12 @@ fn citation_verification(
     else {
         return CitationVerification::Unavailable(CitationUnavailableReason::SourceFile);
     };
+    let Some(window) = line_window_for_evidence(&source, evidence.line) else {
+        return CitationVerification::Failed(CitationFailureReason::LineOutOfRange);
+    };
     let snippet = normalize_evidence_text(&evidence.snippet);
-    let haystack = line_window_for_evidence(&source, evidence.line)
-        .map(|window| normalize_evidence_text(&window))
-        .unwrap_or_else(|| normalize_evidence_text(&source));
-    if haystack.contains(&snippet) {
+    let haystack = normalize_evidence_text(&window);
+    if snippet.is_empty() || haystack.contains(&snippet) {
         CitationVerification::Verified
     } else {
         CitationVerification::Failed(CitationFailureReason::SnippetMismatch)
@@ -147,7 +152,6 @@ fn is_target_source_citation(evidence: &FindingEvidence) -> bool {
         && !file_path.is_empty()
         && !file_path.contains("://")
         && evidence.line > 0
-        && !evidence.snippet.trim().is_empty()
 }
 
 fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
@@ -155,12 +159,9 @@ fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
         return None;
     }
     let lines = source.lines().collect::<Vec<_>>();
-    if lines.is_empty() {
-        return Some(String::new());
-    }
     let index = line.saturating_sub(1) as usize;
     if index >= lines.len() {
-        return Some(String::new());
+        return None;
     }
     let start = index.saturating_sub(4);
     let end = (index + 5).min(lines.len());
@@ -342,6 +343,39 @@ mod tests {
     }
 
     #[test]
+    fn line_only_source_citations_require_a_target_and_existing_line() {
+        let evidence = source_evidence("src/app.rs", 2, "   ");
+
+        assert_eq!(
+            citation_verification(None, &evidence),
+            CitationVerification::Unavailable(CitationUnavailableReason::TargetRoot)
+        );
+        let unavailable = verify_finding_evidence_for_insert(None, std::slice::from_ref(&evidence));
+        assert_downgraded(&unavailable[0], TARGET_ROOT_UNAVAILABLE_NOTE);
+
+        let root = fixture_root();
+        assert_eq!(
+            citation_verification(Some(root.path()), &evidence),
+            CitationVerification::Verified
+        );
+        assert_eq!(
+            verify_finding_evidence_for_insert(
+                Some(root.path()),
+                std::slice::from_ref(&evidence),
+            ),
+            vec![evidence.clone()]
+        );
+
+        let outside = source_evidence("src/app.rs", 100, "");
+        assert_eq!(
+            citation_verification(Some(root.path()), &outside),
+            CitationVerification::Failed(CitationFailureReason::LineOutOfRange)
+        );
+        let failed = verify_finding_evidence_for_insert(Some(root.path()), &[outside]);
+        assert_downgraded(&failed[0], LINE_OUT_OF_RANGE_NOTE);
+    }
+
+    #[test]
     fn unsafe_paths_are_rejected_with_a_specific_reason() {
         let root = fixture_root();
         let evidence = source_evidence("../outside.rs", 1, "secret");
@@ -369,19 +403,31 @@ mod tests {
     }
 
     #[test]
-    fn wrong_lines_and_wrong_snippets_are_reported_as_mismatches() {
+    fn out_of_range_lines_are_distinct_from_snippet_mismatches() {
         let root = fixture_root();
         let wrong_line = source_evidence("src/app.rs", 100, "sink(user_input)");
-        let wrong_snippet = source_evidence("src/app.rs", 2, "exec(user_input)");
 
-        for evidence in [wrong_line, wrong_snippet] {
-            assert_eq!(
-                citation_verification(Some(root.path()), &evidence),
-                CitationVerification::Failed(CitationFailureReason::SnippetMismatch)
-            );
-            let verified = verify_finding_evidence_for_insert(Some(root.path()), &[evidence]);
-            assert_downgraded(&verified[0], SNIPPET_MISMATCH_NOTE);
-        }
+        assert_eq!(
+            citation_verification(Some(root.path()), &wrong_line),
+            CitationVerification::Failed(CitationFailureReason::LineOutOfRange)
+        );
+        let verified = verify_finding_evidence_for_insert(Some(root.path()), &[wrong_line]);
+        assert_downgraded(&verified[0], LINE_OUT_OF_RANGE_NOTE);
+        assert!(!verified[0].rationale.contains(SNIPPET_MISMATCH_NOTE));
+    }
+
+    #[test]
+    fn wrong_snippets_are_reported_as_mismatches() {
+        let root = fixture_root();
+        let evidence = source_evidence("src/app.rs", 2, "exec(user_input)");
+
+        assert_eq!(
+            citation_verification(Some(root.path()), &evidence),
+            CitationVerification::Failed(CitationFailureReason::SnippetMismatch)
+        );
+        let verified = verify_finding_evidence_for_insert(Some(root.path()), &[evidence]);
+        assert_downgraded(&verified[0], SNIPPET_MISMATCH_NOTE);
+        assert!(!verified[0].rationale.contains(LINE_OUT_OF_RANGE_NOTE));
     }
 
     #[test]
