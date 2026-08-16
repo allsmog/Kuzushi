@@ -36,6 +36,33 @@ mod tests {
     }
 
     #[test]
+    fn routed_synonym_aliases_still_complete() {
+        // Regression: the fix for the above must not, in turn, drop real
+        // routed synonyms that happen to share their base command's word
+        // count (e.g. "patch discard" routes to PatchCommand::Reject
+        // alongside "patch reject" — see argument_commands/nested.rs). Only
+        // aliases that *extend* their base command's head with extra
+        // literal words (the "model 1" shape) are value-filled examples.
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert!(
+            app.completion_candidates("discard")
+                .contains(&"patch discard".to_string()),
+            "patch discard is a real routed synonym, not an example"
+        );
+        assert!(
+            app.completion_candidates("run")
+                .contains(&"strategy run".to_string()),
+            "strategy run is a real routed synonym, not an example"
+        );
+        assert!(
+            app.completion_candidates("history")
+                .contains(&"threats history".to_string()),
+            "threats history is a real routed synonym, not an example"
+        );
+    }
+
+    #[test]
     fn show_completion_candidates_cover_show_subcommands() {
         let app = ShellApp::new(V2Config::default(), None);
 

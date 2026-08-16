@@ -3,31 +3,46 @@ use super::*;
 pub(crate) fn command_completion_candidates(prefix: &str, slash: bool) -> Vec<String> {
     let mut values = Vec::new();
     for spec in shell_command_specs() {
+        let base_head = command_completion_head(spec.command);
         values.extend(candidate_for_prefix(spec.command, prefix, slash));
         let aliases = spec
             .aliases
             .iter()
             .copied()
-            .filter(|alias| !is_value_filled_example(alias));
+            .filter(|alias| !is_value_filled_example(base_head.as_deref(), alias));
         values.extend(aliases.filter_map(|alias| candidate_for_prefix(alias, prefix, slash)));
     }
     rank_fuzzy(dedupe_sorted(values), prefix)
 }
 
-/// A `ShellCommandSpec` alias is a value-filled `/help` usage example (e.g.
-/// `"model 1"`) rather than a distinct routable form when every one of its
-/// words is a literal (none carry `<`/`[`/`|` placeholder syntax) and it has
-/// more than one word. Real alternate routes stay single words (`"/auth"`,
-/// `"attachments"`) or keep their placeholders (`"/model [choice]"`);
-/// command routing (`known_command_head`) only ever needs an alias's first
-/// word, so a multi-word literal example adds no completion value — it only
-/// risks fuzzy-matching an unrelated short input (see #172 finding 6, where a
-/// bare `1` matched the `"model 1"` example and Tab-completed into a
-/// model-switch command).
-fn is_value_filled_example(alias: &str) -> bool {
-    let mut words = alias.split_whitespace().peekable();
-    words.next(); // first word may be a legitimate synonym on its own
-    words.peek().is_some() && !alias.contains(['<', '[', '|'])
+/// An alias is a value-filled `/help` usage example — not a distinct
+/// routable form — when its own (placeholder-truncated) head has strictly
+/// more words than the base command's own head and shares that head as a
+/// literal word-for-word prefix (ignoring a leading `/`). That is exactly
+/// the shape produced by substituting a concrete value for the command's
+/// own placeholder: `"model 1"` extends `"model [choice]"`'s truncated
+/// head `"model"` with the filled-in choice.
+///
+/// A genuine routed synonym instead REPLACES one of the base head's own
+/// words in place and keeps the same word count — `"patch discard"` vs.
+/// `"patch reject"`, `"strategy run"` vs. `"strategy fire"`, `"threats
+/// history"` vs. `"threats versions"` — so it is left untouched. See #172
+/// finding 6 and its follow-up review comment.
+fn is_value_filled_example(base_head: Option<&str>, alias: &str) -> bool {
+    let Some(base_head) = base_head else {
+        return false;
+    };
+    let Some(alias_head) = command_completion_head(alias) else {
+        return false;
+    };
+    let base_words: Vec<&str> = base_head.split_whitespace().collect();
+    let alias_words: Vec<&str> = alias_head.split_whitespace().collect();
+    alias_words.len() > base_words.len()
+        && alias_words
+            .iter()
+            .map(|word| word.trim_start_matches('/'))
+            .zip(base_words)
+            .all(|(alias_word, base_word)| alias_word == base_word)
 }
 
 /// Project a command/alias `form` into its completion candidate when it
