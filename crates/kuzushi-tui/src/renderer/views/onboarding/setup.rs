@@ -80,16 +80,11 @@ fn setup_summary_line(
     width: usize,
 ) -> Line<'static> {
     if model.can_start {
-        let execution = if model.selected_model_tasks == 0 {
-            "deterministic/runtime-free · no model or credentials".to_string()
-        } else {
-            format!("{} model-backed task(s)", model.selected_model_tasks)
-        };
         styled(
             &fit(
                 &format!(
-                    " READY · {} Map task(s) · {execution} · s Start Map · Enter edits the selected row",
-                    model.selected_tasks,
+                    " READY · {} · s Start Map · Enter edits the selected row",
+                    setup_execution_summary(model),
                 ),
                 width,
             ),
@@ -104,6 +99,20 @@ fn setup_summary_line(
             theme::warn(),
         )
     }
+}
+
+/// What committing this plan will actually execute. "0 Map task(s)" reads as a
+/// misconfiguration, so an empty-but-ready plan says what it will do instead.
+fn setup_execution_summary(model: &crate::ui_view_models::SetupReadinessModel) -> String {
+    if model.selected_tasks == 0 {
+        return "no task will run · cached Map artifacts reused".to_string();
+    }
+    let execution = if model.selected_model_tasks == 0 {
+        "deterministic/runtime-free · no model or credentials".to_string()
+    } else {
+        format!("{} model-backed task(s)", model.selected_model_tasks)
+    };
+    format!("{} Map task(s) · {execution}", model.selected_tasks)
 }
 
 fn setup_row_line(
@@ -208,6 +217,42 @@ mod tests {
             .join("\n");
 
         assert_eq!(text.matches('▸').count(), 1, "{text}");
+    }
+
+    #[test]
+    fn a_reusable_map_plan_is_not_announced_as_blocked() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(
+            target.path().join("Cargo.toml"),
+            "[package]\nname='fixture'\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(target.path().join(".kuzushi")).unwrap();
+        for artifact in ["context-snapshot.json", "entry-points.json"] {
+            std::fs::write(target.path().join(".kuzushi").join(artifact), "{}").unwrap();
+        }
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        // The plan row reports PROFILING until the target profile lands.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while app.engagement.planning_picker().profile_pending()
+            && std::time::Instant::now() < deadline
+        {
+            app.apply_view_hydration_results();
+            std::thread::yield_now();
+        }
+
+        let text = setup_lines(&app, Rect::new(0, 0, 120, 36))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("NOTHING TO RUN"), "{text}");
+        assert!(text.contains("cached Map artifacts reused"), "{text}");
+        assert!(!text.contains("BLOCKED"), "{text}");
+        assert!(!text.contains("0 Map task(s)"), "{text}");
     }
 
     #[test]
