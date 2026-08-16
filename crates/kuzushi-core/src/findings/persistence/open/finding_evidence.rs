@@ -10,6 +10,7 @@ const UNSAFE_PATH_NOTE: &str =
     "citation-unverified: path was not a safe target-relative source path at insertion time";
 const SNIPPET_MISMATCH_NOTE: &str =
     "citation-unverified: snippet was not found on disk at insertion time";
+const LIVE_CHAIN_STEP_KIND: &str = "live-chain-step";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CitationVerification {
@@ -105,7 +106,7 @@ fn citation_verification(
     target_root: Option<&Path>,
     evidence: &FindingEvidence,
 ) -> CitationVerification {
-    if should_skip_disk_verification(evidence) {
+    if !is_target_source_citation(evidence) {
         return CitationVerification::NotApplicable;
     }
     let Some(target_root) = target_root else {
@@ -130,12 +131,23 @@ fn citation_verification(
     }
 }
 
-fn should_skip_disk_verification(evidence: &FindingEvidence) -> bool {
-    evidence.kind.trim().eq_ignore_ascii_case("reasoning")
-        || evidence.request_blob.is_some()
-        || evidence.response_blob.is_some()
-        || evidence.file_path.trim().is_empty()
-        || evidence.snippet.trim().is_empty()
+/// Disk verification applies only to evidence that structurally claims a
+/// target-relative source location. This deliberately does not allowlist
+/// source-role names: specialist scanners use kinds such as `template-input`
+/// and `template-rendering`. A positive line anchor is the shared source
+/// citation contract, matching `ground_finding_location`; runtime, URL, HTTP,
+/// and reasoning evidence remain outside the filesystem trust boundary.
+fn is_target_source_citation(evidence: &FindingEvidence) -> bool {
+    let kind = evidence.kind.trim();
+    let file_path = evidence.file_path.trim();
+    !kind.eq_ignore_ascii_case("reasoning")
+        && !kind.eq_ignore_ascii_case(LIVE_CHAIN_STEP_KIND)
+        && evidence.request_blob.is_none()
+        && evidence.response_blob.is_none()
+        && !file_path.is_empty()
+        && !file_path.contains("://")
+        && evidence.line > 0
+        && !evidence.snippet.trim().is_empty()
 }
 
 fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
@@ -257,10 +269,76 @@ mod tests {
             request_blob: Some("POST /login HTTP/1.1".to_string()),
             response_blob: None,
         };
+        let url = FindingEvidence {
+            kind: "external-reference".to_string(),
+            file_path: "https://example.test/advisory".to_string(),
+            line: 1,
+            snippet: "affected endpoint".to_string(),
+            rationale: "external advisory".to_string(),
+            confidence: 70,
+            request_blob: None,
+            response_blob: None,
+        };
 
-        let verified = verify_finding_evidence_for_insert(None, &[reasoning.clone(), http.clone()]);
+        let verified = verify_finding_evidence_for_insert(
+            None,
+            &[reasoning.clone(), http.clone(), url.clone()],
+        );
 
-        assert_eq!(verified, vec![reasoning, http]);
+        assert_eq!(verified, vec![reasoning, http, url]);
+    }
+
+    #[test]
+    fn unavailable_target_preserves_empirical_live_chain_evidence() {
+        let runtime = FindingEvidence {
+            kind: LIVE_CHAIN_STEP_KIND.to_string(),
+            file_path: "box.htb".to_string(),
+            // Protect the runtime kind explicitly even if a future producer
+            // adds an executed-step ordinal that looks like a source line.
+            line: 7,
+            snippet: "RCE step landed".to_string(),
+            rationale: "command output matched the expected marker".to_string(),
+            confidence: 100,
+            request_blob: None,
+            response_blob: None,
+        };
+
+        assert_eq!(
+            citation_verification(None, &runtime),
+            CitationVerification::NotApplicable
+        );
+        assert_eq!(
+            verify_finding_evidence_for_insert(None, std::slice::from_ref(&runtime)),
+            vec![runtime]
+        );
+    }
+
+    #[test]
+    fn arbitrary_line_anchored_source_roles_still_require_verification() {
+        let mut evidence = source_evidence("src/app.rs", 2, "sink(user_input)");
+        evidence.kind = "template-input".to_string();
+
+        assert_eq!(
+            citation_verification(None, &evidence),
+            CitationVerification::Unavailable(CitationUnavailableReason::TargetRoot)
+        );
+        let verified = verify_finding_evidence_for_insert(None, &[evidence]);
+        assert_downgraded(&verified[0], TARGET_ROOT_UNAVAILABLE_NOTE);
+    }
+
+    #[test]
+    fn line_less_evidence_is_not_a_disk_citation() {
+        let mut evidence = source_evidence("src/app.rs", 0, "sink(user_input)");
+        evidence.kind = "trace-summary".to_string();
+
+        assert_eq!(
+            citation_verification(None, &evidence),
+            CitationVerification::NotApplicable
+        );
+        assert_eq!(
+            verify_finding_evidence_for_insert(None, std::slice::from_ref(&evidence)),
+            vec![evidence]
+        );
     }
 
     #[test]
