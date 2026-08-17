@@ -49,7 +49,9 @@ pub(super) enum BudgetEvidenceReason {
 impl BudgetEvidenceReason {
     pub(super) fn label(self) -> &'static str {
         match self {
-            Self::MissingAtStartup => "lifecycle stream did not appear before the startup grace expired",
+            Self::MissingAtStartup => {
+                "lifecycle stream did not appear before the startup grace expired"
+            }
             Self::OpenFailed => "lifecycle stream could not be opened",
             Self::MetadataFailed => "lifecycle stream metadata could not be read",
             Self::SeekFailed => "lifecycle stream could not be resumed at the verified offset",
@@ -74,8 +76,12 @@ impl BudgetEvidenceReason {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum LiveSpendPoll {
-    Available { spent_usd: f64 },
-    Pending { spent_usd: f64 },
+    Available {
+        spent_usd: f64,
+    },
+    Pending {
+        spent_usd: f64,
+    },
     Unavailable {
         spent_usd: f64,
         reason: BudgetEvidenceReason,
@@ -94,7 +100,9 @@ impl LiveSpendPoll {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum BudgetEvidenceDecision {
-    Continue { spent_usd: f64 },
+    Continue {
+        spent_usd: f64,
+    },
     Stop {
         spent_usd: f64,
         reason: BudgetEvidenceReason,
@@ -116,9 +124,7 @@ impl BudgetEvidenceGuard {
         match poll {
             LiveSpendPoll::Available { spent_usd } => self.available(spent_usd),
             LiveSpendPoll::Pending { spent_usd } => self.pending(spent_usd),
-            LiveSpendPoll::Unavailable { spent_usd, reason } => {
-                self.unavailable(spent_usd, reason)
-            }
+            LiveSpendPoll::Unavailable { spent_usd, reason } => self.unavailable(spent_usd, reason),
         }
     }
 
@@ -194,10 +200,6 @@ impl LiveSpendPoller {
             spent: 0.0,
             observed_stream: false,
         }
-    }
-
-    pub(super) fn spent_usd(&self) -> f64 {
-        self.spent
     }
 
     pub(super) fn poll(&mut self) -> LiveSpendPoll {
@@ -357,8 +359,8 @@ fn validate_envelope(
 mod tests {
     use super::*;
     use kuzushi_core::run_lifecycle::{
-        DiagnosticLevel, ModelUsage, RunCallId, RunId, RunItemEnvelopeV1, RunItemId,
-        RunItemSource, RunItemStatus, RunItemV1, SafeText,
+        DiagnosticLevel, ModelUsage, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
+        RunItemStatus, RunItemV1, SafeText,
     };
     use std::io::Write;
 
@@ -455,10 +457,7 @@ mod tests {
     fn missing_stream_is_pending_before_first_observation() {
         let tmp = tempfile::tempdir().unwrap();
         let mut poller = LiveSpendPoller::new(tmp.path(), "absent");
-        assert_eq!(
-            poller.poll(),
-            LiveSpendPoll::Pending { spent_usd: 0.0 }
-        );
+        assert_eq!(poller.poll(), LiveSpendPoll::Pending { spent_usd: 0.0 });
     }
 
     #[test]
@@ -470,7 +469,10 @@ mod tests {
         let mut poller = LiveSpendPoller::new(tmp.path(), "live");
         assert!((available_spend(poller.poll()) - 0.4).abs() < 1e-12);
 
-        let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         writeln!(file, "{}", chain.terminal_line(0.35)).unwrap();
         file.flush().unwrap();
         assert!((available_spend(poller.poll()) - 0.75).abs() < 1e-12);

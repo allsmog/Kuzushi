@@ -549,8 +549,8 @@ fn campaign_attempt_cost(
     if let Some(summary) = summary {
         let summarized = summary.cost_usd.or(summary.observed_cost_usd);
         let observed = max_observed_cost(summarized, traced);
-        let unresolved = summary.provider_spend_unresolved
-            || outcome_requires_unresolved_spend(report.outcome);
+        let unresolved =
+            summary.provider_spend_unresolved || outcome_requires_unresolved_spend(report.outcome);
         return (observed, unresolved);
     }
     let unresolved = traced.is_some() || outcome_requires_unresolved_spend(report.outcome);
@@ -700,10 +700,7 @@ mod cost_accounting_tests {
         summary.provider_spend_unresolved = true;
 
         assert_eq!(
-            campaign_attempt_cost(
-                Some(&summary),
-                &report(JobOutcome::ToolFailed, 0.0)
-            ),
+            campaign_attempt_cost(Some(&summary), &report(JobOutcome::ToolFailed, 0.0)),
             (Some(0.75), true)
         );
     }
@@ -711,17 +708,11 @@ mod cost_accounting_tests {
     #[test]
     fn unavailable_budget_evidence_keeps_validated_spend_as_a_lower_bound() {
         assert_eq!(
-            campaign_attempt_cost(
-                None,
-                &report(JobOutcome::BudgetEvidenceUnavailable, 0.75)
-            ),
+            campaign_attempt_cost(None, &report(JobOutcome::BudgetEvidenceUnavailable, 0.75)),
             (Some(0.75), true)
         );
         assert_eq!(
-            campaign_attempt_cost(
-                None,
-                &report(JobOutcome::BudgetEvidenceUnavailable, 0.0)
-            ),
+            campaign_attempt_cost(None, &report(JobOutcome::BudgetEvidenceUnavailable, 0.0)),
             (None, true),
             "zero observed spend still leaves provider spend unresolved"
         );

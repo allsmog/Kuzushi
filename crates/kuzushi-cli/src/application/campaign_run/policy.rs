@@ -289,13 +289,7 @@ mod tests {
             reason: "budget-evidence-unavailable".to_string(),
         };
         assert_eq!(
-            transition_for(
-                JobOutcome::BudgetEvidenceUnavailable,
-                false,
-                1,
-                5,
-                5
-            ),
+            transition_for(JobOutcome::BudgetEvidenceUnavailable, false, 1, 5, 5),
             expected
         );
         assert_eq!(
