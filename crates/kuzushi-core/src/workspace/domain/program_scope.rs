@@ -120,8 +120,12 @@ fn unmatched_scope_verdict(has_allow_list: bool) -> ScopeVerdict {
 fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
     let mut compiled = Vec::with_capacity(list.hosts.len() + list.cidrs.len());
     for raw in &list.hosts {
-        let glob =
-            Glob::new(raw).with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
+        // Both sides of the comparison are normalized, so a glob written with
+        // uppercase letters or a root dot still denies the asset it names.
+        // Character classes are normalized too: `[A-Z]` becomes `[a-z]`, which
+        // matches the same hosts once the candidate is lowercased.
+        let glob = Glob::new(&normalize_host(raw))
+            .with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
         compiled.push(HostPattern::HostGlob(glob));
     }
     for raw in &list.cidrs {
@@ -151,7 +155,8 @@ fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
 /// Pull the host component out of a free-form target string. Accepts
 /// raw hosts, IP literals, `host:port`, and URLs with schemes. Falls
 /// back to the trimmed input so unknown formats still get a chance to
-/// match host globs.
+/// match host globs. The result is normalized by [`normalize_host`] so a
+/// deny rule cannot be evaded by changing the case of a hostname.
 fn extract_host(target: &str) -> String {
     let trimmed = target.trim();
     let after_scheme = trimmed
@@ -169,13 +174,28 @@ fn extract_host(target: &str) -> String {
         .rsplit_once('@')
         .map(|(_, rest)| rest)
         .unwrap_or(authority);
-    strip_port(host_and_port).to_string()
+    normalize_host(strip_port(host_and_port))
+}
+
+/// Put a hostname into the one form both scope patterns and candidate targets
+/// are compared in: DNS is case-insensitive (RFC 4343) and the root label is
+/// optional, so `ADMIN.Example.com.` and `admin.example.com` name one asset.
+/// ASCII-only folding keeps IDN labels from being widened by Unicode case
+/// folding. Harmless for IP literals: addresses carry no uppercase ASCII
+/// letters beyond hex digits, which parse either way.
+fn normalize_host(host: &str) -> String {
+    host.trim().trim_end_matches('.').to_ascii_lowercase()
 }
 
 fn strip_port(host: &str) -> &str {
     // Brackets denote IPv6 literals — `[::1]:8080` becomes `::1`.
     if let Some(bracket_end) = host.strip_prefix('[').and_then(|rest| rest.find(']')) {
         return &host[1..1 + bracket_end];
+    }
+    // A bare IPv6 literal is all colons and has no port to strip; splitting it
+    // would leave a fragment that never matches a CIDR rule.
+    if IpAddr::from_str(host).is_ok() {
+        return host;
     }
     host.rsplit_once(':').map(|(host, _)| host).unwrap_or(host)
 }
@@ -306,6 +326,76 @@ mod tests {
             "#,
         );
         assert_eq!(scope.verdict("[::1]:8080"), ScopeVerdict::InScope);
+    }
+
+    #[test]
+    fn bare_ipv6_literal_is_matched_against_cidr_rules() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["2001:db8::/32"]
+            "#,
+        );
+        assert_eq!(scope.verdict("2001:db8::1"), ScopeVerdict::OutOfScope);
+        assert_eq!(
+            scope.verdict("https://[2001:db8::1]:8443/"),
+            ScopeVerdict::OutOfScope
+        );
+        assert_eq!(scope.verdict("2001:dead::1"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn host_case_does_not_evade_a_deny_rule() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.example.com"]
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        assert_eq!(scope.verdict("ADMIN.example.com"), ScopeVerdict::OutOfScope);
+        assert_eq!(
+            scope.verdict("https://Admin.Example.COM/panel"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn deny_rule_written_in_uppercase_still_matches() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["Admin.Example.COM"]
+            "#,
+        );
+        assert_eq!(scope.verdict("admin.example.com"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn trailing_root_dot_does_not_evade_a_deny_rule() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        assert_eq!(scope.verdict("admin.example.com."), ScopeVerdict::OutOfScope);
+        assert_eq!(
+            scope.verdict("https://admin.example.com.:8443/"),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn case_and_root_dot_normalize_allow_list_matches_too() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            hosts = ["*.example.com"]
+            "#,
+        );
+        assert_eq!(scope.verdict("API.Example.com."), ScopeVerdict::InScope);
     }
 
     #[test]
