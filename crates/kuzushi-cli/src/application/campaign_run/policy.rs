@@ -18,6 +18,9 @@ pub(super) enum JobOutcome {
     /// The dispatcher killed the child because its live traced spend
     /// crossed the per-job budget ceiling.
     OverBudget,
+    /// The dispatcher killed the child because its canonical live accounting
+    /// stream could no longer authorize continued spend.
+    BudgetEvidenceUnavailable,
 }
 
 impl JobOutcome {
@@ -55,6 +58,7 @@ impl JobOutcome {
             Self::TimedOut => "timed-out",
             Self::Interrupted => "interrupted",
             Self::OverBudget => "over-budget",
+            Self::BudgetEvidenceUnavailable => "budget-evidence-unavailable",
         }
     }
 }
@@ -89,6 +93,9 @@ pub(super) fn transition_for(
         JobOutcome::Blocked => park(outcome),
         JobOutcome::Canceled => park(outcome),
         JobOutcome::Interrupted => park(outcome),
+        // Retrying a job with no trustworthy spend evidence can spend again
+        // under the same broken guard, even when its output resembles a 429.
+        JobOutcome::BudgetEvidenceUnavailable => park(outcome),
         // Retrying an over-budget job would just spend the same money
         // again; it parks with its partial run state kept for resume.
         JobOutcome::OverBudget => park(outcome),
@@ -268,12 +275,33 @@ mod tests {
                 reason: "over-budget".to_string()
             }
         );
-        // Rate-limit sniffing must not turn an over-budget park into a free
-        // requeue: the outcome match wins before the rate-limited arm.
         assert_eq!(
             transition_for(JobOutcome::OverBudget, true, 1, 5, 5),
             Transition::Park {
                 reason: "over-budget".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn unavailable_budget_evidence_parks_before_rate_limit_retry_logic() {
+        let expected = Transition::Park {
+            reason: "budget-evidence-unavailable".to_string(),
+        };
+        assert_eq!(
+            transition_for(
+                JobOutcome::BudgetEvidenceUnavailable,
+                false,
+                1,
+                5,
+                5
+            ),
+            expected
+        );
+        assert_eq!(
+            transition_for(JobOutcome::BudgetEvidenceUnavailable, true, 1, 5, 5),
+            Transition::Park {
+                reason: "budget-evidence-unavailable".to_string()
             }
         );
     }
@@ -303,11 +331,11 @@ mod tests {
         let mut wall = QuotaWall::new(3);
         assert!(!wall.observe(true));
         assert!(!wall.observe(true));
-        assert!(!wall.observe(false)); // streak broken
+        assert!(!wall.observe(false));
         assert!(!wall.observe(true));
         assert!(!wall.observe(true));
-        assert!(wall.observe(true)); // 3rd consecutive trips
-        assert!(!wall.observe(true)); // counter reset after trip
+        assert!(wall.observe(true));
+        assert!(!wall.observe(true));
     }
 
     #[test]
