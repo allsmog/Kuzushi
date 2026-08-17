@@ -15,7 +15,7 @@ mod queue;
 use crate::application::run_exit::RunCommandExit;
 use crate::command::CampaignCommand;
 use anyhow::{Context, Result};
-use budget::{effective_job_budget, live_run_spend_usd};
+use budget::effective_job_budget;
 use child::{run_child, ChildReport, ChildSpec};
 use kuzushi_core::capabilities::campaign::{acquire_dispatcher_lease, CampaignDispatcherLease};
 use kuzushi_core::run_artifacts::load_run_summary;
@@ -318,18 +318,18 @@ impl Dispatcher {
         let summary = load_child_summary(&self.target, run_id, &report)?;
         report.outcome = reconciled_child_outcome(&report, summary.as_ref())?;
         let summary_error = summary.as_ref().and_then(|summary| summary.error.clone());
-        // A killed child (over-budget/timeout/shutdown) never finalized its
-        // summary, but its money is already spent: fall back to the live
-        // trace sum so the campaign-level budget still sees that spend.
-        let (cost, provider_spend_unresolved) =
-            campaign_attempt_cost(summary.as_ref(), &self.target, run_id, report.outcome);
+        // The child carries the last strictly validated live spend. Settlement
+        // must not reread a missing/corrupt stream and erase that lower bound.
+        let (cost, provider_spend_unresolved) = campaign_attempt_cost(summary.as_ref(), &report);
         let failure_text = format!(
             "{} {}",
             summary_error.unwrap_or_default(),
             report.output_tail
         );
-        let rate_limited =
-            report.outcome != JobOutcome::Completed && looks_rate_limited(&failure_text);
+        let rate_limited = !matches!(
+            report.outcome,
+            JobOutcome::Completed | JobOutcome::BudgetEvidenceUnavailable
+        ) && looks_rate_limited(&failure_text);
         let attempts = self
             .store
             .job(job_id)
@@ -543,22 +543,39 @@ fn report_resumed_jobs(store: &mut QueueStore) -> Result<()> {
 
 fn campaign_attempt_cost(
     summary: Option<&kuzushi_core::RunSummary>,
-    target: &Path,
-    run_id: &str,
-    outcome: JobOutcome,
+    report: &ChildReport,
 ) -> (Option<f64>, bool) {
+    let traced = positive_observed_spend(report.observed_spend_usd);
     if let Some(summary) = summary {
-        let observed = summary.cost_usd.or(summary.observed_cost_usd);
-        return (observed, summary.provider_spend_unresolved);
+        let summarized = summary.cost_usd.or(summary.observed_cost_usd);
+        let observed = max_observed_cost(summarized, traced);
+        let unresolved =
+            summary.provider_spend_unresolved || outcome_requires_unresolved_spend(report.outcome);
+        return (observed, unresolved);
     }
-    let live = live_run_spend_usd(target, run_id);
-    let observed = (live > 0.0).then_some(live);
-    let unresolved = observed.is_some()
-        || matches!(
-            outcome,
-            JobOutcome::TimedOut | JobOutcome::Interrupted | JobOutcome::OverBudget
-        );
-    (observed, unresolved)
+    let unresolved = traced.is_some() || outcome_requires_unresolved_spend(report.outcome);
+    (traced, unresolved)
+}
+
+fn positive_observed_spend(spent_usd: f64) -> Option<f64> {
+    (spent_usd > 0.0).then_some(spent_usd + 0.0)
+}
+
+fn max_observed_cost(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right) + 0.0),
+        (left, right) => left.or(right),
+    }
+}
+
+fn outcome_requires_unresolved_spend(outcome: JobOutcome) -> bool {
+    matches!(
+        outcome,
+        JobOutcome::TimedOut
+            | JobOutcome::Interrupted
+            | JobOutcome::OverBudget
+            | JobOutcome::BudgetEvidenceUnavailable
+    )
 }
 
 fn load_child_summary(
@@ -658,6 +675,15 @@ async fn sleep_or_shutdown(wait: Duration, shutdown: &mut tokio::sync::watch::Re
 mod cost_accounting_tests {
     use super::*;
 
+    fn report(outcome: JobOutcome, observed_spend_usd: f64) -> ChildReport {
+        ChildReport {
+            outcome,
+            exit_code: None,
+            output_tail: String::new(),
+            observed_spend_usd,
+        }
+    }
+
     #[test]
     fn child_exit_contract_accepts_only_its_persisted_terminal_statuses() {
         assert!(exit_agrees_with_persisted_status(130, "canceled"));
@@ -669,17 +695,37 @@ mod cost_accounting_tests {
 
     #[test]
     fn campaign_attempt_cost_preserves_incomplete_provider_spend() {
-        let target = tempfile::tempdir().unwrap();
         let mut summary = kuzushi_core::RunSummary::running("run-cost", "run", None, "target");
         summary.observed_cost_usd = Some(0.75);
         summary.provider_spend_unresolved = true;
 
         assert_eq!(
+            campaign_attempt_cost(Some(&summary), &report(JobOutcome::ToolFailed, 0.0)),
+            (Some(0.75), true)
+        );
+    }
+
+    #[test]
+    fn unavailable_budget_evidence_keeps_validated_spend_as_a_lower_bound() {
+        assert_eq!(
+            campaign_attempt_cost(None, &report(JobOutcome::BudgetEvidenceUnavailable, 0.75)),
+            (Some(0.75), true)
+        );
+        assert_eq!(
+            campaign_attempt_cost(None, &report(JobOutcome::BudgetEvidenceUnavailable, 0.0)),
+            (None, true),
+            "zero observed spend still leaves provider spend unresolved"
+        );
+    }
+
+    #[test]
+    fn settlement_never_discards_a_higher_validated_live_lower_bound() {
+        let mut summary = kuzushi_core::RunSummary::running("run-cost", "run", None, "target");
+        summary.observed_cost_usd = Some(0.5);
+        assert_eq!(
             campaign_attempt_cost(
                 Some(&summary),
-                target.path(),
-                "run-cost",
-                JobOutcome::ToolFailed
+                &report(JobOutcome::BudgetEvidenceUnavailable, 0.75)
             ),
             (Some(0.75), true)
         );

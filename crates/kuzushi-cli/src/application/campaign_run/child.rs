@@ -5,7 +5,7 @@
 //! process group with a parent-death lifeline; Windows uses a kill-on-close Job
 //! Object. A scanner subprocess must never outlive its campaign job.
 
-use super::budget::LiveSpendPoller;
+use super::budget::{BudgetEvidenceDecision, BudgetEvidenceGuard, LiveSpendPoller};
 use super::policy::{budget_exhausted, JobOutcome};
 use anyhow::{Context, Result};
 use kuzushi_core::scan::{PreparedProcessGroup, RegisteredChild, ScanCancellation};
@@ -37,6 +37,15 @@ pub(super) struct ChildReport {
     pub(super) exit_code: Option<i32>,
     /// Tail of the child's combined output for rate-limit sniffing.
     pub(super) output_tail: String,
+    /// Last strictly validated lifecycle spend. This is a lower bound when
+    /// the child was killed before terminal settlement.
+    pub(super) observed_spend_usd: f64,
+}
+
+struct SupervisionReport {
+    outcome: JobOutcome,
+    exit_code: Option<i32>,
+    observed_spend_usd: f64,
 }
 
 /// Spawn, bound, and reap one job child. Cancellation (dispatcher shutdown)
@@ -56,11 +65,12 @@ pub(super) async fn run_child(
     let child = cancellation
         .register_prepared_child(child, group)
         .context("Could not supervise campaign job child")?;
-    let outcome = supervise_child(&child, spec, shutdown).await?;
+    let supervised = supervise_child(&child, spec, shutdown).await?;
     Ok(ChildReport {
-        outcome: outcome.0,
-        exit_code: outcome.1,
+        outcome: supervised.outcome,
+        exit_code: supervised.exit_code,
         output_tail: log_tail(&spec.log_path),
+        observed_spend_usd: supervised.observed_spend_usd,
     })
 }
 
@@ -68,10 +78,11 @@ async fn supervise_child(
     child: &RegisteredChild,
     spec: &ChildSpec,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
-) -> Result<(JobOutcome, Option<i32>)> {
+) -> Result<SupervisionReport> {
     let timeout = tokio::time::sleep(spec.timeout);
     tokio::pin!(timeout);
     let mut spend_poller = LiveSpendPoller::new(&spec.target, &spec.run_id);
+    let mut evidence_guard = BudgetEvidenceGuard::default();
     let mut spend_poll = tokio::time::interval(BUDGET_POLL);
     spend_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut status_poll = tokio::time::interval(CHILD_STATUS_POLL);
@@ -79,36 +90,80 @@ async fn supervise_child(
         tokio::select! {
             _ = status_poll.tick() => {
                 if let Some(status) = child.try_wait().context("Could not poll job child")? {
-                    let code = status.code();
-                    return Ok((JobOutcome::from_exit_code(code), code));
+                    return Ok(exited_child(status.code(), &mut spend_poller));
                 }
             }
             _ = &mut timeout => {
-                return stop_child(child, JobOutcome::TimedOut);
+                let spent = refresh_spend(&mut spend_poller);
+                return stop_child(child, JobOutcome::TimedOut, spent);
             }
             _ = shutdown.changed() => {
-                return stop_child(child, JobOutcome::Interrupted);
+                let spent = refresh_spend(&mut spend_poller);
+                return stop_child(child, JobOutcome::Interrupted, spent);
             }
             _ = spend_poll.tick(), if spec.job_budget_usd.is_some() => {
-                let spent = spend_poller.poll();
-                if budget_exhausted(spent, spec.job_budget_usd) {
-                    eprintln!(
-                        "campaign: job run {} crossed its ${:.2} job budget (live spend ${spent:.2}) — stopping it",
-                        spec.run_id,
-                        spec.job_budget_usd.unwrap_or_default(),
-                    );
-                    return stop_child(child, JobOutcome::OverBudget);
+                if let Some(report) = budget_stop(child, spec, &mut spend_poller, &mut evidence_guard)? {
+                    return Ok(report);
                 }
             }
         }
     }
 }
 
-fn stop_child(child: &RegisteredChild, outcome: JobOutcome) -> Result<(JobOutcome, Option<i32>)> {
+fn exited_child(code: Option<i32>, spend_poller: &mut LiveSpendPoller) -> SupervisionReport {
+    SupervisionReport {
+        outcome: JobOutcome::from_exit_code(code),
+        exit_code: code,
+        observed_spend_usd: refresh_spend(spend_poller),
+    }
+}
+
+fn refresh_spend(spend_poller: &mut LiveSpendPoller) -> f64 {
+    spend_poller.poll().spent_usd()
+}
+
+fn budget_stop(
+    child: &RegisteredChild,
+    spec: &ChildSpec,
+    spend_poller: &mut LiveSpendPoller,
+    evidence_guard: &mut BudgetEvidenceGuard,
+) -> Result<Option<SupervisionReport>> {
+    match evidence_guard.observe(spend_poller.poll()) {
+        BudgetEvidenceDecision::Continue { spent_usd }
+            if budget_exhausted(spent_usd, spec.job_budget_usd) =>
+        {
+            eprintln!(
+                "campaign: job run {} crossed its ${:.2} job budget (live spend ${spent_usd:.2}) — stopping it",
+                spec.run_id,
+                spec.job_budget_usd.unwrap_or_default(),
+            );
+            stop_child(child, JobOutcome::OverBudget, spent_usd).map(Some)
+        }
+        BudgetEvidenceDecision::Continue { .. } => Ok(None),
+        BudgetEvidenceDecision::Stop { spent_usd, reason } => {
+            eprintln!(
+                "campaign: job run {} lost live budget evidence after ${spent_usd:.2} observed ({}) — stopping it",
+                spec.run_id,
+                reason.label(),
+            );
+            stop_child(child, JobOutcome::BudgetEvidenceUnavailable, spent_usd).map(Some)
+        }
+    }
+}
+
+fn stop_child(
+    child: &RegisteredChild,
+    outcome: JobOutcome,
+    observed_spend_usd: f64,
+) -> Result<SupervisionReport> {
     child
         .kill_and_wait()
         .context("Could not stop campaign job child")?;
-    Ok((outcome, None))
+    Ok(SupervisionReport {
+        outcome,
+        exit_code: None,
+        observed_spend_usd,
+    })
 }
 
 fn child_command(
@@ -228,6 +283,12 @@ mod tests {
             .unwrap();
     }
 
+    fn write_malformed_lifecycle(target: &Path, run_id: &str) {
+        let path = kuzushi_core::run_artifacts::run_artifact_path(target, run_id, "items.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"{not-json}\n").unwrap();
+    }
+
     #[test]
     fn log_tail_keeps_exactly_the_last_sixteen_kibibytes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -253,16 +314,30 @@ mod tests {
             .unwrap();
         assert_eq!(report.outcome, JobOutcome::OverBudget);
         assert_eq!(report.exit_code, None);
-        // The first poll tick fires immediately — the kill must not wait
-        // out the sleeping child or the per-job timeout.
+        assert!((report.observed_spend_usd - 9.9).abs() < 1e-12);
         assert!(started.elapsed() < Duration::from_secs(20));
     }
 
     #[tokio::test]
-    async fn an_unbudgeted_child_never_polls_and_completes_on_its_exit_code() {
+    async fn durable_budget_evidence_corruption_kills_and_reaps_the_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let binary = fake_child(tmp.path(), "corrupt-sleeper", "sleep 30");
+        write_malformed_lifecycle(tmp.path(), "corrupt");
+        let (_tx, rx) = tokio::sync::watch::channel(false);
+        let started = std::time::Instant::now();
+        let report = run_child(&spec(tmp.path(), binary, "corrupt", Some(5.0)), rx)
+            .await
+            .unwrap();
+        assert_eq!(report.outcome, JobOutcome::BudgetEvidenceUnavailable);
+        assert_eq!(report.exit_code, None);
+        assert_eq!(report.observed_spend_usd, 0.0);
+        assert!(started.elapsed() < Duration::from_secs(20));
+    }
+
+    #[tokio::test]
+    async fn an_unbudgeted_child_never_enforces_the_job_cap() {
         let tmp = tempfile::tempdir().unwrap();
         let binary = fake_child(tmp.path(), "clean-exit", "exit 0");
-        // Lifecycle spend far over any cap must be ignored when no cap is set.
         write_over_cap_lifecycle(tmp.path(), "uncapped", 99.0);
         let (_tx, rx) = tokio::sync::watch::channel(false);
         let report = run_child(&spec(tmp.path(), binary, "uncapped", None), rx)
@@ -270,6 +345,7 @@ mod tests {
             .unwrap();
         assert_eq!(report.outcome, JobOutcome::Completed);
         assert_eq!(report.exit_code, Some(0));
+        assert!((report.observed_spend_usd - 99.0).abs() < 1e-12);
     }
 
     /// A completed job must not leave background grandchildren behind: the
@@ -320,5 +396,6 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(report.outcome, JobOutcome::Completed);
+        assert!((report.observed_spend_usd - 0.5).abs() < 1e-12);
     }
 }

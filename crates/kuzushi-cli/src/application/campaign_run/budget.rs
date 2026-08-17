@@ -9,7 +9,12 @@
 //! side channel.
 
 use kuzushi_core::run_artifacts::{run_artifact_path, terminal_model_call_cost_report};
-use std::path::Path;
+use kuzushi_core::run_lifecycle::RunItemEnvelopeV1;
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
+
+const STARTUP_PENDING_POLL_LIMIT: u8 = 8;
+const TRANSIENT_FAILURE_POLL_LIMIT: u8 = 3;
 
 /// The ceiling for one job: the tightest of the dispatcher-wide
 /// `--job-budget` and the plan row's `jobBudgetUsd`. Two present values
@@ -25,96 +30,360 @@ fn positive(value: Option<f64>) -> Option<f64> {
     value.filter(|usd| *usd > 0.0)
 }
 
-/// Sum of terminal model-call costs observed so far in a run's lifecycle.
-///
-/// Tolerant by design: a live lifecycle stream can end in a torn line mid-append and a
-/// dead poll must not kill a healthy job, so unparsable lines and invalid
-/// cost rows are skipped rather than treated as evidence. A missing stream =
-/// $0 spent — the strict lifecycle cost reader remains the
-/// settlement-time accounting path.
-pub(super) fn live_run_spend_usd(target: &Path, run_id: &str) -> f64 {
-    let Ok(body) = std::fs::read_to_string(run_artifact_path(target, run_id, "items.jsonl")) else {
-        return 0.0;
-    };
-    sum_terminal_call_costs(&body)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum BudgetEvidenceReason {
+    MissingAtStartup,
+    OpenFailed,
+    MetadataFailed,
+    SeekFailed,
+    ReadFailed,
+    Truncated,
+    InvalidUtf8,
+    MalformedRecord,
+    WrongRun,
+    BrokenSequence,
+    BrokenHashChain,
+    InvalidHash,
 }
 
-fn sum_terminal_call_costs(lines: &str) -> f64 {
-    lines
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-        .filter_map(|line| {
-            serde_json::from_str::<kuzushi_core::run_lifecycle::RunItemEnvelopeV1>(line).ok()
-        })
-        .filter_map(|envelope| terminal_model_call_cost_report(&envelope.item))
-        .map(|report| report.observed_usd())
-        .sum::<f64>()
-        + 0.0
+impl BudgetEvidenceReason {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::MissingAtStartup => {
+                "lifecycle stream did not appear before the startup grace expired"
+            }
+            Self::OpenFailed => "lifecycle stream could not be opened",
+            Self::MetadataFailed => "lifecycle stream metadata could not be read",
+            Self::SeekFailed => "lifecycle stream could not be resumed at the verified offset",
+            Self::ReadFailed => "lifecycle stream could not be read",
+            Self::Truncated => "lifecycle stream was truncated or replaced",
+            Self::InvalidUtf8 => "a complete lifecycle record was not valid UTF-8",
+            Self::MalformedRecord => "a complete lifecycle record was malformed",
+            Self::WrongRun => "a lifecycle record belonged to another run",
+            Self::BrokenSequence => "the lifecycle sequence was not contiguous",
+            Self::BrokenHashChain => "the lifecycle hash chain was broken",
+            Self::InvalidHash => "a lifecycle record failed hash verification",
+        }
+    }
+
+    fn is_transient(self) -> bool {
+        matches!(
+            self,
+            Self::OpenFailed | Self::MetadataFailed | Self::SeekFailed | Self::ReadFailed
+        )
+    }
 }
 
-/// Incremental live-spend poller: remembers the byte offset of the last
-/// complete line it folded, so a 2-second poll over a multi-hour lifecycle
-/// reads only the appended tail instead of re-folding from byte 0 every
-/// tick (which made a long job's polling cost quadratic).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum LiveSpendPoll {
+    Available {
+        spent_usd: f64,
+    },
+    Pending {
+        spent_usd: f64,
+    },
+    Unavailable {
+        spent_usd: f64,
+        reason: BudgetEvidenceReason,
+    },
+}
+
+impl LiveSpendPoll {
+    pub(super) fn spent_usd(self) -> f64 {
+        match self {
+            Self::Available { spent_usd }
+            | Self::Pending { spent_usd }
+            | Self::Unavailable { spent_usd, .. } => spent_usd,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) enum BudgetEvidenceDecision {
+    Continue {
+        spent_usd: f64,
+    },
+    Stop {
+        spent_usd: f64,
+        reason: BudgetEvidenceReason,
+    },
+}
+
+/// Bounded tolerance around the raw poller. The stream may not exist on the
+/// first immediate interval tick, and a live filesystem can suffer a short
+/// transient read failure. Neither grace is unbounded; unknown evidence
+/// eventually becomes a terminal stop instead of silently authorizing spend.
+#[derive(Debug, Default)]
+pub(super) struct BudgetEvidenceGuard {
+    startup_pending: u8,
+    transient_failures: u8,
+}
+
+impl BudgetEvidenceGuard {
+    pub(super) fn observe(&mut self, poll: LiveSpendPoll) -> BudgetEvidenceDecision {
+        match poll {
+            LiveSpendPoll::Available { spent_usd } => self.available(spent_usd),
+            LiveSpendPoll::Pending { spent_usd } => self.pending(spent_usd),
+            LiveSpendPoll::Unavailable { spent_usd, reason } => self.unavailable(spent_usd, reason),
+        }
+    }
+
+    fn available(&mut self, spent_usd: f64) -> BudgetEvidenceDecision {
+        self.startup_pending = 0;
+        self.transient_failures = 0;
+        BudgetEvidenceDecision::Continue { spent_usd }
+    }
+
+    fn pending(&mut self, spent_usd: f64) -> BudgetEvidenceDecision {
+        self.transient_failures = 0;
+        streak_decision(
+            &mut self.startup_pending,
+            STARTUP_PENDING_POLL_LIMIT,
+            spent_usd,
+            BudgetEvidenceReason::MissingAtStartup,
+        )
+    }
+
+    fn unavailable(
+        &mut self,
+        spent_usd: f64,
+        reason: BudgetEvidenceReason,
+    ) -> BudgetEvidenceDecision {
+        if !reason.is_transient() {
+            return BudgetEvidenceDecision::Stop { spent_usd, reason };
+        }
+        self.startup_pending = 0;
+        streak_decision(
+            &mut self.transient_failures,
+            TRANSIENT_FAILURE_POLL_LIMIT,
+            spent_usd,
+            reason,
+        )
+    }
+}
+
+fn streak_decision(
+    streak: &mut u8,
+    limit: u8,
+    spent_usd: f64,
+    reason: BudgetEvidenceReason,
+) -> BudgetEvidenceDecision {
+    *streak = streak.saturating_add(1);
+    if *streak >= limit {
+        BudgetEvidenceDecision::Stop { spent_usd, reason }
+    } else {
+        BudgetEvidenceDecision::Continue { spent_usd }
+    }
+}
+
+/// Incremental live-spend poller. It commits byte offset, sequence/hash-chain
+/// cursor, and spend only after every newly completed line validates. A torn
+/// final suffix is read again on the next poll and never partially trusted.
 pub(super) struct LiveSpendPoller {
-    path: std::path::PathBuf,
+    path: PathBuf,
+    expected_run_id: String,
     offset: u64,
+    next_seq: u64,
+    previous_hash: Option<String>,
     spent: f64,
+    observed_stream: bool,
 }
 
 impl LiveSpendPoller {
     pub(super) fn new(target: &Path, run_id: &str) -> Self {
         Self {
             path: run_artifact_path(target, run_id, "items.jsonl"),
+            expected_run_id: run_id.to_string(),
             offset: 0,
+            next_seq: 1,
+            previous_hash: None,
             spent: 0.0,
+            observed_stream: false,
         }
     }
 
-    /// Fold any newly appended complete lines and return total spend so
-    /// far. Same tolerance contract as `live_run_spend_usd`: a missing or
-    /// unreadable stream reports the last known total, torn tails wait for
-    /// their newline.
-    pub(super) fn poll(&mut self) -> f64 {
-        use std::io::{Read, Seek, SeekFrom};
-        let Ok(mut file) = std::fs::File::open(&self.path) else {
-            return self.spent;
+    pub(super) fn poll(&mut self) -> LiveSpendPoll {
+        let file = match std::fs::File::open(&self.path) {
+            Ok(file) => file,
+            Err(error) => return self.open_failure(&error),
         };
-        if file.seek(SeekFrom::Start(self.offset)).is_err() {
-            return self.spent;
+        self.observed_stream = true;
+        match read_appended_bytes(file, self.offset) {
+            Ok(tail) => self.fold_tail(&tail),
+            Err(reason) => LiveSpendPoll::Unavailable {
+                spent_usd: self.spent,
+                reason,
+            },
         }
-        let mut tail = String::new();
-        if file.read_to_string(&mut tail).is_err() {
-            return self.spent;
-        }
-        let complete = match tail.rfind('\n') {
-            Some(position) => &tail[..=position],
-            None => return self.spent,
-        };
-        self.spent = self.spent + sum_terminal_call_costs(complete) + 0.0;
-        self.offset += complete.len() as u64;
-        self.spent
     }
+
+    fn open_failure(&self, error: &std::io::Error) -> LiveSpendPoll {
+        if error.kind() == std::io::ErrorKind::NotFound && !self.observed_stream {
+            return LiveSpendPoll::Pending {
+                spent_usd: self.spent,
+            };
+        }
+        LiveSpendPoll::Unavailable {
+            spent_usd: self.spent,
+            reason: BudgetEvidenceReason::OpenFailed,
+        }
+    }
+
+    fn fold_tail(&mut self, tail: &[u8]) -> LiveSpendPoll {
+        let Some(last_newline) = tail.iter().rposition(|byte| *byte == b'\n') else {
+            return LiveSpendPoll::Available {
+                spent_usd: self.spent,
+            };
+        };
+        let outcome = validate_complete_prefix(&tail[..=last_newline], self);
+        self.commit_valid_prefix(&outcome.folded, outcome.consumed);
+        match outcome.failure {
+            Some(reason) => LiveSpendPoll::Unavailable {
+                spent_usd: self.spent,
+                reason,
+            },
+            None => LiveSpendPoll::Available {
+                spent_usd: self.spent,
+            },
+        }
+    }
+
+    fn commit_valid_prefix(&mut self, folded: &FoldedTail, consumed: usize) {
+        self.offset += consumed as u64;
+        self.next_seq = folded.next_seq;
+        self.previous_hash.clone_from(&folded.previous_hash);
+        self.spent += folded.added_spend_usd + 0.0;
+    }
+}
+
+fn read_appended_bytes(
+    mut file: std::fs::File,
+    offset: u64,
+) -> Result<Vec<u8>, BudgetEvidenceReason> {
+    let length = file
+        .metadata()
+        .map_err(|_| BudgetEvidenceReason::MetadataFailed)?
+        .len();
+    if length < offset {
+        return Err(BudgetEvidenceReason::Truncated);
+    }
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|_| BudgetEvidenceReason::SeekFailed)?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail)
+        .map_err(|_| BudgetEvidenceReason::ReadFailed)?;
+    let final_length = file
+        .metadata()
+        .map_err(|_| BudgetEvidenceReason::MetadataFailed)?
+        .len();
+    if final_length < offset {
+        return Err(BudgetEvidenceReason::Truncated);
+    }
+    Ok(tail)
+}
+
+struct FoldedTail {
+    next_seq: u64,
+    previous_hash: Option<String>,
+    added_spend_usd: f64,
+}
+
+struct PrefixValidation {
+    folded: FoldedTail,
+    consumed: usize,
+    failure: Option<BudgetEvidenceReason>,
+}
+
+fn validate_complete_prefix(complete: &[u8], poller: &LiveSpendPoller) -> PrefixValidation {
+    let mut folded = FoldedTail {
+        next_seq: poller.next_seq,
+        previous_hash: poller.previous_hash.clone(),
+        added_spend_usd: 0.0,
+    };
+    let mut consumed = 0;
+    for record in complete.split_inclusive(|byte| *byte == b'\n') {
+        let line = &record[..record.len().saturating_sub(1)];
+        if let Err(reason) = fold_line(line, &poller.expected_run_id, &mut folded) {
+            return PrefixValidation {
+                folded,
+                consumed,
+                failure: Some(reason),
+            };
+        }
+        consumed += record.len();
+    }
+    PrefixValidation {
+        folded,
+        consumed,
+        failure: None,
+    }
+}
+
+fn fold_line(
+    line: &[u8],
+    expected_run_id: &str,
+    folded: &mut FoldedTail,
+) -> Result<(), BudgetEvidenceReason> {
+    let text = std::str::from_utf8(line).map_err(|_| BudgetEvidenceReason::InvalidUtf8)?;
+    let envelope: RunItemEnvelopeV1 =
+        serde_json::from_str(text).map_err(|_| BudgetEvidenceReason::MalformedRecord)?;
+    validate_envelope(&envelope, expected_run_id, folded)?;
+    folded.added_spend_usd += terminal_model_call_cost_report(&envelope.item)
+        .map(|report| report.observed_usd())
+        .unwrap_or(0.0);
+    folded.next_seq += 1;
+    folded.previous_hash = Some(envelope.event_hash);
+    Ok(())
+}
+
+fn validate_envelope(
+    envelope: &RunItemEnvelopeV1,
+    expected_run_id: &str,
+    folded: &FoldedTail,
+) -> Result<(), BudgetEvidenceReason> {
+    (envelope.run_id.as_str() == expected_run_id)
+        .then_some(())
+        .ok_or(BudgetEvidenceReason::WrongRun)?;
+    (envelope.seq == folded.next_seq)
+        .then_some(())
+        .ok_or(BudgetEvidenceReason::BrokenSequence)?;
+    (envelope.prev_event_hash == folded.previous_hash)
+        .then_some(())
+        .ok_or(BudgetEvidenceReason::BrokenHashChain)?;
+    envelope
+        .verify_hash()
+        .map_err(|_| BudgetEvidenceReason::InvalidHash)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::run_lifecycle::{
+        DiagnosticLevel, ModelUsage, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
+        RunItemStatus, RunItemV1, SafeText,
+    };
+    use std::io::Write;
 
-    fn terminal_line(run_id: &str, n: u64, usd: f64) -> String {
-        use kuzushi_core::run_lifecycle::{
-            ModelUsage, RunCallId, RunId, RunItemEnvelopeV1, RunItemId, RunItemSource,
-            RunItemStatus, RunItemV1, SafeText,
-        };
-        let cost = kuzushi_core::runtime::RuntimeCostReport::known(
-            kuzushi_core::runtime::RuntimeCost::from_usd(usd, "campaign test").unwrap(),
-        );
-        let envelope = RunItemEnvelopeV1::new(
-            n + 1,
-            RunId::parse(run_id).unwrap(),
-            RunItemId::new(),
-            RunItemSource::Runtime,
-            RunItemV1::ModelCallFinished {
+    struct EnvelopeChain {
+        run_id: RunId,
+        next_seq: u64,
+        previous_hash: Option<String>,
+    }
+
+    impl EnvelopeChain {
+        fn new(run_id: &str) -> Self {
+            Self {
+                run_id: RunId::parse(run_id).unwrap(),
+                next_seq: 1,
+                previous_hash: None,
+            }
+        }
+
+        fn terminal_line(&mut self, usd: f64) -> String {
+            let cost = kuzushi_core::runtime::RuntimeCostReport::known(
+                kuzushi_core::runtime::RuntimeCost::from_usd(usd, "campaign test").unwrap(),
+            );
+            let item = RunItemV1::ModelCallFinished {
                 provider: SafeText::operator_visible("test"),
                 model: SafeText::operator_visible("test:model"),
                 status: RunItemStatus::Completed,
@@ -126,13 +395,51 @@ mod tests {
                 cost,
                 error_class: None,
                 failure: None,
-            },
-            None,
-        )
-        .unwrap()
-        .with_call(RunCallId::new())
-        .unwrap();
-        serde_json::to_string(&envelope).unwrap()
+            };
+            self.line(item, true)
+        }
+
+        fn diagnostic_line(&mut self, message: &str) -> String {
+            self.line(
+                RunItemV1::DiagnosticNotice {
+                    level: DiagnosticLevel::Info,
+                    message: SafeText::operator_visible(message),
+                },
+                false,
+            )
+        }
+
+        fn line(&mut self, item: RunItemV1, with_call: bool) -> String {
+            let envelope = RunItemEnvelopeV1::new(
+                self.next_seq,
+                self.run_id.clone(),
+                RunItemId::new(),
+                RunItemSource::Runtime,
+                item,
+                self.previous_hash.clone(),
+            )
+            .unwrap();
+            let envelope = if with_call {
+                envelope.with_call(RunCallId::new()).unwrap()
+            } else {
+                envelope
+            };
+            self.next_seq += 1;
+            self.previous_hash = Some(envelope.event_hash.clone());
+            serde_json::to_string(&envelope).unwrap()
+        }
+    }
+
+    fn write_lines(path: &Path, lines: &[String]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, lines.join("\n") + "\n").unwrap();
+    }
+
+    fn available_spend(poll: LiveSpendPoll) -> f64 {
+        match poll {
+            LiveSpendPoll::Available { spent_usd } => spent_usd,
+            other => panic!("expected available budget evidence, got {other:?}"),
+        }
     }
 
     #[test]
@@ -142,73 +449,235 @@ mod tests {
         assert_eq!(effective_job_budget(None, Some(3.0)), Some(3.0));
         assert_eq!(effective_job_budget(Some(5.0), Some(3.0)), Some(3.0));
         assert_eq!(effective_job_budget(Some(2.0), Some(3.0)), Some(2.0));
-        // Zero/negative caps are configuration noise, not "kill instantly".
         assert_eq!(effective_job_budget(Some(0.0), None), None);
         assert_eq!(effective_job_budget(Some(-1.0), Some(3.0)), Some(3.0));
     }
 
     #[test]
-    fn live_spend_sums_terminal_calls_and_survives_a_torn_tail() {
+    fn missing_stream_is_pending_before_first_observation() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = run_artifact_path(tmp.path(), "live", "items.jsonl");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let body = format!(
-            "{}\n{}\n{}\n{}",
-            terminal_line("live", 1, 0.4),
-            r#"{"unrelated":true}"#,
-            terminal_line("live", 3, 0.35),
-            r#"{"schemaVersion":1,"seq"#,
-        );
-        std::fs::write(&path, body).unwrap();
-        assert!((live_run_spend_usd(tmp.path(), "live") - 0.75).abs() < 1e-12);
+        let mut poller = LiveSpendPoller::new(tmp.path(), "absent");
+        assert_eq!(poller.poll(), LiveSpendPoll::Pending { spent_usd: 0.0 });
     }
 
     #[test]
-    fn live_spend_is_zero_before_the_lifecycle_exists() {
+    fn valid_stream_folds_terminal_cost_incrementally() {
         let tmp = tempfile::tempdir().unwrap();
-        assert_eq!(live_run_spend_usd(tmp.path(), "absent"), 0.0);
+        let path = run_artifact_path(tmp.path(), "live", "items.jsonl");
+        let mut chain = EnvelopeChain::new("live");
+        write_lines(&path, &[chain.terminal_line(0.4)]);
+        let mut poller = LiveSpendPoller::new(tmp.path(), "live");
+        assert!((available_spend(poller.poll()) - 0.4).abs() < 1e-12);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
+        writeln!(file, "{}", chain.terminal_line(0.35)).unwrap();
+        file.flush().unwrap();
+        assert!((available_spend(poller.poll()) - 0.75).abs() < 1e-12);
+        assert!((available_spend(poller.poll()) - 0.75).abs() < 1e-12);
+    }
+
+    #[test]
+    fn incomplete_utf8_torn_tail_waits_for_its_newline() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "utf8", "items.jsonl");
+        let mut chain = EnvelopeChain::new("utf8");
+        let first = chain.terminal_line(0.25);
+        let next = chain.diagnostic_line("price €");
+        let euro = next.find('€').expect("fixture contains euro");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut file = std::fs::File::create(&path).unwrap();
+        writeln!(file, "{first}").unwrap();
+        file.write_all(&next.as_bytes()[..euro + 1]).unwrap();
+        file.flush().unwrap();
+
+        let mut poller = LiveSpendPoller::new(tmp.path(), "utf8");
+        assert!((available_spend(poller.poll()) - 0.25).abs() < 1e-12);
+        file.write_all(&next.as_bytes()[euro + 1..]).unwrap();
+        file.write_all(b"\n").unwrap();
+        file.flush().unwrap();
+        assert!((available_spend(poller.poll()) - 0.25).abs() < 1e-12);
+        assert_eq!(poller.next_seq, 3);
+    }
+
+    #[test]
+    fn complete_malformed_record_is_unavailable_without_advancing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "bad", "items.jsonl");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"{not-json}\n").unwrap();
+        let mut poller = LiveSpendPoller::new(tmp.path(), "bad");
+        assert_eq!(
+            poller.poll(),
+            LiveSpendPoll::Unavailable {
+                spent_usd: 0.0,
+                reason: BudgetEvidenceReason::MalformedRecord,
+            }
+        );
+        assert_eq!(poller.offset, 0);
+        assert_eq!(poller.next_seq, 1);
+    }
+
+    #[test]
+    fn valid_prefix_is_retained_as_a_lower_bound_before_corruption() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "prefix", "items.jsonl");
+        let mut chain = EnvelopeChain::new("prefix");
+        let valid = chain.terminal_line(0.4);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, format!("{valid}\n{{not-json}}\n")).unwrap();
+        let mut poller = LiveSpendPoller::new(tmp.path(), "prefix");
+        assert_eq!(
+            poller.poll(),
+            LiveSpendPoll::Unavailable {
+                spent_usd: 0.4,
+                reason: BudgetEvidenceReason::MalformedRecord,
+            }
+        );
+        assert_eq!(poller.offset, valid.len() as u64 + 1);
+        assert_eq!(poller.next_seq, 2);
+    }
+
+    #[test]
+    fn wrong_run_sequence_chain_and_hash_fail_closed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cases = [
+            ("wrong-run", BudgetEvidenceReason::WrongRun),
+            ("wrong-seq", BudgetEvidenceReason::BrokenSequence),
+            ("wrong-chain", BudgetEvidenceReason::BrokenHashChain),
+            ("wrong-hash", BudgetEvidenceReason::InvalidHash),
+        ];
+        for (name, expected) in cases {
+            let path = run_artifact_path(tmp.path(), name, "items.jsonl");
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let line = invalid_line(name);
+            std::fs::write(&path, format!("{line}\n")).unwrap();
+            let mut poller = LiveSpendPoller::new(tmp.path(), name);
+            assert_eq!(
+                poller.poll(),
+                LiveSpendPoll::Unavailable {
+                    spent_usd: 0.0,
+                    reason: expected,
+                },
+                "case {name}"
+            );
+            assert_eq!(poller.offset, 0, "case {name}");
+        }
+    }
+
+    fn invalid_line(case: &str) -> String {
+        let run_id = if case == "wrong-run" { "other" } else { case };
+        let mut chain = EnvelopeChain::new(run_id);
+        let line = chain.terminal_line(0.1);
+        let mut value: serde_json::Value = serde_json::from_str(&line).unwrap();
+        match case {
+            "wrong-seq" => value["seq"] = serde_json::json!(2),
+            "wrong-chain" => value["prevEventHash"] = serde_json::json!("sha256:deadbeef"),
+            "wrong-hash" => value["eventHash"] = serde_json::json!("sha256:deadbeef"),
+            _ => {}
+        }
+        serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
+    fn truncation_retains_the_last_observed_spend() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "truncate", "items.jsonl");
+        let mut chain = EnvelopeChain::new("truncate");
+        write_lines(&path, &[chain.terminal_line(0.6)]);
+        let mut poller = LiveSpendPoller::new(tmp.path(), "truncate");
+        assert!((available_spend(poller.poll()) - 0.6).abs() < 1e-12);
+        std::fs::write(&path, b"").unwrap();
+        assert_eq!(
+            poller.poll(),
+            LiveSpendPoll::Unavailable {
+                spent_usd: 0.6,
+                reason: BudgetEvidenceReason::Truncated,
+            }
+        );
+    }
+
+    #[test]
+    fn startup_and_transient_graces_stop_at_their_bounds_and_reset() {
+        let pending = LiveSpendPoll::Pending { spent_usd: 0.0 };
+        let mut guard = BudgetEvidenceGuard::default();
+        for _ in 1..STARTUP_PENDING_POLL_LIMIT {
+            assert_eq!(
+                guard.observe(pending),
+                BudgetEvidenceDecision::Continue { spent_usd: 0.0 }
+            );
+        }
+        assert_eq!(
+            guard.observe(pending),
+            BudgetEvidenceDecision::Stop {
+                spent_usd: 0.0,
+                reason: BudgetEvidenceReason::MissingAtStartup,
+            }
+        );
+
+        let transient = LiveSpendPoll::Unavailable {
+            spent_usd: 0.4,
+            reason: BudgetEvidenceReason::ReadFailed,
+        };
+        let mut guard = BudgetEvidenceGuard::default();
+        for _ in 1..TRANSIENT_FAILURE_POLL_LIMIT {
+            assert_eq!(
+                guard.observe(transient),
+                BudgetEvidenceDecision::Continue { spent_usd: 0.4 }
+            );
+        }
+        assert_eq!(
+            guard.observe(LiveSpendPoll::Available { spent_usd: 0.5 }),
+            BudgetEvidenceDecision::Continue { spent_usd: 0.5 }
+        );
+        assert_eq!(
+            guard.observe(transient),
+            BudgetEvidenceDecision::Continue { spent_usd: 0.4 }
+        );
+    }
+
+    #[test]
+    fn durable_corruption_stops_immediately() {
+        let mut guard = BudgetEvidenceGuard::default();
+        assert_eq!(
+            guard.observe(LiveSpendPoll::Unavailable {
+                spent_usd: 1.25,
+                reason: BudgetEvidenceReason::InvalidHash,
+            }),
+            BudgetEvidenceDecision::Stop {
+                spent_usd: 1.25,
+                reason: BudgetEvidenceReason::InvalidHash,
+            }
+        );
     }
 
     /// A 4-hour job's lifecycle (100k lines) must not be re-folded from byte 0
-    /// on every 2-second poll: after the first fold, a no-growth poll reads
-    /// only file metadata + EOF and stays in the low-millisecond range, and
-    /// appended tails fold incrementally with torn tails deferred.
+    /// on every 2-second poll. The fixture is hash-linked like the real stream.
     #[test]
     fn incremental_poll_over_100k_lifecycle_reads_only_the_tail() {
         let tmp = tempfile::tempdir().unwrap();
         let path = run_artifact_path(tmp.path(), "long", "items.jsonl");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let terminal = terminal_line("long", 0, 0.001);
-        let body = vec![terminal; 100_000].join("\n") + "\n";
-        std::fs::write(&path, &body).unwrap();
+        let file = std::fs::File::create(&path).unwrap();
+        let mut writer = std::io::BufWriter::new(file);
+        let mut chain = EnvelopeChain::new("long");
+        for _ in 0..100_000 {
+            writeln!(writer, "{}", chain.diagnostic_line("heartbeat")).unwrap();
+        }
+        writer.flush().unwrap();
 
         let mut poller = LiveSpendPoller::new(tmp.path(), "long");
-        let first = poller.poll();
-        assert!((first - 100.0).abs() < 1e-6, "{first}");
-
-        // Steady-state polls with no growth must be effectively free.
+        assert_eq!(available_spend(poller.poll()), 0.0);
         let started = std::time::Instant::now();
         for _ in 0..50 {
-            assert!((poller.poll() - 100.0).abs() < 1e-6);
+            assert_eq!(available_spend(poller.poll()), 0.0);
         }
         let per_poll = started.elapsed() / 50;
         assert!(
             per_poll < std::time::Duration::from_millis(5),
             "steady-state poll cost {per_poll:?} — tail polling regressed to a full re-fold"
         );
-
-        // A torn append is deferred, then folded once its newline lands.
-        let mut file = std::fs::OpenOptions::new()
-            .append(true)
-            .open(&path)
-            .unwrap();
-        use std::io::Write;
-        let next = terminal_line("long", 100_000, 0.001);
-        write!(file, "{}", &next[..40]).unwrap();
-        file.flush().unwrap();
-        assert!((poller.poll() - 100.0).abs() < 1e-6, "torn tail must wait");
-        writeln!(file, "{}", &next[40..]).unwrap();
-        file.flush().unwrap();
-        assert!((poller.poll() - 100.001).abs() < 1e-6);
     }
 }
