@@ -141,6 +141,7 @@ dirs = "6.0"
 libc = "0.2"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm_0_29", "layout-cache", "underline-color"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
+same-file = "1.0"
 schemars = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

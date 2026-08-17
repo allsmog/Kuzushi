@@ -10,6 +10,7 @@
 
 use kuzushi_core::run_artifacts::{run_artifact_path, terminal_model_call_cost_report};
 use kuzushi_core::run_lifecycle::RunItemEnvelopeV1;
+use same_file::Handle as FileIdentity;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,7 @@ pub(super) enum BudgetEvidenceReason {
     SeekFailed,
     ReadFailed,
     Truncated,
+    Replaced,
     InvalidUtf8,
     MalformedRecord,
     WrongRun,
@@ -56,7 +58,8 @@ impl BudgetEvidenceReason {
             Self::MetadataFailed => "lifecycle stream metadata could not be read",
             Self::SeekFailed => "lifecycle stream could not be resumed at the verified offset",
             Self::ReadFailed => "lifecycle stream could not be read",
-            Self::Truncated => "lifecycle stream was truncated or replaced",
+            Self::Truncated => "lifecycle stream was truncated",
+            Self::Replaced => "lifecycle stream was replaced",
             Self::InvalidUtf8 => "a complete lifecycle record was not valid UTF-8",
             Self::MalformedRecord => "a complete lifecycle record was malformed",
             Self::WrongRun => "a lifecycle record belonged to another run",
@@ -187,6 +190,7 @@ pub(super) struct LiveSpendPoller {
     previous_hash: Option<String>,
     spent: f64,
     observed_stream: bool,
+    stream_identity: Option<FileIdentity>,
 }
 
 impl LiveSpendPoller {
@@ -199,22 +203,41 @@ impl LiveSpendPoller {
             previous_hash: None,
             spent: 0.0,
             observed_stream: false,
+            stream_identity: None,
         }
     }
 
     pub(super) fn poll(&mut self) -> LiveSpendPoll {
-        let file = match std::fs::File::open(&self.path) {
-            Ok(file) => file,
-            Err(error) => return self.open_failure(&error),
+        let mut current = match self.open_verified_stream() {
+            Ok(identity) => identity,
+            Err(poll) => return poll,
         };
-        self.observed_stream = true;
-        match read_appended_bytes(file, self.offset) {
+        let tail = read_appended_bytes(current.as_file_mut(), self.offset);
+        let _ = self.stream_identity.get_or_insert(current);
+        match tail {
             Ok(tail) => self.fold_tail(&tail),
             Err(reason) => LiveSpendPoll::Unavailable {
                 spent_usd: self.spent,
                 reason,
             },
         }
+    }
+
+    fn open_verified_stream(&mut self) -> Result<FileIdentity, LiveSpendPoll> {
+        let current = FileIdentity::from_path(&self.path)
+            .map_err(|error| self.open_failure(&error))?;
+        self.observed_stream = true;
+        if self
+            .stream_identity
+            .as_ref()
+            .is_some_and(|expected| expected != &current)
+        {
+            return Err(LiveSpendPoll::Unavailable {
+                spent_usd: self.spent,
+                reason: BudgetEvidenceReason::Replaced,
+            });
+        }
+        Ok(current)
     }
 
     fn open_failure(&self, error: &std::io::Error) -> LiveSpendPoll {
@@ -257,7 +280,7 @@ impl LiveSpendPoller {
 }
 
 fn read_appended_bytes(
-    mut file: std::fs::File,
+    file: &mut std::fs::File,
     offset: u64,
 ) -> Result<Vec<u8>, BudgetEvidenceReason> {
     let length = file
@@ -595,6 +618,33 @@ mod tests {
             LiveSpendPoll::Unavailable {
                 spent_usd: 0.6,
                 reason: BudgetEvidenceReason::Truncated,
+            }
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn same_size_replacement_is_unavailable() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = run_artifact_path(tmp.path(), "replaced", "items.jsonl");
+        let mut chain = EnvelopeChain::new("replaced");
+        write_lines(&path, &[chain.diagnostic_line("heartbeat")]);
+        let mut poller = LiveSpendPoller::new(tmp.path(), "replaced");
+        assert_eq!(available_spend(poller.poll()), 0.0);
+
+        let replacement = path.with_extension("replacement");
+        std::fs::write(&replacement, std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            std::fs::metadata(&replacement).unwrap().len(),
+            std::fs::metadata(&path).unwrap().len()
+        );
+        std::fs::rename(replacement, path).unwrap();
+
+        assert_eq!(
+            poller.poll(),
+            LiveSpendPoll::Unavailable {
+                spent_usd: 0.0,
+                reason: BudgetEvidenceReason::Replaced,
             }
         );
     }

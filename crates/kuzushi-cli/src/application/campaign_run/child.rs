@@ -81,8 +81,8 @@ async fn supervise_child(
 ) -> Result<SupervisionReport> {
     let timeout = tokio::time::sleep(spec.timeout);
     tokio::pin!(timeout);
-    let mut spend_poller = LiveSpendPoller::new(&spec.target, &spec.run_id);
-    let mut evidence_guard = BudgetEvidenceGuard::default();
+    let mut spend = LiveSpendPoller::new(&spec.target, &spec.run_id);
+    let mut guard = BudgetEvidenceGuard::default();
     let mut spend_poll = tokio::time::interval(BUDGET_POLL);
     spend_poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut status_poll = tokio::time::interval(CHILD_STATUS_POLL);
@@ -90,19 +90,17 @@ async fn supervise_child(
         tokio::select! {
             _ = status_poll.tick() => {
                 if let Some(status) = child.try_wait().context("Could not poll job child")? {
-                    return Ok(exited_child(status.code(), &mut spend_poller));
+                    return Ok(exited_child(status.code(), spec, &mut spend, &mut guard));
                 }
             }
             _ = &mut timeout => {
-                let spent = refresh_spend(&mut spend_poller);
-                return stop_child(child, JobOutcome::TimedOut, spent);
+                return terminal_stop(child, JobOutcome::TimedOut, spec, &mut spend, &mut guard);
             }
             _ = shutdown.changed() => {
-                let spent = refresh_spend(&mut spend_poller);
-                return stop_child(child, JobOutcome::Interrupted, spent);
+                return terminal_stop(child, JobOutcome::Interrupted, spec, &mut spend, &mut guard);
             }
             _ = spend_poll.tick(), if spec.job_budget_usd.is_some() => {
-                if let Some(report) = budget_stop(child, spec, &mut spend_poller, &mut evidence_guard)? {
+                if let Some(report) = budget_stop(child, spec, &mut spend, &mut guard)? {
                     return Ok(report);
                 }
             }
@@ -110,16 +108,61 @@ async fn supervise_child(
     }
 }
 
-fn exited_child(code: Option<i32>, spend_poller: &mut LiveSpendPoller) -> SupervisionReport {
-    SupervisionReport {
-        outcome: JobOutcome::from_exit_code(code),
-        exit_code: code,
-        observed_spend_usd: refresh_spend(spend_poller),
-    }
+fn exited_child(
+    code: Option<i32>,
+    spec: &ChildSpec,
+    spend_poller: &mut LiveSpendPoller,
+    evidence_guard: &mut BudgetEvidenceGuard,
+) -> SupervisionReport {
+    terminal_report(
+        JobOutcome::from_exit_code(code),
+        code,
+        spec,
+        spend_poller,
+        evidence_guard,
+    )
 }
 
-fn refresh_spend(spend_poller: &mut LiveSpendPoller) -> f64 {
-    spend_poller.poll().spent_usd()
+fn terminal_stop(
+    child: &RegisteredChild,
+    outcome: JobOutcome,
+    spec: &ChildSpec,
+    spend_poller: &mut LiveSpendPoller,
+    evidence_guard: &mut BudgetEvidenceGuard,
+) -> Result<SupervisionReport> {
+    let report = terminal_report(outcome, None, spec, spend_poller, evidence_guard);
+    stop_child(child, report.outcome, report.observed_spend_usd)
+}
+
+fn terminal_report(
+    outcome: JobOutcome,
+    exit_code: Option<i32>,
+    spec: &ChildSpec,
+    spend_poller: &mut LiveSpendPoller,
+    evidence_guard: &mut BudgetEvidenceGuard,
+) -> SupervisionReport {
+    let poll = spend_poller.poll();
+    let decision = match spec.job_budget_usd {
+        Some(_) => evidence_guard.observe(poll),
+        None => BudgetEvidenceDecision::Continue {
+            spent_usd: poll.spent_usd(),
+        },
+    };
+    match decision {
+        BudgetEvidenceDecision::Continue { spent_usd } => SupervisionReport {
+            outcome,
+            exit_code,
+            observed_spend_usd: spent_usd,
+        },
+        BudgetEvidenceDecision::Stop { spent_usd, reason } => {
+            report_evidence_loss(spec, spent_usd, reason.label());
+            SupervisionReport {
+                outcome: JobOutcome::BudgetEvidenceUnavailable,
+                exit_code,
+                observed_spend_usd: spent_usd,
+            }
+        }
+    }
 }
 
 fn budget_stop(
@@ -141,14 +184,17 @@ fn budget_stop(
         }
         BudgetEvidenceDecision::Continue { .. } => Ok(None),
         BudgetEvidenceDecision::Stop { spent_usd, reason } => {
-            eprintln!(
-                "campaign: job run {} lost live budget evidence after ${spent_usd:.2} observed ({}) — stopping it",
-                spec.run_id,
-                reason.label(),
-            );
+            report_evidence_loss(spec, spent_usd, reason.label());
             stop_child(child, JobOutcome::BudgetEvidenceUnavailable, spent_usd).map(Some)
         }
     }
+}
+
+fn report_evidence_loss(spec: &ChildSpec, spent_usd: f64, reason: &str) {
+    eprintln!(
+        "campaign: job run {} lost live budget evidence after ${spent_usd:.2} observed ({reason})",
+        spec.run_id,
+    );
 }
 
 fn stop_child(
@@ -300,6 +346,36 @@ mod tests {
         let tail = log_tail(&path);
 
         assert_eq!(tail.as_bytes(), expected_tail);
+    }
+
+    #[test]
+    fn terminal_refresh_preserves_unavailable_budget_evidence() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_malformed_lifecycle(tmp.path(), "terminal-corrupt");
+        let child_spec = spec(
+            tmp.path(),
+            tmp.path().join("unused"),
+            "terminal-corrupt",
+            Some(5.0),
+        );
+
+        for (outcome, exit_code) in [
+            (JobOutcome::Completed, Some(0)),
+            (JobOutcome::TimedOut, None),
+        ] {
+            let mut poller = LiveSpendPoller::new(tmp.path(), "terminal-corrupt");
+            let mut guard = BudgetEvidenceGuard::default();
+            let report = terminal_report(
+                outcome,
+                exit_code,
+                &child_spec,
+                &mut poller,
+                &mut guard,
+            );
+            assert_eq!(report.outcome, JobOutcome::BudgetEvidenceUnavailable);
+            assert_eq!(report.exit_code, exit_code);
+            assert_eq!(report.observed_spend_usd, 0.0);
+        }
     }
 
     #[tokio::test]

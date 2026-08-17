@@ -21,6 +21,7 @@ kuzushi-cpg = { path = "../kuzushi-cpg" }
 kuzushi-mcp-treesitter = { path = "../kuzushi-mcp-treesitter" }
 kuzushi-openai = { path = "../kuzushi-openai" }
 kuzushi-tui = { path = "../kuzushi-tui" }
+same-file.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

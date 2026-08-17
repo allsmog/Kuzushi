@@ -598,6 +598,9 @@ fn reconciled_child_outcome(
     report: &ChildReport,
     summary: Option<&kuzushi_core::RunSummary>,
 ) -> Result<JobOutcome> {
+    if report.outcome == JobOutcome::BudgetEvidenceUnavailable {
+        return Ok(report.outcome);
+    }
     let Some(exit_code) = report.exit_code else {
         return Ok(report.outcome);
     };
@@ -715,6 +718,19 @@ mod cost_accounting_tests {
             campaign_attempt_cost(None, &report(JobOutcome::BudgetEvidenceUnavailable, 0.0)),
             (None, true),
             "zero observed spend still leaves provider spend unresolved"
+        );
+    }
+
+    #[test]
+    fn unavailable_budget_evidence_survives_terminal_summary_reconciliation() {
+        let mut summary = kuzushi_core::RunSummary::running("run-evidence", "run", None, "target");
+        summary.status = "completed".to_string();
+        let mut child = report(JobOutcome::BudgetEvidenceUnavailable, 0.0);
+        child.exit_code = Some(0);
+
+        assert_eq!(
+            reconciled_child_outcome(&child, Some(&summary)).unwrap(),
+            JobOutcome::BudgetEvidenceUnavailable
         );
     }
 

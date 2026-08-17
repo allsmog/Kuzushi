@@ -1924,6 +1924,7 @@ dependencies = [
  "kuzushi-mcp-treesitter",
  "kuzushi-openai",
  "kuzushi-tui",
+ "same-file",
  "serde",
  "serde_json",
  "tempfile",
