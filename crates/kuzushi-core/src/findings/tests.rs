@@ -2400,10 +2400,29 @@ mod tests {
 
     #[test]
     fn stores_lists_and_replaces_structured_finding_evidence() {
+        // Insertion now verifies source citations against the run's target
+        // root, so the cited lines have to exist on disk or the evidence is
+        // fail-closed to reasoning before it is ever stored.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            temp.path().join("app.py"),
+            format!(
+                "{}filename = file.filename\n{}file.save(filepath)\n",
+                "# fixture\n".repeat(47),
+                "# fixture\n".repeat(14),
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            temp.path().join("helpers.py"),
+            format!("{}Image.open(input_path)\n", "# fixture\n".repeat(14)),
+        )
+        .unwrap();
+
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-evidence";
         store
-            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .record_run_started(run_id, temp.path(), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "exploit-chain",
