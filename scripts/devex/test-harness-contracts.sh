@@ -27,6 +27,38 @@ assert_eq REVIEW_REQUIRED "$(devex_journey_result_label 0 1)" "open review label
 assert_eq 3 "$(devex_report_review_count 'result: FAIL · 1 pass / 2 fail / 3 review-for-human')" \
   "outer gates preserve review requirements even when machine checks fail"
 
+RETENTION_ROOT="$TEST_ROOT/retention"
+mkdir -p "$RETENTION_ROOT"
+index=1
+while [ "$index" -le 23 ]; do
+  run_name=$(printf '202608%02d-120000' "$index")
+  mkdir -p "$RETENTION_ROOT/$run_name"
+  devex_write_run_result "$RETENTION_ROOT/$run_name" successful 0 0 0
+  index=$((index + 1))
+done
+mkdir -p "$RETENTION_ROOT/20260824-120000" "$RETENTION_ROOT/20260825-120000" \
+  "$RETENTION_ROOT/20260826-120000" "$RETENTION_ROOT/20260827-120000"
+devex_write_run_result "$RETENTION_ROOT/20260824-120000" failed 1 0 0
+devex_write_run_result "$RETENTION_ROOT/20260825-120000" review 0 0 1
+devex_write_run_result "$RETENTION_ROOT/20260826-120000" skipped 0 1 0
+printf 'legacy evidence\n' > "$RETENTION_ROOT/20260827-120000/report.txt"
+ln -s "20260801-120000" "$RETENTION_ROOT/latest"
+ln -s "$TEST_ROOT" "$RETENTION_ROOT/20260828-120000"
+devex_prune_successful_runs "$RETENTION_ROOT" 20
+assert_eq 21 "$(find "$RETENTION_ROOT" -type f -name run-result.json \
+  -exec grep -l '"status": "successful"' {} \; | wc -l | tr -d ' ')" \
+  "retention keeps newest successful runs plus an older latest target"
+[ -d "$RETENTION_ROOT/20260801-120000" ] \
+  || { printf 'FAIL: latest successful run was pruned\n' >&2; exit 1; }
+[ ! -e "$RETENTION_ROOT/20260802-120000" ] && [ ! -e "$RETENTION_ROOT/20260803-120000" ] \
+  || { printf 'FAIL: oldest non-latest successful runs were retained\n' >&2; exit 1; }
+for protected in 20260824-120000 20260825-120000 20260826-120000 20260827-120000; do
+  [ -d "$RETENTION_ROOT/$protected" ] \
+    || { printf 'FAIL: protected run $protected was pruned\n' >&2; exit 1; }
+done
+[ -L "$RETENTION_ROOT/20260828-120000" ] \
+  || { printf 'FAIL: timestamp-shaped symlink was followed or pruned\n' >&2; exit 1; }
+
 printf 'Review is locked\n' > "$TEST_ROOT/wait-screen.txt"
 devex_file_contains_any "$TEST_ROOT/wait-screen.txt" \
   'Viewing Review || Review is locked' \

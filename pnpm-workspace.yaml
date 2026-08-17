@@ -1,3 +1,23 @@
+packages:
+  - npm/platform-packages/*
+
+# Resolve every optional native package into the lockfile regardless of the
+# maintainer machine running pnpm. Consumers still install only their matching
+# os/cpu/libc package according to each published manifest.
+supportedArchitectures:
+  os:
+    - current
+    - darwin
+    - linux
+    - win32
+  cpu:
+    - current
+    - arm64
+    - x64
+  libc:
+    - current
+    - glibc
+
 allowBuilds:
   better-sqlite3: true
   esbuild: true

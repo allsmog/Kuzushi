@@ -100,16 +100,50 @@ impl ScanEngine for DepHygieneScanner {
 pub struct CargoAuditScanner;
 
 impl CargoAuditScanner {
-    /// Probe whether `cargo audit` is callable in the current environment.
+    /// Probe whether `cargo-audit` is callable in the current environment.
+    ///
+    /// Calling the Cargo shim for this capability check can make rustup install
+    /// the repository's pinned toolchain even though cargo-audit is already a
+    /// standalone executable. Probe that executable directly so read-only
+    /// doctor and scanner-selection paths cannot bootstrap a toolchain.
     /// Returns `false` on any spawn or non-success exit, including when
-    /// `cargo` itself is missing.
+    /// `cargo-audit` itself is missing.
     pub fn binary_available() -> bool {
-        Command::new("cargo")
-            .args(["audit", "--version"])
+        Self::binary_available_at("cargo-audit")
+    }
+
+    fn binary_available_at(binary: impl AsRef<std::ffi::OsStr>) -> bool {
+        let mut command = Command::new(binary);
+        command.arg("--version");
+        Self::command_succeeds(&mut command)
+    }
+
+    fn command_succeeds(command: &mut Command) -> bool {
+        command
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod cargo_audit_probe_tests {
+    use super::CargoAuditScanner;
+
+    #[test]
+    fn probes_the_executable_directly_without_requiring_cargo() {
+        let current_test_binary = std::env::current_exe().expect("current test executable");
+        let mut command = std::process::Command::new(current_test_binary);
+        command.arg("--help");
+        assert!(CargoAuditScanner::command_succeeds(&mut command));
+    }
+
+    #[test]
+    fn missing_executable_is_reported_as_unavailable() {
+        assert!(!CargoAuditScanner::binary_available_at(
+            "kuzushi-definitely-missing-cargo-audit"
+        ));
     }
 }

@@ -21,6 +21,8 @@ KUZUSHI_NATIVE_BIN="$PWD/target/debug/kuzushi" \
 ./scripts/devex/run-journey.sh all      # J1..J17
 ./scripts/devex/run-journey.sh --size 80x24 J14   # environment-matrix cell
 ./scripts/devex/run-journey.sh --artifact-root /tmp/kuzushi-audit J17
+./scripts/devex/run-journey.sh --retain-successful 20 J17
+./scripts/devex/run-journey.sh --retain-all J17   # preserve every run
 ./scripts/devex/test-harness-contracts.sh          # no TUI; evidence-contract tests
 ```
 
@@ -36,6 +38,15 @@ Overrides:
   a tiny seeded fixture repo per journey).
 - `KUZUSHI_DEVEX_ARTIFACT_ROOT=<dir>` (or `--artifact-root <dir>`) — capture
   destination. The default remains `scripts/devex/artifacts`.
+- `KUZUSHI_DEVEX_RETAIN_SUCCESSFUL=<count>` (or `--retain-successful <count>`)
+  — successful run directories to retain (default `20`). Failed, skipped,
+  review-required, legacy, and `latest`-linked runs are preserved. Use
+  `--retain-all` to disable pruning for one invocation.
+
+Journey launches reuse the operator's `RUSTUP_HOME` while keeping the
+application HOME isolated. This stops read-only capability probes from
+installing a complete Rust toolchain inside retained evidence; `CARGO_HOME`
+and Cargo credentials remain isolated.
 
 Journeys that need a live model key (`require-any-env: ANTHROPIC_API_KEY …`,
 e.g. J4) **skip honestly** when no key is set — they are never faked.
@@ -61,6 +72,8 @@ symlinks the newest run):
 - `report.txt` — the PASS / FAIL / REVIEW log for the journey
 - `fixture-target/`, `home/` — the seeded target repo and temp `$HOME`, kept
   for inspection
+- `run-result.json` — run-level status used by conservative successful-run
+  retention; directories without this trusted manifest are never pruned
 
 ## Honest verdicts
 

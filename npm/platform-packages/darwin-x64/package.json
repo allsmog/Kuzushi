@@ -1,0 +1,11 @@
+{
+  "name": "@kuzushi/darwin-x64",
+  "version": "0.24.0-alpha.12",
+  "description": "Kuzushi native runtime for macOS x64",
+  "license": "MIT",
+  "repository": "https://github.com/allsmog/Kuzushi.git",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "files": ["bin"],
+  "publishConfig": { "access": "public" }
+}

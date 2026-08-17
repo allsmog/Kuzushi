@@ -4,6 +4,7 @@ dist/
 target/
 target-dev/
 native/
+npm/platform-packages/*/bin/
 .env
 .env.*
 !.env.example

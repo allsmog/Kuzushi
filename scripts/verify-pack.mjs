@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node
 import path from "node:path";
 import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
-import { nativeExecutableName, nativeRuntimeBinaries } from "./native-runtime-contract.mjs";
+import { nativePlatformPackages } from "./native-runtime-contract.mjs";
 
 const repo = process.cwd();
 const manifest = readPackageManifest();
@@ -13,7 +13,14 @@ const packageFileShapeFailures = packageFileEntryShapeFailures(rawPackageFileEnt
 const entries = Array.isArray(rawPackageFileEntries)
   ? rawPackageFileEntries.filter((entry) => typeof entry === "string")
   : [];
-const manifestRecordFields = ["bin", "scripts", "dependencies", "devDependencies", "exports"];
+const manifestRecordFields = [
+  "bin",
+  "scripts",
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "exports",
+];
 const manifestRecordShapeFailures = manifestRecordFields.flatMap((field) =>
   packageRecordFieldFailures(field, manifest[field]),
 );
@@ -23,15 +30,6 @@ const packageDependencies = recordOrEmpty(manifest.dependencies);
 const packageDevDependencies = recordOrEmpty(manifest.devDependencies);
 const packageOptionalDependencies = recordOrEmpty(manifest.optionalDependencies);
 const packageExports = recordOrEmpty(manifest.exports);
-const omitNative = process.env.KUZUSHI_VERIFY_PACK_OMIT_NATIVE === "1";
-const verifyReleaseAssembly = process.env.KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY === "1";
-const requiredReleaseNativeDirs = [
-  "native/linux-x64",
-  "native/linux-arm64",
-  "native/darwin-x64",
-  "native/darwin-arm64",
-  "native/win32-x64",
-];
 const includes = entries.filter((entry) => !entry.startsWith("!")).filter(isIncludedEntry);
 const excludes = entries.filter((entry) => entry.startsWith("!")).map((entry) => entry.slice(1));
 const requiredPackageFiles = [
@@ -49,7 +47,7 @@ const requiredPackageFiles = [
 ];
 const allowedPackageEntries = [
   "bin",
-  "native",
+  "scripts/native-runtime-contract.mjs",
   "scripts/langgraph-bridge.mjs",
   "scripts/langgraph-bridge",
   "scripts/kuzushi-dynamic-module-host.mjs",
@@ -68,8 +66,8 @@ const expectedPackageBin = {
 };
 const allowedLifecycleScripts = {};
 const requiredReleaseScripts = {
-  prepack: "pnpm build:native",
   "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
+  "pack:native-platforms": "node scripts/pack-platform-packages.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
   "publish:npm:dry": "bash scripts/publish-npm.sh",
   "publish:npm:go": "bash scripts/publish-npm.sh --publish",
@@ -226,7 +224,7 @@ const offenders = sorted.filter((file) => denied.some((pattern) => pattern.test(
 const deniedFixtureFailures = deniedPathFixtureFailures();
 const packagePathShapeFailures = packagePayloadPathShapeFailures(includes);
 const packageEntryFailures = packageFilesEntryFailures(entries);
-const nativeFailures = nativeBinaryFailures(sorted);
+const nativeFailures = platformPackageManifestFailures();
 const binFailures = packageBinFailures(packageBin);
 const binSurfaceFixtureFailures = packageBinSurfaceFixtureFailures(packageBinSurfaceFixtures);
 const binWrapperFailures = binWrapperContentFailures();
@@ -343,7 +341,7 @@ process.stdout.write(
   ),
 );
 process.stdout.write(
-  "\npackage artifact check passed (no local state, bin aliases, and native runtime payloads are consistent)\n",
+  "\npackage artifact check passed (thin launcher and platform package contracts are consistent)\n",
 );
 
 function runArchitectureContractChecks() {
@@ -458,7 +456,7 @@ function packagePayloadStatShapeFailures(normalized, stat) {
 }
 
 function isIncludedEntry(entry) {
-  return !(omitNative && normalize(entry) === "native");
+  return Boolean(entry);
 }
 
 function isExcluded(rel) {
@@ -555,63 +553,44 @@ function binWrapperContentFailures() {
   ];
 }
 
-function nativeBinaryFailures(files) {
-  if (omitNative) return [];
-  const dirs = nativePlatformDirs(files);
-  if (dirs.length === 0) {
-    return [
-      "missing shipped native directory native/<platform>-<arch>",
-      ...missingReleaseNativeDirs(dirs),
-    ];
-  }
+function platformPackageManifestFailures() {
+  return nativePlatformPackages.flatMap(platformPackageManifestEntryFailures);
+}
+
+function platformPackageManifestEntryFailures(platformPackage) {
+  const relativePath = `npm/platform-packages/${platformPackage.slug}/package.json`;
+  if (!existsSync(path.join(repo, relativePath))) return [`missing ${relativePath}`];
+  const platformManifest = JSON.parse(readFileSync(path.join(repo, relativePath), "utf8"));
   return [
-    ...missingReleaseNativeDirs(dirs),
-    ...dirs.flatMap((dir) => [
-      ...missingNativeBinaries(files, dir),
-      ...extraNativePayloadFailures(files, dir),
-      ...nativeExecutableFailures(dir),
-    ]),
+    ...platformPackageFieldFailures(platformPackage, platformManifest, relativePath),
+    ...platformPackageLibcFailures(platformPackage, platformManifest, relativePath),
+    ...(platformManifest.publishConfig?.access === "public"
+      ? []
+      : [`${relativePath} publishConfig.access must be public`]),
   ];
 }
 
-function missingReleaseNativeDirs(dirs) {
-  if (!verifyReleaseAssembly) return [];
-  return requiredReleaseNativeDirs
-    .filter((dir) => !dirs.includes(dir))
-    .map((dir) => `release assembly is missing required native directory ${dir}`);
+function platformPackageFieldFailures(platformPackage, platformManifest, relativePath) {
+  const expectedFields = {
+    name: platformPackage.packageName,
+    version: manifest.version,
+    os: [platformPackage.os],
+    cpu: [platformPackage.cpu],
+    files: ["bin"],
+  };
+  return Object.entries(expectedFields)
+    .filter(
+      ([field, expected]) => JSON.stringify(platformManifest[field]) !== JSON.stringify(expected),
+    )
+    .map(([field, expected]) => `${relativePath} ${field} must be ${JSON.stringify(expected)}`);
 }
 
-function nativePlatformDirs(files) {
-  return [
-    ...new Set(
-      files
-        .filter((file) => file.startsWith("native/"))
-        .map((file) => file.split("/").slice(0, 2).join("/")),
-    ),
-  ].sort();
-}
-
-function missingNativeBinaries(files, dir) {
-  return expectedNativeBinaries(dir)
-    .filter((file) => !files.includes(file))
-    .map((file) => `missing shipped native binary ${file}`);
-}
-
-function extraNativePayloadFailures(files, dir) {
-  const allowed = new Set(expectedNativeBinaries(dir));
-  return files
-    .filter((file) => file.startsWith(`${dir}/`))
-    .filter((file) => !allowed.has(file))
-    .map((file) => `uncontracted shipped native payload ${file}`);
-}
-
-function expectedNativeBinaries(dir) {
-  const platform = dir.startsWith("native/win32-") ? "win32" : "unix";
-  return nativeRuntimeBinaries.map((binary) => `${dir}/${nativeExecutableName(binary, platform)}`);
-}
-
-function nativeExecutableFailures(dir) {
-  return dir.startsWith("native/win32-") ? [] : executableFileFailures(expectedNativeBinaries(dir));
+function platformPackageLibcFailures(platformPackage, platformManifest, relativePath) {
+  if (!platformPackage.libc) return [];
+  const expected = JSON.stringify([platformPackage.libc]);
+  return JSON.stringify(platformManifest.libc) === expected
+    ? []
+    : [`${relativePath} libc must be ${expected}`];
 }
 
 function executableFileFailures(files) {
@@ -971,9 +950,17 @@ function normalizeExportTarget(value) {
 }
 
 function packageOptionalDependencyFailures(optionalDependencies) {
-  return Object.keys(optionalDependencies).map(
-    (name) => `package optionalDependencies has uncontracted package ${name}`,
+  const expected = new Map(
+    nativePlatformPackages.map(({ packageName }) => [packageName, manifest.version]),
   );
+  return [
+    ...[...expected]
+      .filter(([name, version]) => optionalDependencies[name] !== version)
+      .map(([name, version]) => `package optionalDependencies.${name} must be ${version}`),
+    ...Object.keys(optionalDependencies)
+      .filter((name) => !expected.has(name))
+      .map((name) => `package optionalDependencies has uncontracted package ${name}`),
+  ];
 }
 
 function deferredAdapterDependencyFailures(dependencies, optionalDependencies) {

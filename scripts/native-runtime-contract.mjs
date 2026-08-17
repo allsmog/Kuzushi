@@ -35,6 +35,50 @@ export const nativeRuntimeBinaries = Object.freeze(
   nativeRuntimePackages.map(({ binaryName }) => binaryName),
 );
 
+export const nativePlatformPackages = Object.freeze([
+  {
+    slug: "linux-x64",
+    packageName: "@kuzushi/linux-x64",
+    os: "linux",
+    cpu: "x64",
+    libc: "glibc",
+    required: true,
+  },
+  {
+    slug: "linux-arm64",
+    packageName: "@kuzushi/linux-arm64",
+    os: "linux",
+    cpu: "arm64",
+    libc: "glibc",
+    required: true,
+  },
+  {
+    slug: "darwin-x64",
+    packageName: "@kuzushi/darwin-x64",
+    os: "darwin",
+    cpu: "x64",
+    required: true,
+  },
+  {
+    slug: "darwin-arm64",
+    packageName: "@kuzushi/darwin-arm64",
+    os: "darwin",
+    cpu: "arm64",
+    required: true,
+  },
+  {
+    slug: "win32-x64",
+    packageName: "@kuzushi/win32-x64",
+    os: "win32",
+    cpu: "x64",
+    required: true,
+  },
+]);
+
+export function nativePlatformPackage(platform = process.platform, arch = process.arch) {
+  return nativePlatformPackages.find(({ os, cpu }) => os === platform && cpu === arch);
+}
+
 export function nativeExecutableName(binaryName, platform = process.platform) {
   return platform === "win32" ? `${binaryName}.exe` : binaryName;
 }

@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { nativeRuntimePackages } from "./native-runtime-contract.mjs";
+import { nativePlatformPackages, nativeRuntimePackages } from "./native-runtime-contract.mjs";
 
 const root = process.cwd();
 const manifest = readJson("package.json");
@@ -31,6 +31,7 @@ for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.y
 }
 checkNativeRuntimeContract();
 checkDynamicHostVersion();
+checkPlatformPackageVersions();
 checkWorkspaceLockVersions();
 checkNativeReleaseSmoke();
 checkReleaseAssemblyGate();
@@ -101,6 +102,18 @@ function checkDynamicHostVersion() {
   }
 }
 
+function checkPlatformPackageVersions() {
+  for (const { slug, packageName } of nativePlatformPackages) {
+    const platformManifest = readJson(`npm/platform-packages/${slug}/package.json`);
+    if (platformManifest.name !== packageName || platformManifest.version !== manifest.version) {
+      failures.push(`${slug} platform package must be ${packageName}@${manifest.version}`);
+    }
+    if (manifest.optionalDependencies?.[packageName] !== manifest.version) {
+      failures.push(`${packageName} must be an exact-version optional dependency`);
+    }
+  }
+}
+
 function checkWorkspaceLockVersions() {
   const lock = readText("Cargo.lock");
   const members = [...cargo.matchAll(/^\s*"crates\/([^"]+)",?$/gm)].map((match) => match[1]);
@@ -121,7 +134,7 @@ function checkWorkspaceLockVersions() {
 function checkReleaseInstructions() {
   const instructions = readText("RELEASING.md");
   const staged =
-    "git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md";
+    "git add package.json pnpm-lock.yaml npm/platform-packages Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md";
   if (!instructions.includes(staged)) {
     failures.push("RELEASING.md must stage every release-version source and CHANGELOG.md");
   }
@@ -141,11 +154,10 @@ function checkNativeReleaseSmoke() {
 
 function checkReleaseAssemblyGate() {
   const workflow = readText(".github/workflows/release.yml");
-  const packVerifier = readText("scripts/verify-pack.mjs");
   failures.push(
     ...releaseAssemblyActivationFailures(workflow),
     ...nativeReleaseMatrixFailures(workflow),
-    ...requiredReleaseNativeDirFailures(packVerifier),
+    ...platformPackageAssemblyFailures(workflow),
   );
 }
 
@@ -207,16 +219,14 @@ function releaseAssemblyActivationFailures(workflow) {
   return activationFailures;
 }
 
-function requiredReleaseNativeDirFailures(packVerifier) {
-  return [
-    "native/linux-x64",
-    "native/linux-arm64",
-    "native/darwin-x64",
-    "native/darwin-arm64",
-    "native/win32-x64",
-  ]
-    .filter((nativeDir) => !packVerifier.includes(nativeDir))
-    .map((nativeDir) => `release assembly gate must require ${nativeDir}`);
+function platformPackageAssemblyFailures(workflow) {
+  const missingTokens = ["pnpm pack:native-platforms", "node scripts/publish-platform-packages.mjs"]
+    .filter((token) => !workflow.includes(token))
+    .map((token) => `release assembly gate must mention ${token}`);
+  const optionalPlatforms = nativePlatformPackages
+    .filter(({ required }) => !required)
+    .map(({ slug }) => `release platform package ${slug} must block publication`);
+  return [...missingTokens, ...optionalPlatforms];
 }
 
 function nativeReleaseMatrixFailures(workflow) {

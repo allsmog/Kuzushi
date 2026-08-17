@@ -25,13 +25,13 @@ cargo test --workspace
 pnpm build:native
 pnpm verify:pack
 
-# 2. Consistently bump package.json, Cargo.toml, Cargo.lock workspace entries,
-#    and the dynamic-module host protocol version.
+# 2. Consistently bump the launcher and platform package manifests, Cargo
+#    workspace/lock entries, and the dynamic-module host protocol version.
 node scripts/bump-release-version.mjs 0.24.0-alpha.13
 pnpm check:release
 
 # 3. Commit every source updated by the bump, plus the changelog, and tag
-git add package.json Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md
+git add package.json pnpm-lock.yaml npm/platform-packages Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
 git tag "v$(node -p 'require("./package.json").version')"
 
@@ -43,7 +43,9 @@ Do not publish from the local package build. `pnpm publish:npm:go` fails
 closed by design because `pnpm build:native` stages only the current host.
 The tag-triggered workflow is the sole publishing path and requires
 `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, and `win32-x64`
-payloads before `npm publish` can run.
+payloads before npm publication can run. It
+publishes one exact-version optional package per successful platform, then the
+thin `kuzushi` launcher.
 
 ## Automated Release (via CI)
 
@@ -54,15 +56,18 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
    darwin-arm64, and win32-x64. Every platform blocks publication if its build,
    platform contract, packaging, or artifact upload fails.
 3. Stages the CLI and every advertised MCP server from each green build into
-   `native/<platform>-<arch>/`.
+   `native/<platform>-<arch>/`, then packs each directory as
+   `@kuzushi/<platform>-<arch>`.
 4. Executes each platform's staged CLI plus every advertised MCP health check
    with an empty inherited `PATH`, runs the platform-specific process/atomic
-   tests, then runs `pnpm verify:pack` against the assembled npm tarball.
-5. Publishes to npm with the multi-platform native payload (requires
-   `NPM_TOKEN` secret).
-6. Creates a GitHub Release with changelog, the full Node-capable npm tarball,
-   and CLI-plus-MCP native archives. The native archives intentionally omit
-   Node dependencies; model-backed and dynamic-Node tools use npm or source.
+   tests, then runs `pnpm verify:pack` against the thin launcher and platform
+   packages.
+5. Publishes the available platform packages first and the thin `kuzushi`
+   launcher last (requires `NPM_TOKEN` and access to the `@kuzushi` scope).
+6. Creates a GitHub Release with changelog, the thin launcher tarball,
+    platform npm packages, and CLI-plus-MCP native archives. The native archives
+    intentionally omit Node dependencies; model-backed and dynamic-Node tools
+    use npm or source.
 7. Installs the public npm version into a clean prefix on all five supported
    platform/architecture pairs, then runs both command wrappers, `doctor`, and
    the offline demo. Each leg uploads a JSON consumer receipt.

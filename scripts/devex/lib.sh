@@ -28,6 +28,64 @@ devex_journey_result_label() { # <fail-count> <review-count>
   esac
 }
 
+devex_write_run_result() { # <run-dir> <status> <fail> <skip> <review>
+  local run_dir=$1 status=$2 fail_count=$3 skip_count=$4 review_count=$5
+  case $status in
+    successful|failed|skipped|review) ;;
+    *) devex_log "refusing to write unknown DevEx run status: $status"; return 1;;
+  esac
+  {
+    printf '{\n'
+    printf '  "status": "%s",\n' "$status"
+    printf '  "failed_journeys": %s,\n' "$fail_count"
+    printf '  "skipped_journeys": %s,\n' "$skip_count"
+    printf '  "review_required_journeys": %s\n' "$review_count"
+    printf '}\n'
+  } > "$run_dir/run-result.json"
+}
+
+devex_run_result_status() { # <run-dir>
+  sed -n 's/^[[:space:]]*"status":[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$1/run-result.json" 2>/dev/null | head -1
+}
+
+devex_prune_successful_runs() { # <artifact-root> <retain-count>
+  local artifact_root=$1 retain_count=$2 candidates candidate name kept=0 latest_target latest_name
+  case $retain_count in
+    ''|*[!0-9]*) devex_log "invalid successful-run retention count: $retain_count"; return 1;;
+  esac
+  [ -d "$artifact_root" ] || return 0
+
+  latest_target=$(readlink "$artifact_root/latest" 2>/dev/null || true)
+  latest_name=${latest_target##*/}
+  candidates=$(
+    for candidate in "$artifact_root"/*; do
+      [ -d "$candidate" ] || continue
+      [ -L "$candidate" ] && continue
+      name=$(basename "$candidate")
+      printf '%s\n' "$name" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || continue
+      [ "$(devex_run_result_status "$candidate")" = successful ] || continue
+      printf '%s\n' "$name"
+    done | LC_ALL=C sort -r
+  )
+
+  for name in $candidates; do
+    candidate="$artifact_root/$name"
+    if [ "$name" = "$latest_name" ] || [ "$kept" -lt "$retain_count" ]; then
+      kept=$((kept + 1))
+      continue
+    fi
+    # Re-check every invariant at the deletion edge. In particular, never
+    # follow a directory symlink or prune evidence without an explicit pass.
+    [ -d "$candidate" ] || continue
+    [ -L "$candidate" ] && continue
+    printf '%s\n' "$name" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || continue
+    [ "$(devex_run_result_status "$candidate")" = successful ] || continue
+    rm -rf "$candidate"
+    devex_log "pruned successful DevEx run $candidate"
+  done
+}
+
 devex_report_review_count() { # <result-line>
   local count
   count=$(printf '%s' "$1" | sed -n \

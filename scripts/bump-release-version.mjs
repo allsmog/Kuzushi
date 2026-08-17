@@ -6,13 +6,37 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const semverPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 export function bumpReleaseSources(sources, nextVersion) {
-  if (!semverPattern.test(nextVersion)) {
-    throw new Error(`release version must be SemVer without build metadata: ${nextVersion}`);
-  }
+  assertReleaseVersion(nextVersion);
   const manifest = JSON.parse(sources.packageJson);
   const currentVersion = manifest.version;
   assertCurrentVersions(sources, currentVersion);
-  manifest.version = nextVersion;
+  updateRootManifest(manifest, nextVersion);
+  const platformPackages = updatePlatformManifests(
+    sources.platformPackages,
+    currentVersion,
+    nextVersion,
+  );
+  const versionedText = updateVersionedTextSources(
+    sources,
+    currentVersion,
+    nextVersion,
+    platformPackages.length,
+  );
+  return {
+    packageJson: `${JSON.stringify(manifest, null, 2)}\n`,
+    platformPackages,
+    ...versionedText,
+  };
+}
+
+function updateVersionedTextSources(sources, currentVersion, nextVersion, platformPackageCount) {
+  const pnpmLock = replaceExactCount(
+    sources.pnpmLock,
+    `specifier: ${currentVersion}`,
+    `specifier: ${nextVersion}`,
+    platformPackageCount,
+    "pnpm platform package specifiers",
+  );
   const cargoToml = replaceOnce(
     sources.cargoToml,
     `version = "${currentVersion}"`,
@@ -33,11 +57,37 @@ export function bumpReleaseSources(sources, nextVersion) {
     workspacePackages,
   );
   return {
-    packageJson: `${JSON.stringify(manifest, null, 2)}\n`,
     cargoToml,
     cargoLock,
     dynamicHost,
+    pnpmLock,
   };
+}
+
+function assertReleaseVersion(nextVersion) {
+  if (!semverPattern.test(nextVersion)) {
+    throw new Error(`release version must be SemVer without build metadata: ${nextVersion}`);
+  }
+}
+
+function updateRootManifest(manifest, nextVersion) {
+  manifest.version = nextVersion;
+  for (const packageName of Object.keys(manifest.optionalDependencies ?? {})) {
+    if (packageName.startsWith("@kuzushi/")) {
+      manifest.optionalDependencies[packageName] = nextVersion;
+    }
+  }
+}
+
+function updatePlatformManifests(sources, currentVersion, nextVersion) {
+  return sources.map((source) => {
+    const manifest = JSON.parse(source);
+    if (manifest.version !== currentVersion) {
+      throw new Error(`${manifest.name} and package.json versions are already inconsistent`);
+    }
+    manifest.version = nextVersion;
+    return `${JSON.stringify(manifest, null, 2)}\n`;
+  });
 }
 
 function assertCurrentVersions(sources, currentVersion) {
@@ -84,6 +134,14 @@ function replaceOnce(source, current, next, label) {
   return `${source.slice(0, first)}${next}${source.slice(first + current.length)}`;
 }
 
+function replaceExactCount(source, current, next, expectedCount, label) {
+  const actualCount = source.split(current).length - 1;
+  if (actualCount !== expectedCount) {
+    throw new Error(`${label} must occur exactly ${expectedCount} times; found ${actualCount}`);
+  }
+  return source.split(current).join(next);
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -94,6 +152,10 @@ function readSources(root) {
     cargoToml: readFileSync(path.join(root, "Cargo.toml"), "utf8"),
     cargoLock: readFileSync(path.join(root, "Cargo.lock"), "utf8"),
     dynamicHost: readFileSync(path.join(root, "scripts/kuzushi-dynamic-module-host.mjs"), "utf8"),
+    platformPackages: platformPackagePaths().map((relativePath) =>
+      readFileSync(path.join(root, relativePath), "utf8"),
+    ),
+    pnpmLock: readFileSync(path.join(root, "pnpm-lock.yaml"), "utf8"),
   };
 }
 
@@ -102,6 +164,16 @@ function writeSources(root, sources) {
   writeFileSync(path.join(root, "Cargo.toml"), sources.cargoToml);
   writeFileSync(path.join(root, "Cargo.lock"), sources.cargoLock);
   writeFileSync(path.join(root, "scripts/kuzushi-dynamic-module-host.mjs"), sources.dynamicHost);
+  writeFileSync(path.join(root, "pnpm-lock.yaml"), sources.pnpmLock);
+  platformPackagePaths().forEach((relativePath, index) => {
+    writeFileSync(path.join(root, relativePath), sources.platformPackages[index]);
+  });
+}
+
+function platformPackagePaths() {
+  return ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"].map(
+    (slug) => `npm/platform-packages/${slug}/package.json`,
+  );
 }
 
 function main() {

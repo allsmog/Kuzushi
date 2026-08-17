@@ -13,8 +13,11 @@
 #   ./scripts/devex/run-journey.sh --list        # catalog
 #   ./scripts/devex/run-journey.sh --size 60x20 J1   # size override (J14 matrix)
 #   ./scripts/devex/run-journey.sh --artifact-root /tmp/kuzushi-audit J17
+#   ./scripts/devex/run-journey.sh --retain-successful 20 J17
+#   ./scripts/devex/run-journey.sh --retain-all J17
 #   KUZUSHI_BIN=... KUZUSHI_DEVEX_TARGET=... override binary / @TARGET token.
 #   KUZUSHI_DEVEX_ARTIFACT_ROOT=... overrides the default artifact directory.
+#   KUZUSHI_DEVEX_RETAIN_SUCCESSFUL=... overrides successful-run retention.
 #
 # Verdicts are honest: `expect:` lines are machine-checked substrings
 # (PASS/FAIL); `ask:` lines are human-judgment invariant questions emitted as
@@ -28,6 +31,8 @@ JOURNEY_DIR="$SCRIPT_DIR/journeys"
 DEFAULT_ARTIFACT_ROOT="$SCRIPT_DIR/artifacts"
 DEFAULT_SIZE="110x32"
 DEFAULT_WAIT_FOR_TIMEOUT=20
+DEFAULT_RETAIN_SUCCESSFUL=20
+DEVEX_RUSTUP_HOME=${RUSTUP_HOME:-${HOME:?}/.rustup}
 
 # shellcheck source=scripts/devex/lib.sh
 . "$SCRIPT_DIR/lib.sh"
@@ -311,7 +316,11 @@ d_shell() { # host-side setup command (fixture seeding etc.)
 
 launch_cmd() { # assemble `env -u K K=V ... <cmd>`
   local tail=$1 prefix=""
-  [ -n "$ENV_PREFIX" ] && prefix="env $ENV_PREFIX"
+  if [ -n "$ENV_PREFIX" ]; then
+    prefix="env ${ENV_PREFIX}RUSTUP_HOME=$(devex_shell_quote "$DEVEX_RUSTUP_HOME") "
+  else
+    prefix="env RUSTUP_HOME=$(devex_shell_quote "$DEVEX_RUSTUP_HOME") "
+  fi
   printf '%s' "$prefix$tail"
 }
 
@@ -845,7 +854,7 @@ run_journey() { # <journey-file> <run-dir>
 # main
 # ---------------------------------------------------------------------------
 main() {
-  local ids="" size_flag="" artifact_flag=""
+  local ids="" size_flag="" artifact_flag="" retain_flag="" retain_all=0
   SIZE_OVERRIDE=""
   while [ $# -gt 0 ]; do
     case $1 in
@@ -854,6 +863,8 @@ main() {
       --size) shift; size_flag=$1;;
       --bin)  shift; KUZUSHI_BIN=$1;;
       --artifact-root) shift; artifact_flag=$1;;
+      --retain-successful) shift; retain_flag=$1;;
+      --retain-all) retain_all=1;;
       all) ids="1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17";;
       [Jj]*) ids="$ids ${1#[Jj]}";;
       *) devex_log "unknown argument: $1"; usage 1;;
@@ -868,6 +879,10 @@ main() {
     || devex_die "kuzushi binary not found at $KUZUSHI_BIN — build with 'cargo build -p kuzushi-cli' or set KUZUSHI_BIN"
   KUZUSHI_DEVEX_TARGET=${KUZUSHI_DEVEX_TARGET:-}
   ARTIFACT_ROOT=${artifact_flag:-${KUZUSHI_DEVEX_ARTIFACT_ROOT:-$DEFAULT_ARTIFACT_ROOT}}
+  RETAIN_SUCCESSFUL=${retain_flag:-${KUZUSHI_DEVEX_RETAIN_SUCCESSFUL:-$DEFAULT_RETAIN_SUCCESSFUL}}
+  case $RETAIN_SUCCESSFUL in
+    ''|*[!0-9]*) devex_die "--retain-successful must be a non-negative integer";;
+  esac
   SIZE_OVERRIDE=$size_flag
   RUN_SIZE=${size_flag:-$DEFAULT_SIZE}
 
@@ -897,6 +912,17 @@ main() {
 
   printf '\n=== summary ===%s\n\nartifacts: %s\n' "$summary" "$run_dir"
   printf 'REVIEW means human judgment is still required; judge every referenced snapshot before claiming the journey passed.\n'
+  local run_status=successful
+  if [ "$total_fail" -gt 0 ]; then
+    run_status=failed
+  elif [ "$total_review_required" -gt 0 ]; then
+    run_status=review
+  elif [ "$total_skip" -gt 0 ]; then
+    run_status=skipped
+  fi
+  devex_write_run_result \
+    "$run_dir" "$run_status" "$total_fail" "$total_skip" "$total_review_required"
+  [ "$retain_all" = 1 ] || devex_prune_successful_runs "$ARTIFACT_ROOT" "$RETAIN_SUCCESSFUL"
   [ "$total_fail" -eq 0 ] || exit 1
   [ "$total_review_required" -eq 0 ] || exit "$DEVEX_REVIEW_REQUIRED_EXIT"
 }

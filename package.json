@@ -36,7 +36,6 @@
     "link:local:restore": "node scripts/link-local.mjs --restore",
     "build:rust": "cargo build --workspace --locked",
     "build:native": "node scripts/build-native-runtime.mjs",
-    "prepack": "pnpm build:native",
     "test": "node --test scripts/setup-contract.test.mjs scripts/ensure-upstream-remote.test.mjs scripts/bump-release-version.test.mjs scripts/rust-mutation-shard.test.mjs scripts/rust-source-markers.test.mjs scripts/verify-repository.test.mjs scripts/check-secrets.test.mjs scripts/check-format-hook-coverage.test.mjs scripts/recall-eval-score.test.mjs scripts/smoke-published-release.test.mjs scripts/check-diff-coverage.test.mjs scripts/langgraph-bridge/errors.test.mjs scripts/langgraph-bridge/file-tools.test.mjs scripts/langgraph-bridge/mcp.test.mjs scripts/langgraph-bridge/model.test.mjs scripts/langgraph-bridge/oauth-login.test.mjs",
     "test:rust": "cargo test --workspace --locked",
     "test:performance": "cargo test -p kuzushi-tui --lib workbench_warmed_input_to_paint_p95_stays_within_budget --locked -- --ignored --test-threads=1",
@@ -56,6 +55,7 @@
     "verify:ci": "node scripts/verify-repository.mjs ci",
     "verify:ci:summary": "node scripts/verify-repository.mjs ci --summary",
     "verify:pack": "node scripts/verify-pack.mjs && node scripts/smoke-packed-runtime.mjs",
+    "pack:native-platforms": "node scripts/pack-platform-packages.mjs",
     "publish:npm": "bash scripts/publish-npm.sh",
     "publish:npm:dry": "bash scripts/publish-npm.sh",
     "publish:npm:go": "bash scripts/publish-npm.sh --publish",
@@ -67,7 +67,7 @@
   },
   "files": [
     "bin",
-    "native",
+    "scripts/native-runtime-contract.mjs",
     "scripts/langgraph-bridge.mjs",
     "scripts/langgraph-bridge",
     "scripts/kuzushi-dynamic-module-host.mjs",
@@ -91,6 +91,13 @@
     "@langchain/mcp-adapters": "^1.0.0",
     "@langchain/openai": "^1.0.0",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "@kuzushi/darwin-arm64": "0.24.0-alpha.12",
+    "@kuzushi/darwin-x64": "0.24.0-alpha.12",
+    "@kuzushi/linux-arm64": "0.24.0-alpha.12",
+    "@kuzushi/linux-x64": "0.24.0-alpha.12",
+    "@kuzushi/win32-x64": "0.24.0-alpha.12"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",

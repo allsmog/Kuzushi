@@ -27,7 +27,7 @@ jobs:
     permissions:
       contents: read
 
-  # ── Publish to npm (stages every platform binary built by this release) ─
+  # ── Publish thin launcher + one optional package per native platform ────
   publish-npm:
     needs: [ci, native-binaries]
     runs-on: ubuntu-latest
@@ -74,10 +74,17 @@ jobs:
       - name: Verify required multi-platform package assembly
         env:
           KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
-        run: pnpm verify:pack
+        run: |
+          pnpm pack:native-platforms
+          pnpm verify:pack
       # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
       # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
-      - name: Publish to npm
+      - name: Publish platform packages to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+        run: node scripts/publish-platform-packages.mjs
+      - name: Publish thin launcher to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
@@ -210,11 +217,13 @@ jobs:
       - name: Verify required multi-platform release assembly
         env:
           KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
-        run: pnpm verify:pack
+        run: |
+          pnpm pack:native-platforms
+          pnpm verify:pack
 
-      # Pack the schema/native package after native/ was staged above; skip
-      # prepack so the already-tested binaries are not rebuilt.
-      - run: npm pack --ignore-scripts
+      # The root package stays thin; native platform packages were packed by
+      # the assembly gate above from the already-tested release archives.
+      - run: npm pack --ignore-scripts --pack-destination dist/npm
 
       - name: Generate changelog from commits since previous tag
         run: |
@@ -240,6 +249,6 @@ jobs:
           body_path: ${{ env.CHANGELOG_PATH }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            kuzushi-*.tgz
+            dist/npm/*.tgz
             kuzushi-*.tar.gz
             kuzushi-*.zip

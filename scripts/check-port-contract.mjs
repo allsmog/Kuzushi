@@ -152,13 +152,15 @@ const fullCiRequirements = [
 ];
 
 const releaseRequirements = [
-  // Release jobs stage every green matrix build into native/<slug>/ so the
-  // npm tarball and the release .tgz are multi-platform.
+  // Release jobs turn every green native/<slug>/ input into a separate
+  // platform npm package, then publish the thin launcher last.
   "pattern: release-native-*",
   "merge-multiple: true",
   "Stage native binaries for every built platform",
   "pnpm verify:pack",
   "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
+  "pnpm pack:native-platforms",
+  "node scripts/publish-platform-packages.mjs",
   "npm publish --access public --provenance --ignore-scripts",
   "npm publish --access public --ignore-scripts",
   "npm pack --ignore-scripts",
