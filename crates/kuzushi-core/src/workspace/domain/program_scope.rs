@@ -184,7 +184,31 @@ fn extract_host(target: &str) -> String {
 /// folding. Harmless for IP literals: addresses carry no uppercase ASCII
 /// letters beyond hex digits, which parse either way.
 fn normalize_host(host: &str) -> String {
-    host.trim().trim_end_matches('.').to_ascii_lowercase()
+    trim_root_dot(host.trim()).to_ascii_lowercase()
+}
+
+/// Drop the optional DNS root label. A scope glob may spell that final dot as
+/// an escaped `\.`; globset treats `.` as an ordinary character, so the escape
+/// is redundant and both spellings name the same host. The escape has to leave
+/// with its dot — a lone trailing `\` is a `DanglingEscape` that globset
+/// refuses to compile, which would fail the whole scope file to load. Candidate
+/// hosts carry no escapes, so for them this is a plain trailing-dot trim.
+fn trim_root_dot(host: &str) -> &str {
+    let mut rest = host;
+    while let Some(head) = rest.strip_suffix('.') {
+        rest = match escapes_the_root_dot(head) {
+            true => &head[..head.len() - 1],
+            false => head,
+        };
+    }
+    rest
+}
+
+/// `true` when the text before a root dot ends in a backslash that escapes it.
+/// An odd run of backslashes escapes the dot; an even run is literal
+/// backslashes that the dot merely follows.
+fn escapes_the_root_dot(head: &str) -> bool {
+    (head.len() - head.trim_end_matches('\\').len()) % 2 == 1
 }
 
 fn strip_port(host: &str) -> &str {
@@ -396,6 +420,35 @@ mod tests {
             "#,
         );
         assert_eq!(scope.verdict("API.Example.com."), ScopeVerdict::InScope);
+    }
+
+    #[test]
+    fn a_rule_that_escapes_its_root_dot_still_loads_and_denies_the_host() {
+        // globset rejects a dangling `\`, so dropping the dot without its
+        // redundant escape would fail the whole scope file to load.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ['admin.example.com\.']
+            "#,
+        );
+        assert_eq!(scope.verdict("admin.example.com"), ScopeVerdict::OutOfScope);
+        assert_eq!(
+            scope.verdict("ADMIN.example.com."),
+            ScopeVerdict::OutOfScope
+        );
+    }
+
+    #[test]
+    fn trim_root_dot_removes_root_labels_without_corrupting_escapes() {
+        assert_eq!(trim_root_dot("admin.example.com"), "admin.example.com");
+        assert_eq!(trim_root_dot("admin.example.com."), "admin.example.com");
+        assert_eq!(trim_root_dot("admin.example.com.."), "admin.example.com");
+        // An odd run of backslashes escapes the dot: both leave together.
+        assert_eq!(trim_root_dot(r"admin.example.com\."), "admin.example.com");
+        // An even run is literal backslashes the dot merely follows.
+        assert_eq!(trim_root_dot(r"admin.example.com\\."), r"admin.example.com\\");
+        assert_eq!(trim_root_dot("."), "");
     }
 
     #[test]
