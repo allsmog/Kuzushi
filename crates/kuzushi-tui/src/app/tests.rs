@@ -10754,6 +10754,32 @@ fn setup_start_key_commits_regardless_of_the_focused_row() {
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 }
 
+/// Start Map with nothing checked records the explicit Map skip and advances,
+/// but `phases.stop_after` bounds where it may land. Announcing the next phase
+/// from a non-picker view must gate on that config exactly as the picker does.
+#[test]
+fn setup_start_with_an_empty_plan_stops_at_the_configured_phase() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut config = V2Config::default();
+    config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
+    let mut app = ShellApp::new(config, None);
+    app.set_target(Some(dir.path().to_path_buf()));
+    app.open_setup();
+    app.engagement.planning_picker_mut().selected_mut().clear();
+    assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
+
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+
+    assert!(update.handled);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "phase"
+            && line
+                .body
+                .contains("scan stopped by config phases.stop_after=map")
+    }));
+}
+
 #[test]
 fn setup_plan_editor_returns_without_starting_or_losing_its_cursor() {
     let dir = tempfile::tempdir().expect("temp target");

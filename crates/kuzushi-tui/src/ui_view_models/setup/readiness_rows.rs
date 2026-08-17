@@ -63,14 +63,48 @@ fn plan_blocker(
         ));
     }
     if selected_rows.is_empty() {
-        return Some(blocked_row(
+        return Some(empty_plan_row(app));
+    }
+    missing_prerequisite_row(selected_rows).or_else(|| invalid_option_row(app, selected_rows))
+}
+
+/// Nothing is checked. On a target with Map work left to plan that is a real
+/// blocker, but on a target whose recommended Map artifacts already exist it is
+/// the honest resting state — the plan editor already shows every row as
+/// `SKIP · cached`, so Setup must not claim the run is unconfigured.
+fn empty_plan_row(app: &ShellApp) -> SetupReadinessRow {
+    match current_map_artifacts(app) {
+        Some(cached) => optional_row(
+            SetupRowId::Plan,
+            "Map plan",
+            "NOTHING TO RUN",
+            format!(
+                "{cached} cached Map artifact(s) will be reused · Enter to add work or rebuild"
+            ),
+        ),
+        None => blocked_row(
             SetupRowId::Plan,
             "Map plan",
             "EMPTY",
             "select at least one Map task",
-        ));
+        ),
     }
-    missing_prerequisite_row(selected_rows).or_else(|| invalid_option_row(app, selected_rows))
+}
+
+/// How many Map artifacts are already on disk, when the planner recommends no
+/// further work. `None` while anything is still recommended: an operator who
+/// unchecked recommended rows has an empty plan, not a reusable one.
+fn current_map_artifacts(app: &ShellApp) -> Option<usize> {
+    let picker = app.engagement.planning_picker();
+    if !picker.default_selected().is_empty() {
+        return None;
+    }
+    let cached = picker
+        .tasks()
+        .iter()
+        .filter(|row| row.artifact_state == crate::app::PlanningArtifactState::Cached)
+        .count();
+    (cached > 0).then_some(cached)
 }
 
 fn missing_prerequisite_row(

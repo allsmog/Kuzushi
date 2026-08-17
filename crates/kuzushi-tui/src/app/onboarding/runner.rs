@@ -604,6 +604,12 @@ impl ShellApp {
             self.open_phase_picker(next);
             return;
         }
+        // `open_phase_picker` gates on `phases.stop_after`; announcing must
+        // too, or advancing from a non-picker view walks past the configured
+        // stopping boundary. The gate holds the phase and logs the reason.
+        if self.phase_blocked_by_config(next) {
+            return;
+        }
         self.engagement.set_phase(next);
         self.set_success_notice(
             "phase",

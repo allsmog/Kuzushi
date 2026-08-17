@@ -18,6 +18,51 @@ mod tests {
     }
 
     #[test]
+    fn bare_digit_does_not_complete_to_model_switch_command() {
+        // Regression: `aliases: &["model 1", ...]` on the `model [choice]`
+        // spec used to feed the literal example value "model 1" into
+        // completion candidates. A bare "1" is a subsequence of "model 1",
+        // so any operator typing digit page-navigation shortcuts while
+        // still in Prompt mode (rather than Navigate mode) would see the
+        // composer Tab-complete into a model-switch command with no
+        // relation to what they typed. See #172 finding 6.
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let candidates = app.completion_candidates("1");
+        assert!(
+            !candidates.iter().any(|c| c.starts_with("model")),
+            "bare digit must not fuzzy-match a model-switch example alias: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn routed_synonym_aliases_still_complete() {
+        // Regression: the fix for the above must not, in turn, drop real
+        // routed synonyms that happen to share their base command's word
+        // count (e.g. "patch discard" routes to PatchCommand::Reject
+        // alongside "patch reject" — see argument_commands/nested.rs). Only
+        // aliases that *extend* their base command's head with extra
+        // literal words (the "model 1" shape) are value-filled examples.
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert!(
+            app.completion_candidates("discard")
+                .contains(&"patch discard".to_string()),
+            "patch discard is a real routed synonym, not an example"
+        );
+        assert!(
+            app.completion_candidates("run")
+                .contains(&"strategy run".to_string()),
+            "strategy run is a real routed synonym, not an example"
+        );
+        assert!(
+            app.completion_candidates("history")
+                .contains(&"threats history".to_string()),
+            "threats history is a real routed synonym, not an example"
+        );
+    }
+
+    #[test]
     fn show_completion_candidates_cover_show_subcommands() {
         let app = ShellApp::new(V2Config::default(), None);
 

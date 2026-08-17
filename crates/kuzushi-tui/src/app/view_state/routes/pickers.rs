@@ -625,6 +625,12 @@ impl PlanningPickerRouteState {
         &mut self.selected
     }
 
+    /// The phase's freshly-derived recommendation, before operator edits.
+    /// Empty means the planner has nothing left to propose for this target.
+    pub(crate) fn default_selected(&self) -> &BTreeSet<PlanningTaskId> {
+        &self.default_selected
+    }
+
     pub(crate) fn rebuild(&self) -> &BTreeSet<PlanningTaskId> {
         &self.rebuild
     }

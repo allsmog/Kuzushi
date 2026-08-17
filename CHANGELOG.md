@@ -5,6 +5,18 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Fixed:**
+
+- Setup no longer reports `Map plan EMPTY` and `BLOCKED` for a target whose
+  recommended Map artifacts already exist. That state now reads
+  `NOTHING TO RUN`, names how many cached artifacts will be reused, and the
+  Start Map action states that it records the explicit Map skip instead of
+  promising a run. Nothing checked while the planner still recommends work
+  remains a real blocker.
+- Advancing the guided journey from a non-picker view now honors
+  `phases.stop_after` the same way the phase picker already did, so a bounded
+  journey stops where it is configured to instead of walking to the next phase.
+
 ## v0.24.0-alpha.12 — complete cross-platform release
 
 **Fixed:**
