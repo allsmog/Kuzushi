@@ -7,6 +7,12 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- `.kuzushi/scope.toml` host rules are now matched case-insensitively and
+  ignore a trailing root dot, so `ADMIN.example.com` and `admin.example.com.`
+  can no longer slip past an `[out_of_scope]` rule written as
+  `admin.example.com`. CIDR rules also match bare IPv6 literals such as
+  `2001:db8::1`, which previously reached recon dispatch and bounty imports
+  unchecked.
 - Setup no longer reports `Map plan EMPTY` and `BLOCKED` for a target whose
   recommended Map artifacts already exist. That state now reads
   `NOTHING TO RUN`, names how many cached artifacts will be reused, and the

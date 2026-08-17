@@ -446,6 +446,11 @@ hosts = ["admin.example.com"]
 When an allow list is present, unmatched hosts/IPs are out of scope. With only
 deny rules, unmatched targets remain unknown rather than explicitly allowed.
 
+Host matching is case-insensitive and ignores a trailing root dot, so one rule
+covers `admin.example.com`, `ADMIN.example.com`, and `admin.example.com.`. CIDR
+rules match bare IPv6 literals (`2001:db8::1`) as well as bracketed ones
+(`[2001:db8::1]:8443`).
+
 ## Patch application and re-verification
 
 `PatchResult` controls patch synthesis and disposable-worktree validation only.
