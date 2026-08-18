@@ -661,6 +661,10 @@ fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
 
 fn destination_next_action(destination: JourneyDestination, progress: JourneyProgress) -> String {
     match destination {
+        JourneyDestination::Phase(WorkflowPhase::Map) if progress.map_artifacts_built => {
+            "choose whether to use, rebuild, or explicitly skip current-revision Map evidence"
+                .to_string()
+        }
         JourneyDestination::Phase(WorkflowPhase::Map) => {
             "build or explicitly skip the current-revision map".to_string()
         }
@@ -1069,6 +1073,10 @@ mod tests {
             assert!(!journey.progress.map_checkpoint, "discarded={discarded}");
             assert!(!journey.progress.legacy_inferred, "discarded={discarded}");
             assert_eq!(journey.current, WorkflowPhase::Map);
+            assert_eq!(
+                journey.next_action,
+                "choose whether to use, rebuild, or explicitly skip current-revision Map evidence"
+            );
         }
     }
 
@@ -1259,6 +1267,10 @@ mod tests {
         assert_eq!(
             journey.destination,
             JourneyDestination::Phase(WorkflowPhase::Map)
+        );
+        assert_eq!(
+            journey.next_action,
+            "build or explicitly skip the current-revision map"
         );
     }
 
