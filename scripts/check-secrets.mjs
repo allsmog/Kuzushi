@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 const RULES = [
   {
     name: "private key",
-    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
+    pattern: /-----BEGIN (?:ENCRYPTED |RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
     candidate: (match) => match[0],
     allowPlaceholders: false,
   },
