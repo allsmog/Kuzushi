@@ -6,8 +6,8 @@ pub(in crate::findings::persistence::open) struct FindingIdentityAssignment {
     pub match_tier: FindingIdentityMatchTier,
 }
 
-/// Bound on how many prior-run rows are inspected for one dedup_key before
-/// giving up on cross-run identity reuse.
+/// Bound on how many prior-run rows are inspected for one identity reuse
+/// query before giving up and calculating a new structural identity.
 const CROSS_RUN_CANDIDATE_LIMIT: usize = 32;
 
 impl FindingStore {
@@ -17,6 +17,13 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
     ) -> Result<FindingIdentityAssignment> {
+        // Preserve already-issued identities before applying the structural
+        // key used for new findings. Exact producer fingerprints cover legacy
+        // rows without a dedup key; dedup reuse continues to converge
+        // differently-worded rediscoveries. Stored rows are never rewritten.
+        if let Some(reused) = self.exact_fingerprint_identity(conn, scan_id, finding)? {
+            return Ok(reused);
+        }
         if let Some(reused) = self.cross_run_identity(conn, scan_id, finding)? {
             return Ok(reused);
         }
@@ -28,6 +35,29 @@ impl FindingStore {
             match_tier: identity_key.match_tier,
         };
         Ok(assignment)
+    }
+
+    /// Reuse a prior identity for the exact producer fingerprint before
+    /// calculating a key with the new structural algorithm. This keeps legacy
+    /// identities traceable for findings that predate dedup-key population.
+    fn exact_fingerprint_identity(
+        &self,
+        conn: &Connection,
+        scan_id: &str,
+        finding: &Finding,
+    ) -> Result<Option<FindingIdentityAssignment>> {
+        if finding.fingerprint.trim().is_empty() {
+            return Ok(None);
+        }
+        let rekeyed = rekeyed_old_fps(conn)?;
+        let identity_id = prior_run_fingerprint_rows(conn, scan_id, &finding.fingerprint)?
+            .into_iter()
+            .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
+            .and_then(|prior| prior.identity_id);
+        Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
+            identity_id,
+            match_tier: FindingIdentityMatchTier::StableFingerprint,
+        }))
     }
 
     /// Same dedup_key + same file on an open row from an earlier run reuses
@@ -53,6 +83,28 @@ impl FindingStore {
             match_tier: FindingIdentityMatchTier::DedupKeyCrossRun,
         }))
     }
+}
+
+fn prior_run_fingerprint_rows(
+    conn: &Connection,
+    scan_id: &str,
+    fingerprint: &str,
+) -> Result<Vec<Finding>> {
+    let mut stmt = conn.prepare(
+        "select finding_json
+           from finding_current
+          where fingerprint = ?1
+            and run_id <> ?2
+          order by id asc
+          limit ?3",
+    )?;
+    let rows = stmt
+        .query_map(
+            params![fingerprint, scan_id, CROSS_RUN_CANDIDATE_LIMIT as i64],
+            super::finding_writes::row_to_current_finding,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 fn prior_run_rows(conn: &Connection, scan_id: &str, dedup_key: &str) -> Result<Vec<Finding>> {
