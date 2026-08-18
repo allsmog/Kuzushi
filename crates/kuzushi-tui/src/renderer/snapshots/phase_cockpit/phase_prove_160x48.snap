@@ -10,7 +10,7 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
  v verify displayed · x suppress displayed · z attack path / replay · findings reveal queue · report open Report            │
 │▸ STATUS / NEXT                                                                                                            │ JOURNEY
 │PROOF SUBJECT · finding F-0001                                                                                             │ Review 3/5
-│F-0001  CRITICAL  ✓ [●●●] · RUNTIME VERIFIED · 1 source(s)  runtime_verified                                               │ ⛭ fix
+│F-0001  CRITICAL  ✓ [●●●] · RUNTIME VERIFIED · 1 source(s)  runtime_verified                                               │ ⛭ autonomy:fix
 │SQL injection reaches query                                                                                                │
 │src/auth/login.rs:17                                                                                                       │ IN FLIGHT
 │STATUS runtime_verified · decision:needs_review · evidence:1                                                               │ ⠋ context:build
@@ -40,7 +40,7 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
 │ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt safe reproduction                    │
 │ c  Generate attack chain model prerequisites, trust transitions, and impact over verified findings                        │
 │ 5  Draft patch           open Fix with this finding to stage a remediation                                                │
-│ x  Mark false positive   draft suppress — records a durable review decision with a reason                                 │
+│ x  Add suppression rule  draft an expiring rule with an auditable reason                                                  │
 │D defer proof · Esc return to findings                                                                                     │
 │                                                                                                                           │
 │                                                                                                                           │
@@ -48,7 +48,7 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
 │                                                                                                                           │
 │                                                                                                                           │
 │                                                                                                                           │
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
+run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...       6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │
 ◎ PROVE VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                        │

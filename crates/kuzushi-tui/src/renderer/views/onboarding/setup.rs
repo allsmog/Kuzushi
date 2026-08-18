@@ -102,7 +102,7 @@ fn setup_summary_line(
         styled(
             &fit(
                 &format!(
-                    " READY · {} · s Start Map · Enter edits the selected row",
+                    " READY · {} · move to Start Map and press Enter",
                     setup_execution_summary(model),
                 ),
                 width,

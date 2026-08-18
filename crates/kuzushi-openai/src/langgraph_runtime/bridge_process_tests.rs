@@ -266,7 +266,10 @@ fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("stdout/stderr details were suppressed"));
+    assert!(
+        error.contains("stdout/stderr details were suppressed"),
+        "{error}"
+    );
     assert!(!error.contains(sentinel));
 }
 
@@ -283,7 +286,10 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
         .unwrap_err()
         .to_string();
 
-    assert!(error.contains("could not parse next-step bridge JSON response"));
+    assert!(
+        error.contains("could not parse next-step bridge JSON response"),
+        "{error}"
+    );
     assert!(!error.contains("openai-codex"));
 }
 

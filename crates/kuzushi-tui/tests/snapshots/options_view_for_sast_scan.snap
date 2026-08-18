@@ -8,7 +8,7 @@ KUZUSHI shell route · view:options[sast:scan] · target:none · model:unconfigu
 tool: sast:scan
 view: options
 
-option            value       default    req    type   aliases           description
+option            value...    default    req    type   aliases           description
 mode              -           standard   no     enum   preset            Analysis mode or preset. Choices:...
 taskMode          -           auto       no     enum   task_mode         Task-selection mode. Choices: auto|manual.
 tasks             -           -          no     list   taskIds, task...  Manual task allowlist. Use /tasks to edit.

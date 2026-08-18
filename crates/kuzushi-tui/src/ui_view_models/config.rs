@@ -306,7 +306,7 @@ fn config_source_rows(app: &ShellApp) -> Vec<ConfigSummaryRow> {
 
 fn path_source_detail(path: &std::path::Path) -> String {
     let state = if path.is_file() { "loaded" } else { "absent" };
-    format!("{} · {state}", path.display())
+    format!("{state}: {}", path.display())
 }
 
 fn session_budget_detail(

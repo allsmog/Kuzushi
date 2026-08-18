@@ -1016,10 +1016,14 @@ function tuiQuickstartContextSnapshotLabelFailures(root) {
 }
 
 export function checkPromptPathHelpers(root) {
-  const helperFile = "crates/kuzushi-core/src/options/prompt_paths.rs";
-  const helperPath = path.join(root, helperFile);
-  if (!existsSync(helperPath)) return [`prompt path helper: missing ${helperFile}`];
-  const helper = readFileSync(helperPath, "utf8");
+  const helperFiles = [
+    "crates/kuzushi-core/src/options/prompt_paths.rs",
+    "crates/kuzushi-descriptor/src/prompt_paths.rs",
+  ];
+  const missing = helperFiles.find((file) => !existsSync(path.join(root, file)));
+  if (missing) return [`prompt path helper: missing ${missing}`];
+  const coreHelper = readFileSync(path.join(root, helperFiles[0]), "utf8");
+  const helper = helperFiles.map((file) => readFileSync(path.join(root, file), "utf8")).join("\n");
   const constants = rustStringConstants(helper, ["PROMPTS_DIR", "HOUSE_RULES_DIR"]);
   return [
     constants.PROMPTS_DIR === "prompts"
@@ -1029,7 +1033,7 @@ export function checkPromptPathHelpers(root) {
       ? null
       : "prompt path helper must name HOUSE_RULES_DIR as house-rules",
     ...promptPathHelperFunctionFailures(helper),
-    ...promptPathHelperDerivationFailures(helper),
+    ...promptPathHelperDerivationFailures(coreHelper),
     ...promptPathConsumerFailures(root),
   ].filter(Boolean);
 }

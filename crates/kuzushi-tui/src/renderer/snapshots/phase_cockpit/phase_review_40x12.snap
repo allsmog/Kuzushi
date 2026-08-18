@@ -9,8 +9,8 @@ KUZUSHI · Viewing Review · ● LIVE
         6 of 6 ledger candidates
 │▸ FINDINGS · 6
 │6 of 6 · [completeness:all]
-│▸F-0001  C [●●●] s1 @? runtime open S
-│
+│[order: proof > severity]
+│▸F-0001  C [●●●] s1 @– runtime open S
 run rout... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────
  Ctrl+C request abort

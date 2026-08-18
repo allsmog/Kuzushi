@@ -45,15 +45,15 @@ next [fresh] - continue the engagement (alias: continue) — open the derived ph
 pass at the Map planner
   aliases / examples: next, /next
 map - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
-  aliases / examples: /map
+  aliases / examples: /map, /ma
 scan - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
-  aliases / examples: /scan
+  aliases / examples: /scan, /sc
 review - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
-  aliases / examples: /review
+  aliases / examples: /review, /rv
 prove - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
-  aliases / examples: /prove
+  aliases / examples: /prove, /pr
 fix - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target <target> run sast:scan`
-  aliases / examples: /fix
+  aliases / examples: /fix, /fx
 phase <map|scan|review|prove|fix> - interactive TUI only; for scripts use `kuzushi scan <target>` or `kuzushi --target
 <target> run sast:scan`
   aliases / examples: phase map, phase scan, phase review, phase prove, phase fix, phase hunt, phase confirm
@@ -162,16 +162,16 @@ component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint
   aliases / examples: open F-0001, /open <id>
-decision <verdict> <reason> - record a human review decision for the selected finding
-aliases / examples: decision confirmed reviewed source-linked evidence, decision suppressed accepted by policy owner,
-review rejected_false_positive reviewed data flow
+decision <verdict> <reason> - record triage status; use dismiss for false positives or suppress for a rule
+aliases / examples: decision confirmed reviewed source-linked evidence, decision deferred needs runtime harness,
+decision needs_review confirm the trust boundary
 proof defer <id> --reason <text> - record a human proof deferral for the current finding generation
   aliases / examples: /proof defer F-0001 --reason production harness unavailable
-dismiss <reason> <note> - dismiss the selected finding with an auditable reason
+dismiss <reason> <note> - dismiss the selected finding with a structured, auditable reason
   aliases / examples: dismiss false_positive not reachable in prod, dismiss used_in_tests test fixture only
-suppress <id> --reason <text> [--author operator] [--days 90] - record an expiring suppression rule and matching human
+suppress <id> --reason <text> [--author operator] [--days 90] - record an expiring suppression rule plus its human
 review decision
-  aliases / examples: /suppress F-0001 --reason false-positive
+  aliases / examples: /suppress F-0001 --reason false-positive, /x F-0001 --reason false-positive
 show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts
@@ -195,7 +195,7 @@ activity - live module-progress dashboard
 handoff - latest bounded failure handoff
   aliases / examples: /handoff, failure, /failure
 verify <finding> - verify a finding's exploitability (runs verify:finding)
-  aliases / examples: verify F-0001, /verify F-0001
+  aliases / examples: verify F-0001, /verify F-0001, /v F-0001
 patch <finding> - draft a remediation for a finding (runs patch:finding)
   aliases / examples: patch F-0001, /patch F-0001
 patch apply - apply the pending reviewed patch to the active target
@@ -204,8 +204,8 @@ patch reject - discard the pending reviewed patch
   aliases / examples: /patch reject, patch discard
 patch regen [--style minimal|defensive] - regenerate the pending patch for the same finding
   aliases / examples: /patch regen, patch regen --style defensive
-since <ref> - scope findings to a git ref
-  aliases / examples: /since <ref>
+findings since <ref> - filter saved findings by git ref; does not run a scan
+  aliases / examples: since <ref>, /since <ref>
 threats [1-4] - threat model views
   aliases / examples: /threats [1-4], threats summary, threats stride, threats stories, threats scope
 threats edit - open the editable threat model view
@@ -235,7 +235,7 @@ provider - show LangGraph provider choices
 backend - show Rust runtime backend
   aliases / examples: /backend
 model [choice] - select explicit provider:model
-  aliases / examples: model 1, /model [choice]
+  aliases / examples: model 1, /model [choice], /mdl [choice]
 cost - show known session cost estimate
   aliases / examples: /cost
 config - show runtime config status
@@ -262,6 +262,8 @@ cancel - cancel the active scan/tool/agent without leaving the shell
   aliases / examples: /cancel, c, /c, stop, /stop
 resume [runId] - continue a failed run from its checkpoint, or resume a paused scan
   aliases / examples: /resume [runId]
+retry [runId] - start a failed, interrupted, or canceled run again with its recorded input
+  aliases / examples: /retry [runId]
 story - show session story replacements
   aliases / examples: /story
 prompts - prompt override view

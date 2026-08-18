@@ -10,7 +10,7 @@ KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● L
  Tab cycle map views · z zoom selected view · next → Review · jobs inspect Map runs · report open Report                    │
 ◇ SYSTEM SUMMARY · why the system exists and how its parts move data                                                        │ JOURNEY
 views  [summary] · dfd  ·  Tab cycles · z zoom                                                                              │ Review 3/5
-┌EXECUTIVE SUMMARY ─────────────────────────────────────┐ ┌OVERALL DATA FLOW ──────────────────────────────────────────────┐│ ⛭ fix
+┌EXECUTIVE SUMMARY ─────────────────────────────────────┐ ┌OVERALL DATA FLOW ──────────────────────────────────────────────┐│ ⛭ autonomy:fix
 │phase-target: purpose not recorded in this threat model. │ │external → application · 1 flow · boundary                      ││
 │The primary process component is API. 3 components     │ │application → data · 1 flow · boundary                          ││ IN FLIGHT
 │exchange data over 2 flows across 3 trust zones; 2     │ │                                                                ││ ⠋ context:build
@@ -48,7 +48,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │                                                                                                                          ││
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
 ./phase-target · rev:unknown · context:present · indexed=3 total=3 · 3 nodes · 2 flows                                        │
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
+run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...       6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │
 ◇ MAP VIEW › NAVIGATE · Shift+Tab phase→ j/k component · Enter DFD · Tab map view · z zoom · Esc prompt                     │

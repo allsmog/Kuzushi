@@ -10,16 +10,16 @@ KUZUSHI · Viewing Review · target ./phase-target · ● LIVE
         candidates
 │▸ FINDINGS · 6
 │6 of 6 · [completeness:all]
+│[order: proof band, then severity]
 │facets pre · severity high:2 medium:2 critical:1 +1 ·...
 │file src/api/orders.rs:1 src/api/upload.rs:1...
 │confidence unverified:5 confirmed:1 · status open:5...
-│● proof · s sources · @ author
-│▸F-0001  C [●●●] s1 @? runtime open       SQL injectio...
-│  SQL injection reaches query
+│s# count · @H human · @A auto · @I imported · @– none...
+│▸F-0001  C [●●●] s1 @– runtime open       SQL injectio...
 │  src/auth/login.rs:17
 │  ▸ next:patch · Enter open
 │
-run route · workbench           6 findings · 1 C · 2 H · 2 M
+run route · notify:unavailab... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort
  Esc prompt

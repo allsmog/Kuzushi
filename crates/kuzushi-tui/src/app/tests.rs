@@ -10804,7 +10804,8 @@ fn setup_start_with_an_empty_plan_stops_at_the_configured_phase() {
     app.engagement.planning_picker_mut().selected_mut().clear();
     assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
 
-    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    app.router.setup_mut().set_cursor(6);
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert!(update.handled);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
@@ -13221,7 +13222,7 @@ fn external_state_artifacts_keep_workspace_file_caches_warm() {
 }
 
 #[test]
-fn scripted_cross_target_scan_activates_target_before_scan_preparation() {
+fn scripted_cross_target_scan_activates_target_and_clears_session_options() {
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -13272,11 +13273,12 @@ fn scripted_cross_target_scan_activates_target_before_scan_preparation() {
     assert_eq!(app.target(), Some(second_workspace.root()));
     assert!(app.findings().is_empty(), "target A cache leaked into B");
     assert_eq!(workspace_option_marker(&app), Some("target-b"));
-    assert_eq!(
+    assert!(
         app.option_store()
             .values_for(OptionScope::Session, &OptionTarget::All)
-            .and_then(|values| values.get("session-marker")),
-        Some(&serde_json::json!("keep-across-scripted-scan"))
+            .and_then(|values| values.get("session-marker"))
+            .is_none(),
+        "session options must not leak across targets"
     );
     assert!(matches!(
         followups.last(),
