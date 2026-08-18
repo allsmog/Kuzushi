@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+
+import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
+
+const RULES = [
+  {
+    name: "private key",
+    pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/g,
+    candidate: (match) => match[0],
+    allowPlaceholders: false,
+  },
+  {
+    name: "GitHub token",
+    pattern: /\bgh[pousr]_[A-Za-z0-9]{36,255}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "GitHub fine-grained token",
+    pattern: /\bgithub_pat_[A-Za-z0-9_]{50,255}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "AWS access key",
+    pattern: /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "OpenAI or compatible API key",
+    pattern: /\bsk-(?!ant-)(?:proj-|svcacct-)?[A-Za-z0-9_-]{32,}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "Anthropic API or OAuth key",
+    pattern: /\bsk-ant-(?:api|oat)\d+-[A-Za-z0-9_-]{20,}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "Google API key",
+    pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "Slack token",
+    pattern: /\bxox[baprs]-[0-9A-Za-z-]{20,}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "Stripe live secret",
+    pattern: /\b(?:sk|rk)_live_[0-9A-Za-z]{20,}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "SendGrid API key",
+    pattern: /\bSG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b/g,
+    candidate: (match) => match[0],
+  },
+  {
+    name: "credential assignment",
+    pattern:
+      /\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|secret[_-]?key|password|passwd)\b\s*[:=]\s*["'`]([^"'`\s]{20,})["'`]/gi,
+    candidate: (match) => match[1],
+  },
+  {
+    name: "credential-bearing connection URL",
+    pattern:
+      /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:\s/]+:([^@\s/]{8,})@/gi,
+    candidate: (match) => match[1],
+  },
+];
+
+const INTENTIONAL_SECRET_FIXTURE_PREFIX = "tests/fixtures/secret-scan/";
+
+function isPlaceholder(value) {
+  const lower = value.toLowerCase();
+  return (
+    /[<>{}]/.test(value) ||
+    value.includes("${") ||
+    /^\*+$/.test(value) ||
+    [
+      "example",
+      "placeholder",
+      "dummy",
+      "changeme",
+      "replace-me",
+      "replace_me",
+      "not-a-real",
+      "not_real",
+      "fake-token",
+      "test-token",
+    ].some((marker) => lower.includes(marker))
+  );
+}
+
+export function scanLine(line) {
+  const matches = new Set();
+  for (const rule of RULES) {
+    for (const match of line.matchAll(rule.pattern)) {
+      const candidate = rule.candidate(match);
+      if (rule.allowPlaceholders !== false && isPlaceholder(candidate)) {
+        continue;
+      }
+      matches.add(rule.name);
+    }
+  }
+  return [...matches];
+}
+
+function parseNewLineStart(header) {
+  const match = header.match(/\+(\d+)(?:,(\d+))?/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+export function scanDiff(diff) {
+  const findings = [];
+  let currentPath = null;
+  let newLine = null;
+
+  for (const rawLine of diff.split("\n")) {
+    if (rawLine.startsWith("+++ ")) {
+      currentPath = rawLine === "+++ /dev/null" ? null : rawLine.replace(/^\+\+\+ b\//, "");
+      continue;
+    }
+    if (rawLine.startsWith("@@ ")) {
+      newLine = parseNewLineStart(rawLine);
+      continue;
+    }
+    if (currentPath === null || newLine === null) {
+      continue;
+    }
+    if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+      if (!currentPath.startsWith(INTENTIONAL_SECRET_FIXTURE_PREFIX)) {
+        for (const rule of scanLine(rawLine.slice(1))) {
+          findings.push({ path: currentPath, line: newLine, rule });
+        }
+      }
+      newLine += 1;
+      continue;
+    }
+    if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+      continue;
+    }
+    if (!rawLine.startsWith("\\")) {
+      newLine += 1;
+    }
+  }
+
+  return findings;
+}
+
+const EMPTY_TREE_SHA = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+function diffRange(base, head) {
+  return /^0{40}$/.test(base) ? `${EMPTY_TREE_SHA}..${head}` : `${base}...${head}`;
+}
+
+export function diffForRange(base, head, cwd = process.cwd()) {
+  const range = diffRange(base, head);
+  const result = spawnSync(
+    "git",
+    [
+      "diff",
+      "--no-ext-diff",
+      "--no-textconv",
+      "--unified=0",
+      "--no-color",
+      "--diff-filter=ACMR",
+      range,
+      "--",
+    ],
+    { cwd, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    const detail = result.stderr?.trim() || `git diff exited ${result.status}`;
+    throw new Error(`secret scan could not establish diff range ${range}: ${detail}`);
+  }
+  return result.stdout;
+}
+
+export function parseArguments(argv, environment = process.env) {
+  let base =
+    environment.KUZUSHI_SECRET_SCAN_BASE_REF ??
+    environment.KUZUSHI_CRAP_RISK_BASE_REF ??
+    "HEAD^";
+  let head = environment.KUZUSHI_SECRET_SCAN_HEAD_REF ?? "HEAD";
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--base") {
+      base = argv[index + 1] ?? null;
+      index += 1;
+    } else if (arg === "--head") {
+      head = argv[index + 1] ?? null;
+      index += 1;
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+  if (!base || !head) {
+    throw new Error("secret scan requires non-empty base and head Git refs");
+  }
+  return { base, head };
+}
+
+function escapeWorkflowCommand(value) {
+  return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
+
+export function formatFinding(finding, githubActions = process.env.GITHUB_ACTIONS === "true") {
+  const message = `Potential ${finding.rule} found; credential value redacted`;
+  if (!githubActions) {
+    return `${finding.path}:${finding.line}: ${message}`;
+  }
+  const path = escapeWorkflowCommand(finding.path).replaceAll(",", "%2C").replaceAll(":", "%3A");
+  return [
+    `::error file=${path},line=${finding.line},title=Potential secret::`,
+    escapeWorkflowCommand(message),
+  ].join("");
+}
+
+export function run(argv = process.argv.slice(2)) {
+  const { base, head } = parseArguments(argv);
+  const findings = scanDiff(diffForRange(base, head));
+  if (findings.length === 0) {
+    console.log(`Secret scan passed for ${base}...${head}.`);
+    return 0;
+  }
+  for (const finding of findings) {
+    console.error(formatFinding(finding));
+  }
+  console.error(`Secret scan rejected ${findings.length} added credential pattern(s).`);
+  return 1;
+}
+
+const invokedPath = process.argv[1] ? fileURLToPath(import.meta.url) === resolve(process.argv[1]) : false;
+if (invokedPath) {
+  try {
+    process.exitCode = run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`Secret scan failed closed: ${message}`);
+    process.exitCode = 1;
+  }
+}
