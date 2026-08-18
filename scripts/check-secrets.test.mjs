@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
-import { formatFinding, parseArguments, scanDiff, scanLine } from "./check-secrets.mjs";
+import {
+  fixtureIsApproved,
+  formatFinding,
+  parseArguments,
+  scanDiff,
+  scanLine,
+} from "./check-secrets.mjs";
 
 const patterned = (prefix, length) => {
   const alphabet = "Ab9Cd8Ef7Gh6Jk5Lm4Np3Qr2St1Uv0WxYz";
@@ -53,20 +62,41 @@ test("scans only added lines and keeps accurate new-file line numbers", () => {
   assert.deepEqual(scanDiff(diff), [{ path: "src/config.rs", line: 11, rule: "GitHub token" }]);
 });
 
-test("does not reject the product's intentional secret-scanner fixtures", () => {
-  const github = patterned("ghp_", 40);
+test("only exact approved fixture bytes bypass their intentional patterns", () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "kuzushi-secret-fixture-"));
+  const relative = "tests/fixtures/secret-scan/leaks/tokens.env";
+  const fixture = path.join(directory, relative);
+  const github = "ghp_" + "ABCdefGHIjklMNOpqrSTUvwxYZ0123456789";
+  const contents = [
+    "# Synthetic tokens. None are real credentials. Stripe / Google / OpenAI",
+    "# / Slack detectors are exercised by inline-string cases in",
+    "# secret-scan.test.ts (assembled at test time) to keep this fixture file",
+    "# from tripping third-party secret-scanning blocklists on push.",
+    `GITHUB_TOKEN=${github}`,
+    "",
+  ].join("\n");
   const diff = [
-    [
-      "diff --git a/tests/fixtures/secret-scan/leaks/github.env",
-      "b/tests/fixtures/secret-scan/leaks/github.env",
-    ].join(" "),
+    `diff --git a/${relative} b/${relative}`,
     "--- /dev/null",
-    "+++ b/tests/fixtures/secret-scan/leaks/github.env",
+    `+++ b/${relative}`,
     "@@ -0,0 +1 @@",
     `+GITHUB_TOKEN=${github}`,
   ].join("\n");
 
-  assert.deepEqual(scanDiff(diff), []);
+  try {
+    mkdirSync(path.dirname(fixture), { recursive: true });
+    writeFileSync(fixture, contents);
+    assert.equal(fixtureIsApproved(relative, directory), true);
+    assert.deepEqual(scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)), []);
+
+    writeFileSync(fixture, `${contents}# changed\n`);
+    assert.equal(fixtureIsApproved(relative, directory), false);
+    assert.deepEqual(scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)), [
+      { path: relative, line: 1, rule: "GitHub token" },
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("defaults to the repository quality base and permits explicit overrides", () => {
