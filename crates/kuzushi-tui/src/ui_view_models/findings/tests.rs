@@ -72,7 +72,9 @@ fn provenance_filtered_projection_refreshes_when_run_history_finishes_loading() 
             target: workspace.root().to_path_buf(),
             key,
             value: crate::app::ViewHydrationValue::RunSummaryEntries(
-                crate::app::RunSummaryEntriesState::Ready(entries),
+                crate::app::RunSummaryEntriesHydration::without_recoveries(
+                    crate::app::RunSummaryEntriesState::Ready(entries),
+                ),
             ),
         });
     let ready = projected_visible_findings(&app);
@@ -433,6 +435,50 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
 }
 
 #[test]
+fn selected_finding_detail_keeps_complete_decision_history() {
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "demo.history",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "reviewed finding",
+    );
+    finding.id = Some(7);
+    let decisions = (0..7)
+        .map(|index| kuzushi_core::findings::ReviewDecisionRecord {
+            id: index,
+            finding_id: 7,
+            identity_id: None,
+            decision: kuzushi_core::findings::ReviewDecision {
+                verdict: kuzushi_core::findings::ReviewDecisionVerdict::Confirmed,
+                author: TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: format!("decision rationale {index}"),
+                dismiss_reason: None,
+                actor: Some("operator".to_string()),
+            },
+            triage_verdict: Some(TriageVerdict::TruePositive),
+            created_at: format!("2026-08-{index:02}T00:00:00Z"),
+            provenance: None,
+        })
+        .collect();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_findings(vec![finding]);
+    app.set_review_decisions(decisions);
+
+    let detail = selected_finding_detail_model(&app).expect("selected finding");
+
+    assert_eq!(detail.decision_history_rows.len(), 7);
+    assert_eq!(detail.decision_history_overflow, 0);
+    assert!(detail
+        .decision_history_rows
+        .iter()
+        .any(|row| row.rationale == "decision rationale 0"));
+}
+
+#[test]
 fn selected_finding_detail_includes_run_summary_provenance() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -708,6 +754,62 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
     rejected.static_proof_state = Some(StaticProofState::StaticallyRejected);
     assert_eq!(finding_proof_label(&rejected), "static-no");
     assert_eq!(finding_proof_badge(&rejected).tier, ProofTier::Rejected);
+}
+
+#[test]
+fn verification_failure_context_never_overwrites_the_canonical_proof_band() {
+    let mut infrastructure = Finding::new_tool(
+        "verify",
+        "demo.infrastructure",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::High,
+        "verification infrastructure failed",
+    )
+    .with_static_proof_state(StaticProofState::SourceSinkLinked);
+    let mut verification = crate::test_support::test_empirical_verification(4);
+    verification.proof_verdict = PersistedProofVerdict::InfrastructureError;
+    infrastructure.verification = Some(verification);
+
+    assert_eq!(finding_proof_label(&infrastructure), "verify-infra");
+    assert_eq!(finding_proof_meter(&infrastructure), "[●●○]");
+    assert_eq!(
+        finding_proof_badge(&infrastructure).tier,
+        ProofTier::StaticLinked
+    );
+    assert_eq!(
+        ProofConfidence::classify(&infrastructure),
+        ProofConfidence::Likely
+    );
+
+    let mut build_failure = infrastructure.clone();
+    build_failure.static_proof_state = None;
+    build_failure.verification.as_mut().unwrap().proof_verdict =
+        PersistedProofVerdict::HarnessFailedToBuild;
+    assert_eq!(finding_proof_label(&build_failure), "verify-build");
+    assert_eq!(finding_proof_meter(&build_failure), "[●○○]");
+    assert_eq!(
+        finding_proof_badge(&build_failure).tier,
+        ProofTier::Suspected
+    );
+
+    let mut not_reproduced = infrastructure.clone();
+    not_reproduced.verification.as_mut().unwrap().proof_verdict =
+        PersistedProofVerdict::NotReproduced;
+    assert_eq!(finding_proof_label(&not_reproduced), "not reproduced");
+    assert_eq!(finding_proof_meter(&not_reproduced), "[●●○]");
+
+    let mut unauthenticated = infrastructure;
+    unauthenticated.static_proof_state = None;
+    unauthenticated.verification.as_mut().unwrap().proof_verdict = PersistedProofVerdict::Exploited;
+    unauthenticated.verification.as_mut().unwrap().provenance = None;
+    assert_eq!(finding_proof_label(&unauthenticated), "not verified");
+    assert_eq!(finding_proof_meter(&unauthenticated), "[●○○]");
+    assert_eq!(
+        finding_proof_badge(&unauthenticated).tier,
+        ProofTier::Suspected
+    );
 }
 
 #[test]

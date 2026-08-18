@@ -294,7 +294,7 @@ mod tests {
         );
         assert_eq!(
             exported["findings"][0]["evidence"]["derivedSourcePresent"],
-            serde_json::json!(true)
+            serde_json::json!(false)
         );
         assert_eq!(exported["findings"][0]["evidence"]["observedCount"], 1);
         assert_eq!(
@@ -1911,12 +1911,16 @@ mod tests {
         assert!(output.join("manifest.json").exists());
 
         let readme = fs::read_to_string(output.join("README.md")).unwrap();
-        assert!(readme.contains("**Projection:** `WorkspaceFindingExportRecord`"));
-        assert!(readme.contains("**Completeness:** `all`"));
+        assert!(readme.contains("automated, AI-assisted security analysis"));
+        assert!(readme.contains("Treat each finding as a review candidate"));
+        assert!(readme.contains("`confirmed` means authenticated runtime reproduction"));
+        assert!(!readme.contains("WorkspaceFindingExportRecord"));
+        assert!(readme.contains("**Finding selection:** `all`"));
         assert!(readme.contains("**Included:** 2 of 2 finding(s)"));
+        assert!(readme.contains("**Field coverage:** human-readable subset"));
         assert!(readme.contains("**Review decisions:** needs_review=2"));
         assert!(readme.contains(
-            "| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |"
+            "| Alias | Severity | Proof band | Decision | Lifecycle | Evidence | Location |"
         ));
 
         let manifest: serde_json::Value =
@@ -1931,11 +1935,37 @@ mod tests {
         );
         assert_eq!(manifest["includedCount"], 2);
         assert_eq!(manifest["totalCount"], 2);
-        assert!(manifest["metadata"]["omittedFields"]
+        let omitted = manifest["metadata"]["omittedFields"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|field| field.as_str() == Some("evidence.rawHttpBlobPresent")));
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>();
+        for field in [
+            "kind",
+            "triageState",
+            "dismissal",
+            "suppressed",
+            "location.endLine",
+            "evidence.rawHttpBlobPresent",
+            "evidence.evidenceConfidenceMax",
+            "analysis.humanReviewPresent",
+            "verification.backend",
+            "vulnSource",
+            "provenance.kuzushiVersion",
+            "remediation.findingScanId",
+        ] {
+            assert!(omitted.contains(&field), "missing omitted field {field}");
+        }
+        for rendered in [
+            "recommendation",
+            "impact",
+            "category",
+            "exploitScenario",
+            "preconditions",
+        ] {
+            assert!(!omitted.contains(&rendered), "rendered field listed as omitted: {rendered}");
+        }
         let files = manifest["files"].as_array().unwrap();
         assert_eq!(files.len(), 3);
         assert!(files.iter().any(|file| {
@@ -1952,6 +1982,61 @@ mod tests {
             .as_str()
             .is_some_and(|hash| hash.starts_with("sha256:")));
         assert!(output.join("findings").join(format!("{alias}.md")).exists());
+    }
+
+    #[test]
+    fn markdown_bundle_renders_producer_security_context_without_fabricating_empty_sections() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_fixture_source(workspace.root());
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-enriched", workspace.root(), "completed")
+            .unwrap();
+        let mut enriched = fixture_finding("fixture/enriched", Severity::High, 10);
+        enriched.remediation = Some("Bind `id` and notify @security\nthen retest".to_string());
+        enriched.impact = Some("An attacker can read [private] rows".to_string());
+        enriched.exploit_scenario = Some("A crafted id reaches the query".to_string());
+        enriched.category = Some("injection".to_string());
+        enriched.preconditions = vec!["Network access to `GET /orders`".to_string()];
+        store.insert_finding("run-enriched", &enriched).unwrap();
+        let mut sparse = fixture_finding("fixture/sparse", Severity::Low, 20);
+        sparse.remediation = Some("  \n".to_string());
+        sparse.preconditions = vec!["  ".to_string()];
+        store.insert_finding("run-enriched", &sparse).unwrap();
+
+        let output = tmp.path().join("enriched-bundle");
+        export_workspace_findings(
+            &workspace,
+            &output,
+            Some(WorkspaceExportFormat::MarkdownBundle),
+        )
+        .unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(output.join("manifest.json")).unwrap())
+                .unwrap();
+        let entries = manifest["findings"].as_array().unwrap();
+        let enriched_path = entries
+            .iter()
+            .find(|entry| entry["ruleId"] == "fixture/enriched")
+            .unwrap()["path"]
+            .as_str()
+            .unwrap();
+        let sparse_path = entries
+            .iter()
+            .find(|entry| entry["ruleId"] == "fixture/sparse")
+            .unwrap()["path"]
+            .as_str()
+            .unwrap();
+        let markdown = fs::read_to_string(output.join(enriched_path)).unwrap();
+        assert!(markdown.contains("## Security context"), "{markdown}");
+        assert!(markdown.contains("**Recommended change:** Bind `id` and notify &#64;security then retest"), "{markdown}");
+        assert!(markdown.contains("**Impact:** An attacker can read \\[private\\] rows"), "{markdown}");
+        assert!(markdown.contains("**Exploit scenario:** A crafted id reaches the query"), "{markdown}");
+        assert!(markdown.contains("**Category:** injection"), "{markdown}");
+        assert!(markdown.contains("  - Network access to `GET /orders`"), "{markdown}");
+        let sparse_markdown = fs::read_to_string(output.join(sparse_path)).unwrap();
+        assert!(!sparse_markdown.contains("## Security context"), "{sparse_markdown}");
     }
 
     #[test]
@@ -2004,7 +2089,7 @@ mod tests {
         assert_eq!(manifest["metadata"]["totalCount"], 2);
         assert_eq!(manifest["findings"][0]["ruleId"], "fixture/confirmed");
         let readme = fs::read_to_string(output.join("README.md")).unwrap();
-        assert!(readme.contains("**Completeness:** `complete`"));
+        assert!(readme.contains("**Finding selection:** `complete`"));
         assert!(readme.contains("**Included:** 1 of 2 finding(s)"));
         assert!(readme.contains("**Review decisions:** confirmed=1"));
         let alias = manifest["findings"][0]["alias"].as_str().unwrap();
@@ -2023,7 +2108,7 @@ mod tests {
             "{finding_markdown}"
         );
         assert!(finding_markdown.contains(
-            "**Evidence origin:** observed=true code=1 capture=0 other=0 model-generated-reasoning=0 derived-source=true"
+            "**Evidence origin:** observed=true code=1 capture=0 other=0 model-generated-reasoning=0 derived-source=false"
         ), "{finding_markdown}");
         assert!(
             finding_markdown.contains("**Automated reasoning:** true"),

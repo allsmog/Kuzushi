@@ -62,6 +62,14 @@ impl WorkbenchCache {
     fn project_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
         match key {
             ViewHydrationKey::GitMetadata => self.git_metadata_needs_refresh(target),
+            ViewHydrationKey::RevisionRelationship {
+                accepted_revision,
+                current_revision,
+            } => self.revision_relationship_hydration_needed(
+                target,
+                accepted_revision,
+                current_revision,
+            ),
             ViewHydrationKey::ProjectScopeTree => self
                 .cached_project_scope_tree(Some(target))
                 .is_not_requested(),
@@ -74,6 +82,12 @@ impl WorkbenchCache {
             ViewHydrationKey::PromptMutations => self
                 .cached_prompt_mutations(Some(target))
                 .is_not_requested(),
+            _ => self.finding_hydration_needed(target, key),
+        }
+    }
+
+    fn finding_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
+        match key {
             ViewHydrationKey::FindingPatchTruth {
                 fingerprint,
                 finding_scan_id,
@@ -98,6 +112,16 @@ impl WorkbenchCache {
                 .is_not_requested(),
             _ => false,
         }
+    }
+
+    fn revision_relationship_hydration_needed(
+        &self,
+        target: &Path,
+        accepted_revision: &str,
+        current_revision: &str,
+    ) -> bool {
+        self.cached_revision_relationship(Some(target), accepted_revision, current_revision)
+            .is_not_requested()
     }
 
     fn workspace_hydration_needed(&self, target: &Path, key: &ViewHydrationKey) -> bool {
@@ -158,9 +182,10 @@ impl WorkbenchCache {
             (ViewHydrationKey::LatestRunPointer, ViewHydrationValue::LatestRunPointer(state)) => {
                 self.store_latest_run_pointer(target, state)
             }
-            (ViewHydrationKey::RunSummaryEntries, ViewHydrationValue::RunSummaryEntries(state)) => {
-                self.store_run_summary_entries(target, state)
-            }
+            (
+                ViewHydrationKey::RunSummaryEntries,
+                ViewHydrationValue::RunSummaryEntries(hydration),
+            ) => self.store_run_summary_entries(target, hydration.state),
             (
                 ViewHydrationKey::RunArtifactText { run_id, leaf },
                 ViewHydrationValue::RunArtifactText(state),
@@ -257,6 +282,16 @@ impl WorkbenchCache {
                     metadata,
                     stale: false,
                 });
+            }
+            (
+                ViewHydrationKey::RevisionRelationship {
+                    accepted_revision,
+                    current_revision,
+                },
+                ViewHydrationValue::RevisionRelationship(relationship),
+            ) => {
+                self.revision_relationships
+                    .insert((target, accepted_revision, current_revision), relationship);
             }
             (ViewHydrationKey::ProjectScopeTree, ViewHydrationValue::ProjectScopeTree(state)) => {
                 self.scope_tree = Some(ScopeTreeCache { target, state });
@@ -490,6 +525,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::RunProjection { .. }
         | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
         ViewHydrationKey::GitMetadata
+        | ViewHydrationKey::RevisionRelationship { .. }
         | ViewHydrationKey::ProjectScopeTree
         | ViewHydrationKey::ProjectModelDocument { .. }
         | ViewHydrationKey::StrategyQueue

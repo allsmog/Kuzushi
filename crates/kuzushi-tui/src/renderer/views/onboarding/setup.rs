@@ -5,18 +5,16 @@ use crate::ui_view_models::{setup_readiness_model, SetupReadinessRow, SetupReadi
 pub(crate) fn setup_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = setup_readiness_model(app);
     let width = area.width as usize;
+    let compact = area.width < 72;
     let mut lines = vec![divider("SETUP · READY THE MAP RUN", area.width)];
-    lines.push(muted(&fit(
-        "One readiness check. Model and credentials are required only by the selected plan.",
-        width,
-    )));
-    lines.push(blank());
-    lines.extend(setup_readiness_lines(
-        app,
-        &model.rows,
-        width,
-        area.width < 72,
-    ));
+    if !compact {
+        lines.push(muted(&fit(
+            "One readiness check. Model and credentials are required only by the selected plan.",
+            width,
+        )));
+        lines.push(blank());
+    }
+    lines.extend(setup_readiness_lines(app, &model.rows, width, compact));
     lines.extend(setup_editor_lines(app, width));
     lines.push(blank());
     lines.push(setup_summary_line(&model, width));
@@ -40,15 +38,36 @@ fn setup_readiness_lines(
         if !compact && row.id == crate::app::SetupRowId::Target {
             lines.extend(setup_target_fact_lines(app, width));
         }
-        if !compact && index == app.router.setup().cursor() {
-            lines.extend(
-                wrap_text(&format!("    {}", row.detail), width)
-                    .into_iter()
-                    .map(|line| muted(&line)),
-            );
-        }
+        lines.extend(setup_selected_row_detail(app, row, index, width, compact));
     }
     lines
+}
+
+fn setup_selected_row_detail(
+    app: &ShellApp,
+    row: &SetupReadinessRow,
+    index: usize,
+    width: usize,
+    compact: bool,
+) -> Vec<Line<'static>> {
+    if index != app.router.setup().cursor() {
+        return Vec::new();
+    }
+    let prefix = if compact { "    why · " } else { "    " };
+    let limit = if compact { 2 } else { usize::MAX };
+    let detail = compact_setup_detail(row, compact);
+    wrap_text(&format!("{prefix}{detail}"), width)
+        .into_iter()
+        .take(limit)
+        .map(|line| muted(&line))
+        .collect()
+}
+
+fn compact_setup_detail(row: &SetupReadinessRow, compact: bool) -> String {
+    if compact && row.id == crate::app::SetupRowId::Target {
+        return crate::ui_view_models::compact_target_path(&row.detail);
+    }
+    row.detail.clone()
 }
 
 fn setup_target_fact_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
@@ -128,7 +147,7 @@ fn setup_row_line(
         SetupReadinessTone::Action => " ",
     };
     let body = if compact {
-        format!("{glyph} {:<12} {} · {}", row.label, row.status, row.detail)
+        format!("{glyph} {:<12} {}", row.label, row.status)
     } else {
         format!("{glyph} {:<14} {:<16}", row.label, row.status)
     };
@@ -182,6 +201,54 @@ mod tests {
                     "{text}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn compact_setup_wraps_the_selected_reason_instead_of_ellipsizing_it() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        app.router.setup_mut().set_cursor(2);
+
+        let text = setup_lines(&app, Rect::new(0, 0, 40, 12))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        assert!(text.contains("why · the selected Map plan is"), "{text}");
+        assert!(text.contains("deterministic/runtime-free"), "{text}");
+        assert!(text.contains("Start Map"), "{text}");
+    }
+
+    #[test]
+    fn sixty_column_setup_shows_the_selected_target_reason_and_every_row() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.open_setup();
+        app.router.setup_mut().set_cursor(0);
+
+        let text = setup_lines(&app, Rect::new(0, 0, 60, 20))
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("why ·"), "{text}");
+        let target_name = target.path().file_name().unwrap().to_string_lossy();
+        assert!(text.contains(target_name.as_ref()), "{text}");
+        for label in [
+            "Map plan",
+            "Model",
+            "Credentials",
+            "Prompt",
+            "Budget",
+            "Start Map",
+        ] {
+            assert!(text.contains(label), "missing {label}: {text}");
         }
     }
 

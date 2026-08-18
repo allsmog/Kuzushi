@@ -24,6 +24,7 @@ pub(in crate::renderer::views) fn phase_header_lines(
 
 fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
+    lines.extend(checkpoint_drift_line(header, width));
     lines.extend(phase_rail_line(&header.phase_rail, width));
     lines.extend(
         header
@@ -33,6 +34,59 @@ fn context_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Lin
     );
     lines.extend(next_header_lines(header, width));
     lines
+}
+
+fn checkpoint_drift_line(header: &EngagementHeaderModel, width: usize) -> Option<Line<'static>> {
+    let drift = header.checkpoint_drift.as_ref()?;
+    let phase = drift.phase.title();
+    let accepted = short_revision(drift.accepted_revision.as_deref());
+    let current = short_revision(drift.current_revision.as_deref());
+    let change = checkpoint_change_text(drift);
+    let full = format!(
+        "! accepted {phase} is stale · rev {accepted} → {current} · {change} · rerun {phase}"
+    );
+    let compact = format!("! {phase} stale · rerun {phase} · {accepted}→{current}");
+    let minimal = format!("! {phase} stale · rerun {phase}");
+    let text = if display_width(&full) <= width {
+        full
+    } else if display_width(&compact) <= width {
+        compact
+    } else {
+        minimal
+    };
+    Some(Line::from(Span::styled(fit(&text, width), theme::warn())))
+}
+
+fn checkpoint_change_text(drift: &crate::ui_view_models::CheckpointDrift) -> String {
+    let change = match drift.relationship {
+        Some(kuzushi_core::workspace::RevisionRelationship::AheadBy(count)) => {
+            let noun = if count == 1 { "commit" } else { "commits" };
+            format!("{count} {noun} behind")
+        }
+        Some(kuzushi_core::workspace::RevisionRelationship::DivergedOrRewound) => {
+            "history diverged or rewound".to_string()
+        }
+        Some(kuzushi_core::workspace::RevisionRelationship::Unavailable) => {
+            "commit distance unavailable".to_string()
+        }
+        Some(kuzushi_core::workspace::RevisionRelationship::Same) if drift.dirty_changed => {
+            "working tree changed".to_string()
+        }
+        Some(kuzushi_core::workspace::RevisionRelationship::Same) => {
+            "checkpoint snapshot changed".to_string()
+        }
+        None if drift.accepted_revision != drift.current_revision => {
+            "revision changed; checking distance".to_string()
+        }
+        None => "working tree changed".to_string(),
+    };
+    change
+}
+
+fn short_revision(revision: Option<&str>) -> String {
+    revision
+        .map(|revision| revision.chars().take(7).collect())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn next_header_lines(header: &EngagementHeaderModel, width: usize) -> Vec<Line<'static>> {

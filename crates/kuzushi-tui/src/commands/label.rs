@@ -24,6 +24,12 @@ pub enum ShellCommand {
     /// `scan [target]` guided-workflow command directly. The shell parser no
     /// longer emits this variant.
     Scan(Option<PathBuf>),
+    /// Execute `sast:scan` over files changed since a Git revision. Unlike
+    /// `findings since`, this creates new scan evidence.
+    ScanSince {
+        reference: String,
+        include_worktree: bool,
+    },
     /// Open the guided Map → Scan workflow, optionally selecting a target
     /// first. Emitted by the public `full` and `pipeline` shell verbs.
     Full(Option<PathBuf>),
@@ -154,6 +160,7 @@ pub enum ShellCommand {
     Clear,
     Load(Option<String>),
     Resume(Option<String>),
+    Retry(Option<String>),
     Pause,
     Cancel,
     Story,

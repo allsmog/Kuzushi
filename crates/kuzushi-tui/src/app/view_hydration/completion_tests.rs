@@ -4,6 +4,49 @@ use ratatui::{backend::TestBackend, Terminal};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+#[test]
+fn recovery_hydration_emits_one_warning_and_transcript_receipt() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let recovery = kuzushi_core::RecoveredRun {
+        run_id: "run-recovered-12345678".to_string(),
+        reason: "run process 99 is no longer running".to_string(),
+    };
+
+    app.apply_view_hydration_drain(run_history_hydration(temp.path(), vec![recovery]));
+    app.apply_view_hydration_drain(run_history_hydration(temp.path(), Vec::new()));
+
+    let notice = app.advisory().notice.as_ref().expect("recovery notice");
+    assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+    assert!(notice.message.contains("Recovered 1 abandoned run"));
+    assert!(notice.message.contains("open `jobs` or `replay"));
+    assert_eq!(
+        app.log_lines()
+            .iter()
+            .filter(|line| line.body.contains("Recovered 1 abandoned run"))
+            .count(),
+        1
+    );
+}
+
+fn run_history_hydration(
+    target: &Path,
+    newly_recovered: Vec<kuzushi_core::RecoveredRun>,
+) -> ViewHydrationDrain {
+    ViewHydrationDrain {
+        results: vec![ViewHydrationResult {
+            target: target.to_path_buf(),
+            key: ViewHydrationKey::RunSummaryEntries,
+            value: ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesHydration {
+                state: RunSummaryEntriesState::Ready(Vec::new()),
+                newly_recovered,
+            }),
+        }],
+        failures: Vec::new(),
+    }
+}
+
 #[derive(Debug, Default)]
 struct CompletionReader {
     reads: AtomicUsize,

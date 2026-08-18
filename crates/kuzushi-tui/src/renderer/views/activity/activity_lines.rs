@@ -123,7 +123,6 @@ fn append_activity_heartbeat(
     let (model, rows) = activity.heartbeat_rows(width, Instant::now());
     let style = match model.tone {
         ActivityHeartbeatTone::Live => theme::success(),
-        ActivityHeartbeatTone::Stalled => theme::warn(),
         ActivityHeartbeatTone::Complete => theme::muted(),
         ActivityHeartbeatTone::Warning => theme::warn(),
         ActivityHeartbeatTone::Failed => theme::danger(),

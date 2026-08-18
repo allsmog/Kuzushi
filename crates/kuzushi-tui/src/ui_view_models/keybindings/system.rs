@@ -68,9 +68,10 @@ fn setup_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         ];
     }
     vec![
-        bind("j/k", "move"),
+        bind("↑/↓", "move"),
+        bind("type", "command"),
         bind("Enter", "open/start"),
-        bind("Esc/q", "workbench"),
+        bind("Esc", "workbench"),
         bind("Ctrl+C", "exit"),
     ]
 }
@@ -99,22 +100,23 @@ fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
             if app.engagement.planning_picker().returns_to_setup() =>
         {
             vec![
-                bind("KEYS", "j/k option"),
-                bind("Tab/Shift+Tab/o", "tasks"),
+                bind("KEYS", "↑/↓ option"),
+                bind("Tab/Shift+Tab", "tasks"),
+                bind("type", "command"),
                 bind("Enter", "edit"),
                 bind("Space", "cycle"),
-                bind("Esc/q", "tasks"),
+                bind("Ctrl+S", "persist option"),
+                bind("Esc", "tasks"),
             ]
         }
         crate::app::PickerFocus::OptionsPane => vec![
-            bind("KEYS", "j/k option"),
-            bind("Tab/Shift+Tab/o", "steps"),
-            bind("1-5", "phase"),
+            bind("KEYS", "↑/↓ option"),
+            bind("Tab/Shift+Tab", "steps"),
+            bind("type", "command"),
             bind("Enter", "edit"),
             bind("Space", "cycle"),
-            bind("S", "persist"),
-            bind("Esc/q", "steps"),
-            bind("COMMAND", ": type"),
+            bind("Ctrl+S", "persist option"),
+            bind("Esc", "steps"),
         ],
         crate::app::PickerFocus::List => planning_picker_list_keybindings(app),
     }
@@ -126,9 +128,10 @@ fn planning_picker_list_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     let inline_selected = planning_inline_action_selected(app);
     let mut bindings = vec![
-        bind("KEYS", "j/k move"),
-        bind("h/l ←/→", "phase"),
-        bind("1-5", "jump phase"),
+        bind("KEYS", "↑/↓ move"),
+        bind("←/→", "phase"),
+        bind("type", "command"),
+        bind("F5", "toggle rebuild"),
     ];
     match inline_selected {
         Some(true) => {
@@ -140,29 +143,24 @@ fn planning_picker_list_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
             bindings.push(bind("Enter", "run checked"));
         }
         None => {
-            bindings.push(bind("Tab/Shift+Tab/o", "focus pane"));
+            bindings.push(bind("Tab/Shift+Tab", "focus pane"));
             bindings.push(bind("Space", "check"));
             bindings.push(bind("Enter", "run checked"));
         }
     }
-    bindings.extend([
-        bind("a/n", "all/none"),
-        bind("g", "rebuild cached"),
-        bind("s", "skip phase"),
-        bind("Esc/q", "workbench"),
-        bind("COMMAND", ": type"),
-    ]);
+    bindings.push(bind("Esc", "workbench"));
     bindings
 }
 
 fn setup_plan_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("KEYS", "j/k move"),
+        bind("KEYS", "↑/↓ move"),
+        bind("type", "command"),
         bind("Space", "check"),
-        bind("Tab/Shift+Tab/o", "focus pane"),
-        bind("p", "review prompt"),
+        bind("F5", "toggle rebuild"),
+        bind("Tab/Shift+Tab", "focus pane"),
         bind("Enter", "save to Setup"),
-        bind("Esc/q", "return to Setup"),
+        bind("Esc", "return to Setup"),
     ]
 }
 
@@ -183,10 +181,19 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     if choice_picker_prompt_focused(app) {
         return picker_prompt_keybindings();
     }
+    if app.router.setup().editor() == Some(crate::app::SetupEditor::Credentials)
+        && app.router.auth_picker().is_api_key_row()
+    {
+        return vec![
+            bind("type", "API key"),
+            bind("Enter", "accept"),
+            bind("Esc", "back"),
+        ];
+    }
     vec![
-        bind("j/k", "move"),
+        bind("↑/↓", "move"),
         bind("demo", "offline"),
-        bind(":", "type command"),
+        bind("type", "command"),
         bind("Enter", "select"),
         bind("Esc", "skip"),
     ]

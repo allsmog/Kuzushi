@@ -43,6 +43,7 @@ fn render_wide(
         .split(area);
     let top = Layout::default()
         .direction(Direction::Horizontal)
+        .spacing(1)
         .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
         .split(rows[0]);
     render_panel(
@@ -176,11 +177,11 @@ fn wrapped_rows(lines: &[Line<'_>], width: usize) -> usize {
         .sum()
 }
 
-fn panel_block(title: &str) -> Block<'_> {
+fn panel_block(title: &str) -> Block<'static> {
     Block::default()
         .borders(Borders::ALL)
         .border_style(diagram_style(super::diagram_subtle()))
-        .title(Span::styled(title, theme::heading()))
+        .title(Span::styled(format!("{title} "), theme::heading()))
 }
 
 fn executive_summary_lines(model: &DfdModel, overview: &DfdOverview) -> Vec<Line<'static>> {

@@ -602,6 +602,7 @@ Useful package scripts:
 
 | Script | Purpose |
 | --- | --- |
+| `pnpm launch` | Build and open the native Rust shell against this checkout. |
 | `pnpm dev -- <args>` | Run the native Rust CLI from source. |
 | `pnpm build:native` | Build and stage the CLI plus all shipped MCP server binaries for npm packaging. |
 | `pnpm build` | Compile retained TypeScript library exports. |

@@ -295,6 +295,9 @@ pub(crate) struct TerminalLoopState {
     /// redraw/refocus replays without conflating later approvals that reuse a
     /// stable id after the earlier item was resolved.
     pub(crate) active_attention_ids: std::collections::BTreeSet<String>,
+    /// Prevents repeated transcript noise when a focus-blind terminal cannot
+    /// receive desktop alerts. Reset after any reported focus state.
+    pub(crate) focus_unknown_notice_emitted: bool,
     run_focus_hold: RunFocusVisibilityHold,
 }
 
@@ -305,6 +308,7 @@ impl Default for TerminalLoopState {
             last_draw: None,
             last_title: None,
             active_attention_ids: std::collections::BTreeSet::new(),
+            focus_unknown_notice_emitted: false,
             run_focus_hold: RunFocusVisibilityHold::default(),
         }
     }

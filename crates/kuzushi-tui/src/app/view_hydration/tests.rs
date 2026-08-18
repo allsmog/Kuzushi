@@ -9,6 +9,62 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+fn run_entry_with_git(sha: &str, dirty: bool) -> kuzushi_core::RunSummaryEntry {
+    let mut summary = kuzushi_core::RunSummary::default();
+    summary.run_id = "run-history".to_string();
+    summary.target_git = Some(RunTargetGitMetadata {
+        sha: sha.to_string(),
+        branch: Some("main".to_string()),
+        dirty,
+    });
+    kuzushi_core::RunSummaryEntry {
+        run_id: summary.run_id.clone(),
+        path: PathBuf::from("run.json"),
+        state: kuzushi_core::RunSummaryEntryState::Ready(summary),
+    }
+}
+
+#[test]
+fn returning_workspace_drift_detects_revision_and_worktree_changes() {
+    let clean_current = RunTargetGitMetadata {
+        sha: "bbbbbbbbbbbb".to_string(),
+        branch: Some("main".to_string()),
+        dirty: false,
+    };
+    let revision_drift =
+        returning_workspace_drift(&clean_current, &[run_entry_with_git("aaaaaaaaaaaa", false)])
+            .expect("revision drift");
+    assert_eq!(
+        revision_drift.0,
+        kuzushi_core::incremental_index::WorkspaceChange::GitHeadChanged
+    );
+    assert!(revision_drift.1.contains("aaaaaaaa → bbbbbbbb"));
+
+    let dirty_current = RunTargetGitMetadata {
+        dirty: true,
+        ..clean_current.clone()
+    };
+    let worktree_drift =
+        returning_workspace_drift(&dirty_current, &[run_entry_with_git("bbbbbbbbbbbb", false)])
+            .expect("worktree drift");
+    assert_eq!(
+        worktree_drift.0,
+        kuzushi_core::incremental_index::WorkspaceChange::GitIndexChanged
+    );
+}
+
+#[test]
+fn returning_workspace_drift_stays_clear_for_the_same_clean_revision() {
+    let current = RunTargetGitMetadata {
+        sha: "aaaaaaaaaaaa".to_string(),
+        branch: Some("main".to_string()),
+        dirty: false,
+    };
+    assert!(
+        returning_workspace_drift(&current, &[run_entry_with_git("aaaaaaaaaaaa", false)]).is_none()
+    );
+}
+
 #[derive(Debug, Default)]
 struct CountingReader {
     reads: AtomicUsize,
@@ -20,9 +76,11 @@ struct FailingRunHistoryReader;
 impl ViewArtifactReader for FailingRunHistoryReader {
     fn read(&self, _target: &Path, key: &ViewHydrationKey) -> ViewHydrationValue {
         if key == &ViewHydrationKey::RunSummaryEntries {
-            return ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Failed(
-                "fixture run-history failure".to_string(),
-            ));
+            return ViewHydrationValue::RunSummaryEntries(
+                RunSummaryEntriesHydration::without_recoveries(RunSummaryEntriesState::Failed(
+                    "fixture run-history failure".to_string(),
+                )),
+            );
         }
         missing_value(key)
     }
@@ -50,7 +108,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::LatestRunPointer(LatestRunPointerState::Missing)
         }
         ViewHydrationKey::RunSummaryEntries => {
-            ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(Vec::new()))
+            ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesHydration::without_recoveries(
+                RunSummaryEntriesState::Ready(Vec::new()),
+            ))
         }
         ViewHydrationKey::RunArtifactText { run_id, leaf } => {
             ViewHydrationValue::RunArtifactText(kuzushi_core::RunArtifactRead::Missing {
@@ -76,6 +136,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
             ViewHydrationValue::SourceFile(Err("missing fixture source".to_string()))
         }
         ViewHydrationKey::GitMetadata => ViewHydrationValue::GitMetadata(None),
+        ViewHydrationKey::RevisionRelationship { .. } => ViewHydrationValue::RevisionRelationship(
+            kuzushi_core::workspace::RevisionRelationship::Unavailable,
+        ),
         ViewHydrationKey::ProjectScopeTree => {
             ViewHydrationValue::ProjectScopeTree(ProjectScopeTreeState::RootOnly)
         }

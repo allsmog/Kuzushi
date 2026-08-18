@@ -1,0 +1,30 @@
+# J51 — Emptiness probe via the paused-prompt ':' route
+# Recovers J42's blocked question: does the explicit worklist verb land on
+# honest empty guidance (no fabricated rows), given that Setup pauses the
+# command prompt and requires ':' to type a command?
+name: Empty worklist and scene via colon route
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch: --target @TARGET
+wait-for: 30 KUZUSHI
+wait: 2
+keys: :
+type: worklist
+keys: Enter
+wait: 3
+snap: worklist-empty
+ask: Did the worklist verb land on ONE empty-guidance panel (no risk worklist + context:build/worklist:rank CTAs), zero fabricated rows — or did the keystrokes get swallowed again?
+keys: Escape
+keys: q
+submit: scene
+wait: 2
+snap: scene-empty
+ask: On a target with no artifacts, does the scene gallery page show one guidance line per empty page (empty_hint), never dummy content?
+keys: Tab
+wait: 1
+snap: scene-tab-2
+keys: Tab
+wait: 1
+snap: scene-tab-3
+ask: Do empty pages stay out of the Tab rail (gate-on-non-empty) or does Tab stop on blank pages?

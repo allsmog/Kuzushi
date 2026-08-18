@@ -596,6 +596,10 @@ mod tests {
             ShellCommand::Since("main".to_string())
         );
         assert_eq!(
+            parse_command("findings since main"),
+            ShellCommand::Since("main".to_string())
+        );
+        assert_eq!(
             parse_command("/replay run-123"),
             ShellCommand::Replay("run-123".to_string())
         );
@@ -678,6 +682,65 @@ mod tests {
                 ShellCommand::Phase(phase)
             );
         }
+    }
+
+    #[test]
+    fn compact_expert_aliases_keep_high_frequency_actions_in_prompt_mode() {
+        for (alias, phase) in [
+            ("/ma", WorkflowPhase::Map),
+            ("/sc", WorkflowPhase::Scan),
+            ("/rv", WorkflowPhase::Review),
+            ("/pr", WorkflowPhase::Prove),
+            ("/fx", WorkflowPhase::Fix),
+        ] {
+            assert_eq!(parse_command(alias), ShellCommand::Phase(phase));
+        }
+        assert_eq!(
+            parse_command("/v F-0001"),
+            ShellCommand::RunTool {
+                tool: Some("verify:finding".to_string()),
+                input: Some(r#"{"fingerprint":"F-0001"}"#.to_string()),
+            }
+        );
+        assert!(matches!(
+            parse_command("/x F-0001 --reason scanner mismatch"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Suppress { .. })
+        ));
+        assert_eq!(
+            parse_command("/mdl openai:gpt-5.5"),
+            ShellCommand::Model(Some("openai:gpt-5.5".to_string()))
+        );
+    }
+
+    #[test]
+    fn scan_since_executes_while_findings_since_only_filters_saved_rows() {
+        assert_eq!(
+            parse_command("scan since main"),
+            ShellCommand::ScanSince {
+                reference: "main".to_string(),
+                include_worktree: false,
+            }
+        );
+        assert_eq!(
+            parse_command("scan since HEAD~2 --include-worktree"),
+            ShellCommand::ScanSince {
+                reference: "HEAD~2".to_string(),
+                include_worktree: true,
+            }
+        );
+        assert_eq!(
+            parse_command("findings since main"),
+            ShellCommand::Since("main".to_string())
+        );
+    }
+
+    #[test]
+    fn retry_is_the_explicit_failed_run_alias() {
+        assert_eq!(parse_command("retry"), ShellCommand::Retry(None));
+        assert_eq!(
+            parse_command("retry run-123"),
+            ShellCommand::Retry(Some("run-123".to_string()))
+        );
     }
 
     #[test]
@@ -926,6 +989,7 @@ mod tests {
             "reparse",
             "replay",
             "resume",
+            "retry",
             "review-decision",
             "run-diff",
             "run-tool",
@@ -1075,6 +1139,7 @@ mod tests {
             ShellCommand::Component(_) => "component",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
+            ShellCommand::ScanSince { .. } => "scan-since",
             ShellCommand::Full(_) => "full",
             ShellCommand::LaunchStartView => "launch-start-view",
             ShellCommand::LaunchTargetPicker => "launch-target-picker",
@@ -1158,6 +1223,7 @@ mod tests {
             ShellCommand::Clear => "clear",
             ShellCommand::Load(_) => "load",
             ShellCommand::Resume(_) => "resume",
+            ShellCommand::Retry(_) => "retry",
             ShellCommand::Pause => "pause",
             ShellCommand::Cancel => "cancel",
             ShellCommand::Story => "story",

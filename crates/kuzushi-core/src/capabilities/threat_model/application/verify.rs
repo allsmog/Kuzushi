@@ -572,6 +572,22 @@ fn validate_unbacked_git_identity(
     Ok(())
 }
 
+#[cfg(test)]
+pub(crate) fn bind_test_provenance(document: &mut Value, target: &Path) {
+    if !document.get("provenance").is_some_and(Value::is_object) {
+        document["provenance"] = json!({});
+    }
+    let provenance = document["provenance"].as_object_mut().unwrap();
+    provenance.insert(
+        "treeHash".to_string(),
+        json!(crate::incremental_index::current_workspace_tree_hash(target).unwrap()),
+    );
+    if let Some(git) = crate::workspace::target_git_metadata(target) {
+        provenance.insert("revision".to_string(), json!(git.sha));
+        provenance.insert("revisionDirty".to_string(), json!(git.dirty));
+    }
+}
+
 fn required_receipt_text<'a>(receipt: &'a Value, field: &str) -> Result<&'a str> {
     receipt
         .get(field)

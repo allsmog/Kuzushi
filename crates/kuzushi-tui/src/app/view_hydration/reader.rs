@@ -75,10 +75,15 @@ fn read_run_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydration
     }
 }
 
-fn read_recent_run_history(target: &Path, limit: usize) -> RunSummaryEntriesState {
-    match kuzushi_core::list_recent_run_summary_entries(target, limit) {
-        Ok(entries) => RunSummaryEntriesState::Ready(entries),
-        Err(error) => RunSummaryEntriesState::Failed(error.to_string()),
+fn read_recent_run_history(target: &Path, limit: usize) -> RunSummaryEntriesHydration {
+    match kuzushi_core::list_recent_run_summary_entries_with_recoveries(target, limit) {
+        Ok(read) => RunSummaryEntriesHydration {
+            state: RunSummaryEntriesState::Ready(read.entries),
+            newly_recovered: read.newly_recovered,
+        },
+        Err(error) => RunSummaryEntriesHydration::without_recoveries(
+            RunSummaryEntriesState::Failed(error.to_string()),
+        ),
     }
 }
 
@@ -86,6 +91,16 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
     match key {
         ViewHydrationKey::GitMetadata => Some(ViewHydrationValue::GitMetadata(
             kuzushi_core::workspace::target_git_metadata(target),
+        )),
+        ViewHydrationKey::RevisionRelationship {
+            accepted_revision,
+            current_revision,
+        } => Some(ViewHydrationValue::RevisionRelationship(
+            kuzushi_core::workspace::target_revision_relationship(
+                target,
+                accepted_revision,
+                current_revision,
+            ),
         )),
         ViewHydrationKey::ProjectScopeTree => Some(ViewHydrationValue::ProjectScopeTree(
             project_scope_tree(target),

@@ -235,6 +235,49 @@ fn non_triage_review_decision_has_no_legacy_triage_verdict() {
     assert!(finding.triage.is_none());
 }
 
+#[test]
+fn decision_history_is_newest_first_and_never_crosses_durable_identities() {
+    let mut selected = finding("demo.selected", 10, "selected");
+    selected.id = Some(7);
+    selected.identity_id = Some("fi_selected".to_string());
+    let records = vec![
+        decision_record(1, 7, "fi_selected", "older", "2026-07-01T00:00:00Z"),
+        decision_record(2, 7, "fi_other", "wrong identity", "2026-07-03T00:00:00Z"),
+        decision_record(3, 8, "fi_selected", "newer", "2026-07-02T00:00:00Z"),
+    ];
+
+    let history = review_decision_history_for(&selected, &records);
+
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].decision.rationale, "newer");
+    assert_eq!(history[1].decision.rationale, "older");
+}
+
+fn decision_record(
+    id: i64,
+    finding_id: i64,
+    identity_id: &str,
+    rationale: &str,
+    created_at: &str,
+) -> ReviewDecisionRecord {
+    ReviewDecisionRecord {
+        id,
+        finding_id,
+        identity_id: Some(identity_id.to_string()),
+        decision: ReviewDecision {
+            verdict: ReviewDecisionVerdict::RejectedFalsePositive,
+            author: TriageAuthor::Human,
+            confidence: 1.0,
+            rationale: rationale.to_string(),
+            dismiss_reason: None,
+            actor: Some("operator".to_string()),
+        },
+        triage_verdict: Some(TriageVerdict::FalsePositive),
+        created_at: created_at.to_string(),
+        provenance: None,
+    }
+}
+
 fn finding(rule: &str, line: u32, message: &str) -> Finding {
     Finding::new_tool(
         "semgrep",

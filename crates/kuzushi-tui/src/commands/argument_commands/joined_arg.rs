@@ -7,7 +7,7 @@ pub(crate) fn parse_joined_arg_command(
 ) -> Option<ShellCommand> {
     let rest = args.join(" ");
     let command = match verb {
-        "model" => ShellCommand::Model((!rest.trim().is_empty()).then_some(rest)),
+        "model" | "mdl" => ShellCommand::Model((!rest.trim().is_empty()).then_some(rest)),
         "aim" => ShellCommand::Aim((!rest.trim().is_empty()).then_some(rest)),
         "tools" => ShellCommand::Tools(tools_query(&rest)),
         "find" => ShellCommand::Tools(tools_query(&rest)),

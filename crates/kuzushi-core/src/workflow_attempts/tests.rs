@@ -510,6 +510,10 @@ fn unavailable_dirty_identity_blocks_cross_attempt_reuse_without_losing_history(
         .ledger
         .selected_for(WorkflowPhase::Scan, &attempt.target_snapshot)
         .is_none());
+    assert!(recovered
+        .ledger
+        .latest_selected_history_for_target(WorkflowPhase::Scan, &attempt.target_snapshot)
+        .is_none());
 }
 
 #[test]
@@ -548,6 +552,17 @@ fn indexed_snapshot_reuses_non_git_evidence_only_while_source_matches() {
         .ledger
         .selected_for(WorkflowPhase::Scan, &attempt.target_snapshot)
         .is_none());
+    assert_eq!(
+        after
+            .ledger
+            .latest_selected_history_for_target(
+                WorkflowPhase::Scan,
+                &PhaseTargetSnapshot::capture(target.path()),
+            )
+            .map(|record| record.completed.attempt_id.as_str()),
+        Some(attempt.attempt_id.as_str()),
+        "authenticated historical selection remains available for drift disclosure"
+    );
 }
 
 #[cfg(unix)]
@@ -657,6 +672,17 @@ fn clean_commit_receipt_stays_referenced_but_reuse_stops_after_mutation() {
         .ledger
         .selected_for(WorkflowPhase::Scan, &attempt.target_snapshot)
         .is_none());
+    assert_eq!(
+        after
+            .ledger
+            .latest_selected_history_for_target(
+                WorkflowPhase::Scan,
+                &PhaseTargetSnapshot::capture(target.path()),
+            )
+            .map(|record| record.completed.attempt_id.as_str()),
+        Some(attempt.attempt_id.as_str()),
+        "commit drift remains presentational history, never current truth"
+    );
 }
 
 #[test]
@@ -1552,6 +1578,53 @@ fn target_attempt_presence_survives_revision_changes_and_disposition() {
 }
 
 #[test]
+fn selected_target_history_discloses_stale_checkpoint_without_reusing_it() {
+    let attempt = completed(PhaseAttemptOutcome::Completed);
+    let selection = PhaseAttemptDispositionRecorded::new(
+        &attempt.attempt_id,
+        PhaseAttemptDisposition::Selected {
+            acknowledged_partial: false,
+        },
+    );
+    let current = PhaseTargetSnapshot {
+        revision: Some("def".to_string()),
+        dirty: true,
+        ..attempt.target_snapshot.clone()
+    };
+    let ledger = PhaseAttemptLedger::from_events([
+        PhaseAttemptEvent::PhaseAttemptCompleted(attempt.clone()),
+        PhaseAttemptEvent::PhaseAttemptDispositionRecorded(selection),
+    ])
+    .unwrap();
+
+    assert!(ledger.selected_for(WorkflowPhase::Scan, &current).is_none());
+    assert_eq!(
+        ledger
+            .latest_selected_for_target(WorkflowPhase::Scan, &current)
+            .map(|record| record.completed.attempt_id.as_str()),
+        Some(attempt.attempt_id.as_str())
+    );
+    assert!(ledger
+        .latest_selected_for_target(
+            WorkflowPhase::Scan,
+            &PhaseTargetSnapshot {
+                target: "/other-target".to_string(),
+                ..current.clone()
+            }
+        )
+        .is_none());
+
+    let mut blocked = ledger;
+    blocked.block_content_reuse(&attempt.attempt_id);
+    assert!(blocked
+        .latest_selected_for_target(WorkflowPhase::Scan, &current)
+        .is_none());
+    assert!(blocked
+        .latest_selected_history_for_target(WorkflowPhase::Scan, &current)
+        .is_none());
+}
+
+#[test]
 fn explicit_phase_skip_survives_restart_for_only_the_exact_snapshot() {
     let target = tempfile::tempdir().unwrap();
     let snapshot = PhaseTargetSnapshot {
@@ -1605,6 +1678,17 @@ fn proof_deferral_survives_restart_for_only_the_exact_finding_generation() {
         Some("stable-fp"),
         "scan-1"
     ));
+    let deferral = ledger
+        .proof_deferral_for(&snapshot, "new-fingerprint", Some("stable-fp"), "scan-1")
+        .expect("durable deferral record");
+    assert_eq!(
+        deferral.reason,
+        "runtime harness is unavailable in this environment"
+    );
+    assert_eq!(
+        ledger.latest_proof_deferral_for(&snapshot),
+        Some(deferral)
+    );
     assert!(!ledger.proof_is_deferred_for(&snapshot, "finding-fp", Some("stable-fp"), "scan-2"));
     assert!(!ledger.proof_is_deferred_for(
         &PhaseTargetSnapshot {

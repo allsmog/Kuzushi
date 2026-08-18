@@ -1,7 +1,6 @@
 use super::{format_runtime_cost, format_session_cost};
 use crate::ShellApp;
 
-const DEFAULT_SESSION_BUDGET_USD: f64 = 5.0;
 const COST_BAR_WIDTH: usize = 30;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -40,31 +39,29 @@ pub(crate) enum CostTone {
 
 pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
     let session = app.session();
-    let cap = session
-        .session_budget_usd()
-        .unwrap_or(DEFAULT_SESSION_BUDGET_USD);
+    let budget = session.session_budget_usd();
     let session_cost = session.session_cost_usd();
     let last_tool = session.last_tool_cost_usd();
     let (session_text, last_tool_text) = cost_texts(app);
     let budget_text = budget_text(session.session_budget_usd());
+    let hard_ceiling_text = hard_ceiling_text(app.config().operator.spend_hard_ceiling_usd);
     CostModel {
-        budget_rows: cost_budget_rows(
-            session_cost,
-            last_tool,
-            cap,
-            session.cost_accounting_is_complete(),
-        ),
+        budget_rows: budget.map_or_else(Vec::new, |cap| {
+            cost_budget_rows(
+                session_cost,
+                last_tool,
+                cap,
+                session.cost_accounting_is_complete(),
+            )
+        }),
         spend_rows: cost_spend_rows(
             session_text.clone(),
             last_tool_text.clone(),
             budget_text.clone(),
+            hard_ceiling_text,
         ),
         auth_spend_cells: [session_text, last_tool_text],
-        budget_status: budget_status(
-            session_cost,
-            session.session_budget_usd(),
-            session.cost_accounting_is_complete(),
-        ),
+        budget_status: budget_status(session_cost, budget, session.cost_accounting_is_complete()),
     }
 }
 
@@ -94,11 +91,17 @@ fn format_last_tool_cost(
     }
 }
 
-fn cost_spend_rows(session: String, last_tool: String, budget: String) -> Vec<CostSpendRow> {
+fn cost_spend_rows(
+    session: String,
+    last_tool: String,
+    budget: String,
+    hard_ceiling: String,
+) -> Vec<CostSpendRow> {
     vec![
         cost_spend_row("session", session),
         cost_spend_row("last tool", last_tool),
         cost_spend_row("budget", budget),
+        cost_spend_row("hard ceiling", hard_ceiling),
     ]
 }
 
@@ -176,7 +179,13 @@ fn capped_percent(used: f64, cap: f64) -> usize {
 fn budget_text(budget: Option<f64>) -> String {
     budget
         .map(|value| format!("${value:.2}"))
-        .unwrap_or_else(|| "unset (default $5.00 soft cap shown above)".to_string())
+        .unwrap_or_else(|| "not enforced".to_string())
+}
+
+fn hard_ceiling_text(ceiling: Option<f64>) -> String {
+    ceiling
+        .map(|value| format!("${value:.2}"))
+        .unwrap_or_else(|| "not configured".to_string())
 }
 
 fn budget_status(

@@ -43,6 +43,21 @@ pub(crate) enum RunSummaryEntriesState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RunSummaryEntriesHydration {
+    pub(crate) state: RunSummaryEntriesState,
+    pub(crate) newly_recovered: Vec<kuzushi_core::RecoveredRun>,
+}
+
+impl RunSummaryEntriesHydration {
+    pub(crate) fn without_recoveries(state: RunSummaryEntriesState) -> Self {
+        Self {
+            state,
+            newly_recovered: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) enum ScanStageReceiptState {
     Ready(kuzushi_core::run_artifacts::PhaseStageReceipt),
     Missing,
@@ -162,6 +177,10 @@ pub(crate) enum ViewHydrationKey {
         path: PathBuf,
     },
     GitMetadata,
+    RevisionRelationship {
+        accepted_revision: String,
+        current_revision: String,
+    },
     ProjectScopeTree,
     ProjectModelDocument {
         scope_id: String,
@@ -198,7 +217,7 @@ pub(crate) enum ViewHydrationValue {
     FindingCompletionValues(Vec<String>),
     RunIdCompletionValues(Vec<String>),
     LatestRunPointer(LatestRunPointerState),
-    RunSummaryEntries(RunSummaryEntriesState),
+    RunSummaryEntries(RunSummaryEntriesHydration),
     RunArtifactText(RunArtifactTextRead),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
     ScanStageReceipt(ScanStageReceiptState),
@@ -207,6 +226,7 @@ pub(crate) enum ViewHydrationValue {
     ScannedSnippet(ScannedSnippetState),
     SourceFile(Result<String, String>),
     GitMetadata(Option<RunTargetGitMetadata>),
+    RevisionRelationship(kuzushi_core::workspace::RevisionRelationship),
     ProjectScopeTree(ProjectScopeTreeState),
     ProjectModelDocument(Option<ProjectModelDocument>),
     StrategyQueue(StrategyQueueState),
@@ -381,6 +401,18 @@ impl ShellApp {
                 )
             )
         });
+        let recovered_runs = drain
+            .results
+            .iter()
+            .filter_map(|result| match &result.value {
+                ViewHydrationValue::RunSummaryEntries(hydration) => {
+                    Some(hydration.newly_recovered.as_slice())
+                }
+                _ => None,
+            })
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
         {
             let mut cache = self.workbench_cache().borrow_mut();
             for result in drain.results {
@@ -394,6 +426,51 @@ impl ShellApp {
         if refresh_target_profile {
             self.apply_ready_target_profile();
         }
+        self.disclose_returning_workspace_drift();
+        self.announce_recovered_runs(&recovered_runs);
+    }
+
+    fn disclose_returning_workspace_drift(&mut self) {
+        if self.workspace_stale().is_some() {
+            return;
+        }
+        let (current, history) = {
+            let cache = self.workbench_cache().borrow();
+            (
+                cache.cached_git_metadata(self.target()),
+                cache.cached_run_summary_entries(self.target()),
+            )
+        };
+        let (
+            ViewDataState::Ready(Some(current)),
+            ViewDataState::Ready(RunSummaryEntriesState::Ready(history)),
+        ) = (current, history)
+        else {
+            return;
+        };
+        let Some((change, message)) = returning_workspace_drift(&current, &history) else {
+            return;
+        };
+        self.domain_mut().apply_workspace_changes(&[change]);
+        self.log("workspace", message);
+    }
+
+    fn announce_recovered_runs(&mut self, recovered: &[kuzushi_core::RecoveredRun]) {
+        let Some(first) = recovered.first() else {
+            return;
+        };
+        let message = if recovered.len() == 1 {
+            let run_ref = crate::app::compact_run_reference(&first.run_id);
+            format!(
+                "Recovered 1 abandoned run as interrupted · {run_ref} · open `jobs` or `replay {run_ref}`"
+            )
+        } else {
+            format!(
+                "Recovered {} abandoned runs as interrupted · open `jobs`",
+                recovered.len()
+            )
+        };
+        self.set_warn_notice("recovery", message);
     }
 
     fn pending_active_view_hydration_keys(&self, target: &Path) -> Vec<ViewHydrationKey> {
@@ -466,4 +543,35 @@ impl ShellApp {
         }
         self.set_shell_view(original);
     }
+}
+
+fn returning_workspace_drift(
+    current: &RunTargetGitMetadata,
+    history: &[kuzushi_core::RunSummaryEntry],
+) -> Option<(kuzushi_core::incremental_index::WorkspaceChange, String)> {
+    let prior = history.iter().find_map(|entry| match &entry.state {
+        kuzushi_core::RunSummaryEntryState::Ready(summary) => summary.target_git.as_ref(),
+        kuzushi_core::RunSummaryEntryState::Issue(_) => None,
+    })?;
+    if prior.sha != current.sha {
+        return Some((
+            kuzushi_core::incremental_index::WorkspaceChange::GitHeadChanged,
+            format!(
+                "workspace changed since the latest run · {} → {}",
+                compact_revision(&prior.sha),
+                compact_revision(&current.sha)
+            ),
+        ));
+    }
+    (prior.dirty || current.dirty).then(|| {
+        (
+            kuzushi_core::incremental_index::WorkspaceChange::GitIndexChanged,
+            "worktree changes may make persisted run state stale · rerun the affected phase"
+                .to_string(),
+        )
+    })
+}
+
+fn compact_revision(revision: &str) -> &str {
+    revision.get(..revision.len().min(8)).unwrap_or(revision)
 }

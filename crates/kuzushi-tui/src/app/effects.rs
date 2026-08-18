@@ -138,6 +138,7 @@ pub(crate) struct ContextBuild {
 
 pub(crate) struct ResumeSession {
     pub(crate) run_id: Option<String>,
+    pub(crate) from_start: bool,
 }
 
 pub(crate) struct PlanningTaskDispatch {

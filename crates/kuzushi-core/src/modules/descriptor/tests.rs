@@ -1,6 +1,27 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::config::V2Config;
+
+    fn marker_a(
+        _registry: &ModuleRegistry,
+        _name: &str,
+        _input: &Value,
+        _ctx: &ToolExecutionContext<'_>,
+        _runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
+        Ok(json!("a"))
+    }
+
+    fn marker_b(
+        _registry: &ModuleRegistry,
+        _name: &str,
+        _input: &Value,
+        _ctx: &ToolExecutionContext<'_>,
+        _runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<Value> {
+        Ok(json!("b"))
+    }
 
     #[test]
     fn builds_visible_hidden_and_maturity_tiered_modules() {
@@ -67,6 +88,92 @@ mod tests {
 
         let hidden_tool = hidden_tool_with_options("demo:legacy", "Legacy demo.", vec![]);
         assert!(hidden_tool.hidden);
+    }
+
+    #[test]
+    fn with_tool_executor_binds_named_tool_over_module_default() {
+        let module = builtin_module(
+            "demo",
+            "Demo",
+            ModuleKind::Defense,
+            "Demo module",
+            vec![
+                tool("demo:default", "Use the default executor."),
+                tool("demo:special", "Use the special executor."),
+            ],
+            vec![],
+        )
+        .with_executor(marker_a)
+        .with_tool_executor("demo:special", marker_b);
+        let registry = ModuleRegistry::default();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let input = json!({});
+
+        let default = module.tool_executors["demo:default"](
+            &registry,
+            "demo:default",
+            &input,
+            &ctx,
+            None,
+        )
+        .unwrap();
+        let special = module.tool_executors["demo:special"](
+            &registry,
+            "demo:special",
+            &input,
+            &ctx,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(default, json!("a"));
+        assert_eq!(special, json!("b"));
+    }
+
+    #[test]
+    fn descriptor_serde_shape_is_stable() {
+        let descriptor = tool_with_options(
+            "demo:scan",
+            "Scan demo.",
+            vec![opt("target", OptionType::Path, "Target path.")
+                .required()
+                .workspace_read()],
+        )
+        .with_policy(read_policy(
+            ToolPhase::Scan,
+            WorkspaceRequirement::Required,
+        ));
+
+        assert_eq!(
+            serde_json::to_value(descriptor).unwrap(),
+            json!({
+                "name": "demo:scan",
+                "description": "Scan demo.",
+                "headless": true,
+                "phase": "scan",
+                "effect": "read",
+                "approval": "none",
+                "workspace_requirement": "required",
+                "finding_store_requirement": "optional",
+                "options": [{
+                    "name": "target",
+                    "type": "path",
+                    "description": "Target path.",
+                    "required": true,
+                    "advanced": false,
+                    "evasion": false,
+                    "pathSemantics": "workspace-read"
+                }]
+            })
+        );
     }
 
     #[test]

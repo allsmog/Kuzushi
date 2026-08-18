@@ -34,12 +34,31 @@ impl ShellApp {
         if matches!(self.shell_view(), ShellView::FilePicker) {
             return Some(self.handle_file_picker_key(key));
         }
+        self.handle_non_file_picker_capture_override(key)
+    }
+
+    fn handle_non_file_picker_capture_override(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         if self.picker_prompt_focused() {
             return Some(InputUpdate::handled_if(
                 self.handle_picker_prompt_focus_key(key),
             ));
         }
+        if self.inline_picker_editor_owns_key() {
+            let update = self.dispatch_picker_control_key(key);
+            return Some(if update.handled {
+                update
+            } else {
+                InputUpdate::handled()
+            });
+        }
+        self.enter_picker_command_input(key)
+    }
+
+    fn enter_picker_command_input(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         if self.enter_picker_prompt_if_requested(key) {
+            return Some(InputUpdate::handled());
+        }
+        if self.enter_picker_prompt_with_printable(key) {
             return Some(InputUpdate::handled());
         }
         None
@@ -50,10 +69,36 @@ impl ShellApp {
         if update.handled {
             return update;
         }
-        // Treat a picker as a true modal: swallow every other non-Ctrl/Alt
-        // keystroke so stray input cannot divert later navigation into the
-        // prompt and make the picker feel frozen.
+        // Non-printable keys without a picker action remain owned by the modal.
         InputUpdate::handled()
+    }
+
+    fn inline_picker_editor_owns_key(&self) -> bool {
+        let editor = self.router.setup().editor();
+        let planning_option = self.engagement.planning_picker().option_edit().is_some();
+        matches!(editor, Some(SetupEditor::Budget))
+            || planning_option
+            || (editor == Some(SetupEditor::Credentials)
+                && self.router.auth_picker().is_api_key_row())
+    }
+
+    pub(crate) fn picker_surface_accepts_composer_input(&self) -> bool {
+        self.is_picker_view()
+            && !matches!(self.shell_view(), ShellView::FilePicker)
+            && self.current_picker_focus() != PickerFocus::Prompt
+            && !self.inline_picker_editor_owns_key()
+    }
+
+    fn enter_picker_prompt_with_printable(&mut self, key: KeyEvent) -> bool {
+        let Some(ch) = picker_command_char(key) else {
+            return false;
+        };
+        if !self.picker_surface_accepts_composer_input() {
+            return false;
+        }
+        self.enter_picker_prompt_focus();
+        self.insert_printable_key(ch);
+        true
     }
 
     fn enter_picker_prompt_if_requested(&mut self, key: KeyEvent) -> bool {
@@ -66,7 +111,18 @@ impl ShellApp {
 
     fn picker_should_capture_key(&self, key: KeyEvent) -> bool {
         self.is_picker_view()
-            && (!picker_shell_chord(key.modifiers) || self.credential_picker_owns_shell_chord(key))
+            && (!picker_shell_chord(key.modifiers)
+                || self.credential_picker_owns_shell_chord(key)
+                || self.planning_picker_owns_shell_chord(key))
+    }
+
+    fn planning_picker_owns_shell_chord(&self, key: KeyEvent) -> bool {
+        matches!(
+            self.shell_view(),
+            ShellView::PlanningPicker | ShellView::Setup
+        ) && self.current_picker_focus() == PickerFocus::OptionsPane
+            && key.modifiers == KeyModifiers::CONTROL
+            && key.code == KeyCode::Char('s')
     }
 
     fn credential_picker_owns_shell_chord(&self, key: KeyEvent) -> bool {
@@ -107,8 +163,9 @@ impl ShellApp {
             && self.engagement.planning_picker().option_edit().is_none()
     }
 
-    fn enter_picker_prompt_focus(&mut self) {
+    pub(super) fn enter_picker_prompt_focus(&mut self) {
         self.set_current_picker_focus(PickerFocus::Prompt);
+        self.set_input_mode(InputMode::Prompt);
         self.engagement.planning_picker_mut().set_option_edit(None);
         self.engagement.planning_picker_mut().clear_option_error();
     }
@@ -157,16 +214,16 @@ impl ShellApp {
 
     fn handle_model_picker_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_model_picker_cursor(-1);
                 InputUpdate::handled()
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_model_picker_cursor(1);
                 InputUpdate::handled()
             }
             KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_model_picker_choice()),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.defer_model_picker();
                 InputUpdate::handled()
             }
@@ -186,21 +243,16 @@ impl ShellApp {
             return self.handle_setup_budget_key(code);
         }
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.router.setup_mut().move_cursor(-1);
                 InputUpdate::handled()
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.router.setup_mut().move_cursor(1);
                 InputUpdate::handled()
             }
             KeyCode::Enter => self.activate_setup_row(),
-            // Dedicated commit key: Enter activates whichever row is
-            // focused (Target row opens the target picker again), so the
-            // advertised Start Map action needs a key that works regardless
-            // of cursor position.
-            KeyCode::Char('s') => self.start_setup_map(),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.open_workbench();
                 InputUpdate::handled()
             }
@@ -421,16 +473,16 @@ impl ShellApp {
 
     fn handle_target_picker_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_target_picker_cursor(-1);
                 InputUpdate::handled()
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_target_picker_cursor(1);
                 InputUpdate::handled()
             }
             KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_target_picker_choice()),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.defer_target_picker();
                 InputUpdate::handled()
             }
@@ -511,15 +563,11 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         match code {
-            KeyCode::Char('q') => {
-                self.defer_auth_picker();
-                InputUpdate::handled()
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_auth_picker_cursor(-1);
                 InputUpdate::handled()
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_auth_picker_cursor(1);
                 InputUpdate::handled()
             }
@@ -667,19 +715,6 @@ impl ShellApp {
         }
     }
 
-    fn defer_auth_picker(&mut self) {
-        self.router.auth_picker_mut().clear_key_draft();
-        self.log(
-            "onboarding",
-            "auth deferred — set credentials and re-run /onboarding, or run `demo` for the offline fixture",
-        );
-        if self.router.setup().editor() == Some(SetupEditor::Credentials) {
-            self.return_to_setup_from_editor();
-        } else {
-            self.open_workbench();
-        }
-    }
-
     fn return_to_model_picker(&mut self) {
         self.router.auth_picker_mut().clear_key_draft();
         if self.router.setup().editor() == Some(SetupEditor::Credentials) {
@@ -709,7 +744,7 @@ impl ShellApp {
         }
         match self.engagement.planning_picker().focus() {
             PickerFocus::List => self.handle_planning_step_key(key.code),
-            PickerFocus::OptionsPane => self.handle_planning_options_key(key.code),
+            PickerFocus::OptionsPane => self.handle_planning_options_key(key),
             PickerFocus::Prompt => InputUpdate::ignored(),
         }
     }
@@ -756,10 +791,7 @@ impl ShellApp {
 
     fn handle_planning_step_navigation_key(&mut self, code: KeyCode) -> bool {
         if self.engagement.planning_picker().returns_to_setup()
-            && matches!(
-                code,
-                KeyCode::Left | KeyCode::Right | KeyCode::Char('h' | 'l' | '1' | '2' | '3' | '4')
-            )
+            && matches!(code, KeyCode::Left | KeyCode::Right)
         {
             self.log(
                 "setup",
@@ -768,26 +800,20 @@ impl ShellApp {
             return true;
         }
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_planning_cursor(-1);
                 true
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_planning_cursor(1);
                 true
             }
-            KeyCode::Left | KeyCode::Char('h') => {
+            KeyCode::Left => {
                 self.move_planning_phase(-1);
                 true
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            KeyCode::Right => {
                 self.move_planning_phase(1);
-                true
-            }
-            KeyCode::Char(ch) if phase_for_digit(ch).is_some() => {
-                if let Some(phase) = phase_for_digit(ch) {
-                    self.open_phase_picker(phase);
-                }
                 true
             }
             _ => false,
@@ -800,26 +826,17 @@ impl ShellApp {
                 self.toggle_planning_current_row();
                 true
             }
-            KeyCode::Char('a') | KeyCode::Char('A') => {
-                self.select_all_planning_rows();
-                true
-            }
-            KeyCode::Char('n') | KeyCode::Char('N') => {
-                self.clear_planning_selection();
-                true
-            }
-            KeyCode::Char('g') => {
-                self.toggle_rebuild_current_row();
-                true
-            }
             _ => false,
         }
     }
 
     fn handle_planning_step_action_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
-            KeyCode::Char('p') => InputUpdate::handled_with_effects(self.review_planning_prompt()),
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('o') => {
+            KeyCode::F(5) => {
+                self.toggle_rebuild_current_row();
+                InputUpdate::handled()
+            }
+            KeyCode::Tab | KeyCode::BackTab => {
                 self.enter_planning_options_pane();
                 InputUpdate::handled()
             }
@@ -833,12 +850,7 @@ impl ShellApp {
                 }
                 self.accept_planning_picker()
             }
-            KeyCode::Char('s') if self.engagement.planning_picker().returns_to_setup() => {
-                self.return_to_setup_from_editor();
-                InputUpdate::handled()
-            }
-            KeyCode::Char('s') => InputUpdate::handled_with_effects(self.skip_planning_phase()),
-            KeyCode::Esc | KeyCode::Char('q') => {
+            KeyCode::Esc => {
                 self.close_planning_picker();
                 InputUpdate::handled()
             }
@@ -846,13 +858,19 @@ impl ShellApp {
         }
     }
 
-    fn handle_planning_options_key(&mut self, code: KeyCode) -> InputUpdate {
+    fn handle_planning_options_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('s') {
+            return InputUpdate::handled_with_effects(
+                self.reduce_persist_selected_planning_option_override(),
+            );
+        }
+        let code = key.code;
         match code {
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 self.move_planning_option_cursor(-1);
                 InputUpdate::handled()
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 self.move_planning_option_cursor(1);
                 InputUpdate::handled()
             }
@@ -864,20 +882,7 @@ impl ShellApp {
                 self.cycle_selected_planning_option();
                 InputUpdate::handled()
             }
-            KeyCode::Char(ch) if phase_for_digit(ch).is_some() => {
-                if let Some(phase) = phase_for_digit(ch) {
-                    self.open_phase_picker(phase);
-                }
-                InputUpdate::handled()
-            }
-            KeyCode::Char('S') => InputUpdate::handled_with_effects(
-                self.reduce_persist_selected_planning_option_override(),
-            ),
-            KeyCode::Tab
-            | KeyCode::BackTab
-            | KeyCode::Char('o')
-            | KeyCode::Esc
-            | KeyCode::Char('q') => {
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => {
                 self.leave_planning_options_pane();
                 InputUpdate::handled()
             }
@@ -885,8 +890,8 @@ impl ShellApp {
         }
     }
 
-    /// `g` on a cached Map artifact row toggles it between reuse (default) and
-    /// rebuild. Rebuild marks the row to re-run even though its artifact exists.
+    /// F5 on a cached artifact toggles it between reuse and rebuild without
+    /// taking a printable byte away from command entry.
     fn toggle_rebuild_current_row(&mut self) {
         let Some(row) = self.engagement.planning_picker().current_row().cloned() else {
             return;
@@ -969,27 +974,6 @@ impl ShellApp {
             return;
         }
         self.log("planning", message);
-    }
-
-    fn select_all_planning_rows(&mut self) {
-        let rows = self.engagement.planning_picker().tasks().to_vec();
-        let selected = self.engagement.planning_picker_mut().selected_mut();
-        for row in &rows {
-            if row.cli_available
-                || matches!(
-                    row.artifact_state,
-                    crate::app::PlanningArtifactState::Cached
-                )
-            {
-                selected.insert(row.id);
-            }
-        }
-        self.log("planning", "selected all available rows");
-    }
-
-    fn clear_planning_selection(&mut self) {
-        self.engagement.planning_picker_mut().selected_mut().clear();
-        self.log("planning", "cleared selection");
     }
 
     pub(crate) fn accept_planning_picker(&mut self) -> InputUpdate {
@@ -1127,23 +1111,12 @@ impl ShellApp {
             "phase",
             format!(
                 "nothing to run — all {} checked {} are cached and will be reused; \
-                 press g to rebuild one, or s to skip this phase",
+                 type `next fresh` to rebuild defaults, or uncheck all and press Enter to skip",
                 self.engagement.planning_picker().selected().len(),
                 task_word(self.engagement.planning_picker().selected().len())
             ),
         );
         Vec::new()
-    }
-
-    fn skip_planning_phase(&mut self) -> Vec<ShellEffect> {
-        let phase = self
-            .engagement
-            .current_phase()
-            .map(|phase| phase.label())
-            .unwrap_or("planning");
-        self.log("phase", format!("skipped {phase}"));
-        self.record_current_phase_skip();
-        self.advance_to_next_phase()
     }
 
     fn close_planning_picker(&mut self) {
@@ -1187,6 +1160,19 @@ fn picker_shell_chord(modifiers: KeyModifiers) -> bool {
     modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT)
 }
 
+fn picker_command_char(key: KeyEvent) -> Option<char> {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
+        return None;
+    }
+    match key.code {
+        KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => Some(ch),
+        _ => None,
+    }
+}
+
 fn credential_picker_global_chord(key: KeyEvent) -> bool {
     key.modifiers.contains(KeyModifiers::CONTROL)
         && matches!(
@@ -1206,17 +1192,6 @@ fn auth_key_word_delete_requested(key: KeyEvent) -> bool {
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
     let control_w = key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL);
     modified_backspace || control_w
-}
-
-fn phase_for_digit(ch: char) -> Option<WorkflowPhase> {
-    match ch {
-        '1' => Some(WorkflowPhase::Map),
-        '2' => Some(WorkflowPhase::Scan),
-        '3' => Some(WorkflowPhase::Review),
-        '4' => Some(WorkflowPhase::Prove),
-        '5' => Some(WorkflowPhase::Fix),
-        _ => None,
-    }
 }
 
 fn step_word(count: usize) -> &'static str {
@@ -1332,18 +1307,74 @@ mod tests {
     }
 
     #[test]
-    fn advertised_colon_opens_prompt_without_editing_the_api_key() {
+    fn printable_picker_key_moves_losslessly_into_the_composer() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::TargetPicker);
+        app.router.target_picker_mut().open(Vec::new());
+
+        let update = app.reduce_key(plain_key(KeyCode::Char('q')));
+
+        assert!(update.handled);
+        assert_eq!(app.shell_view(), ShellView::TargetPicker);
+        assert!(app.picker_prompt_focused());
+        assert_eq!(app.input(), "q");
+    }
+
+    #[test]
+    fn api_key_editor_keeps_printable_input_ownership() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.open_credential_entry("anthropic".to_string());
+
+        let update = app.reduce_key(plain_key(KeyCode::Char('d')));
+
+        assert!(update.handled);
+        assert!(!app.picker_prompt_focused());
+        assert_eq!(app.router.auth_picker().key_draft(), "d");
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn budget_and_planning_option_editors_keep_first_refusal() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_shell_view(ShellView::Setup);
+        app.router.setup_mut().begin_budget_edit(None);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('q'))).handled);
+        assert!(app.input().is_empty());
+        assert!(app.router.setup().budget_draft().is_empty());
+
+        app.set_shell_view(ShellView::PlanningPicker);
+        app.engagement
+            .planning_picker_mut()
+            .set_option_edit(Some(PlanningOptionEdit {
+                task: PlanningTaskId::GatherRepoContext,
+                option_name: "scope".to_string(),
+                draft: String::new(),
+            }));
+        assert!(app.reduce_key(plain_key(KeyCode::Char(':'))).handled);
+        assert_eq!(
+            app.engagement
+                .planning_picker()
+                .option_edit()
+                .map(|edit| edit.draft.as_str()),
+            Some(":")
+        );
+        assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn api_key_editor_keeps_colon_in_the_secret_draft() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.open_auth_method_picker("anthropic".to_string());
 
         let update = app.reduce_key(plain_key(KeyCode::Char(':')));
 
         assert!(update.handled);
-        assert!(app.picker_prompt_focused());
-        assert!(app.router.auth_picker().key_draft().is_empty());
+        assert!(!app.picker_prompt_focused());
+        assert_eq!(app.router.auth_picker().key_draft(), ":");
         app.reduce_key(plain_key(KeyCode::Char('j')));
-        assert_eq!(app.input(), "j");
-        assert!(app.router.auth_picker().key_draft().is_empty());
+        assert!(app.input().is_empty());
+        assert_eq!(app.router.auth_picker().key_draft(), ":j");
     }
 
     #[test]

@@ -13,6 +13,32 @@ fn steer_command_summary(raw: &str) -> String {
     }
 }
 
+struct ChangedScanRequest {
+    input: String,
+    path_count: usize,
+}
+
+fn changed_scan_request(
+    target: &std::path::Path,
+    reference: &str,
+    include_worktree: bool,
+) -> anyhow::Result<Option<ChangedScanRequest>> {
+    let scope = kuzushi_core::git_diff_files(target, reference, include_worktree)?;
+    let paths = scope
+        .files
+        .into_iter()
+        .filter(|path| target.join(path).is_file())
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>();
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(ChangedScanRequest {
+        path_count: paths.len(),
+        input: serde_json::json!({ "paths": paths, "diffBase": reference }).to_string(),
+    }))
+}
+
 impl ShellApp {
     pub(crate) fn reduce_command_effects(
         &mut self,
@@ -27,6 +53,7 @@ impl ShellApp {
 
     fn reduce_shell_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
         self.reduce_status_command_effect(command)
+            .or_else(|| self.reduce_scan_command_effect(command))
             .or_else(|| self.reduce_knowledge_command_effect(command))
             .or_else(|| self.reduce_navigation_command_effect(command))
             .or_else(|| self.reduce_view_command_effect(command))
@@ -34,6 +61,17 @@ impl ShellApp {
             .or_else(|| self.reduce_findings_command_effect(command))
             .or_else(|| self.reduce_jobs_command_effect(command))
             .or_else(|| self.reduce_terminal_command_effect(command))
+    }
+
+    fn reduce_scan_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
+        let ShellCommand::ScanSince {
+            reference,
+            include_worktree,
+        } = command
+        else {
+            return None;
+        };
+        Some(self.reduce_scan_since(reference, *include_worktree))
     }
 
     fn reduce_jobs_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
@@ -177,6 +215,11 @@ impl ShellApp {
             ShellCommand::Pause => Some(vec![ShellEffect::PauseActiveWork]),
             ShellCommand::Resume(run_id) => Some(vec![ShellEffect::ResumeSession(ResumeSession {
                 run_id: run_id.clone(),
+                from_start: false,
+            })]),
+            ShellCommand::Retry(run_id) => Some(vec![ShellEffect::ResumeSession(ResumeSession {
+                run_id: run_id.clone(),
+                from_start: true,
             })]),
             _ => None,
         }
@@ -378,6 +421,43 @@ impl ShellApp {
             }
             _ => None,
         }
+    }
+
+    fn reduce_scan_since(&mut self, reference: &str, include_worktree: bool) -> Vec<ShellEffect> {
+        let Some(target) = self.target_owned() else {
+            self.log(
+                "error",
+                "scan since requires an active target. Next: target <path>",
+            );
+            return Vec::new();
+        };
+        let request = match changed_scan_request(&target, reference, include_worktree) {
+            Ok(Some(request)) => request,
+            Ok(None) => {
+                self.log(
+                    "scan",
+                    format!("no existing changed files since {reference}; no scan started"),
+                );
+                return Vec::new();
+            }
+            Err(error) => {
+                self.log("error", format!("scan since {reference}: {error:#}"));
+                return Vec::new();
+            }
+        };
+        let worktree = if include_worktree {
+            "including tracked worktree changes"
+        } else {
+            "committed changes only"
+        };
+        self.log(
+            "scan",
+            format!(
+                "scanning {} changed file(s) since {reference} ({worktree})",
+                request.path_count
+            ),
+        );
+        self.reduce_run_tool(Some("sast:scan".to_string()), Some(request.input))
     }
 
     fn reduce_findings_command_effect(
@@ -807,11 +887,15 @@ impl ShellApp {
             Err(error) => {
                 self.log(
                     "error",
-                    with_next_step(error.to_string(), "target <path> then since <ref>"),
+                    with_next_step(error.to_string(), "target <path> then findings since <ref>"),
                 );
                 return Vec::new();
             }
         };
+        self.log(
+            "findings",
+            format!("filtered saved findings since {reference}; no scan ran"),
+        );
         self.reduce_open_filtered_findings(&expression)
     }
 
@@ -1313,6 +1397,21 @@ fn validate_run_focus_steer(raw: &str) -> Result<String, String> {
 mod run_focus_steer_tests {
     use super::*;
 
+    fn git(repo: &std::path::Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap().trim().to_string()
+    }
+
     #[test]
     fn steer_accepts_only_an_explicit_run_command() {
         assert_eq!(
@@ -1322,6 +1421,31 @@ mod run_focus_steer_tests {
         assert!(validate_run_focus_steer("findings").is_err());
         assert!(validate_run_focus_steer("run").is_err());
         assert!(validate_run_focus_steer("queue run semgrep:scan").is_err());
+    }
+
+    #[test]
+    fn changed_scan_request_carries_existing_files_and_diff_base() {
+        let repo = tempfile::tempdir().unwrap();
+        git(repo.path(), &["init", "-q"]);
+        git(repo.path(), &["config", "user.email", "test@example.com"]);
+        git(repo.path(), &["config", "user.name", "Test"]);
+        std::fs::create_dir(repo.path().join("src")).unwrap();
+        std::fs::write(repo.path().join("src/lib.rs"), "fn first() {}\n").unwrap();
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-qm", "baseline"]);
+        let baseline = git(repo.path(), &["rev-parse", "HEAD"]);
+        std::fs::write(repo.path().join("src/lib.rs"), "fn changed() {}\n").unwrap();
+        git(repo.path(), &["add", "."]);
+        git(repo.path(), &["commit", "-qm", "change"]);
+
+        let request = changed_scan_request(repo.path(), &baseline, false)
+            .unwrap()
+            .expect("changed scan request");
+        let input: serde_json::Value = serde_json::from_str(&request.input).unwrap();
+
+        assert_eq!(request.path_count, 1);
+        assert_eq!(input["paths"], serde_json::json!(["src/lib.rs"]));
+        assert_eq!(input["diffBase"], baseline);
     }
 
     #[test]

@@ -117,13 +117,18 @@ impl ShellApp {
         if verdict == ReviewDecisionVerdict::Suppressed {
             return vec![self.default_suppression_effect(alias, &finding, reason)];
         }
+        if verdict == ReviewDecisionVerdict::RejectedFalsePositive {
+            let decision =
+                ReviewDecision::dismissal(DismissReason::FalsePositive, &reason, "operator");
+            return vec![self.current_finding_decision_effect(alias, finding, decision)];
+        }
         let decision = ReviewDecision {
             verdict,
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: reason,
             dismiss_reason: None,
-            actor: None,
+            actor: Some("operator".to_string()),
         };
         vec![self.current_finding_decision_effect(alias, finding, decision)]
     }
@@ -303,7 +308,7 @@ impl ShellApp {
             self.set_warn_notice(
                 "review",
                 format!(
-                    "unknown review decision `{value}`. Next: decision confirmed|rejected_false_positive|suppressed|deferred|accepted_risk|needs_review <reason>"
+                    "unknown review decision `{value}`. Next: decision confirmed|deferred|accepted_risk|needs_review <reason> · dismiss false_positive <note> · suppress <id> --reason <text>"
                 ),
             );
         }

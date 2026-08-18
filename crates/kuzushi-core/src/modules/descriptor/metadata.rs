@@ -1,11 +1,15 @@
 use super::*;
+use super::descriptor_validation::validate_declared_policy;
 use crate::modules::registry::ToolExecutor;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone)]
 pub struct BuiltinModule {
     pub(in crate::modules) metadata: ModuleMetadata,
     pub(in crate::modules) tools: Vec<ToolDescriptor>,
     pub(in crate::modules) dag_nodes: Vec<DagNodeDescriptor>,
+    pub(in crate::modules) tool_executors: BTreeMap<String, ToolExecutor>,
+    pub(in crate::modules) dag_executors: BTreeMap<String, ToolExecutor>,
     pub(in crate::modules) hidden: bool,
     pub(in crate::modules) maturity: ModuleMaturity,
 }
@@ -52,89 +56,31 @@ impl BuiltinModule {
     }
 
     pub(in crate::modules) fn with_executor(mut self, executor: ToolExecutor) -> Self {
-        for tool in &mut self.tools {
-            tool.executor = Some(executor);
+        for tool in &self.tools {
+            self.tool_executors.insert(tool.name.clone(), executor);
         }
-        for node in &mut self.dag_nodes {
-            node.executor = Some(executor);
+        for node in &self.dag_nodes {
+            self.dag_executors.insert(node.id.clone(), executor);
         }
+        self
+    }
+
+    pub(in crate::modules) fn with_tool_executor(
+        mut self,
+        name: &str,
+        executor: ToolExecutor,
+    ) -> Self {
+        debug_assert!(
+            self.tools.iter().any(|tool| tool.name == name),
+            "with_tool_executor: no tool named {name:?}"
+        );
+        self.tool_executors.insert(name.to_string(), executor);
         self
     }
 
     pub(in crate::modules) fn validate_declared_policy(&self) -> Result<()> {
         for tool in &self.tools {
-            tool.validate_declared_policy(&self.metadata.id)?;
-        }
-        Ok(())
-    }
-}
-
-impl ToolDescriptor {
-    pub(in crate::modules) fn with_prompt(mut self, prompt: PromptSpec) -> Self {
-        self.prompts.push(prompt);
-        self
-    }
-
-    pub(in crate::modules) fn with_continuation(
-        mut self,
-        continuation: ContinuationSupport,
-    ) -> Self {
-        self.continuation = continuation;
-        self
-    }
-
-    pub(in crate::modules) fn with_policy(mut self, policy: ToolPolicy) -> Self {
-        self.phase = policy.phase;
-        self.runtime_requirement = policy.runtime_requirement;
-        self.effect = policy.effect;
-        self.approval = policy.approval;
-        self.workspace_requirement = policy.workspace_requirement;
-        self.finding_store_requirement = policy.finding_store_requirement;
-        self.policy_declared = true;
-        self
-    }
-
-    fn validate_declared_policy(&self, module_id: &str) -> Result<()> {
-        if !self.policy_declared {
-            anyhow::bail!(
-                "built-in tool {:?} in module {:?} has no descriptor-owned policy",
-                self.name,
-                module_id
-            )
-        }
-        if self.effect.needs_operator_approval() && self.approval != ApprovalPolicy::Explicit {
-            anyhow::bail!(
-                "built-in tool {:?} has {:?} effect without explicit approval",
-                self.name,
-                self.effect
-            )
-        }
-        if self.finding_store_requirement == FindingStoreRequirement::Required
-            && self.workspace_requirement != WorkspaceRequirement::Required
-        {
-            anyhow::bail!(
-                "built-in tool {:?} requires a finding store but not a workspace",
-                self.name
-            )
-        }
-        self.validate_prompt_options("built-in tool")?;
-        Ok(())
-    }
-
-    pub(in crate::modules) fn validate_prompt_options(&self, kind: &str) -> Result<()> {
-        for prompt in &self.prompts {
-            if !self
-                .options
-                .iter()
-                .any(|option| option.name == prompt.option_key)
-            {
-                anyhow::bail!(
-                    "{kind} {:?} prompt {:?} refers to undeclared option {:?}",
-                    self.name,
-                    prompt.role,
-                    prompt.option_key
-                )
-            }
+            validate_declared_policy(tool, &self.metadata.id)?;
         }
         Ok(())
     }
@@ -168,6 +114,8 @@ pub(in crate::modules) fn module(
         },
         tools,
         dag_nodes,
+        tool_executors: BTreeMap::new(),
+        dag_executors: BTreeMap::new(),
         hidden,
         maturity: ModuleMaturity::Core,
     }
@@ -218,7 +166,6 @@ pub(in crate::modules) fn tool_with_options(
         finding_store_requirement: FindingStoreRequirement::default(),
         options,
         prompts: Vec::new(),
-        executor: None,
         policy_declared: false,
     }
 }

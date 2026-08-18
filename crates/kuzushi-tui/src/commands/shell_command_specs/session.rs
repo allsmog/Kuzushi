@@ -44,6 +44,12 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "continue a failed run from its checkpoint, or resume a paused scan",
     },
     ShellCommandSpec {
+        command: "retry [runId]",
+        aliases: &["/retry [runId]"],
+        category: ShellCommandCategory::Session,
+        description: "start a failed, interrupted, or canceled run again with its recorded input",
+    },
+    ShellCommandSpec {
         command: "story",
         aliases: &["/story"],
         category: ShellCommandCategory::Session,

@@ -10,8 +10,8 @@ pub(crate) fn parse_single_arg_command(
         "open" | "use" | "since" | "replay" | "trace" | "detach" | "reparse" => {
             parse_required_single_arg_command(verb, first, original)
         }
-        "provider" | "backend" | "resume" | "kb" | "attachments" | "files" | "file-picker"
-        | "component" => parse_optional_single_arg_command(verb, first),
+        "provider" | "backend" | "resume" | "retry" | "kb" | "attachments" | "files"
+        | "file-picker" | "component" => parse_optional_single_arg_command(verb, first),
         "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
         "next" | "continue" => parse_next_command(first, original),
@@ -45,6 +45,7 @@ fn parse_optional_single_arg_command(verb: &str, first: Option<&str>) -> ShellCo
         "backend" => ShellCommand::Backend(first.map(ToString::to_string)),
         "target" => ShellCommand::Target(first.map(ToString::to_string)),
         "resume" => ShellCommand::Resume(first.map(ToString::to_string)),
+        "retry" => ShellCommand::Retry(first.map(ToString::to_string)),
         "kb" | "attachments" => ShellCommand::KnowledgeBase(first.map(ToString::to_string)),
         "files" | "file-picker" => ShellCommand::FilePicker,
         "component" => ShellCommand::Component(first.map(ToString::to_string)),

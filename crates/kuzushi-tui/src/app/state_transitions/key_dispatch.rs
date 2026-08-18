@@ -293,6 +293,7 @@ impl ShellApp {
         };
         let effects = self.resume_session_effect(crate::app::ResumeSession {
             run_id: Some(run_id),
+            from_start: false,
         });
         InputUpdate::handled_with_effects(effects)
     }
@@ -679,6 +680,13 @@ impl ShellApp {
         let update = self.handle_empty_input_view_key(key, modifiers);
         if update.handled {
             return update;
+        }
+        if modifiers.plain {
+            if let KeyCode::Char(ch) = key.code {
+                self.enter_prompt_mode();
+                self.insert_printable_key(ch);
+                return InputUpdate::handled();
+            }
         }
         InputUpdate::handled_if(self.handle_unhandled_navigation_key(key, modifiers))
     }
@@ -1430,15 +1438,10 @@ impl ShellApp {
             return;
         }
         self.set_input_mode(InputMode::Navigate);
-        self.log("input", "navigation mode — Esc returns to prompt");
     }
 
     fn enter_prompt_mode(&mut self) {
         self.set_input_mode(InputMode::Prompt);
-        self.log(
-            "input",
-            "prompt mode — Esc on an empty prompt returns to navigation",
-        );
     }
 
     fn handle_unhandled_navigation_key(
@@ -1621,6 +1624,25 @@ mod tests {
             actor: None,
             remembered: false,
         }
+    }
+
+    #[test]
+    fn successful_input_mode_flips_do_not_write_the_transcript() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let baseline = app.log_lines().len();
+
+        app.enter_navigate_mode();
+        app.enter_prompt_mode();
+
+        assert_eq!(app.log_lines().len(), baseline);
+
+        app.set_input("unfinished");
+        app.enter_navigate_mode();
+        assert_eq!(app.input_mode(), InputMode::Prompt);
+        assert_eq!(app.log_lines().len(), baseline + 1);
+        assert!(app.log_lines()[baseline]
+            .body
+            .contains("finish or clear the prompt"));
     }
 
     fn pending_descriptor_confirm() -> PendingConfirm {
@@ -2113,7 +2135,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_confirm_still_yields_ctrl_c_to_immediate_idle_exit() {
+    fn pending_confirm_yields_ctrl_c_to_volatile_state_disclosure() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.advisory_mut().pending_confirm = Some(pending_network_confirm());
         app.set_input("existing draft");
@@ -2121,10 +2143,8 @@ mod tests {
         let update = app.reduce_key(ctrl_key(KeyCode::Char('c')));
 
         assert!(update.handled);
-        assert!(matches!(
-            update.effects.as_slice(),
-            [ShellEffect::RequestShellQuit]
-        ));
+        assert!(update.effects.is_empty());
+        assert_eq!(app.shell_view(), ShellView::QuitConfirm);
         assert_eq!(app.input(), "existing draft");
         assert!(app.advisory().pending_confirm.is_some());
     }
@@ -2565,9 +2585,6 @@ mod tests {
         let (_target, mut app, attempt_id) = app_with_unresolved_map_result(config);
 
         assert!(app.reduce_key(plain_key(KeyCode::Esc)).handled);
-        assert_eq!(app.input_mode(), InputMode::Navigate);
-        assert!(app.reduce_key(plain_key(KeyCode::Char('a'))).handled);
-        assert!(app.input().is_empty());
         assert_eq!(app.input_mode(), InputMode::Navigate);
         assert!(app.reduce_key(plain_key(KeyCode::Char('x'))).handled);
         assert_eq!(app.input_mode(), InputMode::Prompt);

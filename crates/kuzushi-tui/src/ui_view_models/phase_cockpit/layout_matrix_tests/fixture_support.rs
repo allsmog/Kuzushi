@@ -64,6 +64,7 @@ pub(super) fn fixture_review_queue(populated: bool) -> ReviewQueueModel {
         filter_label: "all".to_string(),
         completeness_mode: "all",
         ordering_indicator: None,
+        operator_calibration: Default::default(),
         header: format!("{count} fixture findings"),
         empty_reason: (!populated).then_some("fixture empty".to_string()),
         rows: Arc::from([]),

@@ -120,6 +120,7 @@ fn result_display_skips_the_preview_line_that_restates_the_summary() {
 
     let lines = find_result_cell(&presentation).display_lines();
 
+    assert!(lines[0].contains("Semgrep scan (semgrep:scan)"), "heading: {lines:?}");
     assert!(lines[0].contains("bounded evidence"), "heading: {lines:?}");
     assert!(
         !lines[1..].iter().any(|line| line.contains("bounded evidence")),

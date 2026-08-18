@@ -149,6 +149,9 @@ impl ShellApp {
         let Some(canonical_name) = canonical_shell_option(name) else {
             return None;
         };
+        if canonical_name == UI_AUTONOMY_OPTION {
+            return Some(self.reduce_set_autonomy_option(global, value));
+        }
         let Some(value) = parse_bool_pref(value) else {
             self.log(
                 "error",
@@ -177,6 +180,25 @@ impl ShellApp {
         Some(persist_option_effects(scope))
     }
 
+    fn reduce_set_autonomy_option(&mut self, global: bool, value: &str) -> Vec<ShellEffect> {
+        if !global {
+            self.log(
+                "error",
+                "ui.autonomy is global; use setg ui.autonomy <recon|scan|review|prove|fix>",
+            );
+            return Vec::new();
+        }
+        let Some(posture) = kuzushi_core::AutonomyPosture::parse(value) else {
+            self.log(
+                "error",
+                "invalid ui.autonomy value; expected recon, scan, review, prove, or fix",
+            );
+            return Vec::new();
+        };
+        self.change_autonomy(posture);
+        Vec::new()
+    }
+
     fn reduce_unset_shell_option(&mut self, global: bool, name: &str) -> Option<Vec<ShellEffect>> {
         let Some(canonical_name) = canonical_shell_option(name) else {
             return None;
@@ -201,13 +223,13 @@ impl ShellApp {
         Some(persist_option_effects(scope))
     }
 
-    pub(crate) fn persist_option_store(&mut self, scope: OptionScope) {
+    pub(crate) fn persist_option_store(&mut self, scope: OptionScope) -> bool {
         if scope == OptionScope::Session {
-            return;
+            return true;
         }
         #[cfg(test)]
         if !self.option_persistence_enabled_for_test {
-            return;
+            return true;
         }
         let paths = match kuzushi_core::ConfigPaths::from_target(self.target()) {
             Ok(paths) => paths,
@@ -216,7 +238,7 @@ impl ShellApp {
                     "options",
                     format!("could not resolve option store path: {error}"),
                 );
-                return;
+                return false;
             }
         };
         if let Err(error) = self.option_store_mut().save_persistent(
@@ -224,7 +246,9 @@ impl ShellApp {
             paths.project_options_path().as_deref(),
         ) {
             self.log("options", format!("could not persist options: {error}"));
+            return false;
         }
+        true
     }
 
     fn clear_legacy_global_tool_option(&mut self, global: bool, name: &str) -> bool {
@@ -254,6 +278,7 @@ fn canonical_shell_option(name: &str) -> Option<&'static str> {
     match name.trim() {
         UI_AUTO_OPEN_ACTIVITY_OPTION | "auto_open_activity" => Some(UI_AUTO_OPEN_ACTIVITY_OPTION),
         UI_AUTO_OPEN_VIZ_OPTION | "auto_open_viz" => Some(UI_AUTO_OPEN_VIZ_OPTION),
+        UI_AUTONOMY_OPTION | "autonomy" => Some(UI_AUTONOMY_OPTION),
         UI_RAIL_OPTION => Some(UI_RAIL_OPTION),
         UI_NOTIFY_OPTION => Some(UI_NOTIFY_OPTION),
         _ => None,

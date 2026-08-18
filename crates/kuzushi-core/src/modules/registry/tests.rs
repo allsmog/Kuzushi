@@ -474,6 +474,18 @@ mod tests {
     }
 
     #[test]
+    fn report_tools_no_longer_route_through_catch_all() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = kwp_context(&config, None, None, None);
+        let input = json!({});
+
+        assert!(dispatch_context_workspace_tool("report:build", &input, &ctx).is_none());
+        assert!(dispatch_context_workspace_tool("report:sarif", &input, &ctx).is_none());
+        assert!(registry.executors.contains_key("report:build"));
+    }
+
+    #[test]
     fn runtime_requirement_metadata_is_attached_to_descriptors() {
         let registry = ModuleRegistry::with_v2_builtins();
 

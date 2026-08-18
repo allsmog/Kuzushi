@@ -31,7 +31,7 @@ pub(crate) const AUTH_CONFIG_MODEL_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "model [choice]",
-        aliases: &["model 1", "/model [choice]"],
+        aliases: &["model 1", "/model [choice]", "/mdl [choice]"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "select explicit provider:model",
     },

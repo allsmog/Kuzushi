@@ -1102,7 +1102,7 @@ fn validate_dynamic_tool_policy(tool: &ToolDescriptor) -> Result<()> {
             tool.name
         );
     }
-    tool.validate_prompt_options("dynamic tool")?;
+    validate_prompt_options(&tool, "dynamic tool")?;
     Ok(())
 }
 

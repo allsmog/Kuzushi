@@ -81,11 +81,12 @@ pub(crate) use run_summary_store::{
     list_current_run_summary_prefix, load_run_summary_without_repair, CurrentRunSummaryPrefix,
 };
 pub use run_summary_store::{
-    list_recent_run_summary_entries, list_run_summaries, list_run_summary_entries,
-    list_run_summary_entries_cursor_page, list_run_summary_entries_page, load_run_summary,
-    read_latest_run_pointer, repair_latest_run_pointer, write_run_summary, LatestRunPointerIssue,
-    LatestRunPointerState, RunSummaryEntriesCursorPage, RunSummaryEntry, RunSummaryEntryState,
-    RunSummaryIssue,
+    list_recent_run_summary_entries, list_recent_run_summary_entries_with_recoveries,
+    list_run_summaries, list_run_summary_entries, list_run_summary_entries_cursor_page,
+    list_run_summary_entries_page, load_run_summary, read_latest_run_pointer,
+    repair_latest_run_pointer, run_summary_history_exists, write_run_summary,
+    LatestRunPointerIssue, LatestRunPointerState, RecoveredRun, RunSummaryEntriesCursorPage,
+    RunSummaryEntriesRead, RunSummaryEntry, RunSummaryEntryState, RunSummaryIssue,
 };
 pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,

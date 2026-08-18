@@ -13,6 +13,11 @@ fn credential_prompt_focus_routes_paste_to_composer_not_secret_draft() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.open_auth_method_picker("anthropic".to_string());
     app.reduce_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Down,
+        crossterm::event::KeyModifiers::NONE,
+    ));
+    assert!(!app.router.auth_picker().is_api_key_row());
+    app.reduce_key(crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Char(':'),
         crossterm::event::KeyModifiers::NONE,
     ));
@@ -22,6 +27,60 @@ fn credential_prompt_focus_routes_paste_to_composer_not_secret_draft() {
     assert!(update.handled);
     assert_eq!(app.input(), "jobs");
     assert!(app.router.auth_picker().key_draft().is_empty());
+}
+
+#[test]
+fn picker_list_paste_moves_losslessly_into_the_composer() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_shell_view(ShellView::TargetPicker);
+    app.router.target_picker_mut().open(Vec::new());
+
+    let update = app.reduce_paste("queue run secret-scan:scan {}");
+
+    assert!(update.handled);
+    assert!(app.picker_prompt_focused());
+    assert_eq!(app.input(), "queue run secret-scan:scan {}");
+}
+
+#[test]
+fn planning_options_paste_moves_losslessly_into_the_composer() {
+    let target_dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.set_target(Some(target_dir.path().to_path_buf()));
+    let task = crate::app::PlanningTaskId::GatherRepoContext;
+    let row = crate::app::PlanningTaskRow::for_task(task, target_dir.path());
+    app.engagement
+        .planning_picker_mut()
+        .open(vec![row], [task].into_iter().collect());
+    app.engagement
+        .planning_picker_mut()
+        .set_focus(crate::app::PickerFocus::OptionsPane);
+    app.set_shell_view(ShellView::PlanningPicker);
+
+    let update = app.reduce_paste("queue run secret-scan:scan {}");
+
+    assert!(update.handled);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        crate::app::PickerFocus::Prompt
+    );
+    assert_eq!(app.input(), "queue run secret-scan:scan {}");
+}
+
+#[test]
+fn picker_editors_keep_paste_ownership() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.open_credential_entry("anthropic".to_string());
+
+    assert!(app.reduce_paste("sk-session").handled);
+    assert_eq!(app.router.auth_picker().key_draft(), "sk-session");
+    assert!(app.input().is_empty());
+
+    app.router.setup_mut().finish_editor();
+    app.router.setup_mut().begin_budget_edit(None);
+    assert!(app.reduce_paste("2.50").handled);
+    assert_eq!(app.router.setup().budget_draft(), "2.50");
+    assert!(app.input().is_empty());
 }
 
 #[test]

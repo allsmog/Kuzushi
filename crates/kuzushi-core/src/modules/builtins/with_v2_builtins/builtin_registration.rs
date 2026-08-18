@@ -65,13 +65,17 @@ impl ModuleRegistry {
     fn register_builtin_tools(&mut self, builtin: &BuiltinModule) {
         for tool in builtin.tools() {
             self.tools.insert(tool.name.clone(), tool.clone());
-            let executor = tool.executor.unwrap_or_else(|| {
-                panic!(
-                    "built-in tool {:?} in module {:?} has no descriptor executor",
-                    tool.name,
-                    builtin.metadata().id
-                )
-            });
+            let executor = builtin
+                .tool_executors
+                .get(&tool.name)
+                .copied()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "built-in tool {:?} in module {:?} has no descriptor executor",
+                        tool.name,
+                        builtin.metadata().id
+                    )
+                });
             self.executors.insert(tool.name.clone(), executor);
         }
     }
@@ -79,13 +83,17 @@ impl ModuleRegistry {
     fn register_builtin_dag_executors(&mut self, builtin: &BuiltinModule) {
         for node in builtin.dag_nodes() {
             if !self.executors.contains_key(&node.id) {
-                let executor = node.executor.unwrap_or_else(|| {
-                    panic!(
-                        "built-in DAG node {:?} in module {:?} has no descriptor executor",
-                        node.id,
-                        builtin.metadata().id
-                    )
-                });
+                let executor = builtin
+                    .dag_executors
+                    .get(&node.id)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "built-in DAG node {:?} in module {:?} has no descriptor executor",
+                            node.id,
+                            builtin.metadata().id
+                        )
+                    });
                 self.executors.insert(node.id.clone(), executor);
             }
         }
@@ -370,7 +378,11 @@ fn register_finding_report_modules(registry: &mut ModuleRegistry) {
     registry.register(findings_module().with_executor(execute_context_workspace_tool));
     registry.register(suppress_module().with_executor(execute_context_workspace_tool));
     registry.register(pack_module().with_executor(execute_context_workspace_tool));
-    registry.register(report_module().with_executor(execute_context_workspace_tool));
+    registry.register(
+        report_module()
+            .with_tool_executor("report:build", execute_report_build_tool)
+            .with_tool_executor("report:sarif", execute_report_sarif_tool),
+    );
 }
 
 fn register_security_map_modules(registry: &mut ModuleRegistry) {

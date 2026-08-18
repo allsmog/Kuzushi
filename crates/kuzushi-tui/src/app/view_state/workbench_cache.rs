@@ -75,6 +75,8 @@ pub(crate) struct WorkbenchCache {
     latest_run_pointer: Option<LatestRunPointerCache>,
     source_file: Option<SourceFileCache>,
     git_metadata: Option<GitMetadataCache>,
+    revision_relationships:
+        BTreeMap<(PathBuf, String, String), kuzushi_core::workspace::RevisionRelationship>,
     scope_tree: Option<ScopeTreeCache>,
     project_model_document: Option<ProjectModelDocumentCache>,
     strategy_queue: Option<StrategyQueueCache>,
@@ -407,6 +409,7 @@ impl WorkbenchCache {
     pub(crate) fn invalidate_workspace_files(&mut self) {
         self.source_file = None;
         self.mark_git_metadata_stale();
+        self.revision_relationships.clear();
         self.scope_tree = None;
         self.project_model_document = None;
         self.strategy_queue = None;

@@ -11,10 +11,24 @@ pub(crate) fn full_mode_scope_files(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Option<Vec<std::path::PathBuf>>> {
+    if input.get("scopeFile").is_none() {
+        if let Some(paths) = full_mode_input_paths(input)? {
+            return Ok(Some(paths));
+        }
+    }
     let Some(path) = full_mode_scope_path(input, ctx) else {
         return Ok(None);
     };
     read_full_mode_scope_file(&path)
+}
+
+fn full_mode_input_paths(input: &Value) -> Result<Option<Vec<std::path::PathBuf>>> {
+    let paths = string_list_input(input, &["paths", "includePaths", "include_paths"])?
+        .unwrap_or_default()
+        .into_iter()
+        .map(std::path::PathBuf::from)
+        .collect::<Vec<_>>();
+    Ok(non_empty_full_mode_scope_files(paths))
 }
 
 pub(crate) fn full_mode_scope_path(
@@ -153,6 +167,29 @@ pub(crate) fn required_full_mode_runtime(
             "full-mode:hunt"
         ))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::full_mode_input_paths;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    #[test]
+    fn changed_file_paths_scope_full_mode_without_a_sidecar_file() {
+        let paths = full_mode_input_paths(&json!({
+            "paths": ["src/auth.rs", "src/db.rs"]
+        }))
+        .unwrap();
+
+        assert_eq!(
+            paths,
+            Some(vec![
+                PathBuf::from("src/auth.rs"),
+                PathBuf::from("src/db.rs")
+            ])
+        );
+    }
 }
 
 pub(crate) fn full_mode_routed_runtime<'a>(

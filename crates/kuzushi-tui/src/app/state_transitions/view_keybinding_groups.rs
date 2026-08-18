@@ -464,7 +464,7 @@ fn backlog_verdict_keybindings() -> Vec<ViewKeybinding> {
         bind_char(
             'f',
             "f",
-            "reject-FP",
+            "draft false-positive",
             ViewHotkeyAction::WorkbenchBacklogDecide("rejected_false_positive"),
         ),
         bind_char(
@@ -501,7 +501,7 @@ fn prove_page_action_keybindings() -> Vec<ViewKeybinding> {
         bind_char(
             'x',
             "x",
-            "draft suppress",
+            "suppression rule",
             ViewHotkeyAction::WorkbenchSuppress,
         ),
         bind_char(

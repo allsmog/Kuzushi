@@ -8,6 +8,23 @@ impl ShellApp {
         let Some((alias, finding)) = self.selected_visible_finding_at_cursor() else {
             return Vec::new();
         };
+        self.open_captured_finding(alias, finding)
+    }
+
+    /// Capture the row before changing pages because Review and Prove can
+    /// project different finding sets at the same cursor index.
+    pub(crate) fn open_finding_at_cursor_on_page(
+        &mut self,
+        page: WorkbenchPage,
+    ) -> Vec<ShellEffect> {
+        let Some((alias, finding)) = self.selected_visible_finding_at_cursor() else {
+            return Vec::new();
+        };
+        self.set_workbench_page(page);
+        self.open_captured_finding(alias, finding)
+    }
+
+    fn open_captured_finding(&mut self, alias: String, finding: Finding) -> Vec<ShellEffect> {
         *self.selected_finding_mut() = Some(finding.clone());
         self.focus_workbench_details_for_opened_finding();
         let effects = self.review_session_start_effects(&finding);

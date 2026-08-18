@@ -292,9 +292,16 @@ fn evidence_confidence_max(finding: &Finding) -> Option<u8> {
 }
 
 fn derived_source_present(finding: &Finding) -> bool {
-    !finding.sources.is_empty()
-        || finding.source_signature.is_some()
-        || finding.corroboration_count > 1
+    matches!(
+        finding.static_proof_state,
+        Some(
+            StaticProofState::CodeCited
+                | StaticProofState::SourceSinkLinked
+                | StaticProofState::SanitizerChecked
+                | StaticProofState::StaticallyConfirmed
+                | StaticProofState::StaticallyRejected
+        )
+    )
 }
 
 fn analysis_summary(
@@ -325,7 +332,7 @@ fn evidence_state(finding: &Finding, counts: &EvidenceOriginCounts) -> &'static 
         counts.observed_count > 0,
         counts.model_generated_reasoning_count > 0,
         finding.corroboration_count > 1 || finding.sources.len() > 1,
-        !finding.sources.is_empty() || finding.source_signature.is_some(),
+        derived_source_present(finding),
     )
 }
 

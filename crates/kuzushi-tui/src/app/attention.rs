@@ -1,4 +1,4 @@
-use super::{GuidedScanStage, SetupEditor, ShellApp};
+use super::{GuidedScanStage, LiveActivityPhase, SetupEditor, ShellApp};
 use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
 use kuzushi_core::WorkflowPhase;
 
@@ -66,6 +66,16 @@ impl AttentionBroker {
         };
         Some(format!("{subject} · {}", primary.route.hint()))
     }
+}
+
+/// Notification candidates include terminal ad-hoc runs. They stay out of
+/// the persistent attention rail because opening Activity is sufficient
+/// acknowledgement; the active-id snapshot prevents repeated pings.
+pub(crate) fn notification_attention_items(app: &ShellApp) -> Vec<AttentionItem> {
+    let mut items = AttentionBroker::from_app(app).items;
+    collect_ad_hoc_run_result(app, &mut items);
+    items.sort_by_key(|item| (item.kind, route_order(item.route)));
+    items
 }
 
 impl AttentionKind {
@@ -174,6 +184,31 @@ fn collect_phase_results(app: &ShellApp, items: &mut Vec<AttentionItem>) {
     }
 }
 
+fn collect_ad_hoc_run_result(app: &ShellApp, items: &mut Vec<AttentionItem>) {
+    let Some(session) = app.activity() else {
+        return;
+    };
+    if session.phase_attempt_id.is_some() {
+        return;
+    }
+    let Some(activity) = app.live_activity() else {
+        return;
+    };
+    let kind = match activity.phase {
+        LiveActivityPhase::Partial => AttentionKind::PartialResult,
+        LiveActivityPhase::Completed
+        | LiveActivityPhase::Skipped
+        | LiveActivityPhase::Failed
+        | LiveActivityPhase::Refused => AttentionKind::ResultDisposition,
+        _ => return,
+    };
+    items.push(AttentionItem {
+        id: format!("ad-hoc-run:{}", session.run_id),
+        kind,
+        route: AttentionRoute::Activity,
+    });
+}
+
 fn route_order(route: AttentionRoute) -> usize {
     match route {
         AttentionRoute::Workbench(phase) => phase.position(),
@@ -229,5 +264,22 @@ mod tests {
         assert!(debug.contains("Credential"));
         assert!(!debug.contains("api_key"));
         assert!(!debug.contains("secret"));
+    }
+
+    #[test]
+    fn terminal_ad_hoc_run_is_notification_only() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_activity(Some(crate::ActivitySession::new("direct-run")));
+        app.set_live_activity_state(Some(crate::LiveActivity::new(
+            LiveActivityPhase::Completed,
+            "taint-iris:hunt",
+            "complete",
+        )));
+
+        assert!(AttentionBroker::from_app(&app).items().is_empty());
+        let items = notification_attention_items(&app);
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, "ad-hoc-run:direct-run");
+        assert_eq!(items[0].route, AttentionRoute::Activity);
     }
 }

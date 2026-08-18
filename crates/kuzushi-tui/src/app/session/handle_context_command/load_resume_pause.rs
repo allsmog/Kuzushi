@@ -44,6 +44,9 @@ impl ShellApp {
     }
 
     pub(crate) fn resume_session_effect(&mut self, resume: ResumeSession) -> Vec<ShellEffect> {
+        if resume.from_start {
+            return self.retry_session_effect(resume.run_id);
+        }
         if let Some(run_id) = normalized_resume_run_id(resume) {
             return self.resume_recorded_run(run_id);
         }
@@ -51,6 +54,44 @@ impl ShellApp {
             self.offer_latest_resumable_run();
         }
         Vec::new()
+    }
+
+    fn retry_session_effect(&mut self, run_id: Option<String>) -> Vec<ShellEffect> {
+        if let Some(run_id) = run_id.filter(|value| !value.trim().is_empty()) {
+            return self.retry_recorded_run(run_id);
+        }
+        let Some(run_id) = self.latest_resumable_run_id() else {
+            self.show_resume_guidance();
+            return Vec::new();
+        };
+        self.log(
+            "retry",
+            format!("latest retryable run is {run_id} · Enter starts it again"),
+        );
+        self.set_input(format!("retry {run_id}"));
+        self.set_input_mode(InputMode::Prompt);
+        Vec::new()
+    }
+
+    fn retry_recorded_run(&mut self, run_id: String) -> Vec<ShellEffect> {
+        match self.recorded_failed_invocation(&run_id) {
+            Ok(Some((tool, input))) => {
+                self.log(
+                    "retry",
+                    format!("retrying {run_id} from the beginning with recorded input · {tool}"),
+                );
+                self.reduce_run_tool(Some(tool), Some(input))
+            }
+            Ok(None) => {
+                self.open_resume_replay(run_id);
+                Vec::new()
+            }
+            Err(error) => {
+                self.log("error", format!("retry: {error:#}"));
+                self.open_resume_replay(run_id);
+                Vec::new()
+            }
+        }
     }
 
     /// Bare `resume` with nothing paused: draft `resume <runId>` for the most
@@ -134,6 +175,24 @@ impl ShellApp {
             return Ok(None);
         }
         let input_path = kuzushi_core::run_artifacts::run_dir(&target, run_id).join("input.json");
+        let input = std::fs::read_to_string(&input_path)
+            .with_context(|| format!("Could not read recorded input {}", input_path.display()))?;
+        Ok(Some((tool, input)))
+    }
+
+    fn recorded_failed_invocation(&self, run_id: &str) -> anyhow::Result<Option<(String, String)>> {
+        let Some(target) = self.target() else {
+            anyhow::bail!("retry requires an active target. Next: target <path>");
+        };
+        let summary = kuzushi_core::run_artifacts::load_run_summary(target, run_id)?;
+        let retryable = matches!(
+            summary.status.as_str(),
+            "failed" | "interrupted" | "canceled"
+        );
+        let Some(tool) = summary.tool.filter(|_| retryable) else {
+            return Ok(None);
+        };
+        let input_path = kuzushi_core::run_artifacts::run_dir(target, run_id).join("input.json");
         let input = std::fs::read_to_string(&input_path)
             .with_context(|| format!("Could not read recorded input {}", input_path.display()))?;
         Ok(Some((tool, input)))
@@ -306,7 +365,10 @@ mod resume_tests {
     use super::*;
     use kuzushi_core::{V2Config, WorkspaceTarget};
 
-    fn app_with_run(status_failed: bool) -> (tempfile::TempDir, ShellApp, String) {
+    fn app_with_run(
+        status_failed: bool,
+        with_checkpoint: bool,
+    ) -> (tempfile::TempDir, ShellApp, String) {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let run_id = "run-resume-1".to_string();
@@ -325,7 +387,7 @@ mod resume_tests {
         let run_dir = kuzushi_core::run_artifacts::run_dir(workspace.root(), &run_id);
         std::fs::create_dir_all(&run_dir).unwrap();
         std::fs::write(run_dir.join("input.json"), r#"{"target":"."}"#).unwrap();
-        if status_failed {
+        if with_checkpoint {
             write_resume_checkpoint(workspace.root(), &run_id);
         }
         let app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -360,7 +422,7 @@ mod resume_tests {
 
     #[test]
     fn failed_run_resumes_with_its_recorded_tool_and_input() {
-        let (_temp, mut app, run_id) = app_with_run(true);
+        let (_temp, mut app, run_id) = app_with_run(true, true);
 
         let invocation = app.resumable_run_invocation(&run_id).unwrap();
 
@@ -372,9 +434,12 @@ mod resume_tests {
 
     #[test]
     fn bare_resume_drafts_the_latest_resumable_run() {
-        let (_temp, mut app, run_id) = app_with_run(true);
+        let (_temp, mut app, run_id) = app_with_run(true, true);
 
-        let effects = app.resume_session_effect(ResumeSession { run_id: None });
+        let effects = app.resume_session_effect(ResumeSession {
+            run_id: None,
+            from_start: false,
+        });
 
         assert!(effects.is_empty());
         assert_eq!(app.input(), format!("resume {run_id}"));
@@ -383,14 +448,31 @@ mod resume_tests {
 
     #[test]
     fn still_running_run_is_not_resumable_and_falls_back_to_replay() {
-        let (_temp, mut app, run_id) = app_with_run(false);
+        let (_temp, mut app, run_id) = app_with_run(false, false);
 
         assert_eq!(app.resumable_run_invocation(&run_id).unwrap(), None);
 
         let effects = app.resume_session_effect(ResumeSession {
             run_id: Some(run_id.clone()),
+            from_start: false,
         });
         assert!(effects.is_empty());
         assert_eq!(app.shell_view(), ShellView::Replay);
+    }
+
+    #[test]
+    fn failed_run_retries_from_recorded_input_without_a_checkpoint() {
+        let (_temp, mut app, run_id) = app_with_run(true, false);
+
+        assert_eq!(
+            app.recorded_failed_invocation(&run_id).unwrap(),
+            Some(("x-ray:run".to_string(), r#"{"target":"."}"#.to_string()))
+        );
+        let effects = app.resume_session_effect(ResumeSession {
+            run_id: Some(run_id),
+            from_start: true,
+        });
+
+        assert!(!effects.is_empty());
     }
 }

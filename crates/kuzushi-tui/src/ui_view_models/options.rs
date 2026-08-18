@@ -1,5 +1,6 @@
 use crate::{OptionsFilter, OptionsView, ShellApp};
 use kuzushi_core::modules::{OptionSpec, OptionType};
+use kuzushi_core::OptionScope;
 
 const OPTIONS_SUMMARY_COLUMN_COUNT: usize = 2;
 
@@ -132,7 +133,15 @@ pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel 
     let mut rows = tool
         .options
         .iter()
-        .filter_map(|spec| option_row(spec, view.filter, stored.get(&spec.name)))
+        .filter_map(|spec| {
+            option_row(
+                spec,
+                view.filter,
+                stored.get(&spec.name),
+                app.option_store()
+                    .effective_stored_value_scope(&tool.name, &spec.name),
+            )
+        })
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| !row.has_stored_value);
     let body = if rows.is_empty() {
@@ -204,7 +213,7 @@ fn options_table(rows: Vec<OptionsTableRow>) -> OptionsTable {
             "set <key> <value>: session-only (lost on exit); setg <key> <value>: global for this tool.",
         headers: [
             "option",
-            "value",
+            "value · scope",
             "default",
             "req",
             "type",
@@ -232,6 +241,7 @@ fn option_row(
     spec: &OptionSpec,
     filter: OptionsFilter,
     current: Option<&serde_json::Value>,
+    scope: Option<OptionScope>,
 ) -> Option<OptionsTableRow> {
     let has_stored_value = current.is_some();
     if !option_visible(spec, filter, has_stored_value) {
@@ -240,7 +250,7 @@ fn option_row(
     Some(OptionsTableRow {
         cells: [
             spec.name.clone(),
-            current.map(format_json_value).unwrap_or_else(dash),
+            stored_value_label(current, scope),
             spec.default
                 .as_ref()
                 .map(format_json_value)
@@ -252,6 +262,19 @@ fn option_row(
         ],
         has_stored_value,
     })
+}
+
+fn stored_value_label(current: Option<&serde_json::Value>, scope: Option<OptionScope>) -> String {
+    let Some(current) = current else {
+        return dash();
+    };
+    let scope = match scope {
+        Some(OptionScope::Global) => "global",
+        Some(OptionScope::Workspace) => "workspace",
+        Some(OptionScope::Session) => "session",
+        None => "unknown source",
+    };
+    format!("{} · {scope}", format_json_value(current))
 }
 
 fn options_filter_label(filter: OptionsFilter) -> &'static str {

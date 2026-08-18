@@ -145,7 +145,7 @@ fn prove_fixture(state: SemanticFixture) -> ProvePhaseModel {
         selection_disclosure: None,
         investigation: None,
         trace: None,
-        empty_hint: (richness == 0).then_some("fixture empty"),
+        empty_hint: (richness == 0).then_some("fixture empty".to_string()),
     }
 }
 

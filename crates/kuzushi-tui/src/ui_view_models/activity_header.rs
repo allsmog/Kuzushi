@@ -16,6 +16,7 @@ pub(crate) struct ActivityHeaderModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActivityRunOutcome {
     WaitingForOperator,
+    Canceling,
     Terminal {
         status: String,
         findings: Option<u64>,
@@ -95,7 +96,7 @@ pub(crate) fn activity_header_model_with_queue(
 fn activity_cost_label(session: &ActivitySession) -> String {
     match session.runtime_cost_report() {
         Err(_) => "cost accounting error".to_string(),
-        Ok(cost) if cost.is_unavailable() => "cost unavailable".to_string(),
+        Ok(cost) if cost.is_unavailable() => "cost not recorded".to_string(),
         Ok(cost) if cost.is_complete() => format!("cost ${:.4}", cost.observed_usd()),
         Ok(cost) => format!("cost >=${:.4} (incomplete)", cost.observed_usd()),
     }
@@ -111,6 +112,7 @@ fn progress_segment(
         Some(ActivityRunOutcome::WaitingForOperator) => {
             "? waiting for operator input · run paused safely".to_string()
         }
+        Some(ActivityRunOutcome::Canceling) => "◐ run canceling · waiting for cleanup".to_string(),
         Some(ActivityRunOutcome::Terminal {
             status,
             findings,
@@ -374,6 +376,21 @@ mod tests {
     }
 
     #[test]
+    fn canceling_run_never_claims_a_terminal_cancellation() {
+        let session = ActivitySession::new("canceling-run");
+
+        let model = activity_header_model(
+            &session,
+            &ActivityRouteState::default(),
+            Some(ActivityRunOutcome::Canceling),
+            None,
+        );
+
+        assert!(model.summary_title.contains("run canceling"));
+        assert!(!model.summary_title.contains("run canceled"));
+    }
+
+    #[test]
     fn activity_header_model_counts_tasks_and_cost() {
         let mut session = ActivitySession::new("tool-1778354160-e1b1d602a576");
         session.tasks.insert(
@@ -464,6 +481,17 @@ mod tests {
         let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
 
         assert!(model.detailed_title.contains("cost >=$0.0000 (incomplete)"));
+    }
+
+    #[test]
+    fn unavailable_terminal_cost_never_renders_as_zero_dollars() {
+        let mut session = ActivitySession::new("tool-unmetered");
+        session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
+
+        let model = activity_header_model(&session, &ActivityRouteState::default(), None, None);
+
+        assert!(model.detailed_title.contains("cost not recorded"));
+        assert!(!model.detailed_title.contains("$0.0000"));
     }
 
     #[test]

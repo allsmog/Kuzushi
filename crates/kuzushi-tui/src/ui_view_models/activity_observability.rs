@@ -3,11 +3,11 @@ use crate::{ActivitySession, DagTaskState};
 use std::time::{Duration, Instant};
 
 pub(crate) const ACTIVITY_STALE_PROGRESS_AFTER: Duration = Duration::from_secs(30);
+const MODEL_CALL_QUIET_WARNING_AFTER: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActivityHeartbeatTone {
     Live,
-    Stalled,
     Complete,
     Warning,
     Failed,
@@ -26,11 +26,8 @@ pub(crate) fn activity_heartbeat_model(
     outcome: Option<&ActivityRunOutcome>,
     now: Instant,
 ) -> ActivityHeartbeatModel {
-    if matches!(outcome, Some(ActivityRunOutcome::WaitingForOperator)) {
-        return ActivityHeartbeatModel {
-            text: " ? WAITING INPUT · operator answer required · run paused safely".to_string(),
-            tone: ActivityHeartbeatTone::Warning,
-        };
+    if let Some(heartbeat) = operator_owned_heartbeat(outcome) {
+        return heartbeat;
     }
     let (age, source) = progress_signal(session, now);
     if !live {
@@ -49,8 +46,26 @@ pub(crate) fn activity_heartbeat_model(
     }
 }
 
-/// A typed open model call is authoritative quiet work until a typed terminal,
-/// timeout, or cancellation item closes it.
+fn operator_owned_heartbeat(
+    outcome: Option<&ActivityRunOutcome>,
+) -> Option<ActivityHeartbeatModel> {
+    let text = match outcome {
+        Some(ActivityRunOutcome::WaitingForOperator) => {
+            " ? WAITING INPUT · operator answer required · run paused safely"
+        }
+        Some(ActivityRunOutcome::Canceling) => {
+            " ◐ CANCELING · waiting for cleanup · Ctrl+C stays here"
+        }
+        _ => return None,
+    };
+    Some(ActivityHeartbeatModel {
+        text: text.to_string(),
+        tone: ActivityHeartbeatTone::Warning,
+    })
+}
+
+/// Typed call state owns closure, but elapsed silence still owns the warning
+/// tone. This keeps an open provider socket from looking healthy forever.
 fn stale_heartbeat(
     session: &ActivitySession,
     running_tool: Option<&str>,
@@ -59,6 +74,16 @@ fn stale_heartbeat(
     source: &str,
 ) -> ActivityHeartbeatModel {
     if let Some(query_age) = open_query_in_flight(session, now) {
+        if query_age >= MODEL_CALL_QUIET_WARNING_AFTER {
+            return ActivityHeartbeatModel {
+                text: format!(
+                    " ⚠ MODEL CALL QUIET for {} · current {} · provider call remains open · Ctrl+C available",
+                    age_label(query_age),
+                    current_subject(session, running_tool),
+                ),
+                tone: ActivityHeartbeatTone::Warning,
+            };
+        }
         return ActivityHeartbeatModel {
             text: format!(
                 " ◐ query in flight {} · current {} · last {source}",
@@ -70,11 +95,11 @@ fn stale_heartbeat(
     }
     ActivityHeartbeatModel {
         text: format!(
-            " ⚠ NO PROGRESS SIGNAL for {} · current {} · last {source} · Ctrl+C cancels",
+            " ◐ TOOL QUIET for {} · current {} · last {source} · process remains active · Ctrl+C available",
             age_label(age),
             current_subject(session, running_tool),
         ),
-        tone: ActivityHeartbeatTone::Stalled,
+        tone: ActivityHeartbeatTone::Warning,
     }
 }
 
@@ -103,6 +128,7 @@ struct TerminalHeartbeat {
 fn terminal_heartbeat(outcome: Option<&ActivityRunOutcome>) -> TerminalHeartbeat {
     let status = match outcome {
         Some(ActivityRunOutcome::WaitingForOperator) => "waiting",
+        Some(ActivityRunOutcome::Canceling) => "canceling",
         Some(ActivityRunOutcome::Failed { .. }) => "failed",
         Some(ActivityRunOutcome::Terminal { status, .. }) => status.as_str(),
         None => "completed",
@@ -112,6 +138,7 @@ fn terminal_heartbeat(outcome: Option<&ActivityRunOutcome>) -> TerminalHeartbeat
         "failed" | "refused" | "interrupted" => terminal("✗ FAILED", ActivityHeartbeatTone::Failed),
         "partial" => terminal("⚠ PARTIAL", ActivityHeartbeatTone::Warning),
         "canceled" | "cancelled" => terminal("× CANCELED", ActivityHeartbeatTone::Warning),
+        "canceling" => terminal("◐ CANCELING", ActivityHeartbeatTone::Warning),
         "skipped" => terminal("⊘ SKIPPED", ActivityHeartbeatTone::Warning),
         _ => terminal("✓ COMPLETE", ActivityHeartbeatTone::Complete),
     }
@@ -237,16 +264,19 @@ mod tests {
         assert_eq!(session.open_model_call_age(probe), Some(expected_age));
         let heartbeat =
             activity_heartbeat_model(session, Some("threat-model:build"), true, None, probe);
-        assert_eq!(
-            heartbeat.tone,
-            ActivityHeartbeatTone::Live,
+        let (expected_tone, expected_label) = if expected_age >= MODEL_CALL_QUIET_WARNING_AFTER {
+            (ActivityHeartbeatTone::Warning, "MODEL CALL QUIET")
+        } else {
+            (ActivityHeartbeatTone::Live, "query in flight")
+        };
+        assert_eq!(heartbeat.tone, expected_tone, "{}", heartbeat.text);
+        assert!(
+            heartbeat.text.contains(expected_label),
             "{}",
             heartbeat.text
         );
         assert!(
-            heartbeat
-                .text
-                .contains(&format!("query in flight {}", age_label(expected_age))),
+            heartbeat.text.contains(&age_label(expected_age)),
             "{}",
             heartbeat.text
         );
@@ -258,7 +288,7 @@ mod tests {
     }
 
     #[test]
-    fn stale_live_activity_names_the_current_tool_and_last_real_signal() {
+    fn quiet_live_tool_names_the_current_tool_and_last_real_signal_without_claiming_a_stall() {
         let now = Instant::now();
         let mut session = ActivitySession::for_phase("context-run", WorkflowPhase::Map);
         session
@@ -283,12 +313,8 @@ mod tests {
 
         let model = activity_heartbeat_model(&session, Some("context:build"), true, None, now);
 
-        assert_eq!(model.tone, ActivityHeartbeatTone::Stalled);
-        assert!(
-            model.text.contains("NO PROGRESS SIGNAL for 45s"),
-            "{}",
-            model.text
-        );
+        assert_eq!(model.tone, ActivityHeartbeatTone::Warning);
+        assert!(model.text.contains("TOOL QUIET for 45s"), "{}", model.text);
         assert!(
             model.text.contains("current context:build"),
             "{}",
@@ -301,8 +327,8 @@ mod tests {
         );
     }
 
-    /// C1: a quiet-but-open typed model call remains work in flight regardless
-    /// of age. Its typed terminal/timeout/cancel item owns closure.
+    /// C1: a quiet typed model call remains work in flight, but prolonged
+    /// silence is visibly downgraded from healthy live activity.
     #[test]
     fn open_model_call_reports_query_in_flight_instead_of_a_false_stall() {
         let mut session = ActivitySession::for_phase("model-run", WorkflowPhase::Scan);
@@ -490,5 +516,22 @@ mod tests {
         assert!(model.text.contains("WAITING INPUT"), "{}", model.text);
         assert!(model.text.contains("run paused safely"), "{}", model.text);
         assert!(!model.text.contains("✓ COMPLETE"), "{}", model.text);
+    }
+
+    #[test]
+    fn canceling_activity_remains_nonterminal_until_cleanup_finishes() {
+        let session = ActivitySession::for_phase("canceling-run", WorkflowPhase::Scan);
+
+        let model = activity_heartbeat_model(
+            &session,
+            None,
+            false,
+            Some(&ActivityRunOutcome::Canceling),
+            Instant::now(),
+        );
+
+        assert_eq!(model.tone, ActivityHeartbeatTone::Warning);
+        assert!(model.text.contains("CANCELING"));
+        assert!(!model.text.contains("CANCELED"));
     }
 }

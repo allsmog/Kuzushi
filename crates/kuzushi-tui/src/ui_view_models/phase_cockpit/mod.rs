@@ -5,10 +5,10 @@
 //! Kuzushi has not actually observed.
 
 use super::{
-    context_strip_model, journey_model, AttackSurfaceRiskModel, AttackTree, ContextSnapshotModel,
-    DfdModel, FindingDetailModel, FindingsModel, JourneyModel, JourneyPhaseStatus,
-    PatchReviewModel, ProjectModel, ReportPreviewModel, ReviewQueueModel, RiskByModule,
-    TaintFlowPath, ThreatPatchCardModel, WorklistViewModel,
+    context_strip_model, journey_model, AttackSurfaceRiskModel, AttackTree, CheckpointDrift,
+    ContextSnapshotModel, DfdModel, FindingDetailModel, FindingsModel, JourneyModel,
+    JourneyPhaseStatus, PatchReviewModel, ProjectModel, ReportPreviewModel, ReviewQueueModel,
+    RiskByModule, TaintFlowPath, ThreatPatchCardModel, WorklistViewModel,
 };
 #[cfg(test)]
 use crate::{phase_attempt_outcome_from_label, phase_result_policy};
@@ -140,6 +140,7 @@ pub(crate) struct EngagementHeaderModel {
     /// Reality-derived engagement phase. Page selection may differ and never
     /// mutates this value.
     pub(crate) reality_phase: Option<WorkflowPhase>,
+    pub(crate) checkpoint_drift: Option<CheckpointDrift>,
     pub(crate) target: String,
     pub(crate) context: String,
     pub(crate) model: String,
@@ -242,7 +243,7 @@ pub(crate) struct ProvePhaseModel {
     pub(crate) attack_path: TaintFlowPath,
     pub(crate) proof: Option<ProofReplayModel>,
     pub(crate) selection_disclosure: Option<SelectionDisclosureModel>,
-    pub(crate) empty_hint: Option<&'static str>,
+    pub(crate) empty_hint: Option<String>,
     /// The bounded investigation plan card opened by `v`: what the verifier
     /// will pursue, under which safety boundary, and the exact command Enter
     /// drafts. Present only while the operator has the card open.
@@ -473,6 +474,7 @@ fn engagement_header_model(
     EngagementHeaderModel {
         phase,
         reality_phase: guidance.reality_phase,
+        checkpoint_drift: journey.and_then(|journey| journey.checkpoint_drift.clone()),
         target: context.target,
         context: context_state,
         model,

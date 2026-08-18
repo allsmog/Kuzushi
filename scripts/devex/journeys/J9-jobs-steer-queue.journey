@@ -9,8 +9,8 @@ env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
-wait-for: 5 ACTIVITY
+submit: demo
+wait-for: 10 RUN FOCUS
 # Queue a tool while the demo run is live — should land in the steer queue.
 type: queue run secret-scan:scan {}
 keys: Enter

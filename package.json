@@ -30,6 +30,7 @@
     "export:source": "bash scripts/export-clean-source.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
     "prepare": "husky",
+    "launch": "cargo run -p kuzushi-cli -- --target . shell",
     "dev": "cargo run -p kuzushi-cli",
     "dev:rust": "cargo run -p kuzushi-cli",
     "link:local": "node scripts/link-local.mjs",

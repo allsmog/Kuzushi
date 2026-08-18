@@ -77,11 +77,11 @@ fn model_picker_controls(width: usize) -> Line<'static> {
     responsive_keybind_hint_line(
         width,
         &[
-            ("↑/↓/j/k", "move"),
-            (":demo", "offline fixture"),
-            (":", "type a command"),
+            ("↑/↓", "move"),
+            ("demo", "offline fixture"),
+            ("type", "a command"),
             ("Enter", "confirm"),
-            ("Esc/q", "defer (you'll need to /model later)"),
+            ("Esc", "defer (you'll need to /model later)"),
         ],
         &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "defer")],
     )

@@ -462,18 +462,7 @@ impl ActivitySession {
             outcome: outcome.clone(),
             run_count: self.sequence_run_count,
             elapsed_secs: self.sequence_started_at.elapsed().as_secs(),
-            cost: self.runtime_cost_report().map_or_else(
-                |_| "cost accounting error".to_string(),
-                |report| {
-                    if report.is_unavailable() {
-                        "cost not recorded".to_string()
-                    } else if report.is_complete() {
-                        format!("${:.4}", report.observed_usd())
-                    } else {
-                        format!(">=${:.4} (metering incomplete)", report.observed_usd())
-                    }
-                },
-            ),
+            cost: self.run_focus_cost_label(),
             origin_phase: self.origin_phase,
             attempt_id: self
                 .phase_attempt_id
@@ -487,6 +476,21 @@ impl ActivitySession {
             actions: policy.actions,
             recommended_next: policy.recommended_next,
         });
+    }
+
+    pub(crate) fn run_focus_cost_label(&self) -> String {
+        self.runtime_cost_report().map_or_else(
+            |_| "cost accounting error".to_string(),
+            |report| {
+                if report.is_unavailable() {
+                    "cost not recorded".to_string()
+                } else if report.is_complete() {
+                    format!("${:.4}", report.observed_usd())
+                } else {
+                    format!(">=${:.4} (metering incomplete)", report.observed_usd())
+                }
+            },
+        )
     }
 
     /// Construct a session whose phase origin is known at launch time.

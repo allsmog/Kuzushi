@@ -30,6 +30,9 @@ fn compact_status_footer_left_segments(app: &ShellApp) -> Vec<String> {
     if let Some(attention) = attention_footer_segment(app) {
         segments.push(attention);
     }
+    if let Some(notify) = notification_availability_footer_segment(app) {
+        segments.push(notify);
+    }
     segments.push(view_status_segment(app));
     segments
 }
@@ -72,6 +75,7 @@ fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     let onboarding = setup_is_in_progress(app);
     [
         attention_footer_segment(app),
+        notification_availability_footer_segment(app),
         (!onboarding).then(|| journey_footer_segment(app)).flatten(),
         (!onboarding)
             .then(|| autonomy_footer_segment(app))
@@ -87,9 +91,10 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     let onboarding = setup_is_in_progress(app);
     [
         attention_footer_segment(app),
+        notification_availability_footer_segment(app),
         (!onboarding).then(|| journey_footer_segment(app)).flatten(),
         // The autonomy dial rides beside the phase chip — the always-visible
-        // master control (`⛭ 作 prove`, with `⚠` when it throttles the walker).
+        // master control (`⛭ autonomy:prove`, with `⚠` when it throttles the walker).
         (!onboarding)
             .then(|| autonomy_footer_segment(app))
             .flatten(),
@@ -104,6 +109,11 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
 
 fn attention_footer_segment(app: &ShellApp) -> Option<String> {
     crate::AttentionBroker::from_app(app).footer_segment()
+}
+
+fn notification_availability_footer_segment(app: &ShellApp) -> Option<String> {
+    (app.ui().notify_enabled() && app.ui().terminal_focus() == crate::app::FocusState::Unknown)
+        .then(|| "notify:unavailable · focus unknown".to_string())
 }
 
 fn setup_is_in_progress(app: &ShellApp) -> bool {

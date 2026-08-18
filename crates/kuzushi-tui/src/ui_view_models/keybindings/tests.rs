@@ -78,6 +78,20 @@ fn unmapped_leaf_views_advertise_only_reachable_mode_actions() {
 }
 
 #[test]
+fn prompt_footer_names_the_actual_first_escape_effect_for_a_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input("verify F-0001");
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("Esc", "clear draft · Ctrl+_ restores")));
+    assert!(!bindings.iter().any(|binding| {
+        binding.key == "Esc" && (binding.label == "nav mode" || binding.label == "back")
+    }));
+}
+
+#[test]
 fn workbench_footer_separates_prompt_commands_from_navigation_keys() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
@@ -377,14 +391,13 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
 
     let bindings = footer_keybindings(&app);
 
-    assert!(bindings.contains(&bind("KEYS", "j/k move")));
-    assert!(bindings.contains(&bind("h/l ←/→", "phase")));
-    assert!(bindings.contains(&bind("1-5", "jump phase")));
-    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "focus pane")));
-    assert!(bindings.contains(&bind("a/n", "all/none")));
-    assert!(bindings.contains(&bind("s", "skip phase")));
-    assert!(bindings.contains(&bind("Esc/q", "workbench")));
-    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(bindings.contains(&bind("KEYS", "↑/↓ move")));
+    assert!(bindings.contains(&bind("←/→", "phase")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab", "focus pane")));
+    assert!(bindings.contains(&bind("type", "command")));
+    assert!(bindings.contains(&bind("Esc", "workbench")));
+    assert!(!bindings.iter().any(|binding| binding.key.contains('j')));
+    assert!(!bindings.iter().any(|binding| binding.key.contains('q')));
     assert!(!bindings.contains(&bind("Esc", "close")));
     assert!(!bindings.contains(&bind("workbench", "phase workflow")));
 
@@ -393,11 +406,10 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
         .set_focus(crate::app::PickerFocus::OptionsPane);
     let bindings = footer_keybindings(&app);
 
-    assert!(bindings.contains(&bind("KEYS", "j/k option")));
-    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "steps")));
-    assert!(bindings.contains(&bind("1-5", "phase")));
-    assert!(bindings.contains(&bind("Esc/q", "steps")));
-    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(bindings.contains(&bind("KEYS", "↑/↓ option")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab", "steps")));
+    assert!(bindings.contains(&bind("type", "command")));
+    assert!(bindings.contains(&bind("Esc", "steps")));
     assert!(!bindings.contains(&bind("workbench", "phase workflow")));
 }
 

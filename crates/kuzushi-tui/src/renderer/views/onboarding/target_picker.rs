@@ -194,7 +194,7 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
     );
     lines.extend(
         wrap_text(
-            "no repo or no key yet: type `:demo` for the offline fixture",
+            "no repo or no key yet: type `demo` for the offline fixture",
             width as usize,
         )
         .into_iter()
@@ -204,11 +204,11 @@ fn target_picker_list_footer(width: u16) -> Vec<Line<'static>> {
     lines.push(responsive_keybind_hint_line(
         width as usize,
         &[
-            ("↑/↓/j/k", "move"),
-            (":", "type a command"),
-            (":demo", "offline fixture"),
+            ("↑/↓", "move"),
+            ("type", "a command"),
+            ("demo", "offline fixture"),
             ("Enter", "select"),
-            ("Esc/q", "browse without a target"),
+            ("Esc", "browse without a target"),
         ],
         &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "browse")],
     ));

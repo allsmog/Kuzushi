@@ -27,8 +27,14 @@ pub(super) fn validate_v2_attempts(
             failures.push(format!("attempt {id}: {error}"));
             continue;
         }
-        if !content_identity_matches_current(target, completed, &recovered.ledger) {
-            recovered.ledger.block_content_reuse(id);
+        match current_content_identity_status(target, completed, &recovered.ledger) {
+            CurrentContentIdentityStatus::Current => {}
+            CurrentContentIdentityStatus::AuthenticatedDrift => {
+                recovered.ledger.block_content_reuse_for_drift(id);
+            }
+            CurrentContentIdentityStatus::Unverifiable => {
+                recovered.ledger.block_content_reuse(id);
+            }
         }
     }
 }
@@ -222,33 +228,51 @@ fn content_identities_agree(
     ) || stored == referenced
 }
 
-fn content_identity_matches_current(
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CurrentContentIdentityStatus {
+    Current,
+    AuthenticatedDrift,
+    Unverifiable,
+}
+
+fn current_content_identity_status(
     target: &Path,
     completed: &PhaseAttemptCompletedV2,
     ledger: &crate::workflow_attempts::PhaseAttemptLedger,
-) -> bool {
+) -> CurrentContentIdentityStatus {
     if ledger.attempt(&completed.attempt_id.to_string()).is_none() {
-        return false;
+        return CurrentContentIdentityStatus::Unverifiable;
     }
-    current_target_matches_identity(target, &completed.target_content_identity)
+    compare_current_target_identity(target, &completed.target_content_identity)
 }
 
-fn current_target_matches_identity(target: &Path, identity: &TargetContentIdentity) -> bool {
+fn compare_current_target_identity(
+    target: &Path,
+    identity: &TargetContentIdentity,
+) -> CurrentContentIdentityStatus {
     match identity {
-        TargetContentIdentity::CleanGitCommit { commit } => {
-            crate::workspace::target_git_metadata(target)
-                .is_some_and(|git| !git.dirty && git.sha == commit.as_str())
-        }
+        TargetContentIdentity::CleanGitCommit { commit } => match crate::workspace::target_git_metadata(target) {
+            Some(git) if !git.dirty && git.sha == commit.as_str() => CurrentContentIdentityStatus::Current,
+            Some(_) => CurrentContentIdentityStatus::AuthenticatedDrift,
+            None => CurrentContentIdentityStatus::Unverifiable,
+        },
         TargetContentIdentity::IndexedSnapshot {
             tree_hash: Some(expected),
             ..
-        } => crate::incremental_index::current_workspace_tree_hash(target)
-            .is_ok_and(|current| current == expected.as_str()),
+        } => match crate::incremental_index::current_workspace_tree_hash(target) {
+            Ok(current) if current == expected.as_str() => CurrentContentIdentityStatus::Current,
+            Ok(_) => CurrentContentIdentityStatus::AuthenticatedDrift,
+            Err(_) => CurrentContentIdentityStatus::Unverifiable,
+        },
         TargetContentIdentity::IndexedSnapshot {
             tree_hash: None, ..
-        } => false,
-        TargetContentIdentity::Unavailable { .. } => false,
+        }
+        | TargetContentIdentity::Unavailable { .. } => CurrentContentIdentityStatus::Unverifiable,
     }
+}
+
+fn current_target_matches_identity(target: &Path, identity: &TargetContentIdentity) -> bool {
+    compare_current_target_identity(target, identity) == CurrentContentIdentityStatus::Current
 }
 
 pub(super) fn block_unreferenced_uuid_attempts(

@@ -11,8 +11,10 @@ use super::review_state::{
 };
 use super::{finding_facet_values, FindingSearch, SeverityTone};
 use crate::{ReviewQueueCacheKey, ShellApp};
+use kuzushi_core::findings::{ReviewDecisionConflict, ReviewDecisionVerdict};
 use kuzushi_core::{
-    finding_next_action, project_finding, Finding, FindingNextAction, ProofConfidence,
+    finding_next_action, project_finding, Finding, FindingNextAction, PersistedVerification,
+    ProofConfidence,
 };
 use std::sync::Arc;
 
@@ -64,13 +66,51 @@ pub(crate) struct ReviewQueueModel {
     pub(crate) facet_groups: Arc<[ReviewFacetGroup]>,
     pub(crate) filter_label: String,
     pub(crate) completeness_mode: &'static str,
-    /// Present only while the review-yield Learn objective is actually
-    /// ranking a band of this queue — see `learn_ordering_indicator`.
+    /// Names the active display order. The normal queue announces its
+    /// proof-band/severity order; Learn replaces that label when it actually
+    /// reorders a band. Backlog names severity-first in its header instead.
     pub(crate) ordering_indicator: Option<&'static str>,
+    pub(crate) operator_calibration: OperatorCalibrationModel,
     pub(crate) header: String,
     pub(crate) empty_reason: Option<String>,
     pub(crate) rows: Arc<[ReviewQueueRow]>,
     pub(crate) selected_row: Option<usize>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct OperatorCalibrationModel {
+    pub(crate) identified: usize,
+    pub(crate) runtime_supported: usize,
+    pub(crate) contradicted: usize,
+    pub(crate) needs_follow_up: usize,
+    pub(crate) unattributed_human_history: bool,
+}
+
+impl OperatorCalibrationModel {
+    pub(crate) fn is_available(self) -> bool {
+        self.identified > 0 || self.unattributed_human_history
+    }
+
+    pub(crate) fn label(self, compact: bool) -> String {
+        if self.identified == 0 && self.unattributed_human_history {
+            return if compact {
+                "my decisions · identity unavailable".to_string()
+            } else {
+                "your evidence follow-up is unavailable · older human decisions have no stable operator identity"
+                    .to_string()
+            };
+        }
+        if compact {
+            return format!(
+                "my decisions · ok {} · conflict {} · check {}",
+                self.runtime_supported, self.contradicted, self.needs_follow_up
+            );
+        }
+        format!(
+            "your evidence follow-up · {} runtime-supported · {} contradicted · {} need follow-up",
+            self.runtime_supported, self.contradicted, self.needs_follow_up
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,7 +194,8 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         facet_groups,
         filter_label: review_queue_filter_label(app, mode),
         completeness_mode: if backlog { "backlog" } else { mode.label() },
-        ordering_indicator: learn_ordering_indicator(app),
+        ordering_indicator: review_ordering_indicator(app, backlog),
+        operator_calibration: operator_calibration_model(app.findings(), app.review_decisions()),
         header,
         empty_reason: review_queue_empty_reason(
             total_count,
@@ -166,6 +207,62 @@ pub(crate) fn review_queue_model(app: &ShellApp, mode: ReviewQueueMode) -> Revie
         rows,
         selected_row,
     }
+}
+
+fn operator_calibration_model(
+    findings: &[Finding],
+    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+) -> OperatorCalibrationModel {
+    let index = EffectiveReviewStateIndex::from_findings_and_decisions(findings, decisions);
+    let unattributed_human_history = decisions.iter().any(|record| {
+        record.decision.author == kuzushi_core::findings::TriageAuthor::Human
+            && record.decision.actor.as_deref().is_none_or(str::is_empty)
+    });
+    let mut model = OperatorCalibrationModel {
+        unattributed_human_history,
+        ..OperatorCalibrationModel::default()
+    };
+    for finding in findings {
+        let Some(decision) = index.effective_decision_for(finding) else {
+            continue;
+        };
+        if decision.review_decision().actor.as_deref() != Some("operator") {
+            continue;
+        }
+        model.identified += 1;
+        let conflict = ReviewDecisionConflict::classify(
+            finding,
+            decision.verdict(),
+            decision.carried_from_durable_identity(),
+        );
+        match conflict {
+            Some(
+                ReviewDecisionConflict::RuntimeVerifiedAfterRejection
+                | ReviewDecisionConflict::NotReproducedAfterConfirmation,
+            ) => {
+                model.contradicted += 1;
+                continue;
+            }
+            Some(ReviewDecisionConflict::ReappearedAfterRejection) => {
+                model.needs_follow_up += 1;
+                continue;
+            }
+            None => {}
+        }
+        if matches!(
+            decision.verdict(),
+            ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix
+        ) && finding
+            .verification
+            .as_ref()
+            .is_some_and(PersistedVerification::is_empirically_verified)
+        {
+            model.runtime_supported += 1;
+            continue;
+        }
+        model.needs_follow_up += 1;
+    }
+    model
 }
 
 fn review_search_active(review: &crate::app::WorkbenchReviewState) -> bool {
@@ -180,9 +277,17 @@ fn review_search_active(review: &crate::app::WorkbenchReviewState) -> bool {
 /// whose every band is frozen leaves the baseline order on screen, and a chip
 /// claiming otherwise would name a state that does not exist.
 pub(crate) const LEARN_ORDERING_INDICATOR: &str = "learn mode - model knowledge-gap review";
+pub(crate) const BASELINE_ORDERING_INDICATOR: &str = "order: proof band, then severity";
 
 fn learn_ordering_indicator(app: &ShellApp) -> Option<&'static str> {
     super::findings::learn_ordering_ranks_queue(app).then_some(LEARN_ORDERING_INDICATOR)
+}
+
+fn review_ordering_indicator(app: &ShellApp, backlog: bool) -> Option<&'static str> {
+    if backlog {
+        return None;
+    }
+    Some(learn_ordering_indicator(app).unwrap_or(BASELINE_ORDERING_INDICATOR))
 }
 
 /// The backlog projection already dropped decided findings, so the header

@@ -209,15 +209,19 @@ impl ShellApp {
 
     fn pending_run_focus_completion(&self) -> Option<RunFocusCompletion> {
         let session = self.activity()?;
-        session
-            .run_focus_terminal_pending
-            .then(|| RunFocusCompletion {
+        session.run_focus_terminal_pending.then(|| {
+            let mut receipt = session.run_focus_receipt.clone();
+            if let Some(receipt) = receipt.as_mut() {
+                receipt.cost = session.run_focus_cost_label();
+            }
+            RunFocusCompletion {
                 origin: session.run_focus_origin,
                 backgrounded: session.run_focus_backgrounded,
-                receipt: session.run_focus_receipt.clone(),
+                receipt,
                 answer_acknowledgement: session.operator_answer_acknowledgement.clone(),
                 pending_viz: session.run_focus_pending_viz,
-            })
+            }
+        })
     }
 
     fn clear_pending_run_focus_completion(&mut self) {
@@ -2318,6 +2322,33 @@ mod run_focus_completion_tests {
                 .as_ref()
                 .is_some_and(|receipt| receipt.outcome == "completed" && receipt.run_count == 1)
         }));
+    }
+
+    #[test]
+    fn finalization_refreshes_receipt_from_settled_cost() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut session = ActivitySession::new("run-cost");
+        session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE);
+        session.mark_run_focus_terminal_pending("completed");
+        assert_eq!(
+            session
+                .run_focus_receipt
+                .as_ref()
+                .map(|receipt| receipt.cost.as_str()),
+            Some("cost not recorded")
+        );
+        session.settle_runtime_cost(kuzushi_core::runtime::RuntimeCostReport::known(
+            kuzushi_core::runtime::RuntimeCost::ZERO,
+        ));
+        app.set_activity(Some(session));
+
+        assert!(app.finalize_run_focus_if_idle());
+        assert_eq!(
+            app.activity()
+                .and_then(|session| session.run_focus_receipt.as_ref())
+                .map(|receipt| receipt.cost.as_str()),
+            Some("$0.0000")
+        );
     }
 
     #[test]

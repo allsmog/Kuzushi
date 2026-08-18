@@ -35,7 +35,7 @@ macro_rules! shell_app_initial_state {
             ),
             runtime_state: RuntimeState::default(),
             #[cfg(test)]
-            option_persistence_enabled_for_test: true,
+            option_persistence_enabled_for_test: false,
         }
     }};
 }

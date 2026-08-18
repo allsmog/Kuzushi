@@ -442,7 +442,7 @@ fn stalled_progress_row(
         disclosed_keys: BTreeSet::new(),
         text: fit(
             &format!(
-                " ⚠ no progress signal for {} since {source}",
+                " ◐ tool quiet for {} since {source}; process remains active",
                 silence_duration_label(elapsed)
             ),
             width,
@@ -452,17 +452,30 @@ fn stalled_progress_row(
 }
 
 fn query_in_flight_row(query_age: Duration, width: usize) -> ActivityFeedPaneRow {
+    let (marker, detail, tone) = if query_age >= Duration::from_secs(120) {
+        (
+            "⚠",
+            "provider call remains open; Ctrl+C available",
+            ActivityFeedRowTone::Warn,
+        )
+    } else {
+        (
+            "◐",
+            "model call awaiting response",
+            ActivityFeedRowTone::Primary,
+        )
+    };
     ActivityFeedPaneRow {
         key: None,
         disclosed_keys: BTreeSet::new(),
         text: fit(
             &format!(
-                " ◐ query in flight {} · model call awaiting response",
-                silence_duration_label(query_age)
+                " {marker} query in flight {} · {detail}",
+                silence_duration_label(query_age),
             ),
             width,
         ),
-        tone: ActivityFeedRowTone::Primary,
+        tone,
     }
 }
 

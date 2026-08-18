@@ -120,7 +120,11 @@ fn stale_run_summary_entries_serve_until_rehydrated() {
     cache.apply_view_hydration(ViewHydrationResult {
         target: target.clone(),
         key: ViewHydrationKey::RunSummaryEntries,
-        value: ViewHydrationValue::RunSummaryEntries(RunSummaryEntriesState::Ready(vec![entry])),
+        value: ViewHydrationValue::RunSummaryEntries(
+            RunSummaryEntriesHydration::without_recoveries(RunSummaryEntriesState::Ready(vec![
+                entry,
+            ])),
+        ),
     });
     assert!(!cache.run_summary_entries_need_refresh(&target));
 

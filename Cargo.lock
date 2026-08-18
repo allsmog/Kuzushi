@@ -1962,6 +1962,7 @@ dependencies = [
  "ipnet",
  "kuzushi-codeindex",
  "kuzushi-cpg",
+ "kuzushi-descriptor",
  "kuzushi-mcp-common",
  "kuzushi-sandbox",
  "libc",
@@ -2007,6 +2008,14 @@ dependencies = [
  "cpg-incremental",
  "regex",
  "tempfile",
+]
+
+[[package]]
+name = "kuzushi-descriptor"
+version = "0.24.0-alpha.9"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

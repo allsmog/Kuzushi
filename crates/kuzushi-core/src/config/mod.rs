@@ -29,6 +29,7 @@ mod config_hash;
 mod config_model;
 pub mod domain;
 mod load_config_for_target;
+mod source_inventory;
 #[cfg(test)]
 mod tests;
 
@@ -60,3 +61,4 @@ pub use load_config_for_target::persist_global_model_selection;
 pub use load_config_for_target::write_default_config;
 pub use load_config_for_target::ConfigDiagnostic;
 pub use load_config_for_target::LoadedConfig;
+pub use source_inventory::{ConfigSourceInventory, ConfigValueSource};

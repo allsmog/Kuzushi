@@ -85,6 +85,32 @@ impl WorkbenchCache {
         self.loading_state(target, &ViewHydrationKey::GitMetadata)
     }
 
+    pub(crate) fn cached_revision_relationship(
+        &self,
+        target: Option<&Path>,
+        accepted_revision: &str,
+        current_revision: &str,
+    ) -> ViewDataState<kuzushi_core::workspace::RevisionRelationship> {
+        let Some(target) = target else {
+            return ViewDataState::NotRequested;
+        };
+        let key = (
+            target.to_path_buf(),
+            accepted_revision.to_string(),
+            current_revision.to_string(),
+        );
+        if let Some(relationship) = self.revision_relationships.get(&key) {
+            return ViewDataState::Ready(*relationship);
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::RevisionRelationship {
+                accepted_revision: accepted_revision.to_string(),
+                current_revision: current_revision.to_string(),
+            },
+        )
+    }
+
     pub(crate) fn cached_project_scope_tree(
         &self,
         target: Option<&Path>,

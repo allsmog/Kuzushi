@@ -5,25 +5,20 @@ type HintBinding = (&'static str, &'static str);
 
 const API_KEY_WIDE_HINTS: &[HintBinding] = &[
     ("↑/↓", "move"),
-    (":", "type a command"),
+    ("type", "API key"),
     ("Enter", "accept key"),
     ("Esc", "back"),
 ];
 const API_KEY_NARROW_HINTS: &[HintBinding] =
     &[("↑/↓", "move"), ("Enter", "accept"), ("Esc", "back")];
 const AUTH_METHOD_WIDE_HINTS: &[HintBinding] = &[
-    ("↑/↓/j/k", "move"),
-    (":", "type a command"),
+    ("↑/↓", "move"),
+    ("type", "a command"),
     ("Enter", "confirm"),
     ("Esc", "back"),
-    ("q", "return to Setup"),
 ];
-const AUTH_METHOD_NARROW_HINTS: &[HintBinding] = &[
-    ("↑/↓", "move"),
-    ("Enter", "select"),
-    ("Esc", "back"),
-    ("q", "Setup"),
-];
+const AUTH_METHOD_NARROW_HINTS: &[HintBinding] =
+    &[("↑/↓", "move"), ("Enter", "select"), ("Esc", "back")];
 
 pub(crate) fn auth_method_picker_lines(
     app: &ShellApp,
@@ -111,7 +106,7 @@ fn compact_auth_footer(app: &ShellApp) -> Vec<Line<'static>> {
         ];
     }
     vec![
-        muted(" ↑/↓/j/k move · Enter select"),
+        muted(" ↑/↓ move · type a command · Enter select"),
         muted(" Esc back · q Setup · : command"),
     ]
 }
@@ -322,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn non_editor_footer_truthfully_labels_q_as_return_to_setup() {
+    fn non_editor_footer_reserves_plain_letters_for_commands() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.open_auth_method_picker("anthropic".to_string());
         app.router.auth_picker_mut().set_cursor(1);
@@ -333,9 +328,8 @@ mod tests {
             .collect::<String>();
 
         assert!(text.contains("Esc back"), "{text}");
-        assert!(text.contains("q return to Setup"), "{text}");
-        assert!(!text.contains("q leave setup"), "{text}");
-        assert!(!text.contains("Esc/q leave setup"), "{text}");
+        assert!(text.contains("type a command"), "{text}");
+        assert!(!text.contains("q "), "{text}");
     }
 
     #[test]

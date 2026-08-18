@@ -179,8 +179,9 @@ The Rust shell uses the same descriptors:
 - `scan` prepares `sast:scan` input from the option store before dispatch.
 - `autonomy [recon|scan|review|prove|fix]` (alias `posture`) reads or sets the
   always-visible autonomy dial; `Ctrl+↑`/`Ctrl+↓` raise/lower it one rung. The
-  dial is the same ceiling `kuzushi run --autonomy` sets; it is session-scoped
-  and clamped by `[phases].stop_after`.
+  requested rung is stored globally as `ui.autonomy`, then clamped by the
+  active target's `[phases].stop_after`. The applied rung never changes
+  workflow reality and headless `run` keeps its explicit `--autonomy` policy.
 
 The interactive route is
 `Target → Setup → Map ↔ Run Focus → Scan ↔ Run Focus → Review → Prove ↔ Run
@@ -486,6 +487,12 @@ All inconclusive outcomes preserve the earlier `SOUND` synthesis result.
 Finding exports expose remediation metadata additively in JSON/JSONL/Markdown,
 SARIF properties, and flattened CSV columns: application id, patch run id,
 application state, reverify outcome/run id, diff hash, and touched paths.
+
+Export evidence-state labels describe evidence, not identity metadata. A
+constructor-generated source signature and an automatic source-occurrence row
+remain identity metadata only. `source_linked` requires explicit source-grounded
+static proof; a finding with no observed evidence, model reasoning, independent
+corroboration, or static grounding remains `message_only`.
 
 ## Suppression rules
 

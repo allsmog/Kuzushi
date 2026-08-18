@@ -20,6 +20,7 @@ pub struct PhaseAttemptLedger {
     skipped_checkpoints: Vec<PhaseCheckpointSkipped>,
     proof_deferrals: Vec<ProofDeferralRecorded>,
     content_reuse_blocked_attempts: BTreeSet<String>,
+    content_drift_blocked_attempts: BTreeSet<String>,
 }
 
 impl PhaseAttemptLedger {
@@ -108,6 +109,54 @@ impl PhaseAttemptLedger {
             .max_by_key(|record| self.selection_sort_key(record))
     }
 
+    /// The most recent reusable selected checkpoint for the same target,
+    /// regardless of revision or dirty state.
+    ///
+    /// This is presentation history only: callers must never use it to
+    /// advance current-revision workflow truth. Attempts whose content reuse
+    /// was blocked during recovery are excluded for the same reason they are
+    /// excluded from [`Self::selected_for`].
+    pub fn latest_selected_for_target(
+        &self,
+        phase: WorkflowPhase,
+        snapshot: &PhaseTargetSnapshot,
+    ) -> Option<&PhaseAttemptRecord> {
+        self.attempts
+            .values()
+            .filter(|record| {
+                selected_record_matches_target(record, phase, snapshot)
+                    && !self
+                        .content_reuse_blocked_attempts
+                        .contains(&record.completed.attempt_id)
+            })
+            .max_by_key(|record| self.selection_sort_key(record))
+    }
+
+    /// The newest trusted selection for this target, including an attempt
+    /// whose authenticated content identity differs from the current tree.
+    ///
+    /// Presentation may use this to explain a checkpoint rewind. Workflow
+    /// advancement must continue to use [`Self::selected_for`]. Attempts
+    /// blocked for malformed or unauthenticated history remain excluded.
+    pub fn latest_selected_history_for_target(
+        &self,
+        phase: WorkflowPhase,
+        snapshot: &PhaseTargetSnapshot,
+    ) -> Option<&PhaseAttemptRecord> {
+        self.attempts
+            .values()
+            .filter(|record| {
+                selected_record_matches_target(record, phase, snapshot)
+                    && (!self
+                        .content_reuse_blocked_attempts
+                        .contains(&record.completed.attempt_id)
+                        || self
+                            .content_drift_blocked_attempts
+                            .contains(&record.completed.attempt_id))
+            })
+            .max_by_key(|record| self.selection_sort_key(record))
+    }
+
     pub fn content_reuse_is_blocked(&self, attempt_id: &str) -> bool {
         self.content_reuse_blocked_attempts.contains(attempt_id)
     }
@@ -115,6 +164,13 @@ impl PhaseAttemptLedger {
     pub(crate) fn block_content_reuse(&mut self, attempt_id: impl Into<String>) {
         self.content_reuse_blocked_attempts
             .insert(attempt_id.into());
+    }
+
+    pub(crate) fn block_content_reuse_for_drift(&mut self, attempt_id: impl Into<String>) {
+        let attempt_id = attempt_id.into();
+        self.content_reuse_blocked_attempts
+            .insert(attempt_id.clone());
+        self.content_drift_blocked_attempts.insert(attempt_id);
     }
 
     pub fn phase_was_skipped(&self, phase: WorkflowPhase, snapshot: &PhaseTargetSnapshot) -> bool {
@@ -141,11 +197,34 @@ impl PhaseAttemptLedger {
         identity_id: Option<&str>,
         scan_id: &str,
     ) -> bool {
-        self.proof_deferrals.iter().any(|record| {
+        self.proof_deferral_for(snapshot, fingerprint, identity_id, scan_id)
+            .is_some()
+    }
+
+    /// The newest durable deferral for an exact discovery generation.
+    pub fn proof_deferral_for(
+        &self,
+        snapshot: &PhaseTargetSnapshot,
+        fingerprint: &str,
+        identity_id: Option<&str>,
+        scan_id: &str,
+    ) -> Option<&ProofDeferralRecorded> {
+        self.proof_deferrals.iter().rev().find(|record| {
             record.target_snapshot.equivalent_to(snapshot)
                 && record.finding_scan_id == scan_id
                 && deferral_identity_matches(record, fingerprint, identity_id)
         })
+    }
+
+    /// The newest durable proof deferral for the current target snapshot.
+    pub fn latest_proof_deferral_for(
+        &self,
+        snapshot: &PhaseTargetSnapshot,
+    ) -> Option<&ProofDeferralRecorded> {
+        self.proof_deferrals
+            .iter()
+            .rev()
+            .find(|record| record.target_snapshot.equivalent_to(snapshot))
     }
 
     fn apply(&mut self, event: PhaseAttemptEvent, sequence: usize) -> Result<()> {
@@ -262,6 +341,22 @@ fn selected_record_matches(
 ) -> bool {
     record.completed.phase == phase
         && record.completed.target_snapshot.equivalent_to(snapshot)
+        && matches!(
+            record.disposition.as_ref().map(|value| &value.disposition),
+            Some(PhaseAttemptDisposition::Selected { .. })
+        )
+}
+
+fn selected_record_matches_target(
+    record: &PhaseAttemptRecord,
+    phase: WorkflowPhase,
+    snapshot: &PhaseTargetSnapshot,
+) -> bool {
+    record.completed.phase == phase
+        && super::target_identities_match(
+            &record.completed.target_snapshot.target,
+            &snapshot.target,
+        )
         && matches!(
             record.disposition.as_ref().map(|value| &value.disposition),
             Some(PhaseAttemptDisposition::Selected { .. })

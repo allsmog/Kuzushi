@@ -169,6 +169,9 @@ fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp)
 /// keys out of the footer. Name the flow on the doorway itself so the footer
 /// still gives direction instead of a bare "nav mode".
 fn prompt_navigate_label(app: &ShellApp) -> String {
+    if let Some(label) = prompt_editor_escape_label(app) {
+        return label;
+    }
     if map_summary_navigation_available(app) {
         return "nav components · j/k move · Enter DFD".to_string();
     }
@@ -180,6 +183,13 @@ fn prompt_navigate_label(app: &ShellApp) -> String {
     } else {
         "nav mode".to_string()
     }
+}
+
+fn prompt_editor_escape_label(app: &ShellApp) -> Option<String> {
+    if app.completion_cycle().is_some() {
+        return Some("restore completion prefix".to_string());
+    }
+    (!app.input().is_empty()).then(|| "clear draft · Ctrl+_ restores".to_string())
 }
 
 fn map_summary_navigation_available(app: &ShellApp) -> bool {
