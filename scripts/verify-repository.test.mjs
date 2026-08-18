@@ -21,6 +21,7 @@ test("CI plan includes every host-independent hard gate", () => {
   const quick = quickPlan.map(({ name }) => name);
   const ci = ciPlan.map(({ name }) => name);
 
+  assert.ok(quick.includes("secrets"));
   assert.ok(quick.includes("tests"));
   assert.ok(quick.includes("cargo-check"));
   assert.ok(ci.includes("coverage"));
@@ -35,6 +36,7 @@ test("CI plan includes every host-independent hard gate", () => {
   assert.ok(ci.includes("e2e"));
   assert.deepEqual(ci.slice(0, quick.length), quick);
   assert.equal(new Set(ciPlan.map(commandKey)).size, ciPlan.length);
+  assert.deepEqual(stepArgs(quickPlan, "secrets"), ["quality:secrets"]);
   assert.deepEqual(stepArgs(quickPlan, "cargo-check"), [
     "check",
     "--workspace",
@@ -106,7 +108,7 @@ test("summary output suppresses successful child output", {
     assert.equal(result.status, 0);
     assert.equal(receipt.ok, true);
     assert.doesNotMatch(result.stderr, /fake child output/);
-    assert.match(result.stderr, /verify: tests/);
+    assert.match(result.stderr, /verify: secrets/);
   });
 });
 

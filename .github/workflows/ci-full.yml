@@ -59,27 +59,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint GitHub Actions workflows
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
-      - name: Reject newly introduced Anthropic-shaped credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-          pattern='sk-ant-(api|oat)[0-9]+-[A-Za-z0-9_-]{20,}'
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            matches=$(git diff origin/main..HEAD --unified=0 --no-color | \
-              grep -E '^\+' | grep -E "$pattern" || true)
-          else
-            matches=$(grep -rEn --color=never \
-              --exclude-dir=node_modules \
-              --exclude-dir=dist \
-              --exclude-dir=.git \
-              --exclude-dir=generated \
-              "$pattern" . || true)
-          fi
-          if [ -n "$matches" ]; then
-            echo "::error::Anthropic-shaped credential pattern found:"
-            echo "$matches"
-            exit 1
-          fi
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}

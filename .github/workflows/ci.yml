@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  # Do not run on every pushed commit. One quick pass when review starts, plus
-  # merge-queue and main validation, bounds routine Actions usage by PR count.
+  # Run one quick pass when review starts and again for each later PR head.
+  # Drafts still skip runner allocation below; merge-queue and main validation
+  # keep the exact SHA that may merge or ship bound to a fresh receipt.
   pull_request:
     branches: [main]
-    types: [opened, reopened, ready_for_review]
+    types: [opened, reopened, ready_for_review, synchronize]
   merge_group:
   push:
     branches: [main]
@@ -39,8 +40,8 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  # Draft PRs do not allocate a runner. Marking one ready is its explicit CI
-  # request; later commit pushes are intentionally not subscribed above.
+  # Draft PRs do not allocate a runner. Marking one ready is its first CI
+  # request; synchronize then keeps later ready-PR heads covered exactly.
   quality-gauntlet:
     name: quality-gauntlet
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -62,27 +63,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint GitHub Actions workflows
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
-      - name: Reject newly introduced Anthropic-shaped credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-          pattern='sk-ant-(api|oat)[0-9]+-[A-Za-z0-9_-]{20,}'
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            matches=$(git diff origin/main..HEAD --unified=0 --no-color | \
-              grep -E '^\+' | grep -E "$pattern" || true)
-          else
-            matches=$(grep -rEn --color=never \
-              --exclude-dir=node_modules \
-              --exclude-dir=dist \
-              --exclude-dir=.git \
-              --exclude-dir=generated \
-              "$pattern" . || true)
-          fi
-          if [ -n "$matches" ]; then
-            echo "::error::Anthropic-shaped credential pattern found:"
-            echo "$matches"
-            exit 1
-          fi
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
