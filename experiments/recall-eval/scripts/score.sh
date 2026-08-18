@@ -31,6 +31,8 @@ agg_hits=0
 agg_total=0
 agg_oracle=0
 agg_usd=0
+agg_cost_seen=false
+agg_cost_complete=true
 
 for slice_dir in "$REPORT_DIR"/*/; do
   slice=$(basename "$slice_dir")
@@ -45,7 +47,7 @@ for slice_dir in "$REPORT_DIR"/*/; do
   recall_pm10=$(jq -r '.recall.pm_lines  // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_fn=$(jq -r '.recall.function_  // .recall.function // 0 | (. * 1000 | floor / 1000)' "$match")
   recall_file=$(jq -r '.recall.file_only // 0 | (. * 1000 | floor / 1000)' "$match")
-  usd=$(jq -r '.cost_usd // 0 | (. * 100 | floor / 100)' "$match")
+  usd=$(jq -r 'if (.cost_usd | type) == "number" then (.cost_usd * 100 | floor / 100 | tostring) else "unknown" end' "$match")
   wall=$(jq -r '.wall_seconds // 0' "$match")
 
   echo "| $slice | $findings_count | $hits | $misses | $precision | $recall_exact | $recall_pm10 | $recall_fn | $recall_file | $usd | $wall |" >> "$SUMMARY"
@@ -53,8 +55,19 @@ for slice_dir in "$REPORT_DIR"/*/; do
   agg_hits=$(( agg_hits + hits ))
   agg_total=$(( agg_total + findings_count ))
   agg_oracle=$(( agg_oracle + hits + misses ))
-  agg_usd=$(awk -v a="$agg_usd" -v b="$usd" 'BEGIN{printf "%.2f", a+b}')
+  agg_cost_seen=true
+  if [[ "$usd" == "unknown" ]]; then
+    agg_cost_complete=false
+  else
+    agg_usd=$(awk -v a="$agg_usd" -v b="$usd" 'BEGIN{printf "%.2f", a+b}')
+  fi
 done
+
+if [[ "$agg_cost_seen" == true && "$agg_cost_complete" == true ]]; then
+  aggregate_cost="\$$agg_usd"
+else
+  aggregate_cost="unknown"
+fi
 
 {
   echo
@@ -66,7 +79,7 @@ done
     overall_prec=$(awk -v h="$agg_hits" -v t="$agg_total" 'BEGIN{printf "%.3f", h/t}')
   else overall_prec="0"
   fi
-  echo "**Aggregate:** recall=$overall_recall precision=$overall_prec total_findings=$agg_total cost=\$$agg_usd"
+  echo "**Aggregate:** recall=$overall_recall precision=$overall_prec total_findings=$agg_total cost=$aggregate_cost"
 } >> "$SUMMARY"
 
 # Append one row per run to HISTORY.md
@@ -78,7 +91,7 @@ if [[ ! -f "$HISTORY" ]]; then
     echo "|---|---|---:|---:|---:|---:|---:|"
   } > "$HISTORY"
 fi
-echo "| $ts | $git_sha | $agg_total | $agg_hits | $overall_recall | $overall_prec | \$$agg_usd |" >> "$HISTORY"
+echo "| $ts | $git_sha | $agg_total | $agg_hits | $overall_recall | $overall_prec | $aggregate_cost |" >> "$HISTORY"
 
 echo "score: wrote $SUMMARY"
 echo "score: appended row to $HISTORY"
