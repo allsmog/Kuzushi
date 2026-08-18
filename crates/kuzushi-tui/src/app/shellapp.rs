@@ -83,12 +83,13 @@ impl ShellApp {
         }
     }
 
-    /// Returning to an already-open planning picker (nav-history pop, Esc
-    /// from a contextual deck) must re-derive row artifact reality — tools
-    /// may have completed while another view was on screen. Gated on the
-    /// staleness flag so a picker nothing ran under is left untouched.
+    /// Returning to a planning surface (the picker itself or Setup's embedded
+    /// Map plan) must re-derive row artifact reality — tools may have completed
+    /// while Activity or another view was on screen. Gated on the staleness
+    /// flag so a plan nothing ran under is left untouched.
     fn refresh_planning_picker_on_return(&mut self, view: ShellView) {
-        if view != ShellView::PlanningPicker || !self.engagement.planning_picker().artifacts_stale()
+        if !matches!(view, ShellView::PlanningPicker | ShellView::Setup)
+            || !self.engagement.planning_picker().artifacts_stale()
         {
             return;
         }
@@ -1316,6 +1317,39 @@ mod tests {
             app.router.workbench().focus_for(WorkbenchPage::Prove),
             crate::ui_view_models::PhaseSurfaceId::ProveReceipt
         );
+    }
+
+    #[test]
+    fn returning_to_setup_refreshes_stale_map_artifacts() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let task = PlanningTaskId::GatherRepoContext;
+        let row = PlanningTaskRow::for_task(task, target.path());
+        assert_eq!(row.artifact_state, PlanningArtifactState::Missing);
+        app.engagement.planning_picker_mut().open_phase_profiled(
+            WorkflowPhase::Map,
+            vec![row],
+            [task].into_iter().collect(),
+            false,
+        );
+        app.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(true);
+        app.engagement.planning_picker_mut().mark_artifacts_stale();
+
+        let artifact = task.artifact_path(target.path()).unwrap();
+        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        std::fs::write(&artifact, "{}").unwrap();
+        app.set_shell_view(ShellView::Activity);
+
+        app.set_shell_view(ShellView::Setup);
+
+        let picker = app.engagement.planning_picker();
+        let row = picker.tasks().iter().find(|row| row.id == task).unwrap();
+        assert_eq!(row.artifact_state, PlanningArtifactState::Cached);
+        assert!(!picker.selected().contains(&task));
+        assert!(!picker.artifacts_stale());
     }
 
     #[test]
