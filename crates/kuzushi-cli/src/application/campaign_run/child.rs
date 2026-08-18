@@ -37,7 +37,7 @@ pub(super) struct ChildReport {
     pub(super) exit_code: Option<i32>,
     /// Tail of the child's combined output for rate-limit sniffing.
     pub(super) output_tail: String,
-    /// Last strictly validated lifecycle spend. This is a lower bound when
+    /// Last strictly authenticated lifecycle spend. This is a lower bound when
     /// the child was killed before terminal settlement.
     pub(super) observed_spend_usd: f64,
 }
@@ -365,13 +365,7 @@ mod tests {
         ] {
             let mut poller = LiveSpendPoller::new(tmp.path(), "terminal-corrupt");
             let mut guard = BudgetEvidenceGuard::default();
-            let report = terminal_report(
-                outcome,
-                exit_code,
-                &child_spec,
-                &mut poller,
-                &mut guard,
-            );
+            let report = terminal_report(outcome, exit_code, &child_spec, &mut poller, &mut guard);
             assert_eq!(report.outcome, JobOutcome::BudgetEvidenceUnavailable);
             assert_eq!(report.exit_code, exit_code);
             assert_eq!(report.observed_spend_usd, 0.0);

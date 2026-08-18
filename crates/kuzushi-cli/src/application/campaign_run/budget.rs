@@ -224,8 +224,8 @@ impl LiveSpendPoller {
     }
 
     fn open_verified_stream(&mut self) -> Result<FileIdentity, LiveSpendPoll> {
-        let current = FileIdentity::from_path(&self.path)
-            .map_err(|error| self.open_failure(&error))?;
+        let current =
+            FileIdentity::from_path(&self.path).map_err(|error| self.open_failure(&error))?;
         self.observed_stream = true;
         if self
             .stream_identity
