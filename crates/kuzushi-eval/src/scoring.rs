@@ -44,7 +44,7 @@ pub(crate) fn score(
         matches: scored.matches_out,
         missed_oracle: scored.missed,
         expected_min_recall: oracle.expected_min_recall.unwrap_or(0.0),
-        cost_usd: 0.0,
+        cost_usd: cli.cost_usd,
         wall_seconds: cli.wall_seconds,
     }
 }
