@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{extract_cwe, normalize_cwe, Finding, FindingEvidence};
+use super::{extract_cwe, normalize_cwe, Finding};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -32,20 +32,16 @@ pub(crate) struct FindingIdentityKey {
 pub(crate) struct FindingIdentityInput<'a> {
     pub fingerprint: &'a str,
     pub rule_id: &'a str,
-    pub title: &'a str,
     pub file_path: &'a str,
-    pub message: &'a str,
-    pub evidence: &'a [FindingEvidence],
+    pub start_line: u32,
 }
 
 pub(crate) fn finding_identity_key_for_finding(finding: &Finding) -> FindingIdentityKey {
     finding_identity_key_for_input(FindingIdentityInput {
         fingerprint: &finding.fingerprint,
         rule_id: &finding.rule_id,
-        title: &finding.title,
         file_path: &finding.file_path,
-        message: &finding.message,
-        evidence: &finding.evidence,
+        start_line: finding.start_line,
     })
 }
 
@@ -66,10 +62,16 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
     format!("fi_{}", hash.as_str())
 }
 
+/// Durable identity is intentionally independent of producer-supplied prose
+/// and evidence. Evidence is verified at the persistence boundary, but
+/// identity assignment happens before the projected row is written; allowing
+/// snippets into this key would let a fabricated citation influence history
+/// even when persistence later downgraded it. File, rule family, and source
+/// locus are available without trusting that content.
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
     let weakness = weakness_key(input);
     let symbol = crate::identity::finding_identity::normalize_path(input.file_path);
-    let snippet = evidence_snippet(input.evidence).unwrap_or_else(|| text_locator(input));
+    let locator = structural_locator(input);
     crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
         tool_family: tool_family_from_fingerprint(input.fingerprint),
         rule_id: &weakness,
@@ -78,45 +80,27 @@ fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
         normalizer_version: None,
         symbol_path_or_rename_group: Some(&symbol),
         ast_locus_hash: None,
-        normalized_snippet: &snippet,
+        normalized_snippet: &locator,
         local_context_hash: None,
         disambiguator: None,
     })
 }
 
-fn text_locator(input: &FindingIdentityInput<'_>) -> String {
-    let parts = [input.title, input.message]
-        .into_iter()
-        .map(crate::identity::finding_identity::normalize_finding_text)
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>();
-    if parts.is_empty() {
-        "finding".to_string()
+fn structural_locator(input: &FindingIdentityInput<'_>) -> String {
+    if input.start_line == 0 {
+        "file".to_string()
     } else {
-        format!("text:{}", parts.join("\u{1f}"))
+        format!("line:{}", input.start_line)
     }
 }
 
+/// Weakness identity may use a structured CWE embedded in the rule id, but it
+/// must not infer one from a title or message whose wording can change between
+/// model or human rediscoveries.
 fn weakness_key(input: &FindingIdentityInput<'_>) -> String {
-    extract_cwe(input.rule_id, input.title, input.message)
+    extract_cwe(input.rule_id, "", "")
         .map(|cwe| format!("cwe:{}", normalize_cwe(&cwe)))
         .unwrap_or_else(|| format!("rule:{}", normalize_token(input.rule_id)))
-}
-
-fn evidence_snippet(evidence: &[FindingEvidence]) -> Option<String> {
-    let mut snippets = evidence
-        .iter()
-        .filter_map(|evidence| {
-            let snippet =
-                crate::identity::finding_identity::normalize_finding_text(&evidence.snippet);
-            (!snippet.is_empty()).then_some(snippet)
-        })
-        .collect::<Vec<_>>();
-    if snippets.is_empty() {
-        return None;
-    }
-    snippets.sort();
-    Some(snippets.join("\u{1f}"))
 }
 
 fn tool_family_from_fingerprint(fingerprint: &str) -> &str {
@@ -144,6 +128,19 @@ pub fn finding_identity_alias(identity_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::findings::FindingEvidence;
+
+    fn finding(message: &str, line: u32) -> Finding {
+        Finding {
+            fingerprint: format!("fp3_{}", message.replace(' ', "-")),
+            rule_id: "CWE-89".to_string(),
+            title: message.to_string(),
+            file_path: "src/db.rs".to_string(),
+            start_line: line,
+            message: message.to_string(),
+            ..Finding::default()
+        }
+    }
 
     #[test]
     fn finding_identity_id_is_target_scoped_and_stable() {
@@ -158,79 +155,76 @@ mod tests {
     }
 
     #[test]
-    fn evidence_identity_ignores_line_number() {
-        let first = Finding {
-            fingerprint: "fp3-first".to_string(),
-            rule_id: "CWE-79".to_string(),
-            title: "xss".to_string(),
-            file_path: "src/app.ts".to_string(),
-            message: "html sink".to_string(),
-            evidence: vec![FindingEvidence {
-                kind: "code".to_string(),
-                file_path: "src/app.ts".to_string(),
-                line: 10,
-                snippet: "render(user.name)".to_string(),
-                rationale: "sink".to_string(),
-                confidence: 90,
-                request_blob: None,
-                response_blob: None,
-            }],
-            ..Finding::default()
-        };
+    fn producer_evidence_cannot_change_identity() {
+        let mut first = finding("query sink", 10);
+        first.evidence = vec![FindingEvidence {
+            kind: "code".to_string(),
+            file_path: "src/db.rs".to_string(),
+            line: 10,
+            snippet: "query(first_input)".to_string(),
+            rationale: "producer citation".to_string(),
+            confidence: 90,
+            request_blob: None,
+            response_blob: None,
+        }];
         let mut second = first.clone();
-        second.fingerprint = "fp3-second".to_string();
-        second.evidence[0].line = 42;
+        second.evidence[0].snippet = "fabricated(second_input)".to_string();
 
-        let first_key = finding_identity_key_for_finding(&first);
-        let second_key = finding_identity_key_for_finding(&second);
-
-        assert_eq!(first_key.key, second_key.key);
         assert_eq!(
-            first_key.match_tier,
-            FindingIdentityMatchTier::StableFingerprint
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
         );
     }
 
     #[test]
-    fn empty_evidence_identity_ignores_line_number() {
-        let first = Finding {
-            fingerprint: "fp3-first".to_string(),
-            rule_id: "CWE-89".to_string(),
-            title: "sql injection".to_string(),
-            file_path: "src/db.rs".to_string(),
-            start_line: 10,
-            message: "query sink".to_string(),
-            evidence: Vec::new(),
-            ..Finding::default()
-        };
+    fn evidence_free_identity_ignores_title_and_message_wording() {
+        let first = finding("sql injection reaches query sink", 10);
         let mut second = first.clone();
-        second.fingerprint = "fp3-second".to_string();
-        second.start_line = 500;
+        second.fingerprint = "fp3_reworded".to_string();
+        second.title = "tainted input reaches database".to_string();
+        second.message = "different producer explanation".to_string();
 
-        let first_key = finding_identity_key_for_finding(&first);
-        let second_key = finding_identity_key_for_finding(&second);
-
-        assert_eq!(first_key.key, second_key.key);
+        assert_eq!(
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
+        );
     }
 
     #[test]
-    fn empty_evidence_identity_uses_text_locator() {
-        let first = Finding {
-            fingerprint: "fp3-first".to_string(),
-            rule_id: "CWE-89".to_string(),
-            title: "sql injection".to_string(),
-            file_path: "src/db.rs".to_string(),
-            start_line: 10,
-            message: "query sink".to_string(),
-            evidence: Vec::new(),
-            ..Finding::default()
-        };
+    fn structural_source_lines_keep_nearby_findings_distinct() {
+        let first = finding("first query sink", 10);
+        let second = finding("second query sink", 11);
+
+        assert_ne!(
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
+        );
+    }
+
+    #[test]
+    fn structured_rule_family_remains_part_of_identity() {
+        let first = finding("query sink", 10);
         let mut second = first.clone();
-        second.message = "command sink".to_string();
+        second.rule_id = "CWE-78".to_string();
 
-        let first_key = finding_identity_key_for_finding(&first);
-        let second_key = finding_identity_key_for_finding(&second);
+        assert_ne!(
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
+        );
+    }
 
-        assert_ne!(first_key.key, second_key.key);
+    #[test]
+    fn prose_only_cwe_mentions_do_not_change_weakness_identity() {
+        let mut first = finding("query sink CWE-89", 10);
+        first.rule_id = "db.query-sink".to_string();
+        let mut second = first.clone();
+        second.fingerprint = "fp3_reworded".to_string();
+        second.title = "command execution CWE-78".to_string();
+        second.message = "producer changed the prose classification".to_string();
+
+        assert_eq!(
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
+        );
     }
 }
