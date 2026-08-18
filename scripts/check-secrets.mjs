@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const RULES = [
@@ -71,7 +73,24 @@ const RULES = [
   },
 ];
 
-const INTENTIONAL_SECRET_FIXTURE_PREFIX = "tests/fixtures/secret-scan/";
+const APPROVED_FIXTURE_HASHES = new Map([
+  [
+    "tests/fixtures/secret-scan/leaks/aws-keys.env",
+    "263c194120335221f1647a7bb6f0d762dce39947771c5a46e0c8c7a4d4c59b63",
+  ],
+  [
+    "tests/fixtures/secret-scan/leaks/key.pem",
+    "cd2d2bf18494e900c83dfeadc75f12211ee5f9c96c3c008ffeca3f95e0e48e6e",
+  ],
+  [
+    "tests/fixtures/secret-scan/leaks/placeholder.cfg",
+    "14ada17e99a880d874d6c6d101a177576dfaad8525a7d04c7bb8d4df2e51609e",
+  ],
+  [
+    "tests/fixtures/secret-scan/leaks/tokens.env",
+    "8b7aafb8a4101c17211828b66ddc10bd93c358d6a5b443307ce4c2e6ef0861f9",
+  ],
+]);
 
 function isPlaceholder(value) {
   const lower = value.toLowerCase();
@@ -113,7 +132,20 @@ function parseNewLineStart(header) {
   return match ? Number.parseInt(match[1], 10) : null;
 }
 
-export function scanDiff(diff) {
+export function fixtureIsApproved(path, cwd = process.cwd()) {
+  const expected = APPROVED_FIXTURE_HASHES.get(path);
+  if (!expected) {
+    return false;
+  }
+  try {
+    const actual = createHash("sha256").update(readFileSync(resolve(cwd, path))).digest("hex");
+    return actual === expected;
+  } catch {
+    return false;
+  }
+}
+
+export function scanDiff(diff, approvedPath = () => false) {
   const findings = [];
   let currentPath = null;
   let newLine = null;
@@ -131,7 +163,7 @@ export function scanDiff(diff) {
       continue;
     }
     if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
-      if (!currentPath.startsWith(INTENTIONAL_SECRET_FIXTURE_PREFIX)) {
+      if (!approvedPath(currentPath)) {
         for (const rule of scanLine(rawLine.slice(1))) {
           findings.push({ path: currentPath, line: newLine, rule });
         }
@@ -224,7 +256,8 @@ export function formatFinding(finding, githubActions = process.env.GITHUB_ACTION
 
 export function run(argv = process.argv.slice(2)) {
   const { base, head } = parseArguments(argv);
-  const findings = scanDiff(diffForRange(base, head));
+  const cwd = process.cwd();
+  const findings = scanDiff(diffForRange(base, head, cwd), (path) => fixtureIsApproved(path, cwd));
   if (findings.length === 0) {
     console.log(`Secret scan passed for ${base}...${head}.`);
     return 0;
