@@ -31,9 +31,11 @@ test("detects representative provider and platform credentials", () => {
 
 test("detects private keys, generic assignments, and credential-bearing URLs", () => {
   const privateKeyHeader = ["-----BEGIN ", "PRIVATE KEY-----"].join("");
+  const encryptedPrivateKeyHeader = ["-----BEGIN ENCRYPTED ", "PRIVATE KEY-----"].join("");
   const secret = patterned("", 28);
 
   assert.deepEqual(scanLine(privateKeyHeader), ["private key"]);
+  assert.deepEqual(scanLine(encryptedPrivateKeyHeader), ["private key"]);
   assert.deepEqual(scanLine(`client_secret = "${secret}"`), ["credential assignment"]);
   assert.deepEqual(scanLine(`postgres://user:${secret}@db.example.invalid/app`), [
     "credential-bearing connection URL",
