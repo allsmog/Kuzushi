@@ -1,9 +1,12 @@
 use super::DoctorCheck;
 use kuzushi_openai::LangGraphRuntime;
 use std::env;
+use std::ffi::OsStr;
 #[cfg(unix)]
 use std::fs;
 use std::path::{Path, PathBuf};
+
+const DEFAULT_WINDOWS_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 
 pub(crate) fn check_bridge_command(config: &kuzushi_core::V2Config) -> DoctorCheck {
     match LangGraphRuntime::from_config(config, current_dir_for_doctor()) {
@@ -67,16 +70,58 @@ pub(crate) fn resolve_executable(
     path: Option<&std::ffi::OsStr>,
     cwd: &Path,
 ) -> Option<PathBuf> {
+    resolve_executable_for_platform(
+        binary,
+        path,
+        cwd,
+        cfg!(windows),
+        env::var_os("PATHEXT").as_deref(),
+    )
+}
+
+fn resolve_executable_for_platform(
+    binary: &str,
+    path: Option<&OsStr>,
+    cwd: &Path,
+    windows: bool,
+    path_ext: Option<&OsStr>,
+) -> Option<PathBuf> {
     let candidate = Path::new(binary);
     if candidate.components().count() > 1 {
         let resolved = resolve_command_path(binary, cwd);
-        return is_executable_file(&resolved).then_some(resolved);
+        return executable_candidates(&resolved, windows, path_ext)
+            .find(|candidate| is_executable_file(candidate));
     }
 
     path.into_iter()
         .flat_map(env::split_paths)
-        .map(|dir| dir.join(binary))
+        .flat_map(|dir| executable_candidates(&dir.join(binary), windows, path_ext))
         .find(|candidate| is_executable_file(candidate))
+}
+
+fn executable_candidates(
+    candidate: &Path,
+    windows: bool,
+    path_ext: Option<&OsStr>,
+) -> impl Iterator<Item = PathBuf> {
+    let mut candidates = vec![candidate.to_path_buf()];
+    if windows && candidate.extension().is_none() {
+        candidates.extend(
+            windows_executable_extensions(path_ext)
+                .map(|extension| candidate.with_extension(extension.trim_start_matches('.'))),
+        );
+    }
+    candidates.into_iter()
+}
+
+fn windows_executable_extensions(path_ext: Option<&OsStr>) -> impl Iterator<Item = &str> {
+    path_ext
+        .and_then(OsStr::to_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_WINDOWS_PATHEXT)
+        .split(';')
+        .map(str::trim)
+        .filter(|extension| !extension.is_empty())
 }
 
 pub(crate) fn resolve_command_path(value: &str, cwd: &Path) -> PathBuf {
@@ -104,5 +149,54 @@ pub(crate) fn is_executable_file(path: &Path) -> bool {
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn windows_resolution_applies_pathext_to_bare_commands() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let node = temp.path().join("node.EXE");
+        fs::write(&node, b"stub").expect("write executable fixture");
+        make_executable(&node);
+        let search_path = env::join_paths([temp.path()]).expect("search path");
+
+        let resolved = resolve_executable_for_platform(
+            "node",
+            Some(&search_path),
+            temp.path(),
+            true,
+            Some(OsStr::new(".COM;.EXE;.CMD")),
+        );
+
+        assert_eq!(resolved, Some(node));
+    }
+
+    #[test]
+    fn windows_resolution_does_not_append_pathext_to_explicit_extensions() {
+        let candidates = executable_candidates(
+            Path::new("node.custom"),
+            true,
+            Some(OsStr::new(".EXE;.CMD")),
+        )
+        .collect::<Vec<_>>();
+
+        assert_eq!(candidates, vec![PathBuf::from("node.custom")]);
+    }
+
+    fn make_executable(path: &Path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(path).expect("fixture metadata").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(path, permissions).expect("fixture permissions");
+        }
+        #[cfg(not(unix))]
+        let _ = path;
     }
 }

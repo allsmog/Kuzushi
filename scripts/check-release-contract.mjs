@@ -34,6 +34,9 @@ checkDynamicHostVersion();
 checkWorkspaceLockVersions();
 checkNativeReleaseSmoke();
 checkReleaseAssemblyGate();
+checkReleaseCiGate();
+checkReleaseMetadata();
+checkPublishedReleaseSmoke();
 checkReleaseInstructions();
 
 if (process.env.GITHUB_REF_TYPE === "tag") {
@@ -144,6 +147,50 @@ function checkReleaseAssemblyGate() {
     ...nativeReleaseMatrixFailures(workflow),
     ...requiredReleaseNativeDirFailures(packVerifier),
   );
+}
+
+function checkReleaseCiGate() {
+  const workflow = readText(".github/workflows/release.yml");
+  failures.push(
+    ...missingTokenFailures(workflow, "release workflow", [
+      "uses: ./.github/workflows/ci-full.yml",
+    ]),
+  );
+}
+
+function checkReleaseMetadata() {
+  const workflow = readText(".github/workflows/release.yml");
+  failures.push(
+    ...missingTokenFailures(workflow, "release workflow", [
+      "prerelease: ${{ contains(github.ref_name, '-') }}",
+    ]),
+  );
+}
+
+function checkPublishedReleaseSmoke() {
+  const releaseWorkflow = readText(".github/workflows/release.yml");
+  const smokeWorkflow = readText(".github/workflows/published-release-smoke.yml");
+  failures.push(
+    ...missingTokenFailures(releaseWorkflow, "release workflow", [
+      "needs: [publish-npm, github-release]",
+      "uses: ./.github/workflows/published-release-smoke.yml",
+      "version: ${{ github.ref_name }}",
+    ]),
+    ...missingTokenFailures(smokeWorkflow, "published smoke", [
+      "node scripts/smoke-published-release.mjs",
+      "ubuntu-latest",
+      "ubuntu-24.04-arm",
+      "macos-15-intel",
+      "macos-14",
+      "windows-latest",
+    ]),
+  );
+}
+
+function missingTokenFailures(source, subject, tokens) {
+  return tokens
+    .filter((token) => !source.includes(token))
+    .map((token) => `${subject} must contain ${token}`);
 }
 
 function releaseAssemblyActivationFailures(workflow) {

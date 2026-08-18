@@ -27,7 +27,7 @@ pnpm verify:pack
 
 # 2. Consistently bump package.json, Cargo.toml, Cargo.lock workspace entries,
 #    and the dynamic-module host protocol version.
-node scripts/bump-release-version.mjs 0.24.0-alpha.12
+node scripts/bump-release-version.mjs 0.24.0-alpha.13
 pnpm check:release
 
 # 3. Commit every source updated by the bump, plus the changelog, and tag
@@ -63,6 +63,9 @@ Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
 6. Creates a GitHub Release with changelog, the full Node-capable npm tarball,
    and CLI-plus-MCP native archives. The native archives intentionally omit
    Node dependencies; model-backed and dynamic-Node tools use npm or source.
+7. Installs the public npm version into a clean prefix on all five supported
+   platform/architecture pairs, then runs both command wrappers, `doctor`, and
+   the offline demo. Each leg uploads a JSON consumer receipt.
 
 ```sh
 # If you've already published manually, just push the tag:
@@ -80,6 +83,9 @@ git push origin main --tags
 ```sh
 npm view kuzushi version          # check published version
 npm install -g kuzushi && kuzushi --version   # install and verify
+
+# Rerun the five-platform public-package smoke for an existing release.
+gh workflow run published-release-smoke.yml -f version=0.24.0-alpha.13
 ```
 
 ## Surface Compatibility Migrations

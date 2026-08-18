@@ -90,6 +90,16 @@ jobs:
             npm publish --access public --ignore-scripts
           fi
 
+  # Prove the public package works from a clean npm prefix on every supported
+  # platform after both registries expose the immutable release.
+  published-release-smoke:
+    needs: [publish-npm, github-release]
+    uses: ./.github/workflows/published-release-smoke.yml
+    with:
+      version: ${{ github.ref_name }}
+    permissions:
+      contents: read
+
   # ── Cross-platform native binaries for the GitHub Release ───────────────
   # Each leg builds natively on its own runner arch (no cross toolchains).
   # Every supported archive is required before npm or GitHub publication.
@@ -228,6 +238,7 @@ jobs:
         with:
           generate_release_notes: true
           body_path: ${{ env.CHANGELOG_PATH }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             kuzushi-*.tgz
             kuzushi-*.tar.gz

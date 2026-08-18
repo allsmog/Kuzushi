@@ -37,7 +37,7 @@
     "build:rust": "cargo build --workspace --locked",
     "build:native": "node scripts/build-native-runtime.mjs",
     "prepack": "pnpm build:native",
-    "test": "node --test scripts/setup-contract.test.mjs scripts/ensure-upstream-remote.test.mjs scripts/bump-release-version.test.mjs scripts/rust-mutation-shard.test.mjs scripts/rust-source-markers.test.mjs scripts/verify-repository.test.mjs scripts/check-secrets.test.mjs scripts/recall-eval-score.test.mjs scripts/check-diff-coverage.test.mjs scripts/langgraph-bridge/errors.test.mjs scripts/langgraph-bridge/file-tools.test.mjs scripts/langgraph-bridge/mcp.test.mjs scripts/langgraph-bridge/model.test.mjs scripts/langgraph-bridge/oauth-login.test.mjs",
+    "test": "node --test scripts/setup-contract.test.mjs scripts/ensure-upstream-remote.test.mjs scripts/bump-release-version.test.mjs scripts/rust-mutation-shard.test.mjs scripts/rust-source-markers.test.mjs scripts/verify-repository.test.mjs scripts/check-secrets.test.mjs scripts/recall-eval-score.test.mjs scripts/smoke-published-release.test.mjs scripts/check-diff-coverage.test.mjs scripts/langgraph-bridge/errors.test.mjs scripts/langgraph-bridge/file-tools.test.mjs scripts/langgraph-bridge/mcp.test.mjs scripts/langgraph-bridge/model.test.mjs scripts/langgraph-bridge/oauth-login.test.mjs",
     "test:rust": "cargo test --workspace --locked",
     "test:performance": "cargo test -p kuzushi-tui --lib workbench_warmed_input_to_paint_p95_stays_within_budget --locked -- --ignored --test-threads=1",
     "test:e2e": "bash tests/e2e/run-smoke.sh",

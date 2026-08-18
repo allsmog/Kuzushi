@@ -1,0 +1,60 @@
+name: Published Release Smoke
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Published npm version or matching v-prefixed release tag
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published npm version; blank uses the npm latest tag
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  published-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-x64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+          - os: macos-15-intel
+            slug: darwin-x64
+          - os: macos-14
+            slug: darwin-arm64
+          - os: windows-latest
+            slug: win32-x64
+    name: published-${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install and exercise the published release
+        env:
+          KUZUSHI_SMOKE_VERSION: ${{ inputs.version }}
+          KUZUSHI_SMOKE_RECEIPT: published-release-smoke.json
+        run: node scripts/smoke-published-release.mjs
+      - name: Upload consumer receipt
+        if: always() && hashFiles('published-release-smoke.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: published-release-smoke-${{ matrix.slug }}
+          path: published-release-smoke.json
+          if-no-files-found: error
+          retention-days: 30
