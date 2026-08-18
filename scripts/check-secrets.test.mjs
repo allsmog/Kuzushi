@@ -14,7 +14,7 @@ import {
 
 const patterned = (prefix, length) => {
   const alphabet = "Ab9Cd8Ef7Gh6Jk5Lm4Np3Qr2St1Uv0WxYz";
-  return prefix + alphabet.repeat(Math.ceil(length / alphabet.length)).slice(0, length);
+  return `${prefix}${alphabet.repeat(Math.ceil(length / alphabet.length)).slice(0, length)}`;
 };
 
 test("detects representative provider and platform credentials", () => {
@@ -66,7 +66,7 @@ test("only exact approved fixture bytes bypass their intentional patterns", () =
   const directory = mkdtempSync(path.join(os.tmpdir(), "kuzushi-secret-fixture-"));
   const relative = "tests/fixtures/secret-scan/leaks/tokens.env";
   const fixture = path.join(directory, relative);
-  const github = "ghp_" + "ABCdefGHIjklMNOpqrSTUvwxYZ0123456789";
+  const github = ["ghp_", "ABCdefGHIjklMNOpqrSTUvwxYZ0123456789"].join("");
   const contents = [
     "# Synthetic tokens. None are real credentials. Stripe / Google / OpenAI",
     "# / Slack detectors are exercised by inline-string cases in",
