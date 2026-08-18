@@ -19,7 +19,8 @@ pub(crate) struct MatchReport {
     pub(crate) matches: Vec<MatchRow>,
     pub(crate) missed_oracle: Vec<MissedOracle>,
     pub(crate) expected_min_recall: f64,
-    pub(crate) cost_usd: f64,
+    /// Measured scan cost. `None` means no accounting receipt was supplied.
+    pub(crate) cost_usd: Option<f64>,
     pub(crate) wall_seconds: u64,
 }
 
