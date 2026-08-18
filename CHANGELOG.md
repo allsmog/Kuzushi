@@ -5,8 +5,38 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.13 · operator experience and descriptor boundaries
+
+**Additive:**
+
+- Module and tool descriptor contracts now live in the dedicated
+  `kuzushi-descriptor` crate, while the Rust registry remains the shared
+  execution boundary for scan, shell, and run modes.
+- Review now exposes complete decision history, operator-specific calibration,
+  stronger conflict categories, proof-band ordering, and consistent
+  false-positive dismissal.
+
+**Security and reliability:**
+
+- Revision drift and abandoned-run recovery remain fail-closed while the shell
+  now volunteers authenticated staleness, commit distance, and one-shot repair
+  notices. Untracked source also participates in dirty-worktree identity.
+- Proof bands, Markdown bundles, JSON evidence origin, and SARIF severity/help
+  now share the same evidence-grounded classification and remediation context.
+- File-scoped rescans and exact retries dispatch through the normal shared tool
+  boundary instead of filtering stale findings or falling back to replay.
+
 **Fixed:**
 
+- Printable typing and paste are lossless across picker and planner views, bare
+  `demo` follows the displayed guidance, and Review-to-Prove navigation retains
+  finding identity.
+- Cancellation stays nonterminal until cleanup finishes, missing cost never
+  renders as zero, recovered and background runs volunteer attention, and
+  quiet model/tool work uses honest distinct disclosures.
+- Setup, Prove, scene, configuration, cost, quit confirmation, and narrow-width
+  views now explain empty, deferred, volatile, source, and readiness state
+  instead of requiring operators to infer it.
 - `.kuzushi/scope.toml` host rules are now matched case-insensitively and
   ignore a trailing root dot, so `ADMIN.example.com` and `admin.example.com.`
   can no longer slip past an `[out_of_scope]` rule written as

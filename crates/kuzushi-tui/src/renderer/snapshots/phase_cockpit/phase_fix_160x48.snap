@@ -10,7 +10,7 @@ KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● L
  patch apply write reviewed diff · patch reject discard candidate · patch regen replace candidate · report open Report      │
 │▸ REMEDIATION                    │KUZUSHI · BREAKDOWN REPORT                           │VERIFICATION                       │ JOURNEY
 │STATE  Staged for approval       │1 C · 2 H · 2 M · 1 L · 6 total · 0 terminal · 6...  │✓ patch drafted through the...     │ Review 3/5
-│NEXT   patch apply · write...    │report sarif/all · preview only · no report written  │○ applied · build and tests...     │ ⛭ fix
+│NEXT   patch apply · write...    │report sarif/all · preview only · no report written  │○ applied · build and tests...     │ ⛭ autonomy:fix
 │OR patch reject · patch regen    │◆ F-0001  CRITICAL  SQL injection reaches query      │○ proof fails after patch...       │
 │▸ report                         │                                                     │defer with a reason code...        │ IN FLIGHT
 │  choose format, completeness,   │                                                     │                                   │ ⠋ context:build
@@ -48,7 +48,7 @@ KUZUSHI · Viewing Fix · next required Review · target ./phase-target · ● L
 │                                 │                                                     │                                   │
 │                                 │                                                     │                                   │
 │                                 │                                                     │                                   │
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...           6 findings / 1 crit / 2 high / 2 med│
+run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...       6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │
 ◆ FIX VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt                                                          │

@@ -1,6 +1,6 @@
 {
   "name": "@kuzushi/linux-x64",
-  "version": "0.24.0-alpha.12",
+  "version": "0.24.0-alpha.13",
   "description": "Kuzushi native runtime for Linux x64 (glibc)",
   "license": "MIT",
   "repository": "https://github.com/allsmog/Kuzushi.git",

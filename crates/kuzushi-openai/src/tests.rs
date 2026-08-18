@@ -342,7 +342,7 @@ printf '%s' '{response}'
             format!(
                 r#"#!/bin/sh
 printf started > {started}
-while :; do :; done
+while :; do sleep 1; done
 "#,
                 started = started.display()
             ),
@@ -405,7 +405,7 @@ while :; do :; done
         std::fs::write(
             &bridge,
             format!(
-                "#!/bin/sh\nprintf started > {}\nwhile :; do :; done\n",
+                "#!/bin/sh\nprintf started > {}\nwhile :; do sleep 1; done\n",
                 started.display()
             ),
         )

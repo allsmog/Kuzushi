@@ -8,7 +8,7 @@ KUZUSHI · Viewing Prove · next Review
  ▸ NEXT record terminal dispositions for
         6 of 6 ledger candidates
 │▸ PROVE · STATUS / NEXT
-│F-0001 [●●●] 1src RTV critical
+│F-0001 [●●●] 1src runtime critical
 │STATUS runtime_verified · [●●●]
 │NEXT   patch F-0001
 run rout... 6 findings · 1 C · 2 H · 2 M

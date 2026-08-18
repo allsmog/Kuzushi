@@ -389,7 +389,7 @@ fn terminal_presentation_cost(
 
 fn run_focus_header_cost_label(cost: RuntimeCostReport) -> String {
     if cost.is_unavailable() {
-        return "cost unavailable".to_string();
+        return "cost not recorded".to_string();
     }
     if cost.is_complete() {
         return format!("cost ${:.4}", cost.observed_usd());

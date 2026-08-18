@@ -8,7 +8,9 @@ Kuzushi · VIEW REVIEW · target:no target · o idle · modules:all modules
  type Esc then B review decision backlog · type Enter open in Prove · type findings show full queue
 
  -- FINDINGS -----------------------------------------------------------------------------------------------------------
-0 of 0 · [completeness:all] · * proof · s sources · @ author
+0 of 0 · [completeness:all]
+[order: proof band, then severity]
+[***] runtime · [**o] static · [*oo] signal · [xxx] dismissed · s# sources · @H human · @A automated · @I imported ·...
 facets before search · severity:0
   source:0
   file:0

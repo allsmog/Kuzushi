@@ -2671,7 +2671,10 @@ fn plain_help_guidance_wraps_without_truncating_command_shapes() {
 
 #[test]
 fn renders_config_onboarding_without_silent_model_selection() {
-    let backend = TestBackend::new(100, 28);
+    // Config now includes the complete effective-source inventory before the
+    // model catalog. Give this content test enough height to assert both
+    // sections; compact viewport behavior is covered separately.
+    let backend = TestBackend::new(100, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config_mut().model = None;

@@ -1,6 +1,6 @@
 {
   "name": "kuzushi",
-  "version": "0.24.0-alpha.12",
+  "version": "0.24.0-alpha.13",
   "description": "Kuzushi — security-native code agent for evidence-backed repository scans",
   "author": "Shayaun Nejad",
   "repository": {
@@ -94,11 +94,11 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
-    "@kuzushi/darwin-arm64": "0.24.0-alpha.12",
-    "@kuzushi/darwin-x64": "0.24.0-alpha.12",
-    "@kuzushi/linux-arm64": "0.24.0-alpha.12",
-    "@kuzushi/linux-x64": "0.24.0-alpha.12",
-    "@kuzushi/win32-x64": "0.24.0-alpha.12"
+    "@kuzushi/darwin-arm64": "0.24.0-alpha.13",
+    "@kuzushi/darwin-x64": "0.24.0-alpha.13",
+    "@kuzushi/linux-arm64": "0.24.0-alpha.13",
+    "@kuzushi/linux-x64": "0.24.0-alpha.13",
+    "@kuzushi/win32-x64": "0.24.0-alpha.13"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",

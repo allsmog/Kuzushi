@@ -31,12 +31,12 @@ KUZUSHI · Viewing Prove · next required Review · target ./phase-target · ●
 │ v  Run investigation     draft verify for F-0001 — resolve missing evidence, attempt safe reproduction
 │ c  Generate attack chain model prerequisites, trust transitions, and impact over verified findings
 │ 5  Draft patch           open Fix with this finding to stage a remediation
-│ x  Mark false positive   draft suppress — records a durable review decision with a reason
+│ x  Add suppression rule  draft an expiring rule with an auditable reason
 │D defer proof · Esc return to findings
 │
 │
 │
-run route · ⠋ context:build · 42s · 1/2 · Review 3/5 · ⛭ fix · workbench ·...       6 findings / 1 crit / 2 high / 2 med
+run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...   6 findings / 1 crit / 2 high / 2 med
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Ctrl+C request abort   Esc prompt
 ◎ PROVE VIEW › NAVIGATE · Shift+Tab phase→ Tab/[/] pane · Esc prompt

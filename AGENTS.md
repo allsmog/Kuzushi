@@ -41,7 +41,7 @@ Rust descriptor/executor path first.
 
 ### Key files
 
-- `crates/kuzushi-core/src/modules/descriptor/descriptor_model.rs` —
+- `crates/kuzushi-descriptor/src/descriptor_model.rs` —
   `ToolDescriptor`, `OptionSpec`, `RuntimeRequirement`, and option metadata.
 - `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/` — Rust builtin
   registration, lookup, execution, DAG descriptors, and output normalization.

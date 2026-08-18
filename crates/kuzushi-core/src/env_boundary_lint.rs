@@ -19,6 +19,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Config / bootstrap boundaries.
     "agent_router/router_state.rs", // KUZUSHI_MODELS_FILE (operator models file)
     "config/apply_env_overrides.rs", // sanctioned env bootstrap tier
+    "config/source_inventory.rs",   // reports which sanctioned env tier supplied a setting
     // PATH / HOME / process-integration lookups.
     "capabilities/fuzz_engine/engine_cli.rs", // PATH which (python3 for the engine)
     "capabilities/module_recommender/adapters.rs", // PATH probe for optional binaries

@@ -103,7 +103,7 @@ fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
         } else {
             indicator
         };
-        append_or_wrap(&mut lines, &format!("[{indicator}]"), width);
+        lines.push(format!("[{indicator}]"));
     }
     if model.operator_calibration.is_available() {
         lines.push(model.operator_calibration.label(width < 72));
