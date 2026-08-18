@@ -91,20 +91,34 @@ fn empty_plan_row(app: &ShellApp) -> SetupReadinessRow {
     }
 }
 
-/// How many Map artifacts are already on disk, when the planner recommends no
-/// further work. `None` while anything is still recommended: an operator who
-/// unchecked recommended rows has an empty plan, not a reusable one.
+/// How many Map artifacts are already on disk, when no recommended row still
+/// has work left. `None` while a recommended row is uncached: an operator who
+/// unchecked real work has an empty plan, not a reusable one.
+///
+/// Reality, not the recommendation set, decides. A prior failed or interrupted
+/// attempt keeps its task recommended even after a later run left the artifact
+/// on disk; the picker reconciles that by reusing the cached artifact and
+/// leaving the row unchecked, so Setup must read the same reality instead of
+/// calling the resulting empty plan unconfigured.
 fn current_map_artifacts(app: &ShellApp) -> Option<usize> {
     let picker = app.engagement.planning_picker();
-    if !picker.default_selected().is_empty() {
+    if picker
+        .tasks()
+        .iter()
+        .any(|row| picker.default_selected().contains(&row.id) && !is_cached_planning_row(row))
+    {
         return None;
     }
     let cached = picker
         .tasks()
         .iter()
-        .filter(|row| row.artifact_state == crate::app::PlanningArtifactState::Cached)
+        .filter(|row| is_cached_planning_row(row))
         .count();
     (cached > 0).then_some(cached)
+}
+
+fn is_cached_planning_row(row: &crate::app::PlanningTaskRow) -> bool {
+    row.artifact_state == crate::app::PlanningArtifactState::Cached
 }
 
 fn missing_prerequisite_row(

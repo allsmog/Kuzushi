@@ -18,7 +18,10 @@ Notable changes to Kuzushi. Release procedure lives in
   `NOTHING TO RUN`, names how many cached artifacts will be reused, and the
   Start Map action states that it records the explicit Map skip instead of
   promising a run. Nothing checked while the planner still recommends work
-  remains a real blocker.
+  remains a real blocker. A task the planner still recommends because an
+  earlier attempt failed or was interrupted no longer forces the blocker
+  either when a later run already left its artifact on disk: Setup now reads
+  the same cached-artifact reality the plan editor shows.
 - Advancing the guided journey from a non-picker view now honors
   `phases.stop_after` the same way the phase picker already did, so a bounded
   journey stops where it is configured to instead of walking to the next phase.

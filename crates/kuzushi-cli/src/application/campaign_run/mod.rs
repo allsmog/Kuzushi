@@ -318,7 +318,7 @@ impl Dispatcher {
         let summary = load_child_summary(&self.target, run_id, &report)?;
         report.outcome = reconciled_child_outcome(&report, summary.as_ref())?;
         let summary_error = summary.as_ref().and_then(|summary| summary.error.clone());
-        // The child carries the last strictly validated live spend. Settlement
+        // The child carries the last strictly authenticated live spend. Settlement
         // must not reread a missing/corrupt stream and erase that lower bound.
         let (cost, provider_spend_unresolved) = campaign_attempt_cost(summary.as_ref(), &report);
         let failure_text = format!(

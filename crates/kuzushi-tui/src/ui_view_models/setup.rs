@@ -357,6 +357,39 @@ mod tests {
         assert!(!start.detail.contains("continues to"), "{start:?}");
     }
 
+    /// A failed or interrupted prior attempt keeps its task recommended even
+    /// after a later run left the artifact on disk. The picker reconciles that
+    /// by reusing the cached artifact and leaving the row unchecked, so Setup
+    /// must report the reusable plan instead of an EMPTY blocker.
+    #[test]
+    fn a_recommended_but_already_cached_map_plan_is_not_a_blocker() {
+        let (_target, mut app) = app_with_reusable_map(V2Config::default());
+        let rows = app.engagement.planning_picker().tasks().to_vec();
+        let recommended = rows
+            .iter()
+            .filter(|row| row.artifact_state == crate::app::PlanningArtifactState::Cached)
+            .map(|row| row.id)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(
+            recommended.len(),
+            2,
+            "fixture must cache both Map artifacts"
+        );
+        app.engagement.planning_picker_mut().open_phase_profiled(
+            crate::app::WorkflowPhase::Map,
+            rows,
+            recommended,
+            false,
+        );
+        assert!(app.engagement.planning_picker().selected().is_empty());
+
+        let model = setup_readiness_model(&app);
+
+        assert_eq!(model.rows[1].status, "NOTHING TO RUN");
+        assert_eq!(model.rows[1].blocker, None);
+        assert!(model.can_start);
+    }
+
     /// Unchecking still-recommended work leaves real Map work unplanned, so the
     /// row must stay a blocker even though a cached artifact is on disk.
     #[test]
