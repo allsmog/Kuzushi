@@ -27,6 +27,7 @@ mod tests {
             findings: PathBuf::from("/tmp/f.json"),
             slice: "test".to_string(),
             target: PathBuf::from("/tmp"),
+            cost_usd: None,
             wall_seconds: 0,
             pretty: true,
         }
@@ -91,6 +92,40 @@ mod tests {
     }
 
     #[test]
+    fn score_distinguishes_unknown_and_measured_cost() {
+        let oracle = Oracle {
+            cve: "CVE-TEST".to_string(),
+            name: None,
+            commit: None,
+            ground_truth: Vec::new(),
+            expected_min_recall: None,
+        };
+        let dump = FindingsDump {
+            findings: Vec::new(),
+        };
+
+        let unknown = score(&cli(), &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(unknown.cost_usd, None);
+        assert!(render_match_report(&unknown, false)
+            .unwrap()
+            .contains("\"cost_usd\":null"));
+
+        let mut measured_cli = cli();
+        measured_cli.cost_usd = Some(1.25);
+        let measured = score(&measured_cli, &oracle, &dump, Path::new("/tmp"));
+        assert_eq!(measured.cost_usd, Some(1.25));
+    }
+
+    #[test]
+    fn cost_parser_rejects_negative_or_non_finite_values() {
+        assert_eq!(parse_non_negative_cost_usd("0"), Ok(0.0));
+        assert_eq!(parse_non_negative_cost_usd("1.25"), Ok(1.25));
+        for invalid in ["-0", "-0.01", "NaN", "inf", "-inf", "not-a-number"] {
+            assert!(parse_non_negative_cost_usd(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
     fn load_match_report_reads_json_files_and_renderer_respects_pretty_flag() {
         let temp = std::env::temp_dir().join(format!(
             "kuzushi-eval-load-report-{}",
@@ -136,6 +171,7 @@ mod tests {
             findings,
             slice: "test".to_string(),
             target: temp,
+            cost_usd: None,
             wall_seconds: 0,
             pretty: false,
         };
