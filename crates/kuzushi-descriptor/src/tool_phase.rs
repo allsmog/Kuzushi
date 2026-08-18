@@ -1,4 +1,4 @@
-use super::ModuleKind;
+use crate::ModuleKind;
 use serde::{Deserialize, Serialize};
 
 /// Canonical journey phase a tool belongs to. This is the single source of

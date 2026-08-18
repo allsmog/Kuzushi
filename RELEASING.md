@@ -3,6 +3,14 @@
 The canonical changelog lives in [CHANGELOG.md](./CHANGELOG.md). Update it as
 part of every release commit.
 
+## Export compatibility notes
+
+- Markdown-bundle and machine-export `derivedSourcePresent` now means that a
+  finding has explicit source-grounded static proof. A constructor-generated
+  source signature or automatic occurrence row remains provenance and no
+  longer promotes a zero-evidence finding from `message_only` to
+  `source_linked`.
+
 ## Prerequisites
 
 - Node.js 22 or newer (`node --version`); this must match `engines.node` in the

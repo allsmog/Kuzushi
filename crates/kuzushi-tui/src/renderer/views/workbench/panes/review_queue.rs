@@ -70,7 +70,13 @@ struct ReviewQueueViewport {
 
 fn review_queue_chrome_lines(model: &ReviewQueueModel, inner: Rect) -> Vec<Line<'static>> {
     let width = inner.width as usize;
-    let legend = "● proof · s sources · @ author";
+    let legend = if width >= 120 {
+        "[●●●] runtime · [●●○] static · [●○○] signal · [×××] dismissed · s# sources · @H human · @A automated · @I imported · @– none · @? unknown"
+    } else if width >= 72 {
+        "bands named · s# count · @H/A/I/–/? author"
+    } else {
+        "s# count · @H human · @A auto · @I imported · @– none · @? unknown"
+    };
     let mut summaries = active_filter_lines(model, width);
     if width >= 72 {
         append_or_wrap(&mut summaries, legend, width);
@@ -91,11 +97,16 @@ fn active_filter_lines(model: &ReviewQueueModel, width: usize) -> Vec<String> {
     for chip in &model.active_filter_chips {
         append_or_wrap(&mut lines, &format!("[{chip}]"), width);
     }
-    // Its own line, never wrapped in beside a filter chip: what ordered the
-    // list is a different claim from what narrowed it, and half of this one
-    // sharing a clipped line would read as a filter the operator did not set.
     if let Some(indicator) = model.ordering_indicator {
-        lines.push(format!("[{indicator}]"));
+        let indicator = if width < 48 {
+            "order: proof > severity"
+        } else {
+            indicator
+        };
+        append_or_wrap(&mut lines, &format!("[{indicator}]"), width);
+    }
+    if model.operator_calibration.is_available() {
+        lines.push(model.operator_calibration.label(width < 72));
     }
     lines
 }
@@ -335,6 +346,7 @@ fn authority_marker(row: &ReviewQueueRow) -> &'static str {
         "human" | "operator" => "@H",
         "auto" | "agent" | "model" => "@A",
         "imported" => "@I",
+        "-" => "@–",
         _ => "@?",
     }
 }
@@ -386,7 +398,7 @@ fn review_queue_title_text(row: &ReviewQueueRow, width: usize) -> String {
 
 fn review_queue_full_signal_summary(row: &ReviewQueueRow) -> String {
     format!(
-        "{} {} decision:{}{} {} next:{} status:{} conf:{}",
+        "{} {} decision:{}{} {} next:{} status:{} decision-score:{}",
         row.identity_label,
         row.priority_label,
         review_queue_decision_label(row),
@@ -401,7 +413,12 @@ fn review_queue_full_signal_summary(row: &ReviewQueueRow) -> String {
 fn review_queue_conflict_segment(row: &ReviewQueueRow) -> String {
     row.decision_conflict
         .as_ref()
-        .map(|_| " conflict:reappeared".to_string())
+        .map(|conflict| {
+            format!(
+                " conflict:{}",
+                crate::ui_view_models::review_conflicts::review_conflict_compact_label(conflict)
+            )
+        })
         .unwrap_or_default()
 }
 
@@ -518,6 +535,7 @@ mod tests {
             filter_label: "completeness:all".to_string(),
             completeness_mode: "all",
             ordering_indicator: None,
+            operator_calibration: Default::default(),
             header: format!("REVIEW QUEUE - showing {} of {}", rows.len(), rows.len()),
             empty_reason: None,
             rows: rows.into(),
@@ -591,15 +609,25 @@ mod tests {
     }
 
     #[test]
+    fn no_decision_and_unknown_author_have_distinct_markers() {
+        let mut row = review_row();
+        row.decision_author = "-".to_string();
+        assert!(line_text(review_queue_row_line(&row, 80)).contains("@–"));
+
+        row.decision_author = "unexpected".to_string();
+        assert!(line_text(review_queue_row_line(&row, 80)).contains("@?"));
+    }
+
+    #[test]
     fn compact_queue_externalizes_metadata_codes() {
         let text = lines_text(populated_review_queue_pane_lines(
             &review_model(vec![review_row()]),
             Rect::new(0, 0, 60, 6),
         ));
 
-        assert!(text.contains("● proof"), "{text}");
-        assert!(text.contains("s sources"), "{text}");
-        assert!(text.contains("@ author"), "{text}");
+        assert!(text.contains("s# count"), "{text}");
+        assert!(text.contains("@H human"), "{text}");
+        assert!(text.contains("@A auto"), "{text}");
     }
 
     #[test]
@@ -611,7 +639,7 @@ mod tests {
         let text = line_text(review_queue_row_line(&row, 160));
 
         assert!(text.contains("decision:rejected_fp"), "{text}");
-        assert!(text.contains("conflict:reappeared"), "{text}");
+        assert!(text.contains("conflict:scanner-reappeared"), "{text}");
     }
 
     #[test]
@@ -766,6 +794,7 @@ mod tests {
             filter_label: "completeness:open".to_string(),
             completeness_mode: "open",
             ordering_indicator: None,
+            operator_calibration: Default::default(),
             header: "REVIEW QUEUE - showing 0 of 2 - 0 open - 2 complete".to_string(),
             empty_reason: Some("all visible findings have terminal decisions".to_string()),
             rows: Vec::new().into(),

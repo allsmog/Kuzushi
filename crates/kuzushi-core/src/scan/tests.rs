@@ -315,6 +315,69 @@ mod tests {
     }
 
     #[test]
+    fn scan_runner_accepts_file_scopes_and_keeps_only_requested_files() {
+        struct FileScopedScanner;
+
+        impl ScanEngine for FileScopedScanner {
+            fn id(&self) -> &'static str {
+                "file-scoped"
+            }
+
+            fn scan(
+                &self,
+                target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                assert!(target.ends_with("src"));
+                Ok(vec![
+                    Finding::new_tool(
+                        "static",
+                        "static/requested",
+                        "requested.rs",
+                        7,
+                        None,
+                        Severity::Medium,
+                        "requested finding",
+                    ),
+                    Finding::new_tool(
+                        "static",
+                        "static/neighbor",
+                        "neighbor.rs",
+                        9,
+                        None,
+                        Severity::Medium,
+                        "neighbor finding",
+                    ),
+                ])
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("src")).unwrap();
+        fs::write(tmp.path().join("src/requested.rs"), "fn requested() {}\n").unwrap();
+        fs::write(tmp.path().join("src/neighbor.rs"), "fn neighbor() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(FileScopedScanner)];
+        let options = ScanRunOptions {
+            run_id: Some("scan-file-scoped".to_string()),
+            severity: None,
+            paths: vec!["src/requested.rs".to_string()],
+            tasks: None,
+            static_proof_state: None,
+            index_static_evidence: false,
+        };
+
+        run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
+        let findings = store
+            .list_findings_for_scan_id("scan-file-scoped")
+            .unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file_path, "src/requested.rs");
+    }
+
+    #[test]
     fn semgrep_static_evidence_scan_runner_indexes_whitebox_signals() {
         struct StaticSemgrepScanner;
 

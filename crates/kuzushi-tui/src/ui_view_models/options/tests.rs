@@ -49,7 +49,7 @@ fn options_model_formats_stored_option_rows() {
         table.headers,
         [
             "option",
-            "value",
+            "value · scope",
             "default",
             "req",
             "type",
@@ -60,7 +60,7 @@ fn options_model_formats_stored_option_rows() {
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
         cells: ["view".to_string(), "options".to_string()],
     }));
-    assert_eq!(triage.cells[1], "true");
+    assert_eq!(triage.cells[1], "true · session");
     assert_eq!(triage.cells[4], "bool");
     assert!(triage.has_stored_value);
 }
@@ -191,7 +191,7 @@ fn plain_options_model_projects_ready_table() {
         table.headers,
         [
             "option",
-            "value",
+            "value · scope",
             "default",
             "req",
             "type",

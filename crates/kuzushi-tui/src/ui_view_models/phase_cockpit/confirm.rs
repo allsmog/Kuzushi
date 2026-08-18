@@ -32,12 +32,24 @@ pub(super) fn prove_phase_model(app: &ShellApp) -> ProvePhaseModel {
         finding,
         attack_path,
         proof,
-        empty_hint: selected
-            .is_none()
-            .then_some("select a finding to inspect its path and proof"),
+        empty_hint: selected.is_none().then(|| prove_empty_hint(app)),
         investigation,
         trace,
     }
+}
+
+fn prove_empty_hint(app: &ShellApp) -> String {
+    let Some(deferral) = app.engagement.latest_proof_deferral() else {
+        return "select a finding to inspect its path and proof".to_string();
+    };
+    let subject = deferral
+        .identity_id
+        .as_deref()
+        .unwrap_or(&deferral.finding_fingerprint);
+    format!(
+        "proof deferral recorded for {subject} by operator · {}. No proof was produced; open Review to select a finding",
+        deferral.reason
+    )
 }
 
 /// The bounded investigation plan card. Built only while the operator holds

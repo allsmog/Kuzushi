@@ -83,13 +83,21 @@ fn push_readme_header(
     total_count: usize,
 ) {
     out.push_str("# Kuzushi findings bundle\n\n");
+    out.push_str(
+        "Kuzushi combines scanner output with automated, AI-assisted security analysis. \
+         Treat each finding as a review candidate, not as proof by itself.\n\n",
+    );
+    out.push_str(
+        "Proof bands describe evidence: `confirmed` means authenticated runtime reproduction; \
+         `likely` means linked static or code evidence; `unverified` has not been promoted beyond \
+         a signal; `dismissed` was rejected or suppressed.\n\n",
+    );
     out.push_str(&format!(
         "- **Target:** {}\n",
         markdown_code_span(&workspace.root().display().to_string())
     ));
-    out.push_str("- **Projection:** `WorkspaceFindingExportRecord`\n");
     out.push_str(&format!(
-        "- **Completeness:** `{}`\n",
+        "- **Finding selection:** `{}`\n",
         options.completeness.as_str()
     ));
     out.push_str(&format!(
@@ -97,21 +105,10 @@ fn push_readme_header(
         records.len(),
         total_count
     ));
-    out.push_str(&format!(
-        "- **Omitted fields:** {}\n\n",
-        omitted_fields_label()
-    ));
-}
-
-fn omitted_fields_label() -> String {
-    let fields = super::export_metadata::workspace_export_omitted_fields(
-        WorkspaceExportFormat::MarkdownBundle,
+    out.push_str(
+        "- **Field coverage:** human-readable subset; see \
+         `manifest.json` → `metadata.omittedFields`\n\n",
     );
-    if fields.is_empty() {
-        "none".to_string()
-    } else {
-        fields.join(", ")
-    }
 }
 
 fn push_readme_summary(out: &mut String, records: &[WorkspaceFindingExportRecord]) {
@@ -151,7 +148,7 @@ fn projection_count_summary(
 fn push_readme_findings_table(out: &mut String, records: &[WorkspaceFindingExportRecord]) {
     out.push_str("## Findings\n\n");
     out.push_str(
-        "| Alias | Severity | Confidence | Decision | Lifecycle | Evidence | Location |\n",
+        "| Alias | Severity | Proof band | Decision | Lifecycle | Evidence | Location |\n",
     );
     out.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for record in records {
@@ -260,6 +257,7 @@ fn render_bundle_finding_markdown(
 ) -> String {
     let mut out = String::new();
     push_bundle_header(&mut out, record);
+    push_bundle_security_context(&mut out, record);
     push_bundle_message(&mut out, finding);
     if !finding.evidence.is_empty() {
         out.push_str("## Evidence\n\n");
@@ -268,6 +266,54 @@ fn render_bundle_finding_markdown(
         }
     }
     out
+}
+
+fn push_bundle_security_context(out: &mut String, record: &WorkspaceFindingExportRecord) {
+    if !has_bundle_security_context(record) {
+        return;
+    }
+    out.push_str("## Security context\n\n");
+    push_optional_bundle_field(out, "Recommended change", record.recommendation.as_deref());
+    push_optional_bundle_field(out, "Impact", record.impact.as_deref());
+    push_optional_bundle_field(out, "Exploit scenario", record.exploit_scenario.as_deref());
+    push_optional_bundle_field(out, "Category", record.category.as_deref());
+    if record
+        .preconditions
+        .iter()
+        .any(|value| !value.trim().is_empty())
+    {
+        out.push_str("- **Preconditions:**\n");
+        for precondition in record
+            .preconditions
+            .iter()
+            .filter(|value| !value.trim().is_empty())
+        {
+            out.push_str(&format!("  - {}\n", markdown_inline_text(precondition)));
+        }
+    }
+    out.push('\n');
+}
+
+fn has_bundle_security_context(record: &WorkspaceFindingExportRecord) -> bool {
+    [
+        record.recommendation.as_deref(),
+        record.impact.as_deref(),
+        record.exploit_scenario.as_deref(),
+        record.category.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|value| !value.trim().is_empty())
+        || record
+            .preconditions
+            .iter()
+            .any(|value| !value.trim().is_empty())
+}
+
+fn push_optional_bundle_field(out: &mut String, label: &str, value: Option<&str>) {
+    if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+        out.push_str(&format!("- **{label}:** {}\n", markdown_inline_text(value)));
+    }
 }
 
 fn push_bundle_header(out: &mut String, record: &WorkspaceFindingExportRecord) {
@@ -387,7 +433,7 @@ fn push_bundle_analysis_summary(out: &mut String, record: &WorkspaceFindingExpor
         record.analysis.automated_reasoning_present
     ));
     out.push_str(&format!(
-        "- **Confidence:** {}\n",
+        "- **Proof band:** {}\n",
         markdown_inline_text(&record.proof_confidence)
     ));
     out.push_str(&format!(

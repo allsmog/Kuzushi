@@ -1,6 +1,5 @@
 use crate::findings::{
-    finding_lifecycle_status, Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict,
-    TriageVerdict,
+    Finding, ReviewDecision, ReviewDecisionConflict, ReviewDecisionRecord, TriageVerdict,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,13 +76,12 @@ impl WorkspaceFindingReviewContext {
     }
 
     pub fn decision_conflict_label(&self, finding: &Finding) -> Option<&'static str> {
-        if self.source != WorkspaceFindingReviewSource::DurableIdentity {
-            return None;
-        }
-        if self.decision.verdict != ReviewDecisionVerdict::RejectedFalsePositive {
-            return None;
-        }
-        active_scanner_signal(finding).then_some("reappeared_after_rejection")
+        ReviewDecisionConflict::classify(
+            finding,
+            self.decision.verdict,
+            self.source == WorkspaceFindingReviewSource::DurableIdentity,
+        )
+        .map(ReviewDecisionConflict::export_token)
     }
 }
 
@@ -104,16 +102,4 @@ fn review_source_for_finding(
     } else {
         WorkspaceFindingReviewSource::DurableIdentity
     }
-}
-
-fn active_scanner_signal(finding: &Finding) -> bool {
-    matches!(
-        finding_lifecycle_status(finding),
-        "candidate"
-            | "seen"
-            | "statically_supported"
-            | "verified_static"
-            | "needs_runtime_evidence"
-            | "runtime_verified"
-    )
 }

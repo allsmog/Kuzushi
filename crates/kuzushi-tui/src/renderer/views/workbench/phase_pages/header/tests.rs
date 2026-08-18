@@ -16,6 +16,7 @@ fn scan_header(
     EngagementHeaderModel {
         phase: kuzushi_core::WorkflowPhase::Scan,
         reality_phase: Some(kuzushi_core::WorkflowPhase::Scan),
+        checkpoint_drift: None,
         target: "./target".to_string(),
         context: "context present".to_string(),
         model: "unconfigured".to_string(),
@@ -76,6 +77,7 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
     let header = EngagementHeaderModel {
         phase: kuzushi_core::WorkflowPhase::Scan,
         reality_phase: Some(kuzushi_core::WorkflowPhase::Review),
+        checkpoint_drift: None,
         target: "/a/very/long/target/that/must/not/evict/mode/truth".to_string(),
         context: "context present".to_string(),
         model: "configured".to_string(),
@@ -103,6 +105,35 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
 
     let wide = line_text(identity_line(&header, 120));
     assert!(wide.contains("next required Review"), "{wide}");
+}
+
+#[test]
+fn stale_checkpoint_names_cause_and_rerun_without_claiming_progress() {
+    let mut header = scan_header(None);
+    header.checkpoint_drift = Some(crate::ui_view_models::CheckpointDrift {
+        phase: kuzushi_core::WorkflowPhase::Scan,
+        accepted_revision: Some("abcdef012345".to_string()),
+        current_revision: Some("123456789abc".to_string()),
+        dirty_changed: false,
+        relationship: Some(kuzushi_core::workspace::RevisionRelationship::AheadBy(3)),
+    });
+
+    let wide = phase_header_lines(&header, &scan_hints(), 140, 40)
+        .into_iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(wide.contains("accepted Scan is stale"), "{wide}");
+    assert!(wide.contains("3 commits behind"), "{wide}");
+    assert!(wide.contains("rerun Scan"), "{wide}");
+
+    let narrow = phase_header_lines(&header, &[], 40, 20)
+        .into_iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(narrow.contains("Scan stale"), "{narrow}");
+    assert!(narrow.contains("rerun Scan"), "{narrow}");
 }
 
 #[test]

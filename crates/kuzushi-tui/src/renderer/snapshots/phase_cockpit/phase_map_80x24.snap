@@ -10,7 +10,7 @@ KUZUSHI · Viewing Map · next required Review · target ./phase-target · ● L
  Tab cycle map views · z zoom selected view · next → Review · report open Report
 ◇ SYSTEM SUMMARY · why the system exists and how its parts move data
 views  [summary] · dfd  ·  Tab cycles · z zoom
-┌SYSTEM SUMMARY · component 1/3 · ↑/↓ select · Enter DFD───────────────────────┐
+┌SYSTEM SUMMARY · component 1/3 · ↑/↓ select · Enter DFD ──────────────────────┐
 │EXECUTIVE SUMMARY                                                             │
 │phase-target: purpose not recorded in this threat model. The primary process    │
 │component is API. 3 components exchange data over 2 flows across 3 trust      │

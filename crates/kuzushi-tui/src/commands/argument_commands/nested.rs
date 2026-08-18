@@ -10,9 +10,7 @@ pub(crate) fn parse_nested_shell_command(
         "findings" | "f" => parse_findings_command(args),
         "export" => parse_workspace_findings_export_args(args),
         "recon:import" | "recon-import" => parse_recon_import_command(args),
-        "recon" if args.first() == Some(&"import") => {
-            parse_recon_import_command(args.get(1..).unwrap_or_default())
-        }
+        "recon" => return parse_recon_nested_command(args),
         "auth" => parse_auth_command(args),
         "threats" => parse_threat_command(args),
         "show" => parse_show_command(args, original),
@@ -33,14 +31,19 @@ pub(crate) fn parse_nested_shell_command(
         "decision" | "review" => parse_review_decision_command(args),
         "proof" => parse_proof_command(args),
         "dismiss" => parse_dismiss_command(args),
-        "suppress" => parse_suppress_command(args),
-        "verify" => parse_verify_command(args),
+        "suppress" | "x" => parse_suppress_command(args),
+        "verify" | "v" => parse_verify_command(args),
         "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_recon_nested_command(args: &[&str]) -> Option<ShellCommand> {
+    (args.first() == Some(&"import"))
+        .then(|| parse_recon_import_command(args.get(1..).unwrap_or_default()))
 }
 
 fn parse_proof_command(args: &[&str]) -> ShellCommand {
@@ -341,6 +344,10 @@ pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellComm
 pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         Some("filter") => parse_findings_filter(args.get(1..).unwrap_or_default()),
+        Some("since") => args
+            .get(1)
+            .map(|reference| ShellCommand::Since((*reference).to_string()))
+            .unwrap_or_else(|| ShellCommand::Unknown("findings since <ref>".to_string())),
         Some("export") => parse_workspace_findings_export_args(args.get(1..).unwrap_or_default()),
         Some(other) => ShellCommand::Unknown(format!("findings {other}")),
         None => ShellCommand::Findings,

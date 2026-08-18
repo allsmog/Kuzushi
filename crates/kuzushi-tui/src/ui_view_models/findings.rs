@@ -3,7 +3,7 @@ use super::review_conflicts::effective_review_decision_conflict_label;
 use super::review_state::{
     effective_review_confidence_label, effective_review_decision_complete,
     effective_review_decision_label, evidence_state_label, lifecycle_status_label,
-    EffectiveReviewDecision, EffectiveReviewStateIndex,
+    review_decision_history_for, EffectiveReviewDecision, EffectiveReviewStateIndex,
 };
 use super::review_yield::{review_yield_detail_for, ReviewYieldDetailModel};
 use super::workspace::findings_db_relative_path;
@@ -143,6 +143,8 @@ pub(crate) struct FindingDetailModel {
     pub(crate) decision: String,
     pub(crate) decision_source: String,
     pub(crate) decision_history: String,
+    pub(crate) decision_history_rows: Vec<DecisionHistoryRow>,
+    pub(crate) decision_history_overflow: usize,
     pub(crate) decision_conflict: Option<String>,
     pub(crate) evidence_state: String,
     pub(crate) proof_state: String,
@@ -168,6 +170,14 @@ pub(crate) struct FindingDetailModel {
     /// Advisory review-yield explanation. `None` — the default — means the
     /// operator did not turn the signal on, and the section does not render.
     pub(crate) review_yield: Option<ReviewYieldDetailModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DecisionHistoryRow {
+    pub(crate) verdict: String,
+    pub(crate) author: String,
+    pub(crate) created_at: String,
+    pub(crate) rationale: String,
 }
 
 /// On-disk source context around the finding's `file_path:start_line`,
@@ -434,7 +444,30 @@ pub(crate) fn finding_detail_model_for_projection(
     detail.dataflow_evidence = dataflow;
     detail.dataflow_overflow = dataflow_overflow;
     detail.review_yield = review_yield_detail_for(app, finding);
+    apply_decision_history(&mut detail, finding, app.review_decisions());
     detail
+}
+
+fn apply_decision_history(
+    detail: &mut FindingDetailModel,
+    finding: &Finding,
+    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
+) {
+    let history = review_decision_history_for(finding, decisions);
+    detail.decision_history_overflow = 0;
+    detail.decision_history_rows = history
+        .into_iter()
+        .map(|record| DecisionHistoryRow {
+            verdict: record.decision.verdict.as_str().to_string(),
+            author: record
+                .decision
+                .actor
+                .clone()
+                .unwrap_or_else(|| record.decision.author.as_str().to_string()),
+            created_at: record.created_at.clone(),
+            rationale: record.decision.rationale.clone(),
+        })
+        .collect();
 }
 
 /// Project the finding's hydrated deep-audit dataflow rows from the workbench
@@ -1518,10 +1551,21 @@ fn finding_proof_label(finding: &Finding) -> String {
 }
 
 fn finding_proof_badge(finding: &Finding) -> ProofBadge {
-    runtime_proof_label(finding)
+    let tier = proof_tier(ProofConfidence::classify(finding));
+    let label = runtime_proof_label(finding)
         .or_else(|| static_proof_label(finding))
         .or_else(|| non_runtime_verification_label(finding))
-        .unwrap_or_else(|| proof_badge("unverified", ProofTier::Suspected))
+        .unwrap_or_else(|| "unverified".to_string());
+    proof_badge(label, tier)
+}
+
+fn proof_tier(confidence: ProofConfidence) -> ProofTier {
+    match confidence {
+        ProofConfidence::Confirmed => ProofTier::RuntimeVerified,
+        ProofConfidence::Likely => ProofTier::StaticLinked,
+        ProofConfidence::Unverified => ProofTier::Suspected,
+        ProofConfidence::Dismissed => ProofTier::Rejected,
+    }
 }
 
 pub(crate) fn finding_proof_meter(finding: &Finding) -> String {
@@ -1543,59 +1587,29 @@ pub(crate) fn finding_unique_source_count(finding: &Finding) -> usize {
     unique.max(finding.corroboration_count as usize)
 }
 
-fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
+fn runtime_proof_label(finding: &Finding) -> Option<String> {
     let verification = finding.verification.as_ref()?;
     if verification.is_model_assessment()
         || verification.proof_verdict == PersistedProofVerdict::NotAttempted
     {
         return None;
     }
-    Some(match verification.proof_verdict {
-        PersistedProofVerdict::NotAttempted => unreachable!("not-attempted handled above"),
-        PersistedProofVerdict::Exploited => proof_badge(
-            format!("verified L{}", verification.proof_level),
-            ProofTier::RuntimeVerified,
-        ),
-        PersistedProofVerdict::NotReproduced => proof_badge("not-repro", ProofTier::Rejected),
-        PersistedProofVerdict::HarnessFailedToBuild => {
-            proof_badge("verify-build", ProofTier::Rejected)
-        }
-        PersistedProofVerdict::InfrastructureError => {
-            proof_badge("verify-infra", ProofTier::Rejected)
-        }
-        PersistedProofVerdict::LanguageUnsupportedYet => {
-            proof_badge("unsupported", ProofTier::Suspected)
-        }
-        PersistedProofVerdict::InsufficientFindingDetail => {
-            proof_badge("needs-detail", ProofTier::Suspected)
-        }
-    })
+    Some(runtime_validation_summary(Some(verification)).label)
 }
 
-fn non_runtime_verification_label(finding: &Finding) -> Option<ProofBadge> {
+fn non_runtime_verification_label(finding: &Finding) -> Option<String> {
     let verification = finding.verification.as_ref()?;
     if verification.is_model_assessment() {
-        return Some(proof_badge("model-assessed", ProofTier::Suspected));
+        return Some("model-assessed".to_string());
     }
     (verification.proof_verdict == PersistedProofVerdict::NotAttempted)
-        .then(|| proof_badge("needs-runtime", ProofTier::Suspected))
+        .then(|| "needs-runtime".to_string())
 }
 
-fn static_proof_label(finding: &Finding) -> Option<ProofBadge> {
-    match finding.static_proof_state? {
-        StaticProofState::StaticallyConfirmed => {
-            Some(proof_badge("static-supported", ProofTier::StaticLinked))
-        }
-        StaticProofState::StaticallyRejected => Some(proof_badge("static-no", ProofTier::Rejected)),
-        StaticProofState::SourceSinkLinked | StaticProofState::SanitizerChecked => {
-            Some(proof_badge("path-linked", ProofTier::StaticLinked))
-        }
-        StaticProofState::CodeCited => Some(proof_badge("code-cited", ProofTier::StaticLinked)),
-        StaticProofState::NeedsRuntimeEvidence => {
-            Some(proof_badge("needs-runtime", ProofTier::Suspected))
-        }
-        StaticProofState::SignalOnly => Some(proof_badge("signal-only", ProofTier::Suspected)),
-    }
+fn static_proof_label(finding: &Finding) -> Option<String> {
+    finding
+        .static_proof_state
+        .map(|state| static_proof_summary(Some(state)).label.to_string())
 }
 
 fn proof_badge(label: impl Into<String>, tier: ProofTier) -> ProofBadge {

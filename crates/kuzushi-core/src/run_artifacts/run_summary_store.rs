@@ -57,6 +57,25 @@ pub struct RunSummaryEntriesCursorPage {
     pub history: super::RunHistoryPageInfo,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveredRun {
+    pub run_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunSummaryEntriesRead {
+    pub entries: Vec<RunSummaryEntry>,
+    /// Repairs performed by this read. Already-recovered interrupted runs do
+    /// not reappear here on later reads.
+    pub newly_recovered: Vec<RecoveredRun>,
+}
+
+#[derive(Debug, Default)]
+struct RepairJournal {
+    newly_recovered: Vec<RecoveredRun>,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct CurrentRunSummaryPrefix {
     pub entries: Vec<RunSummaryEntry>,
@@ -170,7 +189,7 @@ fn summary_index_transition_for_unreadable_path(
 pub fn load_run_summary(target: impl AsRef<Path>, run_id: &str) -> Result<RunSummary> {
     let target = target.as_ref();
     let (path, summary) = load_run_summary_raw(target, run_id)?;
-    repair_stale_running_summary(target, &path, summary)
+    repair_stale_running_summary(target, &path, summary).map(|repair| repair.summary)
 }
 
 fn load_run_summary_raw(target: &Path, run_id: &str) -> Result<(PathBuf, RunSummary)> {
@@ -276,7 +295,16 @@ pub fn list_run_summaries(target: impl AsRef<Path>) -> Result<Vec<RunSummary>> {
 }
 
 pub fn list_run_summary_entries(target: impl AsRef<Path>) -> Result<Vec<RunSummaryEntry>> {
-    scan_run_summary_entries(target.as_ref(), true)
+    let mut repairs = RepairJournal::default();
+    scan_run_summary_entries(target.as_ref(), true, &mut repairs)
+}
+
+/// Report whether run history exists without repairing stale running entries.
+/// Startup routing uses this before recovery-aware hydration, so the repairing
+/// read can also deliver the transition notice.
+pub fn run_summary_history_exists(target: impl AsRef<Path>) -> Result<bool> {
+    let mut repairs = RepairJournal::default();
+    Ok(!scan_run_summary_entries(target.as_ref(), false, &mut repairs)?.is_empty())
 }
 
 pub(super) fn scan_run_summary_entries_for_index(target: &Path) -> Result<Vec<RunSummaryEntry>> {
@@ -297,15 +325,25 @@ pub(super) fn visit_run_summary_entries_for_index(
     if !root.exists() {
         return Ok(());
     }
+    let mut repairs = RepairJournal::default();
     for entry in
         fs::read_dir(&root).with_context(|| format!("Could not read {}", root.display()))?
     {
-        visit(read_run_summary_entry(target, &entry?, false))?;
+        visit(read_run_summary_entry(
+            target,
+            &entry?,
+            false,
+            &mut repairs,
+        ))?;
     }
     Ok(())
 }
 
-fn scan_run_summary_entries(target: &Path, repair_stale: bool) -> Result<Vec<RunSummaryEntry>> {
+fn scan_run_summary_entries(
+    target: &Path,
+    repair_stale: bool,
+    repairs: &mut RepairJournal,
+) -> Result<Vec<RunSummaryEntry>> {
     let root = checked_runs_root(target)?;
     if !root.exists() {
         return Ok(Vec::new());
@@ -315,7 +353,12 @@ fn scan_run_summary_entries(target: &Path, repair_stale: bool) -> Result<Vec<Run
         fs::read_dir(&root).with_context(|| format!("Could not read {}", root.display()))?
     {
         let entry = entry?;
-        entries.push(read_run_summary_entry(target, &entry, repair_stale));
+        entries.push(read_run_summary_entry(
+            target,
+            &entry,
+            repair_stale,
+            repairs,
+        ));
     }
     entries.sort_by(compare_run_summary_entries);
     Ok(entries)
@@ -331,18 +374,51 @@ pub fn list_run_summary_entries_page(
     offset: usize,
     limit: usize,
 ) -> Result<Vec<RunSummaryEntry>> {
+    Ok(list_run_summary_entries_page_with_recoveries(target, offset, limit)?.entries)
+}
+
+fn list_run_summary_entries_page_without_repair(
+    target: impl AsRef<Path>,
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<RunSummaryEntry>> {
+    Ok(list_run_summary_entries_page_read(target, offset, limit, false)?.entries)
+}
+
+fn list_run_summary_entries_page_with_recoveries(
+    target: impl AsRef<Path>,
+    offset: usize,
+    limit: usize,
+) -> Result<RunSummaryEntriesRead> {
+    list_run_summary_entries_page_read(target, offset, limit, true)
+}
+
+fn list_run_summary_entries_page_read(
+    target: impl AsRef<Path>,
+    offset: usize,
+    limit: usize,
+    repair_stale: bool,
+) -> Result<RunSummaryEntriesRead> {
     if limit == 0 {
-        return Ok(Vec::new());
+        return Ok(RunSummaryEntriesRead {
+            entries: Vec::new(),
+            newly_recovered: Vec::new(),
+        });
     }
     let target = target.as_ref();
+    let mut repairs = RepairJournal::default();
     let indexed = super::run_history_index::load_run_history_page(target, offset, limit)?;
-    match materialize_indexed_page(target, &indexed)? {
-        Some(entries) => Ok(entries),
+    let entries = match materialize_indexed_page(target, &indexed, repair_stale, &mut repairs)? {
+        Some(entries) => entries,
         None => {
             let rebuilt = super::run_history_index::rebuild_then_load_page(target, offset, limit)?;
-            require_matching_indexed_page(target, &rebuilt)
+            require_matching_indexed_page(target, &rebuilt, repair_stale, &mut repairs)?
         }
-    }
+    };
+    Ok(RunSummaryEntriesRead {
+        entries,
+        newly_recovered: repairs.newly_recovered,
+    })
 }
 
 /// Return a generation-bound cursor page when the bounded index contains the
@@ -354,12 +430,13 @@ pub fn list_run_summary_entries_cursor_page(
     limit: usize,
 ) -> Result<RunSummaryEntriesCursorPage> {
     let target = target.as_ref();
+    let mut repairs = RepairJournal::default();
     let indexed = super::run_history_index::load_run_history_cursor_page(target, cursor, limit)?;
-    if let Some(entries) = materialize_indexed_page(target, &indexed)? {
+    if let Some(entries) = materialize_indexed_page(target, &indexed, true, &mut repairs)? {
         return Ok(public_cursor_page(indexed, entries));
     }
     let rebuilt = super::run_history_index::rebuild_then_load_cursor_page(target, cursor, limit)?;
-    let entries = require_matching_indexed_page(target, &rebuilt)?;
+    let entries = require_matching_indexed_page(target, &rebuilt, true, &mut repairs)?;
     Ok(public_cursor_page(rebuilt, entries))
 }
 
@@ -367,7 +444,14 @@ pub fn list_recent_run_summary_entries(
     target: impl AsRef<Path>,
     limit: usize,
 ) -> Result<Vec<RunSummaryEntry>> {
-    list_run_summary_entries_page(target, 0, limit)
+    list_run_summary_entries_page_without_repair(target, 0, limit)
+}
+
+pub fn list_recent_run_summary_entries_with_recoveries(
+    target: impl AsRef<Path>,
+    limit: usize,
+) -> Result<RunSummaryEntriesRead> {
+    list_run_summary_entries_page_with_recoveries(target, 0, limit)
 }
 
 pub(crate) fn list_current_run_summary_prefix(
@@ -397,8 +481,10 @@ fn materialize_current_prefix(
     indexed: Vec<super::run_history_index::RunHistoryIndexEntry>,
 ) -> Result<Option<Vec<RunSummaryEntry>>> {
     let mut entries = Vec::with_capacity(indexed.len());
+    let mut repairs = RepairJournal::default();
     for expected in indexed {
-        let actual = read_indexed_run_summary_entry(target, expected.clone(), false)?;
+        let actual =
+            read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
         if !indexed_ordering_key_matches(&expected, &actual) {
             return Ok(None);
         }
@@ -411,10 +497,11 @@ fn read_run_summary_entry(
     target: &Path,
     entry: &fs::DirEntry,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> RunSummaryEntry {
     let run_id = entry.file_name().to_string_lossy().into_owned();
     let path = entry.path();
-    let state = run_summary_entry_state(target, entry, &run_id, repair_stale);
+    let state = run_summary_entry_state(target, entry, &run_id, repair_stale, repairs);
     RunSummaryEntry {
         run_id,
         path,
@@ -427,6 +514,7 @@ fn run_summary_entry_state(
     entry: &fs::DirEntry,
     run_id: &str,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> RunSummaryEntryState {
     if let Err(error) = super::RunId::parse(run_id) {
         return RunSummaryEntryState::Issue(RunSummaryIssue::InvalidRunId(error.to_string()));
@@ -434,7 +522,7 @@ fn run_summary_entry_state(
     match entry.file_type() {
         Ok(kind) if kind.is_symlink() => issue(RunSummaryIssue::UnsafeSymlink),
         Ok(kind) if !kind.is_dir() => issue(RunSummaryIssue::NotDirectory),
-        Ok(_) => read_run_metadata_entry(target, &entry.path(), run_id, repair_stale),
+        Ok(_) => read_run_metadata_entry(target, &entry.path(), run_id, repair_stale, repairs),
         Err(error) => issue(RunSummaryIssue::UnreadableMetadata(error.to_string())),
     }
 }
@@ -444,6 +532,7 @@ fn read_run_metadata_entry(
     dir: &Path,
     run_id: &str,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> RunSummaryEntryState {
     let path = dir.join(run_metadata_artifact_spec().leaf);
     match fs::symlink_metadata(&path) {
@@ -453,7 +542,7 @@ fn read_run_metadata_entry(
         Err(error) => issue(RunSummaryIssue::UnreadableMetadata(error.to_string())),
         Ok(metadata) if metadata.file_type().is_symlink() => issue(RunSummaryIssue::UnsafeSymlink),
         Ok(metadata) if !metadata.is_file() => issue(RunSummaryIssue::NonFileMetadata),
-        Ok(_) => parse_run_summary_entry(target, &path, run_id, repair_stale),
+        Ok(_) => parse_run_summary_entry(target, &path, run_id, repair_stale, repairs),
     }
 }
 
@@ -462,6 +551,7 @@ fn parse_run_summary_entry(
     path: &Path,
     run_id: &str,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> RunSummaryEntryState {
     let read = super::read_run_artifact_text(target, run_id, run_metadata_artifact_spec().leaf);
     let body = match read.require("Run metadata") {
@@ -481,7 +571,10 @@ fn parse_run_summary_entry(
         return RunSummaryEntryState::Ready(summary);
     }
     match repair_stale_running_summary(target, path, summary) {
-        Ok(summary) => RunSummaryEntryState::Ready(summary),
+        Ok(repair) => {
+            repairs.newly_recovered.extend(repair.recovered);
+            RunSummaryEntryState::Ready(repair.summary)
+        }
         Err(error) => issue(RunSummaryIssue::UnreadableMetadata(error.to_string())),
     }
 }
@@ -490,10 +583,11 @@ fn read_indexed_run_summary_entry(
     target: &Path,
     indexed: super::run_history_index::RunHistoryIndexEntry,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> Result<RunSummaryEntry> {
     let root = checked_runs_root(target)?;
     let path = root.join(&indexed.run_id);
-    let state = indexed_run_summary_state(target, &path, &indexed, repair_stale);
+    let state = indexed_run_summary_state(target, &path, &indexed, repair_stale, repairs);
     Ok(RunSummaryEntry {
         run_id: indexed.run_id,
         path,
@@ -504,10 +598,13 @@ fn read_indexed_run_summary_entry(
 fn materialize_indexed_entries(
     target: &Path,
     indexed: &[super::run_history_index::RunHistoryIndexEntry],
+    repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> Result<Option<Vec<RunSummaryEntry>>> {
     let mut entries = Vec::with_capacity(indexed.len());
     for expected in indexed {
-        let actual = read_indexed_run_summary_entry(target, expected.clone(), true)?;
+        let actual =
+            read_indexed_run_summary_entry(target, expected.clone(), repair_stale, repairs)?;
         if !indexed_ordering_key_matches(expected, &actual) {
             return Ok(None);
         }
@@ -519,12 +616,16 @@ fn materialize_indexed_entries(
 fn materialize_indexed_page(
     target: &Path,
     indexed: &super::run_history_index::IndexedRunHistoryPage,
+    repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> Result<Option<Vec<RunSummaryEntry>>> {
     ensure_bounded_page_is_authentic(indexed)?;
     if !retained_ordering_witness_matches(target, &indexed.retained_entries)? {
         return Ok(None);
     }
-    let Some(entries) = materialize_indexed_entries(target, &indexed.entries)? else {
+    let Some(entries) =
+        materialize_indexed_entries(target, &indexed.entries, repair_stale, repairs)?
+    else {
         return Ok(None);
     };
     if !super::run_history_index::page_generation_is_current(target, indexed.info.generation) {
@@ -546,8 +647,10 @@ fn ensure_bounded_page_is_authentic(
 fn require_matching_indexed_page(
     target: &Path,
     indexed: &super::run_history_index::IndexedRunHistoryPage,
+    repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> Result<Vec<RunSummaryEntry>> {
-    materialize_indexed_page(target, indexed)?
+    materialize_indexed_page(target, indexed, repair_stale, repairs)?
         .context("run-history index still disagrees with canonical run metadata after rebuild")
 }
 
@@ -558,8 +661,10 @@ fn retained_ordering_witness_matches(
     // The authenticity gate above guarantees this is an untruncated index, so
     // the bounded retained witness is also the complete canonical history.
     // Reading it prevents an unrequested row edit from reordering this page.
+    let mut repairs = RepairJournal::default();
     for expected in retained {
-        let actual = read_indexed_run_summary_entry(target, expected.clone(), false)?;
+        let actual =
+            read_indexed_run_summary_entry(target, expected.clone(), false, &mut repairs)?;
         if !indexed_ordering_key_matches(expected, &actual) {
             return Ok(false);
         }
@@ -596,6 +701,7 @@ fn indexed_run_summary_state(
     path: &Path,
     indexed: &super::run_history_index::RunHistoryIndexEntry,
     repair_stale: bool,
+    repairs: &mut RepairJournal,
 ) -> RunSummaryEntryState {
     if let Err(error) = super::RunId::parse(&indexed.run_id) {
         return issue(
@@ -608,7 +714,7 @@ fn indexed_run_summary_state(
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_symlink() => issue(RunSummaryIssue::UnsafeSymlink),
         Ok(metadata) if !metadata.is_dir() => issue(RunSummaryIssue::NotDirectory),
-        Ok(_) => read_run_metadata_entry(target, path, &indexed.run_id, repair_stale),
+        Ok(_) => read_run_metadata_entry(target, path, &indexed.run_id, repair_stale, repairs),
         Err(error) => issue(RunSummaryIssue::UnreadableMetadata(error.to_string())),
     }
 }
@@ -820,17 +926,39 @@ fn run_id_timestamp_millis(run_id: &str) -> Option<u128> {
     timestamp.parse().ok()
 }
 
+struct RunSummaryRepair {
+    summary: RunSummary,
+    recovered: Option<RecoveredRun>,
+}
+
 fn repair_stale_running_summary(
     target: &Path,
     _summary_path: &Path,
     summary: RunSummary,
-) -> Result<RunSummary> {
+) -> Result<RunSummaryRepair> {
     if !needs_run_truth_recovery(target, &summary) {
-        return Ok(summary);
+        return Ok(RunSummaryRepair {
+            summary,
+            recovered: None,
+        });
     }
     let _guard = super::run_ledger::acquire_run_terminal_lock(target, &summary.run_id)?;
     let (_, current) = load_run_summary_raw(target, &summary.run_id)?;
-    recover_run_truth_under_lock(target, current)
+    let transitioned_running = current.status == "running";
+    let repaired = recover_run_truth_under_lock(target, current)?;
+    let recovered = (transitioned_running && is_recovered_interruption(&repaired)).then(|| {
+        RecoveredRun {
+            run_id: repaired.run_id.clone(),
+            reason: repaired
+                .error
+                .clone()
+                .unwrap_or_else(|| "run interrupted during process recovery".to_string()),
+        }
+    });
+    Ok(RunSummaryRepair {
+        summary: repaired,
+        recovered,
+    })
 }
 
 fn needs_run_truth_recovery(target: &Path, summary: &RunSummary) -> bool {
@@ -1516,6 +1644,52 @@ mod liveness_tests {
 
         assert_eq!(second.history.generation, first.history.generation);
         assert_single_recovery_records(tmp.path(), run_id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recent_history_reports_the_repairing_read_only_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-notice-dead-pid";
+        let summary = RunSummary::running(run_id, "scan", None, "target").with_process_id(u32::MAX);
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let first = list_recent_run_summary_entries_with_recoveries(tmp.path(), 10).unwrap();
+        let second = list_recent_run_summary_entries_with_recoveries(tmp.path(), 10).unwrap();
+
+        assert_eq!(first.newly_recovered.len(), 1);
+        assert_eq!(first.newly_recovered[0].run_id, run_id);
+        assert!(first.newly_recovered[0].reason.contains("no longer running"));
+        assert!(second.newly_recovered.is_empty());
+        assert!(matches!(
+            &second.entries[0].state,
+            RunSummaryEntryState::Ready(summary) if summary.status == "interrupted"
+        ));
+        assert_single_recovery_records(tmp.path(), run_id);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_history_probe_leaves_recovery_for_the_noticing_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-startup-probe-dead-pid";
+        let summary = RunSummary::running(run_id, "scan", None, "target").with_process_id(u32::MAX);
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        assert!(run_summary_history_exists(tmp.path()).unwrap());
+        let planner_read = list_recent_run_summary_entries(tmp.path(), 10).unwrap();
+        assert!(matches!(
+            &planner_read[0].state,
+            RunSummaryEntryState::Ready(summary) if summary.status == "running"
+        ));
+        let read = list_recent_run_summary_entries_with_recoveries(tmp.path(), 10).unwrap();
+
+        assert_eq!(read.newly_recovered.len(), 1);
+        assert_eq!(read.newly_recovered[0].run_id, run_id);
+        assert!(matches!(
+            &read.entries[0].state,
+            RunSummaryEntryState::Ready(summary) if summary.status == "interrupted"
+        ));
     }
 
     #[cfg(unix)]

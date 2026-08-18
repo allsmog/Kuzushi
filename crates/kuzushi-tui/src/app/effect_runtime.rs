@@ -339,7 +339,9 @@ impl EffectRuntime {
             ShellEffect::PersistPlanningOptionOverride(persist) => {
                 app.persist_planning_option_override_effect(persist)
             }
-            ShellEffect::PersistOptions(scope) => app.persist_option_store(scope),
+            ShellEffect::PersistOptions(scope) => {
+                app.persist_option_store(scope);
+            }
             _ => unreachable!("persistence effect dispatch"),
         }
     }

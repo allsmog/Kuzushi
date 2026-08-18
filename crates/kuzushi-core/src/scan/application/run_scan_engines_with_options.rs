@@ -31,7 +31,7 @@ pub fn run_scan_engines_with_options_and_cancellation(
         let mut scan_output =
             collect_scan_engine_outputs(workspace, scanners, cancellation, options)?;
         ensure_scan_active(cancellation)?;
-        apply_scan_run_options(&mut scan_output.findings, options);
+        apply_scan_run_options(workspace.root(), &mut scan_output.findings, options);
         index_scan_static_evidence(workspace, options, &scan_output)?;
         for finding in &scan_output.findings {
             store.insert_finding(&run_id, finding)?;
@@ -110,23 +110,74 @@ fn scan_roots(root: &Path, options: &ScanRunOptions) -> Result<Vec<ScanRoot>> {
     if options.paths.is_empty() {
         return Ok(vec![ScanRoot::workspace(root)]);
     }
-    options
+    let mut roots = options
         .paths
         .iter()
         .map(|path| scan_root(root, path))
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+    roots.sort_by_key(|scope| scope.path.components().count());
+    roots.dedup_by(|left, right| left.path == right.path);
+    let mut minimal = Vec::<ScanRoot>::new();
+    for scope in roots {
+        if !minimal
+            .iter()
+            .any(|parent| scope.path.starts_with(&parent.path))
+        {
+            minimal.push(scope);
+        }
+    }
+    Ok(minimal)
 }
 
 fn scan_root(root: &Path, path: &str) -> Result<ScanRoot> {
     let prefix = normalized_scan_path(path)?;
     let absolute = root.join(&prefix);
-    if !absolute.is_dir() {
-        anyhow::bail!("sast:scan paths entry {prefix:?} is not a directory under the target");
-    }
+    let scan_path = if absolute.is_dir() {
+        absolute
+    } else if absolute.is_file() {
+        absolute
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| root.to_path_buf())
+    } else {
+        anyhow::bail!("sast:scan paths entry {prefix:?} does not exist under the target");
+    };
+    let scan_prefix = scan_path
+        .strip_prefix(root)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(path_to_slash_string);
     Ok(ScanRoot {
-        path: absolute,
-        prefix: Some(prefix),
+        path: scan_path,
+        prefix: scan_prefix,
     })
+}
+
+fn path_to_slash_string(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn finding_matches_scan_paths(root: &Path, finding: &Finding, paths: &[String]) -> bool {
+    paths.iter().any(|path| {
+        let Ok(scope) = normalized_scan_path(path) else {
+            return false;
+        };
+        let absolute = root.join(&scope);
+        if absolute.is_file() {
+            finding.file_path == scope
+        } else {
+            finding.file_path == scope || finding.file_path.starts_with(&format!("{scope}/"))
+        }
+    })
+}
+
+fn retain_scoped_findings(root: &Path, findings: &mut Vec<Finding>, paths: &[String]) {
+    if !paths.is_empty() {
+        findings.retain(|finding| finding_matches_scan_paths(root, finding, paths));
+    }
 }
 
 fn normalized_scan_path(path: &str) -> Result<String> {
@@ -194,7 +245,8 @@ fn prefixed_finding_path(scan_root: &Path, prefix: &str, path: &str) -> String {
     }
 }
 
-fn apply_scan_run_options(findings: &mut Vec<Finding>, options: &ScanRunOptions) {
+fn apply_scan_run_options(root: &Path, findings: &mut Vec<Finding>, options: &ScanRunOptions) {
+    retain_scoped_findings(root, findings, &options.paths);
     if let Some(allowed) = &options.severity {
         findings.retain(|finding| allowed.contains(&finding.severity));
     }

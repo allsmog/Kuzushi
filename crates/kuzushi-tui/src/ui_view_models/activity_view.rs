@@ -106,8 +106,8 @@ fn activity_outcome_is_terminal(app: &ShellApp, session: &ActivitySession) -> bo
 }
 
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
-    if session.operator_question.is_some() {
-        return Some(ActivityRunOutcome::WaitingForOperator);
+    if let Some(outcome) = operator_owned_run_outcome(app, session) {
+        return Some(outcome);
     }
     let summary = activity_run_summary(app, session);
     let findings = summary
@@ -123,6 +123,19 @@ fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<Act
     summary
         .and_then(activity_run_summary_outcome)
         .or_else(|| live_activity_run_outcome(app))
+}
+
+fn operator_owned_run_outcome(
+    app: &ShellApp,
+    session: &ActivitySession,
+) -> Option<ActivityRunOutcome> {
+    if activity_abort_pending(app) {
+        return Some(ActivityRunOutcome::Canceling);
+    }
+    session
+        .operator_question
+        .is_some()
+        .then_some(ActivityRunOutcome::WaitingForOperator)
 }
 
 fn typed_activity_run_outcome(

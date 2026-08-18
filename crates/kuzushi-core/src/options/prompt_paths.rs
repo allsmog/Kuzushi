@@ -1,6 +1,10 @@
 use std::path::{Path, PathBuf};
 
-pub const PROMPTS_DIR: &str = "prompts";
+pub use kuzushi_descriptor::prompt_paths::{
+    PROMPTS_DIR, relative_module_prompt_root, relative_prompt_override_path,
+    relative_prompt_overrides_root,
+};
+
 pub const HOUSE_RULES_DIR: &str = "house-rules";
 
 pub fn prompt_overrides_root(target: impl AsRef<Path>) -> PathBuf {
@@ -21,18 +25,6 @@ pub fn house_rules_root(target: impl AsRef<Path>) -> PathBuf {
 
 pub fn house_rule_path(target: impl AsRef<Path>, module: &str) -> PathBuf {
     house_rules_root(target).join(format!("{module}.md"))
-}
-
-pub fn relative_prompt_overrides_root() -> PathBuf {
-    Path::new(".kuzushi").join(PROMPTS_DIR)
-}
-
-pub fn relative_module_prompt_root(module: &str) -> PathBuf {
-    relative_prompt_overrides_root().join(module)
-}
-
-pub fn relative_prompt_override_path(module: &str, verb: &str) -> PathBuf {
-    relative_module_prompt_root(module).join(format!("{verb}.md"))
 }
 
 pub fn relative_house_rules_root() -> PathBuf {

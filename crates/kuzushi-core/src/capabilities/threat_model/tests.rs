@@ -12771,12 +12771,12 @@ mod tests {
     fn anchor_free_entry_points_downgrade_the_build_to_partial() {
         let temp = express_route_workspace();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let surface = express_route_surface(temp.path());
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
-        let entry_point_id = express_route_surface_id(temp.path());
         let runtime = MockThreatRuntime::new(json!({
-            "document": anchor_free_surface_document(&entry_point_id)
+            "document": anchor_free_surface_document(&surface.id)
         }));
         let ctx = ToolExecutionContext {
             config: &config,
@@ -12812,7 +12812,7 @@ mod tests {
                 .iter()
                 .any(|warning| warning.as_str().is_some_and(|text| text
                     == "attack surface: 1/2 entry points carry no path or evidence anchor")),
-            "the anchor-free count must reach the operator verbatim: {warnings:?}"
+            "the grounded row is re-anchored while the synthetic bucket remains disclosed: {warnings:?}"
         );
         assert!(
             !warnings.iter().any(|warning| warning
@@ -12947,14 +12947,12 @@ mod tests {
         temp
     }
 
-    fn express_route_surface_id(root: &Path) -> String {
-        crate::attack_surface::build_attack_surface_map(root)
-            .unwrap()
-            .surfaces
+    fn express_route_surface(target: &Path) -> crate::attack_surface::AttackSurface {
+        let map = crate::attack_surface::build_attack_surface_map(target).unwrap();
+        deterministic_threat_surfaces(&map.surfaces, usize::MAX)
             .into_iter()
             .find(|surface| surface.path == "src/admin.js")
-            .expect("Express route surface")
-            .id
+            .expect("express route must produce a deterministic threat surface")
     }
 
     fn staged_ctx<'a>(
@@ -12971,12 +12969,12 @@ mod tests {
         }
     }
 
-    fn gap_covering_response(entry_point_id: &str) -> Value {
+    fn gap_covering_response(surface: &crate::attack_surface::AttackSurface) -> Value {
         json!({
             "threats": [{
                 "id": "T-GAP-1",
                 "targetElementIds": ["web"],
-                "entryPointIds": [entry_point_id],
+                "entryPointIds": [surface.id],
                 "category": "elevation-of-privilege",
                 "title": "Debug route exposes admin state",
                 "surface": "GET /admin/debug",
@@ -12988,10 +12986,11 @@ mod tests {
             }],
             "deprioritized": [],
             "entryPoints": [{
-                "id": entry_point_id,
+                "id": surface.id,
+                "name": surface.title,
                 "targetElementIds": ["web"],
-                "name": "GET /admin/debug",
-                "path": "src/admin.js"
+                "kind": surface.kind.as_str(),
+                "path": surface.path,
             }]
         })
     }
@@ -13000,10 +12999,10 @@ mod tests {
     fn staged_pipeline_gap_fills_uncovered_surfaces_and_stamps_evidence_metadata() {
         let temp = express_route_workspace();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let surface = express_route_surface(temp.path());
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
-        let entry_point_id = express_route_surface_id(temp.path());
         let runtime = MockThreatRuntime::responses(vec![
             AgentQueryResponse {
                 text: String::new(),
@@ -13012,7 +13011,7 @@ mod tests {
             },
             AgentQueryResponse {
                 text: String::new(),
-                structured: Some(gap_covering_response(&entry_point_id)),
+                structured: Some(gap_covering_response(&surface)),
                 ..Default::default()
             },
         ]);

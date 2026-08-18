@@ -5,6 +5,7 @@ mod initial_state;
 
 pub(crate) const UI_AUTO_OPEN_ACTIVITY_OPTION: &str = "ui.auto_open_activity";
 pub(crate) const UI_AUTO_OPEN_VIZ_OPTION: &str = "ui.auto_open_viz";
+pub(crate) const UI_AUTONOMY_OPTION: &str = "ui.autonomy";
 pub(crate) const UI_RAIL_OPTION: &str = "ui.rail";
 pub(crate) const UI_NOTIFY_OPTION: &str = "ui.notify";
 
@@ -40,6 +41,17 @@ pub(crate) fn refresh_ui_prefs_from_store(app: &mut ShellApp) {
     app.ui_mut().set_auto_open_viz(auto_open_viz);
     app.ui_mut().set_rail_enabled(rail_enabled);
     app.ui_mut().set_notify_enabled(notify_enabled);
+    if let Some(posture) = stored_autonomy_pref(app.option_store()) {
+        app.set_autonomy(posture);
+    }
+}
+
+fn stored_autonomy_pref(option_store: &ToolOptionStore) -> Option<kuzushi_core::AutonomyPosture> {
+    option_store
+        .effective_stored_values("kuzushi:ui")
+        .get(UI_AUTONOMY_OPTION)
+        .and_then(serde_json::Value::as_str)
+        .and_then(kuzushi_core::AutonomyPosture::parse)
 }
 
 fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
@@ -228,10 +240,24 @@ pub(crate) fn persistent_option_store(
         Err(error) => return (ToolOptionStore::new(), Some(error.to_string())),
     };
     match ToolOptionStore::load_persistent(
-        &paths.global_options_path(),
+        &operator_options_path(&paths),
         paths.project_options_path().as_deref(),
     ) {
         Ok(store) => (store, None),
         Err(error) => (ToolOptionStore::new(), Some(error.to_string())),
     }
+}
+
+#[cfg(not(test))]
+fn operator_options_path(paths: &kuzushi_core::ConfigPaths) -> std::path::PathBuf {
+    paths.global_options_path()
+}
+
+#[cfg(test)]
+fn operator_options_path(paths: &kuzushi_core::ConfigPaths) -> std::path::PathBuf {
+    paths
+        .target_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".kuzushi-test-operator-options-absent.json")
 }

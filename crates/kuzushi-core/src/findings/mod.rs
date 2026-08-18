@@ -14,7 +14,8 @@ pub use application::{
     compare_scan_runs, finding_confidence_label, finding_cwe_label, finding_evidence_preview,
     finding_location, finding_remediation_hint, finding_source_label, finding_verdict_label,
     project_finding, severity_badge, severity_icon, ComparedFinding, FindingProjection,
-    ScanComparisonClass, ScanFindingSignature, ScanRunComparison, ScanUncertainMatch,
+    ReviewDecisionConflict, ScanComparisonClass, ScanFindingSignature, ScanRunComparison,
+    ScanUncertainMatch,
 };
 pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,

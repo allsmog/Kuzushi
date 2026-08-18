@@ -40,11 +40,11 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         command: "decision <verdict> <reason>",
         aliases: &[
             "decision confirmed reviewed source-linked evidence",
-            "decision suppressed accepted by policy owner",
-            "review rejected_false_positive reviewed data flow",
+            "decision deferred needs runtime harness",
+            "decision needs_review confirm the trust boundary",
         ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "record a human review decision for the selected finding",
+        description: "record triage status; use dismiss for false positives or suppress for a rule",
     },
     ShellCommandSpec {
         command: "proof defer <id> --reason <text>",
@@ -59,13 +59,16 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
             "dismiss used_in_tests test fixture only",
         ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "dismiss the selected finding with an auditable reason",
+        description: "dismiss the selected finding with a structured, auditable reason",
     },
     ShellCommandSpec {
         command: "suppress <id> --reason <text> [--author operator] [--days 90]",
-        aliases: &["/suppress F-0001 --reason false-positive"],
+        aliases: &[
+            "/suppress F-0001 --reason false-positive",
+            "/x F-0001 --reason false-positive",
+        ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "record an expiring suppression rule and matching human review decision",
+        description: "record an expiring suppression rule plus its human review decision",
     },
     ShellCommandSpec {
         command: "show aliases [prefix]",
@@ -136,7 +139,7 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "verify <finding>",
-        aliases: &["verify F-0001", "/verify F-0001"],
+        aliases: &["verify F-0001", "/verify F-0001", "/v F-0001"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "verify a finding's exploitability (runs verify:finding)",
     },
@@ -165,10 +168,10 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "regenerate the pending patch for the same finding",
     },
     ShellCommandSpec {
-        command: "since <ref>",
-        aliases: &["/since <ref>"],
+        command: "findings since <ref>",
+        aliases: &["since <ref>", "/since <ref>"],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "scope findings to a git ref",
+        description: "filter saved findings by git ref; does not run a scan",
     },
     ShellCommandSpec {
         command: "threats [1-4]",

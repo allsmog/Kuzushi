@@ -96,13 +96,15 @@ fn jobs_registry_model_surfaces_malformed_run_history_entries() {
             target: target.clone(),
             key,
             value: crate::app::ViewHydrationValue::RunSummaryEntries(
-                crate::app::RunSummaryEntriesState::Ready(vec![RunSummaryEntry {
-                    run_id: "run-malformed".to_string(),
-                    path: target.join(".kuzushi/v3/runs/run-malformed"),
-                    state: RunSummaryEntryState::Issue(RunSummaryIssue::InvalidMetadata(
-                        "expected value".to_string(),
-                    )),
-                }]),
+                crate::app::RunSummaryEntriesHydration::without_recoveries(
+                    crate::app::RunSummaryEntriesState::Ready(vec![RunSummaryEntry {
+                        run_id: "run-malformed".to_string(),
+                        path: target.join(".kuzushi/v3/runs/run-malformed"),
+                        state: RunSummaryEntryState::Issue(RunSummaryIssue::InvalidMetadata(
+                            "expected value".to_string(),
+                        )),
+                    }]),
+                ),
             ),
         });
 

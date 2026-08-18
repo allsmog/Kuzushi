@@ -1,0 +1,34 @@
+# J52 — Keyless demo via the picker ':demo' route, then interrupt honesty
+# Recovers J8/J9/J12's blocked states: the picker footer says ':demo offline
+# fixture'; verify that route works, then attempt a mid-run Ctrl+C and audit
+# the terminal states in jobs.
+name: Picker colon-demo entry and interrupt honesty
+cwd: @TMP_TARGET
+env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
+env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
+launch:
+wait-for: 25 CHOOSE A TARGET
+keys: :
+type: demo
+keys: Enter
+wait-snap: 15 RUN FOCUS | demo-run-focus
+keys: C-c
+wait: 1
+snap: after-ctrl-c
+ask: Mid-demo Ctrl+C — does live work show CANCELING while cleanup is active, and never render a killed job as done?
+wait: 4
+keys: Escape
+keys: :
+type: jobs
+keys: Enter
+wait: 2
+snap: jobs-after-interrupt
+expect-not: ✓ done
+ask: Jobs — is the operator-stopped run marked canceled (not interrupted, not done), with stale disk rows labeled honestly?
+keys: Escape
+keys: :
+type: activity
+keys: Enter
+wait: 2
+snap: activity-terminal-state
+ask: Run Focus after cancel — do task rows show an honest terminal state with no fabricated completion glyphs?

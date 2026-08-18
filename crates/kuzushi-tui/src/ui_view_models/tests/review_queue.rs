@@ -82,6 +82,10 @@ fn review_queue_model_separates_open_and_terminal_decisions() {
         open_model.header,
         "REVIEW QUEUE - showing 1 of 2 - 1 open - 1 complete"
     );
+    assert_eq!(
+        open_model.ordering_indicator,
+        Some(BASELINE_ORDERING_INDICATOR)
+    );
     assert!(open_model.empty_reason.is_none());
     assert_eq!(open_model.rows[0].decision, "needs_review");
     assert_eq!(open_model.rows[0].identity_label, "FI-01234567");
@@ -709,6 +713,73 @@ fn review_queue_keeps_reappeared_rejected_identity_open() {
         Some("reappeared_after_rejection")
     );
     assert!(!open_model.rows[0].decision_complete);
+}
+
+#[test]
+fn operator_calibration_counts_only_identified_evidence_outcomes() {
+    let confirmed_identity = "fi_confirmed_0123456789abcdef";
+    let rejected_identity = "fi_rejected_0123456789abcdef";
+    let mut confirmed_finding = identity_finding(
+        "semgrep/confirmed",
+        Severity::High,
+        12,
+        10,
+        confirmed_identity,
+    );
+    confirmed_finding.verification = Some(crate::test_support::test_empirical_verification(3));
+    let mut rejected_rerun = identity_finding(
+        "semgrep/rejected",
+        Severity::High,
+        18,
+        20,
+        rejected_identity,
+    );
+    rejected_rerun.verification = Some(crate::test_support::test_empirical_verification(3));
+    let mut confirmed_decision =
+        review_decision_record(&confirmed_finding, 100, ReviewDecisionVerdict::Confirmed);
+    confirmed_decision.decision.actor = Some("operator".to_string());
+    let mut rejected_decision = ReviewDecisionRecord {
+        finding_id: 19,
+        identity_id: Some(rejected_identity.to_string()),
+        ..review_decision_record(
+            &rejected_rerun,
+            101,
+            ReviewDecisionVerdict::RejectedFalsePositive,
+        )
+    };
+    rejected_decision.decision.actor = Some("operator".to_string());
+
+    let model = operator_calibration_model(
+        &[confirmed_finding, rejected_rerun],
+        &[confirmed_decision, rejected_decision],
+    );
+
+    assert_eq!(model.identified, 2);
+    assert_eq!(model.runtime_supported, 1);
+    assert_eq!(model.contradicted, 1);
+    assert_eq!(model.needs_follow_up, 0);
+    assert_eq!(
+        model.label(false),
+        "your evidence follow-up · 1 runtime-supported · 1 contradicted · 0 need follow-up"
+    );
+}
+
+#[test]
+fn operator_calibration_discloses_unattributed_legacy_decisions() {
+    let finding = identity_finding(
+        "semgrep/legacy",
+        Severity::Medium,
+        8,
+        1,
+        "fi_legacy_0123456789abcdef",
+    );
+    let decision = review_decision_record(&finding, 3, ReviewDecisionVerdict::Confirmed);
+
+    let model = operator_calibration_model(&[finding], &[decision]);
+
+    assert_eq!(model.identified, 0);
+    assert!(model.unattributed_human_history);
+    assert_eq!(model.label(true), "my decisions · identity unavailable");
 }
 
 fn identity_finding(

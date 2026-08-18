@@ -28,6 +28,8 @@ expect: candidate
 expect: claim ·
 # An unconfirmed finding refuses patch drafting — triage gates remediation.
 submit: run patch:finding {"fingerprint":"F-0001"}
+wait-for: 20 CONFIRM · descriptor-declared effect
+keys: y
 wait-for: 30 run receipt
 wait: 1
 snap: patch-refusal-unconfirmed

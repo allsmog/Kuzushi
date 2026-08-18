@@ -57,15 +57,85 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_paste(&mut self, text: &str) -> InputUpdate {
-        if text.is_empty() {
-            return InputUpdate::ignored();
-        }
-        if self.advisory().pending_confirm.is_some() {
-            return InputUpdate::handled();
+        if let Some(update) = self.paste_preflight(text) {
+            return update;
         }
         let normalised = normalise_paste_text(text);
+        if let Some(update) = self.capture_picker_editor_paste(&normalised) {
+            return update;
+        }
+        if !self.prepare_picker_for_paste() {
+            return InputUpdate::handled();
+        }
         self.paste_before_prompt(&normalised)
             .unwrap_or_else(|| self.paste_into_prompt(&normalised))
+    }
+
+    fn paste_preflight(&self, text: &str) -> Option<InputUpdate> {
+        if text.is_empty() {
+            return Some(InputUpdate::ignored());
+        }
+        self.advisory()
+            .pending_confirm
+            .is_some()
+            .then(InputUpdate::handled)
+    }
+
+    fn prepare_picker_for_paste(&mut self) -> bool {
+        if self.picker_surface_accepts_composer_input() {
+            self.enter_picker_prompt_focus();
+            return true;
+        }
+        if self.shell_view() == ShellView::FilePicker {
+            return true;
+        }
+        if !self.is_picker_view() {
+            return true;
+        }
+        self.picker_prompt_focused()
+    }
+
+    fn capture_picker_editor_paste(&mut self, text: &str) -> Option<InputUpdate> {
+        if self.capture_auth_key_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        if self.capture_budget_paste(text) || self.capture_planning_option_paste(text) {
+            return Some(InputUpdate::handled());
+        }
+        None
+    }
+
+    fn capture_budget_paste(&mut self, text: &str) -> bool {
+        if self.shell_view() != ShellView::Setup
+            || self.router.setup().editor() != Some(crate::app::SetupEditor::Budget)
+        {
+            return false;
+        }
+        let value = text.trim();
+        if value.is_empty() || value.chars().any(|ch| !ch.is_ascii_digit() && ch != '.') {
+            self.router
+                .setup_mut()
+                .set_budget_error("paste a positive USD amount, such as 2.50");
+            return true;
+        }
+        for ch in value.chars() {
+            self.router.setup_mut().push_budget_char(ch);
+        }
+        true
+    }
+
+    fn capture_planning_option_paste(&mut self, text: &str) -> bool {
+        if !matches!(
+            self.shell_view(),
+            ShellView::Setup | ShellView::PlanningPicker
+        ) {
+            return false;
+        }
+        let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() else {
+            return false;
+        };
+        edit.draft.push_str(text);
+        true
     }
 
     fn paste_before_prompt(&mut self, text: &str) -> Option<InputUpdate> {
@@ -90,9 +160,6 @@ impl ShellApp {
     }
 
     fn handle_routed_paste(&mut self, text: &str) -> Option<InputUpdate> {
-        if self.capture_auth_key_paste(text) {
-            return Some(InputUpdate::handled());
-        }
         self.attachment_effects_from_paste(text)
             .map(InputUpdate::handled_with_effects)
     }

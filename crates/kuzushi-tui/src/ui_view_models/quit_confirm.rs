@@ -37,20 +37,23 @@ impl From<QuitConfirmSnapshot> for QuitConfirmModel {
 
 fn default_quit_confirm_model(app: &ShellApp) -> QuitConfirmModel {
     let active_count = usize::from(app.has_running_work());
+    let volatile_rows = volatile_session_rows(app);
     QuitConfirmModel {
         status: default_status(app),
         timestamp: "--:--:--".to_string(),
         warning_title: "CONFIRM SESSION EXIT".to_string(),
-        warning_body: default_warning(active_count),
-        sections: default_sections(active_count),
+        warning_body: default_warning(active_count, !volatile_rows.is_empty()),
+        sections: default_sections(active_count, volatile_rows),
         default_line: "default · n/N/Esc · stay".to_string(),
         footer: default_footer(app, active_count),
     }
 }
 
-fn default_warning(active_count: usize) -> String {
+fn default_warning(active_count: usize, has_volatile_state: bool) -> String {
     if active_count > 0 {
         "the shell will request active-work cancellation and cleanup before exiting".to_string()
+    } else if has_volatile_state {
+        "no active work is running; the not-saved session state below will be discarded".to_string()
     } else {
         "no active work is running; exiting will close the shell".to_string()
     }
@@ -80,14 +83,96 @@ fn default_cost(app: &ShellApp) -> String {
         .unwrap_or_else(|| format_session_cost(0.0))
 }
 
-fn default_sections(active_count: usize) -> Vec<QuitConfirmSection> {
-    vec![
-        QuitConfirmSection::new(
-            default_in_flight_title(active_count),
-            default_in_flight_rows(active_count),
-        ),
-        QuitConfirmSection::new("CHOOSE", default_choice_rows(active_count)),
+fn default_sections(active_count: usize, volatile_rows: Vec<String>) -> Vec<QuitConfirmSection> {
+    let mut sections = vec![QuitConfirmSection::new(
+        default_in_flight_title(active_count),
+        default_in_flight_rows(active_count),
+    )];
+    if !volatile_rows.is_empty() {
+        sections.push(QuitConfirmSection::new("NOT SAVED", volatile_rows));
+    }
+    sections.push(QuitConfirmSection::new(
+        "CHOOSE",
+        default_choice_rows(active_count),
+    ));
+    sections
+}
+
+pub(crate) fn has_volatile_session_state(app: &ShellApp) -> bool {
+    !volatile_session_rows(app).is_empty()
+}
+
+fn volatile_session_rows(app: &ShellApp) -> Vec<String> {
+    [
+        queued_commands_row(app),
+        session_budget_row(app),
+        budget_draft_row(app),
+        planning_option_draft_row(app),
+        setup_plan_row(app),
+        prompt_draft_row(app),
+        credential_draft_row(app),
+        command_draft_row(app),
     ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn queued_commands_row(app: &ShellApp) -> Option<String> {
+    let queued = app.steer_queue().len();
+    (queued > 0).then(|| format!("    !   queued commands   {queued} will be discarded"))
+}
+
+fn session_budget_row(app: &ShellApp) -> Option<String> {
+    (app.session().session_budget_usd() != app.config().operator.session_budget_usd)
+        .then(|| "    !   session budget   changed for this session only".to_string())
+}
+
+fn budget_draft_row(app: &ShellApp) -> Option<String> {
+    (app.router.setup().editor() == Some(crate::app::SetupEditor::Budget))
+        .then(|| "    !   budget draft   active edit will be discarded; content hidden".to_string())
+}
+
+fn planning_option_draft_row(app: &ShellApp) -> Option<String> {
+    app.engagement
+        .planning_picker()
+        .option_edit()
+        .is_some()
+        .then(|| {
+            "    !   planning option draft   active edit will be discarded; content hidden"
+                .to_string()
+        })
+}
+
+fn setup_plan_row(app: &ShellApp) -> Option<String> {
+    let picker = app.engagement.planning_picker();
+    (!picker.selected().is_empty())
+        .then(|| "    !   planning selection   session choices will be discarded".to_string())
+}
+
+fn prompt_draft_row(app: &ShellApp) -> Option<String> {
+    app.router
+        .prompts()
+        .document()
+        .is_some_and(|document| document.dirty)
+        .then(|| {
+            "    !   prompt draft   unsaved edits will be discarded; content hidden".to_string()
+        })
+}
+
+fn credential_draft_row(app: &ShellApp) -> Option<String> {
+    (!app.router.auth_picker().key_draft().is_empty()).then(|| {
+        "    !   credential draft   unsaved input will be discarded; content hidden".to_string()
+    })
+}
+
+fn command_draft_row(app: &ShellApp) -> Option<String> {
+    let draft_chars = app.input().chars().count();
+    (draft_chars > 0).then(|| {
+        format!(
+            "    !   command draft   {draft_chars} characters will be discarded; content hidden"
+        )
+    })
 }
 
 fn default_in_flight_title(active_count: usize) -> &'static str {
@@ -138,6 +223,7 @@ fn default_footer(app: &ShellApp, active_count: usize) -> QuitConfirmFooter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::QueuedCommand;
     use kuzushi_core::V2Config;
 
     #[test]
@@ -216,6 +302,81 @@ mod tests {
             ]
         );
         assert_no_unimplemented_quit_claims(&model);
+    }
+
+    #[test]
+    fn quit_confirm_discloses_volatile_state_without_echoing_draft_content() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.steer_queue_mut().enqueue(QueuedCommand {
+            raw: "run semgrep:scan".to_string(),
+            summary: "semgrep".to_string(),
+        });
+        app.session_mut().set_session_budget_usd(Some(2.0));
+        app.set_input("secret draft");
+
+        let model = quit_confirm_model(&app);
+        let volatile = model
+            .sections
+            .iter()
+            .find(|section| section.title == "NOT SAVED")
+            .expect("not-saved section");
+        let text = volatile.rows.join("\n");
+
+        assert!(text.contains("1 will be discarded"));
+        assert!(text.contains("session budget"));
+        assert!(text.contains("12 characters"));
+        assert!(!text.contains("secret draft"));
+    }
+
+    #[test]
+    fn quit_confirm_discloses_active_setup_drafts_without_echoing_content() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router.setup_mut().begin_budget_edit(None);
+        app.router.setup_mut().push_budget_char('9');
+        app.engagement.planning_picker_mut().set_option_edit(Some(
+            crate::app::PlanningOptionEdit {
+                task: crate::app::PlanningTaskId::GatherRepoContext,
+                option_name: "scope".to_string(),
+                draft: "secret scope".to_string(),
+            },
+        ));
+
+        let model = quit_confirm_model(&app);
+        let text = model
+            .sections
+            .iter()
+            .find(|section| section.title == "NOT SAVED")
+            .expect("not-saved section")
+            .rows
+            .join("\n");
+
+        assert!(text.contains("budget draft"));
+        assert!(text.contains("planning option draft"));
+        assert!(!text.contains("secret scope"));
+    }
+
+    #[test]
+    fn quit_confirm_discloses_phase_planner_selection() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement
+            .planning_picker_mut()
+            .selected_mut()
+            .insert(crate::app::PlanningTaskId::ScanSemgrep);
+        app.engagement
+            .planning_picker_mut()
+            .set_return_to_setup(false);
+
+        let model = quit_confirm_model(&app);
+        let text = model
+            .sections
+            .iter()
+            .find(|section| section.title == "NOT SAVED")
+            .expect("not-saved section")
+            .rows
+            .join("\n");
+
+        assert!(text.contains("planning selection"));
+        assert!(text.contains("session choices will be discarded"));
     }
 
     fn assert_no_unimplemented_quit_claims(model: &QuitConfirmModel) {

@@ -66,8 +66,12 @@ fn cost_prompt_line(footer: &CostScreenFooter) -> String {
 
 fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("BUDGETS", area.width));
-    for row in &model.budget_rows {
-        lines.push(cost_budget_bar(row));
+    if model.budget_rows.is_empty() {
+        lines.push(detail("this session", "not enforced"));
+    } else {
+        for row in &model.budget_rows {
+            lines.push(cost_budget_bar(row));
+        }
     }
     lines.push(blank());
 }

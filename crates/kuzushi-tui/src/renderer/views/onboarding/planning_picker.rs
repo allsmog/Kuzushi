@@ -76,10 +76,7 @@ fn expanded_planning_footer_lines(app: &ShellApp, width: usize) -> Vec<Line<'sta
 
 fn prompt_review_hint_line(app: &ShellApp) -> Line<'static> {
     if app.planning_prompt_review_available() {
-        return styled(
-            " p Review prompt · opens the selected model-backed instructions",
-            theme::accent(),
-        );
+        return styled(" Prompt review is available from Setup", theme::accent());
     }
     blank()
 }
@@ -311,7 +308,9 @@ fn planning_controls_line(app: &ShellApp, width: usize) -> Line<'static> {
         );
     }
     let text = match app.engagement.planning_picker().focus() {
-        PickerFocus::OptionsPane => " ↑/↓ option  Space cycle  Enter edit  Tab tasks  Esc back",
+        PickerFocus::OptionsPane => {
+            " ↑/↓ option  Space cycle  Enter edit  Tab tasks  type cmd  Ctrl+S persist  Esc back"
+        }
         PickerFocus::Prompt => " Esc tasks  Enter command  Ctrl+G palette  Ctrl+C exit",
         PickerFocus::List => planning_list_controls(app, width),
     };
@@ -343,22 +342,18 @@ fn planning_list_controls(app: &ShellApp, width: usize) -> &'static str {
     default_planning_controls(app, width)
 }
 
-fn default_planning_controls(app: &ShellApp, width: usize) -> &'static str {
-    if width < 76 {
-        return " ↑/↓ move  Space check  Tab pane  Enter run  Esc exit";
+fn default_planning_controls(_app: &ShellApp, width: usize) -> &'static str {
+    if width < 92 {
+        return " ↑/↓ move  Space check  Tab  Enter run  type cmd  Esc exit";
     }
-    if app.planning_prompt_review_available() {
-        " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter run  Esc exit"
-    } else {
-        " ↑/↓ move  Space check  Tab pane  h/l phase  Enter run  Esc exit"
-    }
+    " ↑/↓ move  Space check  Tab pane  ←/→ phase  Enter run  type command  Esc exit  F5 rebuild"
 }
 
 fn setup_planning_controls(width: usize) -> &'static str {
     if width < 76 {
-        " ↑/↓ move  Space check  Enter save  Esc setup"
+        " ↑/↓ move  Space check  Tab  Enter save  type cmd  Esc return"
     } else {
-        " ↑/↓ move  Space check  p Review prompt  Tab pane  Enter save to Setup  Esc return"
+        " ↑/↓ move  Space check  Tab pane  Enter save  type command  Esc return"
     }
 }
 
@@ -465,7 +460,7 @@ fn push_phase_rail(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
 
 fn phase_rail_line(phases: &[JourneyPhaseStatus], width: usize) -> Line<'static> {
     let mut spans = vec![
-        Span::styled("‹h ", theme::accent()),
+        Span::styled("‹← ", theme::accent()),
         Span::styled("phase ", theme::muted()),
     ];
     for (idx, phase) in phases.iter().enumerate() {
@@ -474,7 +469,7 @@ fn phase_rail_line(phases: &[JourneyPhaseStatus], width: usize) -> Line<'static>
         }
         push_phase_segment(&mut spans, idx, phase);
     }
-    spans.push(Span::styled(" l›", theme::accent()));
+    spans.push(Span::styled(" →›", theme::accent()));
     fit_spans(spans, width)
 }
 
@@ -1834,7 +1829,7 @@ mod tests {
             "↑/↓ move",
             "Space check",
             "Tab pane",
-            "h/l phase",
+            "←/→ phase",
             "Enter run",
             "Esc exit",
         ] {
@@ -1931,8 +1926,8 @@ mod tests {
         );
         let hint_row = model_backed
             .iter()
-            .position(|line| line.contains("Review prompt"))
-            .expect("prompt review hint");
+            .position(|line| line.contains("Prompt review"))
+            .unwrap_or_else(|| panic!("missing prompt review hint: {model_backed:#?}"));
         assert!(deterministic[hint_row].is_empty());
     }
 

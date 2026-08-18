@@ -32,6 +32,7 @@ globset = "0.4"
 # ipnet powers CIDR-range matching in `.kuzushi/scope.toml`.
 ipnet = "2.10"
 kuzushi-codeindex = { path = "../kuzushi-codeindex" }
+kuzushi-descriptor = { path = "../kuzushi-descriptor" }
 # In-process cpg-rs engine adapter. The default `private-cpg` feature name is
 # retained for compatibility; disabling defaults keeps only a fail-closed
 # compile adapter.

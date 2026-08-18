@@ -142,12 +142,12 @@ fn append_model_failure(
 }
 
 fn result_lines(value: &ResultSummaryPresentationV1) -> Vec<String> {
-    // Operator label, not the registry key: `Result · Plan campaign jobs`
-    // instead of `Result · campaign:plan`. Keys stay in run artifacts and
-    // replay for grep-ability.
+    // Keep the friendly name for scanability and the registry key for the
+    // operator who wants to repeat this exact capability from the shell.
     let mut lines = vec![format!(
-        "Result · {} · {} · {}",
+        "Result · {} ({}) · {} · {}",
         crate::modules::tool_display_name(value.tool.as_str()),
+        value.tool,
         value.status,
         value.summary
     )];

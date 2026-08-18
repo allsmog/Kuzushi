@@ -16,6 +16,43 @@ pub struct TargetRevisionSwitch {
     pub current: RunTargetGitMetadata,
 }
 
+/// An ancestry-safe comparison between an accepted checkpoint revision and
+/// the current target revision. A numeric distance is reported only after git
+/// proves that the accepted revision is an ancestor of the current revision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RevisionRelationship {
+    Same,
+    AheadBy(u64),
+    DivergedOrRewound,
+    Unavailable,
+}
+
+pub fn target_revision_relationship(
+    target: &Path,
+    accepted_revision: &str,
+    current_revision: &str,
+) -> RevisionRelationship {
+    let Some(accepted) = resolve_target_git_commit(target, accepted_revision) else {
+        return RevisionRelationship::Unavailable;
+    };
+    let Some(current) = resolve_target_git_commit(target, current_revision) else {
+        return RevisionRelationship::Unavailable;
+    };
+    if accepted == current {
+        return RevisionRelationship::Same;
+    }
+    match git_ancestor_status(target, &accepted, &current) {
+        Some(true) => {}
+        Some(false) => return RevisionRelationship::DivergedOrRewound,
+        None => return RevisionRelationship::Unavailable,
+    }
+    let range = format!("{accepted}..{current}");
+    git_stdout(target, &["rev-list", "--count", &range])
+        .and_then(|count| count.parse().ok())
+        .map(RevisionRelationship::AheadBy)
+        .unwrap_or(RevisionRelationship::Unavailable)
+}
+
 pub fn target_git_metadata(target: &Path) -> Option<RunTargetGitMetadata> {
     let sha = git_stdout(target, &["rev-parse", "HEAD"])?;
     Some(RunTargetGitMetadata {
@@ -64,12 +101,15 @@ fn git_branch(target: &Path) -> Option<String> {
     git_stdout(target, &["branch", "--show-current"]).filter(|branch| !branch.trim().is_empty())
 }
 
-/// Provenance dirty flag: tracked modifications only (`-uno`). Untracked
-/// files are invisible to revision provenance (they exist in no commit) and
-/// enumerating them cost ~4.7 s of the ~6.3 s cold open on a monorepo-sized
-/// target — 10x the tracked-only probe.
+/// Provenance dirty flag for every source file Git can see. Untracked files
+/// must count because scanners read them even though no commit identifies
+/// their contents. `normal` collapses untracked directories to bound output;
+/// the metadata timeout remains the latency guard for unusually large trees.
 fn git_dirty_excluding_kuzushi_state(target: &Path) -> bool {
-    git_stdout(target, &["status", "--porcelain", "-uno"])
+    git_stdout(
+        target,
+        &["status", "--porcelain", "--untracked-files=normal"],
+    )
         .map(|status| dirty_status_lines(&status).any(|line| !status_line_is_kuzushi_state(line)))
         .unwrap_or(false)
 }
@@ -107,6 +147,23 @@ fn git_stdout_allow_empty(target: &Path, args: &[&str]) -> Option<String> {
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn git_ancestor_status(target: &Path, accepted: &str, current: &str) -> Option<bool> {
+    let mut command = Command::new("git");
+    command
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .arg("-C")
+        .arg(target)
+        .args(["merge-base", "--is-ancestor", accepted, current]);
+    let status = bounded_git_output(&mut command, GIT_METADATA_TIMEOUT)
+        .ok()?
+        .status;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        _ => None,
+    }
 }
 
 fn run_git_checked(target: &Path, args: &[&str]) -> Result<()> {
@@ -201,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn untracked_files_do_not_mark_the_revision_dirty() {
+    fn untracked_source_marks_the_revision_dirty() {
         let Some(repo) = temp_git_repo() else {
             return;
         };
@@ -209,10 +266,7 @@ mod tests {
 
         let metadata = target_git_metadata(repo.path()).unwrap();
 
-        assert!(
-            !metadata.dirty,
-            "untracked files exist in no commit and must not dirty revision provenance"
-        );
+        assert!(metadata.dirty, "scanners can read untracked source content");
 
         fs::write(repo.path().join("tracked.txt"), "modified\n").unwrap();
         assert!(target_git_metadata(repo.path()).unwrap().dirty);
@@ -268,6 +322,34 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(5),
             "timeout must fire well before the subprocess would finish"
+        );
+    }
+
+    #[test]
+    fn revision_relationship_reports_only_ancestry_proven_distance() {
+        let Some(repo) = temp_git_repo() else {
+            return;
+        };
+        let first = git_head(repo.path()).unwrap();
+        fs::write(repo.path().join("tracked.txt"), "second\n").unwrap();
+        git(repo.path(), &["add", "tracked.txt"]);
+        git(
+            repo.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "second"],
+        );
+        let second = git_head(repo.path()).unwrap();
+
+        assert_eq!(
+            target_revision_relationship(repo.path(), &first, &second),
+            RevisionRelationship::AheadBy(1)
+        );
+        assert_eq!(
+            target_revision_relationship(repo.path(), &second, &first),
+            RevisionRelationship::DivergedOrRewound
+        );
+        assert_eq!(
+            target_revision_relationship(repo.path(), "missing", &second),
+            RevisionRelationship::Unavailable
         );
     }
 

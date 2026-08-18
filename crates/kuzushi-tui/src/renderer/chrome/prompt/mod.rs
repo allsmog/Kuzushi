@@ -49,7 +49,7 @@ fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
         ));
     }
     (app.is_picker_view() && !app.picker_prompt_focused())
-        .then(|| disabled_prompt_line("command prompt paused — : to type a command"))
+        .then(|| disabled_prompt_line("type a command · ↑/↓ moves the picker · Enter selects"))
 }
 
 fn prompt_prefix_style(page: Option<crate::WorkbenchPage>) -> ratatui::style::Style {

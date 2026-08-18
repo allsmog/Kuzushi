@@ -24,20 +24,31 @@ pub(crate) fn refresh_terminal_redraw_state(
 /// later, distinct gate with the same stable id to notify.
 fn sync_attention_signals(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    app: &ShellApp,
+    app: &mut ShellApp,
     state: &mut TerminalLoopState,
 ) -> Result<()> {
-    let broker = crate::app::AttentionBroker::from_app(app);
-    let new_items =
-        crate::app::newly_appeared_attention(&mut state.active_attention_ids, broker.items());
+    if app.ui().terminal_focus() != crate::app::FocusState::Unknown {
+        state.focus_unknown_notice_emitted = false;
+    }
+    let items = crate::app::notification_attention_items(app);
+    let new_items = crate::app::newly_appeared_attention(&mut state.active_attention_ids, &items);
     let message = crate::app::notification_message(&new_items);
     let Some(message) = message else {
         return Ok(());
     };
-    if crate::app::should_notify_blurred(app.ui().notify_enabled(), app.ui().terminal_focus())
-        .is_err()
-    {
-        return Ok(());
+    match crate::app::should_notify_blurred(app.ui().notify_enabled(), app.ui().terminal_focus()) {
+        Ok(()) => {}
+        Err(crate::app::NotifySkip::FocusUnknown) => {
+            if !state.focus_unknown_notice_emitted {
+                app.log(
+                    "notify",
+                    "desktop alert unavailable because this terminal does not report focus",
+                );
+                state.focus_unknown_notice_emitted = true;
+            }
+            return Ok(());
+        }
+        Err(_) => return Ok(()),
     }
     // BEL rings the terminal's bell; OSC 9 raises a desktop notification on
     // terminals that support it (iTerm2, kitty, WezTerm) and is ignored

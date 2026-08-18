@@ -159,11 +159,15 @@ impl ShellApp {
     ) -> Vec<ShellEffect> {
         self.invalidate_view_hydration();
         let root = workspace.root().to_path_buf();
+        let target_changed = self.target().is_some_and(|active| active != root.as_path());
         let session_options = self
             .option_store()
             .scope_only(kuzushi_core::OptionScope::Session);
+        let discarded_session_option_count = session_options.value_count();
         let (mut option_store, option_store_error) = persistent_option_store(Some(&workspace));
-        option_store.merge_store(session_options);
+        if !target_changed {
+            option_store.merge_store(session_options);
+        }
         self.domain_mut().reset_for_target(&workspace);
         self.reset_review_sessions_for_target();
         self.engagement.reset_for_target();
@@ -179,6 +183,14 @@ impl ShellApp {
         self.set_active_scope(None);
         if let Some(error) = option_store_error {
             self.log("options", error);
+        }
+        if target_changed && discarded_session_option_count > 0 {
+            self.log(
+                "options",
+                format!(
+                    "cleared {discarded_session_option_count} session option(s) from the previous target; use setg for cross-target defaults"
+                ),
+            );
         }
         self.record_active_target(&root);
         self.refresh_active_scope_tree(&root);

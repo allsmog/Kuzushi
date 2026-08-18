@@ -29,6 +29,18 @@ pub struct JourneyModel {
     pub next_action: String,
     pub next_tools: String,
     pub next_summary: String,
+    /// Same-target selected checkpoint that is intentionally not reusable for
+    /// the current revision/dirty snapshot.
+    pub checkpoint_drift: Option<CheckpointDrift>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckpointDrift {
+    pub phase: WorkflowPhase,
+    pub accepted_revision: Option<String>,
+    pub current_revision: Option<String>,
+    pub dirty_changed: bool,
+    pub relationship: Option<kuzushi_core::workspace::RevisionRelationship>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -226,6 +238,40 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         next_summary: destination_next_summary(destination, progress, &next_action),
         next_action,
         next_tools: projected_next_tools(app, destination),
+        checkpoint_drift: checkpoint_drift(app, current),
+    })
+}
+
+fn checkpoint_drift(app: &ShellApp, phase: WorkflowPhase) -> Option<CheckpointDrift> {
+    if app.engagement.phase_attempt_projection_is_degraded() {
+        return None;
+    }
+    let accepted = app.engagement.stale_selected_phase_attempt(phase)?;
+    let current = app.engagement.phase_target_snapshot()?;
+    let accepted_snapshot = &accepted.completed.target_snapshot;
+    let relationship = accepted_snapshot
+        .revision
+        .as_deref()
+        .zip(current.revision.as_deref())
+        .and_then(|(accepted, current_revision)| {
+            if accepted == current_revision {
+                return Some(kuzushi_core::workspace::RevisionRelationship::Same);
+            }
+            match app.workbench_cache().borrow().cached_revision_relationship(
+                app.target(),
+                accepted,
+                current_revision,
+            ) {
+                ViewDataState::Ready(relationship) => Some(relationship),
+                ViewDataState::NotRequested | ViewDataState::Loading => None,
+            }
+        });
+    Some(CheckpointDrift {
+        phase,
+        accepted_revision: accepted_snapshot.revision.clone(),
+        current_revision: current.revision.clone(),
+        dirty_changed: accepted_snapshot.dirty != current.dirty,
+        relationship,
     })
 }
 
@@ -787,7 +833,7 @@ pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
 pub fn autonomy_footer_segment(app: &ShellApp) -> Option<String> {
     let journey = journey_model(app)?;
     let posture = app.autonomy();
-    let mut segment = format!("⛭ {}", posture.label());
+    let mut segment = format!("⛭ autonomy:{}", posture.label());
     if posture.ceiling() < journey.current {
         segment.push_str(" ⚠");
     }
@@ -1357,6 +1403,51 @@ mod tests {
         assert!(journey.progress.map_checkpoint);
         assert!(!journey.progress.scan_checkpoint);
         assert_eq!(journey.current, WorkflowPhase::Scan);
+    }
+
+    #[test]
+    fn stale_selected_map_is_disclosed_without_advancing_reality() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let current = PhaseTargetSnapshot::capture(target.path());
+        let accepted = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-old".to_string()],
+            PhaseTargetSnapshot {
+                target: current.target.clone(),
+                revision: Some("accepted-revision".to_string()),
+                dirty: false,
+            },
+            PhaseAttemptOutcome::Completed,
+        );
+        let ledger = PhaseAttemptLedger::from_events([
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptCompleted(
+                accepted.clone(),
+            ),
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptDispositionRecorded(
+                PhaseAttemptDispositionRecorded::new(
+                    accepted.attempt_id,
+                    PhaseAttemptDisposition::Selected {
+                        acknowledged_partial: false,
+                    },
+                ),
+            ),
+        ])
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.engagement
+            .set_phase_attempt_projection(Some(current), ledger);
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(!journey.progress.map_checkpoint);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        let drift = journey.checkpoint_drift.expect("stale checkpoint");
+        assert_eq!(drift.phase, WorkflowPhase::Map);
+        assert_eq!(
+            drift.accepted_revision.as_deref(),
+            Some("accepted-revision")
+        );
     }
 
     #[test]

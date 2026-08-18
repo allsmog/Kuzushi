@@ -179,6 +179,26 @@ impl EffectiveReviewStateIndex {
     }
 }
 
+pub(crate) fn review_decision_history_for<'a>(
+    finding: &Finding,
+    records: &'a [ReviewDecisionRecord],
+) -> Vec<&'a ReviewDecisionRecord> {
+    let identity_id = normalized_identity_id(finding);
+    let mut matching = records
+        .iter()
+        .filter(|record| match identity_id.as_deref() {
+            Some(identity_id) => {
+                normalized_record_identity_id(record).as_deref() == Some(identity_id)
+            }
+            None => finding.id == Some(record.finding_id),
+        })
+        .collect::<Vec<_>>();
+    matching.sort_by(|left, right| {
+        ReviewSortKey::from_record(right).cmp(&ReviewSortKey::from_record(left))
+    });
+    matching
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct ReviewSortKey {
     created_at: String,

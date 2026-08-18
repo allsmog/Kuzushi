@@ -8,7 +8,7 @@ use super::export_projection_model::{
     WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
 };
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 const KUZUSHI_INFORMATION_URI: &str = "https://github.com/allsmog/Kuzushi";
 
@@ -148,26 +148,43 @@ fn build_sarif_run(
 }
 
 fn sarif_rules(records: &[&WorkspaceFindingExportRecord]) -> Vec<serde_json::Value> {
-    let mut rules: BTreeMap<&str, &WorkspaceFindingExportRecord> = BTreeMap::new();
+    let mut rules: BTreeMap<&str, Vec<&WorkspaceFindingExportRecord>> = BTreeMap::new();
     for record in records {
-        rules.entry(record.rule_id.as_str()).or_insert(record);
+        rules.entry(record.rule_id.as_str()).or_default().push(record);
     }
     rules
-        .values()
-        .map(|record| sarif_rule(record))
+        .into_iter()
+        .map(|(rule_id, records)| sarif_rule(rule_id, &records))
         .collect()
 }
 
-fn sarif_rule(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+fn sarif_rule(rule_id: &str, records: &[&WorkspaceFindingExportRecord]) -> serde_json::Value {
+    let record = records
+        .iter()
+        .copied()
+        .min_by_key(|record| (sarif_severity_rank(&record.severity), record.fingerprint.as_str()))
+        .expect("SARIF rule groups are non-empty");
+    let mut tags = vec!["security".to_string()];
+    tags.extend(
+        records
+            .iter()
+            .filter_map(|record| record.cwe.as_ref())
+            .cloned()
+            .collect::<BTreeSet<_>>(),
+    );
     let mut rule = json!({
-        "id": record.rule_id,
-        "name": record.rule_id,
+        "id": rule_id,
+        "name": rule_id,
         "shortDescription": { "text": record.title },
         "fullDescription": { "text": record.message },
+        "help": {
+            "text": "Inspect the result message, proof band, evidence properties, and recommended change before remediation."
+        },
         "defaultConfiguration": { "level": sarif_level(&record.severity) },
+        "properties": { "tags": tags },
     });
-    if let Some(cwe) = record.cwe.as_ref() {
-        rule["properties"] = json!({ "tags": ["security", cwe] });
+    if let Some(score) = sarif_security_severity(&record.severity) {
+        rule["properties"]["security-severity"] = json!(score);
     }
     rule
 }
@@ -291,7 +308,42 @@ fn sarif_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value 
     merge_sarif_properties(&mut properties, sarif_proof_properties(record));
     merge_sarif_properties(&mut properties, sarif_provenance_properties(record));
     merge_sarif_properties(&mut properties, sarif_remediation_properties(record));
+    merge_sarif_properties(&mut properties, sarif_hunt_properties(record));
     properties
+}
+
+fn sarif_hunt_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
+    let mut properties = serde_json::Map::new();
+    properties.insert("kuzushiTriageState".to_string(), json!(record.triage_state));
+    insert_optional_property(
+        &mut properties,
+        "kuzushiRecommendation",
+        record.recommendation.as_ref(),
+    );
+    insert_optional_property(&mut properties, "kuzushiImpact", record.impact.as_ref());
+    insert_optional_property(&mut properties, "kuzushiCategory", record.category.as_ref());
+    insert_optional_property(
+        &mut properties,
+        "kuzushiExploitScenario",
+        record.exploit_scenario.as_ref(),
+    );
+    if !record.preconditions.is_empty() {
+        properties.insert(
+            "kuzushiPreconditions".to_string(),
+            json!(record.preconditions),
+        );
+    }
+    serde_json::Value::Object(properties)
+}
+
+fn insert_optional_property<T: serde::Serialize>(
+    properties: &mut serde_json::Map<String, serde_json::Value>,
+    key: &str,
+    value: Option<&T>,
+) {
+    if let Some(value) = value {
+        properties.insert(key.to_string(), json!(value));
+    }
 }
 
 fn sarif_remediation_properties(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
@@ -301,6 +353,7 @@ fn sarif_remediation_properties(record: &WorkspaceFindingExportRecord) -> serde_
     json!({
         "kuzushiRemediationApplicationId": remediation.application_id,
         "kuzushiRemediationPatchRunId": remediation.patch_run_id,
+        "kuzushiRemediationFindingScanId": remediation.finding_scan_id,
         "kuzushiRemediationApplicationState": remediation.application_state,
         "kuzushiRemediationEmpiricallyVerified": remediation.empirically_verified,
         "kuzushiRemediationReverifyOutcome": remediation.reverify_outcome,
@@ -345,6 +398,7 @@ fn sarif_evidence_properties(record: &WorkspaceFindingExportRecord) -> serde_jso
         "kuzushiDerivedSourcePresent": record.evidence.derived_source_present,
         "kuzushiEvidenceSourceCount": record.evidence.source_count,
         "kuzushiRawHttpBlobPresent": record.evidence.raw_http_blob_present,
+        "kuzushiEvidenceConfidenceMax": record.evidence.evidence_confidence_max,
         "kuzushiStaticProofRecorded": record.analysis.static_proof_recorded,
         "kuzushiAutomatedReasoningPresent": record.analysis.automated_reasoning_present,
         "kuzushiHumanReviewPresent": record.analysis.human_review_present,
@@ -392,6 +446,28 @@ fn sarif_level(severity: &str) -> &'static str {
         "medium" => "warning",
         "low" | "info" | "unknown" => "note",
         _ => "note",
+    }
+}
+
+fn sarif_security_severity(severity: &str) -> Option<&'static str> {
+    match severity {
+        "critical" => Some("9.1"),
+        "high" => Some("8.0"),
+        "medium" => Some("5.0"),
+        "low" => Some("2.0"),
+        "info" => Some("0.1"),
+        _ => None,
+    }
+}
+
+fn sarif_severity_rank(severity: &str) -> u8 {
+    match severity {
+        "critical" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        "info" => 4,
+        _ => 5,
     }
 }
 

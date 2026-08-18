@@ -9,7 +9,7 @@
 //! cap.
 
 use super::ShellApp;
-use kuzushi_core::AutonomyPosture;
+use kuzushi_core::{AutonomyPosture, OptionScope, OptionTarget};
 
 impl ShellApp {
     /// The live operator autonomy posture.
@@ -68,33 +68,71 @@ impl ShellApp {
         );
     }
 
-    fn change_autonomy(&mut self, requested: AutonomyPosture) {
+    pub(crate) fn change_autonomy(&mut self, requested: AutonomyPosture) {
         let previous = self.autonomy();
         let applied = self.set_autonomy(requested);
-        if applied == previous {
-            let message = format!(
-                "posture stays at {} (cap: {})",
-                applied.label(),
-                self.autonomy_cap().label()
-            );
-            self.log("autonomy", &message);
-            self.set_warn_notice("autonomy", message);
-            return;
-        }
-        let message = format!(
-            "posture → {} — authorizes up to the {} phase",
-            applied.label(),
-            applied.ceiling().word()
-        );
+        let saved = self.persist_autonomy_preference(requested);
+        let (message, changed) =
+            autonomy_change_message(previous, applied, self.autonomy_cap(), saved);
         self.log("autonomy", &message);
-        self.set_success_notice("autonomy", message);
+        self.set_autonomy_change_notice(saved && changed, message);
     }
+
+    fn persist_autonomy_preference(&mut self, requested: AutonomyPosture) -> bool {
+        self.option_store_mut().set_value(
+            OptionScope::Global,
+            OptionTarget::All,
+            crate::app::UI_AUTONOMY_OPTION,
+            serde_json::Value::String(requested.label().to_string()),
+        );
+        self.persist_option_store(OptionScope::Global)
+    }
+
+    fn set_autonomy_change_notice(&mut self, success: bool, message: String) {
+        if success {
+            self.set_success_notice("autonomy", message);
+        } else {
+            self.set_warn_notice("autonomy", message);
+        }
+    }
+}
+
+fn autonomy_change_message(
+    previous: AutonomyPosture,
+    applied: AutonomyPosture,
+    cap: AutonomyPosture,
+    saved: bool,
+) -> (String, bool) {
+    if applied == previous {
+        let suffix = if saved { "" } else { "; preference not saved" };
+        return (
+            format!(
+                "posture stays at {} (cap: {}){suffix}",
+                applied.label(),
+                cap.label()
+            ),
+            false,
+        );
+    }
+    let suffix = if saved {
+        ""
+    } else {
+        "; applied for this session, preference not saved"
+    };
+    (
+        format!(
+            "posture → {} · authorizes up to the {} phase{suffix}",
+            applied.label(),
+            applied.ceiling().word(),
+        ),
+        true,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use crate::app::ShellApp;
-    use kuzushi_core::{AutonomyPosture, GuidedPhase, V2Config};
+    use kuzushi_core::{AutonomyPosture, GuidedPhase, OptionScope, OptionTarget, V2Config};
 
     #[test]
     fn default_posture_is_fix_behavior_preserving() {
@@ -146,5 +184,22 @@ mod tests {
         // Reading (None) leaves the posture unchanged.
         app.reduce_autonomy_command(None);
         assert_eq!(app.autonomy(), AutonomyPosture::Prove);
+    }
+
+    #[test]
+    fn verb_stores_the_requested_global_preference_before_clamping() {
+        let mut config = V2Config::default();
+        config.phases.stop_after = Some(GuidedPhase::Scan);
+        let mut app = ShellApp::new(config, None);
+
+        app.reduce_autonomy_command(Some(AutonomyPosture::Fix));
+
+        assert_eq!(app.autonomy(), AutonomyPosture::Scan);
+        assert_eq!(
+            app.option_store()
+                .values_for(OptionScope::Global, &OptionTarget::All)
+                .and_then(|values| values.get(crate::app::UI_AUTONOMY_OPTION)),
+            Some(&serde_json::json!("fix"))
+        );
     }
 }

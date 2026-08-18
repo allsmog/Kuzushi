@@ -15,7 +15,14 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     // Routing + view only: target/ctx/model are the top cockpit strip's job,
     // so each session fact is stated once per screen.
-    assert_eq!(model.left_segments, ["shell route", "capabilities"]);
+    assert_eq!(
+        model.left_segments,
+        [
+            "shell route",
+            "notify:unavailable · focus unknown",
+            "capabilities"
+        ]
+    );
     assert_eq!(model.right_segments, ["0 findings"]);
 }
 
@@ -199,6 +206,7 @@ fn status_footer_model_prefers_active_scan_status() {
         [
             "run route",
             "running: semgrep",
+            "notify:unavailable · focus unknown",
             "capabilities",
             "openai:gpt-5.2",
         ]
@@ -219,8 +227,28 @@ fn status_footer_model_reflects_active_tool_model_override() {
         [
             "run route",
             "triage:run: active",
+            "notify:unavailable · focus unknown",
             "capabilities",
             "openai:gpt-tool (tool)",
         ]
     );
+}
+
+#[test]
+fn status_footer_hides_notification_warning_when_focus_is_known_or_alerts_are_off() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.ui_mut()
+        .set_terminal_focus(crate::app::FocusState::Focused);
+    assert!(!status_footer_model(&app)
+        .left_segments
+        .iter()
+        .any(|segment| segment.starts_with("notify:")));
+
+    app.ui_mut()
+        .set_terminal_focus(crate::app::FocusState::Unknown);
+    app.ui_mut().set_notify_enabled(false);
+    assert!(!status_footer_model(&app)
+        .left_segments
+        .iter()
+        .any(|segment| segment.starts_with("notify:")));
 }

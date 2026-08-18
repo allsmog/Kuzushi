@@ -1,5 +1,9 @@
-use super::*;
-use crate::modules::registry::ToolExecutor;
+use crate::{
+    ApprovalPolicy, FindingStoreRequirement, ToolEffect, ToolPhase, ToolPolicy,
+    WorkspaceRequirement,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModuleMetadata {
@@ -61,10 +65,10 @@ pub struct ToolDescriptor {
     /// here: this is the stable, editable instruction surface.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompts: Vec<PromptSpec>,
+    /// Descriptor-authoring state; excluded from serialization and identity.
+    #[doc(hidden)]
     #[serde(skip)]
-    pub(in crate::modules) executor: Option<ToolExecutor>,
-    #[serde(skip)]
-    pub(in crate::modules) policy_declared: bool,
+    pub policy_declared: bool,
 }
 
 impl PartialEq for ToolDescriptor {
@@ -98,7 +102,7 @@ pub struct PromptSpec {
 
 impl PromptSpec {
     pub fn override_relative_path(&self) -> std::path::PathBuf {
-        crate::options::relative_prompt_override_path(&self.module_id, &self.verb)
+        crate::prompt_paths::relative_prompt_override_path(&self.module_id, &self.verb)
     }
 }
 
@@ -214,8 +218,10 @@ impl PathSemantics {
     }
 }
 
+/// Descriptor-authoring internals used by Kuzushi's registration layer.
+#[doc(hidden)]
 impl OptionSpec {
-    pub(in crate::modules) fn new(name: &str, option_type: OptionType, description: &str) -> Self {
+    pub fn new(name: &str, option_type: OptionType, description: &str) -> Self {
         Self {
             name: name.to_string(),
             option_type,
@@ -234,87 +240,89 @@ impl OptionSpec {
         }
     }
 
-    pub(in crate::modules) fn required(mut self) -> Self {
+    pub fn required(mut self) -> Self {
         self.required = true;
         self
     }
 
-    pub(in crate::modules) fn advanced(mut self) -> Self {
+    pub fn advanced(mut self) -> Self {
         self.advanced = true;
         self
     }
 
-    pub(in crate::modules) fn evasion(mut self) -> Self {
+    pub fn evasion(mut self) -> Self {
         self.evasion = true;
         self
     }
 
-    pub(in crate::modules) fn workspace_read(mut self) -> Self {
+    pub fn workspace_read(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::WorkspaceRead);
         self
     }
 
-    pub(in crate::modules) fn state_write(mut self) -> Self {
+    pub fn state_write(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::StateWrite);
         self
     }
 
-    pub(in crate::modules) fn target_write(mut self) -> Self {
+    pub fn target_write(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::TargetWrite);
         self
     }
 
-    pub(in crate::modules) fn external_write(mut self) -> Self {
+    pub fn external_write(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::ExternalWrite);
         self
     }
 
-    pub(in crate::modules) fn external_read(mut self) -> Self {
+    pub fn external_read(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::ExternalRead);
         self
     }
 
-    pub(in crate::modules) fn executable(mut self) -> Self {
+    pub fn executable(mut self) -> Self {
         self.path_semantics = Some(PathSemantics::Executable);
         self
     }
 
-    pub(in crate::modules) fn inline_or_workspace_file(mut self) -> Self {
+    pub fn inline_or_workspace_file(mut self) -> Self {
         self.file_reference_semantics = Some(FileReferenceSemantics::InlineOrWorkspaceFile);
         self
     }
 
-    pub(in crate::modules) fn inline_or_workspace_files(mut self) -> Self {
+    pub fn inline_or_workspace_files(mut self) -> Self {
         self.file_reference_semantics = Some(FileReferenceSemantics::InlineOrWorkspaceFiles);
         self
     }
 
-    pub(in crate::modules) fn default(mut self, value: Value) -> Self {
+    pub fn default(mut self, value: Value) -> Self {
         self.default = Some(value);
         self
     }
 
-    pub(in crate::modules) fn integer_range(mut self, minimum: i64, maximum: i64) -> Self {
+    pub fn integer_range(mut self, minimum: i64, maximum: i64) -> Self {
         self.minimum = Some(minimum);
         self.maximum = Some(maximum);
         self
     }
 
-    pub(in crate::modules) fn choices(mut self, choices: &[&str]) -> Self {
+    pub fn choices(mut self, choices: &[&str]) -> Self {
         self.choices = choices.iter().map(|choice| (*choice).to_string()).collect();
         self
     }
 
-    pub(in crate::modules) fn aliases(mut self, aliases: &[&str]) -> Self {
+    pub fn aliases(mut self, aliases: &[&str]) -> Self {
         self.aliases = aliases.iter().map(|alias| (*alias).to_string()).collect();
         self
     }
 
-    pub(in crate::modules) fn deprecated_aliases(mut self, aliases: &[&str]) -> Self {
+    pub fn deprecated_aliases(mut self, aliases: &[&str]) -> Self {
         self.deprecated_aliases = aliases.iter().map(|alias| (*alias).to_string()).collect();
         self
     }
+}
 
+impl OptionSpec {
     pub fn matches_name_or_alias(&self, name: &str) -> bool {
         self.name.eq_ignore_ascii_case(name)
             || self
@@ -333,8 +341,6 @@ pub struct DagNodeDescriptor {
     pub id: String,
     pub output_kind: String,
     pub depends_on: Vec<String>,
-    #[serde(skip)]
-    pub(in crate::modules) executor: Option<ToolExecutor>,
 }
 
 impl PartialEq for DagNodeDescriptor {
@@ -346,3 +352,28 @@ impl PartialEq for DagNodeDescriptor {
 }
 
 impl Eq for DagNodeDescriptor {}
+
+/// Descriptor-authoring internals used by Kuzushi's registration layer.
+#[doc(hidden)]
+impl ToolDescriptor {
+    pub fn with_prompt(mut self, prompt: PromptSpec) -> Self {
+        self.prompts.push(prompt);
+        self
+    }
+
+    pub fn with_continuation(mut self, continuation: ContinuationSupport) -> Self {
+        self.continuation = continuation;
+        self
+    }
+
+    pub fn with_policy(mut self, policy: ToolPolicy) -> Self {
+        self.phase = policy.phase;
+        self.runtime_requirement = policy.runtime_requirement;
+        self.effect = policy.effect;
+        self.approval = policy.approval;
+        self.workspace_requirement = policy.workspace_requirement;
+        self.finding_store_requirement = policy.finding_store_requirement;
+        self.policy_declared = true;
+        self
+    }
+}

@@ -3906,6 +3906,11 @@ fn review_decision_accepts_human_language_false_positive_alias() {
         apply.decision.verdict,
         kuzushi_core::findings::ReviewDecisionVerdict::RejectedFalsePositive
     );
+    assert_eq!(
+        apply.decision.dismiss_reason,
+        Some(kuzushi_core::findings::DismissReason::FalsePositive)
+    );
+    assert_eq!(apply.decision.actor.as_deref(), Some("operator"));
 }
 
 #[test]
@@ -5856,6 +5861,22 @@ fn proof_deferral_command_persists_a_human_current_generation_decision() {
             .map(|notice| notice.source.as_str()),
         Some("prove")
     );
+    // A deferred row is absent from the Prove projection; the durable
+    // receipt must still explain the otherwise empty page.
+    app.set_findings(Vec::new());
+    app.set_workbench_page(WorkbenchPage::Prove);
+    let model = crate::ui_view_models::phase_cockpit_model_for_phase(&app, WorkflowPhase::Prove);
+    let crate::ui_view_models::PhaseCockpitBody::Prove(prove) = model.body else {
+        panic!("expected Prove model");
+    };
+    let hint = prove
+        .empty_hint
+        .expect("proof deferral empty-state receipt");
+    assert!(hint.contains("proof deferral recorded"), "{hint}");
+    assert!(
+        hint.contains("production harness is intentionally unavailable"),
+        "{hint}"
+    );
 }
 
 #[test]
@@ -7703,10 +7724,7 @@ fn config_view_onboards_with_keyboard_model_selection() {
 }
 
 #[test]
-fn auth_picker_navigation_keys_work_outside_key_editor_with_text_in_prompt() {
-    // Regression: the picker used to bail whenever the input buffer was
-    // non-empty, so a stray character silently stole j/k/Enter. As a true
-    // modal it now captures navigation regardless of prompt contents.
+fn auth_picker_arrow_navigation_works_outside_the_key_editor() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("openai".to_string());
     app.router.auth_picker_mut().set_cursor(1);
@@ -7714,12 +7732,12 @@ fn auth_picker_navigation_keys_work_outside_key_editor_with_text_in_prompt() {
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
     );
     assert_eq!(
         app.router.auth_picker().cursor(),
         2,
-        "j must move the picker cursor"
+        "Down must move the picker cursor"
     );
     assert_eq!(
         app.input(),
@@ -7891,9 +7909,10 @@ fn credential_list_owns_non_global_modifier_chords_on_every_row() {
 }
 
 #[test]
-fn credential_prompt_focus_keeps_shared_composer_editing() {
+fn credential_entry_returns_to_setup_before_shared_composer_editing() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_credential_entry("openai".to_string());
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
@@ -8309,6 +8328,7 @@ fn picker_footer_omits_tab_complete_hint() {
     // completes — that contradicted the picker's own hint row.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
     let bindings = crate::ui_view_models::footer_keybindings(&app);
     assert!(
         !bindings.iter().any(|binding| binding.key == "Tab"),
@@ -8353,7 +8373,7 @@ fn target_picker_prompt_first_escape_returns_to_picker_before_browsing() {
 }
 
 #[test]
-fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
+fn picker_printable_key_focuses_prompt_losslessly_and_esc_returns_to_picker() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::PlanningPicker);
     app.engagement.set_phase(WorkflowPhase::Map);
@@ -8362,15 +8382,7 @@ fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
     );
-    assert!(
-        app.input().is_empty(),
-        "list-focused picker swallows letters"
-    );
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
-    );
+    assert_eq!(app.input(), "j", "the takeover keeps its triggering byte");
     assert_eq!(
         app.engagement.planning_picker().focus(),
         PickerFocus::Prompt
@@ -8378,9 +8390,9 @@ fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
-    assert_eq!(app.input(), "j", "prompt-focused picker accepts typing");
+    assert_eq!(app.input(), "jo", "prompt-focused picker accepts typing");
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
@@ -10250,6 +10262,32 @@ fn ctrl_c_at_idle_returns_shell_quit_effect_without_quitting_inline() {
 }
 
 #[test]
+fn ctrl_c_at_idle_discloses_volatile_session_state_before_exit() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input("unfinished command");
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Char('c'),
+            KeyModifiers::CONTROL,
+        ))),
+    );
+
+    assert!(result.changed);
+    assert!(result.effects.is_empty());
+    assert_eq!(app.shell_view(), ShellView::QuitConfirm);
+    assert!(!app.should_quit());
+    let model = crate::ui_view_models::quit_confirm_model(&app);
+    assert!(model.sections.iter().any(|section| {
+        section
+            .rows
+            .iter()
+            .any(|row| row.contains("command draft") && row.contains("18 characters"))
+    }));
+}
+
+#[test]
 fn ctrl_c_with_active_scan_returns_cancel_effect_without_aborting_inline() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let cancel = ScanCancellation::default();
@@ -10728,9 +10766,7 @@ fn fresh_target_opens_aggregate_setup() {
 }
 
 #[test]
-fn setup_start_key_commits_regardless_of_the_focused_row() {
-    // `Enter` activates the focused row (Target row → target picker), so the
-    // advertised Start Map commit needs `s` to dispatch from any cursor position.
+fn setup_start_row_commits_with_enter() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
@@ -10740,10 +10776,10 @@ fn setup_start_key_commits_regardless_of_the_focused_row() {
         .planning_picker_mut()
         .selected_mut()
         .insert(PlanningTaskId::GatherRepoContext);
-    app.router.setup_mut().set_cursor(1);
+    app.router.setup_mut().set_cursor(6);
     assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
 
-    let update = app.reduce_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert!(update.handled);
     assert!(matches!(
@@ -11533,7 +11569,7 @@ fn planning_phase_navigation_clamps_at_rail_edges() {
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
     );
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app
@@ -11544,7 +11580,7 @@ fn planning_phase_navigation_clamps_at_rail_edges() {
     app.open_phase_picker(WorkflowPhase::Fix);
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Right, KeyModifiers::empty()),
     );
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Fix));
     assert!(app
@@ -11562,7 +11598,7 @@ fn planning_phase_navigation_moves_horizontally_without_running() {
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Left, KeyModifiers::empty()),
     );
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
@@ -11587,7 +11623,7 @@ fn planning_phase_navigation_logs_config_block_instead_of_silent_noop() {
 
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Right, KeyModifiers::empty()),
     );
 
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
@@ -11899,7 +11935,7 @@ fn auth_picker_esc_returns_to_aggregate_setup() {
 }
 
 #[test]
-fn auth_picker_q_returns_to_setup_and_clears_the_draft() {
+fn auth_picker_esc_returns_to_setup_and_clears_the_draft_from_any_row() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config_mut().model = Some("openai:gpt-5.5".to_string());
     app.open_credential_entry("openai".to_string());
@@ -11909,18 +11945,15 @@ fn auth_picker_q_returns_to_setup_and_clears_the_draft() {
         KeyEvent::new(KeyCode::Down, KeyModifiers::empty()),
     );
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
-    );
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view(), ShellView::Setup);
     assert_eq!(app.router.setup().editor(), None);
     assert!(app.router.auth_picker().key_draft().is_empty());
-    assert!(app
+    assert!(!app
         .log_lines()
         .iter()
-        .any(|line| line.body.contains("auth deferred")));
+        .any(|line| line.body.contains("draft-secret")));
 }
 
 #[test]
@@ -12902,7 +12935,7 @@ fn offline_demo_uses_target_activation_before_preparing_its_scan() {
 }
 
 #[test]
-fn target_activation_reloads_workspace_options_and_preserves_session_values() {
+fn target_activation_reloads_workspace_options_and_clears_previous_target_session_values() {
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -12932,8 +12965,13 @@ fn target_activation_reloads_workspace_options_and_preserves_session_values() {
         app.option_store()
             .values_for(OptionScope::Session, &OptionTarget::All)
             .and_then(|values| values.get("session-marker")),
-        Some(&serde_json::json!("target-a-session"))
+        None
     );
+    assert!(app.log_lines().iter().any(|line| {
+        line.prefix == "options"
+            && line.body.contains("cleared 1 session option")
+            && line.body.contains("use setg")
+    }));
 }
 
 #[test]
@@ -13253,6 +13291,7 @@ fn scripted_cross_target_scan_activates_target_before_scan_preparation() {
 
 fn save_workspace_option_marker(workspace: &WorkspaceTarget, value: &str) {
     let paths = kuzushi_core::ConfigPaths::from_target(Some(workspace.root())).unwrap();
+    let isolated_operator_options = workspace.root().join("operator-options-for-test.json");
     let mut store = ToolOptionStore::new();
     store.set_value(
         OptionScope::Workspace,
@@ -13262,7 +13301,7 @@ fn save_workspace_option_marker(workspace: &WorkspaceTarget, value: &str) {
     );
     store
         .save_persistent(
-            &paths.global_options_path(),
+            &isolated_operator_options,
             paths.project_options_path().as_deref(),
         )
         .unwrap();
@@ -18622,6 +18661,24 @@ fn run_focus_keeps_prompt_draft_outside_its_owned_input_mode() {
 }
 
 #[test]
+fn run_focus_unbound_printable_starts_a_lossless_command_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Activity);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    for ch in "queue run secret-scan:scan {}".chars() {
+        press_key(
+            &mut app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        );
+    }
+
+    assert_eq!(app.input(), "queue run secret-scan:scan {}");
+    assert!(app.router.activity().steer_editor.is_none());
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+}
+
+#[test]
 fn activity_findings_key_does_not_replace_run_focus() {
     let temp = tempfile::tempdir().expect("temp target");
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -19224,7 +19281,7 @@ fn target_picker_over_a_bound_target_anchors_and_preserves_it() {
     assert_eq!(selected.path, temp.path());
 
     let update = app.reduce_key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Char('q'),
+        crossterm::event::KeyCode::Esc,
         crossterm::event::KeyModifiers::NONE,
     ));
 
@@ -19560,7 +19617,7 @@ fn planning_picker_esc_closes_without_recording_skip_or_advancing() {
 }
 
 #[test]
-fn planning_picker_s_records_skip_and_advances_phase() {
+fn planning_picker_skips_when_the_operator_unchecks_everything_and_confirms() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
@@ -19572,9 +19629,10 @@ fn planning_picker_s_records_skip_and_advances_phase() {
         )],
     );
 
+    app.engagement.planning_picker_mut().selected_mut().clear();
     press_key(
         &mut app,
-        KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
     assert!(app
@@ -19585,7 +19643,7 @@ fn planning_picker_s_records_skip_and_advances_phase() {
     assert!(app
         .log_lines()
         .iter()
-        .any(|line| { line.prefix == "phase" && line.body.contains("skipped MAP") }));
+        .any(|line| { line.prefix == "phase" && line.body.contains("skipping MAP") }));
 
     let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(dir.path());
     let ledger = kuzushi_core::workflow_attempts::load_phase_attempt_ledger(dir.path()).unwrap();
@@ -19671,7 +19729,7 @@ fn selected_clean_scan_ignores_findings_from_older_generations() {
 }
 
 #[test]
-fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
+fn planning_picker_number_keys_start_a_lossless_command_draft() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
@@ -19689,9 +19747,15 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
     );
 
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
-    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Review));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.engagement.planning_queues_empty());
-    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::Prompt
+    );
+    assert_eq!(app.input(), "3");
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     app.engagement
         .planning_picker_mut()
@@ -19704,7 +19768,11 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
     assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.engagement.planning_queues_empty());
-    assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::Prompt
+    );
+    assert_eq!(app.input(), "1");
 }
 
 #[test]
@@ -19804,7 +19872,7 @@ fn open_stride_planning_options_with_model_override(app: &mut ShellApp) -> serde
 }
 
 #[test]
-fn planning_option_promote_key_returns_effect_without_persisting() {
+fn planning_option_ctrl_s_returns_effect_without_persisting() {
     let dir = tempfile::tempdir().expect("temp target");
     let workspace = WorkspaceTarget::new(dir.path()).expect("workspace");
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -19816,12 +19884,11 @@ fn planning_option_promote_key_returns_effect_without_persisting() {
     let result = update(
         &mut app,
         Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Char('S'),
-            KeyModifiers::empty(),
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
         ))),
     );
 
-    assert!(result.changed);
     assert_eq!(result.effects.len(), 1);
     assert!(matches!(
         &result.effects[0],
@@ -19840,7 +19907,7 @@ fn planning_option_promote_key_returns_effect_without_persisting() {
 }
 
 #[test]
-fn planning_option_promote_key_executes_effect_when_requested() {
+fn planning_option_ctrl_s_persists_when_executed() {
     let dir = tempfile::tempdir().expect("temp target");
     let workspace = WorkspaceTarget::new(dir.path()).expect("workspace");
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -19849,15 +19916,14 @@ fn planning_option_promote_key_executes_effect_when_requested() {
     let expected = open_stride_planning_options_with_model_override(&mut app);
     let target = OptionTarget::Tool("threat-model:build".to_string());
 
-    let changed = update_and_execute_effects(
+    update_and_execute_effects(
         &mut app,
         Msg::Term(TermEvent::Key(KeyEvent::new(
-            KeyCode::Char('S'),
-            KeyModifiers::empty(),
+            KeyCode::Char('s'),
+            KeyModifiers::CONTROL,
         ))),
     );
 
-    assert!(changed);
     assert_eq!(
         app.option_store()
             .values_for(OptionScope::Global, &target)
@@ -20493,10 +20559,7 @@ fn phase_advance_opens_next_picker_while_operator_watches_activity() {
 }
 
 #[test]
-fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
-    // a/A, n/N, Esc/q: the shifted variants are deliberate caps-lock
-    // forgiveness for selection and close. `G` is intentionally not a rebuild alias, preserving
-    // the shell-wide g/G navigation convention for scrollable views.
+fn planning_picker_printable_letters_are_lossless_command_input() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
@@ -20512,72 +20575,37 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
     );
     app.engagement.planning_picker_mut().selected_mut().clear();
 
-    press_key(
-        &mut app,
+    for key in [
         KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT),
-    );
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+    ] {
+        press_key(&mut app, key);
+    }
+
+    assert_eq!(app.input(), "Angq");
     assert_eq!(
-        app.engagement.planning_picker().selected().len(),
-        2,
-        "A selects all like a"
+        app.engagement.planning_picker().focus(),
+        PickerFocus::Prompt
     );
+    assert!(app.engagement.planning_picker().selected().is_empty());
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
 
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT),
-    );
-    assert!(
-        app.engagement.planning_picker().selected().is_empty(),
-        "N clears like n"
-    );
-
-    app.engagement.planning_picker_mut().set_cursor(1); // the cached row
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
-    );
-    assert!(
-        app.engagement
-            .planning_picker()
-            .rebuild()
-            .contains(&PlanningTaskId::BuildXRay),
-        "g marks cached rows for rebuild"
-    );
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
-    );
-    assert!(
-        !app.engagement
-            .planning_picker()
-            .rebuild()
-            .contains(&PlanningTaskId::BuildXRay),
-        "second g returns cached rows to reuse"
-    );
-
-    press_key(
-        &mut app,
-        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT),
-    );
-    assert!(
-        !app.engagement
-            .planning_picker()
-            .rebuild()
-            .contains(&PlanningTaskId::BuildXRay),
-        "G is not an unadvertised rebuild alias"
-    );
-    assert!(app.input().is_empty(), "modal picker swallows inert G");
-
+    app.set_input("");
+    app.set_cursor(0);
+    app.engagement
+        .planning_picker_mut()
+        .set_focus(PickerFocus::OptionsPane);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view(), ShellView::Workbench);
-    assert!(
-        !app.engagement
-            .skipped_phases()
-            .contains(&WorkflowPhase::Map),
-        "q closes like Esc without recording a skip"
+
+    assert_eq!(app.input(), "q");
+    assert_eq!(
+        app.engagement.planning_picker().focus(),
+        PickerFocus::Prompt
     );
 }
 
@@ -21843,6 +21871,52 @@ fn backlog_one_key_decision_saves_through_the_existing_decision_path() {
         latest.decision.rationale
     );
     assert_eq!(app.router.workbench().review().session_decided, 1);
+}
+
+#[test]
+fn backlog_false_positive_key_drafts_the_structured_dismissal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-fp", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-fp",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/fp",
+                "src/app.ts",
+                11,
+                None,
+                Severity::High,
+                "candidate false positive",
+            ),
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    run_command(
+        &mut app,
+        ShellCommand::FindingsFilter("completeness:open".to_string()),
+    );
+    app.set_shell_view(ShellView::Workbench);
+    app.router
+        .workbench_mut()
+        .set_page(Some(crate::app::WorkbenchPage::Review));
+    app.set_input_mode(crate::InputMode::Navigate);
+    app.router.workbench_mut().review_mut().backlog = true;
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.input(), "dismiss false_positive ");
+    assert_eq!(app.input_mode(), crate::InputMode::Prompt);
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    assert!(store.latest_review_decision(finding_id).unwrap().is_none());
 }
 
 fn backlog_v2_fixture_findings() -> Vec<Finding> {

@@ -121,6 +121,25 @@ impl EngagementState {
         self.phase_attempt_ledger.selected_for(phase, snapshot)
     }
 
+    /// Trusted selected history for this target that is not current workflow
+    /// truth. Authenticated content drift is included for disclosure; corrupt
+    /// or unverifiable history remains excluded.
+    pub(crate) fn stale_selected_phase_attempt(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
+        let snapshot = self.phase_target_snapshot.as_ref()?;
+        if self
+            .phase_attempt_ledger
+            .selected_for(phase, snapshot)
+            .is_some()
+        {
+            return None;
+        }
+        self.phase_attempt_ledger
+            .latest_selected_history_for_target(phase, snapshot)
+    }
+
     pub(crate) fn selected_attempt_completed_after(
         &self,
         earlier: WorkflowPhase,
@@ -171,22 +190,37 @@ impl EngagementState {
     }
 
     pub(crate) fn proof_is_deferred_for(&self, finding: &kuzushi_core::Finding) -> bool {
+        self.proof_deferral_for(finding).is_some()
+    }
+
+    pub(crate) fn proof_deferral_for(
+        &self,
+        finding: &kuzushi_core::Finding,
+    ) -> Option<&kuzushi_core::workflow_attempts::ProofDeferralRecorded> {
         let Some(snapshot) = self.phase_target_snapshot.as_ref() else {
-            return false;
+            return None;
         };
         let Some(scan_id) = finding
             .scan_id
             .as_deref()
             .filter(|scan_id| !scan_id.trim().is_empty())
         else {
-            return false;
+            return None;
         };
-        self.phase_attempt_ledger.proof_is_deferred_for(
+        self.phase_attempt_ledger.proof_deferral_for(
             snapshot,
             &finding.fingerprint,
             finding.identity_id.as_deref(),
             scan_id,
         )
+    }
+
+    pub(crate) fn latest_proof_deferral(
+        &self,
+    ) -> Option<&kuzushi_core::workflow_attempts::ProofDeferralRecorded> {
+        let snapshot = self.phase_target_snapshot.as_ref()?;
+        self.phase_attempt_ledger
+            .latest_proof_deferral_for(snapshot)
     }
 
     pub(crate) fn arm_attempt_lineage(

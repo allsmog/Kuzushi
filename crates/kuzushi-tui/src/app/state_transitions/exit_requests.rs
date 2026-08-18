@@ -217,6 +217,10 @@ impl ShellApp {
 
     pub(super) fn reduce_quit_chord(&mut self) -> InputUpdate {
         if !self.has_running_work() {
+            if crate::ui_view_models::has_volatile_session_state(self) {
+                self.set_shell_view(ShellView::QuitConfirm);
+                return InputUpdate::handled();
+            }
             return InputUpdate::handled_with_effects(vec![ShellEffect::RequestShellQuit]);
         }
         if self.abort_request_pending() {

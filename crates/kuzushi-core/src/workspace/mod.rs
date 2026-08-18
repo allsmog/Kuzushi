@@ -67,7 +67,8 @@ pub use git_history_mining::{
     GitHistoryMiningConfig, VulnCommit,
 };
 pub use git_metadata::{
-    resolve_target_git_commit, switch_target_revision, target_git_metadata, TargetRevisionSwitch,
+    resolve_target_git_commit, switch_target_revision, target_git_metadata,
+    target_revision_relationship, RevisionRelationship, TargetRevisionSwitch,
 };
 pub(crate) use infrastructure::git_tracked_relative_paths;
 pub use inventory::*;

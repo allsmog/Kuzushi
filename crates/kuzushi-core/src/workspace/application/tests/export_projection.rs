@@ -128,9 +128,22 @@ fn export_record_labels_automated_reasoning_without_calling_it_observed_evidence
     let records = workspace_finding_export_records_with_reviews(&[finding], &[]);
 
     assert!(!records[0].evidence.observed_evidence_present);
-    assert!(records[0].evidence.derived_source_present);
+    assert!(!records[0].evidence.derived_source_present);
+    assert_eq!(records[0].evidence.state, "message_only");
     assert!(records[0].analysis.automated_reasoning_present);
     assert!(!records[0].analysis.human_review_present);
+}
+
+#[test]
+fn constructor_identity_metadata_does_not_claim_source_grounding() {
+    let finding = basic_finding(Severity::High);
+    assert!(finding.source_signature.is_some());
+
+    let record = workspace_finding_export_records_with_reviews(&[finding], &[]).remove(0);
+
+    assert_eq!(record.evidence.state, "message_only");
+    assert!(!record.evidence.derived_source_present);
+    assert_eq!(record.evidence.observed_count, 0);
 }
 
 #[test]

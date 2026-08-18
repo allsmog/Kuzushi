@@ -6,6 +6,7 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
         .is_some()
         .then(common_target_keys)
         .unwrap_or_default();
+    append_checkpoint_revision_key(app, &mut keys);
     append_project_document_key(app, &mut keys);
     append_view_hydration_keys(app, app.shell_view(), &mut keys);
     if let Some(origin) = app
@@ -18,6 +19,27 @@ pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey
     keys.sort();
     keys.dedup();
     keys
+}
+
+fn append_checkpoint_revision_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+    let Some(journey) = crate::ui_view_models::journey_model(app) else {
+        return;
+    };
+    let Some(drift) = journey.checkpoint_drift else {
+        return;
+    };
+    if drift.accepted_revision == drift.current_revision {
+        return;
+    }
+    let (Some(accepted_revision), Some(current_revision)) =
+        (drift.accepted_revision, drift.current_revision)
+    else {
+        return;
+    };
+    keys.push(ViewHydrationKey::RevisionRelationship {
+        accepted_revision,
+        current_revision,
+    });
 }
 
 fn append_view_hydration_keys(app: &ShellApp, view: ShellView, keys: &mut Vec<ViewHydrationKey>) {

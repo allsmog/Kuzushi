@@ -335,8 +335,8 @@ fn learn_shows_the_model_knowledge_gap_indicator_once_it_ranks_a_band() {
     let mut harness = armed_banded_harness(ReviewYieldMode::Learn);
     assert_eq!(
         queue_indicator(&harness.app),
-        None,
-        "an armed mode that has not scored anything ranks nothing"
+        Some("order: proof band, then severity"),
+        "an unscored queue must announce its baseline order"
     );
 
     publish_learn_scores(&mut harness.app, &MIXED_ENTROPY);
@@ -358,11 +358,14 @@ fn a_fully_frozen_queue_shows_no_indicator() {
     publish_score_row(&mut harness.app, vec![None, None, None, None, None]);
 
     assert_eq!(display_aliases(&harness.app), baseline);
-    assert_eq!(queue_indicator(&harness.app), None);
+    assert_eq!(
+        queue_indicator(&harness.app),
+        Some("order: proof band, then severity")
+    );
 }
 
-/// No other mode may borrow the chip — including `within-band`, which orders
-/// the queue by a different key and would be misdescribed by this one.
+/// No other mode may borrow the Learn label; each still announces the
+/// baseline order that is actually visible.
 #[test]
 fn no_other_mode_shows_the_learn_indicator() {
     for mode in [
@@ -374,7 +377,11 @@ fn no_other_mode_shows_the_learn_indicator() {
         let mut harness = armed_banded_harness(mode);
         publish_learn_scores(&mut harness.app, &MIXED_ENTROPY);
 
-        assert_eq!(queue_indicator(&harness.app), None, "{mode:?}");
+        assert_eq!(
+            queue_indicator(&harness.app),
+            Some("order: proof band, then severity"),
+            "{mode:?}"
+        );
     }
 }
 

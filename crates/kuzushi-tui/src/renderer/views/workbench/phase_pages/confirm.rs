@@ -268,11 +268,41 @@ fn render_next_action_menu(
     state: PhaseRenderState,
 ) {
     let width = area.width.saturating_sub(2) as usize;
+    let lines = next_action_menu_lines(finding, width);
+    render_lines_pane(
+        frame,
+        area,
+        "CHOOSE NEXT ACTION",
+        lines,
+        PhaseSurfaceId::ProveNextAction,
+        state,
+    );
+}
+
+fn next_action_menu_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
     let reference = finding
         .alias
         .clone()
         .unwrap_or_else(|| finding.identity_label.clone());
-    let rows: [(&str, &str, String); 4] = [
+    let mut lines = next_action_specs(&reference)
+        .into_iter()
+        .map(|(key, action, consequence)| {
+            Line::from(vec![
+                Span::styled(format!(" {key}  "), theme::accent()),
+                Span::styled(format!("{action:<22}"), theme::primary()),
+                Span::styled(fit(&consequence, width.saturating_sub(27)), theme::muted()),
+            ])
+        })
+        .collect::<Vec<_>>();
+    lines.push(Line::styled(
+        fit("D defer proof · Esc return to findings", width),
+        theme::muted(),
+    ));
+    lines
+}
+
+fn next_action_specs(reference: &str) -> [(&'static str, &'static str, String); 4] {
+    [
         (
             "v",
             "Run investigation",
@@ -290,30 +320,10 @@ fn render_next_action_menu(
         ),
         (
             "x",
-            "Mark false positive",
-            "draft suppress — records a durable review decision with a reason".to_string(),
+            "Add suppression rule",
+            "draft an expiring rule with an auditable reason".to_string(),
         ),
-    ];
-    let mut lines = Vec::new();
-    for (key, action, consequence) in rows {
-        lines.push(Line::from(vec![
-            Span::styled(format!(" {key}  "), theme::accent()),
-            Span::styled(format!("{action:<22}"), theme::primary()),
-            Span::styled(fit(&consequence, width.saturating_sub(27)), theme::muted()),
-        ]));
-    }
-    lines.push(Line::styled(
-        fit("D defer proof · Esc return to findings", width),
-        theme::muted(),
-    ));
-    render_lines_pane(
-        frame,
-        area,
-        "CHOOSE NEXT ACTION",
-        lines,
-        PhaseSurfaceId::ProveNextAction,
-        state,
-    );
+    ]
 }
 
 fn render_unzoomed(
@@ -446,10 +456,23 @@ fn compact_next_line(finding: &FindingDetailModel, width: usize) -> Line<'static
 
 fn compact_confidence(label: &str) -> &str {
     match label {
-        "RUNTIME VERIFIED" | "CONFIRMED" => "RTV",
-        "LIKELY" => "LIK",
-        "DISMISSED" => "DIS",
-        _ => "UNV",
+        "RUNTIME VERIFIED" | "CONFIRMED" => "runtime",
+        "LIKELY" => "static",
+        "DISMISSED" => "dismissed",
+        _ => "signal",
+    }
+}
+
+#[cfg(test)]
+mod compact_confidence_tests {
+    use super::compact_confidence;
+
+    #[test]
+    fn compact_proof_bands_use_plain_words() {
+        assert_eq!(compact_confidence("RUNTIME VERIFIED"), "runtime");
+        assert_eq!(compact_confidence("LIKELY"), "static");
+        assert_eq!(compact_confidence("unverified"), "signal");
+        assert_eq!(compact_confidence("DISMISSED"), "dismissed");
     }
 }
 
@@ -526,7 +549,10 @@ fn render_empty(
 fn empty_selection_lines(model: &ProvePhaseModel) -> Vec<Line<'static>> {
     empty_state_panel(
         "no finding selected",
-        &[model.empty_hint.unwrap_or("select a finding in Review")],
+        &[model
+            .empty_hint
+            .as_deref()
+            .unwrap_or("select a finding in Review")],
         &[("2", "open Review and choose a finding")],
     )
 }

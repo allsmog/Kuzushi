@@ -674,7 +674,7 @@ mod tests {
     }
 
     #[test]
-    fn planning_picker_review_key_opens_selected_agentic_prompt() {
+    fn planning_picker_plain_p_starts_a_command_instead_of_opening_a_prompt_editor() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
         app.open_phase_picker(WorkflowPhase::Scan);
@@ -696,11 +696,12 @@ mod tests {
         let update = app.reduce_key(key(KeyCode::Char('p')));
         EffectRuntime::execute(&mut app, update.effects);
 
-        assert_eq!(app.shell_view(), ShellView::PromptsEditor);
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
         assert_eq!(
-            app.router.prompts().document().unwrap().origin,
-            ShellView::PlanningPicker
+            app.engagement.planning_picker().focus(),
+            PickerFocus::Prompt
         );
+        assert_eq!(app.input(), "p");
     }
 
     #[test]

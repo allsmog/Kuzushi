@@ -244,12 +244,12 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         rendered.contains("Review"),
         "phase rail shows Review: {rendered}"
     );
-    assert!(rendered.contains("‹h"), "rail advertises h: {rendered}");
+    assert!(rendered.contains("‹←"), "rail advertises left: {rendered}");
     assert!(
         rendered.contains("1 Map"),
         "rail numbers phases: {rendered}"
     );
-    assert!(rendered.contains("l›"), "rail advertises l: {rendered}");
+    assert!(rendered.contains("→›"), "rail advertises right: {rendered}");
     assert!(
         rendered.contains("TASKS FOCUS"),
         "focused task pane is explicit: {rendered}"
@@ -270,8 +270,8 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         !rendered.contains("↑/↓/j/k"),
         "planner body should not duplicate footer keybinds: {rendered}"
     );
-    assert!(rendered.contains("command prompt paused"), "{rendered}");
-    assert!(rendered.contains(": to type a command"), "{rendered}");
+    assert!(rendered.contains("type a command"), "{rendered}");
+    assert!(rendered.contains("↑/↓ moves the picker"), "{rendered}");
     assert!(!rendered.contains("kuzushi>"), "{rendered}");
 }
 
@@ -714,7 +714,7 @@ fn planning_picker_pins_operator_attention_to_the_top() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let buffer = terminal.backend().buffer();
     let header_row = banner_row(buffer, "MAP").expect("phase header row");
-    let prompt_row = banner_row(buffer, "command prompt paused").expect("prompt row");
+    let prompt_row = banner_row(buffer, "type a command").expect("prompt row");
 
     assert!(
         header_row <= 1,
@@ -777,7 +777,7 @@ fn planning_picker_prompt_focus_renders_live_prompt() {
 
     assert!(rendered.contains("kuzushi>"), "{rendered}");
     assert!(rendered.contains("help"), "{rendered}");
-    assert!(!rendered.contains("command prompt paused"), "{rendered}");
+    assert!(!rendered.contains("↑/↓ moves the picker"), "{rendered}");
 }
 
 #[test]
@@ -4736,7 +4736,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
         "manual-path escape hatch"
     );
     assert!(
-        rendered.contains("type `:demo`"),
+        rendered.contains("type `demo`"),
         "targetless/no-key escape hatch must advertise a live binding \
          (the `d` hotkey was retired)"
     );
@@ -4879,13 +4879,13 @@ fn compact_model_picker_keeps_the_selected_model_visible() {
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(std::path::PathBuf::from("/work/acme")));
     app.open_model_picker();
-    app.router.model_picker_mut().open(4, 5);
+    app.router.model_picker_mut().open(5, 6);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("models 5-5 of 6"), "{rendered}");
-    assert!(rendered.contains("▸ Claude Sonnet"), "{rendered}");
+    assert!(rendered.contains("models 6-6 of 6"), "{rendered}");
+    assert!(rendered.contains("▸ Claude Opus"), "{rendered}");
     assert!(!rendered.contains("d demo"), "{rendered}");
     assert!(rendered.contains("Enter select"), "{rendered}");
 }
@@ -6486,7 +6486,7 @@ fn run_focus_keeps_run_ownership_without_duplicate_phase_chrome() {
 }
 
 #[test]
-fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
+fn tall_run_focus_pins_quiet_tool_disclosure_in_the_authoritative_header() {
     let (_target, mut app) = phase_native_workbench_fixture(WorkbenchPage::Map);
     let now = std::time::Instant::now();
     let mut session = ActivitySession::for_phase("stale-context", kuzushi_core::WorkflowPhase::Map);
@@ -6515,8 +6515,8 @@ fn tall_run_focus_pins_stale_progress_warning_in_the_authoritative_header() {
 
     let warning_row = rows
         .iter()
-        .position(|row| row.contains("NO PROGRESS SIGNAL"))
-        .expect("pinned stale-progress warning");
+        .position(|row| row.contains("TOOL QUIET"))
+        .expect("pinned quiet-tool disclosure");
     assert!(
         warning_row < 6,
         "warning should remain in the header: {rendered}"

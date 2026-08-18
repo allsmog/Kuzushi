@@ -18,6 +18,8 @@ pub(crate) use schema_markdown::*;
 pub(crate) use source_bundle::*;
 pub(crate) use staged::*;
 pub use verify::{stamp_verification, verification_warning, verify_threat_model_document};
+#[cfg(test)]
+pub(crate) use verify::bind_test_provenance;
 
 mod build_threat_model;
 mod build_summary;

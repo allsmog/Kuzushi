@@ -78,7 +78,7 @@ fn push_signals_section(
     push_detail_kv(lines, "severity", &detail.severity_label, budget);
     push_wrapped(
         lines,
-        &format!("confidence: {}", detail.proof_confidence_label),
+        &format!("proof band: {}", detail.proof_confidence_label),
         budget,
         "  ",
         theme::proof_confidence_tone(detail.proof_confidence),
@@ -270,15 +270,47 @@ fn push_decision_section(
 
 fn push_review_action_lines(lines: &mut Vec<Line<'static>>, budget: usize) {
     for action in [
-        "decide: `decision <true-positive|false-positive> <reason>`",
-        "dismiss: `dismiss <reason> <note>`",
-        "suppress: `suppress <id> --reason <text> --days 90`",
+        "triage: `decision <confirmed|deferred|needs_review> <reason>`",
+        "false positive: `dismiss false_positive <note>`",
+        "suppression rule: `suppress <id> --reason <text> --days 90`",
     ] {
         push_wrapped(lines, action, budget, "  ", theme::muted());
     }
 }
 
 fn push_decision_summary_lines(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    budget: usize,
+) {
+    if let Some(current) = detail.decision_history_rows.first() {
+        push_recorded_decision(lines, "current decision", current, budget);
+        push_prior_decisions(lines, detail, budget);
+    } else {
+        push_unrecorded_decision_summary(lines, detail, budget);
+    }
+    push_wrapped(
+        lines,
+        &format!("decision source: {}", detail.decision_source),
+        budget,
+        "  ",
+        theme::muted(),
+    );
+    if let Some(conflict) = detail.decision_conflict.as_deref() {
+        push_wrapped(
+            lines,
+            &format!(
+                "decision conflict: {}",
+                crate::ui_view_models::review_conflicts::review_conflict_detail_label(conflict)
+            ),
+            budget,
+            "  ",
+            theme::warn(),
+        );
+    }
+}
+
+fn push_unrecorded_decision_summary(
     lines: &mut Vec<Line<'static>>,
     detail: &FindingDetailModel,
     budget: usize,
@@ -292,25 +324,50 @@ fn push_decision_summary_lines(
     );
     push_wrapped(
         lines,
-        &format!("decision source: {}", detail.decision_source),
-        budget,
-        "  ",
-        theme::muted(),
-    );
-    push_wrapped(
-        lines,
         &format!("decision history: {}", detail.decision_history),
         budget,
         "  ",
         theme::muted(),
     );
-    if let Some(conflict) = detail.decision_conflict.as_deref() {
+}
+
+fn push_recorded_decision(
+    lines: &mut Vec<Line<'static>>,
+    label: &str,
+    row: &crate::ui_view_models::DecisionHistoryRow,
+    budget: usize,
+) {
+    push_wrapped(
+        lines,
+        &format!(
+            "{label}: {} · {} · {}",
+            row.verdict, row.author, row.created_at
+        ),
+        budget,
+        "  ",
+        theme::label(),
+    );
+    push_wrapped(lines, &row.rationale, budget, "    ", theme::muted());
+}
+
+fn push_prior_decisions(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    budget: usize,
+) {
+    for row in detail.decision_history_rows.iter().skip(1) {
+        push_recorded_decision(lines, "prior decision", row, budget);
+    }
+    if detail.decision_history_overflow > 0 {
         push_wrapped(
             lines,
-            &format!("decision conflict: {conflict}"),
+            &format!(
+                "+{} older decision(s) not shown",
+                detail.decision_history_overflow
+            ),
             budget,
             "  ",
-            theme::warn(),
+            theme::muted(),
         );
     }
 }
@@ -323,11 +380,14 @@ fn push_triage_decision_lines(
     let Some(triage) = &detail.triage else {
         return;
     };
+    let score_context = matches!(triage.author.as_str(), "auto" | "agent" | "model")
+        .then_some(" (author-reported; not proof)")
+        .unwrap_or_default();
     push_wrapped(
         lines,
         &format!(
-            "review decision: {} · confidence {} · by {} · source {}",
-            triage.review_decision, triage.confidence, triage.author, triage.source
+            "review decision: {} · decision score {}{} · by {} · source {}",
+            triage.review_decision, triage.confidence, score_context, triage.author, triage.source
         ),
         budget,
         "  ",
@@ -847,10 +907,10 @@ mod tests {
         let text = detail_text(None);
 
         assert!(
-            text.contains("decision <true-positive|false-positive> <reason>"),
+            text.contains("decision <confirmed|deferred|needs_review> <reason>"),
             "{text}"
         );
-        assert!(text.contains("dismiss <reason> <note>"), "{text}");
+        assert!(text.contains("dismiss false_positive <note>"), "{text}");
         assert!(
             text.contains("suppress <id> --reason <text> --days 90"),
             "{text}"
@@ -989,10 +1049,12 @@ mod tests {
 
         assert!(
             text.contains(
-                "review decision: confirmed · confidence 0.91 · by human · source selected finding"
+                "review decision: confirmed · decision score 0.91 · by human · source selected finding"
             ),
             "{text}"
         );
+        assert!(text.contains("proof band:"), "{text}");
+        assert!(!text.contains("confidence:"), "{text}");
         assert!(text.contains("current decision: confirmed"), "{text}");
         assert!(
             text.contains("decision history: latest loaded decision from selected finding"),
@@ -1022,6 +1084,10 @@ mod tests {
             text.contains(
                 "automated/model-generated review reasoning: model inferred source and sink are linked"
             ),
+            "{text}"
+        );
+        assert!(
+            text.contains("decision score 0.72 (author-reported; not proof)"),
             "{text}"
         );
     }

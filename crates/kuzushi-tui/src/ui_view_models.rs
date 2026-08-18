@@ -67,7 +67,7 @@ mod recent_module_activity;
 mod recommendation;
 mod report_preview;
 mod retry_card;
-mod review_conflicts;
+pub(crate) mod review_conflicts;
 mod review_queue;
 mod review_state;
 mod review_yield;
@@ -172,9 +172,9 @@ pub(crate) use findings::{
     selected_finding_detail_model, selected_finding_out_of_window_notice,
     visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
     visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
-    FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
-    FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel, TriageSummaryModel,
-    SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
+    DecisionHistoryRow, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
+    FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel,
+    TriageSummaryModel, SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
@@ -194,8 +194,8 @@ pub(crate) use jobs_registry::{
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
     finding_is_review_actionable, finding_ledger_counts, journey_footer_segment, journey_model,
-    journey_phase_segment, JourneyDestination, JourneyModel, JourneyPhaseAccess, JourneyPhaseState,
-    JourneyPhaseStatus, JourneyPhaseTone, ReportReason,
+    journey_phase_segment, CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess,
+    JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -266,7 +266,7 @@ pub(crate) use prompt_tuning::{
 pub(crate) use pwn::{
     pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
 };
-pub(crate) use quit_confirm::{quit_confirm_model, QuitConfirmModel};
+pub(crate) use quit_confirm::{has_volatile_session_state, quit_confirm_model, QuitConfirmModel};
 pub(crate) use rail::{rail_sections, RailSection};
 pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,

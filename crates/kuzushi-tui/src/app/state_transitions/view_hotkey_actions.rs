@@ -8,6 +8,20 @@ enum FocusedWorkbenchVisualization {
     ProofReplay,
 }
 
+fn human_review_decision(
+    verdict: kuzushi_core::findings::ReviewDecisionVerdict,
+    rationale: &str,
+) -> kuzushi_core::findings::ReviewDecision {
+    kuzushi_core::findings::ReviewDecision {
+        verdict,
+        author: kuzushi_core::findings::TriageAuthor::Human,
+        confidence: 1.0,
+        rationale: rationale.to_string(),
+        dismiss_reason: None,
+        actor: Some("operator".to_string()),
+    }
+}
+
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> InputUpdate {
         let Some(binding) = self
@@ -308,13 +322,10 @@ impl ShellApp {
     }
 
     fn open_review_queue_finding(&mut self) -> Vec<ShellEffect> {
-        if crate::ui_view_models::visible_finding_at_cursor(self).is_some() {
-            self.set_workbench_page(WorkbenchPage::Prove);
+        if crate::ui_view_models::visible_finding_at_cursor(self).is_none() {
+            return self.open_workbench_finding_or_log();
         }
-        // Open after the page transition so finding detail remains focused;
-        // otherwise `set_workbench_page` resets focus to the Confirm
-        // composition's primary Evidence surface.
-        self.open_workbench_finding_or_log()
+        self.open_finding_at_cursor_on_page(WorkbenchPage::Prove)
     }
 
     /// Enter on an artifact action opens the Map planner with the relevant
@@ -712,7 +723,7 @@ impl ShellApp {
             self.log(
                 "review",
                 format!(
-                    "backlog preset ON — untriaged only, severity-first; c confirm · f reject-FP · d defer · w needs-review · B off ({decided} decided this session)"
+                    "backlog preset ON · untriaged only, severity-first; c confirm · f draft false-positive · d defer · w needs-review · B off ({decided} decided this session)"
                 ),
             );
         } else {
@@ -729,6 +740,19 @@ impl ShellApp {
     /// apply unchanged.
     fn apply_backlog_one_key_decision(&mut self, verdict: &'static str) -> InputUpdate {
         if !self.router.workbench().review().backlog {
+            return InputUpdate::handled();
+        }
+        if verdict == "rejected_false_positive" {
+            self.router
+                .workbench_mut()
+                .review_mut()
+                .backlog_confirm_bulk = false;
+            self.set_input("dismiss false_positive ");
+            self.set_input_mode(InputMode::Prompt);
+            self.log(
+                "review",
+                "false-positive dismissal drafted · add the reason and submit",
+            );
             return InputUpdate::handled();
         }
         self.remember_backlog_batch_for_cursored_finding();
@@ -815,42 +839,10 @@ impl ShellApp {
             self.log("review", "backlog defer-all — nothing visible to defer");
             return InputUpdate::handled();
         }
-        if !self.router.workbench().review().backlog_confirm_bulk {
-            self.router
-                .workbench_mut()
-                .review_mut()
-                .backlog_confirm_bulk = true;
-            self.log(
-                "review",
-                format!(
-                    "backlog defer-all — press X again to defer {} visible finding(s), any other action cancels",
-                    batch.len()
-                ),
-            );
+        if self.arm_backlog_bulk_defer(batch.len()) {
             return InputUpdate::handled();
         }
-        self.router
-            .workbench_mut()
-            .review_mut()
-            .backlog_confirm_bulk = false;
-        let mut effects = Vec::new();
-        let mut undo_batch = Vec::new();
-        for (alias, finding) in batch {
-            undo_batch.push(crate::app::view_state::BacklogUndoEntry {
-                finding: finding.clone(),
-                alias: alias.clone(),
-                prior_verdict: self.latest_verdict_str(&finding),
-            });
-            let decision = kuzushi_core::findings::ReviewDecision {
-                verdict: kuzushi_core::findings::ReviewDecisionVerdict::Deferred,
-                author: kuzushi_core::findings::TriageAuthor::Human,
-                confidence: 1.0,
-                rationale: "backlog bulk defer by operator".to_string(),
-                dismiss_reason: None,
-                actor: None,
-            };
-            effects.push(self.current_finding_decision_effect(alias, finding, decision));
-        }
+        let (effects, undo_batch) = self.defer_backlog_batch(batch);
         let count = undo_batch.len();
         self.router.workbench_mut().review_mut().backlog_last_batch = undo_batch;
         self.log(
@@ -861,6 +853,47 @@ impl ShellApp {
             handled: true,
             effects,
         }
+    }
+
+    fn arm_backlog_bulk_defer(&mut self, count: usize) -> bool {
+        let review = self.router.workbench_mut().review_mut();
+        if review.backlog_confirm_bulk {
+            review.backlog_confirm_bulk = false;
+            return false;
+        }
+        review.backlog_confirm_bulk = true;
+        self.log(
+            "review",
+            format!(
+                "backlog defer-all · press X again to defer {count} visible finding(s), any other action cancels"
+            ),
+        );
+        true
+    }
+
+    fn defer_backlog_batch(
+        &self,
+        batch: Vec<(Option<String>, Finding)>,
+    ) -> (
+        Vec<ShellEffect>,
+        Vec<crate::app::view_state::BacklogUndoEntry>,
+    ) {
+        batch
+            .into_iter()
+            .map(|(alias, finding)| {
+                let undo = crate::app::view_state::BacklogUndoEntry {
+                    finding: finding.clone(),
+                    alias: alias.clone(),
+                    prior_verdict: self.latest_verdict_str(&finding),
+                };
+                let decision = human_review_decision(
+                    kuzushi_core::findings::ReviewDecisionVerdict::Deferred,
+                    "backlog bulk defer by operator",
+                );
+                let effect = self.current_finding_decision_effect(alias, finding, decision);
+                (effect, undo)
+            })
+            .unzip()
     }
 
     /// Single-level undo: append the inverse review record per finding in
@@ -881,28 +914,8 @@ impl ShellApp {
             self.log("review", "backlog undo — no decision batch to reverse");
             return InputUpdate::handled();
         }
-        let mut effects = Vec::new();
-        let mut restored = 0usize;
-        for entry in batch {
-            let Some(verdict) = self.parse_review_decision_verdict_or_log(&entry.prior_verdict)
-            else {
-                continue;
-            };
-            let decision = kuzushi_core::findings::ReviewDecision {
-                verdict,
-                author: kuzushi_core::findings::TriageAuthor::Human,
-                confidence: 1.0,
-                rationale: "backlog undo — restore prior latest decision".to_string(),
-                dismiss_reason: None,
-                actor: None,
-            };
-            effects.push(self.current_finding_decision_effect(
-                entry.alias,
-                entry.finding,
-                decision,
-            ));
-            restored += 1;
-        }
+        let effects = self.backlog_undo_effects(batch);
+        let restored = effects.len();
         self.log(
             "review",
             format!("backlog undo — {restored} inverse record(s) appended"),
@@ -911,6 +924,21 @@ impl ShellApp {
             handled: true,
             effects,
         }
+    }
+
+    fn backlog_undo_effects(
+        &mut self,
+        batch: Vec<crate::app::view_state::BacklogUndoEntry>,
+    ) -> Vec<ShellEffect> {
+        batch
+            .into_iter()
+            .filter_map(|entry| {
+                let verdict = self.parse_review_decision_verdict_or_log(&entry.prior_verdict)?;
+                let decision =
+                    human_review_decision(verdict, "backlog undo · restore prior latest decision");
+                Some(self.current_finding_decision_effect(entry.alias, entry.finding, decision))
+            })
+            .collect()
     }
 
     /// The findings currently visible under the backlog projection
@@ -1406,6 +1434,67 @@ mod invariant_hunt_focus_tests {
             "{focus}"
         );
         assert!(focus.contains("Hunt the whole repository"), "{focus}");
+    }
+}
+
+#[cfg(test)]
+mod review_to_prove_identity_tests {
+    use super::*;
+    use kuzushi_core::{Finding, Severity, TriageOutcome, TriageVerdict};
+
+    fn actionable(line: u32, title: &str) -> Finding {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            format!("fixture/{line}"),
+            "src/app.rs",
+            line,
+            None,
+            Severity::High,
+            title,
+        );
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 1.0,
+            rationale: "test review".to_string(),
+            ..TriageOutcome::default()
+        });
+        finding
+    }
+
+    #[test]
+    fn review_open_captures_identity_before_switching_to_prove() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "prove-attempt",
+            "verify:finding",
+            serde_json::json!({"ok": true, "status": "completed", "data": {}}),
+        );
+        crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Prove,
+            "prove-attempt",
+            kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Completed,
+        );
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+        app.set_findings(vec![actionable(7, "first"), actionable(19, "second")]);
+        app.set_workbench_page(WorkbenchPage::Review);
+        app.router.findings_mut().set_cursor(1);
+        let expected = crate::ui_view_models::visible_finding_at_cursor(&app)
+            .expect("review row")
+            .1
+            .fingerprint;
+
+        app.open_review_queue_finding();
+
+        assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Prove));
+        assert_eq!(
+            app.selected_finding()
+                .as_ref()
+                .map(|finding| &finding.fingerprint),
+            Some(&expected)
+        );
     }
 }
 

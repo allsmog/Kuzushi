@@ -88,25 +88,48 @@ fn parse_routed_command(trimmed: &str) -> ShellCommand {
 /// The five workflow names are zero-argument shortcuts for their exact phase
 /// planners. `review` with arguments remains the human-decision command, while
 /// `scan` with a target receives a dedicated migration error downstream.
-const DIRECT_PHASE_COMMANDS: [(&str, WorkflowPhase); 5] = [
+const DIRECT_PHASE_COMMANDS: [(&str, WorkflowPhase); 10] = [
     ("map", WorkflowPhase::Map),
+    ("ma", WorkflowPhase::Map),
     ("scan", WorkflowPhase::Scan),
+    ("sc", WorkflowPhase::Scan),
     ("review", WorkflowPhase::Review),
+    ("rv", WorkflowPhase::Review),
     ("prove", WorkflowPhase::Prove),
+    ("pr", WorkflowPhase::Prove),
     ("fix", WorkflowPhase::Fix),
+    ("fx", WorkflowPhase::Fix),
 ];
 
 fn parse_direct_phase_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {
     let phase = DIRECT_PHASE_COMMANDS
         .iter()
         .find_map(|(command, phase)| (*command == verb).then_some(*phase))?;
+    if let Some(command) = parse_scan_since_command(verb, args) {
+        return Some(command);
+    }
     if args.is_empty() {
         return Some(ShellCommand::Phase(phase));
     }
-    if verb == "review" {
+    if matches!(verb, "review" | "rv") {
         return None;
     }
     Some(ShellCommand::Unknown(original.to_string()))
+}
+
+fn parse_scan_since_command(verb: &str, args: &[&str]) -> Option<ShellCommand> {
+    if verb != "scan" {
+        return None;
+    }
+    let (reference, include_worktree) = match args {
+        ["since", reference] => (*reference, false),
+        ["since", reference, "--include-worktree"] => (*reference, true),
+        _ => return None,
+    };
+    Some(ShellCommand::ScanSince {
+        reference: reference.to_string(),
+        include_worktree,
+    })
 }
 
 fn parse_full_command(verb: &str, args: &[&str], original: &str) -> Option<ShellCommand> {

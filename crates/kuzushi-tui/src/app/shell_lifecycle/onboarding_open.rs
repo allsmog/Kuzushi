@@ -658,7 +658,7 @@ fn fresh_phase_preselection(
 }
 
 fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
-    kuzushi_core::list_run_summaries(target).is_ok_and(|runs| !runs.is_empty())
+    kuzushi_core::run_summary_history_exists(target).unwrap_or(true)
 }
 
 fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {

@@ -112,3 +112,93 @@ fn uri_scheme_detection_ignores_relative_invalid_and_windows_paths() {
     assert!(!has_uri_scheme(":missing"));
     assert!(!has_uri_scheme("bad_scheme:value"));
 }
+
+fn sarif_record(rule_id: &str, severity: &str, fingerprint: &str) -> WorkspaceFindingExportRecord {
+    WorkspaceFindingExportRecord {
+        rule_id: rule_id.to_string(),
+        severity: severity.to_string(),
+        fingerprint: fingerprint.to_string(),
+        title: format!("{rule_id} title"),
+        message: format!("{rule_id} result"),
+        triage_state: "needs_review".to_string(),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn security_rules_carry_stable_help_tags_and_distinct_security_severity() {
+    let critical = sarif_record("demo.critical", "critical", "fp-critical");
+    let high = sarif_record("demo.high", "high", "fp-high");
+    let unknown = sarif_record("demo.unknown", "unknown", "fp-unknown");
+    let rules = sarif_rules(&[&critical, &high, &unknown]);
+
+    let rule = |id: &str| rules.iter().find(|rule| rule["id"] == id).unwrap();
+    assert_eq!(
+        rule("demo.critical")["properties"]["security-severity"],
+        "9.1"
+    );
+    assert_eq!(
+        rule("demo.high")["properties"]["security-severity"],
+        "8.0"
+    );
+    assert!(rule("demo.unknown")["properties"]
+        .get("security-severity")
+        .is_none());
+    assert_eq!(
+        rule("demo.high")["properties"]["tags"],
+        json!(["security"])
+    );
+    assert_eq!(
+        rule("demo.high")["help"]["text"],
+        "Inspect the result message, proof band, evidence properties, and recommended change before remediation."
+    );
+}
+
+#[test]
+fn duplicate_rule_uses_maximum_severity_independent_of_input_order() {
+    let low = sarif_record("demo.shared", "low", "fp-low");
+    let mut critical = sarif_record("demo.shared", "critical", "fp-critical");
+    critical.cwe = Some("CWE-89".to_string());
+
+    let forward = sarif_rules(&[&low, &critical]);
+    let reverse = sarif_rules(&[&critical, &low]);
+
+    assert_eq!(forward, reverse);
+    assert_eq!(forward[0]["defaultConfiguration"]["level"], "error");
+    assert_eq!(forward[0]["properties"]["security-severity"], "9.1");
+    assert_eq!(
+        forward[0]["properties"]["tags"],
+        json!(["security", "CWE-89"])
+    );
+}
+
+#[test]
+fn finding_specific_guidance_stays_on_results_not_shared_rules() {
+    let mut record = sarif_record("demo.guidance", "high", "fp-guidance");
+    record.recommendation = Some("Use a parameterized query".to_string());
+    record.impact = Some("Private rows can be read".to_string());
+    record.exploit_scenario = Some("A crafted id reaches SQL".to_string());
+    record.category = Some("injection".to_string());
+    record.preconditions = vec!["attacker can call GET /orders".to_string()];
+
+    let rule = &sarif_rules(&[&record])[0];
+    let result = sarif_result(&record);
+
+    assert!(!rule["help"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("parameterized query"));
+    assert_eq!(
+        result["properties"]["kuzushiRecommendation"],
+        "Use a parameterized query"
+    );
+    assert_eq!(result["properties"]["kuzushiImpact"], "Private rows can be read");
+    assert_eq!(result["properties"]["kuzushiCategory"], "injection");
+    assert_eq!(
+        result["properties"]["kuzushiPreconditions"],
+        json!(["attacker can call GET /orders"])
+    );
+
+    let sparse = sarif_result(&sarif_record("demo.sparse", "low", "fp-sparse"));
+    assert!(sparse["properties"].get("kuzushiRecommendation").is_none());
+}

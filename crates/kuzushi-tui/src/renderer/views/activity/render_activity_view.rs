@@ -179,7 +179,6 @@ fn activity_header_lines(
     }
     let style = match health.tone {
         ActivityHeartbeatTone::Live => theme::success(),
-        ActivityHeartbeatTone::Stalled => theme::warn().add_modifier(Modifier::BOLD),
         ActivityHeartbeatTone::Complete => theme::muted(),
         ActivityHeartbeatTone::Warning => theme::warn(),
         ActivityHeartbeatTone::Failed => theme::danger().add_modifier(Modifier::BOLD),

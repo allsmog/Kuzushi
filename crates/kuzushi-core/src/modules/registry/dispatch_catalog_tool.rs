@@ -71,8 +71,6 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "pack:suggest-shards" => Some(crate::capabilities::shard_suggest::execute_suggest_shards(
             input, ctx,
         )),
-        "report:build" => Some(build_report_tool(input, ctx)),
-        "report:sarif" => Some(execute_report_sarif_tool(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => dispatch_finding_ledger_tool(name, input, ctx),
     }
@@ -386,15 +384,6 @@ fn findings_provenance_target(
     ctx.workspace
         .map(|workspace| workspace.root().to_path_buf())
         .context("findings:list provenance filters require an active workspace or target")
-}
-
-pub(in crate::modules) fn build_report_tool(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<Value> {
-    let target = resolve_tool_target(input, ctx)?;
-    let run_id = string_input_any(input, &["runId", "run_id"]);
-    Ok(crate::report::build_run_report(&target, run_id.as_deref())?.to_tool_json())
 }
 
 pub(in crate::modules) fn dispatch_native_security_tool(

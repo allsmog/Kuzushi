@@ -223,14 +223,16 @@ mod verify_import_tests {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
-
-        let result =
-            import_threat_model_adapter(
-                json!({"document": hand_written_document(workspace.root())}),
-                &ctx,
-            )
-                .unwrap();
-        assert_eq!(result["data"]["verification"]["verdict"], json!("verified"));
+        let result = import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap();
+        assert_eq!(
+            result["data"]["verification"]["verdict"],
+            json!("verified"),
+            "{result:#}"
+        );
 
         let live = load_persistent_threat_model(workspace.root()).unwrap();
         assert_eq!(
@@ -251,13 +253,11 @@ mod verify_import_tests {
         let mut edited = hand_written_document(workspace.root());
         edited["userEdited"] = json!(true);
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
-
-        let refused =
-            import_threat_model_adapter(
-                json!({"document": hand_written_document(workspace.root())}),
-                &ctx,
-            )
-            .unwrap_err();
+        let refused = import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap_err();
         assert!(refused.to_string().contains("force=true"), "{refused:#}");
 
         import_threat_model_adapter(

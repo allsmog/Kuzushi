@@ -50,7 +50,16 @@ fn report_sarif_tool() -> ToolDescriptor {
     )
 }
 
-pub(in crate::modules) fn execute_report_sarif_tool(
+pub(in crate::modules) fn build_report_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let target = resolve_tool_target(input, ctx)?;
+    let run_id = string_input_any(input, &["runId", "run_id"]);
+    Ok(crate::report::build_run_report(&target, run_id.as_deref())?.to_tool_json())
+}
+
+pub(in crate::modules) fn run_report_sarif_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
@@ -63,4 +72,24 @@ pub(in crate::modules) fn execute_report_sarif_tool(
     let findings = store.list_all_findings()?;
     let records = store.list_review_decisions_for_findings(&findings)?;
     crate::report::export_confirmed_sarif(workspace.root(), input, &findings, &records)
+}
+
+pub(in crate::modules) fn execute_report_build_tool(
+    _registry: &ModuleRegistry,
+    _name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    build_report_tool(input, ctx)
+}
+
+pub(in crate::modules) fn execute_report_sarif_tool(
+    _registry: &ModuleRegistry,
+    _name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    run_report_sarif_tool(input, ctx)
 }
