@@ -5,3 +5,20 @@
 # consult the git credential helper and the private clone fails.
 [net]
 git-fetch-with-cli = true
+
+# Kuzushi is a large Rust workspace, and Cargo's default dev/test profile emits
+# full debugger metadata for every crate. Keep line-numbered panic backtraces
+# for workspace code while omitting dependency debug data; this substantially
+# reduces target/ growth and link work during normal builds and tests.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+# Full debugger metadata remains an explicit opt-in:
+#   cargo build --profile debugging
+#   cargo test --profile debugging
+[profile.debugging]
+inherits = "dev"
+debug = true
