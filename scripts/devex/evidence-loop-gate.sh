@@ -3,9 +3,10 @@
 # redesign contract.
 #
 #   --fast   fmt check + workspace unit tests (kuzushi-core + kuzushi-tui)
-#   --full   clean rebuild (dedicated target dir wiped first) + everything in
-#            --fast + journeys J21 J22 J23 J24 with ZERO machine-check
-#            failures + gate report regeneration
+#   --full   clean workspace-crate rebuild + everything in --fast + journeys
+#            J21 J22 J23 J24 with ZERO machine-check failures + gate report
+#            regeneration. Reuses the checkout target by default; set
+#            KUZUSHI_EVIDENCE_LOOP_TARGET_DIR for an isolated build tree.
 #
 # Honesty policy — the gate never hides a failure, it discloses two known
 # ENVIRONMENT classes and fails on anything else:
@@ -29,7 +30,13 @@ REPO_ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$REPO_ROOT"
 # shellcheck source=scripts/devex/lib.sh
 . "$REPO_ROOT/scripts/devex/lib.sh"
-GATE_TARGET_DIR="$REPO_ROOT/target-dev"
+# Avoid retaining a second full dependency graph under target-dev. An isolated
+# tree remains available for gate/toolchain diagnosis when explicitly requested.
+GATE_TARGET_DIR="${KUZUSHI_EVIDENCE_LOOP_TARGET_DIR:-${CARGO_TARGET_DIR:-$REPO_ROOT/target}}"
+case "$GATE_TARGET_DIR" in
+  /*) ;;
+  *) GATE_TARGET_DIR="$REPO_ROOT/$GATE_TARGET_DIR" ;;
+esac
 GATE_ROOT=${EVIDENCE_LOOP_GATE_ROOT:-"$HOME/kz-evidence-loop/phaseC"}
 STAMP=$(date -u +%Y%m%d-%H%M%S)
 RUN_DIR="$GATE_ROOT/gate-$STAMP-${MODE#--}"
@@ -45,6 +52,7 @@ fail() { FAILED=1; say "GATE-FAIL: $*"; }
 say "evidence-loop gate $MODE · $(date -u +%FT%TZ)"
 say "worktree: $REPO_ROOT @ $(git rev-parse --short HEAD 2>/dev/null || echo unknown) (uncommitted work included by design)"
 say "targets: harness-owned fixtures only (no operator checkout used)"
+say "cargo target: $GATE_TARGET_DIR"
 
 # ---------------------------------------------------------------- fmt
 if ! cargo fmt --check >>"$LOG" 2>&1; then
@@ -63,8 +71,8 @@ if [ "${free_gb:-0}" -lt 10 ]; then
 fi
 if [ "$MODE" = "--full" ]; then
   # Clean rebuild policy: every WORKSPACE crate is rebuilt from scratch
-  # (cargo clean per member); third-party dependency artifacts stay cached.
-  # Disclosed here because the box lacks disk for a full target wipe.
+  # (cargo clean per member); third-party dependency artifacts stay cached and
+  # are shared with normal builds unless an isolated target was requested.
   say "FULL: clean rebuild of all workspace crates (dependency cache retained)"
   for member in $(cargo metadata --no-deps --format-version 1 2>/dev/null       | grep -o '"name":"[^"]*"' | cut -d'"' -f4 | sort -u); do
     cargo clean -p "$member" >>"$LOG" 2>&1 || true
