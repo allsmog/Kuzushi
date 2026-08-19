@@ -5,10 +5,14 @@ than the source tree. The growth is usually the sum of several independent
 Cargo build roots rather than one corrupt cache:
 
 - the checkout's normal `target/` tree;
-- the DevEx gate's legacy `target-dev/` tree;
+- a legacy `target-dev/` tree left by older DevEx gate runs;
 - cargo-llvm-cov's instrumented `target/llvm-cov-target/` tree;
 - one `target/` tree for each Git, Claude, or Codex worktree;
 - incremental and test executables accumulated under each of those roots.
+
+The evidence-loop gate now reuses the checkout's normal Cargo target by default.
+Set `KUZUSHI_EVIDENCE_LOOP_TARGET_DIR` only when an isolated gate build is
+needed for diagnosis.
 
 Cargo does not currently auto-prune workspace build artifacts. Also, the default
 Rust development profile emits full debugger metadata, and the test profile
