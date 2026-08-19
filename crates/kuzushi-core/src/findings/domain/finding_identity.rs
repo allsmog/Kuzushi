@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{extract_cwe, normalize_cwe, Finding};
+use super::Finding;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,18 +30,16 @@ pub(crate) struct FindingIdentityKey {
 }
 
 pub(crate) struct FindingIdentityInput<'a> {
-    pub fingerprint: &'a str,
+    pub tool: &'a str,
     pub rule_id: &'a str,
     pub file_path: &'a str,
-    pub start_line: u32,
 }
 
 pub(crate) fn finding_identity_key_for_finding(finding: &Finding) -> FindingIdentityKey {
     finding_identity_key_for_input(FindingIdentityInput {
-        fingerprint: &finding.fingerprint,
+        tool: &finding.tool,
         rule_id: &finding.rule_id,
         file_path: &finding.file_path,
-        start_line: finding.start_line,
     })
 }
 
@@ -62,57 +60,24 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
     format!("fi_{}", hash.as_str())
 }
 
-/// Durable identity is intentionally independent of producer-supplied prose
-/// and evidence. Evidence is verified at the persistence boundary, but
-/// identity assignment happens before the projected row is written; allowing
-/// snippets into this key would let a fabricated citation influence history
-/// even when persistence later downgraded it. File, rule family, and source
-/// locus are available without trusting that content.
+/// Durable identity is intentionally independent of producer-supplied prose,
+/// evidence, and display locations. Evidence is verified at the persistence
+/// boundary, while line numbers are mutable presentation metadata; neither can
+/// safely decide review/proof continuity.
+///
+/// The legacy `Finding` shape does not carry the richer symbol/AST/blob-span
+/// context used by native v3 observations, so use the same documented generic
+/// fallback as `stable_fingerprint_for_tool`: tool family, rule id, and
+/// normalized file path. Existing exact-fingerprint/dedup identities are
+/// considered before this fallback, so stored identities are not rewritten.
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
-    let weakness = weakness_key(input);
-    let symbol = crate::identity::finding_identity::normalize_path(input.file_path);
-    let locator = structural_locator(input);
-    crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
-        tool_family: tool_family_from_fingerprint(input.fingerprint),
-        rule_id: &weakness,
-        language: None,
-        parser_version: None,
-        normalizer_version: None,
-        symbol_path_or_rename_group: Some(&symbol),
-        ast_locus_hash: None,
-        normalized_snippet: &locator,
-        local_context_hash: None,
-        disambiguator: None,
-    })
-}
-
-fn structural_locator(input: &FindingIdentityInput<'_>) -> String {
-    if input.start_line == 0 {
-        "file".to_string()
-    } else {
-        format!("line:{}", input.start_line)
-    }
-}
-
-/// Weakness identity may use a structured CWE embedded in the rule id, but it
-/// must not infer one from a title or message whose wording can change between
-/// model or human rediscoveries.
-fn weakness_key(input: &FindingIdentityInput<'_>) -> String {
-    extract_cwe(input.rule_id, "", "")
-        .map(|cwe| format!("cwe:{}", normalize_cwe(&cwe)))
-        .unwrap_or_else(|| format!("rule:{}", normalize_token(input.rule_id)))
-}
-
-fn tool_family_from_fingerprint(fingerprint: &str) -> &str {
-    if fingerprint.starts_with("fp3_") {
-        "kuzushi-v3"
-    } else {
-        "imported"
-    }
-}
-
-fn normalize_token(value: &str) -> String {
-    crate::identity::finding_identity::normalize_token(value)
+    crate::identity::stable_fingerprint_for_tool(
+        input.tool,
+        input.rule_id,
+        input.file_path,
+        "",
+        "",
+    )
 }
 
 pub fn finding_identity_alias(identity_id: &str) -> String {
@@ -138,6 +103,7 @@ mod tests {
             file_path: "src/db.rs".to_string(),
             start_line: line,
             message: message.to_string(),
+            tool: "semgrep".to_string(),
             ..Finding::default()
         }
     }
@@ -191,11 +157,11 @@ mod tests {
     }
 
     #[test]
-    fn structural_source_lines_keep_nearby_findings_distinct() {
-        let first = finding("first query sink", 10);
-        let second = finding("second query sink", 11);
+    fn mutable_source_lines_do_not_change_durable_identity() {
+        let first = finding("query sink", 10);
+        let second = finding("query sink", 500);
 
-        assert_ne!(
+        assert_eq!(
             finding_identity_key_for_finding(&first).key,
             finding_identity_key_for_finding(&second).key
         );
@@ -214,7 +180,19 @@ mod tests {
     }
 
     #[test]
-    fn prose_only_cwe_mentions_do_not_change_weakness_identity() {
+    fn tool_family_remains_part_of_identity() {
+        let first = finding("query sink", 10);
+        let mut second = first.clone();
+        second.tool = "systems-hunt".to_string();
+
+        assert_ne!(
+            finding_identity_key_for_finding(&first).key,
+            finding_identity_key_for_finding(&second).key
+        );
+    }
+
+    #[test]
+    fn prose_only_cwe_mentions_do_not_change_identity() {
         let mut first = finding("query sink CWE-89", 10);
         first.rule_id = "db.query-sink".to_string();
         let mut second = first.clone();
