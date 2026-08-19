@@ -567,6 +567,12 @@ artifacts, or bus handlers. A watchdog expiry or operator cancellation sends
 `notifications/cancelled`, records the cancellation, drops stale results, and
 kills the worker process group.
 
+Finding identity remains host-owned at this boundary. A KWP
+`findings.create` payload must omit `fingerprint`, `dedupKey`, and
+`sourceSignature`; the broker rejects those canonical-identity overrides.
+Workers may send `actorFingerprint` when they need to retain a producer-side
+observation id as non-authoritative provenance.
+
 Approve a local module before loading it:
 
 ```sh

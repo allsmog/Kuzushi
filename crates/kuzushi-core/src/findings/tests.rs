@@ -1604,6 +1604,84 @@ mod tests {
     }
 
     #[test]
+    fn cross_run_dedup_key_reuse_is_target_scoped() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-target-a", Path::new("/tmp/repo-a"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-target-b", Path::new("/tmp/repo-b"), "running")
+            .unwrap();
+        let first = Finding::new_tool(
+            "semgrep",
+            "path-traversal-cwe-22",
+            "src/files.rs",
+            20,
+            Some(20),
+            Severity::High,
+            "request path escapes the root",
+        );
+        let second = Finding::new_tool(
+            "agentic-sast",
+            "download-escape-cwe-22",
+            "src/files.rs",
+            22,
+            Some(22),
+            Severity::High,
+            "download path escapes the root",
+        );
+        assert_eq!(first.dedup_key, second.dedup_key);
+        assert_ne!(first.fingerprint, second.fingerprint);
+
+        store.insert_finding("run-target-a", &first).unwrap();
+        store.insert_finding("run-target-b", &second).unwrap();
+        let target_a = store.list_findings_for_scan_id("run-target-a").unwrap();
+        let target_b = store.list_findings_for_scan_id("run-target-b").unwrap();
+
+        assert_ne!(target_a[0].identity_id, target_b[0].identity_id);
+        assert_eq!(target_b[0].identity_match_tier.as_deref(), Some("stable_fp"));
+    }
+
+    #[test]
+    fn spoofed_exact_fingerprint_cannot_cross_structural_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let target = Path::new("/tmp/repo");
+        store
+            .record_run_started("run-victim", target, "running")
+            .unwrap();
+        store
+            .record_run_started("run-spoof", target, "running")
+            .unwrap();
+        let victim = Finding::new_tool(
+            "semgrep",
+            "sql-injection-cwe-89",
+            "src/db.rs",
+            10,
+            Some(10),
+            Severity::High,
+            "tainted input reaches a SQL query",
+        );
+        let mut spoof = Finding::new_tool(
+            "dynamic-module",
+            "command-injection-cwe-78",
+            "src/db.rs",
+            80,
+            Some(80),
+            Severity::High,
+            "tainted input reaches a shell command",
+        );
+        spoof.fingerprint = victim.fingerprint.clone();
+        spoof.dedup_key = None;
+
+        store.insert_finding("run-victim", &victim).unwrap();
+        store.insert_finding("run-spoof", &spoof).unwrap();
+        let victim_row = store.list_findings_for_scan_id("run-victim").unwrap();
+        let spoof_row = store.list_findings_for_scan_id("run-spoof").unwrap();
+
+        assert_ne!(victim_row[0].identity_id, spoof_row[0].identity_id);
+    }
+
+    #[test]
     fn v3_identity_carries_same_snippet_across_line_shifts() {
         let store = FindingStore::open_in_memory().unwrap();
         store

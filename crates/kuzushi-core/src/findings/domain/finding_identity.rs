@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 
-use super::Finding;
+use super::{extract_cwe, normalize_cwe, Finding};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -30,16 +31,29 @@ pub(crate) struct FindingIdentityKey {
 }
 
 pub(crate) struct FindingIdentityInput<'a> {
-    pub tool: &'a str,
     pub rule_id: &'a str,
     pub file_path: &'a str,
+    pub source_locator: Option<&'a str>,
 }
 
+#[cfg(test)]
 pub(crate) fn finding_identity_key_for_finding(finding: &Finding) -> FindingIdentityKey {
     finding_identity_key_for_input(FindingIdentityInput {
-        tool: &finding.tool,
         rule_id: &finding.rule_id,
         file_path: &finding.file_path,
+        source_locator: None,
+    })
+}
+
+pub(crate) fn finding_identity_key_for_finding_at_target(
+    finding: &Finding,
+    target_root: &Path,
+) -> FindingIdentityKey {
+    let source_locator = host_source_locator(target_root, finding);
+    finding_identity_key_for_input(FindingIdentityInput {
+        rule_id: &finding.rule_id,
+        file_path: &finding.file_path,
+        source_locator: source_locator.as_deref(),
     })
 }
 
@@ -65,19 +79,53 @@ pub fn compute_finding_identity_id(target_id: &str, identity_key: &str) -> Strin
 /// boundary, while line numbers are mutable presentation metadata; neither can
 /// safely decide review/proof continuity.
 ///
-/// The legacy `Finding` shape does not carry the richer symbol/AST/blob-span
-/// context used by native v3 observations, so use the same documented generic
-/// fallback as `stable_fingerprint_for_tool`: tool family, rule id, and
-/// normalized file path. Existing exact-fingerprint/dedup identities are
-/// considered before this fallback, so stored identities are not rewritten.
+/// When the cited target source is available, the host reads the cited line and
+/// uses its normalized content as a line-number-independent structural locus.
+/// That keeps two sinks of the same weakness in one file distinct while
+/// surviving insertions above either sink. If source is unavailable, the
+/// honest fallback is the structured weakness and normalized file path.
+/// Existing exact-fingerprint/dedup identities are considered before this
+/// fallback, so stored identities are not rewritten.
 fn stable_identity_key(input: &FindingIdentityInput<'_>) -> String {
-    crate::identity::stable_fingerprint_for_tool(
-        input.tool,
-        input.rule_id,
-        input.file_path,
-        "",
-        "",
-    )
+    let weakness = weakness_key(input.rule_id);
+    let file_path = crate::identity::finding_identity::normalize_path(input.file_path);
+    crate::identity::compute_stable_fp_v3(crate::identity::StableFindingInput {
+        tool_family: "kuzushi",
+        rule_id: &weakness,
+        language: None,
+        parser_version: None,
+        normalizer_version: None,
+        symbol_path_or_rename_group: Some(&file_path),
+        ast_locus_hash: None,
+        normalized_snippet: input.source_locator.unwrap_or("file"),
+        local_context_hash: None,
+        disambiguator: None,
+    })
+}
+
+fn weakness_key(rule_id: &str) -> String {
+    extract_cwe(rule_id, "", "")
+        .map(|cwe| format!("cwe:{}", normalize_cwe(&cwe)))
+        .unwrap_or_else(|| {
+            format!(
+                "rule:{}",
+                crate::identity::finding_identity::normalize_token(rule_id)
+            )
+        })
+}
+
+fn host_source_locator(target_root: &Path, finding: &Finding) -> Option<String> {
+    if finding.start_line == 0 {
+        return None;
+    }
+    let path = super::safe_target_path(target_root, &finding.file_path)?;
+    let source = crate::bounded_file::read_utf8_text_within(target_root, &path, 8 * 1024 * 1024)
+        .ok()?;
+    source
+        .lines()
+        .nth(finding.start_line.saturating_sub(1) as usize)
+        .map(crate::identity::finding_identity::normalize_finding_text)
+        .filter(|line| !line.is_empty())
 }
 
 pub fn finding_identity_alias(identity_id: &str) -> String {
@@ -180,14 +228,54 @@ mod tests {
     }
 
     #[test]
-    fn tool_family_remains_part_of_identity() {
+    fn tool_family_does_not_split_cross_tool_corroboration() {
         let first = finding("query sink", 10);
         let mut second = first.clone();
         second.tool = "systems-hunt".to_string();
 
-        assert_ne!(
+        assert_eq!(
             finding_identity_key_for_finding(&first).key,
             finding_identity_key_for_finding(&second).key
+        );
+    }
+
+    #[test]
+    fn host_source_content_distinguishes_same_rule_findings() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/db.rs"),
+            "query(first_input);\nquery(second_input);\n",
+        )
+        .unwrap();
+        let first = finding("query sink", 1);
+        let second = finding("query sink", 2);
+
+        assert_ne!(
+            finding_identity_key_for_finding_at_target(&first, temp.path()).key,
+            finding_identity_key_for_finding_at_target(&second, temp.path()).key
+        );
+    }
+
+    #[test]
+    fn host_source_content_survives_line_drift() {
+        let first_target = tempfile::tempdir().unwrap();
+        let second_target = tempfile::tempdir().unwrap();
+        for target in [&first_target, &second_target] {
+            std::fs::create_dir_all(target.path().join("src")).unwrap();
+        }
+        std::fs::write(first_target.path().join("src/db.rs"), "query(input);\n").unwrap();
+        std::fs::write(
+            second_target.path().join("src/db.rs"),
+            "use crate::db;\nquery(input);\n",
+        )
+        .unwrap();
+        let first = finding("query sink", 1);
+        let second = finding("query sink", 2);
+
+        assert_eq!(
+            finding_identity_key_for_finding_at_target(&first, first_target.path()).key,
+            finding_identity_key_for_finding_at_target(&second, second_target.path()).key
         );
     }
 

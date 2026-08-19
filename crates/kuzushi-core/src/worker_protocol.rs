@@ -6598,6 +6598,7 @@ fn worker_finding_from_value(
 ) -> Result<crate::findings::Finding, KwpError> {
     let input: WorkerFindingInput =
         serde_json::from_value(value).map_err(|error| KwpError::BadRequest(error.to_string()))?;
+    reject_worker_identity_overrides(&input)?;
     let file_path = required_text(input.file_path.clone(), "finding.filePath")?;
     let start_line = input.start_line.unwrap_or(1);
     let message = input
@@ -6630,17 +6631,26 @@ fn apply_worker_finding_overrides(
     if let Some(value) = nonempty_text(input.title) {
         finding.title = value;
     }
-    if let Some(value) = nonempty_text(input.fingerprint) {
-        finding.fingerprint = value;
-    }
     finding.actor_fingerprint = input.actor_fingerprint;
     finding.static_proof_state = input.static_proof_state;
     finding.remediation = input.remediation;
     finding.references = input.references;
     finding.evidence = input.evidence;
-    finding.dedup_key = input.dedup_key.or(finding.dedup_key.take());
-    finding.source_signature = input.source_signature.or(finding.source_signature.take());
     finding.vuln_source = input.vuln_source.or_else(|| finding.vuln_source.take());
+}
+
+fn reject_worker_identity_overrides(input: &WorkerFindingInput) -> Result<(), KwpError> {
+    let forbidden = [
+        ("fingerprint", input.fingerprint.as_ref()),
+        ("dedupKey", input.dedup_key.as_ref()),
+        ("sourceSignature", input.source_signature.as_ref()),
+    ];
+    if let Some((field, _)) = forbidden.into_iter().find(|(_, value)| value.is_some()) {
+        return Err(KwpError::BadRequest(format!(
+            "finding.{field} is host-owned; use actorFingerprint for producer identity"
+        )));
+    }
+    Ok(())
 }
 
 fn required_text(value: Option<String>, field: &str) -> Result<String, KwpError> {
@@ -6721,6 +6731,51 @@ mod tests {
     use super::*;
     use ed25519_dalek::Signer as _;
     use serde_json::json;
+
+    #[test]
+    fn worker_findings_reject_canonical_identity_overrides() {
+        for field in ["fingerprint", "dedupKey", "sourceSignature"] {
+            let mut value = json!({
+                "ruleId": "demo.rule",
+                "filePath": "src/app.rs",
+                "message": "worker finding"
+            });
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert(field.to_string(), json!("producer-controlled"));
+
+            let error = worker_finding_from_value(value, "dynamic-module").unwrap_err();
+
+            assert_eq!(
+                error,
+                KwpError::BadRequest(format!(
+                    "finding.{field} is host-owned; use actorFingerprint for producer identity"
+                ))
+            );
+        }
+    }
+
+    #[test]
+    fn worker_actor_fingerprint_is_provenance_not_canonical_identity() {
+        let finding = worker_finding_from_value(
+            json!({
+                "ruleId": "demo.rule",
+                "filePath": "src/app.rs",
+                "message": "worker finding",
+                "actorFingerprint": "producer-observation-7"
+            }),
+            "dynamic-module",
+        )
+        .unwrap();
+
+        assert_eq!(
+            finding.actor_fingerprint.as_deref(),
+            Some("producer-observation-7")
+        );
+        assert!(finding.fingerprint.starts_with("fp3_"));
+        assert_ne!(finding.fingerprint, "producer-observation-7");
+    }
 
     struct AllowSignatures;
 

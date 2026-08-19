@@ -5,6 +5,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Security:**
+
+- Durable finding identity now rejects canonical fingerprint, deduplication,
+  and source-signature overrides from KWP workers, keeps actor fingerprints as
+  provenance only, and refuses exact-fingerprint reuse across different
+  tool/rule structures or repository targets. New identities use a
+  host-authenticated source-content locus when available, so line drift does
+  not split one defect, distinct same-rule sinks remain separate, and
+  cross-tool corroboration still converges.
+
 ## v0.24.0-alpha.13 · operator experience and descriptor boundaries
 
 **Additive:**

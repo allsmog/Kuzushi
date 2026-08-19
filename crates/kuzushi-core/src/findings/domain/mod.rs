@@ -25,7 +25,9 @@ pub(crate) use deterministic_scanners::{
     all_components_deterministic, is_deterministic_scanner, tool_components,
 };
 pub use extract_cwe::extract_cwe;
+#[cfg(test)]
 pub(crate) use finding_identity::finding_identity_key_for_finding;
+pub(crate) use finding_identity::finding_identity_key_for_finding_at_target;
 pub use finding_identity::{
     compute_finding_identity_id, finding_identity_alias, FindingIdentityMatchTier,
 };

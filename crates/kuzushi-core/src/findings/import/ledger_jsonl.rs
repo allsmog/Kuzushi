@@ -423,6 +423,15 @@ mod tests {
     #[test]
     fn same_title_rows_at_different_lines_stay_distinct_findings() {
         let (temp, workspace) = fixture_workspace();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        let mut source = vec![""; 717];
+        source[146] = "popen(first_command);";
+        source[716] = "popen(second_command);";
+        std::fs::write(
+            temp.path().join("src/informix.cpp"),
+            source.join("\n"),
+        )
+        .unwrap();
         let ledger = write_ledger(
             temp.path(),
             concat!(

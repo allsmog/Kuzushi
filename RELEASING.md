@@ -10,6 +10,10 @@ part of every release commit.
   source signature or automatic occurrence row remains provenance and no
   longer promotes a zero-evidence finding from `message_only` to
   `source_linked`.
+- KWP `findings.create` no longer accepts worker-supplied `fingerprint`,
+  `dedupKey`, or `sourceSignature` values. Those canonical identity fields are
+  host-owned; module authors should use `actorFingerprint` for a producer-side
+  observation id.
 
 ## Prerequisites
 

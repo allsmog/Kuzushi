@@ -30,7 +30,10 @@ impl FindingStore {
         if let Some(reused) = self.cross_run_identity(conn, scan_id, &context.target_id, finding)? {
             return Ok(reused);
         }
-        let identity_key = finding_identity_key_for_finding(finding);
+        let identity_key = finding_identity_key_for_finding_at_target(
+            finding,
+            std::path::Path::new(&context.target_id),
+        );
         let identity_id = compute_finding_identity_id(&context.target_id, &identity_key.key);
         let assignment = FindingIdentityAssignment {
             identity_id,
@@ -56,7 +59,7 @@ impl FindingStore {
         let identity_id =
             prior_run_fingerprint_rows(conn, scan_id, target_id, &finding.fingerprint)?
                 .into_iter()
-                .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
+                .find(|prior| reusable_exact_fingerprint_identity(prior, finding, &rekeyed))
                 .and_then(|prior| prior.identity_id);
         Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
             identity_id,
@@ -169,8 +172,22 @@ fn reusable_prior_identity(
     !rekeyed_old_fps.contains(stable_key) && !rekeyed_old_fps.contains(&prior.fingerprint)
 }
 
-fn normalized_identity_file(file_path: &str) -> &str {
-    file_path.trim().trim_start_matches("./")
+fn reusable_exact_fingerprint_identity(
+    prior: &Finding,
+    incoming: &Finding,
+    rekeyed_old_fps: &std::collections::HashSet<String>,
+) -> bool {
+    reusable_prior_identity(prior, incoming, rekeyed_old_fps)
+        && normalized_identity_token(&prior.tool) == normalized_identity_token(&incoming.tool)
+        && normalized_identity_token(&prior.rule_id) == normalized_identity_token(&incoming.rule_id)
+}
+
+fn normalized_identity_file(file_path: &str) -> String {
+    crate::identity::finding_identity::normalize_path(file_path)
+}
+
+fn normalized_identity_token(value: &str) -> String {
+    crate::identity::finding_identity::normalize_token(value)
 }
 
 fn rekeyed_old_fps(conn: &Connection) -> Result<std::collections::HashSet<String>> {
