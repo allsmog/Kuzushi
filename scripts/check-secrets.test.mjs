@@ -89,13 +89,17 @@ test("only exact approved fixture bytes bypass their intentional patterns", () =
     mkdirSync(path.dirname(fixture), { recursive: true });
     writeFileSync(fixture, contents);
     assert.equal(fixtureIsApproved(relative, directory), true);
-    assert.deepEqual(scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)), []);
+    assert.deepEqual(
+      scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)),
+      [],
+    );
 
     writeFileSync(fixture, `${contents}# changed\n`);
     assert.equal(fixtureIsApproved(relative, directory), false);
-    assert.deepEqual(scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)), [
-      { path: relative, line: 1, rule: "GitHub token" },
-    ]);
+    assert.deepEqual(
+      scanDiff(diff, (candidate) => fixtureIsApproved(candidate, directory)),
+      [{ path: relative, line: 1, rule: "GitHub token" }],
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

@@ -76,10 +76,15 @@ Body/footer rules: kept at defaults (blank line before body, footer for `Co-Auth
 
 ```json
 {
-  "*.{ts,tsx,js,jsx,json,jsonc}": ["biome check --write --no-errors-on-unmatched"],
+  "*.{ts,tsx,mts,cts,js,jsx,mjs,cjs,json,jsonc}": ["biome check --write --no-errors-on-unmatched"],
   "*.{md,yml,yaml}": ["biome format --write --no-errors-on-unmatched"]
 }
 ```
+
+The first glob must keep listing every extension the CI Biome gate (`pnpm check`)
+actually checks, or unformatted code reaches `main` and fails there instead of at
+commit time. `scripts/check-format-hook-coverage.mjs` enforces that in
+`pnpm quality:architecture`.
 
 **Graceful degradation:** Biome will be installed by DX-3. Until then, `biome` on the `PATH` will not exist — `lint-staged` will fail loudly. To handle the transition window, the pre-commit hook first checks for the presence of either `biome.json` or a `biome` executable and **skips** lint-staged entirely if neither is found. See `.husky/pre-commit`.
 

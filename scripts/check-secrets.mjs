@@ -67,8 +67,7 @@ const RULES = [
   },
   {
     name: "credential-bearing connection URL",
-    pattern:
-      /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:\s/]+:([^@\s/]{8,})@/gi,
+    pattern: /\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis):\/\/[^:\s/]+:([^@\s/]{8,})@/gi,
     candidate: (match) => match[1],
   },
 ];
@@ -138,7 +137,9 @@ export function fixtureIsApproved(path, cwd = process.cwd()) {
     return false;
   }
   try {
-    const actual = createHash("sha256").update(readFileSync(resolve(cwd, path))).digest("hex");
+    const actual = createHash("sha256")
+      .update(readFileSync(resolve(cwd, path)))
+      .digest("hex");
     return actual === expected;
   } catch {
     return false;
@@ -216,9 +217,7 @@ export function diffForRange(base, head, cwd = process.cwd()) {
 
 export function parseArguments(argv, environment = process.env) {
   let base =
-    environment.KUZUSHI_SECRET_SCAN_BASE_REF ??
-    environment.KUZUSHI_CRAP_RISK_BASE_REF ??
-    "HEAD^";
+    environment.KUZUSHI_SECRET_SCAN_BASE_REF ?? environment.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
   let head = environment.KUZUSHI_SECRET_SCAN_HEAD_REF ?? "HEAD";
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];

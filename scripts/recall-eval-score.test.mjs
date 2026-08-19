@@ -18,8 +18,7 @@ const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const sourceScript = path.join(repo, "experiments/recall-eval/scripts/score.sh");
 const hasShellDependencies =
   process.platform !== "win32" &&
-  spawnSync("bash", ["-lc", "command -v jq >/dev/null && command -v git >/dev/null"]).status ===
-    0;
+  spawnSync("bash", ["-lc", "command -v jq >/dev/null && command -v git >/dev/null"]).status === 0;
 
 const matchReport = (costUsd) => ({
   findings_total: 1,
@@ -31,43 +30,37 @@ const matchReport = (costUsd) => ({
   wall_seconds: 2,
 });
 
-test(
-  "recall-eval summaries preserve unknown cost instead of coercing it to zero",
-  { skip: !hasShellDependencies },
-  () => {
-    withScoreHarness(
-      [
-        ["unknown-slice", matchReport(null)],
-        ["measured-slice", matchReport(1.25)],
-      ],
-      ({ summary, history }) => {
-        assert.match(summary, /\| unknown-slice .* \| unknown \| 2 \|/);
-        assert.match(summary, /\| measured-slice .* \| 1\.25 \| 2 \|/);
-        assert.match(summary, /cost=unknown/);
-        assert.doesNotMatch(summary, /cost=\$1\.25/);
-        assert.match(history, /\| unknown \|/);
-      },
-    );
-  },
-);
+test("recall-eval summaries preserve unknown cost instead of coercing it to zero", {
+  skip: !hasShellDependencies,
+}, () => {
+  withScoreHarness(
+    [
+      ["unknown-slice", matchReport(null)],
+      ["measured-slice", matchReport(1.25)],
+    ],
+    ({ summary, history }) => {
+      assert.match(summary, /\| unknown-slice .* \| unknown \| 2 \|/);
+      assert.match(summary, /\| measured-slice .* \| 1\.25 \| 2 \|/);
+      assert.match(summary, /cost=unknown/);
+      assert.doesNotMatch(summary, /cost=\$1\.25/);
+      assert.match(history, /\| unknown \|/);
+    },
+  );
+});
 
-test(
-  "recall-eval summaries add only fully measured costs",
-  { skip: !hasShellDependencies },
-  () => {
-    withScoreHarness(
-      [
-        ["zero-slice", matchReport(0)],
-        ["paid-slice", matchReport(1.25)],
-      ],
-      ({ summary, history }) => {
-        assert.match(summary, /\| zero-slice .* \| 0 \| 2 \|/);
-        assert.match(summary, /cost=\$1\.25/);
-        assert.match(history, /\| \$1\.25 \|/);
-      },
-    );
-  },
-);
+test("recall-eval summaries add only fully measured costs", { skip: !hasShellDependencies }, () => {
+  withScoreHarness(
+    [
+      ["zero-slice", matchReport(0)],
+      ["paid-slice", matchReport(1.25)],
+    ],
+    ({ summary, history }) => {
+      assert.match(summary, /\| zero-slice .* \| 0 \| 2 \|/);
+      assert.match(summary, /cost=\$1\.25/);
+      assert.match(history, /\| \$1\.25 \|/);
+    },
+  );
+});
 
 function withScoreHarness(reports, assertion) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "kuzushi-recall-eval-score-"));
