@@ -17,17 +17,19 @@ impl FindingStore {
         scan_id: &str,
         finding: &Finding,
     ) -> Result<FindingIdentityAssignment> {
-        // Preserve already-issued identities before applying the structural
-        // key used for new findings. Exact producer fingerprints cover legacy
-        // rows without a dedup key; dedup reuse continues to converge
-        // differently-worded rediscoveries. Stored rows are never rewritten.
-        if let Some(reused) = self.exact_fingerprint_identity(conn, scan_id, finding)? {
-            return Ok(reused);
-        }
-        if let Some(reused) = self.cross_run_identity(conn, scan_id, finding)? {
-            return Ok(reused);
-        }
         let context = scan_identity_context(conn, scan_id)?;
+        // Preserve already-issued identities before applying the structural
+        // key used for new findings. Reuse is target-scoped: one FindingStore
+        // may contain runs for multiple repositories, and a producer
+        // fingerprint or dedup key is not globally unique across those targets.
+        if let Some(reused) =
+            self.exact_fingerprint_identity(conn, scan_id, &context.target_id, finding)?
+        {
+            return Ok(reused);
+        }
+        if let Some(reused) = self.cross_run_identity(conn, scan_id, &context.target_id, finding)? {
+            return Ok(reused);
+        }
         let identity_key = finding_identity_key_for_finding(finding);
         let identity_id = compute_finding_identity_id(&context.target_id, &identity_key.key);
         let assignment = FindingIdentityAssignment {
@@ -44,37 +46,41 @@ impl FindingStore {
         &self,
         conn: &Connection,
         scan_id: &str,
+        target_id: &str,
         finding: &Finding,
     ) -> Result<Option<FindingIdentityAssignment>> {
         if finding.fingerprint.trim().is_empty() {
             return Ok(None);
         }
         let rekeyed = rekeyed_old_fps(conn)?;
-        let identity_id = prior_run_fingerprint_rows(conn, scan_id, &finding.fingerprint)?
-            .into_iter()
-            .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
-            .and_then(|prior| prior.identity_id);
+        let identity_id =
+            prior_run_fingerprint_rows(conn, scan_id, target_id, &finding.fingerprint)?
+                .into_iter()
+                .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
+                .and_then(|prior| prior.identity_id);
         Ok(identity_id.map(|identity_id| FindingIdentityAssignment {
             identity_id,
             match_tier: FindingIdentityMatchTier::StableFingerprint,
         }))
     }
 
-    /// Same dedup_key + same file on an open row from an earlier run reuses
-    /// that row's identity, so repeated hunts converge on one durable
-    /// identity instead of minting a fresh `fi_` per differently-worded
-    /// rediscovery. Rows are never merged — only the identity is shared.
+    /// Same dedup_key + same file on an open row from an earlier run of the
+    /// same target reuses that row's identity, so repeated hunts converge on
+    /// one durable identity instead of minting a fresh `fi_` per
+    /// differently-worded rediscovery. Rows are never merged — only the
+    /// identity is shared.
     fn cross_run_identity(
         &self,
         conn: &Connection,
         scan_id: &str,
+        target_id: &str,
         finding: &Finding,
     ) -> Result<Option<FindingIdentityAssignment>> {
         let Some(dedup_key) = finding.dedup_key.as_deref() else {
             return Ok(None);
         };
         let rekeyed = rekeyed_old_fps(conn)?;
-        let identity_id = prior_run_rows(conn, scan_id, dedup_key)?
+        let identity_id = prior_run_rows(conn, scan_id, target_id, dedup_key)?
             .into_iter()
             .find(|prior| reusable_prior_identity(prior, finding, &rekeyed))
             .and_then(|prior| prior.identity_id);
@@ -88,37 +94,57 @@ impl FindingStore {
 fn prior_run_fingerprint_rows(
     conn: &Connection,
     scan_id: &str,
+    target_id: &str,
     fingerprint: &str,
 ) -> Result<Vec<Finding>> {
     let mut stmt = conn.prepare(
-        "select finding_json
-           from finding_current
-          where fingerprint = ?1
-            and run_id <> ?2
-          order by id asc
-          limit ?3",
+        "select fc.finding_json
+           from finding_current fc
+           join run_states rs on rs.run_id = fc.run_id
+          where fc.fingerprint = ?1
+            and fc.run_id <> ?2
+            and rs.target = ?3
+          order by fc.id asc
+          limit ?4",
     )?;
     let rows = stmt
         .query_map(
-            params![fingerprint, scan_id, CROSS_RUN_CANDIDATE_LIMIT as i64],
+            params![
+                fingerprint,
+                scan_id,
+                target_id,
+                CROSS_RUN_CANDIDATE_LIMIT as i64
+            ],
             super::finding_writes::row_to_current_finding,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 
-fn prior_run_rows(conn: &Connection, scan_id: &str, dedup_key: &str) -> Result<Vec<Finding>> {
+fn prior_run_rows(
+    conn: &Connection,
+    scan_id: &str,
+    target_id: &str,
+    dedup_key: &str,
+) -> Result<Vec<Finding>> {
     let mut stmt = conn.prepare(
-        "select finding_json
-           from finding_current
-          where dedup_key = ?1
-            and run_id <> ?2
-          order by id asc
-          limit ?3",
+        "select fc.finding_json
+           from finding_current fc
+           join run_states rs on rs.run_id = fc.run_id
+          where fc.dedup_key = ?1
+            and fc.run_id <> ?2
+            and rs.target = ?3
+          order by fc.id asc
+          limit ?4",
     )?;
     let rows = stmt
         .query_map(
-            params![dedup_key, scan_id, CROSS_RUN_CANDIDATE_LIMIT as i64],
+            params![
+                dedup_key,
+                scan_id,
+                target_id,
+                CROSS_RUN_CANDIDATE_LIMIT as i64
+            ],
             super::finding_writes::row_to_current_finding,
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
