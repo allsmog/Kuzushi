@@ -29,10 +29,17 @@ async function createFixture() {
 }
 
 function buildDisk(fixture, args = [], configuredEnvironment = {}) {
+  const result = buildDiskResult(fixture, args, configuredEnvironment);
+  assert.equal(result.status, 0, `build-disk failed:\n${result.stdout}${result.stderr}`);
+  return result.stdout;
+}
+
+function buildDiskResult(fixture, args = [], configuredEnvironment = {}) {
   const environment = { ...process.env };
   delete environment.CARGO_TARGET_DIR;
   delete environment.KUZUSHI_EVIDENCE_LOOP_TARGET_DIR;
-  return run("bash", [buildDiskScript, ...args], {
+  return spawnSync("bash", [buildDiskScript, ...args], {
+    encoding: "utf8",
     cwd: fixture.repo,
     env: { ...environment, HOME: fixture.home, ...configuredEnvironment },
   });
@@ -123,6 +130,25 @@ test("keeps configured targets on prune-all dry-run and removes them on apply", 
     buildDisk(fixture, ["--prune-all", "--apply"], environment);
     assert.equal(await exists(cargoTarget), false);
     assert.equal(await exists(evidenceTarget), false);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("refuses every prune mode for a configured unsafe root", async () => {
+  const fixture = await createFixture();
+  try {
+    const sentinel = path.join(fixture.home, "keep");
+    await writeFile(sentinel, "operator data");
+
+    for (const mode of ["--prune-aux", "--prune-incremental", "--prune-all"]) {
+      const result = buildDiskResult(fixture, [mode, "--apply"], {
+        CARGO_TARGET_DIR: fixture.home,
+      });
+      assert.equal(result.status, 2, mode);
+      assert.match(result.stderr, /refusing unsafe prune path/);
+    }
+    assert.equal(await exists(sentinel), true);
   } finally {
     await rm(fixture.root, { recursive: true, force: true });
   }

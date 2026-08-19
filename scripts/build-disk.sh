@@ -158,15 +158,20 @@ report_targets() {
   [ "$found_other" -eq 1 ] || printf '  none found\n'
 }
 
-queue_prune_path() {
-  path=$1
-  [ -e "$path" ] || return 0
+validate_prune_path() {
+  local path=$1
   case "$path" in
     ''|/|"$HOME"|"$repo_root")
       printf 'refusing unsafe prune path: %s\n' "$path" >&2
       exit 2
       ;;
   esac
+}
+
+queue_prune_path() {
+  local path=$1
+  [ -e "$path" ] || return 0
+  validate_prune_path "$path"
   printf '%s\n' "$path" >> "$prune_file"
 }
 
@@ -178,6 +183,7 @@ case "$mode" in
   prune-aux)
     while IFS= read -r target; do
       [ -n "$target" ] || continue
+      validate_prune_path "$target"
       if [ "$(basename "$target")" = target-dev ]; then
         queue_prune_path "$target"
         continue
@@ -190,12 +196,16 @@ case "$mode" in
   prune-incremental)
     while IFS= read -r target; do
       [ -n "$target" ] || continue
+      validate_prune_path "$target"
       find "$target" -type d -name incremental -prune -print 2>/dev/null \
         >> "$prune_file" || true
     done < "$targets_file"
     ;;
   prune-all)
-    cat "$targets_file" >> "$prune_file"
+    while IFS= read -r target; do
+      [ -n "$target" ] || continue
+      queue_prune_path "$target"
+    done < "$targets_file"
     ;;
 esac
 
