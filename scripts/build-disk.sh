@@ -74,6 +74,17 @@ collect_worktrees > "$worktrees_file"
 printf '%s\n' "$repo_root" >> "$worktrees_file"
 sort -u -o "$worktrees_file" "$worktrees_file"
 
+collect_configured_target() {
+  local configured_target=$1
+  [ -n "$configured_target" ] || return 0
+  case "$configured_target" in
+    /*) ;;
+    *) configured_target="$repo_root/$configured_target" ;;
+  esac
+  [ -d "$configured_target" ] || return 0
+  (cd "$configured_target" && pwd -P)
+}
+
 : > "$targets_file"
 while IFS= read -r worktree; do
   [ -n "$worktree" ] || continue
@@ -81,6 +92,8 @@ while IFS= read -r worktree; do
     [ -d "$candidate" ] && printf '%s\n' "$candidate" >> "$targets_file"
   done
 done < "$worktrees_file"
+collect_configured_target "${CARGO_TARGET_DIR:-}" >> "$targets_file"
+collect_configured_target "${KUZUSHI_EVIDENCE_LOOP_TARGET_DIR:-}" >> "$targets_file"
 sort -u -o "$targets_file" "$targets_file"
 
 size_kib() {
@@ -165,16 +178,13 @@ case "$mode" in
   prune-aux)
     while IFS= read -r target; do
       [ -n "$target" ] || continue
-      case "$(basename "$target")" in
-        target-dev)
-          queue_prune_path "$target"
-          ;;
-        target)
-          queue_prune_path "$target/llvm-cov-target"
-          queue_prune_path "$target/.ephemeral"
-          queue_prune_path "$target/mutation.old"
-          ;;
-      esac
+      if [ "$(basename "$target")" = target-dev ]; then
+        queue_prune_path "$target"
+        continue
+      fi
+      queue_prune_path "$target/llvm-cov-target"
+      queue_prune_path "$target/.ephemeral"
+      queue_prune_path "$target/mutation.old"
     done < "$targets_file"
     ;;
   prune-incremental)

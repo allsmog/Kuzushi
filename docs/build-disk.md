@@ -35,10 +35,12 @@ Run this from any Kuzushi worktree:
 bash scripts/build-disk.sh
 ```
 
-The report includes all worktrees registered with Git plus known local agent
-worktree directories. It shows each `target` or `target-dev` root, its largest
-top-level entries, and a separate read-only report for Cargo, rustup, native,
-and npm package caches.
+The report includes all worktrees registered with Git, known local agent
+worktree directories, `CARGO_TARGET_DIR`, and an explicitly configured
+`KUZUSHI_EVIDENCE_LOOP_TARGET_DIR`. Relative configured targets are resolved
+from the current worktree root. It shows each build root, its largest top-level
+entries, and a separate read-only report for Cargo, rustup, native, and npm
+package caches.
 
 ## Reclaim disk safely
 
