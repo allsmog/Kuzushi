@@ -338,8 +338,8 @@ async function main() {
 
 main().catch(async (error) => {
   const response = bridgeErrorResponse(error);
-  // Mirror the bounded redacted detail on stderr so `KUZUSHI_BRIDGE_VERBOSE` /
-  // `KUZUSHI_BRIDGE_LOG` capture it even when stdout parsing fails.
+  // Mirror bounded redacted detail on stderr so native diagnostics can capture
+  // it even when stdout parsing fails.
   if (response.detail) {
     process.stderr.write(`[bridge-error] ${response.errorClass}: ${response.detail}\n`);
   }

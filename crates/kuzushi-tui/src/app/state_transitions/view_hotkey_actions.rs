@@ -78,15 +78,11 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchTogglePaneZoom => self.toggle_workbench_pane_zoom(),
             ViewHotkeyAction::WorkbenchPageNext => {
                 let current = crate::ui_view_models::active_workbench_page(self);
-                let page =
-                    crate::ui_view_models::adjacent_available_workbench_page(self, current, false);
-                self.set_workbench_page(page)
+                self.set_workbench_page(current.next())
             }
             ViewHotkeyAction::WorkbenchPagePrev => {
                 let current = crate::ui_view_models::active_workbench_page(self);
-                let page =
-                    crate::ui_view_models::adjacent_available_workbench_page(self, current, true);
-                self.set_workbench_page(page)
+                self.set_workbench_page(current.prev())
             }
             ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
             ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
@@ -129,15 +125,6 @@ impl ShellApp {
     }
 
     pub(crate) fn set_workbench_page(&mut self, page: WorkbenchPage) {
-        if let Some(reason) =
-            crate::ui_view_models::workbench_page_access(self, page).locked_reason()
-        {
-            self.set_error_notice(
-                "workbench",
-                format!("{} is locked — {reason}", page.phase().title()),
-            );
-            return;
-        }
         let workbench = self.router.workbench_mut();
         workbench.set_page(Some(page));
         workbench.scroll_mut().set(page.primary_surface(), 0);
@@ -147,11 +134,7 @@ impl ShellApp {
 
     pub(super) fn cycle_workbench_page_mode(&mut self) {
         let current = crate::ui_view_models::active_workbench_page(self);
-        let page = crate::ui_view_models::adjacent_available_workbench_page(self, current, false);
-        if page == current {
-            return;
-        }
-        self.set_workbench_page(page);
+        self.set_workbench_page(current.next());
     }
 
     fn cycle_workbench_pane(&mut self, reverse: bool) {

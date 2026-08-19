@@ -2083,6 +2083,14 @@ export default {
         config.operator.mcp_mounts = vec![symcc_mount(&fake_mcp)];
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
 
+        assert_eq!(
+            registry
+                .resolve_tool("agentic-fuzz:hunt")
+                .expect("agentic fuzz descriptor")
+                .phase,
+            ToolPhase::Scan
+        );
+
         let output = registry
             .execute_tool(
                 "agentic-fuzz:hunt",
@@ -2121,6 +2129,40 @@ export default {
             "agentic-fuzz/runs/parser/stdout.txt",
         ] {
             assert_host_artifact_path(&output, path);
+        }
+    }
+
+    #[test]
+    fn dynamic_js_module_accepts_canonical_tool_phases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let module_path = tmp.path().join("canonical-phases.mjs");
+        fs::write(
+            &module_path,
+            r#"
+export default {
+  id: "dynphases", displayName: "Dynamic Phases", category: "internal",
+  tools: [
+    { name: "dynphases:scan", headless: true, phase: "scan", effect: "read", approval: "none", workspaceRequirement: "optional", options: [], run() {} },
+    { name: "dynphases:review", headless: true, phase: "review", effect: "read", approval: "none", workspaceRequirement: "optional", options: [], run() {} },
+    { name: "dynphases:prove", headless: true, phase: "prove", effect: "read", approval: "none", workspaceRequirement: "optional", options: [], run() {} }
+  ]
+};
+"#,
+        )
+        .unwrap();
+        let specifier = format!("file://{}", module_path.display());
+        let registry = approve_and_load_kwp_module(
+            &specifier,
+            Grant::default(),
+            &tmp.path().join("kuzushi.lock"),
+        );
+
+        for (name, phase) in [
+            ("dynphases:scan", ToolPhase::Scan),
+            ("dynphases:review", ToolPhase::Review),
+            ("dynphases:prove", ToolPhase::Prove),
+        ] {
+            assert_eq!(registry.resolve_tool(name).expect("dynamic tool").phase, phase);
         }
     }
 

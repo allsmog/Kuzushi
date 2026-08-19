@@ -26,7 +26,7 @@ const AUDITED_ENV_READ_FILES: &[&str] = &[
     "app/tool_runner/run_tool/background/preflight.rs", // PATH
     "app/onboarding/task_row.rs", // PATH + KUZUSHI_CODEQL_BIN CLI presence probe
     "ui_view_models/home_cockpit.rs", // HOME for ~ display
-    // Compatibility adapter reads (documented in CLAUDE.md).
+    // Compatibility adapter reads (documented in AGENTS.md).
     "app/shell_lifecycle/construction.rs", // ui.auto_open_viz compat value
     // Test / devex hooks.
     "app/devex_phase_fixture/mod.rs",      // DEVEX_PHASE_FIXTURE_ENV

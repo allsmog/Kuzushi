@@ -3,7 +3,7 @@
 use super::phase_cockpit::phase_cockpit_model_for_phase_with_journey;
 use super::{
     journey_model, journey_phase_segment, threat_model_doc, FindingDetailModel, JourneyModel,
-    JourneyPhaseAccess, JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, ReviewQueueMode,
+    JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, ReviewQueueMode,
 };
 use crate::app::{WorkbenchPage, WorkflowPhase};
 use crate::ShellApp;
@@ -18,74 +18,6 @@ pub(crate) enum WorkbenchState {
     Review,
     FindingDetail,
     Report,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum WorkbenchPageAccess {
-    Available,
-    Locked { reason: &'static str },
-}
-
-impl WorkbenchPageAccess {
-    pub(crate) fn is_available(self) -> bool {
-        matches!(self, Self::Available)
-    }
-
-    pub(crate) fn locked_reason(self) -> Option<&'static str> {
-        match self {
-            Self::Available => None,
-            Self::Locked { reason } => Some(reason),
-        }
-    }
-}
-
-pub(crate) fn workbench_page_access(app: &ShellApp, page: WorkbenchPage) -> WorkbenchPageAccess {
-    if app
-        .engagement
-        .unresolved_phase_attempt(page.phase())
-        .is_some()
-    {
-        return WorkbenchPageAccess::Available;
-    }
-    let Some(journey) = journey_model(app) else {
-        return locked("select a target first");
-    };
-    journey
-        .phases
-        .iter()
-        .find(|status| status.phase == page.phase())
-        .map(|status| workbench_access(status.access))
-        .unwrap_or_else(|| locked("phase state is unavailable"))
-}
-
-pub(crate) fn adjacent_available_workbench_page(
-    app: &ShellApp,
-    current: WorkbenchPage,
-    reverse: bool,
-) -> WorkbenchPage {
-    let mut candidate = current;
-    for _ in 0..WorkbenchPage::ALL.len() {
-        candidate = if reverse {
-            candidate.prev()
-        } else {
-            candidate.next()
-        };
-        if workbench_page_access(app, candidate).is_available() {
-            return candidate;
-        }
-    }
-    current
-}
-
-fn workbench_access(access: JourneyPhaseAccess) -> WorkbenchPageAccess {
-    match access {
-        JourneyPhaseAccess::Available => WorkbenchPageAccess::Available,
-        JourneyPhaseAccess::Locked { reason } => locked(reason),
-    }
-}
-
-fn locked(reason: &'static str) -> WorkbenchPageAccess {
-    WorkbenchPageAccess::Locked { reason }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,28 +649,22 @@ mod tests {
     }
 
     #[test]
-    fn fresh_target_locks_empty_future_pages() {
+    fn future_pages_remain_browsable_without_advancing_reality() {
         let target = tempfile::tempdir().expect("target");
         let mut app = app();
         app.set_target(Some(target.path().to_path_buf()));
 
-        assert!(workbench_page_access(&app, WorkbenchPage::Map).is_available());
-        assert_eq!(
-            workbench_page_access(&app, WorkbenchPage::Scan).locked_reason(),
-            Some("complete or skip Map first")
-        );
-        assert_eq!(
-            workbench_page_access(&app, WorkbenchPage::Review).locked_reason(),
-            Some("no vulnerabilities to review; complete Scan or import findings")
-        );
+        app.set_workbench_page(WorkbenchPage::Review);
+        assert_eq!(active_workbench_page(&app), WorkbenchPage::Review);
         let journey = journey_model(&app).expect("journey");
+        assert_eq!(journey.current, WorkflowPhase::Map);
         assert_eq!(journey.phases[0].navigation_symbol(), "●");
         assert_eq!(journey.phases[1].navigation_symbol(), "×");
         assert_eq!(journey.phases[2].navigation_symbol(), "×");
     }
 
     #[test]
-    fn durable_findings_unlock_review_without_advancing_reality() {
+    fn durable_findings_populate_review_without_advancing_reality() {
         let target = tempfile::tempdir().expect("target");
         let mut app = app();
         app.set_target(Some(target.path().to_path_buf()));
@@ -752,14 +678,11 @@ mod tests {
             "prior observation",
         )]);
 
-        assert!(workbench_page_access(&app, WorkbenchPage::Review).is_available());
+        app.set_workbench_page(WorkbenchPage::Review);
+        assert_eq!(active_workbench_page(&app), WorkbenchPage::Review);
         let journey = journey_model(&app).unwrap();
         assert_eq!(journey.current, WorkflowPhase::Map);
         assert_eq!(journey.phases[2].navigation_symbol(), "○");
-        assert_eq!(
-            adjacent_available_workbench_page(&app, WorkbenchPage::Map, false),
-            WorkbenchPage::Review
-        );
     }
 
     #[test]

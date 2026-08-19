@@ -50,6 +50,8 @@ pub(crate) struct PhaseCockpitModel {
 pub(crate) struct PhaseResultCardModel {
     pub(crate) attempt_id: String,
     pub(crate) outcome: String,
+    pub(crate) emphasis: crate::PhaseResultEmphasis,
+    pub(crate) compact_summary: String,
     pub(crate) detail: String,
     pub(crate) detail_rows: Vec<crate::app::PhaseResultDetailRow>,
     pub(crate) semantic_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
@@ -471,6 +473,11 @@ fn engagement_header_model(
     } else {
         configured_model_label(&context.model)
     };
+    let result_card = phase_result_card(app, phase);
+    let result_next = app
+        .engagement
+        .unresolved_phase_attempt(phase)
+        .map(|record| super::journey::unresolved_attempt_action(app, record));
     EngagementHeaderModel {
         phase,
         reality_phase: guidance.reality_phase,
@@ -486,9 +493,11 @@ fn engagement_header_model(
         liveness: super::work_liveness(app),
         finding_filter: app.active_findings_filter().clone(),
         phase_rail: guidance.phase_rail,
-        next_action: guidance.next_action,
-        next_tools: guidance.next_tools,
-        result_card: phase_result_card(app, phase),
+        next_action: result_next.unwrap_or(guidance.next_action),
+        next_tools: result_card
+            .as_ref()
+            .map_or(guidance.next_tools, |_| String::new()),
+        result_card,
     }
 }
 
@@ -521,6 +530,8 @@ fn phase_result_card_model(
     PhaseResultCardModel {
         attempt_id: presentation.attempt_id,
         outcome: presentation.outcome.clone(),
+        emphasis: presentation.emphasis,
+        compact_summary: compact_result_summary(&presentation.compact_summary),
         detail: presentation.detail_lines.join("\n"),
         detail_rows,
         semantic_keys: presentation.semantic_keys,
@@ -546,6 +557,8 @@ fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResult
     PhaseResultCardModel {
         attempt_id: review.parent_attempt_id.clone(),
         outcome: format!("{} review", phase_rerun_action_label(review.derivation)),
+        emphasis: crate::PhaseResultEmphasis::DominantDecision,
+        compact_summary: format!("{} rerun review", review.phase.title()),
         detail,
         detail_rows,
         semantic_keys: std::collections::BTreeSet::new(),
@@ -556,6 +569,42 @@ fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResult
             "review changed options; raw run JSON is available only from the expert command surface"
                 .to_string(),
     }
+}
+
+fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String {
+    let mut parts = vec![format!("{} ready", summary.phase.title())];
+    if !summary.receipt_recorded {
+        parts.push("⚠ receipt unavailable".to_string());
+    }
+    if let Some(cost) = summary.cost.as_deref() {
+        parts.push(if cost_needs_warning(cost) {
+            format!("⚠ {cost}")
+        } else {
+            cost.to_string()
+        });
+    }
+    if !summary.revision_recorded {
+        parts.push("⚠ rev unrecorded".to_string());
+    }
+    parts.extend([
+        format!("{} run(s)", summary.run_count),
+        format!("{} artifact(s)", summary.artifact_count),
+        format!("findings +{}", summary.changed_findings),
+    ]);
+    parts.join(" · ")
+}
+
+fn cost_needs_warning(cost: &str) -> bool {
+    let normalized = cost.to_ascii_lowercase();
+    [
+        "incomplete",
+        "unavailable",
+        "invalid",
+        "not recorded",
+        "accounting",
+    ]
+    .iter()
+    .any(|marker| normalized.contains(marker))
 }
 
 fn phase_rerun_review_rows(

@@ -672,6 +672,17 @@ fn phase_result_card_retains_canonical_keys_until_rendering() {
     let presentation = crate::app::PhaseResultPresentation {
         attempt_id: "attempt-keyed".to_string(),
         outcome: "completed".to_string(),
+        emphasis: crate::PhaseResultEmphasis::CompactDisposition,
+        compact_summary: crate::PhaseResultCompactSummary {
+            phase: WorkflowPhase::Scan,
+            outcome: PhaseAttemptOutcome::Completed,
+            run_count: 1,
+            artifact_count: 0,
+            changed_findings: 0,
+            cost: None,
+            revision_recorded: true,
+            receipt_recorded: true,
+        },
         detail_lines: vec!["Outcome · completed".to_string()],
         detail_rows: vec![crate::app::PhaseResultDetailRow {
             key: Some(key.clone()),
@@ -690,6 +701,25 @@ fn phase_result_card_retains_canonical_keys_until_rendering() {
 }
 
 #[test]
+fn compact_result_summary_keeps_known_cost_and_marks_unknown_accounting() {
+    let mut summary = crate::PhaseResultCompactSummary {
+        phase: WorkflowPhase::Map,
+        outcome: PhaseAttemptOutcome::Completed,
+        run_count: 2,
+        artifact_count: 15,
+        changed_findings: 0,
+        cost: Some("$0.4200".to_string()),
+        revision_recorded: true,
+        receipt_recorded: true,
+    };
+
+    assert!(compact_result_summary(&summary).contains("$0.4200"));
+
+    summary.cost = Some("cost not recorded".to_string());
+    assert!(compact_result_summary(&summary).contains("⚠ cost not recorded"));
+}
+
+#[test]
 fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
     // The strip renders `recommended` as its own `next:` row after the
     // control hint; the identical presentation detail row must not make
@@ -697,6 +727,17 @@ fn card_model_drops_the_detail_row_that_duplicates_the_trailing_next() {
     let presentation = crate::app::PhaseResultPresentation {
         attempt_id: "attempt-failed".to_string(),
         outcome: "failed".to_string(),
+        emphasis: crate::PhaseResultEmphasis::DominantDecision,
+        compact_summary: crate::PhaseResultCompactSummary {
+            phase: WorkflowPhase::Map,
+            outcome: PhaseAttemptOutcome::Failed,
+            run_count: 1,
+            artifact_count: 0,
+            changed_findings: 0,
+            cost: None,
+            revision_recorded: true,
+            receipt_recorded: true,
+        },
         detail_lines: vec![
             "1 canonical run reference(s)".to_string(),
             "next: open the failed run, adjust its input, or run it again".to_string(),

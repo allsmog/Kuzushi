@@ -38,9 +38,9 @@ This snapshot makes the five-phase cockpit a direct projection of durable
 repository evidence:
 
 - The Map, Scan, Review, Prove, and Fix rail always names the whole engagement
-  after `Start Map`. Pages without the required evidence are visibly locked;
-  historical artifacts can reopen their page without pretending that a visit
-  advanced the current reality.
+  after `Start Map`. Every durable page remains browsable, while missing
+  evidence stays explicit and page visits never pretend to advance the current
+  reality.
 - A ready Map embeds the real-data security gallery. Its source-grounded system
   summary, DFD, complete deterministic entry-point inventory with explicit
   model-linkage provenance, and component inventory share selection and
@@ -395,10 +395,11 @@ sessions direct automation to `kuzushi scan <target>` or
 
 Launching the shell against a target opens a guided five-phase engagement
 instead of a flat task list. All five pages remain named after the engagement
-starts; unavailable future pages carry a lock marker, and `Shift+Tab` cycles
-the pages backed by current or historical evidence without changing the shared
-draft or the durable reality checkpoint. Each phase announces what it is for
-and constrains planning to its own descriptor-backed tools:
+starts; unavailable future pages carry an unavailable marker, and `Shift+Tab`
+cycles every durable page without changing the shared draft or the durable
+reality checkpoint. Empty future pages state which evidence is missing. Each
+phase announces what it is for and constrains planning to its own
+descriptor-backed tools:
 
 | Phase | | Focus |
 | --- | --- | --- |
@@ -605,8 +606,7 @@ Useful package scripts:
 | `pnpm launch` | Build and open the native Rust shell against this checkout. |
 | `pnpm dev -- <args>` | Run the native Rust CLI from source. |
 | `pnpm build:native` | Build and stage the CLI plus all shipped MCP server binaries for npm packaging. |
-| `pnpm build` | Compile retained TypeScript library exports. |
-| `pnpm test` | Run retained TypeScript unit/reference tests. |
+| `pnpm test` | Run Node support-layer and repository contract tests. |
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
 | `pnpm quality:crap-risk` | Gate changed production Rust/JS/TS code with the CRAP-risk < 7 proxy. |
@@ -631,29 +631,16 @@ root:
 - [`REDESIGN_COMPLETION_AUDIT.md`](./REDESIGN_COMPLETION_AUDIT.md) records the
   commands and evidence used to verify this branch.
 
-## TypeScript Retention
+## Node Support Boundary
 
-The old TypeScript/Ink CLI is no longer the npm runtime path:
+There is no TypeScript SDK, scanner runtime, or interactive TUI. The npm bins
+launch the staged Rust product through `bin/kuzushi-rs.mjs`, and the package
+exports only public schemas and package metadata.
 
-- `bin.kuzushi` and `bin.kz` point to `bin/kuzushi-rs.mjs`.
-- The `kuzushi-ts` npm bin is removed.
-- The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
-  removed.
-- The source-only `src/cli.ts shell` route now exits with a Rust replacement
-  message; the TypeScript/Ink shell implementation has been deleted.
-- The old `dist/cli*` TypeScript CLI build outputs are excluded from the npm
-  tarball.
-
-Retained TypeScript is classified as one of:
-
-- Published compatibility SDK source: `src/modules/`, `src/testing/`,
-  `src/agent-runtime/types.ts`, `src/bus/types.ts`, and the public root types;
-  these build the `kuzushi`, `kuzushi/modules`, and `kuzushi/testing` exports.
-- TypeScript-only benchmark, code-generation, and packaging tooling that
-  validates those exports and the native release wrapper.
-
-There is no retained TypeScript scanner runtime or interactive TUI.
-
-Do not add new runtime CLI behavior in TypeScript. New product execution paths
-belong in `crates/kuzushi-core`, `crates/kuzushi-cli`, `crates/kuzushi-tui`,
-or `crates/kuzushi-openai`.
+Node remains an implementation detail for the native wrapper, the LangGraph
+bridge, the sandboxed KWP dynamic-module host, repository/build tooling, and
+their focused tests. New product execution paths belong in
+`crates/kuzushi-core`, `crates/kuzushi-cli`, `crates/kuzushi-tui`, or the owning
+Rust MCP crate. Third-party module authors export the plain brokered KWP object
+documented in [docs/modules.md](docs/modules.md); they do not import an
+authoring SDK from this package.

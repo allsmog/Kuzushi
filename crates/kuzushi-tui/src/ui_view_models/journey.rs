@@ -742,28 +742,60 @@ fn projected_next_action(
     destination: JourneyDestination,
     progress: JourneyProgress,
 ) -> String {
-    unresolved_partial_attempt(app, destination)
-        .map(partial_attempt_action)
+    unresolved_attempt(app, destination)
+        .map(|record| unresolved_attempt_action(app, record))
         .unwrap_or_else(|| destination_next_action(destination, progress))
 }
 
-fn unresolved_partial_attempt(
+fn unresolved_attempt(
     app: &ShellApp,
     destination: JourneyDestination,
 ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
-    let JourneyDestination::Phase(phase) = destination else {
-        return None;
+    let destination_attempt = match destination {
+        JourneyDestination::Phase(phase) => app.engagement.unresolved_phase_attempt(phase),
+        JourneyDestination::Report(_) => None,
     };
-    let record = app.engagement.unresolved_phase_attempt(phase)?;
-    (record.completed.outcome == PhaseAttemptOutcome::Partial).then_some(record)
+    destination_attempt.or_else(|| {
+        WorkflowPhase::ORDER
+            .iter()
+            .find_map(|phase| app.engagement.unresolved_phase_attempt(*phase))
+    })
 }
 
-fn partial_attempt_action(record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord) -> String {
-    record
-        .completed
-        .selection_blocked_reason
-        .clone()
-        .unwrap_or_else(|| partial_acknowledgement_action(record.completed.phase))
+pub(super) fn unresolved_attempt_action(
+    app: &ShellApp,
+    record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+) -> String {
+    let completed = &record.completed;
+    if let Some(reason) = app.effective_phase_attempt_blocker(completed) {
+        return reason;
+    }
+    let outcome = app
+        .phase_result_presentation_for(completed)
+        .compact_summary
+        .outcome;
+    match outcome {
+        PhaseAttemptOutcome::Completed => format!(
+            "accept, continue with, or discard the completed {} result",
+            completed.phase.title()
+        ),
+        PhaseAttemptOutcome::Partial => partial_acknowledgement_action(completed.phase),
+        outcome => format!(
+            "inspect, rerun, or discard the {} {} result",
+            phase_attempt_outcome_label(outcome),
+            completed.phase.title()
+        ),
+    }
+}
+
+fn phase_attempt_outcome_label(outcome: PhaseAttemptOutcome) -> &'static str {
+    match outcome {
+        PhaseAttemptOutcome::Completed => "completed",
+        PhaseAttemptOutcome::Partial => "partial",
+        PhaseAttemptOutcome::Blocked => "blocked",
+        PhaseAttemptOutcome::Failed => "failed",
+        PhaseAttemptOutcome::Canceled => "canceled",
+    }
 }
 
 fn partial_acknowledgement_action(phase: WorkflowPhase) -> String {
@@ -774,7 +806,7 @@ fn partial_acknowledgement_action(phase: WorkflowPhase) -> String {
 }
 
 fn projected_next_tools(app: &ShellApp, destination: JourneyDestination) -> String {
-    if unresolved_partial_attempt(app, destination).is_some() {
+    if unresolved_attempt(app, destination).is_some() {
         return String::new();
     }
     destination_tools(destination)
@@ -793,7 +825,10 @@ fn destination_next_summary(
         JourneyDestination::Phase(phase) => {
             format!("{} · {next_action}{inferred}", phase.title())
         }
-        JourneyDestination::Report(reason) => format!("REPORT · {}{inferred}", reason.label()),
+        JourneyDestination::Report(reason) if next_action.starts_with("open Report") => {
+            format!("REPORT · {}{inferred}", reason.label())
+        }
+        JourneyDestination::Report(_) => format!("ATTENTION · {next_action}{inferred}"),
     }
 }
 
@@ -1119,10 +1154,12 @@ mod tests {
             assert!(!journey.progress.map_checkpoint, "discarded={discarded}");
             assert!(!journey.progress.legacy_inferred, "discarded={discarded}");
             assert_eq!(journey.current, WorkflowPhase::Map);
-            assert_eq!(
-                journey.next_action,
+            let expected = if discarded {
                 "choose whether to use, rebuild, or explicitly skip current-revision Map evidence"
-            );
+            } else {
+                "accept, continue with, or discard the completed Map result"
+            };
+            assert_eq!(journey.next_action, expected);
         }
     }
 
@@ -1222,6 +1259,54 @@ mod tests {
         assert_eq!(journey.next_action, "acknowledge the partial Scan");
         assert!(journey.next_tools.is_empty());
         assert!(journey.next_summary.contains(&journey.next_action));
+    }
+
+    #[test]
+    fn unresolved_completed_map_outranks_later_reality_guidance() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        record_selected_scan_attempt(target.path(), PhaseAttemptOutcome::Completed);
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-new".to_string()],
+            PhaseTargetSnapshot::capture(target.path()),
+            PhaseAttemptOutcome::Completed,
+        );
+        append_phase_attempt_completed(target.path(), map).unwrap();
+
+        let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
+
+        assert_eq!(
+            journey.next_action,
+            "accept, continue with, or discard the completed Map result"
+        );
+        assert!(journey.next_tools.is_empty());
+        assert!(journey.next_summary.contains(&journey.next_action));
+    }
+
+    #[test]
+    fn unresolved_blocked_scan_outranks_missing_map_guidance() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let scan = PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["scan-blocked".to_string()],
+            PhaseTargetSnapshot::capture(target.path()),
+            PhaseAttemptOutcome::Blocked,
+        );
+        append_phase_attempt_completed(target.path(), scan).unwrap();
+
+        let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
+
+        assert_eq!(
+            journey.destination,
+            JourneyDestination::Phase(WorkflowPhase::Map)
+        );
+        assert_eq!(
+            journey.next_action,
+            "inspect, rerun, or discard the blocked Scan result"
+        );
+        assert!(journey.next_tools.is_empty());
     }
 
     #[test]

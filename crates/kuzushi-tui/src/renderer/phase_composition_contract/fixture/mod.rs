@@ -46,6 +46,10 @@ impl PhaseReferenceFixture {
             .replace(&self.target_root.display().to_string(), "/tmp/phase-target")
             .replace(&self.target_name, "phase-target")
     }
+
+    pub(super) fn target(&self) -> &std::path::Path {
+        &self.target_root
+    }
 }
 
 fn hydrate_selected_source(app: &mut ShellApp, target: &std::path::Path) {

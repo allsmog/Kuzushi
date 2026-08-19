@@ -1,7 +1,11 @@
 # Plan 007: Harden the published TypeScript SDK contract and remove unused SQLite
 
-> Executor: preserve the `kuzushi/testing` and `kuzushi/modules` public exports.
-> Work in the dirty tree; do not commit or push.
+> **Status: superseded historical plan.** The TypeScript SDK and its package
+> exports were retired by the Rust/KWP cutover. Do not execute this plan; use
+> `docs/modules.md` for the current third-party module contract.
+>
+> Historical executor instruction: preserve the `kuzushi/testing` and
+> `kuzushi/modules` public exports. This instruction is no longer operative.
 
 ## Status
 

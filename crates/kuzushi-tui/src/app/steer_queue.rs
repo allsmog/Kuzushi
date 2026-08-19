@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 /// One operator-submitted command waiting for the live run to finish. We store
 /// the exact submitted line and re-parse it at drain time so a queued command
-/// never captures a stale option snapshot (CLAUDE.md: honest state over silent
+/// never captures a stale option snapshot (AGENTS.md: honest state over silent
 /// staleness).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QueuedCommand {
@@ -71,7 +71,7 @@ impl SteerQueue {
 
     /// Drop every pending item (operator full-stop, e.g. Ctrl+C abort).
     /// Returns the drained commands so the caller can report exactly what was
-    /// dropped instead of silently discarding queued work (CLAUDE.md: honest
+    /// dropped instead of silently discarding queued work (AGENTS.md: honest
     /// state).
     pub(crate) fn drain_all(&mut self) -> Vec<QueuedCommand> {
         self.items.drain(..).map(|entry| entry.command).collect()

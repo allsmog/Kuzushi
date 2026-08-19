@@ -38,6 +38,8 @@ fn partial_result_card() -> crate::ui_view_models::PhaseResultCardModel {
     crate::ui_view_models::PhaseResultCardModel {
         attempt_id: "attempt-partial".to_string(),
         outcome: "partial".to_string(),
+        emphasis: crate::PhaseResultEmphasis::DominantDecision,
+        compact_summary: "Scan partial".to_string(),
         detail: "partial canonical result retained".to_string(),
         detail_rows: vec![crate::app::PhaseResultDetailRow {
             key: None,
@@ -163,6 +165,8 @@ fn compact_result_card_keeps_prompt_draft_navigation_instruction_visible() {
     let card = crate::ui_view_models::PhaseResultCardModel {
         attempt_id: "attempt-1".to_string(),
         outcome: "completed".to_string(),
+        emphasis: crate::PhaseResultEmphasis::CompactDisposition,
+        compact_summary: "Map ready · 1 run(s)".to_string(),
         detail: "completed without interaction".to_string(),
         detail_rows: vec![crate::app::PhaseResultDetailRow {
             key: None,
@@ -233,6 +237,8 @@ fn keyed_result_card() -> crate::ui_view_models::PhaseResultCardModel {
     crate::ui_view_models::PhaseResultCardModel {
         attempt_id: "attempt-with-a-long-stable-identity".to_string(),
         outcome: "partial".to_string(),
+        emphasis: crate::PhaseResultEmphasis::DominantDecision,
+        compact_summary: "Scan partial".to_string(),
         detail: "source-backed detail".to_string(),
         detail_rows: keys
             .iter()

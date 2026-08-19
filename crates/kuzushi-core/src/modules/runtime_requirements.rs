@@ -9,7 +9,7 @@
 //! Those tools fail at runtime with "requires an agent runtime; none
 //! configured" because the caller never passes one.
 //!
-//! Per CLAUDE.md's mode-parity rule ("Do not duplicate policy or parsing
+//! Per AGENTS.md's mode-parity rule ("Do not duplicate policy or parsing
 //! logic across scan, shell, and run modes"), this module exposes shared
 //! descriptor-backed queries plus the input-aware combiner.
 //!

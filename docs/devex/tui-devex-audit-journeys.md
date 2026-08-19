@@ -96,6 +96,24 @@ contract. The current journey is
 - **Judge:** nothing claims "confirmed" beyond the target binding the operator
   explicitly gave, and no language/build guess is dressed up as a verified fact.
 
+### J53 — Ready Map resume keeps durable evidence primary  ⭐ release-blocking (keyless)
+
+Also verifies that Shift+Tab can browse persisted Scan and Review/findings
+projections while Map remains the current journey phase; page navigation must
+never be mistaken for workflow advancement.
+
+- **Journey:** run the deterministic Map plan on the offline reference target,
+  leave its successful result unresolved, inspect the embedded DFD, browse the
+  incomplete Scan and Review pages, restart, and explicitly select the result.
+- **Verify:** Summary remains the primary Map body before and after restart;
+  `RESULT READY` is a compact actionable receipt; the terminal
+  `module-recommender` detail stays behind Open/replay; Tab-to-DFD works before
+  choosing an action; Shift+Tab reaches the findings projection without
+  changing the journey phase; restart never auto-accepts the attempt or
+  restores the prior tab.
+- **Judge:** completed support work reads as context for a decision, not as a
+  replacement application screen, while explicit operator control remains clear.
+
 ## B. Core operator loop
 
 ### J4 — Bounty operator, scan to finding
@@ -451,7 +469,8 @@ check it by hand.
 
 1. **J1** keyless first launch, **J8** interrupt honesty — highest value re-runs.
    **J49** Setup target-facts honesty rides with the Target/Setup set (keyless,
-   release-blocking).
+   release-blocking). **J53** guards ready-Map resume and compact successful
+   result choices (keyless, release-blocking).
 2. J4, J5, J7, J17 — the durable cockpit, reporting, and phase reference.
 3. J6, J9, J10, J11, J12 — control surfaces & discoverability.
 4. J14, J15, J16 — environment matrix.

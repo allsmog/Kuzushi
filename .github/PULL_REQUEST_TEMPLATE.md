@@ -43,7 +43,7 @@ a screenshot or pasted transcript. Delete this section otherwise.
 
 - [ ] Commit messages follow the conventional format (enforced by `commit-msg` hook)
 - [ ] Added/updated tests for new behavior
-- [ ] Updated docs (`README.md`, `CLAUDE.md`, or `docs/`) if behavior changed
+- [ ] Updated docs (`README.md`, `AGENTS.md`, or `docs/`) if behavior changed
 - [ ] Updated `CHANGELOG` / release notes if user-facing
 - [ ] No secrets or API keys committed
 - [ ] No findings DB files (`.kuzushi/findings.sqlite3`) committed

@@ -1,8 +1,10 @@
 # Module Extension-Point Assessment
 
-Status: SDK/domain assessment. Any historical mention of deleted shell/TUI
-files is not current operator UI guidance; new interactive shell behavior
-belongs in `crates/kuzushi-tui`.
+Status: historical TypeScript SDK/domain assessment. The SDK and handles below
+are not current product surfaces; current authors use the brokered KWP contract
+in `docs/modules.md`. Any mention of deleted shell/TUI files is likewise not
+current operator UI guidance; new interactive shell behavior belongs in
+`crates/kuzushi-tui`.
 
 Audit of the Kuzushi module SDK's extension surface from the perspective of a
 third-party module author. The goal: identify gaps that block plausible

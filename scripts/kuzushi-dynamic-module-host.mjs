@@ -1081,11 +1081,13 @@ function normalizeKind(kind) {
 
 function normalizePhase(phase, effect, name) {
   const value = phase ?? (effect === "read" ? "operate" : undefined);
-  if (!["map", "hunt", "confirm", "fix", "operate"].includes(value)) {
-    throw new Error(`${name}.phase must be map, hunt, confirm, fix, or operate`);
+  if (!["map", "scan", "hunt", "review", "prove", "confirm", "fix", "operate"].includes(value)) {
+    throw new Error(
+      `${name}.phase must be map, scan, review, prove, fix, or operate (hunt and confirm are deprecated aliases)`,
+    );
   }
   if (effect !== "read" && value === "operate") {
-    throw new Error(`${name}.phase must be map, hunt, confirm, or fix for effect ${effect}`);
+    throw new Error(`${name}.phase must be map, scan, review, prove, or fix for effect ${effect}`);
   }
   return value;
 }

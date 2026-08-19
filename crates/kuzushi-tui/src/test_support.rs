@@ -1,7 +1,7 @@
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed_with_v2, append_phase_attempt_disposition,
     PhaseAttemptCompleted, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
-    PhaseAttemptOutcome, PhaseTargetSnapshot,
+    PhaseAttemptOutcome, PhaseAttemptReceipt, PhaseResultAction, PhaseTargetSnapshot,
 };
 use kuzushi_core::{WorkflowPhase, WorkspaceTarget};
 use serde_json::{Map, Value};
@@ -235,6 +235,60 @@ pub(crate) fn select_typed_attempt(target: &Path, completed: &PhaseAttemptComple
         ),
     )
     .expect("typed phase disposition");
+}
+
+pub(crate) fn seed_fira_shaped_completed_map_attempt(target: &Path) {
+    record_indexed_run(
+        target,
+        "entry-points",
+        "entry-points:extract",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "45 entry points extracted",
+            "data": {"total": 45}
+        }),
+    );
+    record_indexed_run(
+        target,
+        "recommend-modules",
+        "module-recommender:recommend",
+        serde_json::json!({
+            "ok": true,
+            "status": "completed",
+            "summary": "Recommended 5 module tool(s)",
+            "data": {"recommendedToolCount": 5}
+        }),
+    );
+    let completed = fira_shaped_map_attempt(target);
+    append_phase_attempt_completed_with_v2(target, completed).expect("completed Map attempt");
+}
+
+fn fira_shaped_map_attempt(target: &Path) -> PhaseAttemptCompleted {
+    PhaseAttemptCompleted::new(
+        WorkflowPhase::Map,
+        vec!["entry-points".to_string(), "recommend-modules".to_string()],
+        PhaseTargetSnapshot::capture(target),
+        PhaseAttemptOutcome::Completed,
+    )
+    .with_attempt_id(kuzushi_core::run_lifecycle::RunAttemptId::new().to_string())
+    .with_receipt(PhaseAttemptReceipt {
+        run_count: 2,
+        elapsed_secs: 1,
+        cost: "cost not recorded".to_string(),
+        changed_findings: 0,
+        changed_artifacts: (0..15).map(|index| format!("artifact-{index}")).collect(),
+        interaction_count: 0,
+        rerun_specification: None,
+        actions: vec![
+            PhaseResultAction::SelectAndContinue,
+            PhaseResultAction::Select,
+            PhaseResultAction::Open,
+            PhaseResultAction::RunAgain,
+            PhaseResultAction::Discard,
+        ],
+        recommended_next: Some("open SCAN".to_string()),
+    })
 }
 
 fn snapshot_object(output: &mut Value) -> &mut Map<String, Value> {

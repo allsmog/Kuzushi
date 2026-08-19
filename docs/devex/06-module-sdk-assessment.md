@@ -4,6 +4,9 @@ Status: research-only (no `src/modules/**` edits).
 Date: 2026-04-21.
 Scope: the third-party author experience of the `kuzushi` / `kuzushi/modules` / `kuzushi/testing` SDK surface.
 
+> Historical TypeScript-era assessment. The assessed SDK and paths no longer
+> exist; current authors use the brokered KWP contract in `docs/modules.md`.
+
 Current Rust CLI note: this assessment mentions the legacy TypeScript
 `kuzushi create-module` scaffolder as historical audit context. The current
 Rust operator CLI does not expose that command.

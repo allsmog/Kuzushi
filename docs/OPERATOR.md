@@ -22,15 +22,17 @@ the parity matrix when it is an intentional mode asymmetry).
 
 | Mode | Invocation | Use it for | Exit codes |
 | --- | --- | --- | --- |
-| **shell** | `kuzushi --target <path>` | Interactive cockpit: Setup → Map/Scan/Review/Prove/Fix → Report | n/a (interactive) |
+| **shell** | `kuzushi [--target <path>]` | Interactive cockpit: Setup → Map/Scan/Review/Prove/Fix → Report; without a target, opens the target picker | n/a (interactive) |
 | **run** | `kuzushi run <tool> [json]` | Headless single-tool execution, JSON on stdout | 0 completed/skipped · 2 prepare failed · 3 tool failed (`ok:false`) · 4 partial |
 | **scan** | `kuzushi scan <target>` | Scan orchestration (the `sast:scan` umbrella) | `--fail-on` gate failures exit 3 |
 | **ci** | `kuzushi ci <target>` | Deterministic regression gate over the findings ledger — no model calls | 0 clean · 1 gate tripped · 2 error |
 
-All four converge on the same registry boundary
-(`prepare_tool_input` → `dispatch_prepared_tool_with_runtime`), so a tool
-behaves identically regardless of the mode that launched it; only
-workspace/runtime context preparation differs.
+Scan, shell, and run converge on the authorization-bound registry flow
+(`prepare_dispatch_input` → authorization →
+`dispatch_prepared_input_with_runtime`), so shared tool policy does not depend
+on which mode launched it. Workspace/runtime context and presentation may
+differ where the mode-parity contract says so. `kuzushi ci` is a separate
+deterministic fold over persisted state, not a registry tool.
 
 `kuzushi ci` details (see §6 for the gate semantics):
 
@@ -412,11 +414,14 @@ hardening audit):
   excluded state dir.** Child stdout/stderr (which includes finding text)
   is deliberately durable for post-mortems; its sensitivity boundary is the
   target's `.kuzushi/` state dir, same as the findings store itself.
-- **`~/.kuzushi/bridge-debug.log` — redacted, opt-in verbose.** The
-  claude-cli bridge never embeds model output (which carries scanned
-  source) in errors or this log; stdout bodies are summarized as byte
-  counts and stderr diagnostics are capped. Set `KUZUSHI_BRIDGE_LOG_RAW=1`
-  to opt into raw bodies while debugging.
+- **Bridge diagnostics — redacted and opt-in.** Descriptor options
+  `bridgeVerbose` and `bridgeLogPath` emit or append request-scoped metadata
+  only: provider, selected reasoning level, lengths, tool counts, stop class,
+  and cost/usage when known. They do not record prompts, completions, or raw
+  response bodies. The adapter-only emergency hooks
+  `KUZUSHI_BRIDGE_DEBUG_DUMP=<path>` and
+  `KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT=<directory>` use the same metadata-only
+  projection; despite the latter's legacy name, it does not write prompt text.
 - **Session transcripts (`~/.kuzushi/v3/sessions/`) — redacted semantic
   timeline** (operator-owned store; run events link to target-scoped run
   artifacts by `runId` instead of duplicating payloads).

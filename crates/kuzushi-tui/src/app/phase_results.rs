@@ -20,11 +20,31 @@ pub(crate) struct PhaseResultPolicy {
 pub(crate) struct PhaseResultPresentation {
     pub(crate) attempt_id: String,
     pub(crate) outcome: String,
+    pub(crate) emphasis: PhaseResultEmphasis,
+    pub(crate) compact_summary: PhaseResultCompactSummary,
     pub(crate) detail_lines: Vec<String>,
     pub(crate) detail_rows: Vec<PhaseResultDetailRow>,
     pub(crate) semantic_keys: std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
     pub(crate) actions: Vec<PhaseResultAction>,
     pub(crate) recommended_next: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PhaseResultEmphasis {
+    CompactDisposition,
+    DominantDecision,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PhaseResultCompactSummary {
+    pub(crate) phase: WorkflowPhase,
+    pub(crate) outcome: PhaseAttemptOutcome,
+    pub(crate) run_count: usize,
+    pub(crate) artifact_count: usize,
+    pub(crate) changed_findings: u64,
+    pub(crate) cost: Option<String>,
+    pub(crate) revision_recorded: bool,
+    pub(crate) receipt_recorded: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +247,8 @@ impl ShellApp {
         let outcome = format!("{effective_outcome:?}").to_ascii_lowercase();
         let actions =
             ordered_phase_result_actions(completed.phase, effective_outcome, &policy.actions);
+        let emphasis = phase_result_emphasis(effective_outcome, &actions);
+        let compact_summary = phase_result_compact_summary(completed, effective_outcome);
         let recommended_next = policy
             .recommended_next
             .unwrap_or_else(|| "open the result and choose a disposition".to_string());
@@ -245,6 +267,8 @@ impl ShellApp {
             .collect();
         PhaseResultPresentation {
             attempt_id: completed.attempt_id.clone(),
+            emphasis,
+            compact_summary,
             detail_lines,
             detail_rows: rows,
             semantic_keys,
@@ -503,6 +527,42 @@ fn phase_result_details(
         "next: {recommended_next}"
     )));
     PhaseResultDetails { rows }
+}
+
+fn phase_result_emphasis(
+    outcome: PhaseAttemptOutcome,
+    actions: &[PhaseResultAction],
+) -> PhaseResultEmphasis {
+    let selectable = actions.iter().any(|action| {
+        matches!(
+            action,
+            PhaseResultAction::Select
+                | PhaseResultAction::SelectAndContinue
+                | PhaseResultAction::SelectAndReport
+        )
+    });
+    if outcome == PhaseAttemptOutcome::Completed && selectable {
+        PhaseResultEmphasis::CompactDisposition
+    } else {
+        PhaseResultEmphasis::DominantDecision
+    }
+}
+
+fn phase_result_compact_summary(
+    completed: &PhaseAttemptCompleted,
+    outcome: PhaseAttemptOutcome,
+) -> PhaseResultCompactSummary {
+    let receipt = completed.receipt.as_ref();
+    PhaseResultCompactSummary {
+        phase: completed.phase,
+        outcome,
+        run_count: receipt.map_or(completed.run_refs.len(), |receipt| receipt.run_count),
+        artifact_count: receipt.map_or(0, |receipt| receipt.changed_artifacts.len()),
+        changed_findings: receipt.map_or(0, |receipt| receipt.changed_findings),
+        cost: receipt.map(|receipt| receipt.cost.clone()),
+        revision_recorded: completed.target_snapshot.revision.is_some(),
+        receipt_recorded: receipt.is_some(),
+    }
 }
 
 /// Lineage row: the target identity this attempt was recorded against. The
@@ -1035,6 +1095,53 @@ mod tests {
         ));
 
         assert!(!completed.actions.contains(&PhaseResultAction::ContinueRun));
+    }
+
+    #[test]
+    fn only_selectable_completed_results_use_compact_disposition() {
+        let target = tempfile::tempdir().unwrap();
+        assert_eq!(
+            phase_result_emphasis(PhaseAttemptOutcome::Completed, &[PhaseResultAction::Select]),
+            PhaseResultEmphasis::CompactDisposition
+        );
+        let summary = phase_result_compact_summary(
+            &attempt_with_outcome(target.path(), PhaseAttemptOutcome::Completed),
+            PhaseAttemptOutcome::Completed,
+        );
+        assert_eq!(summary.phase, WorkflowPhase::Scan);
+        assert_eq!(summary.run_count, 1);
+
+        for outcome in [
+            PhaseAttemptOutcome::Partial,
+            PhaseAttemptOutcome::Blocked,
+            PhaseAttemptOutcome::Failed,
+            PhaseAttemptOutcome::Canceled,
+        ] {
+            assert_eq!(
+                phase_result_emphasis(outcome, &[PhaseResultAction::Select]),
+                PhaseResultEmphasis::DominantDecision,
+                "outcome={outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn selection_blocked_completion_remains_a_dominant_decision() {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = super::super::ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.set_target(Some(target.path().to_path_buf()));
+        let completed = attempt_with_outcome(target.path(), PhaseAttemptOutcome::Completed)
+            .with_selection_blocked("map evidence is stale".to_string());
+
+        let result = app.phase_result_presentation_for(&completed);
+
+        assert_eq!(result.emphasis, PhaseResultEmphasis::DominantDecision);
+        assert!(!result.actions.iter().any(|action| matches!(
+            action,
+            PhaseResultAction::Select
+                | PhaseResultAction::SelectAndContinue
+                | PhaseResultAction::SelectAndReport
+        )));
     }
 
     #[test]

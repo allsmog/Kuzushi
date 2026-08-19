@@ -259,7 +259,8 @@ Dynamic descriptor options with `type: "path"` must now add a mandatory
 does not infer whether an unlabelled path is a workspace read, Kuzushi state
 write, target write, external read/write, or executable. Target-owned option
 stores cannot supply model selectors or executable/external/write-capable
-paths. Update modules and their tests before bumping the Kuzushi peer version.
+paths. Update modules and their tests before bumping the required Kuzushi host
+version.
 The native/Node bridge also performs a protocol-version and exact package
 semver handshake, so custom `KUZUSHI_DYNAMIC_MODULE_HOST` implementations must
 emit the documented version envelope/handshake before payloads.

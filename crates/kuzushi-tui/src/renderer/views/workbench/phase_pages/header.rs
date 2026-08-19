@@ -159,6 +159,9 @@ fn result_card_render_rows(
     width: usize,
     max_rows: usize,
 ) -> Vec<PhaseResultRenderRow> {
+    if card.emphasis == crate::PhaseResultEmphasis::CompactDisposition {
+        return compact_disposition_rows(card, width, max_rows);
+    }
     if max_rows <= 3 {
         return compact_result_rows(card, width, max_rows);
     }
@@ -173,6 +176,33 @@ fn result_card_render_rows(
         .chain(detail)
         .chain(fixed.trailing)
         .collect()
+}
+
+fn compact_disposition_rows(
+    card: &crate::ui_view_models::PhaseResultCardModel,
+    width: usize,
+    max_rows: usize,
+) -> Vec<PhaseResultRenderRow> {
+    if max_rows == 0 {
+        return Vec::new();
+    }
+    let mut rows = vec![compact_result_row(
+        " RESULT READY ",
+        &card.compact_summary,
+        width,
+        theme::warn(),
+        card.semantic_keys.clone(),
+    )];
+    if max_rows > 1 {
+        rows.push(compact_result_row(
+            "  ",
+            &card.control_hint,
+            width,
+            theme::accent(),
+            std::collections::BTreeSet::new(),
+        ));
+    }
+    rows
 }
 
 fn compact_result_rows(

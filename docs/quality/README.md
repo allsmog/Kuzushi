@@ -15,6 +15,6 @@ captures rather than as a live work queue.
   reproduce against the current shell should be re-verified before acting;
   several were fixed in later TUI passes.
 
-Live engineering rules live in `CLAUDE.md`/`AGENTS.md`; architecture
-contracts live in `docs/architecture/` and current assessments live in
-`docs/assessments/`.
+Live engineering rules live in `AGENTS.md`; `CLAUDE.md` is only its symlinked
+alias. Architecture contracts live in `docs/architecture/` and current
+assessments live in `docs/assessments/`.

@@ -16,7 +16,7 @@ Status: **DONE** (started 2026-07-20, completed 2026-07-21; loop cron
 - Do not touch the campaign-deck WIP (untracked crates/ files, journey.rs
   campaign edits) beyond mechanical conflicts.
 - CRAP gate: functions complexity <=4, <40 logical lines, focused tests.
-- Follow CLAUDE.md: options via ToolDescriptor first, shared registry
+- Follow AGENTS.md: options via ToolDescriptor first, shared registry
   boundary, plain-renderer parity for any TUI surface, no new env knobs.
 - Verify per-milestone with scoped `cargo test -p kuzushi-core <module>` etc.;
   full `cargo build --workspace && cargo test --workspace` only at the end.
@@ -194,7 +194,7 @@ Status: **DONE** (started 2026-07-20, completed 2026-07-21; loop cron
       untouched so the phase-composition contract holds). 3 tests
       (view-model projection, pending-draws-nothing, ready/failed lines).
       Snapshots unchanged (Pending renders nothing without hydration).
-- [x] Fleet dashboard: smallest honest increment per CLAUDE.md ("module/
+- [x] Fleet dashboard: smallest honest increment per AGENTS.md ("module/
       tool layer before orchestrator internals") — `fleet:status` output IS
       now the one-screen scorecard (header + one row per target: short
       rev/branch/dirty or never-scanned, baselines, xC yH open, flags,

@@ -5,6 +5,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Additive:**
+
+- Successful phase attempts now keep the durable phase workspace primary with
+  a compact action receipt, and operators can browse every phase page
+  without changing reality-derived workflow progress.
+- Local KWP modules now accept the canonical `scan`, `review`, and `prove`
+  descriptor phases while retaining the deprecated `hunt` and `confirm`
+  aliases. Module and contributor guidance now describes the shipped Rust/KWP
+  surface instead of the retired TypeScript SDK.
+
 **Security:**
 
 - Durable finding identity now rejects canonical fingerprint, deduplication,

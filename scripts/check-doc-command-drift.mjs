@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, statSync } from "node:fs";
 import path from "node:path";
 
 const repo = process.cwd();
@@ -54,14 +54,20 @@ const currentGuidanceFiles = [
   "AGENTS.md",
   "CLAUDE.md",
   "CONTRIBUTING.md",
+  "README.md",
+  "docs/OPERATOR.md",
   "docs/architecture/domain-boundaries.md",
+  "docs/assessments/mode-parity.md",
   "docs/current-architecture.mmd",
   "docs/devex/new-contributor-map.md",
+  "docs/modules.md",
+  "docs/operator-control-surfaces.md",
+  "docs/plans/product-flow-functional-spec.md",
 ];
 
 const modelGuidanceFiles = currentGuidanceFiles;
 
-const packageScriptGuidanceFiles = ["CONTRIBUTING.md", ".github/PULL_REQUEST_TEMPLATE.md"];
+const packageScriptGuidanceFiles = [...currentGuidanceFiles, ".github/PULL_REQUEST_TEMPLATE.md"];
 const pnpmCommandsWithoutScripts = new Set(["exec", "install"]);
 
 const staleSplitPathPatterns = [
@@ -102,6 +108,19 @@ const staleModelPathPatterns = [
   { label: "deleted TS model enforcement path", regex: /src\/agent-runtime\/enforcement\.ts/ },
 ];
 
+const staleModuleContractPatterns = [
+  {
+    label: "deleted TypeScript module SDK import",
+    regex: /from\s+["']kuzushi\/(?:modules|testing)["']/,
+  },
+  { label: "deleted JS registry preparation API", regex: /ModuleRegistry\.prepareToolInput/ },
+  { label: "deleted dynamic UI-store handle", regex: /(?:ExecutionContext|ctx)\.uiStore/ },
+  { label: "deleted dynamic TTY probe", regex: /process\.stdout\.isTTY/ },
+  { label: "retired bridge verbose env", regex: /KUZUSHI_BRIDGE_VERBOSE/ },
+  { label: "retired bridge log env", regex: /KUZUSHI_BRIDGE_LOG(?:\b|=)/ },
+  { label: "retired MCP timeout env", regex: /KUZUSHI_MCP_TOOL_TIMEOUT_MS/ },
+];
+
 const allowedContext =
   /\b(legacy|historical|removed|unsupported|not current|does not support|does not expose|do not use|do not add|do not resurrect|deleted|reference-only|preserved reference|retained TypeScript\/Ink references|old TypeScript|former TypeScript)\b/i;
 
@@ -110,12 +129,19 @@ const failures = [
     checkCurrentGuidancePaths(file, staleSplitPathPatterns),
   ),
   ...modelGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleModelPathPatterns)),
+  ...currentGuidanceFiles.flatMap((file) =>
+    checkCurrentGuidancePaths(file, staleModuleContractPatterns),
+  ),
 ];
 
 failures.push(...currentGuidanceFiles.flatMap(checkReferencedRepoPaths));
 failures.push(...packageScriptGuidanceFiles.flatMap(checkPackageScriptReferences));
 failures.push(...canonicalContributorFailures());
+failures.push(...canonicalAgentGuideFailures());
 failures.push(...canonicalReadmeFailures());
+failures.push(...canonicalModuleGuideFailures());
+failures.push(...canonicalExecutionBoundaryFailures());
+failures.push(...canonicalPackageSurfaceFailures());
 failures.push(...canonicalRoadmapFailures());
 failures.push(...canonicalProductFlowPrdFailures());
 failures.push(...canonicalParityTestFailures());
@@ -333,14 +359,120 @@ function canonicalContributorFailures() {
   ].filter(Boolean);
 }
 
+function canonicalAgentGuideFailures() {
+  const file = "CLAUDE.md";
+  const stats = lstatSync(path.join(repo, file));
+  const failures = [];
+  if (!stats.isSymbolicLink()) {
+    failures.push({
+      file,
+      line: 1,
+      pattern: "duplicate agent guide",
+      text: "CLAUDE.md must be a symlink to AGENTS.md",
+    });
+  } else if (readlinkSync(path.join(repo, file)) !== "AGENTS.md") {
+    failures.push({
+      file,
+      line: 1,
+      pattern: "wrong agent-guide symlink",
+      text: readlinkSync(path.join(repo, file)),
+    });
+  }
+
+  const agents = readFileSync(path.join(repo, "AGENTS.md"), "utf8");
+  const claude = readFileSync(path.join(repo, file), "utf8");
+  failures.push(
+    requiredDocTextFailure(
+      "AGENTS.md",
+      agents,
+      "# Kuzushi agent guide",
+      "tool-neutral agent guide title",
+    ),
+    forbiddenDocTextFailure("AGENTS.md", agents, "# CLAUDE.md", "tool-specific guide title"),
+  );
+  if (agents !== claude) {
+    failures.push({
+      file,
+      line: 1,
+      pattern: "divergent agent guide",
+      text: "CLAUDE.md and AGENTS.md must resolve to identical content",
+    });
+  }
+  return failures.filter(Boolean);
+}
+
 function canonicalReadmeFailures() {
   const file = "README.md";
   const text = readFileSync(path.join(repo, file), "utf8");
   return [
-    requiredDocTextFailure(file, text, "Published compatibility SDK source", "retained SDK role"),
+    requiredDocTextFailure(file, text, "There is no TypeScript SDK", "current Node boundary"),
+    forbiddenDocTextFailure(file, text, "Published compatibility SDK source", "retired SDK claim"),
+    forbiddenDocTextFailure(file, text, "`src/modules/`", "deleted TypeScript module source"),
+    forbiddenDocTextFailure(file, text, "`src/testing/`", "deleted TypeScript testing source"),
     forbiddenDocTextFailure(file, text, "`src/agents/`", "deleted TS agents path"),
     forbiddenDocTextFailure(file, text, "scanner normalization", "deleted TS scanner runtime"),
   ].filter(Boolean);
+}
+
+function canonicalModuleGuideFailures() {
+  const file = "docs/modules.md";
+  const text = readFileSync(path.join(repo, file), "utf8");
+  return [
+    requiredDocTextFailure(
+      file,
+      text,
+      "There is no TypeScript authoring SDK",
+      "current module authoring boundary",
+    ),
+    requiredDocTextFailure(
+      file,
+      text,
+      "scripts/kuzushi-dynamic-module-host.mjs",
+      "live dynamic host path",
+    ),
+    requiredDocTextFailure(file, text, "kuzushi.lock", "local KWP approval boundary"),
+    forbiddenDocTextFailure(file, text, "ModuleLoadError", "deleted TypeScript loader API"),
+    forbiddenDocTextFailure(file, text, "defineModule()", "deleted TypeScript authoring helper"),
+    forbiddenDocTextFailure(file, text, "defineTool", "deleted TypeScript authoring helper"),
+  ].filter(Boolean);
+}
+
+function canonicalExecutionBoundaryFailures() {
+  const files = [
+    "AGENTS.md",
+    "docs/modules.md",
+    "docs/OPERATOR.md",
+    "docs/assessments/mode-parity.md",
+    "docs/operator-control-surfaces.md",
+    "docs/plans/product-flow-functional-spec.md",
+  ];
+  return files.flatMap((file) => {
+    const text = readFileSync(path.join(repo, file), "utf8");
+    return [
+      requiredDocTextFailure(
+        file,
+        text,
+        "prepare_dispatch_input",
+        "authorization-bound preparation API",
+      ),
+      requiredDocTextFailure(
+        file,
+        text,
+        "dispatch_prepared_input_with_runtime",
+        "authorization-bound dispatch API",
+      ),
+    ].filter(Boolean);
+  });
+}
+
+function canonicalPackageSurfaceFailures() {
+  const file = "package.json";
+  const manifest = JSON.parse(readFileSync(path.join(repo, file), "utf8"));
+  const exported = manifest.exports ?? {};
+  return ["./modules", "./testing"].flatMap((name) => {
+    if (!(name in exported)) return [];
+    return [{ file, line: 1, pattern: "retired TypeScript SDK export", text: name }];
+  });
 }
 
 function canonicalRoadmapFailures() {

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kuzushi.dev/schemas/module.manifest.schema.json",
   "title": "Kuzushi Module Manifest",
-  "description": "Declarative manifest for a Kuzushi CopilotModule. Lives at the package root as `module.manifest.json` for file-based / package-based modules.",
+  "description": "Published compatibility metadata for a Kuzushi package/file module. Local KWP execution authority is granted separately through kuzushi.lock.",
   "type": "object",
   "required": ["id", "displayName", "version", "category", "entry"],
   "additionalProperties": true,
@@ -20,7 +20,7 @@
     "version": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+([-+].+)?$",
-      "description": "Semver of this module (independent of kuzushiSdkVersion)."
+      "description": "Semver of this module, independent of the optional host-compatibility field."
     },
     "description": {
       "type": "string",
@@ -40,7 +40,7 @@
     "license": { "type": "string" },
     "kuzushiSdkVersion": {
       "type": "string",
-      "description": "Host SDK version the module was built against. A bare semver (0.19.1) or a range (>=0.19, ^1.0.0). The loader warns on major-version drift.",
+      "description": "Deprecated compatibility metadata naming the expected Kuzushi host version. Local KWP workers negotiate the protocol and exact host package version at startup instead.",
       "pattern": "^([\\^~>=<]*\\s*)?\\d+(\\.\\d+){0,2}([-+].+)?(\\s*\\|\\|\\s*.+)?$"
     },
     "requires": {
@@ -50,22 +50,22 @@
         "env": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Environment variables that must be set."
+          "description": "Compatibility metadata only; it does not grant a local KWP worker access to environment variables."
         },
         "bins": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "CLI binaries that must exist on PATH."
+          "description": "Compatibility metadata only; it does not grant a local KWP worker process execution."
         },
         "nodeVersion": {
           "type": "string",
-          "description": "Minimum Node.js version (e.g. '>=22')."
+          "description": "Compatibility metadata for a package host (for example, '>=22')."
         }
       }
     },
     "configSchema": {
       "type": "object",
-      "description": "Per-module config JSON Schema. Validated against `opts.moduleConfig` before init()."
+      "description": "Compatibility metadata for per-module configuration; it does not grant local KWP capabilities."
     }
   }
 }

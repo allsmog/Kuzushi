@@ -52,11 +52,6 @@ fn persist_unresolved_scan_result(target: &std::path::Path, run_id: &str) -> Pha
     )
 }
 
-fn persist_selected_scan_result(target: &std::path::Path, run_id: &str) {
-    let completed = persist_unresolved_scan_result(target, run_id);
-    crate::test_support::select_typed_attempt(target, &completed);
-}
-
 fn app_with_open_guided_other() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     let mut flow = GuidedScanFlow::new(GuidedScanStage::MapRoute);
@@ -689,6 +684,10 @@ fn selecting_map_result_continues_into_scan_module_questions() {
         )));
     assert!(app.bind_guided_phase_result(WorkflowPhase::Map, attempt_id));
     app.show_guided_phase(WorkflowPhase::Map);
+    assert!(
+        app.guided_scan_question_model().is_none(),
+        "selectable completions use the compact phase receipt, not a guided card"
+    );
 
     let update = app.apply_phase_result_command(PhaseResultCommand::Continue);
 
@@ -878,21 +877,28 @@ fn guided_attention_preserves_body_focus_and_scroll_from_mouse_input() {
     );
 }
 
-/// A RESULT checkpoint collapses the body, so body cursor keys must not act
+/// A non-success RESULT checkpoint collapses the body, so body cursor keys must not act
 /// on the invisible body — but the checkpoint is NOT a modal: page and mode
 /// navigation stay live under it (the G4 wedge fix; see
 /// `unresolved_partial_result_does_not_wedge_page_navigation`).
 #[test]
-fn result_ready_attention_consumes_body_navigation_keys() {
+fn dominant_result_attention_consumes_body_navigation_keys() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
-    persist_selected_scan_result(target.path(), "scan-prior");
+    persist_adequate_map_result(target.path(), "run-map-accepted");
+    let accepted = crate::test_support::append_typed_attempt(
+        target.path(),
+        WorkflowPhase::Map,
+        "run-map-accepted",
+        PhaseAttemptOutcome::Completed,
+    );
+    crate::test_support::select_typed_attempt(target.path(), &accepted);
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let completed = PhaseAttemptCompleted::new(
         WorkflowPhase::Map,
         vec!["run-map-1".to_string()],
         PhaseTargetSnapshot::capture(target.path()),
-        PhaseAttemptOutcome::Completed,
+        PhaseAttemptOutcome::Partial,
     );
     append_phase_attempt_completed(target.path(), completed).unwrap();
     app.refresh_phase_attempt_projection();

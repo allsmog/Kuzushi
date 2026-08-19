@@ -4832,8 +4832,10 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     store
         .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
-    let stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
-    let stored_later = make_finding(Severity::High, "zzzz1111", "stored later");
+    let mut stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
+    stable_first.file_path = "src/a.rs".to_string();
+    let mut stored_later = make_finding(Severity::High, "zzzz1111", "stored later");
+    stored_later.file_path = "src/z.rs".to_string();
     store.insert_finding("run-1", &stable_first).unwrap();
     store.insert_finding("run-1", &stored_later).unwrap();
     seed_run_artifact_start(workspace.root(), "run-1", "scan", "sast:scan");
@@ -4876,9 +4878,13 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     let items_after = wait_for_file_text(&items_path, r#""status":"completed""#);
     assert_ne!(items_after, items_before);
 
-    assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
-    }));
+    assert!(
+        app.log_lines().iter().any(|line| {
+            line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
+        }),
+        "scan logs: {:?}",
+        app.log_lines()
+    );
     assert!(app.log_lines().iter().any(
         |line| line.prefix == "result" && line.body == "fail (2 findings / 2 high) exit_hint=1"
     ));
@@ -11255,7 +11261,7 @@ fn closing_the_planner_restores_the_workbench_page_the_operator_came_from() {
 }
 
 #[test]
-fn locked_future_page_keeps_the_current_view_and_explains_why() {
+fn future_page_browsing_does_not_advance_journey_reality() {
     let target = tempfile::tempdir().expect("target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.path().to_path_buf()));
@@ -11264,13 +11270,18 @@ fn locked_future_page_keeps_the_current_view_and_explains_why() {
 
     assert_eq!(
         crate::ui_view_models::active_workbench_page(&app),
-        WorkbenchPage::Map
+        WorkbenchPage::Review
     );
-    let notice = app.advisory().notice.as_ref().expect("lock notice");
-    assert_eq!(notice.severity, crate::NoticeSeverity::Error);
     assert_eq!(
-        notice.message,
-        "Review is locked — no vulnerabilities to review; complete Scan or import findings"
+        crate::ui_view_models::journey_model(&app)
+            .expect("target-backed journey")
+            .current,
+        WorkflowPhase::Map,
+        "browsing Review must not forge durable phase progress"
+    );
+    assert!(
+        app.advisory().notice.is_none(),
+        "browsable future pages must not emit a stale lock error"
     );
 }
 
@@ -14817,14 +14828,17 @@ fn dense_prove_can_open_its_hidden_fourth_surface_as_a_focused_deck() {
 
 #[test]
 fn phase_page_navigation_does_not_pollute_the_operator_transcript() {
+    let target = tempfile::tempdir().expect("target");
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(target.path().to_path_buf()));
     app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_page(Some(WorkbenchPage::Map));
     let transcript_len = app.log_lines().len();
 
-    for _ in 0..WorkbenchPage::ALL.len() * 2 {
+    let mut visited = Vec::new();
+    for _ in 0..WorkbenchPage::ALL.len() {
         press_key(
             &mut app,
             crossterm::event::KeyEvent::new(
@@ -14832,10 +14846,27 @@ fn phase_page_navigation_does_not_pollute_the_operator_transcript() {
                 crossterm::event::KeyModifiers::SHIFT,
             ),
         );
+        visited.push(app.router.workbench().page().expect("workbench page"));
     }
 
     assert_eq!(app.log_lines().len(), transcript_len);
+    assert_eq!(
+        visited,
+        vec![
+            WorkbenchPage::Scan,
+            WorkbenchPage::Review,
+            WorkbenchPage::Prove,
+            WorkbenchPage::Fix,
+            WorkbenchPage::Map,
+        ]
+    );
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Map));
+    assert_eq!(
+        crate::ui_view_models::journey_model(&app)
+            .expect("journey")
+            .current,
+        WorkflowPhase::Map
+    );
 }
 
 #[test]

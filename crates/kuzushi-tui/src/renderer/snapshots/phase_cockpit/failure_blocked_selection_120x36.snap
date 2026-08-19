@@ -6,7 +6,7 @@ size: 120x36
 ---
 KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
  Map ● · Scan ○ · Review × · Prove × · Fix ×
- ▸ NEXT build or explicitly skip the current-revision map
+ ▸ NEXT live run settlement is not healthy and durable; inspect the run before continuing
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
 │RECORDED ENGINE OUTCOMES
 │⚠ Scan attempt · partial

@@ -25,7 +25,7 @@ export default {
       description: "Select a fuzz target and run it through the host fuzz executor.",
       headless: true,
       runtimeRequirement: "never",
-      phase: "hunt",
+      phase: "scan",
       effect: "workspace-write",
       approval: "none",
       workspaceRequirement: "required",

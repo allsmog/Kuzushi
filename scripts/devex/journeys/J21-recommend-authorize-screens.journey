@@ -74,10 +74,11 @@ wait: 1
 keys: Enter
 wait-for: 10 STEP 3 OF 3
 keys: a
-wait-live-snap: 60 RESULT READY | 7-map-result-ready
-expect: Use map & choose Scan modules
+wait-live-snap: 60 SYSTEM SUMMARY | 7-map-result-ready
+expect: RESULT READY
+expect: Map ready
 ask: Result gate — does the completed Map stop with a receipt and recommend (not auto-run) the hand-off to Scan?
-keys: Enter
+keys: n
 wait-live-snap: 15 Seeded by | 8-configure-scan
 expect: Seeded by the threat model
 expect: RECOMMENDED

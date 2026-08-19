@@ -6,6 +6,7 @@
 use super::*;
 use crate::theme;
 use crate::ui_view_models::{phase_cockpit_model_for_phase, PhaseCockpitBody};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
@@ -126,6 +127,71 @@ fn ready_map_renders_the_gallery_as_its_primary_body() {
     assert!(text.contains("views  [summary] · dfd"), "{text}");
     assert!(!text.contains("REPOSITORY / DATA-FLOW MAP"), "{text}");
     assert!(!text.contains("PROJECT CONTEXT · NEXT SCANS"), "{text}");
+}
+
+#[test]
+fn unresolved_completed_map_keeps_the_gallery_primary_with_a_compact_receipt() {
+    let mut fixture = PhaseReferenceFixture::new(WorkbenchPage::Map, 120, 36);
+    let target = fixture.target().to_path_buf();
+    crate::test_support::seed_fira_shaped_completed_map_attempt(&target);
+    fixture.app.clear_running_tool_for_test();
+    fixture.app.refresh_phase_attempt_projection();
+
+    let text = render_compact_map_result(&fixture);
+    assert_compact_map_result(&fixture, &text);
+    navigate_and_accept_compact_map_result(&mut fixture);
+}
+
+fn render_compact_map_result(fixture: &PhaseReferenceFixture) -> String {
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).expect("compact result terminal");
+    terminal
+        .draw(|frame| render_app(frame, &fixture.app))
+        .expect("compact result render");
+    fixture.normalize(buffer_text(terminal.backend().buffer()))
+}
+
+fn assert_compact_map_result(fixture: &PhaseReferenceFixture, text: &str) {
+    let plan = crate::workbench_phase_plan_for_app(
+        &fixture.app,
+        ratatui::layout::Rect::new(0, 0, 120, 36),
+    )
+    .expect("workbench plan");
+
+    assert_ne!(plan.density, crate::ui_view_models::LayoutDensity::Guided);
+    assert!(text.contains("SYSTEM SUMMARY"), "{text}");
+    assert!(text.contains("RESULT READY"), "{text}");
+    assert!(text.contains("Map ready"), "{text}");
+    assert!(text.contains("2 run(s)"), "{text}");
+    assert!(!text.contains("Recommended 5 module tool(s)"), "{text}");
+    assert!(fixture
+        .app
+        .engagement
+        .unresolved_phase_attempt(kuzushi_core::WorkflowPhase::Map)
+        .is_some());
+}
+
+fn navigate_and_accept_compact_map_result(fixture: &mut PhaseReferenceFixture) {
+    fixture.app.set_input_mode(crate::InputMode::Navigate);
+    fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+    assert_eq!(
+        fixture.app.current_map_viz_page(),
+        crate::scene3d::VizPage::Dfd
+    );
+    fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE));
+    assert!(fixture
+        .app
+        .engagement
+        .unresolved_phase_attempt(kuzushi_core::WorkflowPhase::Map)
+        .is_none());
+    assert_eq!(
+        crate::ui_view_models::active_workbench_page(&fixture.app),
+        WorkbenchPage::Map
+    );
 }
 
 #[test]

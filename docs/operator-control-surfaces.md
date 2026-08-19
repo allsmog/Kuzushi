@@ -2,7 +2,10 @@
 
 Kuzushi tool behavior is driven by canonical tool options. CLI flags, shell
 commands, persisted option stores, and direct `run` input all converge on
-`ModuleRegistry::prepare_tool_input`.
+`ModuleRegistry::prepare_dispatch_input`. Its `prepare_tool_input` stage owns
+descriptor option merging and validation before workspace, prompt, execution,
+and authorization bindings are added. Authorized prepared values then execute
+through `dispatch_prepared_input_with_runtime` or its observed variant.
 
 ## Canonical Boundary
 
@@ -637,8 +640,14 @@ a positive integer; invalid or zero values fail closed instead of restoring an
 unbounded wait. Cancellation and pipe-failure guards can still stop a bridge
 earlier.
 
+Agent-backed tools expose `mcpToolTimeoutMs`, `bridgeVerbose`, and
+`bridgeLogPath` as descriptor options. The last two emit metadata-only
+diagnostics. Adapter-only emergency hooks `KUZUSHI_BRIDGE_DEBUG_DUMP` and
+`KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT` use that same redacted projection; the
+legacy `FULL_PROMPT` name does not cause prompt text to be written.
+
 Some existing scanner/tool adapters still read compatibility env vars for
 local binaries, caches, timeouts, or external toolchain integration (for
-example CodeQL, Clang, rev.ng, and MCP bridge knobs). Treat those as
-legacy adapter-boundary exceptions: do not add new product behavior env vars,
-and migrate touched knobs toward declared options or config.
+example CodeQL, Clang, and rev.ng). Treat those as legacy adapter-boundary
+exceptions: do not add new product behavior env vars, and migrate touched knobs
+toward declared options or config.

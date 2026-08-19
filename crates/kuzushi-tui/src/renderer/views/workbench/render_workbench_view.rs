@@ -162,7 +162,12 @@ fn displayed_zoom(
 fn phase_attention_mode(question_visible: bool, phase: &PhaseCockpitModel) -> AttentionMode {
     if question_visible {
         AttentionMode::GuidedQuestion
-    } else if phase.header.result_card.is_some() {
+    } else if phase
+        .header
+        .result_card
+        .as_ref()
+        .is_some_and(|card| card.emphasis == crate::PhaseResultEmphasis::DominantDecision)
+    {
         AttentionMode::ResultReady
     } else {
         AttentionMode::Normal

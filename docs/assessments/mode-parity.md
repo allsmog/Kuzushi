@@ -17,16 +17,20 @@ belong in migration ledgers, not in this current operator contract.
 
 ## Shared Boundary
 
-All modes should prepare and dispatch tools through the Rust module registry:
+All registry-backed modes use the authorization-bound Rust module flow:
 
-- `ModuleRegistry::prepare_tool_input(...)`
-- `ModuleRegistry::dispatch_prepared_tool_with_runtime(...)`
+- `ModuleRegistry::prepare_dispatch_input(...)`
+- bind any required explicit or interactive authorization
+- `ModuleRegistry::dispatch_prepared_input_with_runtime(...)`, or the observed
+  variant when the caller needs lifecycle artifacts
 
 The implementation lives under
 `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/`. Mode-specific
 code may create workspace, runtime, trace, option-store, and cancellation
 context, but descriptor-backed option validation and output normalization belong
-to the shared registry boundary.
+to the shared registry boundary. The raw
+`dispatch_prepared_tool_with_runtime(name, Value, ...)` API remains a
+re-preparing compatibility wrapper, not the pattern for new callers.
 
 ## Current Matrix
 
@@ -181,10 +185,10 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   remains hidden until `Start Map` commits the engagement; visiting Scan,
   Review, Prove, or Fix does not advance it. Legacy scan/triage/verification/
   patch artifacts are inferred without rewriting them. All five page names stay
-  visible after engagement start; unavailable future pages carry a locked
-  marker, page cycling skips them, and direct selection explains the missing
-  prerequisite. Historical artifacts independently reopen their corresponding
-  page even when the next required phase has moved backward.
+  visible after engagement start; unavailable future pages carry an unavailable
+  marker, but page cycling and direct selection can still inspect their honest
+  empty state. Historical artifacts populate their corresponding page even when
+  the next required phase has moved backward.
 - **The relevant-finding corpus is mode-shared.** Review and default bulk triage
   consume all open, non-suppressed findings in the vulnerability database, not
   merely the findings attached to the selected Scan attempt. An explicit scan

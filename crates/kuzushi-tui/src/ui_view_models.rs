@@ -371,11 +371,10 @@ pub(crate) use viz_data::{
     WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
-    active_review_queue_mode, active_workbench_page, adjacent_available_workbench_page,
-    work_liveness, workbench_page_access, workbench_presentation_snapshot,
-    workbench_report_command, workbench_reverify_control_hint, WorkLiveness, WorkbenchChromeModel,
-    WorkbenchHint, WorkbenchPageAccess, WorkbenchPresentationSnapshot, WorkbenchState,
-    WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
+    active_review_queue_mode, active_workbench_page, work_liveness,
+    workbench_presentation_snapshot, workbench_report_command, workbench_reverify_control_hint,
+    WorkLiveness, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
+    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

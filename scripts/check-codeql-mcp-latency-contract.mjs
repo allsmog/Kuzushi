@@ -4,18 +4,7 @@ import { readFileSync } from "node:fs";
 
 const contracts = [
   {
-    file: "AGENTS.md",
-    required: [
-      "result memo for dependency-free local query selectors",
-      "A memo hit skips `codeql database analyze`",
-      "full content authentication of the database tree",
-      "proportional to database size",
-      "local queries with imports are rejected",
-      "OS-sandboxed snapshot paths",
-    ],
-  },
-  {
-    file: "CLAUDE.md",
+    file: "docs/modules.md",
     required: [
       "result memo for dependency-free local query selectors",
       "A memo hit skips `codeql database analyze`",

@@ -13,7 +13,8 @@ The cutover preserves:
 
 - existing `.kuzushi` paths and legacy run/finding/proof/patch artifacts;
 - the run trace schema and chain -> plan -> steer queue order;
-- shared `prepare_tool_input` and `dispatch_prepared_tool_with_runtime` policy;
+- shared `prepare_dispatch_input` and
+  `dispatch_prepared_input_with_runtime` authorization-bound policy;
 - explicit target consent and context-sensitive `Ctrl+C`/`Ctrl+D`: immediate
   idle exit, active-work cancellation without exit, and safe waiting while
   cancellation is pending;

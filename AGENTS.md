@@ -1,6 +1,7 @@
-# CLAUDE.md
+# Kuzushi agent guide
 
-This guide is for AI/code agents (Claude, Codex, etc.) working in Kuzushi.
+This guide is for AI/code agents working in Kuzushi. `CLAUDE.md` is a symlink
+to this file; maintain one source of truth here.
 
 ## Module system
 
@@ -18,11 +19,14 @@ Kuzushi has one live Rust dispatch boundary and three execution modes:
    tool dispatch.
 3. **run mode** (`kuzushi run`) — headless single-tool execution.
 
-All three should converge on `ModuleRegistry::prepare_tool_input(...)` followed
-by `dispatch_prepared_tool_with_runtime(...)` in
+All three should converge on `ModuleRegistry::prepare_dispatch_input(...)`,
+bind any required explicit or interactive authorization, and then call
+`dispatch_prepared_input_with_runtime(...)` (or its observed variant) in
 `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs`. That
-boundary owns descriptor-driven option validation, stored-option merging, trace
-scoping, runtime wrapping, and output normalization. Mode-specific code may
+boundary owns descriptor-driven option validation, stored-option merging, path
+and prompt binding, authorization, trace scoping, runtime wrapping, and output
+normalization. The raw `dispatch_prepared_tool_with_runtime(name, Value, ...)`
+method remains a re-preparing compatibility wrapper. Mode-specific code may
 prepare workspace/runtime/cancellation context, but it should not duplicate
 tool policy or option parsing.
 
@@ -96,16 +100,12 @@ attaches as agent tools when a module asks for it:
 
 The bridge wires these in when the request carries
 `toolPolicy.mcps === true` (set by `taint-iris-next:hunt` automatically
-via `AgentToolPolicy::with_mcps(true)`) or when the operator forces it
-with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
-
-- `KUZUSHI_BRIDGE_VERBOSE=1` — bridge stderr is drained on a background
-  thread and forwarded to the parent's stderr in real time.
-- `KUZUSHI_BRIDGE_LOG=<path>` — also append every bridge log line to
-  `<path>` (useful when stdout is being captured by Rust).
-- `KUZUSHI_MCP_TOOL_TIMEOUT_MS=<N>` — cap per-MCP-tool-call wall-clock
-  so a runaway codeql query surfaces as a tool error instead of
-  hanging the agent loop.
+via `AgentToolPolicy::with_mcps(true)`) or when the operator forces it with
+the adapter compatibility switch `KUZUSHI_AGENT_MCPS=1`. Normal agent tools
+declare `mcpToolTimeoutMs`, `bridgeVerbose`, and `bridgeLogPath` as descriptor
+options. The adapter-only emergency hooks `KUZUSHI_BRIDGE_DEBUG_DUMP` and
+`KUZUSHI_BRIDGE_DEBUG_FULL_PROMPT` emit the same metadata-only diagnostic
+projection; despite the latter's legacy name, it does not write prompt text.
 
 ### Load specifiers
 
@@ -280,8 +280,7 @@ for the operator-facing contract and precedence rules.
 
 Tool/module behavior should flow through declared options, not scattered
 environment variables or ad hoc JSON keys. Treat `OptionSpec` metadata and
-`ModuleRegistry.prepareToolInput` / Rust `prepare_tool_input` as the canonical
-tool-input boundary.
+Rust `prepare_dispatch_input` as the canonical tool-input boundary.
 
 - Tool options are the source of truth for module behavior. Add new knobs to
   the tool descriptor first, with aliases only for compatibility.
@@ -305,14 +304,11 @@ tool-input boundary.
 
 ### Troubleshooting pointers
 
-All `ModuleLoadError` codes and their fixes live in
-[docs/modules.md §12](./docs/modules.md#12-load-errors--moduleloaderror).
-The most common agent-facing surprises:
-
-- `SHAPE_INVALID` with "does not start with" — the tool name lacks the
-  module-id prefix; use `defineTool<"<id>">({...})` to catch at compile time.
-- `ID_MISMATCH` — manifest `id` ≠ exported module `id`.
-- `SDK_INCOMPATIBLE` — manifest `kuzushiSdkVersion` major drifts from host.
+Current KWP load failures and fixes live in
+[docs/modules.md § Troubleshooting](./docs/modules.md#troubleshooting). Common
+causes are a tool name without its module-id prefix, missing descriptor policy,
+an unlabeled path option, a changed digest without renewed approval, or a
+protocol/host-version mismatch. There is no TypeScript `ModuleLoadError` API.
 
 ---
 
@@ -326,11 +322,11 @@ is expected to behave identically and should be filed as a parity bug.
 ### Shared by all three modes
 
 - Tool execution should pass through
-  `ModuleRegistry::prepare_tool_input(...)` and
-  `dispatch_prepared_tool_with_runtime(...)`. The CLI, shell, and scan
-  application code may differ in how they create workspace/runtime/cancellation
-  context, but descriptor-backed option validation and output normalization live
-  in the shared Rust registry path.
+  `ModuleRegistry::prepare_dispatch_input(...)`, authorization binding, and
+  `dispatch_prepared_input_with_runtime(...)` (or its observed variant). The
+  CLI, shell, and scan application code may differ in how they create
+  workspace/runtime/cancellation context, but descriptor-backed option
+  validation and output normalization live in the shared Rust registry path.
 - `ToolExecutionContext` carries the same core Rust handles where they are
   available: `config`, optional `workspace`, optional `findings_store`, and
   optional `trace`. Tools must treat optional handles as optional and fail with
@@ -422,8 +418,8 @@ is expected to behave identically and should be filed as a parity bug.
   target-gated, with a `⚠` when it throttles the walker) and the raise/lower
   chord (`app/state_transitions/key_dispatch.rs::handle_autonomy_key`) are
   interactive-only. The *policy* is shared: the pure
-  `modules::autonomy::gate(name, posture)` runs once in
-  `dispatch_prepared_tool_with_runtime` and **only refuses** tools above the
+  `modules::autonomy::gate(name, posture)` runs once in the shared prepared
+  dispatch path and **only refuses** tools above the
   ceiling — it never redirects/substitutes a tool/model/runtime (no-silent-
   fallback safe). Posture rides `V2Config.autonomy` (serde-skip, in-process,
   default `Fix` = unconstrained so headless callers are unchanged). `kuzushi
@@ -622,10 +618,6 @@ is expected to behave identically and should be filed as a parity bug.
   `.kuzushi/prompts/sast/verify.md` files into the internal triage/verify
   stages. New prompt knobs should be declared as `ToolDescriptor.options` and
   consumed from prepared input.
-- **`ExecutionContext.uiStore` is for live UI feedback only.** Scan
-  workers populate it; run mode leaves it undefined; shell wires it for
-  TTY paths. Tools must treat `uiStore` as optional (already enforced by
-  the type and the `host.capabilities.has("ui-store")` probe).
 - **`scan` mode enters the Rust scan application and dispatches the
   `sast:scan` tool through the shared registry boundary.** Additional scan-time
   behavior belongs in Rust descriptors/executors or in explicit
@@ -634,8 +626,8 @@ is expected to behave identically and should be filed as a parity bug.
 ### When you add a new feature
 
 1. Decide which mode(s) it belongs in. Default: all three.
-2. If shell-only, gate it on `process.stdout.isTTY` and add a one-liner
-   to the "Intentional asymmetries" list above.
+2. If shell-only, keep it in the Rust TUI presentation/application boundary
+   and add a one-liner to the "Intentional asymmetries" list above.
 3. If shared, add it to the Rust descriptor/executor path consumed by CLI,
    TUI, and scan application services. Keep config, option, runtime, and
    findings-store policy in shared helpers rather than duplicating it per mode.

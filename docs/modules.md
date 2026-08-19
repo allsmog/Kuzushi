@@ -1,571 +1,298 @@
-# Kuzushi Modules — Author's Guide
+# Kuzushi modules
 
-Canonical reference for building Kuzushi modules. The public SDK lives behind
-two package exports:
+This document describes the module surfaces implemented by the current Rust
+product. Kuzushi has two authoring paths:
 
-- `kuzushi/modules` — types + authoring helpers (`defineModule`, `defineTool`,
-  `ModuleLoadError`, narrow host handles).
-- `kuzushi/testing` — in-memory mocks for unit-testing a tool in isolation.
+- First-party capabilities are Rust descriptors plus Rust executors registered
+  in `ModuleRegistry`.
+- Third-party local capabilities are single-file JavaScript workers using the
+  brokered Kuzushi Worker Protocol (KWP).
+
+There is no TypeScript authoring SDK and the npm package does not export
+`kuzushi/modules` or `kuzushi/testing`. The published package contains the
+public schemas, native launcher, and Node support files used by the Rust
+product.
 
 Companion docs: [`mcp-server-requirements.md`](./mcp-server-requirements.md)
 for MCP-bridged modules; [`api-compatibility.md`](./api-compatibility.md)
 for legacy aliases and route compatibility; [`module-maturity.md`](./module-maturity.md)
 for Core, Labs, and Compatibility discovery policy;
 [`devex/06-module-sdk-assessment.md`](./devex/06-module-sdk-assessment.md)
-for the SDK audit that shaped the current surface.
+for the historical SDK audit that shaped the current surface.
 
-## 1. What is a module?
+## Sources of truth
 
-A **module** is a unit of capability composition. Each module exposes one or
-more **tools** (callable from shell, headless `run`, or pipeline tasks when
-the loading surface supports that mode) and
-optionally contributes pipeline **tasks**, **knowledge** packs, and event
-declarations. Kuzushi's shell, scan pipeline, and `run` command all dispatch
-through the same module contract — a tool written once works in all three
-modes.
+Use these in descending order when documentation and code disagree:
 
-## 2. Current Rust Product Status
+1. `schemas/module.manifest.schema.json` for the published compatibility
+   manifest shape.
+2. Rust descriptor and registry types under
+   `crates/kuzushi-core/src/modules/` for live product behavior.
+3. `scripts/kuzushi-dynamic-module-host.mjs` and
+   `crates/kuzushi-core/src/modules/dynamic_loader.rs` for the dynamic worker
+   protocol.
+4. `examples/kwp/agentic-fuzz/` for an executable local-worker example.
 
-Kuzushi has one module/tool contract, but not every loading surface is equally
-productized today.
+Changing a public schema or persisted `.kuzushi` contract requires a migration
+section in `RELEASING.md`, documentation, and focused compatibility tests.
 
-- **Built-in Rust modules are execution parts, not the default product
-  navigation.** The shell projects them into five workflow modes
-  (`map`, `scan`, `review`, `prove`, `fix`); `operate` remains a contextual
-  tool phase. Direct engines remain discoverable through `tools`, `/use`, scan
-  tasks, and `kuzushi run <module:tool>`.
-- **Retained TypeScript SDK modules are an authoring and compatibility
-  surface.** The SDK remains useful for tests, package shape, dynamic-module
-  descriptors, and migration references.
-- **Dynamic `file://`, local path, and `package:` module loading is supported
-  through the native CLI's global `--load` flag for shell and headless `run`.**
-  Local file/path modules execute as KWP workers only after the host hashes the
-  exact resolved bundle and finds an active `kuzushi.lock` approval for its
-  digest and descriptor hash. `package:` remains a trusted compatibility path.
-- **MCP servers and deferred plugin adapters are exact, explicit integrations.**
-  Rust MCP servers are exposed through `kuzushi mcp serve <backend>` and the
-  agent bridge. The legacy `mcp:` module specifier remains a parsed
-  compatibility form in the TypeScript SDK; it is not the native dynamic-loader
-  path.
+## Rust built-ins
 
-This guide documents the contract and the SDK shape. Shipping behavior should
-be checked against the shell capability projection, `kuzushi tools`, and the
-Rust registry tests before docs claim a capability is available to operators.
-`kuzushi modules` remains a machine-readable registry view, not the normal
-interactive journey.
+A live built-in is a `BuiltinModule` with `ToolDescriptor` values and a Rust
+executor mapping. The descriptor is the policy surface; the executor consumes
+already prepared canonical input.
 
-## 3. When to build one
+Important locations:
 
-Build a module when:
+- `crates/kuzushi-descriptor/src/` — tool metadata, `OptionSpec`, prompts,
+  phase, effect, approval, and runtime/workspace requirements.
+- `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/` — registration,
+  lookup, execution, DAG metadata, and output normalization.
+- `crates/kuzushi-core/src/modules/registry/` — registry facade and dynamic
+  module installation.
+- `crates/kuzushi-core/src/modules/options/` — stored-option merging,
+  validation, coercion, defaults, aliases, and unknown-key rejection.
+- `crates/kuzushi-core/src/modules/application/sast_scan/` — umbrella scan
+  orchestration and continuation stages.
 
-- You have a new scanner, intel feed, recon probe, or remediation action and
-  it shouldn't live inside the core `sast` module.
-- You want independent versioning, tests, and release cadence.
-- You need a stable capability boundary that can later graduate into the Rust
-  built-in registry or a supported dynamic-loader surface.
+### Dispatch contract
 
-## 4. Anatomy
+CLI scan, shell, and headless run must converge on the authorization-bound
+registry path:
+
+1. `ModuleRegistry::prepare_dispatch_input(...)` merges and validates options,
+   normalizes paths, applies declared prompt defaults, binds any repository
+   execution input, and returns an opaque `PreparedToolInput`.
+2. The launching mode adds any required explicit or interactive authorization.
+3. It dispatches with `dispatch_prepared_input_with_runtime(...)` or
+   `dispatch_prepared_input_observed_with_runtime(...)` when lifecycle
+   observation is required.
+
+The raw `dispatch_prepared_tool_with_runtime(name, Value, ...)` method remains a
+compatibility boundary. It deliberately re-runs preparation and should not be
+the model for new callers. Direct executor calls from a mode-specific path are
+not allowed.
+
+### Adding a built-in tool
+
+1. Choose a stable kebab-case module id and a tool name in
+   `<module-id>:<action>` form.
+2. Add a `ToolDescriptor` with an honest description, `headless` value, journey
+   phase, effect, approval policy, runtime/workspace/findings requirements, and
+   complete `OptionSpec` list.
+3. Add the executor and register it atomically with the module.
+4. Consume canonical prepared option names in the executor. Do not parse a
+   second CLI/TUI/env-only input surface.
+5. Add focused descriptor, preparation, executor, and mode-parity tests.
+6. Document the operator-visible tool in this guide or `docs/OPERATOR.md` /
+   `docs/assessments/mode-parity.md` as appropriate.
+
+`hidden: true` is reserved for internal nodes that must not appear in operator
+or model tool lists. `headless: false` means `kuzushi run` must reject the tool.
+DAG `depends_on` metadata does not schedule work unless the owning executor
+explicitly consumes it.
+
+### Options and prompts
+
+`OptionSpec` is the canonical user-input surface. It owns type coercion,
+defaults, choices, integer bounds, path semantics, aliases, and deprecated
+aliases. Unknown keys fail at preparation.
+
+Prompt-aware tools declare both prompt metadata and its canonical option. When
+that option is unset and an explicit workspace is available, dispatch
+preparation may load:
 
 ```text
-my-module/
-├── module.manifest.json   # declarative metadata (id, entry, requires)
-├── package.json           # npm manifest (peer-deps on kuzushi)
-├── tsconfig.json
-├── src/
-│   ├── index.ts           # exports `defineModule({...})` as default
-│   └── index.test.ts      # uses `kuzushi/testing` helpers
-└── README.md
+<target>/.kuzushi/prompts/<module-id>/<verb>.md
 ```
 
-The current Rust CLI does not ship a module scaffolder. Create this layout
-manually or copy an in-tree module fixture until a Rust-native scaffolder is
-added.
-
-## 5. Manifest — `module.manifest.json`
-
-| Field | Type | Required | Notes |
-|-------|------|----------|-------|
-| `id` | `string` | yes | `[a-z][a-z0-9-]*`. Must equal the exported module's `id`. |
-| `displayName` | `string` | yes | Shown in `/modules` and catalog. |
-| `version` | `string` | yes | Module's own semver. |
-| `description` | `string` | no | One-line summary. `defineModule()` enforces one sentence and <=140 chars when present. |
-| `category` | `"offense" \| "defense" \| "governance" \| "intel"` | yes | Grouping in the catalog. |
-| `entry` | `string` | yes | Relative path to the compiled entry (e.g. `./dist/index.js`). |
-| `kuzushiSdkVersion` | `string` | no (warn if missing) | Host SDK the module was authored against. Drift produces a warn. |
-| `requires` | `{ env?: string[]; bins?: string[]; nodeVersion?: string }` | no | Exposed through SDK helper checks; native Rust built-ins should use descriptor options/config instead. |
-| `configSchema` | `JSONSchema` | no | Validated against operator-supplied `moduleConfig` before `init()`. |
-| `author` / `license` | `string` | no | npm-style metadata. |
-
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/allsmog/Kuzushi/main/schemas/module.manifest.schema.json",
-  "id": "my-module",
-  "displayName": "My Module",
-  "version": "0.1.0",
-  "description": "Example custom module",
-  "category": "offense",
-  "entry": "./dist/index.js",
-  "kuzushiSdkVersion": "0.20.0",
-  "requires": { "nodeVersion": ">=22", "env": ["MY_API_KEY"] }
-}
-```
-
-The published schema at `schemas/module.manifest.schema.json` gives editors
-autocomplete and inline validation.
-
-## 6. The `CopilotModule` contract
-
-Use `defineModule()` from `kuzushi/modules`. It's an identity function that
-gives TypeScript tight inference and runs a construction-time guard that
-every tool name starts with the module id.
-
-```ts
-import { defineModule, defineTool } from "kuzushi/modules";
-import type { ExecutionContext, ToolResult } from "kuzushi/modules";
-
-const pingTool = defineTool<"my-module">({
-  name: "my-module:ping",
-  description: "Connectivity check.",
-  inputSchema: {
-    type: "object",
-    additionalProperties: false,
-    properties: { target: { type: "string" } },
-    required: ["target"],
-  },
-  headless: true,
-  phase: "operate",
-  effect: "read",
-  approval: "none",
-  workspaceRequirement: "required",
-  async execute(input, ctx): Promise<ToolResult> {
-    const target = (input as { target: string }).target;
-    ctx.reportActivity?.(`pinging ${target}`);
-    return { ok: true, output: `pong: ${target}`, data: { target } };
-  },
-});
-
-export default defineModule({
-  id: "my-module",
-  displayName: "My Module",
-  version: "0.1.0",
-  description: "Example module",
-  category: "offense",
-  rank: "normal",
-  tools: [pingTool],
-});
-```
-
-Optional fields: `rank` (`"manual" | "low" | "normal" | "good" | "great" | "excellent"`),
-`authors`, `references` (CVEs, ATT&CK techniques), `disclosureDate`, `notes`
-(stability / reliability / side-effects), `examples` (metadata for docs/tests),
-`requires`, `knowledge`, `events`, `hidden`,
-`init(config, ctx)`, `dispose()`.
-
-> **DAG participation.** DAG nodes are `DagTool`s declared inside `tools`.
-> Use `defineDagTool<"<id>">({...})`; hidden infrastructure nodes use the
-> same `DagTool` contract with `hidden: true`.
-
-For live Rust built-in behavior, use the Rust descriptor/executor path as the
-reference: `crates/kuzushi-core/src/modules/workspace_module.rs` for
-descriptors and `crates/kuzushi-core/src/modules/application/sast_scan/` for
-umbrella orchestration. The retained TypeScript files under `src/modules` are
-SDK compatibility surfaces, not the runtime for built-in scan/shell/run
-behavior.
-
-Model-backed tools that offer operator-editable instructions declare prompt
-metadata on ToolDescriptor. Each entry names its role, canonical option key,
-built-in instruction template, and project override location under
-.kuzushi/prompts. This metadata drives shell preflight review; generated
-repository context is not embedded in the editable template. A tool without
-prompt metadata must not be presented as editable merely because it uses a
-model.
-
-Prompt provenance is part of the dispatch contract. Text auto-loaded from
-`<target>/.kuzushi/prompts/<module>/<verb>.md`, or read through a prompt path
-inside the target, is repository-owned data. The shared preparation boundary
-wraps it as optional focus/context below the descriptor's immutable built-in
-safety and output-contract instructions; it never becomes a replacement
-system prompt. Target-local workspace option stores may not set descriptor
-prompt keys. Explicit inline prompt text from one-shot tool input, shell
-session options, or the operator-owned global option store remains an explicit
-operator replacement. Scan, shell, and run all apply this split through the
-same Rust registry preparation path.
-
-## 7. Writing a tool
-
-Every tool:
-
-- Has a fully-qualified name `<module-id>:<action>`. **Enforced at load time** —
-  the loader throws `ModuleLoadError{ code: "SHAPE_INVALID" }` if a tool's
-  name doesn't start with the module id.
-- Has an `inputSchema` (JSON Schema; top-level `type: "object"`).
-- Has a `headless: boolean`. `headless: true` means **no TTY, no stdin prompts,
-  no interactive subprocess attach** — the tool is safe to dispatch from
-  `kuzushi run` and pipeline mode. If your tool asks the operator a question,
-  mark it `headless: false`.
-- Returns `ToolResult`: `{ ok, output, data?, costUsd? }`.
-
-Duplicate tool names inside a single module are rejected. `costUsd` is optional
-but recommended for LLM-driven tools — the shell accumulates it into the
-per-run cost footer.
-
-### `defineTool` compile-time prefix check
-
-```ts
-// Fails TypeScript before you run it:
-defineTool<"my-module">({
-  name: "other:scan",   // ← Type '"other:scan"' is not assignable to type `my-module:${string}`
-  // ...
-});
-```
-
-### 7.1. Writing a `DagTool`
-
-A `DagTool` is a `ModuleTool` that participates in the scan pipeline DAG.
-It has everything a normal tool has (`name`, `inputSchema`, `execute`) plus a
-`dag` block that declares its `outputKind`, upstream `dependsOn` ids,
-optional `condition`, `promptMode`, `toolPolicy`, and per-finding
-`triageAgentConfig`.
-
-```ts
-import { defineDagTool, requireDag } from "kuzushi/modules";
-import type { ExecutionContext } from "kuzushi/modules";
-import type { Finding } from "kuzushi/scanners";
-import type { ScanOpts } from "kuzushi";
-
-const scan = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
-  name: "my-scanner:hunt",
-  displayName: "My Scanner",
-  description: "LLM-driven hunt for weirdness X.",
-  headless: true,
-  phase: "scan",
-  effect: "workspace-write",
-  approval: "none",
-  workspaceRequirement: "required",
-  inputSchema: {
-    type: "object",
-    additionalProperties: false,
-    properties: { target: { type: "string" } },
-  },
-  dag: {
-    outputKind: "findings",
-    dependsOn: ["context:context-gatherer", "context:app-model-build"],
-    // Optional: only run when some upstream condition holds.
-    condition: (upstream, _cfg) => !!upstream.get("context:app-model-build"),
-  },
-  async run(input, ctx: ExecutionContext): Promise<Finding[]> {
-    const dag = requireDag(ctx);  // throws outside a pipeline run
-    // use dag.runId, dag.scanPath, dag.upstreamOutputs etc.
-    return [];
-  },
-});
-```
-
-Authors don't implement `execute` themselves — the retained TypeScript module
-registry installs one automatically for SDK compatibility. Live Rust scan
-behavior should be implemented through Rust descriptors/executors and the
-shared registry boundary rather than by adding new TypeScript scan runtime
-paths.
-
-**Hidden DAG tools.** Internal helpers that shouldn't appear in `/use`
-overviews or LLM tool lists should still be authored with `defineDagTool`;
-set `hidden: true` and keep dependency names qualified.
-
-## 8. `ExecutionContext` reference
-
-| Field | Stability | Purpose |
-|-------|-----------|---------|
-| `cwd: string` | stable | Project/scan root. |
-| `target?: string` | stable | Active repo/host target. |
-| `workspaceId?: string` | stable | Current workspace id when one is active. |
-| `runtime: AgentRuntime` | stable | LLM backend — call `runtime.query(...)` to reach Claude. |
-| `bus: MessageBus` | stable | Event bus (use sparingly; prefer `events` scope). |
-| `config: KuzushiConfig` | stable | Full host config; read module-specific keys. |
-| `signal?: AbortSignal` | stable | Cancel long-running work. |
-| `host?: HostInfo` | stable (new) | `{ sdkVersion, capabilities }` — see §10. |
-| `logger?: ToolLogger` | stable (new) | `info/warn/error/debug` structured diagnostics. |
-| `uiStore?: HostUiHandle` | narrow-handle | Read/update live shell UI state when the Rust TUI wires it. |
-| `datastore?: ToolOptionStore` | narrow-handle | Read operator-set options (`setg FOO bar`). |
-| `workspace?: WorkspaceHandle` | narrow-handle | Hosts/services/vulns/notes. |
-| `events?: ModuleEventScope` | narrow-handle | Cross-module pub/sub (auto-torn-down on `dispose`). |
-| `print?: PrintSink` | UX helper | `status/good/error/warn` — operator-facing. |
-| `reportActivity?` | UX helper | Progress-rail entries. |
-| `reportOutput?` | UX helper | Ephemeral live-tail output. |
-| `seedTaskOutputs?: Map<string, unknown>` | advanced | Seed pipeline task outputs. |
-| `toolModel?: string` | advanced | Per-tool model override from `setg TRIAGE_MODEL`. |
-
-The narrow-handle interfaces are intentionally smaller than the host's
-concrete classes so third-party modules don't pick up transitive dependencies
-on host internals. Concrete host objects (e.g. `UIStore`, `WorkspaceManager`)
-are structural supersets — no casts needed when the host passes them in.
-
-### Resolving `model` in a module
-
-Modules **must not** hardcode model strings as fallbacks. The runtime
-boundary (`crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`
-plus the Rust agent router) rejects empty / incompatible models and fallback
-chains before any LLM call. `scripts/check-model-safety.mjs` keeps that
-boundary wired into CI. For retained TypeScript SDK modules, the expected
-resolution chain is:
-
-```ts
-const model =
-  (input?.model as string | undefined) /* inline tool arg */ ??
-  ctx.toolModel /* setg <MODULE>_MODEL=… or /set model … */ ??
-  ctx.config.model /* operator-configured global */;
-```
-
-For Rust built-ins, use `resolve_tool_model(tool_name, input, ctx)` or
-`resolve_explicit_model(tool_name, parsed_input_model, ctx.config.model.as_deref())`.
-Do not reintroduce deleted TypeScript task-runtime helpers as a new source of
-model policy.
-
-Anything that looks like `model = X ?? "anthropic:claude-..."` is the
-silent-fallback pattern the audit removed and must not return.
-
-### 8.1. Rust-side: `ctx.trace` (typed lifecycle convenience)
-
-Rust-native modules — anything in `crates/kuzushi-core/src/modules/**` — get
-an additional optional handle on `ToolExecutionContext`:
-
-```rust
-pub struct ToolExecutionContext<'a> {
-    pub config: &'a V2Config,
-    pub workspace: Option<&'a WorkspaceTarget>,
-    pub findings_store: Option<&'a FindingStore>,
-    pub trace: Option<&'a TraceHandle>,
-    pub cancellation: Option<&'a ScanCancellation>,
-    pub authorization: ExecutionAuthorization,
-}
-```
-
-When a mode starts a tool or scan it constructs a `TraceHandle` backed by the
-run's `RunItemWriter`. The dispatch wrapper in
-`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` auto-stamps the
-handle with the calling tool's `module_id` derived from the qualified tool
-name (`semgrep:scan` → `semgrep`), so producer code only needs:
-
-```rust
-if let Some(trace) = ctx.trace {
-    let _ = trace
-        .step("tool", "scan", format!("semgrep start · target={}", target.display()))
-        .emit();
-}
-// ... do work ...
-if let Some(trace) = ctx.trace {
-    let _ = trace
-        .step("done", "scan", format!("semgrep complete · {} findings", findings.len()))
-        .emit();
-}
-```
-
-**API:**
-
-| Method | Purpose |
-|---|---|
-| `trace.step(kind, verb, label)` | Build a bounded typed activity item. Shared dispatch emits call start/finish separately. |
-| `.with_progress(completed, total)` / `.with_severity(s)` | Attach truthful known counts or diagnostic severity. |
-| `.emit() -> RunItemId` | Records the item and returns stable identity for child linkage. |
-| `trace.child(parent_item)` | Returns a clone that attaches subsequent activity under that item. |
-| `trace.for_module(module_id)` | Override the auto-stamped module (e.g. for sub-actor stamping). |
-
-Drop-without-emit is supported: the activity builder records on `Drop` if
-`.emit()` wasn't called, so the simplest pattern is just to ignore the
-returned `RunItemId`.
-
-`cancellation` is the one shared cancellation capability for native scanners,
-nested `sast:scan` subtools, dynamic hosts, and runtime bridges. Code that
-spawns work must propagate it instead of constructing a fresh token.
-`authorization` records whether dispatch is automated, an explicit headless
-operator invocation, or an interactively approved shell action; descriptor
-approval and `headless` policy are enforced from that proof at the shared
-dispatch boundary.
-
-**Suggested phase verbs** (use the same vocabulary as TS `reportActivity`
-so cross-module categorization stays consistent):
-
-| Kind | When |
-|---|---|
-| `tool-progress` | Coalescible, operator-visible progress for the owning call. |
-| `reasoning` | Bounded `SafeReasoningSummary` when attached to a call. |
-| other labels | Bounded `DiagnosticNotice`; they never create task or call state. |
-
-Semantic start and terminal state come from `RunTaskHandle`, shared tool-call
-dispatch, and typed model-call instrumentation—not from these labels.
-
-### 8.2. Per-LLM-call tracing via `TracedRuntime` + `parent_scope`
-
-Beyond the explicit `ctx.trace.step(...)` boundaries above, **every model
-call is lifecycle-instrumented**. The dispatch wrapper at
-`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` wraps the incoming
-`AgentRuntime` in a `TracedRuntime` (defined in
-`crates/kuzushi-core/src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
-call to `runtime.query_blocking`, `runtime.next_step_blocking`,
-`runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
-emits correlated `ModelCallStarted` and `ModelCallFinished` items. The finish
-records provider, selected model, status, latency, usage, and cost when known;
-failed calls additionally carry provider-neutral `RuntimeFailureMetadata` with
-the safe class, optional HTTP status, bounded redacted detail, model-call id,
-and producer stage. Successful calls may add one bounded
-`SafeReasoningSummary`. Producers don't have to thread the observation handle
-into their model call sites. Typed failure fields are authoritative; consumers
-must not recover class or status by parsing the rendered public message.
-
-To group several LLM calls under a labelled phase header, push a
-**parent_scope** RAII guard before the LLM region:
-
-```rust
-let phase = ctx
-    .trace
-    .map(|t| t.step("reasoning", "run", "evidence-collect").emit());
-let _scope = match (ctx.trace, phase) {
-    (Some(trace), Some(parent)) => Some(trace.parent_scope(parent)),
-    _ => None,
-};
-let result = run_triage_stage2(store, runtime, &input, &config, kept)?;
-drop(_scope);
-```
-
-Inside `_scope`, every item emitted by `TracedRuntime` (or by the
-producer itself) carries `parent_item_id = Some(phase)`, so the renderer
-indents the row under the phase header in the right pane. The scope is
-per-thread; nested scopes form a stack and pop in LIFO order on drop.
-
-Producers that already follow this pattern as canonical references:
-`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris-next:hunt`,
-`taint-iris-next:finding-review`, `offense-review:threat-hunt`, `patch:finding`,
-`threat-model:build`, `x-ray:run`, `run_plugin_finding_adapter` (used
-by `vuln-scout:audit` / `tob:audit`), `shinsa:scan`, `prompt-armor:*`.
-
-**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`,
-compatibility aliases, and quarantined exact-only surfaces such as
-`full-mode:*`, `deep-audit:*`, `exploit-chain:*`, `pwn:*`, `threat-leads:*`,
-`chrome-rce:*`, and `vendor-assessment:*`) collapse into one aggregated
-`subsystems` row in the Activity view. Their events also still flow through
-but are filtered out of the right-pane feed unless the operator presses `V`
-(verbose).
-
-**Deep-auditor dataflow tool.** `deep-audit:run` (and the `strategy=deep`
-`triage:run` path it backs) offers the auditor an in-process `cpg_taint_paths`
-tool alongside the code-nav primitives, gated by the `taintTools` option
-(`off` | `available` | `build`, default `available`). The tool queries the
-cpg-rs code property graph for regex source→sink taint flows and returns any
-`guard`/`authz` annotation as falsification evidence. Registration and the
-matching prompt method-step come from one readiness predicate, so a
-`!Send`-safe thread-local warms the graph once per worker thread; a missing
-graph degrades to grep-only (never an implicit build under `available`) and the
-auditor's cited citations persist as a `deep-audit:evidence` audit event that
-the finding-detail / Prove `AUDITED DATAFLOW` section reads. Tool availability
-alone never moves a proof rung.
-
-Folded support facades (`catalog`, `module-recommender`, `bounty`, and
-`randori`) are exact-only during the capability migration. Canonical operator
-routes are direct registry queries, the phase capability projection,
-`recon:import`, and `threat-model:build` methodology options respectively.
-Optional adapter packages do not become visible merely by existing in
-`node_modules`; adapter configuration must be explicit.
-
-Headless `kuzushi run` creates the same typed observation handle as scan and
-shell. Some isolated test/eval contexts may still leave `ctx.trace` as `None`; the
-`if let Some(...)` guard should always short-circuit cleanly.
-
-The trace handle is a producer convenience facade over a `RunObservationHandle`.
-Shared dispatch emits versioned task/tool/model items to `items.jsonl`; live
-labels remain bounded diagnostics and are not a semantic replay protocol. Tool
-inputs persist only an operation fingerprint and safe option names, and model
-items never persist prompts or response text.
-
-See `crates/kuzushi-core/src/run_artifacts/trace_handle.rs` for the
-implementation and
-`crates/kuzushi-core/src/run_lifecycle/application/presentation/tests.rs` for
-projection examples.
-
-## 9. `reportActivity` vs `reportOutput`
-
-Use `reportActivity` for **structured phase labels** — they land in the
-shell's progress rail and scrollback:
-
-```ts
-ctx.reportActivity?.("scanning deps/package.json");
-for (let i = 0; i < deps.length; i++) {
-  ctx.reportActivity?.(`analyzing ${deps[i].name}`, { step: i + 1, total: deps.length });
-}
-```
-
-Use `reportOutput` for **ephemeral subprocess output** — it appears in the
-live `⎿` tail beneath the tool-call header and disappears on completion:
-
-```ts
-ctx.reportOutput?.("npm install: added 142 packages in 3.4s");
-```
-
-Both are best-effort and optional — the `?.` matters in unit tests where no
-bus is wired. KWP-backed dynamic modules that publish to the bus go through
-`kuzushi/bus/publish`; the host checks `grant.bus.produce`, stamps module
-origin, and records workspace-backed publishes in
-`.kuzushi/v3/runs/<runId>/kwp-bus.jsonl`.
-
-## 10. `costUsd`
-
-LLM-driven tools should report per-invocation spend so the shell can show a
-run-level total and honor `--budget` caps:
-
-```ts
-return {
-  ok: true,
-  output: summary,
-  data: { findings },
-  costUsd: usage.input_tokens * 3e-6 + usage.output_tokens * 15e-6,
+Explicit tool input takes precedence. A mode must not add its own undisclosed
+prompt search path. The `sast:scan` umbrella forwards its declared triage and
+verification prompt values to the corresponding stages.
+
+### Runtime and model selection
+
+Descriptor-backed agent tools use `resolve_tool_model`; adapters that have
+already parsed an explicit inline model use `resolve_explicit_model`. Once
+execution policy is resolved, missing or incompatible runtime/model selection
+is an error. A tool must not add a literal default model, a provider fallback
+chain, or a target-local model override.
+
+## Dynamic KWP modules
+
+Local KWP modules are self-contained `.mjs` files. They export a plain module
+object; they do not import Kuzushi helpers.
+
+```js
+export default {
+  id: "example",
+  displayName: "Example",
+  category: "internal",
+  description: "Read a workspace file through the KWP broker.",
+  tools: [
+    {
+      name: "example:inspect",
+      description: "Inspect one workspace-relative text file.",
+      headless: true,
+      runtimeRequirement: "never",
+      phase: "map",
+      effect: "read",
+      approval: "none",
+      workspaceRequirement: "required",
+      options: [
+        {
+          name: "path",
+          type: "path",
+          pathSemantics: "workspace-read",
+          description: "Workspace-relative file to read.",
+          required: true,
+        },
+      ],
+      async execute(input, ctx) {
+        const text = await ctx.fs.readText("workspace", input.path);
+        return {
+          status: "completed",
+          output: `Read ${input.path}`,
+          data: { bytes: new TextEncoder().encode(text).byteLength },
+        };
+      },
+    },
+  ],
 };
 ```
 
-## 11. Capability probe — `ctx.host.capabilities`
+The default export, named `module` export, or imported object itself may be the
+module. A tool may expose `execute(input, ctx)` or the compatibility spelling
+`run(input, ctx)`.
 
-`ctx.host` is populated when compatibility TypeScript modules are executed
-through the module host. Feature-probe before depending on an optional
-capability so your tool survives both shell-mode and headless `run`:
+### Module descriptor
 
-```ts
-if (ctx.host?.capabilities.has("workspace")) {
-  ctx.workspace?.hosts.upsert({ /* ... */ });
-} else {
-  ctx.logger?.warn("my-module:scan running without workspace capability");
-}
+| Field | Requirement | Meaning |
+| --- | --- | --- |
+| `id` | required | Kebab-case module id; every tool name must start with `<id>:`. |
+| `displayName` / `name` | optional | Operator-facing name. `displayName` is preferred. |
+| `category` / `kind` | optional | Module grouping; defaults to `internal`. |
+| `description` | optional | Operator-facing summary. |
+| `hidden` | unsupported | Dynamic modules must remain operator-visible; `true` is rejected. |
+| `tools` | required | Array of tool descriptors. |
+
+The host rejects unsupported module lifecycle fields (`init`, `ready`,
+`dispose`, `requires`, `knowledge`, and `events`) rather than pretending to run
+them.
+
+### Tool descriptor
+
+| Field | Requirement | Meaning |
+| --- | --- | --- |
+| `name` | required | Globally unique `<module-id>:<action>` name. |
+| `description` | optional | Operator/model-facing summary. |
+| `headless` | required | Whether `kuzushi run` may invoke the tool. |
+| `runtimeRequirement` | optional | `never` or `always`; defaults to `never`. |
+| `phase` | required for effectful tools | `map`, `scan`, `review`, `prove`, `fix`, or `operate`. Deprecated `hunt` and `confirm` inputs normalize to `scan` and `prove`. |
+| `effect` | required | `read`, `workspace-write`, `target-write`, `repository-execute`, or `external-action`. |
+| `approval` | required | `none` or `explicit`. Target writes, repository execution, and external actions require `explicit`. |
+| `workspaceRequirement` | required | `optional` or `required`. |
+| `hidden` | unsupported | Dynamic tools must remain operator-visible; `true` is rejected. |
+| `options` / `inputSchema` | optional | Canonical descriptor options or the restricted schema form below. |
+| `prompts` | optional | Declared editable prompt boundaries tied to named options. |
+
+Dynamic policy has no permissive defaults for `headless`, `effect`, `approval`,
+or `workspaceRequirement`. Registration is atomic, duplicate tool names and
+aliases fail, and a dynamic module cannot replace an active or retired built-in
+id. Unsupported tool lifecycle/DAG fields (`init`, `dag`, `runLifecycle`) fail
+during description.
+
+### Dynamic options
+
+Explicit options support these types:
+
+```text
+string | bool | int | float | path | enum | string-list | json
 ```
 
-Well-known capabilities: `"workspace"`, `"ui-store"`, `"datastore"`,
-`"print-sink"`, `"module-events"`, `"structured-output"`, `"tool-model"`.
-The set is open — authors can publish modules that probe future capabilities
-without a kuzushi release.
+Common fields are `name`, `type`, `description`, `required`, `default`,
+`choices`, `aliases`, `deprecatedAliases`, `advanced`, and `evasion`. Integer
+options may add inclusive `minimum` and `maximum` bounds.
 
-## 12. Load specifiers
+Every `path` option must declare one of these semantics:
 
-The native Rust CLI accepts dynamic module specifiers via the global
-`--load <specifier>` flag for `kuzushi shell` and `kuzushi run`. For local
-file/path modules, v0.1 accepts one self-contained entry file, hashes it, checks
-`kuzushi.lock`, copies the approved bytes into a private read-only snapshot,
-and starts a Node KWP worker over JSON-RPC stdio. Multi-file directory bundles
-remain future work. Descriptor probing uses the same stripped environment and
-exact-file-read Node permission shape as the serve worker. KWP loading requires
-permission-mode network denial (`--allow-net`, introduced in Node 25); Kuzushi
-does not pass that flag, adds a macOS network sandbox, and requires Node 26.3.1
-or newer on other platforms. Execution performs a live `initialize` handshake,
-checks the descriptor hash again, then invokes `tools/call`; module stdout is
-redirected to tagged stderr so it cannot corrupt protocol output.
+```text
+workspace-read | state-write | target-write |
+external-read | external-write | executable
+```
 
-The old `[operator].trusted_modules` list remains only for non-local
-compatibility specifiers. It is not the trust decision for local workers.
-Headless dynamic invocations also require an explicit global
-`--target <workspace>` so trust/config and run artifacts are rooted before the
-module executes; dynamic inline path options are never used to bootstrap that
-trust decision.
+The host uses those semantics during canonical path preparation and
+authorization. It never guesses whether an unlabeled path may read, write, or
+execute.
 
-Every privileged worker call carries the host-issued invocation id and epoch.
-The host rejects missing, mismatched, stale, or post-settlement authority
-before dispatching filesystem, runtime, network, MCP, fuzz, findings,
-artifacts, or bus handlers. A watchdog expiry or operator cancellation sends
-`notifications/cancelled`, records the cancellation, drops stale results, and
-kills the worker process group.
+As an alternative, `inputSchema` may describe a closed top-level object. It
+must set `additionalProperties: false`. Supported property shapes are strings,
+booleans, integers, numbers, string enums, arrays of strings, and unconstrained
+JSON objects. Supported property metadata is `description`, `default`, `enum`,
+`items`, and integer `minimum`/`maximum`. Unsupported keywords fail during
+description. Use explicit `options` whenever path semantics or richer option
+metadata is required.
+
+### Declared prompts
+
+A prompt entry declares `role`, `verb`, `optionKey`, and `defaultContent`.
+`moduleId` defaults to the current module and must match it. `optionKey` must
+name an option on the same tool. `contextNote` is optional. This declaration is
+what authorizes the shared prompt override behavior; adding an ad hoc JSON key
+does not.
+
+### Worker context and grants
+
+Approved local workers execute from an operator-owned read-only snapshot with a
+stripped environment. Ambient filesystem, network, process, secret, or MCP
+authority is not inherited. Privileged work goes through grant-checked handles:
+
+| Handle | Purpose |
+| --- | --- |
+| `ctx.fs` | Read/write approved `workspace`, `module-data`, or read-only `input` scopes. |
+| `ctx.runtime` | Query the host-selected runtime within the approved model/cost budget. |
+| `ctx.net` | Fetch approved hosts with request and byte quotas. |
+| `ctx.mcp` | Call an operator-mounted, explicitly aliased MCP tool. |
+| `ctx.fuzz` | Run an approved host-mounted fuzz engine. |
+| `ctx.findings` | Persist bounded, allowed-severity findings. |
+| `ctx.artifacts` | Record bounded artifact references. |
+| `ctx.bus` | Publish to approved topic patterns. |
+
+The local-worker context also carries host-provided `cwd`, a bounded `config`
+projection, KWP metadata, `invocationId`, `runId`, and an abort `signal`.
+Treat these as invocation data, not ambient authority. Compatibility package
+execution may project additional target/tool identity; local modules must not
+depend on that wider shape.
+
+The approval grant is deny-by-default and is stored with the module digest in
+`kuzushi.lock`. Current grant families are `fs`, `net`, `runtime`, `bus`,
+`findings`, `artifacts`, `mcp`, and `fuzz`. Direct Node-worker `exec` grants are
+not supported. See `examples/kwp/agentic-fuzz/grant.example.toml` for a complete
+working subset and `crates/kuzushi-core/src/worker_protocol.rs` for the exact
+serialized fields and quotas.
+
+Every broker request carries a host-issued invocation id and epoch. Missing,
+mismatched, stale, post-cancellation, or post-settlement authority is rejected.
+Cancellation and watchdog expiry stop the worker process group and discard
+stale results.
+
+### Runtime queries
+
+Set `runtimeRequirement: "always"` before calling `ctx.runtime.query(...)`.
+The host owns model and cwd selection. A worker may provide the prompt and
+supported query controls, but it may not inject custom tools, a fallback model,
+host-owned runtime options, or permission callbacks. Unsupported fields fail
+explicitly.
+
+Runtime-free tools receive an unavailable-runtime handle so accidental use is
+an error rather than a silent fallback.
+
+### Results
+
+A tool returns JSON-serializable data. The common result envelope uses
+`status`, `output`, and optional `data`, `artifacts`, and `findings`. Shared Rust
+dispatch normalizes the output and owns lifecycle/cost recording. Worker-returned
+`costUsd` is not trusted as authoritative accounting.
 
 Finding identity remains host-owned at this boundary. A KWP
 `findings.create` payload must omit `fingerprint`, `dedupKey`, and
@@ -573,345 +300,149 @@ Finding identity remains host-owned at this boundary. A KWP
 Workers may send `actorFingerprint` when they need to retain a producer-side
 observation id as non-authoritative provenance.
 
-Approve a local module before loading it:
+## Approval, loading, and audit
+
+Local file/path modules must be approved before Kuzushi describes or executes
+their code. Approval binds the exact file digest, normalized descriptor hash,
+grant, version, and optional signature chain in `kuzushi.lock`.
 
 ```sh
-kuzushi kwp approve file:///abs/path/to/my-module.mjs --grant grant.toml
+kuzushi kwp approve file:///abs/path/to/example.mjs \
+  --grant /abs/path/to/grant.toml
+
 kuzushi --target /abs/workspace \
-  --load file:///abs/path/to/my-module.mjs \
-  run my-module:tool --input '{}'
+  --load file:///abs/path/to/example.mjs \
+  run example:inspect --input '{"path":"README.md"}'
 ```
 
-Workspace-backed runs write broker decisions and invocation lifecycle events
-to `.kuzushi/v3/runs/<runId>/kwp-audit.jsonl`, with bus publishes in
-`kwp-bus.jsonl`. Inspect and verify the hash-linked audit chain with:
+Headless dynamic invocation requires an explicit global `--target`; an inline
+path option cannot establish the trust root. A changed file or descriptor must
+be approved again. A revoked or changed approval is rejected before execution.
+
+Local v0.1 workers are single-file bundles. Kuzushi snapshots the approved
+bytes, makes the snapshot read-only, and starts the Node worker over versioned
+JSON-RPC stdio. Descriptor probing and execution both use the sandboxed host.
+Module stdout is redirected to tagged stderr so it cannot corrupt protocol
+output.
+
+Workspace-backed runs record broker decisions and invocation lifecycle in:
+
+```text
+<target>/.kuzushi/v3/runs/<run-id>/kwp-audit.jsonl
+<target>/.kuzushi/v3/runs/<run-id>/kwp-bus.jsonl
+```
+
+Verify the hash-linked audit chain with:
 
 ```sh
-kuzushi kwp audit --target /abs/workspace --run-id run_... --json
+kuzushi kwp audit --target /abs/workspace --run-id <run-id> --json
 ```
 
-An empty lockfile `signatureChain` is a local operator approval. Non-empty
-entries use `ed25519:v1:<keyId>:<base64Signature>` and are checked against
-global operator signing keys before worker spawn.
+An empty `signatureChain` represents local operator approval. Non-empty entries
+use `ed25519:v1:<key-id>:<base64-signature>` and must verify against
+operator-owned signing keys.
 
-`kuzushi scan` deliberately does not load dynamic Node modules. Passing
-`--load` with `scan` is a hard error with guidance to invoke the trusted tool
-through `kuzushi run`; the flag is never silently discarded and a dynamic tool
-is never invented as a `sast:scan` task. Other commands outside shell/run
-(`modules`, `tools`, `findings`, `doctor`, `mcp`, and so on) reject `--load`
-too, rather than accepting an operator input they will not consume.
+### Specifiers and mode support
 
-### 12.1 Native dynamic-host contract
+| Specifier | Behavior |
+| --- | --- |
+| `builtin:<id>` | Rust built-in lookup. |
+| `file://<absolute-entry>` or local path | Approved, digest-bound single-file KWP worker. |
+| `package:<npm-name>` | Trusted compatibility path; must appear in operator `trusted_modules`. |
+| `mcp:<server-spec>` | Not a dynamic module load path; use the native MCP controls below. |
 
-The native host projects a deliberately narrow, execution-safe subset of the
-retained SDK:
+Only shell and `kuzushi run` consume `--load`. `kuzushi scan` and unrelated
+commands reject the flag instead of ignoring it or treating a dynamic tool as a
+scan engine.
 
-- Module metadata: `id`, `displayName` (legacy `name` is accepted), `category`
-  (legacy `kind` is accepted), `description`, `hidden`, and `tools`.
-- Tool metadata: `name`, `description`, explicit `headless`, `effect`,
-  `approval`, and `workspaceRequirement` values; optional `hidden`; a `phase`
-  that is mandatory for effectful tools; and optional
-  `runtimeRequirement: "never" | "always"`.
-- Tool input: either explicit descriptor `options`, or the restricted object
-  `inputSchema` described below.
-- Execution: `execute(input, ctx)` or the legacy `run(input, ctx)` spelling.
+`package:` is a compatibility trust path, not a way to bypass local-file
+approval. Local-looking, relative, absolute, or colon-bearing package names are
+rejected.
 
-Module ids and tool names are syntax-checked, duplicate names and aliases are
-rejected, and registration is atomic. A dynamic module cannot replace an
-already loaded module or tool. `headless` has no implicit default:
-`headless: false` remains usable in the shell, while `kuzushi run` rejects it.
-Dynamic policy also has no permissive default. `effect` is one of `read`,
-`workspace-write`, `target-write`, `repository-execute`, or `external-action`;
-target writes, repository-selected command execution, and external effects
-require `approval: "explicit"`. `workspaceRequirement` is `optional` or
-`required`. Effectful tools must declare a concrete journey `phase` rather
-than falling into `operate`, so an unknown extension can never escape the
-autonomy ceiling. A `repository-execute` surface must bind its resolved
-commands into canonical prepared input before authorization, disclose them
-before an interactive dispatch (or emit the exact preflight for an explicit
-headless invocation), and fail closed when an isolating execution backend is
-unavailable.
+## Published manifest schema
 
-The canonical descriptor phase vocabulary is `map | scan | review | prove |
-fix | operate`. Candidate-generating scanners and semantic hunts are `scan`;
-triage/classification tools are `review`; only tools that create real
-verification evidence are `prove`; patch/remediation tools are `fix`.
-Descriptor and query input accepts deprecated `hunt` as `scan` and `confirm` as
-`prove` for one major release, with a warning, but descriptors serialize only
-the canonical values. The retained TypeScript SDK likewise accepts deprecated
-input aliases during that window while publishing `review` in its canonical
-union. Numeric phases are invalid.
+`schemas/module.manifest.schema.json` remains a public compatibility metadata
+contract for package/file ecosystems that need `module.manifest.json`. It
+describes identity, display metadata, version, entry, optional host-version
+compatibility, requirements, and config metadata.
 
-Every explicit option with `type: "path"` must also declare
-`pathSemantics`: `workspace-read`, `state-write`, `target-write`,
-`external-read`, `external-write`, or `executable`. `state-write` is confined
-to `<target>/.kuzushi`; `target-write` is confined to the active target and
-requires an explicit authorization proof; external, executable, and write
-paths cannot come from target-owned workspace options. The host rejects a
-path option without semantics instead of guessing. Existing dynamic modules
-must add this field before upgrading.
+The manifest is not the authorization record for a local KWP worker:
 
-The native process and the Node host perform a version handshake before
-describing or executing a module. Both the protocol version and the Kuzushi
-package semver must match, including for a
-`KUZUSHI_DYNAMIC_MODULE_HOST` override. `ctx.host.sdkVersion` reports that
-package semver; it is not a protocol label.
+- `kuzushi.lock` binds executable bytes, descriptor, and broker grants.
+- The live worker export supplies the executable module/tool descriptor.
+- The native and Node sides negotiate the worker protocol and exact host package
+  version at startup.
 
-Host children are supervised as process trees, not only as direct PIDs.
-Describe calls have a 30-second ceiling, execute calls have a 10-minute
-ceiling, stdout is capped at 64 MiB, stderr at 64 KiB, and runtime protocol
-lines at 64 MiB. Cancellation, timeout, malformed protocol, and oversized
-output terminate the process group on Unix and the kill-on-close Job Object on
-Windows before returning an error.
+Do not infer filesystem, network, runtime, model, MCP, or process authority from
+manifest `requires` or `configSchema` fields.
 
-For `inputSchema`, the native bridge requires top-level
-`additionalProperties: false`, because Rust descriptor validation rejects
-unknown option keys. The bridge supports object properties with primitive
-string/boolean/integer/number types, string enums, JSON objects without nested
-schema constraints, and arrays of strings. Supported property metadata is
-`description`, `default`, `enum`, `items`, and inclusive `minimum`/`maximum`
-for integer properties. Unsupported schema keywords,
-non-string enum members, undeclared required properties, invalid defaults, and
-non-string array items fail during load instead of being weakened silently.
-Use explicit descriptor `options` when the JSON Schema subset cannot express
-the input honestly.
+## MCP servers
 
-The legacy one-shot compatibility host cannot honor SDK lifecycle and DAG
-state. It rejects
-module `init`, `ready`, `dispose`, `requires`, `knowledge`, and `events`, plus
-tool `init`, `dag`, and `runLifecycle`, rather than loading them and ignoring
-their behavior. The native execution context supplies `cwd`, `target`, tool
-identity, config, a feature-probe host with no advertised optional
-capabilities, and an explicit error for unsupported `ctx.bus` access. Local
-KWP workers instead expose only the capabilities pinned in their lockfile
-grant and route every effect through the host broker.
+MCP servers are native agent tools, not dynamic module specifiers. Inspect and
+serve them with:
 
-Set `runtimeRequirement: "always"` when the tool calls `ctx.runtime`. The
-native runtime adapter accepts the common SDK query shape
-`{ prompt, options: { model, cwd, temperature, maxOutputTokens, allowedTools,
-outputFormat, systemPromptPrefix, effort } }`. Its result is compatible with
-both styles during migration:
-
-```ts
-// Retained SDK streaming shape.
-for await (const message of ctx.runtime.query(request)) {
-  if (message.type === "result" && message.subtype === "success") {
-    console.log(message.result);
-  }
-}
-
-// Legacy native dynamic-module shape.
-const response = await ctx.runtime.query(request);
-console.log(response.text);
-```
-
-SDK query options that the Rust callback cannot preserve (for example custom
-tools, history, permission callbacks, or a separate budget) produce an
-explicit error. Runtime-free tools receive an unavailable-runtime handle, so
-using `ctx.runtime` without declaring `runtimeRequirement: "always"` also
-fails explicitly.
-
-The retained TypeScript SDK parser also understands four compatibility
-prefixes:
-
-| Prefix | Example | Source |
-|--------|---------|--------|
-| `builtin:` | `builtin:sast` | Shipped inside the kuzushi package. |
-| `file://` | `file:///abs/path/to/my-module/dist/index.js` | Absolute compiled JavaScript module entry. |
-| `package:` | `package:@kuzushi/blackbox` | Installed npm package (manifest optional). |
-| `mcp:` | `mcp:http://localhost:3000` | Parsed compatibility form only; native MCP is served through `kuzushi mcp serve <backend>`. |
-
-A bare string (`"foo"`) defaults to `{ type: "builtin", id: "foo" }`.
-
-## 13. Load errors — `ModuleLoadError`
-
-The loader throws `ModuleLoadError` instead of plain `Error`. Branch on
-`err.code`:
-
-| Code | Cause | Fix |
-|------|-------|-----|
-| `MANIFEST_MISSING` | No `module.manifest.json` in the target directory. | Create the manifest at the module root. |
-| `MANIFEST_INVALID` | Zod-parse failure (missing field, bad semver, bad category). | `err.details.issues` lists every problem. |
-| `REQUIREMENTS_UNMET` | Reserved compatibility code; current SDK exposes requirement checks through `checkRequirements(...)` helper results instead of rejecting in the loader. | Check helper output before loading if your host wants hard enforcement. |
-| `ENTRY_NOT_FOUND` | `entry` path doesn't exist. | Run your build; check `entry` is relative to the manifest. |
-| `SHAPE_INVALID` | Exported module failed `validateModuleExport`. Includes tool-name-prefix and duplicate-name violations. | Error message lists the violating tool index. |
-| `ID_MISMATCH` | Registry id conflict or lookup of an unknown module id. | Use a unique module id and verify the id is registered before resolving it. |
-| `SDK_INCOMPATIBLE` | Reserved compatibility code; current SDK version checks warn through `checkSdkCompatibility(...)` rather than rejecting. | Update the manifest or host when warnings appear. |
-| `CONFIG_INVALID` | `moduleConfig` fails the manifest's `configSchema`. | Check `err.details` for schema path + message. |
-
-`ModuleLoadError extends Error`, so legacy `catch (err) { err.message }`
-patterns keep working.
-
-## 14. Testing
-
-The `kuzushi/testing` export gives you in-memory helpers so tools can be
-unit-tested without spinning up a real runtime or SQLite store.
-
-```ts
-import { describe, it, expect } from "vitest";
-import {
-  createMockToolContext,
-  assertToolResult,
-  expectModuleShape,
-} from "kuzushi/testing";
-import module from "./index.js";
-
-describe("my-module", () => {
-  it("exports a valid module shape", () => {
-    expectModuleShape(module);
-  });
-
-  it("ping returns pong", async () => {
-    const ctx = createMockToolContext({ cwd: "/tmp" });
-    const result = await module.tools[0]!.execute({ target: "example" }, ctx);
-    assertToolResult(result, { ok: true, outputContains: "pong: example" });
-  });
-});
-```
-
-`createMockToolContext` keeps its compatibility profile populated with
-recording runtime, logger, UI, datastore, workspace, event, and print handles.
-Pass a field as explicit `undefined` to test that handle's absence, or pass
-`{ profile: "headless" }` to omit the runtime and optional operator-facing
-handles together. Any handle explicitly supplied to a headless profile wins.
-When `host` is not overridden, its capability set is inferred from the final
-resolved handles. An explicit host capability set remains authoritative, but
-the helper rejects a capability that advertises an omitted handle.
-
-`assertToolResult(result, { costUsdMax })` treats cost as measured data rather
-than assuming an omitted cost is zero. Both the bound and `result.costUsd` must
-be finite, nonnegative numbers; missing, nonnumeric, negative, `NaN`, and
-infinite values fail with a diagnostic. See `src/testing/index.ts` for the full
-helper list.
-
-## 15. Scaffolding status
-
-The legacy TypeScript CLI had a `kuzushi create-module` scaffolder during SDK
-hardening. That command is not part of the current Rust operator CLI, so it
-must not appear in first-run instructions or CI examples.
-
-Until a Rust-native scaffolder is implemented, create the layout from §4
-manually:
-
-- `module.manifest.json` with `$schema`, `id`, `displayName`, `version`,
-  `description`, `category`, `entry`, and `kuzushiSdkVersion`.
-- `package.json` with `peerDependencies.kuzushi` pinned to the host major.
-- `src/index.ts` using `defineModule` + `defineTool`.
-- `src/index.test.ts` using `createMockToolContext` + `expectModuleShape`.
-- `README.md` with load and run examples.
-
-## 16. MCP servers
-
-Native MCP integration is explicit rather than a generic `--load mcp:<spec>`
-module bridge. Every npm and platform-native runtime payload ships the Rust
-servers exposed by the CLI: `gtags`, `clang`, `cpg`, `tree-sitter`,
-`codeql`, `revng`, `context`, `entry-points`, `threat-model`, `threat-intel`,
-and `x-ray`. Operators can run them over stdio with:
-
-```bash
-kuzushi mcp serve <backend>
+```sh
 kuzushi mcp health <backend>
+kuzushi mcp serve <backend>
 ```
 
-Agent-backed tools opt into these servers through the Rust agent bridge and
-tool policy. The legacy `mcp:` module specifier remains a parsed compatibility
-form in the TypeScript SDK, but the native CLI does not convert arbitrary MCP
-servers into module tools.
+The bridge's legacy forced fallback attaches tree-sitter, CPG, and CodeQL. A
+normal agent-tool request uses an artifact-gated attachment plan and can select
+other shipped servers, including context, entry-points, threat-model,
+threat-intel, x-ray, and findings. Do not treat the three-server fallback as the
+complete inventory.
 
-KWP workers reach MCP servers only through host-mounted aliases configured in
-global `operator.mcp_mounts`. A module grant names the alias and allowed tool
-names; module code calls `ctx.mcp.call(...)` and never spawns or connects to
-the server directly. The host validates the mount descriptor hash, isolates
-per-invocation sessions, meters deadlines, and verifies returned artifacts.
+The CodeQL MCP keeps an in-process result memo for dependency-free local query
+selectors. A memo hit skips `codeql database analyze`, but every request still
+performs full content authentication of the database tree, so memo-hit latency
+remains proportional to database size. Pack selectors bypass the memo, and
+local queries with imports are rejected because their dependency closure cannot
+be authenticated. First use of a database revision copies the authenticated
+tree into operator-owned session storage; analysis and prewarm run only on
+OS-sandboxed snapshot paths.
 
-Fuzzing follows the same pattern through `ctx.fuzz.run(...)` and global
-`operator.fuzz_executors`. The worker needs both a matching fuzz grant and
-`artifacts.write`; networked fuzzing is denied by default. The first-party
-example at `examples/kwp/agentic-fuzz/module.mjs` writes its plan through
-brokered workspace FS, optionally calls a mounted `symcc` alias, invokes the
-selected host fuzz executor, and records verified artifact references.
+For descriptor-backed agent tools, MCP and bridge controls are ordinary tool
+options such as `mcpToolTimeoutMs`, `bridgeVerbose`, and `bridgeLogPath`. The
+adapter compatibility/debug switch `KUZUSHI_AGENT_MCPS` may force MCP
+attachment, but it is not a product-option substitute.
 
-`ctx.net.fetch(...)` is also host-brokered. Allowlisted requests can spill a
-bounded response to an artifact via `responseArtifactPath`; request and
-response bytes count cumulatively against `maxBytesPerInvocation`, with DNS/IP
-SSRF checks, unsafe-header stripping, named-credential validation, and
-redirects disabled in the live local-worker backend.
+## Testing
 
-The npm wrapper prepends its private native platform directory to the child
-`PATH`, and the Rust CLI also resolves an MCP executable next to itself. This
-keeps `mcp health`, direct native archives, and bridge-spawned tools independent
-of an operator's global `PATH`. Servers that wrap CodeQL, clangd, GNU
-GLOBAL, or rev.ng still report those external engine prerequisites honestly.
-The pure tree-sitter, cpg (in-process cpg-rs), and artifact-reader servers
-have no external engine.
+Built-ins should have focused Rust tests for descriptor shape, option
+preparation, authorization, executor behavior, output normalization, and each
+intentional mode asymmetry.
 
-The npm package is the full Node-capable distribution. Platform-specific
-native archives on GitHub contain the CLI and MCP siblings only; use the npm
-tarball or a source checkout when a tool needs the LangGraph or trusted
-dynamic-module Node host.
+Dynamic modules should be tested at two levels:
 
-## 17. Troubleshooting
+1. Import the `.mjs` file directly in a Node test and exercise pure helper/tool
+   behavior with deliberately small fake broker handles.
+2. Approve and load the real file through `ModuleRegistry`, then invoke it
+   through canonical dispatch. This catches descriptor normalization, grant,
+   sandbox, handshake, path, cancellation, and output-contract failures that a
+   direct unit test cannot.
 
-| Symptom | Likely cause | Fix |
-|---------|--------------|-----|
-| `Unknown tool: module:action` | Module not registered, wrong id, unsupported dynamic loading path, or tool prefix mismatch. | Check `kuzushi modules` / `kuzushi tools`; for Rust CLI usage, use a built-in or explicitly wired integration. |
-| `ModuleLoadError: MANIFEST_MISSING` | No `module.manifest.json` at the path. | Add manifest at module root. |
-| `ModuleLoadError: REQUIREMENTS_UNMET` | Reserved compatibility code; current SDK helper reports unmet requirements without throwing. | Check `checkRequirements(...)` output if you need hard enforcement. |
-| `ModuleLoadError: ID_MISMATCH` | Duplicate module id during registration, or lookup of an unknown module id. | Use a unique id and verify the module is registered. |
-| `ModuleLoadError: SHAPE_INVALID` with "does not start with" | Tool name prefix violates module id. | Rename tool to `<id>:<action>` or use `defineTool<"id">`. |
-| `ModuleLoadError: SHAPE_INVALID` with "duplicate" | Two tools share a name. | Rename the duplicate. |
-| `ModuleLoadError: SDK_INCOMPATIBLE` | Reserved compatibility code; current SDK version checks warn rather than throw. | Bump manifest or pin host when warnings appear. |
-| MCP backend unavailable | Native MCP backend binary or runtime is missing. | Run `kuzushi mcp health <backend>` and install/configure the backend it reports. |
+There is no `kuzushi/testing` mock package. Keep any test doubles local to the
+module and model only handles the test actually uses.
 
-## 18. Minimal starter
+## Troubleshooting
 
-Complete one-file module, copy-pasteable:
-
-```ts
-import { defineModule, defineTool } from "kuzushi/modules";
-import type { ExecutionContext, ToolResult } from "kuzushi/modules";
-
-const pingTool = defineTool<"my-module">({
-  name: "my-module:ping",
-  description: "Connectivity check.",
-  inputSchema: {
-    type: "object",
-    additionalProperties: false,
-    properties: { target: { type: "string" } },
-    required: ["target"],
-  },
-  headless: true,
-  phase: "operate",
-  effect: "read",
-  approval: "none",
-  workspaceRequirement: "required",
-  async execute(input: unknown, ctx: ExecutionContext): Promise<ToolResult> {
-    const target = (input as { target: string }).target;
-    ctx.reportActivity?.(`pinging ${target}`);
-    ctx.logger?.info("ping started", { target });
-    if (ctx.host?.capabilities.has("workspace")) {
-      ctx.workspace?.notes.create({ workspaceId: ctx.workspaceId!, body: `pinged ${target}` });
-    }
-    return { ok: true, output: `pong: ${target}`, data: { target } };
-  },
-});
-
-export default defineModule({
-  id: "my-module",
-  displayName: "My Module",
-  category: "offense",
-  version: "0.1.0",
-  description: "Example custom module",
-  tools: [pingTool],
-});
-```
-
-Ship it with a `module.manifest.json` as shown in §5 and build to
-`./dist/index.js`. Approve the exact resolved bundle, then load it in the
-native shell or headless run path:
-
-```bash
-kuzushi kwp approve file:///absolute/path/to/my-module/dist/index.js
-kuzushi --target . --load file:///absolute/path/to/my-module/dist/index.js \
-  run my-module:ping --input '{"target":"example.com"}'
-```
+- **Tool name does not start with the module id** — rename it to
+  `<module-id>:<action>`.
+- **Missing policy field** — declare `headless`, `effect`, `approval`, and
+  `workspaceRequirement`; add a concrete phase for effectful tools.
+- **Path option has no semantics** — add the exact `pathSemantics` value rather
+  than coercing the input to a generic string.
+- **Unknown input key** — add a descriptor option or remove the key. Dynamic
+  schemas must set `additionalProperties: false`.
+- **Module is not approved / digest changed** — rerun `kuzushi kwp approve`
+  after reviewing the exact bytes and grant.
+- **Package module is not trusted** — add the exact `package:` specifier to
+  operator-owned `trusted_modules`; do not use that list for local files.
+- **Runtime unavailable** — configure a compatible operator-selected runtime
+  and declare `runtimeRequirement: "always"`.
+- **Broker capability denied** — update the operator-reviewed grant only if the
+  module genuinely needs that capability; do not add an ambient fallback.
+- **Protocol or host version mismatch** — use the Node host shipped with the
+  same Kuzushi package/native binary revision.
+- **`--load` rejected** — invoke the approved tool from shell or `kuzushi run`;
+  scan and unrelated commands do not load dynamic modules.

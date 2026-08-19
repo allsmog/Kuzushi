@@ -148,10 +148,7 @@ impl ShellApp {
         phase: WorkflowPhase,
         attempt_id: &str,
     ) -> Option<GuidedScanQuestionModel> {
-        let record = self
-            .engagement
-            .unresolved_phase_attempt_by_id(phase, attempt_id)?;
-        let presentation = self.phase_result_presentation_for(&record.completed);
+        let (record, presentation) = self.dominant_phase_result(phase, attempt_id)?;
         let actions = presentation.actions;
         let cursor = self
             .ui()
@@ -179,6 +176,22 @@ impl ShellApp {
         model.semantic_keys = presentation.semantic_keys;
         model.cursor = cursor;
         Some(model)
+    }
+
+    fn dominant_phase_result(
+        &self,
+        phase: WorkflowPhase,
+        attempt_id: &str,
+    ) -> Option<(
+        &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+        crate::PhaseResultPresentation,
+    )> {
+        let record = self
+            .engagement
+            .unresolved_phase_attempt_by_id(phase, attempt_id)?;
+        let presentation = self.phase_result_presentation_for(&record.completed);
+        (presentation.emphasis == crate::PhaseResultEmphasis::DominantDecision)
+            .then_some((record, presentation))
     }
 }
 

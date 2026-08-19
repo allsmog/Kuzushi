@@ -204,13 +204,15 @@ definition + dedup rule that fixes them.
 ```
 Read-only documentation-accuracy audit. Do not edit files. Report only.
 
-The agent-facing docs (CLAUDE.md and docs/modules.md, plus docs/ generally) have
+The agent-facing docs (AGENTS.md, its CLAUDE.md symlink, and docs/modules.md,
+plus docs/ generally) have
 drifted from the Rust implementation — several sections still describe deleted
 TypeScript-era behavior. I want a "does the referenced thing still exist" pass.
 
-For every concrete claim in CLAUDE.md and docs/modules.md that names a file path,
+For every concrete claim in AGENTS.md and docs/modules.md that names a file path,
 function/symbol, env var, tool/verb name, CLI flag, or on-disk path
-(e.g. createMcpModule, KUZUSHI_MCP_TOKEN, --load mcp:, prepare_tool_input,
+(e.g. createMcpModule, KUZUSHI_MCP_TOKEN, --load mcp:,
+prepare_dispatch_input,
 the trace schema fields, the viz page mappings, the mode-parity matrix rows):
 
 1. Check whether that path/symbol/flag actually exists in the current tree.

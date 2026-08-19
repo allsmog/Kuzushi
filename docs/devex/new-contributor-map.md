@@ -56,7 +56,8 @@ For vocabulary and dependency rules, see
   paper over it with a hardcoded fallback model.
 - External binaries such as Semgrep, CodeQL, `nmap`, and `curl` are optional
   by tool. Missing binaries should fail actionably.
-- `pnpm build` compiles retained TypeScript exports; Rust builds use Cargo.
+- `pnpm build:native` assembles the native npm runtime; source Rust builds use
+  Cargo. There are no retained TypeScript library exports to compile.
 - `.kuzushi`, `.kuzushi-active`, native binaries, temp prompts, and
   SQLite files are local state, not product assets.
 - The pre-commit hook expects `lint-staged`. If local dependencies are missing,
@@ -88,11 +89,12 @@ Persisted finding/run-artifact change:
 `bash tests/e2e/run-smoke.sh`.
 
 Runtime/model change:
-`pnpm typecheck`; run the no-silent-fallback tests named near the changed
-adapter; update `AGENTS.md` and `RELEASING.md` if semantics change.
+`pnpm quality:model-safety`; run the focused Rust tests named near the changed
+adapter and `pnpm test` when the Node bridge changes; update `AGENTS.md` and
+`RELEASING.md` if semantics change.
 
-Retained TypeScript helper change:
-`pnpm typecheck`; `pnpm test -- --run` if behavior changes.
+Node support-layer change:
+`pnpm test`; run `pnpm check` for JavaScript formatting/lint findings.
 
 Docs/public example change:
 `pnpm check:docs`; run the touched example or help command.
