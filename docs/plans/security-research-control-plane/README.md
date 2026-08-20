@@ -1,233 +1,249 @@
-# RFC — Productizing Kuzushi as a Replayable Security Research Control Plane
+# Kuzushi exploitability-first research plan
 
-> **Status:** proposal for architectural and product review
-> **Date:** 2026-08-19
-> **Scope of this RFC:** product direction, domain contracts, sequencing, and acceptance criteria
-> **Implementation status:** no behavior is implemented by this document
-> **Primary relationship:** extends the existing repository-security workbench and the [control-room PRD](../product-flow-prd.md); it does not replace either
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative. New proof backends and broader target classes stay gated behind the existing evidence, verification, and benchmark exits.
+> **Status:** product and architecture proposal for PR review
 
----
+> **Scope:** project-first research through the existing Kuzushi TUI
 
-## 0. Decision requested
+> **Supersedes in this PR:** the earlier campaign-oriented “security research control plane” interaction model
+> **Does not supersede:** [`ROADMAP.md`](../../../ROADMAP.md), the canonical terminal cockpit contract, or the existing control-room PRD
 
-Approve the following product direction:
+## Decision
 
-> **Kuzushi becomes the local-first system of record and operator workbench for security research: specialist engines may discover or execute, but Kuzushi owns the research question, hypothesis, declared observation boundary, authority, experiment plan, evaluator receipt, proof transition, human decision, remediation, replay, cost, and benchmark truth.**
+The product should not ask an operator to create a research campaign, maintain a hypothesis database, import contest rules, or learn a second workflow.
 
-Approval of this RFC should authorize only a narrow first implementation program:
+The product should start with one project:
 
-1. add an honest `ObservationBoundary` contract to runs and proof claims;
-2. add a host-owned `EvaluatorReceipt` contract;
-3. add a small, replayable research ledger for questions, hypotheses, experiments, observations, and dispositions;
-4. prove the design through one vertical slice that reuses existing repository analysis and runtime verification;
-5. defer new browser, binary, protocol, MCP-estate, and endpoint-monitoring product surfaces until Kuzushi's current P0-P3 roadmap gates are met.
-
-The decision is **not** whether Kuzushi should become a generic autonomous pentesting platform. It should not. The decision is whether Kuzushi should productize the governance and evidence layer that serious security research needs.
-
----
-
-## 1. Executive summary
-
-Kuzushi already has unusually strong foundations for a security-research product:
-
-- durable target-scoped finding identity;
-- append-only evidence and human decisions;
-- replayable, hash-linked run lifecycles;
-- explicit static versus runtime proof;
-- host-owned persistence boundaries;
-- no silent model/provider fallback;
-- bounded budgets, failures, cancellation, and degraded states;
-- a coherent `Map → Scan → Review → Prove → Fix` operator path;
-- capability-scoped modules and plugins whose output remains untrusted until the host commits it.
-
-The important gap is not another scanner. It is that Kuzushi cannot yet represent the **scientific process** that surrounds a finding.
-
-A serious researcher needs to answer:
-
-- What question were we trying to resolve?
-- What evidence inspired the hypothesis?
-- What result would falsify it?
-- What could the experiment actually observe?
-- What authority existed when the experiment ran?
-- Which exact backend, version, target snapshot, and evaluator produced the result?
-- Did the result prove a crash, reachability, a primitive, exposure, or impact?
-- Why was a candidate rejected or left inconclusive?
-- Which observation inspired the next branch of research?
-- Can another person replay the claim without reconstructing a chat transcript?
-- Did a patch remove the primitive, merely hide the signal, or only change the environment?
-
-Today, some of those answers can be inferred from findings, run metadata, proof artifacts, and model traces. They are not first-class, queryable, replayable domain state.
-
-The product opportunity is to make Kuzushi the **control plane for evidence-producing security research**:
-
-```text
-Question
-  → Hypothesis
-  → Authorized experiment
-  → Bounded observation
-  → Deterministic evaluator receipt
-  → Disposition
-  → Finding/proof update
-  → Remediation
-  → Re-experiment
-  → Next hypothesis
+```bash
+kz --target /path/to/project
 ```
 
-This strengthens the existing repository-security wedge before it broadens the target surface. It gives Kuzushi a defensible role even when detection engines commoditize: engines can be swapped; the durable truth, operator decisions, reproducibility, and proof progression remain in Kuzushi.
+Kuzushi then uses its existing terminal cockpit to:
 
----
+1. map high-value attack surfaces;
+2. generate and execute bounded exploit-oriented research strategies;
+3. account for what was tested, skipped, reproduced, or inconclusive;
+4. rank the few findings worth human attention;
+5. choose the next missing proof step for a selected finding;
+6. export a reproducible proof-of-concept bundle.
 
-## 2. Product thesis
+The user-visible flow remains:
 
-### 2.1 The category
+```text
+Target -> Setup -> Map <-> Run Focus -> Scan <-> Run Focus
+       -> Review -> Prove <-> Run Focus -> Fix -> Report
+```
 
-Kuzushi should define and own a category narrower than “AI security agent” and more valuable than “scanner orchestration”:
+This proposal does **not** add a Campaign page, Hypotheses page, Experiments page, authority-graph page, or research dashboard. It does not repurpose Fix as offensive exploit packaging. Fix remains remediation. A proof-of-concept export is a contextual action from Prove.
 
-> **Security research control plane:** a local-first workbench that turns stochastic discovery and heterogeneous tools into replayable, evaluator-backed, human-governed security knowledge.
+## One-sentence promise
 
-The product is not valuable because it can call many models or scanners. It is valuable because it can tell the truth about what those systems did and did not establish.
+> Point Kuzushi at a project; it finds the dangerous boundaries, runs exploitability-first research, ranks the strongest candidates, and lets the operator press `v` to push a candidate toward reproducible proof.
 
-### 2.2 The wedge
+## What the operator sees
 
-The initial wedge remains exactly where Kuzushi is strongest:
+The default journey is intentionally small:
 
-> **Repository-centered vulnerability investigation for AppSec and product-security operators who need defensible evidence, not AI prose.**
+```text
+$ kz --target ./project
 
-The research-control-plane work first productizes the difficult cases inside that wedge:
+Setup
+  one target, a preselected safe Map plan, optional model/budget readiness
+  -> Enter Start Map
 
-- a high-severity finding that needs multiple proof attempts;
-- a scanner disagreement that needs adjudication;
-- a crash that needs reachability and impact analysis;
-- a patch that needs a stronger closure claim than “the scanner stopped reporting it”;
-- a security campaign whose candidates, failures, cost, and terminal reasons must be accounted for;
-- a novel hypothesis derived from an earlier observation;
-- an AI-generated claim that must be constrained by a deterministic evaluator.
+Map
+  ranked attack surfaces and trust boundaries
+  -> Enter Start research
 
-Broader domains—browser security, binaries, firmware, agent infrastructure, protocol peers, deployment paths—become backend integrations later. They do not become separate top-level products.
+Run Focus
+  current research steps, bounded output, cost, background/cancel controls
+  -> b to background or remain and observe
 
-### 2.3 The durable moat
+Scan
+  tested surfaces, experiment funnel, reproduced anomalies, skipped coverage
+  -> Review
 
-The moat is the combination of:
+Review
+  ranked exploit candidates with primitive and reproduction state
+  -> v on one candidate
 
-1. **host-owned truth** — untrusted engines cannot promote their own claims;
-2. **research lineage** — question, hypothesis, experiment, observation, and cascade are durable;
-3. **declared visibility** — every verdict says what the system could and could not observe;
-4. **declared authority** — every effect is attributable to an approved principal and capability;
-5. **orthogonal proof** — static evidence, execution witness, reachability, exploitability, exposure, and impact are not collapsed;
-6. **replay** — another operator can reproduce the projection and inspect the exact artifacts;
-7. **human governance** — acceptance, rejection, suppression, risk, and remediation remain explicit decisions;
-8. **benchmark truth** — quality, failure, latency, and cost are measured from executed work.
+Prove
+  current proof ladder, evidence, observation limits, and one next experiment
+  -> v repeatedly until proof is strong or the candidate is rejected
+  -> e to export a PoC bundle
+```
 
-A scanner can copy a prompt. It is much harder to copy a trustworthy, migration-safe evidence system with a mature operator workflow.
+The normal path does not require opening Strategy Queue. Strategy Queue remains an advanced inspection and correction surface for operators who want to see or alter the generated research plan.
 
----
+## What is automatic
 
-## 3. Relationship to existing Kuzushi direction
+After the operator commits the Map or Scan action, Kuzushi may automatically:
 
-### 3.1 This RFC extends the control-room PRD
+- derive likely trust boundaries from repository context;
+- rank parsers, deserializers, command execution, filesystem, process, network, authentication, native, and cross-component surfaces;
+- generate bounded research strategies;
+- auto-select low-risk read-only strategies within the approved budget;
+- run static, structural, differential, mutation, and sandboxed reproduction work;
+- deduplicate repeated anomalies into stable findings;
+- reject candidates that fail deterministic checks;
+- attach a next proof plan to serious findings;
+- background long-running work;
+- update proof freshness when the project revision changes.
 
-The existing [product-flow PRD](../product-flow-prd.md) defines Kuzushi as a control room for non-deterministic security scans. Its load-bearing mechanisms are sampled sweeps, corroboration, a governed findings ledger, strategies, budgets, and a two-plane operator experience.
+Automatic does not mean ambient authority. Repository execution, target mutation, external actions, network use, and materially expensive work still pass through existing descriptor, approval, budget, sandbox, and no-silent-fallback policy.
 
-This RFC adds the missing research semantics around that control room:
+## What remains internal
 
-| Existing concept | Research-control-plane extension |
-| --- | --- |
-| strategy proposal | hypothesis and experiment plan with a falsification predicate |
-| sweep | one or more experiment attempts under a declared observation boundary |
-| run | execution record linked to a research experiment |
-| result | observation plus evaluator receipt, not merely model output |
-| finding | durable vulnerability identity linked to one or more research claims |
-| proof state | orthogonal proof dimensions with witness-owning transitions |
-| prompt mutation | one possible experiment input, never hidden reasoning state |
-| cost ledger | cost per experiment, proof upgrade, confirmed finding, and closed finding |
-| replay | reconstruction of both run lifecycle and research lineage |
-| strategy correction | human amendment to a hypothesis, plan, or interpretation |
-| report | defensible statement of evidence, visibility, authority, and remaining uncertainty |
+The DEF CON research comparison identified useful architectural concepts:
 
-The control-room PRD answers **how the operator steers non-determinism**. This RFC answers **how the product turns that work into durable research knowledge**.
-
-### 3.2 This RFC does not bypass the current roadmap
-
-The current roadmap is deliberately focused on:
-
-- shipping the product that exists;
-- making evidence validation universal;
-- preserving honest verification;
-- producing public benchmark numbers;
-- strengthening the local-first operator wedge.
-
-The first slices in this RFC must advance those goals, not compete with them.
-
-Allowed before the current P3 benchmark exit:
-
-- observation-boundary disclosure;
+- research hypotheses;
+- controlled experiments;
+- cascade lineage;
+- observation boundaries;
+- startup authority;
 - evaluator receipts;
-- research lifecycle and replay;
-- terminal funnel accounting;
-- startup authority manifests;
-- one repository-security vertical slice using existing engines.
+- exploitability milestones;
+- trajectory-level policy.
 
-Gated until the current evidence and benchmark exits are real:
+These concepts are useful for correctness, replay, and planning, but they are **not new primary operator objects**.
 
-- a browser automation product surface;
-- binary exploitation as a primary workflow;
-- broad MCP/A2A estate discovery;
-- endpoint-wide trajectory monitoring;
-- malicious protocol-peer labs;
-- a marketplace of third-party proof backends;
-- cloud collaboration infrastructure.
+They remain implementation details behind the existing durable objects:
 
-### 3.3 Findings remain findings
+```text
+Target
+Run
+Finding
+Evidence
+Proof
+Human decision
+Artifact
+```
 
-A `ResearchHypothesis` must not replace `Finding`.
+An operator may inspect detailed lineage in Replay or Trace, but the normal workflow is finding-centered.
 
-A finding is the durable identity of a suspected or established security defect. A hypothesis is a falsifiable claim investigated during a research process. The relationship is many-to-many:
+## Product boundary
 
-- one hypothesis may produce several findings;
-- several hypotheses may investigate one finding;
-- a hypothesis may be rejected without creating a finding;
-- a finding may predate the research ledger and later receive research lineage;
-- a negative experiment may strengthen confidence in a rejection without deleting history.
+### In scope for the first product increment
 
-The existing finding identity, evidence, decision, suppression, verification, and patch contracts remain authoritative for vulnerability state.
+- repository-centered AppSec and product-security research;
+- source and build metadata;
+- project-controlled configuration and instruction surfaces;
+- parser and deserializer boundaries;
+- command, filesystem, process, and network authority transitions;
+- existing static/CPG/CodeQL evidence;
+- bounded harness generation and sandboxed reproduction;
+- class-specific proof ladders;
+- reproducible PoC export.
 
----
+### Not in scope for the first increment
 
-## 4. Research basis
+- contest administration;
+- Pwn2Own registration or rules management;
+- cloud collaboration;
+- endpoint monitoring;
+- generic autonomous pentesting;
+- browser, hypervisor, firmware, mobile, or automotive exploit engines;
+- an external plugin marketplace;
+- a new persistent research database;
+- a replacement for the findings store or V3 event log;
+- a TUI page for every internal research concept.
 
-This direction is grounded in the highest-signal DEF CON 34 research and released systems reviewed for Kuzushi. A complete public transcript set was not assumed; the analysis distinguished released implementations, detailed research text, advisories, official slides/abstracts, and title-level evidence.
+Specialist backends may be added later, but they must plug into the same finding, proof, run, authorization, and replay contracts.
 
-| Research system or talk | Product lesson | Kuzushi primitive |
-| --- | --- | --- |
-| PortSwigger HTTP Terminator | autonomous research requires a falsifiable hypothesis, staged execution, a deterministic evaluator, and cascades from confirmed observations | research ledger, evaluator receipt, cascade edge |
-| Project Reference / Wiring the Harness | multi-stage model orchestration is only credible when the full candidate funnel, attrition, cost, and verification are measured | terminal funnel projection, campaign metrics |
-| Witchcraft Solver | a symbolic crash, external reachability, exploit primitive, and impact are different claims owned by different mechanisms | orthogonal proof dimensions |
-| pre-task Gemini CLI RCE research | dangerous authority can arise from configuration, environment, startup, or headless policy before a model answers | startup authority manifest |
-| AgentsLeak | individually allowed file/process/network actions can compose into a prohibited trajectory | normalized action events and stateful policy |
-| SADF | benchmarks must exercise effects and disclose unimplemented metrics rather than fabricate proxies | scenario benchmark contract and undefined-metric discipline |
-| AgentHound | credentials, agents, tools, MCP, A2A, gateways, vector stores, and services form one authority graph | authority graph and path observations |
-| Taming the Swarm | browser claims require DOM/network/storage/console/effect evidence, not model narration | browser proof backend, later |
-| LGTM | a clean verdict is meaningless when dangerous behavior sits outside the observed context | observation-boundary contract |
-| malicious OCI-registry research | protocol clients need adversarial peers, reproducible traces, and host-observed side effects | malicious-peer backend, later |
+## Why this fits Kuzushi
 
-The product should absorb the **general research contracts**, not create one command per talk.
+Kuzushi already has the correct product shape:
 
----
+- a local-first Rust terminal cockpit;
+- deterministic Target and Setup readiness;
+- Map, Scan, Review, Prove, Fix, and Report;
+- foreground Run Focus with backgrounding, steering, cancellation, and durable receipts;
+- a persistent Strategy Queue;
+- findings with stable identity, evidence, proof, human decisions, and replay;
+- descriptor-backed tools and one shared dispatch boundary;
+- explicit runtime/model selection;
+- scoped KWP and plugin authority;
+- append-only V3 events and hash-linked run items;
+- cost and budget accounting.
 
-## Plan packet
+The missing work is connective tissue:
 
-This review packet is split by decision boundary so product direction can be
-accepted without implicitly approving every future backend:
+```text
+Map evidence
+  -> exploitability-ranked strategies
+  -> bounded research sweep
+  -> candidate funnel accounting
+  -> finding-specific next proof plan
+  -> evaluator-backed proof transitions
+  -> PoC export
+```
 
-1. [Product workflow](./01-product-workflow.md) — users, non-goals, lifecycle, CLI/TUI projection, and authorization UX.
-2. [Domain model](./02-domain-model.md) — bounded context, research entities, and invariants.
-3. [Persistence, observation boundary, and startup authority](./03-persistence-boundary-authority.md).
-4. [Proof backends and later agent-security horizon](./04-proof-and-agent-horizon.md).
-5. [Delivery, benchmarks, packaging, and implementation phases](./05-delivery-and-benchmarks.md).
-6. [First twelve PRs, acceptance program, risks, and immediate next action](./06-pr-sequence-and-acceptance.md).
+## Pwn2Own as dogfood, not product structure
 
-The narrow first release is repository-centered: observation boundaries,
-evaluator receipts, terminal funnel accounting, a replayable research ledger,
-and one static-to-runtime vertical slice. Browser, binary, protocol-peer,
-agent-estate, and endpoint-wide capabilities remain separately gated.
+Pwn2Own is a valuable dogfood scenario because it demands:
+
+- high-value attack-surface selection;
+- aggressive false-positive rejection;
+- reliable reproduction;
+- precise separation of anomaly, primitive, boundary crossing, and impact;
+- self-contained evidence.
+
+Kuzushi should help discover and prove a bug in a checked-out target project. It should not become a Pwn2Own campaign manager.
+
+A representative dogfood journey is:
+
+```bash
+kz --target ./coding-agent-project
+```
+
+Then:
+
+```text
+Map identifies project-controlled configuration, tool execution,
+path containment, and child-process authority as high-value surfaces.
+
+Scan runs bounded research strategies.
+
+Review ranks two proof-ready candidates.
+
+Prove drives one candidate from a reproduced target mismatch
+to attacker control, boundary crossing, and a minimized PoC.
+
+Export writes a self-contained evidence bundle.
+```
+
+Contest-specific eligibility and final submission formatting remain downstream work.
+
+## Success criteria
+
+The product is successful when a serious operator can:
+
+1. point Kuzushi at a project without creating any new campaign object;
+2. understand in Map why Kuzushi chose its research priorities;
+3. launch a bounded sweep with one action;
+4. return later to a Scan receipt that accounts for every strategy and candidate;
+5. see a Review queue ordered by research value rather than raw scanner severity;
+6. press `v` and receive the correct next proof experiment;
+7. distinguish reproduced behavior from attacker control, boundary crossing, and impact;
+8. export a PoC that a second machine can reproduce;
+9. replay how the finding reached its current proof state;
+10. trust that missing visibility or failed execution did not become confirmation.
+
+## Packet
+
+- [`01-product-workflow.md`](./01-product-workflow.md) — complete TUI journey and screen contracts.
+- [`02-domain-model.md`](./02-domain-model.md) — user-visible objects, internal-only research state, and invariants.
+- [`03-persistence-boundary-authority.md`](./03-persistence-boundary-authority.md) — execution planning, durable events, observation and authority truth.
+- [`04-proof-and-agent-horizon.md`](./04-proof-and-agent-horizon.md) — proof planner, class-specific ladders, evaluator contract, and backend boundary.
+- [`05-delivery-and-benchmarks.md`](./05-delivery-and-benchmarks.md) — delivery gates, dogfood, metrics, packaging, and adoption evidence.
+- [`06-pr-sequence-and-acceptance.md`](./06-pr-sequence-and-acceptance.md) — focused implementation sequence and acceptance program.
+
+## Review decisions
+
+Review should resolve these questions:
+
+1. Is the one-project, existing-TUI workflow the correct product contract?
+2. Should exploitability-first behavior be a Scan strategy selected automatically from Map, rather than a new top-level mode?
+3. Should Strategy Queue remain advanced-by-default while generated strategies execute through the normal Map/Scan action?
+4. Is `v` on a finding the single operator contract for advancing proof?
+5. Should PoC export remain contextual to Prove, leaving Fix and Report semantics unchanged?
+6. Is the first vertical slice narrow enough: one fixture, one research strategy family, one proof ladder, one PoC bundle?

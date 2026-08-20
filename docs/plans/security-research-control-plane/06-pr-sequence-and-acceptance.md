@@ -1,460 +1,377 @@
-# PR Sequence and Acceptance Program — Kuzushi Security Research Control Plane
+# Implementation sequence and acceptance
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Sequencing rule
 
----
+Do not begin by building a generic research ledger, a new TUI page, or a new exploit engine.
 
-## 1. Proposed first twelve implementation PRs
-
-These are deliberately small and reviewable. Titles are illustrative.
-
-### PR 1 — `feat(research): define observation-boundary domain`
-
-Changes:
-
-- pure domain types;
-- completeness states;
-- bounds and redaction;
-- focused serialization tests;
-- no runtime integration.
-
-Acceptance:
-
-- no unbounded free-form payloads;
-- no optimistic default completeness;
-- unknown and unavailable remain distinct.
-
-### PR 2 — `feat(runs): record source and static observation boundary`
-
-Changes:
-
-- derive boundary from one existing scan path;
-- persist artifact/reference;
-- add run projection;
-- export in JSON/markdown.
-
-Acceptance:
-
-- included/excluded/failed surfaces reconcile;
-- no clean claim without boundary;
-- existing run schemas remain backward compatible.
-
-### PR 3 — `feat(research): add evaluator receipt contract`
-
-Changes:
-
-- evaluator identity;
-- outcome vocabulary;
-- evidence/boundary references;
-- writer event and projection;
-- schema tests.
-
-Acceptance:
-
-- direct backend promotion rejected;
-- evidence unavailable cannot satisfy predicate;
-- receipt is immutable.
-
-### PR 4 — `feat(eval): emit deterministic path evaluator receipt`
-
-Changes:
-
-- adapt one existing static path mechanism;
-- exact input/tool/config identity;
-- negative and inconclusive fixtures.
-
-Acceptance:
-
-- same artifacts produce same outcome;
-- parser/index failure is inconclusive;
-- model prose cannot change evaluator outcome.
-
-### PR 5 — `feat(eval): account for every candidate terminal reason`
-
-Changes:
-
-- funnel state/reason;
-- summary reconciliation;
-- no candidate loss.
-
-Acceptance:
+Build one end-to-end journey through existing surfaces:
 
 ```text
-input = malformed + duplicate + unsupported + rejected + inconclusive + positive + blocked/failed
+Map priority
+-> generated research plan
+-> Run Focus
+-> Scan funnel
+-> Review candidate
+-> `v` proof step
+-> Prove receipt
+-> PoC export
 ```
 
-### PR 6 — `feat(research): persist questions and hypotheses`
+Each PR should be independently reviewable and preserve current behavior when the feature is not selected.
 
-Changes:
+## 2. PR A — Exploitability research purpose and options
 
-- IDs, events, projection;
-- falsification predicate;
-- propose/accept/reject;
-- read-only queries.
+### Goal
 
-Acceptance:
+Represent exploitability-first Scan intent through the existing descriptor and preparation system.
 
-- accepted hypothesis requires predicate;
-- model cannot accept its own proposal;
-- replay stable.
+### Changes
 
-### PR 7 — `feat(research): link experiment plans to prepared dispatch`
+- Add an additive research purpose/profile to canonical scan input.
+- Add descriptor-backed options for:
+  - research enabled/purpose;
+  - time or cost budget;
+  - maximum strategy count;
+  - maximum experiment variants;
+  - automatic low-risk strategy selection;
+  - optional focus text.
+- Ensure CLI, shell, and run consume the same canonical input.
+- Reject unknown and incompatible inputs at preparation.
+- Record the resolved purpose and option digest in run metadata/input.
 
-Changes:
+### Non-goals
 
-- plan digest;
-- target identity;
-- requested authority;
-- authorization binding;
-- run/attempt link.
+- No research strategy implementation.
+- No TUI redesign.
+- No proof changes.
+- No new environment-variable product controls.
 
-Acceptance:
+### Acceptance
 
-- changed input invalidates authorization;
-- direct executor calls impossible;
-- one attempt maps to one run.
+- [ ] Preparation produces byte-equivalent canonical input across modes.
+- [ ] Target-local config cannot select a model or increase execution authority.
+- [ ] Missing model leaves deterministic research available and model-backed strategies unavailable.
+- [ ] Run input and summary disclose the purpose and budget.
+- [ ] Existing standard scans remain unchanged.
 
-### PR 8 — `feat(research): record observations and dispositions`
+## 3. PR B — Map research-priority projection
 
-Changes:
+### Goal
 
-- observations;
-- evaluator application;
-- disposition events;
-- finding links.
+Add an explainable research-priority section to Map.
 
-Acceptance:
+### Changes
 
-- automated disposition requires receipt;
-- contradictory receipts retained;
-- finding identity unchanged.
+- Define a pure `ResearchSurfacePriority` presentation/domain projection.
+- Derive priorities from existing current-revision Map evidence.
+- Include score factors and missing evidence.
+- Render top priorities in TTY and plain mode.
+- Add one `NEXT` action to start research.
+- Preserve Summary/DFD/Entry points/Components ownership and navigation.
 
-### PR 9 — `feat(cli): inspect and export research trees`
+### Acceptance
 
-Changes:
+- [ ] No priority exists without supporting Map evidence.
+- [ ] Priority reasons are stable and bounded.
+- [ ] Missing generated/vendor/native visibility appears as a limitation.
+- [ ] Page visits do not change workflow state.
+- [ ] Compact mode retains top priority and NEXT.
+- [ ] Existing Map snapshots update intentionally.
+
+## 4. PR C — Strategy synthesis and default plan
+
+### Goal
+
+Generate a bounded research plan without requiring Strategy Queue interaction.
+
+### Changes
+
+- Add strategy templates for the first fixture:
+  - static boundary trace;
+  - path/configuration differential;
+  - sandboxed effect reproduction.
+- Reuse or adapt current Strategy Proposal, preflight, correction, cost, runtime, risk, and terminal fields.
+- Generate proposals from Map priorities.
+- Auto-select only low-risk admitted strategies inside budget.
+- Persist one plan artifact and strategy queue lineage.
+- Open Run Focus from the Map action.
+
+### Acceptance
+
+- [ ] The normal fixture journey never opens Strategy Queue.
+- [ ] Advanced Strategy Queue shows the same generated strategies.
+- [ ] Every unselected strategy has a reason.
+- [ ] Explicit operator corrections take precedence over regeneration.
+- [ ] High-risk/effectful strategies require explicit approval.
+- [ ] Estimated cost and runtime appear before launch.
+- [ ] No target mutation occurs outside a disposable admitted workspace.
+
+## 5. PR D — Research funnel and Scan projection
+
+### Goal
+
+Make completed research legible and complete.
+
+### Changes
+
+- Add terminal outcome vocabulary for strategy and experiment stages.
+- Produce `research-funnel.json` as a declared artifact.
+- Bridge bounded terminal facts into target events.
+- Project tested surfaces, strategy outcomes, candidate counts, proof-ready count, cost, duration, and observation coverage into Scan.
+- Add plain/JSON equivalent projection.
+
+### Acceptance
+
+- [ ] Every admitted strategy terminates.
+- [ ] Every generated candidate terminates as rejected, deduplicated, degraded, or persisted.
+- [ ] Partial, failed, blocked, skipped, and unavailable remain distinct.
+- [ ] Clean output is scoped to the observation boundary.
+- [ ] Parent/child run union does not double-count candidates.
+- [ ] Restart reconstructs the same Scan summary.
+- [ ] Compact TUI and plain output preserve the same truth.
+
+## 6. PR E — Candidate normalization and Review ranking
+
+### Goal
+
+Turn research observations into a small, useful Review queue.
+
+### Changes
+
+- Validate research candidate evidence at host ingest.
+- Compute canonical identity from host-owned structural evidence.
+- Attach observation source and reproduction summaries.
+- Add a research-value projection using inspectable factors.
+- Show primitive/reproduction state in Review rows and selected detail.
+- Preserve human decision authority.
+
+### Acceptance
+
+- [ ] Producer-controlled canonical fingerprints are rejected.
+- [ ] Same defect across strategies converges on one finding.
+- [ ] Distinct loci remain distinct.
+- [ ] Fabricated or unavailable citations visibly degrade.
+- [ ] Ranking never changes severity or proof state.
+- [ ] Human decisions survive later observations.
+- [ ] A candidate may be rejected without deleting its funnel receipt.
+
+## 7. PR F — Finding proof planner and `v`
+
+### Goal
+
+Make `v` execute the smallest useful next proof step.
+
+### Changes
+
+- Add additive exploit proof dimensions.
+- Create pure proof-step selection over current finding/proof/target/backend state.
+- Project exact NEXT wording in Review and Prove.
+- Bind the existing `v` action to prepared proof input.
+- Open Run Focus with the finding and proof claim.
+- Report blockers when no safe backend is available.
+
+### Acceptance
+
+- [ ] The planner never treats a model assessment as empirical proof.
+- [ ] The same state produces the same plan digest.
+- [ ] A changed target invalidates or replans the step.
+- [ ] The first fixture transitions through attacker control and boundary crossing separately.
+- [ ] Missing observer produces blocked/inconclusive, not negative proof.
+- [ ] `v` targets the displayed finding even under filters.
+- [ ] Plain mode prints the exact equivalent command.
+
+## 8. PR G — Evaluator receipt and proof transition
+
+### Goal
+
+Advance proof only from authenticated, host-owned receipts.
+
+### Changes
+
+- Define internal evaluator identity, predicate, input, outcome, and receipt.
+- Bind target, authority, observation, backend, harness, and artifact identities.
+- Commit receipts through the writer actor.
+- Update proof projection from receipts.
+- Add replay and stale-proof behavior.
+- Expose relevant evidence and limits in Prove.
+
+### Acceptance
+
+- [ ] Missing receipt cannot advance empirical state.
+- [ ] Invalid experiment cannot count as success or failure.
+- [ ] Conflicting receipts remain visible and resolve by explicit policy.
+- [ ] Receipt replay is deterministic.
+- [ ] Artifact or target identity change stales the dependent state.
+- [ ] Raw model output cannot set evaluator outcome.
+- [ ] Proof and human decision remain separate.
+
+## 9. PR H — PoC bundle export
+
+### Goal
+
+Export a selected finding’s reproducible evidence without adding a new workflow phase.
+
+### Changes
+
+- Add Prove contextual export action.
+- Define bundle manifest and file layout.
+- Include target identity, proof snapshot, reproduction command/procedure, receipts, observation limits, known gaps, and hashes.
+- Copy or reference minimized harness/input artifacts safely.
+- Render preview and final receipt.
+- Add secret and path safety.
+
+### Acceptance
+
+- [ ] Bundle export never mutates finding/proof truth.
+- [ ] Missing artifacts block or visibly degrade export.
+- [ ] Bundle reproduces on a clean fixture checkout.
+- [ ] Known proof gaps appear in human and machine-readable summaries.
+- [ ] Absolute local paths and credentials are absent.
+- [ ] Bundle files authenticate against the manifest.
+- [ ] Fix and Report semantics remain unchanged.
+
+## 10. PR I — Dogfood, benchmarks, and release gates
+
+### Goal
+
+Prove the whole journey works and is worth using.
+
+### Changes
+
+- Add deterministic vulnerable fixture and negative controls.
+- Add `J-RESEARCH-01` TUI journey.
+- Add benchmark manifest.
+- Measure funnel, precision, proof upgrade, cost, time, reproduction, and PoC success.
+- Add one historical real-world vulnerability replay.
+- Document operator workflow and resource cleanup.
+
+### Acceptance
+
+- [ ] One clean-machine project-to-PoC journey passes.
+- [ ] Negative controls produce no proof-ready finding.
+- [ ] Candidate attrition is fully accounted.
+- [ ] Unknown cost remains unknown.
+- [ ] Cancellation and budget exhaustion settle every unit.
+- [ ] Target source remains unchanged during read-only/default research.
+- [ ] Hosted and local validation boundaries are reported honestly.
+- [ ] Release remains blocked if a false empirical confirmation is possible.
+
+## 11. Recommended first implementation slice
+
+The first code PR after alignment should be smaller than PR A through I combined.
+
+Implement:
 
 ```text
-research list
-research show
-research tree
-research export
+one additive Scan purpose
+one deterministic Map priority
+one generated static strategy
+one Scan funnel row
+one expected fixture finding
+one static next-proof plan
 ```
 
-Acceptance:
+No runtime proof yet.
 
-- plain/JSON parity;
-- bounded output;
-- deterministic ordering;
-- no TUI dependency.
+This establishes the vertical seams without inventing the final backend interface.
 
-### PR 10 — `feat(research): dogfood static-to-runtime campaign`
+The second code PR can add the deterministic sandboxed proof receipt for the same fixture.
 
-Changes:
+## 12. Repository seams
 
-- reference fixture;
-- static path attempt;
-- runtime attempt;
-- patch retest;
-- negative and incomplete cases.
-
-Acceptance:
-
-- complete end-to-end replay;
-- exact boundary disclosure;
-- no overclaim from local harness;
-- closure claim names rerun predicates.
-
-### PR 11 — `feat(authority): persist startup authority manifest`
-
-Changes:
-
-- config/env/runtime/module/executable/grant identity;
-- pre-effect recording;
-- degraded unresolved state.
-
-Acceptance:
-
-- target source cannot silently escalate;
-- secret values never persisted;
-- manifest digest binds authorization.
-
-### PR 12 — `feat(tui): project research lineage without new workflow state`
-
-Changes:
-
-- finding detail summary;
-- research tree view;
-- boundary/evaluator detail;
-- no new mutable TUI store.
-
-Acceptance:
-
-- derives from application DTOs;
-- CLI/TUI status parity;
-- no phase advancement from page visits;
-- snapshots disclose uncertainty.
-
----
-
-## 2. Detailed acceptance program
-
-### 2.1 Domain tests
-
-- invalid state transitions rejected;
-- automated disposition without receipt rejected;
-- receipt after disposition time rejected;
-- observation from another target rejected;
-- changed plan digest invalidates authorization;
-- cascade without source observation rejected;
-- close question with active hypothesis requires explicit override;
-- unbounded text rejected/clipped through shared policy;
-- duplicate idempotency key does not duplicate events.
-
-### 2.2 Persistence and replay
-
-- append, crash, replay;
-- truncated tail stops at last valid prefix;
-- hash mismatch degrades;
-- duplicate delivery idempotent;
-- projection rebuild equals live projection;
-- old targets with no research events remain valid;
-- unknown future event version stops safely or is preserved according to V3 compatibility policy;
-- SQLite can be deleted and rebuilt.
-
-### 2.3 Authorization
-
-- read-only static experiment needs no extra approval beyond descriptor policy;
-- repository execution requires explicit approval;
-- changed target snapshot invalidates stale authorization;
-- expired authority rejected;
-- canceled invocation cannot commit late observations;
-- backend cannot request undeclared authority;
-- target-local config cannot broaden grants.
-
-### 2.4 Boundary
-
-- excluded generated/vendor files visible;
-- parser failure visible;
-- truncation visible;
-- unsupported language visible;
-- local harness not rendered as deployment reachability;
-- missing network/deployment scope not silently complete;
-- required boundary missing → evaluator inconclusive;
-- non-applicable boundary does not count as missing.
-
-### 2.5 Evaluator
-
-- deterministic fixtures stable;
-- malformed evidence rejected;
-- wrong target rejected;
-- missing artifact rejected;
-- conflicting evidence produces inconclusive or explicit conflict;
-- evaluator version/digest change visible;
-- model-produced text cannot satisfy a binary predicate by itself.
-
-### 2.6 Reports
-
-Every research export includes:
-
-- target and Kuzushi identities;
-- question/hypotheses;
-- experiment plans and attempts;
-- authority and boundary;
-- observations and evaluator receipts;
-- findings/proof links;
-- human decisions;
-- cost/latency;
-- failures and blocked work;
-- remaining uncertainty;
-- reproduction instructions where safe;
-- integrity/degradation state.
-
----
-
-## 3. Definition of productized
-
-This initiative is not productized merely because domain types exist.
-
-It is productized when all of the following are true:
-
-1. A new operator can start from a finding and open a research question without editing event JSON.
-2. A hypothesis has a visible falsification predicate.
-3. An existing tool can run as an authorized experiment without a parallel dispatch path.
-4. Every result shows an observation boundary.
-5. An evaluator receipt—not a model narrative—owns the automated disposition.
-6. The research tree replays from durable state.
-7. A negative result remains useful and queryable.
-8. A finding displays exactly which proof dimensions were established.
-9. A patch can be retested against the same predicates.
-10. An export can be reviewed on another machine.
-11. The campaign has complete terminal accounting and measured-or-unknown cost.
-12. At least one real benchmark and one dogfood campaign pass.
-13. The current repository-security golden path is not made slower or more confusing by default.
-14. Broader backends remain optional and capability-scoped.
-15. A design partner says the exported evidence replaces meaningful manual reconciliation work.
-
----
-
-## 4. Risks and mitigations
-
-### 4.1 Scope explosion
-
-**Risk:** “Research control plane” becomes justification for browsers, binaries, cloud, MCP discovery, and pentesting at once.
-
-**Mitigation:** enforce roadmap gates and first vertical slice; each backend requires a separate RFC/benchmark.
-
-### 4.2 Duplicate truth systems
-
-**Risk:** research status diverges from runs, findings, or proof.
-
-**Mitigation:** link canonical identities; reuse run terminal states; findings remain authoritative; all research writes use V3 events.
-
-### 4.3 Model narrative masquerades as science
-
-**Risk:** persuasive explanations are interpreted as evaluator outcomes.
-
-**Mitigation:** closed evaluator receipt contract; model-only results capped and labeled; automated disposition requires receipt.
-
-### 4.4 Schema burden
-
-**Risk:** too many public schemas freeze an immature design.
-
-**Mitigation:** begin with internal Rust/event types; publish only after a complete vertical slice and migration review.
-
-### 4.5 Dangerous experimentation
-
-**Risk:** a hypothesis plan is treated as permission to execute.
-
-**Mitigation:** preserve descriptor effect/approval policy; authorization binds exact plan/target/authority; fail closed on stale authority.
-
-### 4.6 TUI overload
-
-**Risk:** research objects create a second complex cockpit.
-
-**Mitigation:** CLI/domain first; project through existing phases; add only read-only DTO-backed TUI views after stability.
-
-### 4.7 False completeness
-
-**Risk:** a boundary summary becomes another optimistic score.
-
-**Mitigation:** dimensioned completeness; unknown/unavailable explicit; evaluator-required dimensions; wording tests.
-
-### 4.8 Backend supply-chain risk
-
-**Risk:** external proof backends expand trusted code and executable authority.
-
-**Mitigation:** digest identity, capability grants, conformance corpus, strict output, host-owned commit, maturity labels.
-
-### 4.9 Benchmark gaming or contamination
-
-**Risk:** research prompts or corpus knowledge leak into evaluation.
-
-**Mitigation:** manifest holdout/contamination status, fixed seeds, blinded slices where possible, raw denominator disclosure.
-
-### 4.10 Commercial distraction
-
-**Risk:** licensing/team/cloud work arrives before core credibility.
-
-**Mitigation:** design partners and paid pilots first; no cloud requirement; benchmark gate before platform expansion.
-
----
-
-## 5. Open decisions
-
-These should be resolved during review, not guessed during implementation.
-
-### 5.1 Naming
-
-Options:
-
-- `research` — clearest for the scientific loop;
-- `investigation` — familiar to AppSec teams;
-- `case` — useful container but too generic;
-- `experiment` — too narrow for question and remediation lineage.
-
-Recommendation: use `research` as the bounded context and “investigation” in operator-facing prose where it reads more naturally.
-
-### 5.2 Confirmation vocabulary
-
-Should hypothesis states include `Confirmed` in v1?
-
-Recommendation: no. Start with:
+Likely implementation areas:
 
 ```text
-proposed
-accepted
-active
-reproduced
-falsified
-inconclusive
-superseded
-expired
+crates/kuzushi-core/src/modules/application/sast_scan/
+crates/kuzushi-core/src/modules/
+crates/kuzushi-core/src/strategy/
+crates/kuzushi-core/src/findings/domain/
+crates/kuzushi-core/src/findings/persistence/
+crates/kuzushi-core/src/storage_v3/writer_actor/
+crates/kuzushi-cli/src/application/
+crates/kuzushi-tui/src/app/
+crates/kuzushi-tui/src/ui_view_models/
+crates/kuzushi-tui/src/renderer/
+schemas/
+examples/
+tests/
+docs/
 ```
 
-Add `confirmed` only when domain-specific evaluator policies define it precisely.
+Implementers must locate the current canonical seam before editing; this list is a map, not authorization to duplicate policy across layers.
 
-### 5.3 First evaluator
+## 13. Validation ladder
 
-Candidates:
+### Focused domain tests
 
-- static source-to-sink predicate;
-- exact runtime crash reproduction;
-- patch retest predicate.
+- priority scoring;
+- strategy admission;
+- funnel reduction;
+- candidate normalization;
+- proof planning;
+- evaluator outcomes;
+- staleness;
+- PoC manifest.
 
-Recommendation: static source-to-sink first because it is deterministic, bounded, and uses existing infrastructure; add runtime reproduction in the vertical slice.
+### Mode parity
 
-### 5.4 Question creation
+- shell and headless prepared input;
+- TTY/plain/JSON projection;
+- same target and run identities;
+- same proof state and next action.
 
-Should any model automatically create questions?
+### Integration
 
-Recommendation: models may propose; an operator or explicit campaign policy creates/accepts them. Avoid uncontrolled research-tree growth.
+- full fixture run;
+- interruption recovery;
+- budget stop;
+- backend unavailable;
+- observer failure;
+- target revision change;
+- duplicate candidate convergence;
+- clean PoC replay.
 
-### 5.5 Research object retention
+### Quality
 
-Recommendation: research events follow target event retention; large artifacts follow existing run/CAS retention policies. Pruning must not leave a disposition claiming evidence that is no longer available without marking that degradation.
+- format;
+- focused tests;
+- strict Clippy;
+- CRAP-risk;
+- architecture and model-safety gates;
+- docs checks;
+- quick repository verification;
+- full suite before release-bound schema or packaging changes.
 
-### 5.6 External backend API
+## 14. Risks
 
-Recommendation: do not publish a stable external `ProofBackend` API until two internal adapters share it. Premature public abstraction would freeze the wrong boundary.
+### Scope explosion
 
-### 5.7 Commercial boundary
+Mitigation: one fixture, three strategy templates, one proof ladder, no new page.
 
-Recommendation: keep all core evidence and replay local and open. Validate paid workflow features through design partners before deciding license boundaries.
+### False confirmation
 
----
+Mitigation: evaluator receipt required for empirical transitions; adversarial tests around observer and harness failure.
 
-## 6. Review checklist
+### Resource growth
 
-Reviewers should reject this plan if it:
+Mitigation: budget and artifact caps, disposable workspaces, retention policy, integration with prune.
 
-- creates a second mutable database;
-- bypasses `ModuleRegistry`;
-- bypasses the writer actor;
-- lets a model confirm itself;
-- treats prompt transcripts as required durable state;
-- changes finding identity;
-- introduces browser/binary/agent-estate breadth before current evidence and benchmark gates;
-- adds TUI state before domain/replay;
-- creates arbitrary execution authority;
-- collapses observation boundary to one score;
-- uses confidence as a substitute for proof;
-- claims productization without a vertical slice and benchmark.
+### TUI overload
 
-Reviewers should approve the direction only if the first implementation slices make the current repository-security product more truthful and more defensible even if no later backend is ever built.
+Mitigation: project priorities in Map, funnel in Scan, candidates in Review, proof in Prove; advanced state stays in Replay/Strategy Queue.
 
----
+### Duplicate truth
 
-## 7. Recommended immediate next action
+Mitigation: writer actor and existing finding/event/run stores remain canonical.
 
-After this RFC is reviewed, the first code issue should be:
+### Backend abstraction too early
 
-> **Add an additive, replayable observation-boundary contract to one existing static scan path, and require one deterministic evaluator to disclose missing or degraded required surfaces.**
+Mitigation: implement the first backend internally; stabilize a public trait only after at least two real adapters share the boundary.
 
-That work is narrow, strengthens current roadmap P1-P3, creates no new scanner or TUI feature, and tests the most important product principle:
+## 15. Rollback
 
-> Kuzushi must never claim more than it could observe.
+The documentation PR is additive.
 
-Only after that contract survives implementation and review should the minimal question/hypothesis ledger begin.
+Each implementation PR should be independently revertible.
+
+Persisted additions should be versioned and optional until the vertical slice is stable. Existing runs and findings must remain readable without research artifacts.

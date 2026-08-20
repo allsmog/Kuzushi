@@ -1,340 +1,481 @@
-# Proof Backends and Agent-Security Horizon — Kuzushi Security Research Control Plane
+# Proof planner, exploit ladders, and backend boundary
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Goal
 
----
+Make `v` the simplest useful command in exploit research.
 
-## 1. Generic proof backend contract
+When the operator selects a finding and presses `v`, Kuzushi should:
 
-### 1.1 Why a backend contract
+1. read the finding’s current proof snapshot;
+2. identify the smallest missing proof claim that materially changes confidence or impact;
+3. select a compatible backend;
+4. estimate cost, time, authority, and observation requirements;
+5. prepare and authorize the experiment through the shared dispatch boundary;
+6. open Run Focus;
+7. evaluate the result with a host-owned predicate;
+8. update Prove and propose the next step.
 
-Kuzushi should not implement browsers, symbolic execution, protocol peers, fuzzers, and binary lifters inside one core architecture. It should give those engines a strict contract.
+The operator should not have to design a research tree.
+
+## 2. Proof dimensions
+
+Keep the existing static proof ladder.
+
+Add orthogonal exploit-research dimensions:
 
 ```rust
-pub trait ProofBackend {
-    fn descriptor(&self) -> ProofBackendDescriptor;
+enum ReproductionState {
+    Unknown,
+    Attempted { attempts: u32 },
+    Reproduced { successes: u32, attempts: u32 },
+    Flaky { successes: u32, attempts: u32 },
+    NotReproduced { attempts: u32 },
+    Inconclusive,
+}
+
+enum AttackerControlState {
+    Unknown,
+    InputInfluence,
+    PartialControl,
+    ControlledValue,
+    ControlledTarget,
+    ControlledInstruction,
+}
+
+enum BoundaryCrossingState {
+    Unknown,
+    WithinDeclaredBoundary,
+    WorkspaceBoundaryCrossed,
+    PermissionBoundaryCrossed,
+    ProcessBoundaryCrossed,
+    SandboxBoundaryCrossed,
+}
+
+enum PrimitiveState {
+    Unknown,
+    Crash,
+    LogicPrimitive,
+    ReadPrimitive,
+    WritePrimitive,
+    ControlFlowInfluence,
+    CodeExecution,
+}
+
+enum ReachabilityState {
+    Unknown,
+    LocalHarnessOnly,
+    ProjectInputReachable,
+    EntrypointReachable,
+    DefaultPathReachable,
+}
+
+enum ImpactState {
+    Unknown,
+    Availability,
+    Confidentiality,
+    Integrity,
+    PrivilegeIncrease,
+    ArbitraryCodeExecution,
+}
+```
+
+The exact enum may be refined by implementation, but the dimensions must not collapse into one `confirmed` boolean.
+
+## 3. Class-specific proof ladders
+
+### 3.1 Source-to-sink finding
+
+```text
+signal
+-> source cited
+-> sink cited
+-> path linked
+-> sanitizer/guard evaluated
+-> runtime effect observed
+-> attacker-controlled input demonstrated
+-> exposed entry point demonstrated
+```
+
+### 3.2 Command, tool, or permission boundary
+
+```text
+unexpected effect
+-> effect reproduced
+-> project-controlled influence
+-> controlled target or argument
+-> outside intended workspace
+-> outside permission grant
+-> arbitrary instruction execution
+-> clean reproduction
+```
+
+### 3.3 Memory corruption
+
+```text
+crash
+-> deterministic reproduction
+-> controlled corruption
+-> read or write primitive
+-> control-flow influence
+-> mitigation bypass
+-> code execution
+-> reachable project input
+```
+
+### 3.4 Parser or protocol logic
+
+```text
+parser divergence
+-> invalid state transition
+-> security-relevant state or memory effect
+-> attacker-controlled message
+-> exposed parser entry point
+-> meaningful impact
+```
+
+### 3.5 Authentication or authorization
+
+```text
+policy discrepancy
+-> unauthorized state transition
+-> attacker-controlled principal/input
+-> protected operation reached
+-> access or privilege impact
+-> default-path reproduction
+```
+
+### 3.6 Patch closure
+
+```text
+patch applied
+-> original reproducer rerun
+-> original primitive absent or changed
+-> alternate equivalent variants tested
+-> reachability retested
+-> deterministic closure or inconclusive result
+```
+
+`Not rediscovered` remains weaker than `Verified`.
+
+## 4. Proof step
+
+```rust
+struct ProofStep {
+    id: ProofStepId,
+    finding_identity: FindingIdentity,
+    claim: ProofClaim,
+    predicate: EvaluatorIdentity,
+    backend_requirement: BackendRequirement,
+    planned_input: PreparedProofInput,
+    expected_evidence: Vec<EvidenceExpectation>,
+    falsification_condition: SafeText,
+    estimated_cost: Option<Money>,
+    estimated_runtime: Option<DurationRange>,
+    effect: ToolEffect,
+    approval: ApprovalPolicy,
+}
+```
+
+A proof step must be falsifiable. “Ask a stronger model whether this is exploitable” is not a runtime proof step.
+
+## 5. Planner policy
+
+Prioritize proof steps by:
+
+```text
+value =
+  expected proof-state gain
+  * decision relevance
+  * backend reliability
+  / cost
+  / runtime
+  / authority risk
+```
+
+The planner should prefer:
+
+1. deterministic checks;
+2. reuse of existing artifacts;
+3. minimal changed variables;
+4. narrow harnesses;
+5. proof of attacker control before speculative impact;
+6. direct observation before model interpretation;
+7. the smallest experiment that can reject the candidate.
+
+It should avoid expensive exploit engineering while basic reachability or control remains unknown.
+
+## 6. TUI next-action contract
+
+Examples:
+
+```text
+NEXT v reproduce the crash with the minimized input
+NEXT v prove that project input controls the resolved executable
+NEXT v test whether the write escapes the admitted workspace
+NEXT v establish that the endpoint is reachable without authentication
+NEXT v rerun the original primitive against the applied patch
+```
+
+Blocked examples:
+
+```text
+PROOF BLOCKED · no admitted native fuzz backend
+PROOF BLOCKED · process observer unavailable
+PROOF BLOCKED · target changed; refresh Map and rerun the reproducer
+PROOF BLOCKED · experiment requires explicit repository execution approval
+```
+
+No generic “run verification” label when a precise claim is known.
+
+## 7. Proof backend interface
+
+Specialist engines plug into a host-owned contract.
+
+```rust
+trait ProofBackend {
+    fn identity(&self) -> ProofBackendIdentity;
+
+    fn supports(
+        &self,
+        claim: &ProofClaim,
+        target: &TargetCapabilities,
+    ) -> SupportDecision;
 
     fn plan(
         &self,
-        request: &ExperimentRequest,
-    ) -> Result<BackendPlan>;
+        request: &ProofRequest,
+    ) -> Result<BackendExperimentPlan>;
 
     fn execute(
         &self,
         authorized: AuthorizedExperiment,
-        sink: &mut dyn ObservationSink,
+        observations: &mut dyn ObservationSink,
     ) -> Result<BackendTerminal>;
 }
 ```
 
-### 1.2 Descriptor
+The core owns:
 
-```rust
-pub struct ProofBackendDescriptor {
-    pub id: BackendId,
-    pub version: String,
-    pub artifact_identity: ArtifactIdentity,
-    pub observation_kinds: Vec<ObservationKind>,
-    pub required_authority: RequestedAuthority,
-    pub supported_boundaries: Vec<BoundaryDimension>,
-    pub evaluator_kinds: Vec<EvaluatorKind>,
-    pub maturity: BackendMaturity,
-}
-```
-
-### 1.3 Host responsibilities
-
-The host:
-
-- validates descriptor and input;
-- resolves prepared tool policy;
-- obtains authorization;
-- creates the canonical run and experiment attempt;
-- binds target and authority;
-- captures observation boundary;
-- enforces budgets/cancellation;
-- normalizes artifacts;
-- records evaluator receipts;
-- applies proof transitions;
-- commits through the writer actor.
-
-### 1.4 Backend responsibilities
-
-The backend:
-
-- declares prerequisites;
-- emits bounded progress;
-- writes only approved artifacts;
-- reports every terminal reason;
-- never claims more visibility than it had;
-- returns observations, not canonical truth;
-- does not persist directly;
-- does not silently use an undeclared fallback engine;
-- provides exact engine/version/config identity.
-
-### 1.5 Initial backend classes
-
-Use existing capabilities first:
-
-1. static source/AST/CPG query;
-2. existing scanner import/execution;
-3. existing runtime exploit/harness verification;
-4. existing fuzz/reproduction path.
-
-Later, after roadmap gates:
-
-5. browser/CDP;
-6. malicious protocol peer;
-7. symbolic/binary solver import;
-8. deployment/exposure observation;
-9. trajectory runtime;
-10. external authority-graph importer.
-
-### 1.6 KWP and plugin relationship
-
-A proof backend may be a first-party Rust built-in or a capability-scoped KWP/plugin adapter.
-
-The backend contract must not weaken existing policy:
-
-- no ambient filesystem;
-- no ambient environment;
-- no arbitrary subprocess;
-- no direct finding/proof/research writes;
-- strict output schema;
-- bounded artifact and observation counts;
-- host-computed identity;
-- host-owned authorization and settlement.
-
----
-
-## 2. Proof model refinement
-
-### 2.1 Preserve static proof state
-
-The existing `StaticProofState` remains valuable:
-
-```text
-signal_only
-code_cited
-source_sink_linked
-sanitizer_checked
-statically_confirmed
-statically_rejected
-needs_runtime_evidence
-```
-
-Do not replace it with one universal confidence score.
-
-### 2.2 Add orthogonal dimensions
-
-Proposed future dimensions:
-
-```rust
-pub enum ExecutionWitness {
-    None,
-    Attempted,
-    CrashObserved,
-    SanitizerViolation,
-    InvariantViolation,
-    SymbolicWitness,
-    BrowserEffectObserved,
-    ProtocolEffectObserved,
-    FormalCounterexample,
-    ExecutionRejected,
-}
-
-pub enum ReachabilityState {
-    Unknown,
-    LocalHarnessOnly,
-    InputControlled,
-    EntrypointReachable,
-    DeploymentReachable,
-}
-
-pub enum ExploitabilityMilestone {
-    Unknown,
-    UncontrolledFailure,
-    ControlledCorruption,
-    ReadPrimitive,
-    WritePrimitive,
-    ControlFlowInfluence,
-    MitigationBypassed,
-    ImpactDemonstrated,
-}
-
-pub enum ExposureState {
-    Unknown,
-    LocalOnly,
-    AuthenticatedSurface,
-    UnauthenticatedSurface,
-    CrossServicePath,
-    InternetObserved,
-}
-```
-
-These are examples; names require code-level reconciliation with existing verification types.
-
-### 2.3 Transition ownership
-
-Each transition names:
-
-- previous state;
-- next state;
-- evaluator receipt;
-- witness artifacts;
-- backend identity;
+- authorization;
+- target and run identity;
+- lifecycle;
+- cancellation;
+- cost;
+- artifact registration;
 - observation boundary;
-- policy;
-- actor;
-- timestamp.
+- evaluator receipt;
+- proof transition;
+- replay;
+- presentation.
 
-A model explanation may accompany the transition but cannot own it.
+The backend owns domain mechanics.
 
-### 2.4 No false total order
+## 8. Initial backend set
 
-Do not sort all proof states into one numeric ladder.
+Do not add every possible research engine.
 
-For example:
+The first useful set is:
 
-- a formal witness may establish a bug while deployment exposure remains unknown;
-- a remote endpoint may be exposed while exploitability remains uncontrolled;
-- a crash may be reproducible without attacker input equivalence;
-- a static path may be strong while runtime instrumentation is unavailable.
+### 8.1 Static path backend
 
-The UI may summarize, but storage must preserve dimensions.
+Uses existing AST/CPG/CodeQL capabilities to answer:
 
-### 2.5 Patch closure
+- source-to-sink path;
+- reachable caller chain;
+- guard/sanitizer presence;
+- project-controlled configuration influence;
+- structural boundary path.
 
-Patch verification should distinguish:
+### 8.2 Sandboxed process backend
+
+Uses existing repository-execution and sandbox machinery to:
+
+- build a focused harness;
+- execute a target;
+- capture exit, process, filesystem, and bounded output evidence;
+- reproduce deterministic effects.
+
+### 8.3 Fuzz or mutation backend
+
+Build on the existing KWP fuzz direction for:
+
+- bounded input mutation;
+- crash discovery;
+- reproduction;
+- minimization;
+- artifact capture.
+
+Production use requires a host-owned isolation backend. A mounted command that merely promises isolation is insufficient for strong proof.
+
+### 8.4 Differential backend
+
+Runs controlled variants while holding target and environment constant.
+
+Useful for:
+
+- path normalization;
+- configuration precedence;
+- authorization display/effect mismatch;
+- parser state differences;
+- patch regression;
+- invariant violations.
+
+## 9. Later backends
+
+These remain gated behind a working first vertical slice and benchmark evidence:
+
+- browser/CDP;
+- malicious protocol peer;
+- binary symbolic/concolic solver;
+- deployment/exposure observer;
+- MCP/A2A authority graph;
+- multi-session agent trajectory monitor;
+- firmware/device/VM backends.
+
+Adding a backend must not add a new top-level TUI workflow.
+
+## 10. Evaluator contract
+
+Each proof claim names a predicate.
+
+Examples:
 
 ```text
-signal absent
-static path absent
-runtime witness absent
-primitive removed
-entrypoint no longer reaches primitive
-exposure path removed
-impact no longer achievable
+process-executed-marker-v1
+write-outside-root-v1
+crash-reproduced-v1
+controlled-byte-observed-v1
+source-sink-path-v1
+unauthenticated-operation-v1
+original-primitive-absent-v1
 ```
 
-A closure claim states which predicates were rerun and which remain untested.
+A predicate defines:
 
----
+- required evidence;
+- valid observation boundary;
+- success;
+- falsification;
+- inconclusive states;
+- invalid experiment states;
+- versioning and compatibility.
 
-## 3. Authority graph and trajectory policy — later product horizon
+The evaluator receipt is the only source for empirical proof advancement.
 
-### 3.1 Authority graph
+## 11. Statistical proof
 
-The graph models principals, credentials, tools, agents, services, and effects.
+Some behaviors are nondeterministic.
 
-Nodes:
+The receipt must record:
 
-```text
-principal
-agent
-subagent
-credential
-model
-tool
-module
-MCP server
-A2A agent
-gateway
-service
-deployment
-config source
-instruction source
-memory/RAG store
-artifact
-process
-data sink
-```
-
-Edges:
-
-```text
-can_read
-can_write
-can_call
-can_execute
-authenticates_as
-delegates_to
-loads_config_from
-consumes_output_from
-can_reach
-can_egress_to
-resolves_credential_through
-```
-
-Every edge records:
-
-- inferred, observed, or actively verified;
-- evidence references;
+- attempts;
+- successes;
+- invalid attempts;
 - environment identity;
-- first/last observed;
-- expiry/retest;
-- source backend.
+- stopping rule;
+- success predicate;
+- confidence interval or explicit simple ratio;
+- whether the result meets policy.
 
-The graph does not replace the CPG. It answers authority and cross-system questions, not code data-flow questions.
+Do not hide one failure inside a “mostly confirmed” badge.
 
-### 3.2 Attack-path observation
-
-Keep intrinsic defect separate from environment exposure.
-
-```rust
-pub struct AttackPathObservation {
-    pub finding: FindingIdentityId,
-    pub environment: EnvironmentIdentity,
-    pub path: Vec<AuthorityEdgeRef>,
-    pub state: PathObservationState,
-    pub evidence: Vec<EvidenceRef>,
-    pub observed_at: Timestamp,
-    pub expires_at: Option<Timestamp>,
-}
-```
-
-A changed deployment path should not mutate the root finding identity.
-
-### 3.3 Normalized action events
-
-Later trajectory policy requires:
-
-```rust
-pub struct ActionEvent {
-    pub run_id: RunId,
-    pub session_id: SessionId,
-    pub subagent_id: Option<SubagentId>,
-    pub principal: AuthorityPrincipal,
-    pub tool: ArtifactIdentity,
-    pub operation: NormalizedOperation,
-    pub resources_read: Vec<ResourceRef>,
-    pub resources_written: Vec<ResourceRef>,
-    pub processes: Vec<ProcessEffect>,
-    pub network: Vec<NetworkEffect>,
-    pub data_labels_in: Vec<DataLabel>,
-    pub data_labels_out: Vec<DataLabel>,
-    pub decision: ActionDecision,
-    pub effect_receipt: Option<EvidenceRef>,
-}
-```
-
-### 3.4 Initial stateful policies
-
-When this horizon begins, start inside Kuzushi's own execution boundary:
+The TUI may show:
 
 ```text
-secret read → encode/transform → outbound network
-target instruction → privileged tool argument
-untrusted tool output → repository execution
-delegation → broader authority
-credential source controlled separately from destination
-memory/RAG write → later-session privileged action
-several low-risk effects → cumulative budget/scope violation
+29 / 32 reproduced · 90.6%
 ```
 
-Do not begin with endpoint-wide monitoring. Prove the semantic contract on Kuzushi-owned events first.
+Policy decides whether that is sufficient for a particular claim.
 
----
+## 12. Negative results
+
+Negative research has value when its boundary is clear.
+
+Possible outcomes:
+
+```text
+falsified for tested construction
+not reproduced in N valid attempts
+inconclusive because observer failed
+inconclusive because harness was incomplete
+backend unsupported
+target changed
+budget exhausted
+```
+
+A falsified construction does not prove the vulnerability class impossible.
+
+## 13. Agent use
+
+Agents help with:
+
+- surface ranking;
+- strategy selection;
+- harness drafting;
+- mutation proposal;
+- trace summarization;
+- duplicate clustering;
+- next-proof planning;
+- impact explanation;
+- PoC README drafting.
+
+Agents do not own:
+
+- effect observation;
+- evaluator outcomes;
+- proof transitions;
+- target identity;
+- authority grants;
+- cost settlement;
+- human decisions.
+
+## 14. Cascade behavior
+
+After an evaluator result, the planner may propose the next step.
+
+Examples:
+
+```text
+path mismatch reproduced
+  -> test controlled alternate target
+
+crash reproduced
+  -> minimize input
+
+controlled write established
+  -> test entry-point reachability
+
+patch removes original input
+  -> generate equivalent variants
+```
+
+The operator normally sees only the resulting `NEXT v ...`.
+
+Advanced Replay may expose why the next step was chosen.
+
+## 15. PoC export acceptance
+
+A PoC bundle is `READY` only when:
+
+- target identity is current;
+- all referenced artifacts exist and authenticate;
+- at least one valid reproduction receipt exists;
+- a deterministic reproduction command or procedure is present;
+- known proof gaps are listed;
+- observation limits are included;
+- secrets and unsafe raw payloads are redacted or intentionally packaged;
+- bundle manifest and files are hashed.
+
+The bundle may be `READY WITH LIMITATIONS`. It must not overstate proof.
+
+## 16. Safety constraints
+
+- No automatic live-target attack.
+- No ambient network.
+- No target writes without explicit descriptor and approval.
+- No repository execution outside an admitted sandbox path.
+- No autonomous persistence or privilege escalation testing on the operator host.
+- No model-generated shell command bypassing prepared input.
+- No proof claim from stdout text alone when a stronger observer is required.
+- Cancellation terminates process groups and settles durable state.
+- Resource and artifact limits are enforced, not advisory.

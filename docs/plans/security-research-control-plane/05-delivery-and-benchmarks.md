@@ -1,516 +1,372 @@
-# Delivery, Benchmarks, and Product Path — Kuzushi Security Research Control Plane
+# Delivery, dogfood, benchmarks, and adoption
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Delivery principle
 
----
+Do not productize broad “AI security research.”
 
-## 1. Evaluation and benchmark program
+Deliver one narrow end-to-end promise:
 
-### 1.1 Research funnel accounting
+> Point Kuzushi at a source project, run one exploitability-first sweep, select one candidate, press `v` to advance proof, and export a reproducible PoC bundle.
 
-Every candidate entering a campaign gets a terminal reason.
+The first release should use existing engines and workflow surfaces wherever possible.
 
-Suggested stages:
+## 2. First vertical slice
 
-```text
-generated
-malformed
-duplicate
-unsupported
-visibility_incomplete
-signal_only
-static_path_established
-static_rejected
-runtime_planned
-runtime_blocked
-runtime_failed
-runtime_not_reproduced
-runtime_reproduced
-reachability_established
-primitive_established
-impact_demonstrated
-patched
-retested
-closed
-```
+Use one synthetic vulnerable fixture with a realistic project-controlled boundary.
 
-A candidate cannot disappear between stages.
-
-### 1.2 Core metrics
-
-#### Verified precision
+Recommended fixture:
 
 ```text
-verified true positives / all reviewed positive findings
+A small coding-agent-like CLI:
+- loads project configuration;
+- displays one path in an approval decision;
+- resolves a different canonical executable target;
+- has a safe mode and a deliberately vulnerable mode for test mutation;
+- emits observable process and filesystem effects.
 ```
 
-Always disclose the review denominator and unresolved count.
-
-#### Oracle recall
-
-```text
-known vulnerabilities detected / known vulnerabilities in eligible boundary
-```
-
-“Ineligible boundary” must be separate from “missed.”
-
-#### Proof-upgrade rate
-
-```text
-findings that advance to a stronger evidence dimension / findings entering Prove
-```
-
-#### Cost per confirmed finding
-
-```text
-total measured campaign cost / confirmed findings
-```
-
-Unknown cost remains unknown; it is never zero.
-
-#### Time to first verified finding
-
-From campaign start to the first host-evaluator-backed finding.
-
-#### Research replay rate
-
-Percentage of terminal hypotheses whose projection and evaluator inputs can be reconstructed from durable artifacts.
-
-#### Boundary completeness
-
-Report each dimension, not a single score.
-
-#### Funnel loss
-
-Counts and percentages by terminal reason.
-
-#### Patch closure strength
-
-Distribution of closure claims:
-
-```text
-signal-only
-static
-runtime
-primitive
-exposure
-impact
-```
-
-### 1.3 Executed benchmark manifest
-
-Every benchmark slice should bind:
-
-```text
-target/corpus digest
-Kuzushi commit and config digest
-model/provider/version
-prompt and policy digests
-tool/plugin/backend identities
-sandbox/executor identity
-seed and repetition policy
-observation boundary
-authority manifest digest
-evaluator identity
-cost and latency
-terminal outcome
-contamination/holdout status
-```
-
-### 1.4 Initial benchmark tracks
-
-Before broader backends:
-
-1. repository vulnerability discovery;
-2. static path adjudication;
-3. runtime reproduction;
-4. patch closure;
-5. negative-hypothesis accounting.
-
-Later:
-
-6. browser effects;
-7. binary exploitability;
-8. agent authority/trajectories;
-9. malicious peers and deployment paths.
-
-### 1.5 No fabricated metrics
-
-If an experiment is not implemented, the metric is undefined.
-
-Do not infer persistence from same-session behavior.
-Do not infer exploitability from a crash.
-Do not infer full recall from eligible files only without disclosing eligibility.
-Do not infer zero cost from missing accounting.
-Do not infer a fixed vulnerability from a missing scanner result.
-
----
-
-## 2. Product packaging and commercial path
-
-### 2.1 Product shape
-
-The recommended product remains one Kuzushi workbench with progressively richer capabilities.
-
-#### Community/core
-
-- local-first repository workbench;
-- findings/evidence/proof;
-- research questions, hypotheses, experiments, evaluator receipts;
-- built-in static and existing runtime backends;
-- local replay and export;
-- public schemas;
-- one-target campaigns.
-
-#### Pro hypothesis
-
-Potential paid value—validate before implementing license machinery:
-
-- saved research campaign templates;
-- richer multi-run/campaign comparison;
-- advanced proof backends;
-- scheduled local campaigns;
-- signed/digest-bound review bundles;
-- customizable evaluator and policy packs;
-- expanded benchmark dashboards;
-- long-term evidence retention controls;
-- priority backend support.
-
-#### Team/enterprise hypothesis
-
-- shared policy/evaluator packs;
-- role-based approvals;
-- team review queues;
-- fleet campaign coordination;
-- CI quality and proof-regression gates;
-- organization-wide benchmark baselines;
-- audit exports;
-- optional remote workers;
-- SSO and administrative policy only when a team coordination product exists.
-
-The core evidence format, replay, and local inspection should not require the cloud.
-
-### 2.2 Do not monetize scanner count
-
-Scanner breadth is easy to copy and hard to price sustainably.
-
-The paid value should be:
-
-- governed workflow;
-- proof depth;
-- reproducibility;
-- team review;
-- policy;
-- benchmark credibility;
-- integration and support.
-
-### 2.3 Product discovery before pricing
-
-Before committing to pricing:
-
-1. interview at least 10 senior AppSec/product-security practitioners;
-2. demo a complete research case, not a module catalog;
-3. ask which artifact they would take to a developer, reviewer, or incident lead;
-4. measure time currently spent reconciling scanner/model output;
-5. recruit 3 design partners with real repositories;
-6. seek at least one paid pilot before building cloud collaboration.
-
-A paid pilot can be services-assisted. The goal is to validate the workflow's value, not pretend the product is self-serve before the benchmark is credible.
-
-### 2.4 Positioning
-
-Recommended one-line positioning:
-
-> **Kuzushi is the local-first security research workbench that turns scanner and AI output into replayable, evaluator-backed findings you can defend.**
-
-Alternative for a technical audience:
-
-> **A security-research control plane for hypotheses, experiments, proof, remediation, and benchmark truth.**
-
-Avoid:
-
-- “autonomous hacker”;
-- “AI finds every vulnerability”;
-- “multi-agent pentest platform”;
-- “fully verified” without boundary qualification.
-
----
-
-## 3. Go-to-market proof before broad expansion
-
-### 3.1 Reference workflows
-
-Build and publish internally first:
-
-1. **Kuzushi self-security campaign**
-   Question: can target-controlled input influence executable or module authority before canonical dispatch?
-
-2. **Known vulnerable repository campaign**
-   Question: can the system progress from scanner signal to static path, runtime witness, patch, and exact retest?
-
-3. **Negative research campaign**
-   Several plausible hypotheses are rejected, demonstrating that Kuzushi preserves and explains negative evidence rather than producing only positive findings.
-
-4. **Cross-engine disagreement campaign**
-   Semgrep/CodeQL/CPG/model-backed tools disagree; evaluator receipts and operator decisions produce one defensible finding state.
-
-### 3.2 Public credibility artifacts
-
-Do not launch the broader story until Kuzushi can show:
-
-- a real scoreboard;
-- one complete replayable campaign bundle;
-- cost and failure accounting;
-- false-positive accounting;
-- one patch closure with a stronger claim than signal disappearance;
-- an honest observation-boundary report;
-- reproducibility on a clean machine.
-
-### 3.3 Design-partner demo
-
-A 20-minute demo should be:
-
-1. open one question;
-2. inspect two hypotheses;
-3. run an existing static experiment;
-4. show the boundary and evaluator receipt;
-5. promote a finding only to the proof actually earned;
-6. run a runtime attempt;
-7. show blocked/inconclusive behavior honestly;
-8. patch and rerun;
-9. export the bundle.
-
-Do not spend the demo browsing dozens of tools.
-
----
-
-## 4. Implementation sequence
-
-### Phase 0 — Align and freeze contracts
-
-**Goal:** review this RFC and settle the smallest domain vocabulary before code.
-
-Deliverables:
-
-- accepted relationship to the control-room PRD and roadmap;
-- naming decision: `research`, `investigation`, or another bounded context;
-- initial event list;
-- initial observation-boundary dimensions;
-- first evaluator kind;
-- first vertical-slice use case;
-- explicit non-goals.
-
-Exit:
-
-- reviewers can identify the first three code PRs;
-- no unresolved disagreement about finding versus hypothesis identity;
-- no plan to bypass existing dispatch, writer, artifact, or authorization boundaries.
-
-### Phase 1 — Truth primitives
-
-#### 1A. Observation boundary
-
-Add a minimal additive domain type for:
-
-- target identity;
-- source inclusion/exclusion;
-- static engine coverage/failures;
-- runtime harness scope;
-- omissions and completeness.
-
-Attach it to one existing run path and export it. No hypothesis model yet.
-
-Exit:
-
-- a clean or positive result cannot be rendered without its boundary;
-- missing required boundary forces an honest degraded status;
-- replay produces the same boundary summary.
-
-#### 1B. Evaluator receipt
-
-Add a host-owned evaluator receipt with:
-
-- evaluator identity;
-- exact input references;
-- boundary reference;
-- closed outcome vocabulary;
-- reasons;
-- determinism declaration.
-
-Use one deterministic evaluator already present in Kuzushi.
-
-Exit:
-
-- model output cannot manufacture a satisfied evaluator receipt;
-- unavailable evidence is not success;
-- receipt replay and schema validation pass.
-
-#### 1C. Terminal funnel accounting
-
-Add terminal reason accounting to one existing campaign/scan path.
-
-Exit:
-
-- every candidate entering the selected path has a terminal reason;
-- summary counts reconcile to input counts;
-- unknown/unsupported/blocked remain separate.
-
-### Phase 2 — Minimal research ledger
-
-#### 2A. Question and hypothesis events
-
-Implement:
-
-- create question;
-- propose/accept/reject hypothesis;
-- falsification predicate;
-- read-only projection.
-
-No experiment execution yet.
-
-#### 2B. Experiment linkage
-
-Link an authorized prepared tool run to an experiment plan and attempt.
-
-Reuse:
-
-- `ModuleRegistry`;
-- existing approval;
-- existing run creation;
-- existing cancellation/settlement;
-- existing artifacts.
-
-#### 2C. Observation, evaluator, disposition
-
-Commit observation and evaluator references through the writer actor. Apply a host-owned disposition.
-
-#### 2D. Replay and export
+The vertical slice proves:
+
+1. Map ranks the path/command boundary.
+2. The generated strategy runs without opening Strategy Queue.
+3. Run Focus displays semantic progress.
+4. Scan accounts for strategy and variant outcomes.
+5. Candidate ingest creates one stable finding.
+6. Review shows current primitive and next proof step.
+7. `v` proves attacker control with a deterministic evaluator.
+8. A second `v` proves or falsifies boundary crossing.
+9. Prove displays observation limits.
+10. `e` exports a self-contained PoC bundle.
+11. Replay reconstructs the sequence.
+12. Changing the target revision stales the proof.
+
+## 3. Dogfood sequence
+
+### 3.1 Stage A: deterministic fixture
+
+Goals:
+
+- zero model dependency;
+- fast local execution;
+- exact expected findings;
+- exact proof transitions;
+- exact PoC manifest;
+- CI-safe.
+
+### 3.2 Stage B: nondeterministic harness fixture
 
 Add:
 
+- flaky reproduction;
+- invalid attempts;
+- budget stop;
+- observer failure;
+- harness incomplete;
+- candidate deduplication;
+- proof planner retry policy.
+
+### 3.3 Stage C: real open-source project
+
+Choose a project with:
+
+- a fixed historical vulnerability;
+- reproducible vulnerable revision;
+- buildable local harness;
+- published patch;
+- clear attacker entry point.
+
+Measure whether Kuzushi:
+
+- ranks the relevant surface;
+- discovers or imports the candidate;
+- rejects nearby false positives;
+- advances to the known primitive;
+- verifies patch closure.
+
+### 3.4 Stage D: Pwn2Own-style dogfood
+
+Point Kuzushi at a checked-out complex target project.
+
+The objective is not to claim a contest vulnerability. It is to validate operator workflow:
+
 ```text
-research list
-research show
-research tree
-research export
+one target
+one bounded sweep
+background execution
+small Review queue
+finding-specific proof advancement
+reproducible export
 ```
 
-Exit:
+Contest-specific rules and final submission work remain outside the product.
 
-- a complete question → hypothesis → experiment → observation → disposition tree replays deterministically;
-- no raw prompt/response is needed to reconstruct it;
-- existing findings can link to the tree without identity migration.
+## 4. Product metrics
 
-### Phase 3 — First product vertical slice
-
-**Use only existing repository-security capabilities.**
-
-Recommended slice:
-
-> A source-to-sink hypothesis investigated by a static path backend, optionally followed by the existing runtime verification path.
-
-Required behavior:
-
-1. open a question from an existing finding;
-2. create a hypothesis with a typed path predicate;
-3. execute a prepared existing tool;
-4. capture the boundary;
-5. record observations;
-6. apply a deterministic evaluator;
-7. update research disposition;
-8. link the finding and proof state;
-9. export the campaign;
-10. rerun after a patch.
-
-Exit:
-
-- one reference fixture passes end to end;
-- one negative case is rejected;
-- one incomplete-boundary case remains inconclusive;
-- one blocked authorization case remains blocked;
-- one patch retest produces an exact closure claim.
-
-### Phase 4 — Operator experience and benchmark
-
-#### 4A. TUI projection
-
-Only after CLI/domain stability:
-
-- research summary in finding detail;
-- active hypothesis/experiment view;
-- boundary and evaluator inspector;
-- next-action projection.
-
-#### 4B. Benchmark scoreboard
+### 4.1 Time to first useful result
 
 Measure:
 
-- eligible recall;
-- verified precision;
-- cost;
-- latency;
-- funnel loss;
-- replay rate;
-- closure strength.
+```text
+time to first source-grounded candidate
+time to first reproduced anomaly
+time to first proof-ready finding
+time to first PoC export
+```
 
-#### 4C. Reference bundles
+### 4.2 Precision
 
-Check in or publish reproducible example campaigns that do not expose sensitive target data.
+Measure:
 
-Exit:
+```text
+candidate observations
+deduplicated findings
+human-rejected findings
+evaluator-falsified findings
+proof-ready findings
+reproduced findings
+```
 
-- a design partner can understand the workflow without repository internals;
-- benchmark metrics come from executed manifests;
-- the TUI consumes application DTOs rather than reading stores directly.
+Do not report only raw detection count.
 
-### Phase 5 — Startup authority
+### 4.3 Proof upgrade
 
-Add the manifest to model-backed and executable experiments.
+```text
+signal -> linked
+linked -> reproduced
+reproduced -> attacker controlled
+controlled -> boundary/primitive
+primitive -> impact
+impact -> clean reproduction
+```
 
-Start with:
+Report conversion and attrition reasons.
 
-- config sources;
-- environment influence;
-- executable resolution;
-- loaded modules/MCP;
-- model/runtime selection;
-- grants/denials.
+### 4.4 Cost
 
-Then add adversarial conformance fixtures.
+Measure:
 
-Exit:
+```text
+cost per strategy
+cost per candidate
+cost per human-reviewed finding
+cost per reproduced finding
+cost per proof-state upgrade
+cost per exported PoC
+```
 
-- every effectful experiment has a pre-effect authority manifest;
-- target-controlled authority escalation attempts are refused and visible;
-- packaged release behavior is tested, not just source design.
+Unknown remains unknown, never zero.
 
-### Phase 6 — Broader backends, gated
+### 4.5 Reliability
 
-Order after existing roadmap P3:
+Measure:
 
-1. browser/CDP;
-2. malicious protocol peer;
-3. authority graph importer;
-4. trajectory runtime on Kuzushi-owned effects;
-5. binary solver import;
-6. deployment exposure observation.
+- valid reproduction attempts;
+- success ratio;
+- invalid attempt ratio;
+- harness build success;
+- observer availability;
+- cancellation and settlement correctness;
+- replay integrity;
+- PoC clean-machine success.
 
-Each backend must land as a narrow adapter plus benchmark, not as a new architecture.
+### 4.6 Coverage honesty
 
-### Phase 7 — Team product, only after usage evidence
+Measure completeness across:
 
-Potential work:
+- source inventory;
+- language parsing;
+- entry-point mapping;
+- selected research surfaces;
+- strategy execution;
+- runtime observers;
+- backend availability;
+- generated/vendor code;
+- resource caps.
 
-- shared policy and evaluator packs;
-- reviewer/approver roles;
-- fleet research campaigns;
-- signed exports;
-- organization scoreboards;
-- optional coordination service.
+## 5. Benchmark manifest
 
-Do not build this from speculation.
+Every published or retained benchmark result binds:
 
----
+```text
+Kuzushi commit and version
+target repository and revision
+target build identity
+configuration and research plan digest
+model/provider identity when used
+prompt and policy digests
+backend and sandbox identities
+observation boundary
+cost and timing
+seed and attempt policy
+terminal funnel
+finding and proof outcomes
+PoC reproduction result
+```
+
+A score without this manifest is not comparable.
+
+## 6. Benchmark corpus
+
+Initial corpus:
+
+1. deterministic project-boundary fixture;
+2. historical source-to-sink CVEs;
+3. parser/crash fixtures;
+4. path/archive extraction fixtures;
+5. command execution and configuration fixtures;
+6. authorization logic fixtures;
+7. patched vulnerable revisions for closure testing.
+
+The corpus should include negative controls and near-miss variants.
+
+## 7. Acceptance thresholds for first release
+
+Suggested release gates:
+
+- every admitted strategy has a terminal outcome;
+- every persisted candidate has validated evidence or a visible degraded state;
+- no model-only path advances empirical proof;
+- proof receipts bind target and observation identity;
+- a clean target revision stales prior proof when required;
+- the deterministic fixture exports a PoC reproducible on a clean machine;
+- no known false “confirmed” state in adversarial tests;
+- cancellation and budget exhaustion settle every run;
+- TUI and plain projection agree on next action and proof state;
+- the normal journey does not require Strategy Queue.
+
+## 8. TUI journey testing
+
+Add an executable DevEx journey:
+
+```text
+J-RESEARCH-01 project to PoC
+```
+
+Steps:
+
+1. launch `kz --target <fixture>`;
+2. commit deterministic Map;
+3. verify Map priorities;
+4. start exploitability research;
+5. background and reopen completed run;
+6. inspect Scan funnel;
+7. open Review;
+8. select the expected finding;
+9. press `v`;
+10. complete proof run;
+11. inspect Prove;
+12. export PoC;
+13. verify target source unchanged;
+14. restart Kuzushi and replay the proof.
+
+At compact terminal sizes, preserve:
+
+- target;
+- phase/page;
+- attempt outcome;
+- candidate count;
+- selected finding;
+- proof state;
+- observation limit;
+- one NEXT action.
+
+## 9. Packaging and distribution
+
+No new distribution product is required.
+
+The feature ships in the existing native package.
+
+Possible later packaging:
+
+```text
+Core
+  Map, bounded research plan, Review/Prove, local PoC export
+
+Labs
+  fuzz, differential, browser, binary, or protocol backends
+
+Team
+  shared policy/evaluator packs and review synchronization
+```
+
+Do not gate proof honesty or replay behind a paid tier.
+
+## 10. Operator documentation
+
+User docs should answer:
+
+- What does exploitability-first research do?
+- What authority can it use?
+- How much can it cost?
+- How do I background it?
+- What is a candidate versus reproduced finding?
+- What does `v` prove?
+- Why is proof inconclusive?
+- How do I export a PoC?
+- How do I delete or prune research artifacts?
+- Which backends are available on my platform?
+
+The quick-start story:
+
+```bash
+kz --target ./project
+```
+
+Then:
+
+```text
+Enter Start Map
+Enter Start research
+b
+Review
+v
+e
+```
+
+## 11. Design-partner evidence
+
+Before broad positioning, run with at least three experienced operators on real projects.
+
+Observe:
+
+- whether Map priorities are understandable;
+- whether default plans feel trustworthy;
+- whether users open Strategy Queue;
+- whether Scan funnel explains failures;
+- whether Review ranking matches human judgment;
+- whether `v` selects a useful next experiment;
+- whether PoC bundles reduce manual work;
+- whether resource usage is acceptable.
+
+A design partner should complete the journey without instruction beyond the one-command starting point.
+
+## 12. Product positioning
+
+Avoid:
+
+```text
+autonomous zero-day machine
+Pwn2Own autopilot
+AI hacker that proves everything
+```
+
+Use:
+
+> Kuzushi is the local-first terminal workbench that turns project security signals into replayable, evaluator-backed exploit evidence.
+
+The differentiator is not the number of agents. It is the governed transition from candidate to proof.
+
+## 13. Scope gates for later work
+
+A new specialist backend requires:
+
+1. a real project use case;
+2. a deterministic or bounded evaluator;
+3. an observation-boundary contract;
+4. sandbox and authority design;
+5. artifact and retention limits;
+6. TUI integration through existing surfaces;
+7. benchmark fixtures;
+8. no new top-level workflow unless the current cockpit cannot represent the truth.
+
+Cloud, collaboration, marketplace, and fleet research stay deferred until the local project-to-PoC journey is credible.

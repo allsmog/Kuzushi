@@ -1,367 +1,457 @@
-# Persistence, Observation Boundary, and Startup Authority — Kuzushi Security Research Control Plane
+# Research execution, persistence, observation, and authority
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Goal
 
----
+Make exploitability-first research automatic without making it unauditable or unsafe.
 
-## 1. Event and persistence contract
+The operator sees one Scan plan. Internally, Kuzushi must know:
 
-### 1.1 Proposed semantic events
+- why each strategy was selected;
+- what authority it required;
+- which variants executed;
+- what was observable;
+- what terminal outcome each unit reached;
+- what evidence supports each candidate;
+- which evaluator advanced proof.
 
-The exact names can change during implementation, but the domain coverage should remain.
+## 2. Planning from Map
 
-```text
-ResearchQuestionCreated
-ResearchQuestionStatusChanged
-
-ResearchHypothesisProposed
-ResearchHypothesisAccepted
-ResearchHypothesisRejected
-ResearchHypothesisSuperseded
-
-ExperimentPlanCreated
-ExperimentPlanAuthorized
-ExperimentPlanDenied
-ExperimentAttemptLinked
-ExperimentAttemptTerminal
-
-ObservationBoundaryRecorded
-ResearchObservationRecorded
-EvaluatorReceiptRecorded
-HypothesisDispositionRecorded
-ResearchCascadeProposed
-ResearchCascadeAccepted
-ResearchCascadeRejected
-
-ResearchQuestionResolved
-ResearchQuestionClosed
-```
-
-Avoid one generic `ResearchUpdated` event. Explicit event types make replay, compatibility, and review safer.
-
-### 1.2 Event payload principles
-
-Each event should contain:
-
-- event schema version;
-- canonical IDs;
-- target identity reference;
-- authority principal;
-- timestamp;
-- bounded semantic fields;
-- artifact/CAS references;
-- policy and object digests;
-- idempotency key where writes may be retried.
-
-Events should not copy:
-
-- complete tool input;
-- full model output;
-- raw traces;
-- source files;
-- screenshots;
-- crash inputs;
-- packet captures.
-
-### 1.3 Source of truth
-
-Use the existing V3 model:
-
-- target-wide append-only event log is the semantic source of truth;
-- CAS stores source snapshots and large evidence;
-- per-run `items.jsonl` records run lifecycle and bounded research/evaluator references;
-- SQLite is a rebuildable projection;
-- reports and exports are derivatives;
-- no `research.json` mutable side database.
-
-### 1.4 Projection tables
-
-Illustrative tables:
+The planner consumes current-revision durable Map evidence:
 
 ```text
-research_questions
-research_hypotheses
-research_experiment_plans
-research_attempts
-research_observations
-research_evaluator_receipts
-research_dispositions
-research_cascade_edges
-research_finding_links
-research_boundary_summaries
+repository inventory
+components
+entry points
+routes
+dependencies
+threat model
+static findings
+CPG/CodeQL availability
+existing tests and fixtures
+build systems
+language/runtime inventory
+prior findings and proof gaps
 ```
 
-Projection schema can evolve without becoming a compatibility source. The event and exported schema require migration discipline.
+It produces a bounded strategy set.
 
-### 1.5 Run integration
+### 2.1 Research surface classes
 
-Each experiment attempt should add bounded typed lifecycle items:
+Initial surface classes:
 
 ```text
-research-question-ref
-hypothesis-ref
-experiment-plan-ref
-observation-boundary-ref
-observation-ref
-evaluator-receipt-ref
-hypothesis-disposition-ref
+input parsing and deserialization
+authentication and authorization
+command and tool execution
+filesystem paths and archive extraction
+process creation and child authority
+network destinations and protocol peers
+configuration and instruction loading
+native/FFI boundaries
+state-machine and concurrency transitions
+cross-component data flow
+patch-regression and historical vulnerable loci
 ```
 
-The run should not embed the complete research tree. Replay of the run and replay of the target research projection remain related but distinct responsibilities.
+### 2.2 Strategy templates
 
-### 1.6 Published schemas
-
-Potential additive schemas:
+Initial templates should be compositional, not talk-named:
 
 ```text
-schemas/research.question.schema.json
-schemas/research.hypothesis.schema.json
-schemas/research.experiment.schema.json
-schemas/research.observation-boundary.schema.json
-schemas/research.evaluator-receipt.schema.json
-schemas/research.export.schema.json
+static boundary trace
+source-to-sink corroboration
+differential configuration test
+path canonicalization differential
+metamorphic input mutation
+dangerous-default review
+lifecycle/state-transition mutation
+bounded harness generation
+sandboxed reproduction
+crash minimization
+authority-chain verification
+patch primitive retest
 ```
 
-Do not publish all schemas in the first code PR. Publish only after Rust types and compatibility tests stabilize.
+A strategy template declares:
 
----
+- compatible surfaces and languages;
+- required Map evidence;
+- required tools/backends;
+- effect and approval class;
+- resource estimates;
+- expected outputs;
+- terminal reasons;
+- candidate normalization contract;
+- evaluator contract.
 
-## 2. Observation boundary
+## 3. Automatic selection policy
 
-### 2.1 Why this is P0
+The normal user should not have to open Strategy Queue.
 
-A security result can be technically correct and still misleading because the dangerous behavior was outside the system's context, index, runtime, network vantage point, or deployment view.
+A strategy may be selected automatically only when:
 
-Kuzushi already records substantial provenance, but it needs one canonical answer to:
+- the operator started the research action;
+- its effect is read-only or admitted sandbox execution;
+- all descriptor and workspace requirements pass;
+- the selected target and revision are bound;
+- required backends are available;
+- the expected cost fits the current budget;
+- its resource risk is below the auto-select ceiling;
+- no policy requires explicit per-strategy approval.
 
-> **What could this experiment actually observe, and what was omitted or degraded?**
+Strategies requiring target writes, repository mutation outside a disposable copy, network effects, external actions, privileged observers, or high resource risk remain explicit.
 
-### 2.2 Proposed shape
+The generated plan receipt should summarize:
 
-```rust
-pub struct ObservationBoundary {
-    pub target: TargetIdentity,
-    pub source: SourceObservationBoundary,
-    pub build: BuildObservationBoundary,
-    pub static_analysis: StaticAnalysisBoundary,
-    pub runtime: RuntimeObservationBoundary,
-    pub network: NetworkObservationBoundary,
-    pub deployment: DeploymentObservationBoundary,
-    pub external_services: Vec<ExternalServiceBoundary>,
-    pub omissions: Vec<BoundaryOmission>,
-    pub failures: Vec<BoundaryFailure>,
-    pub completeness: BoundaryCompleteness,
-    pub boundary_digest: Digest,
-}
+```text
+selected 8
+blocked 2
+skipped unavailable 1
+estimated cost $4.20
+estimated runtime 35-70m
+highest risk medium
 ```
 
-The first release may implement only target/source/static/runtime fields, but the envelope should be extensible.
+## 4. Run structure
 
-### 2.3 Source boundary
+One parent Scan run owns the operator-visible attempt.
 
-Record:
+Child runs may own individual strategies or backends. Parent and child identities must remain linked through existing run semantics.
 
-- canonical target root or snapshot;
-- Git commit/tree identity and dirty state;
-- included path roots;
-- excluded path roots and reasons;
-- generated/vendor/submodule treatment;
-- file count and byte count considered;
-- language detection coverage;
-- unreadable files;
-- unsafe or escaped paths rejected;
-- truncation and caps;
-- snapshot digest.
-
-### 2.4 Static-analysis boundary
-
-Record per engine:
-
-- engine identity and version/digest;
-- supported languages;
-- files accepted;
-- files rejected;
-- parser/index/CPG completeness;
-- query/rule set identity;
-- timeouts;
-- engine errors;
-- unsupported constructs;
-- whether dependencies were resolved;
-- whether generated code was included.
-
-Do not collapse several engines into one optimistic boundary.
-
-### 2.5 Runtime boundary
-
-Record:
-
-- harness identity;
-- build identity;
-- operating system/architecture;
-- sandbox/executor identity;
-- environment policy digest;
-- network policy;
-- process and resource limits;
-- test inputs/corpus references;
-- number of attempts;
-- flaky/non-deterministic observations;
-- which real entrypoints were or were not exercised;
-- whether the result is local harness only.
-
-### 2.6 Completeness
-
-Do not use one percentage as proof of coverage.
-
-```rust
-pub struct BoundaryCompleteness {
-    pub source_inventory: CompletenessState,
-    pub parser_coverage: CompletenessState,
-    pub dependency_resolution: CompletenessState,
-    pub runtime_entrypoints: CompletenessState,
-    pub network_vantage: CompletenessState,
-    pub deployment_vantage: CompletenessState,
-}
+```text
+parent exploitability Scan
+├── static-boundary strategy
+├── path-differential strategy
+├── parser-mutation strategy
+├── sandbox-reproduction strategy
+└── candidate-normalization and ranking
 ```
 
-```rust
-pub enum CompletenessState {
-    Complete,
-    Partial { reason: BoundedText },
-    Unavailable { reason: BoundedText },
-    NotApplicable,
-    Unknown { reason: BoundedText },
-}
+The parent result contains aggregate references, not copied raw payloads.
+
+## 5. Suggested additive run artifacts
+
+Canonical run files remain unchanged.
+
+Research producers may declare:
+
+| Artifact | Purpose |
+| --- | --- |
+| `research-plan.json` | Selected and rejected strategy summaries with digests and requirements |
+| `research-funnel.json` | Terminal accounting from strategy through finding |
+| `observation-boundary.json` | Visible, partial, unavailable, and omitted surfaces |
+| `evaluator-receipts.jsonl` | Bounded evaluator outcomes and evidence references |
+| `proof-plan.json` | Optional finding-specific next proof plan |
+| `poc-manifest.json` | Export-only PoC bundle manifest |
+
+These are producer-declared artifacts registered in `artifacts.json`, not new canonical mutable stores.
+
+## 6. Semantic events
+
+Additive target-wide events may include:
+
+```text
+ResearchPlanAccepted
+ResearchStrategyTerminal
+ResearchObservationCommitted
+ResearchCandidateDispositioned
+FindingProofPlanUpdated
+ProofEvaluatorReceiptCommitted
+PocBundleExported
 ```
 
-### 2.7 Policy
-
-Each evaluator declares required boundary dimensions.
+Events should carry identities and references, not artifact bodies.
 
 Example:
 
-```text
-Evaluator: source-to-sink path exists
-Required:
-  source_inventory != unavailable
-  parser_coverage != unavailable
-  target_identity exact
-Allowed:
-  runtime_entrypoints = not_applicable
-  deployment_vantage = not_applicable
-```
-
-A remote exploitability evaluator may require runtime entrypoint and deployment vantage. If those are missing, it cannot return satisfied.
-
-### 2.8 Operator language
-
-Reports must say:
-
-- “No path was found within the indexed Rust and TypeScript source at commit X.”
-- not “No path exists.”
-
-They must say:
-
-- “The crash reproduced in a local generated harness.”
-- not “The application is exploitable.”
-
----
-
-## 3. Startup authority manifest
-
-### 3.1 Purpose
-
-Security research about agents and tools repeatedly shows that dangerous authority may exist before the first model response:
-
-- project configuration;
-- environment variables;
-- PATH resolution;
-- startup hooks;
-- dynamic modules;
-- prompt or house-rule files;
-- MCP servers;
-- credentials;
-- headless approval policy;
-- inherited descriptors;
-- mounted directories;
-- runtime/model selection.
-
-Kuzushi has controls across these surfaces, but reviewers need one persisted artifact.
-
-### 3.2 Proposed shape
-
 ```rust
-pub struct StartupAuthorityManifest {
-    pub run_id: RunId,
-    pub target: Option<TargetIdentity>,
-    pub config_sources: Vec<AuthoritySource>,
-    pub environment_influences: Vec<EnvironmentInfluence>,
-    pub executable_resolutions: Vec<ExecutableResolution>,
-    pub loaded_capabilities: Vec<LoadedCapability>,
-    pub runtime_selection: Option<RuntimeSelectionReceipt>,
-    pub prompt_influences: Vec<PromptInfluence>,
-    pub credentials: Vec<CredentialAvailability>,
-    pub grants: Vec<CapabilityGrantReceipt>,
-    pub denials: Vec<CapabilityDenialReceipt>,
-    pub unresolved: Vec<UnresolvedAuthoritySurface>,
-    pub policy_digest: Digest,
-    pub manifest_digest: Digest,
+struct ResearchStrategyTerminalEvent {
+    target_identity: TargetContentIdentity,
+    parent_run_id: RunId,
+    strategy_id: StrategyId,
+    template_digest: Digest,
+    outcome: StrategyTerminalOutcome,
+    result_artifacts: Vec<ArtifactRef>,
+    cost: Option<Money>,
+    duration: Duration,
+    terminal_reason: SafeText,
 }
 ```
 
-### 3.3 Trust classes
+## 7. Funnel accounting
+
+The funnel is a first-class product invariant.
+
+```text
+Map surfaces considered
+  -> strategies proposed
+  -> strategies admitted
+  -> strategies completed/partial/blocked/failed
+  -> experiment variants attempted
+  -> observations emitted
+  -> candidates normalized
+  -> candidates deduplicated
+  -> candidates rejected
+  -> findings persisted
+  -> findings proof-ready
+```
+
+Every item entering a stage receives one downstream terminal reason.
+
+This enables trustworthy metrics and prevents silent candidate loss.
+
+## 8. Observation boundary
+
+Every research attempt and proof receipt declares what could be observed.
 
 ```rust
-pub enum AuthoritySourceOwner {
-    Operator,
-    KuzushiDistribution,
-    TargetRepository,
-    ModuleAuthor,
-    ExternalService,
-    RuntimeProvider,
-    OperatingSystem,
-    Unknown,
+struct ObservationBoundary {
+    target_identity: TargetContentIdentity,
+    source_scope: SourceObservationScope,
+    build_scope: BuildObservationScope,
+    runtime_scope: RuntimeObservationScope,
+    process_scope: DimensionState,
+    filesystem_scope: DimensionState,
+    network_scope: DimensionState,
+    authorization_scope: DimensionState,
+    kernel_scope: DimensionState,
+    omitted_surfaces: Vec<OmittedSurface>,
+    degraded_surfaces: Vec<DegradedSurface>,
+    limits: Vec<ResourceLimit>,
+    boundary_digest: Digest,
 }
 ```
 
-Every source records:
-
-- owner/trust class;
-- canonical location or logical identity;
-- digest;
-- load phase;
-- precedence;
-- accepted/rejected/unresolved;
-- possible influence: code execution, network, credentials, model, prompt, policy, filesystem, target mutation.
-
-### 3.4 Invariants
-
-- Target-controlled input cannot silently increase operator or runtime authority.
-- A target-local config or prompt may influence analysis only within declared policy.
-- Loaded executable/module/MCP identity must be digest- or version-bound.
-- Environment influence is disclosed without exposing secret values.
-- Unknown executable resolution is not silently treated as trusted.
-- The manifest is durable before the first external or executable effect.
-- A materially changed authority manifest invalidates stale experiment authorization.
-- A degraded manifest appears in reports and evaluator policy.
-
-### 3.5 Product surface
-
-`kuzushi permissions` can eventually expose a concise projection:
+Dimension states:
 
 ```text
-Authority for run run_...
-  target-controlled config: 2 accepted, 1 rejected
-  operator config: 3
-  model: openai/gpt-... via codex runtime
-  plugins: 1 digest-pinned
-  MCP servers: 3 Rust built-ins
-  filesystem: target read-only; state write
-  network: model provider only
-  repository execution: denied
-  unresolved: PATH identity for semgrep
+complete
+partial
+unavailable
+unknown
+not_applicable
 ```
 
----
+There is no default `complete`.
+
+### 8.1 Source boundary
+
+Include:
+
+- target content identity;
+- included and excluded roots;
+- generated/vendor/submodule treatment;
+- languages detected;
+- parsers/indexers available;
+- parser failures;
+- CPG/CodeQL build identity;
+- file, byte, depth, timeout, and candidate caps.
+
+### 8.2 Runtime boundary
+
+Include:
+
+- harness identity;
+- sandbox backend;
+- OS/platform;
+- process-tree visibility;
+- filesystem visibility;
+- network visibility;
+- authorization/approval event visibility;
+- crash/sanitizer collection;
+- missing kernel or container detail;
+- time and resource caps.
+
+### 8.3 TUI disclosure
+
+Scan shows aggregate coverage.
+
+Prove shows only limits relevant to the selected proof claim.
+
+Examples:
+
+```text
+process and filesystem effects observed
+kernel sandbox state unavailable
+```
+
+or:
+
+```text
+source path complete for Rust and TypeScript
+generated code excluded
+```
+
+## 9. Authority manifest
+
+Automatic research must not rely on ambiguous startup authority.
+
+Before an effectful strategy begins, bind:
+
+```rust
+struct ExecutionAuthorityManifest {
+    target_identity: TargetContentIdentity,
+    prepared_tool_input_digest: Digest,
+    runtime_and_model: Option<RuntimeSelectionReceipt>,
+    config_sources: Vec<AuthoritySource>,
+    environment_influence: Vec<EnvironmentInfluence>,
+    executable_resolutions: Vec<ExecutableResolution>,
+    capability_grants: Vec<CapabilityGrantRef>,
+    explicit_approvals: Vec<ApprovalRef>,
+    sandbox_identity: Option<SandboxIdentity>,
+    authority_digest: Digest,
+}
+```
+
+This can extend current run provenance rather than introducing a separate user-facing artifact for every run.
+
+### 9.1 Rules
+
+- Target-controlled input cannot increase operator authority.
+- Relative executable and path resolution must be recorded after canonical preparation.
+- Missing or changed authority identity invalidates a proof receipt that depends on it.
+- Model selection remains explicit and no-silent-fallback.
+- External backends receive only declared capabilities.
+- Plugin and KWP outputs remain untrusted until host validation and writer commit.
+
+## 10. Experiment isolation
+
+Research strategies may need to mutate or execute a project.
+
+The default safety order is:
+
+1. read-only source snapshot;
+2. disposable workspace copy;
+3. OS-sandboxed process;
+4. container or VM backend when required;
+5. explicit external target only when the operator authorizes it.
+
+The active source checkout should not be mutated by a research experiment unless the tool descriptor explicitly requires and receives target-write approval.
+
+Generated harnesses and mutations live in run or module workspaces and are referenced by digest.
+
+## 11. Candidate ingest
+
+A backend returns candidate observations:
+
+```rust
+struct ResearchCandidate {
+    producer: BackendIdentity,
+    weakness: Option<Weakness>,
+    structural_location: StructuralLocation,
+    title: SafeText,
+    severity_hint: Severity,
+    evidence: Vec<UntrustedEvidenceRef>,
+    requested_proof_hint: Option<ProofHint>,
+}
+```
+
+The host:
+
+1. validates paths, spans, artifacts, and grants;
+2. reads source where necessary;
+3. computes canonical identity;
+4. normalizes evidence;
+5. applies candidate limits;
+6. deduplicates against existing identity;
+7. commits through the writer actor;
+8. records rejected or degraded candidates in funnel accounting.
+
+Producer fingerprints remain provenance only.
+
+## 12. Evaluator receipts
+
+An evaluator receipt is immutable and closed-form.
+
+```rust
+enum EvaluatorOutcome {
+    Satisfied,
+    Falsified,
+    Inconclusive,
+    InvalidExperiment,
+    ObserverUnavailable,
+    BackendFailed,
+}
+```
+
+It binds:
+
+- predicate identity and version;
+- exact input artifacts;
+- target identity;
+- authority manifest digest;
+- observation-boundary digest;
+- backend identity;
+- deterministic or statistical policy;
+- output evidence;
+- outcome.
+
+A model cannot author the final outcome field.
+
+## 13. Reproduction policy
+
+Reproduction is measured, not inferred.
+
+```rust
+struct ReproductionSummary {
+    attempts: u32,
+    successes: u32,
+    failures: u32,
+    invalid_attempts: u32,
+    median_duration: Option<Duration>,
+    environment_identities: Vec<Digest>,
+    success_predicate: EvaluatorIdentity,
+}
+```
+
+Invalid attempts do not count as failures or successes.
+
+A single successful run may establish an observation but should display its sample size.
+
+## 14. Replay
+
+Replay must reconstruct:
+
+- selected strategy plan;
+- strategy terminal outcomes;
+- candidate funnel;
+- finding observation lineage;
+- proof plan at the time;
+- proof receipts;
+- current proof projection;
+- PoC export manifest.
+
+Unknown event versions, hash breaks, gaps, or malformed tails stop at the last valid prefix and disclose degraded replay.
+
+## 15. Retention and disk discipline
+
+Exploit research can generate large harness, corpus, build, crash, and trace artifacts.
+
+The plan must:
+
+- keep semantic events bounded;
+- store large data in CAS or declared artifact roots;
+- enforce per-run and per-strategy byte caps;
+- make retention visible before launch;
+- integrate with existing run pruning;
+- distinguish required PoC artifacts from disposable search intermediates;
+- avoid permanent per-worktree build roots where possible;
+- never silently delete an artifact referenced by a retained proof receipt.
+
+## 16. Security boundaries
+
+The first implementation must preserve:
+
+- one prepared dispatch boundary;
+- descriptor-backed options;
+- explicit effect and approval;
+- target-relative path safety;
+- process-group cancellation;
+- no ambient KWP exec;
+- deny-by-default plugin authority;
+- host-computed finding identity;
+- evidence validation;
+- writer-actor durability;
+- no raw secrets or prompts in lifecycle streams;
+- explicit model/runtime selection;
+- cost accounting that distinguishes unknown from zero.

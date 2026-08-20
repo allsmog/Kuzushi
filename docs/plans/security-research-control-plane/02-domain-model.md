@@ -1,456 +1,458 @@
-# Domain Model — Kuzushi Security Research Control Plane
+# Domain model: keep the product finding-centered
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Design rule
 
----
+The product must not expose a second security-research domain beside findings.
 
-## 1. Product architecture
-
-### 1.1 Layered design
-
-```mermaid
-flowchart TB
-  UX[CLI / TUI / reports / CI]
-  APP[Research application services]
-  DOMAIN[Research + proof + authority domain]
-  REG[ModuleRegistry and prepared dispatch]
-  BACK[Proof backend adapters]
-  EXIST[Existing scanners / MCP / fuzz / verify / patch]
-  STORE[V3 writer actor + event log + CAS + projections]
-
-  UX --> APP
-  APP --> DOMAIN
-  APP --> REG
-  REG --> BACK
-  BACK --> EXIST
-  APP --> STORE
-  BACK --> STORE
-  DOMAIN --> STORE
-```
-
-### 1.2 Ownership rule
-
-Kuzushi core owns:
-
-- identifiers;
-- state transitions;
-- validation;
-- authorization linkage;
-- observation-boundary schema;
-- evaluator-receipt schema;
-- proof transitions;
-- artifact normalization;
-- event append;
-- projection;
-- replay;
-- reports;
-- cost and terminal accounting.
-
-Specialist backends own:
-
-- protocol grammars;
-- browser automation;
-- fuzzing mechanics;
-- symbolic execution;
-- binary lifting;
-- query languages;
-- exploit construction;
-- target-specific harnesses.
-
-A backend returns observations and proposed claims. The host decides what enters durable state.
-
-### 1.3 Proposed bounded context
-
-Suggested initial layout:
+The operator already understands:
 
 ```text
-crates/kuzushi-core/src/research/
-  domain/
-    ids.rs
-    question.rs
-    hypothesis.rs
-    experiment.rs
-    observation.rs
-    evaluator_receipt.rs
-    disposition.rs
-    cascade.rs
-    observation_boundary.rs
-  application/
-    create_question.rs
-    propose_hypothesis.rs
-    plan_experiment.rs
-    record_observation.rs
-    apply_evaluator_receipt.rs
-    record_disposition.rs
-    project_research_tree.rs
-  persistence/
-    events.rs
-    projection.rs
-    queries.rs
-  presentation/
-    summary.rs
-    tree.rs
-    export.rs
+Target
+Run
+Finding
+Evidence
+Proof
+Decision
+Artifact
 ```
 
-Do not create generic repository/service/factory layers unless a real boundary requires them. Follow the repository DDD guidance: pure domain types, application orchestration, IO at adapters, presentation DTOs.
+Those remain the primary nouns.
 
-### 1.4 Integration points
+Internal research state may exist to make planning, replay, and evaluation correct, but it is projected into the existing TUI and durable truth systems.
 
-| Existing component | Integration |
-| --- | --- |
-| `ModuleRegistry::prepare_dispatch_input` | canonical experiment tool input and policy resolution |
-| observed dispatch path | experiment attempt lifecycle and effect receipts |
-| V3 writer actor | only durable commit path |
-| target-wide event log | research and proof semantic events |
-| per-run `items.jsonl` | bounded lifecycle references and evaluator receipts |
-| CAS | large observations, traces, harnesses, screenshots, protocol captures |
-| SQLite | disposable research tree, query, and summary projection |
-| findings domain | links research claims to durable finding identity |
-| static proof state | preserved; extended by orthogonal runtime dimensions |
-| strategy queue | later source of proposed hypotheses/experiment plans |
-| spend ledger | experiment and proof-upgrade cost attribution |
-| exports | research bundle and finding-linked lineage |
+## 2. User-visible objects
 
----
+### 2.1 Target
 
-## 2. Domain model
-
-### 2.1 Identifiers
-
-Identifiers must be host-issued, stable, bounded, and unguessable enough to avoid accidental collision. Display aliases may be human-friendly.
+A selected project with stable identity:
 
 ```rust
-pub struct ResearchQuestionId(String); // rq_...
-pub struct HypothesisId(String);       // hyp_...
-pub struct ExperimentPlanId(String);   // exp_...
-pub struct ExperimentAttemptId(String);// att_...
-pub struct ObservationId(String);      // obs_...
-pub struct EvaluatorReceiptId(String); // eval_...
-pub struct CascadeEdgeId(String);      // cas_...
-```
-
-The canonical ID must not depend on model prose. An optional semantic digest may support deduplication, but it must not replace identity.
-
-### 2.2 Research question
-
-```rust
-pub struct ResearchQuestion {
-    pub id: ResearchQuestionId,
-    pub target: TargetIdentity,
-    pub title: BoundedText,
-    pub scope: ResearchScope,
-    pub created_by: AuthorityPrincipal,
-    pub created_at: Timestamp,
-    pub status: ResearchQuestionStatus,
-    pub linked_findings: Vec<FindingIdentityId>,
+struct ResearchTarget {
+    workspace: WorkspaceTarget,
+    source_identity: TargetContentIdentity,
+    current_revision: Option<GitRevision>,
 }
 ```
 
-Statuses:
+The target is not a “campaign.” It is the same target used by Map, Scan, findings, proof, and Fix.
+
+### 2.2 Research attempt
+
+A research attempt is an ordinary Kuzushi run or parent/child run union with an additive purpose:
 
 ```rust
-pub enum ResearchQuestionStatus {
-    Open,
-    Paused,
-    Resolved,
-    ClosedWithoutResolution,
+enum ScanPurpose {
+    Standard,
+    ExploitabilityResearch,
+    ProofFollowUp { finding_identity: FindingIdentity },
 }
 ```
 
-A question is resolved only through an explicit human or policy-owned decision referencing the supporting hypothesis dispositions. A model cannot resolve it.
+The purpose affects planning and presentation. It does not create a new run store.
 
-### 2.3 Hypothesis
+### 2.3 Finding
+
+A research candidate becomes a normal durable finding only after host validation.
+
+The finding keeps:
+
+- stable target-scoped identity;
+- weakness and structural locator;
+- evidence;
+- observation sources;
+- static proof state;
+- runtime verification;
+- human decision;
+- remediation history;
+- current next proof plan;
+- PoC artifact references.
+
+Model-generated text cannot define canonical identity.
+
+### 2.4 Evidence
+
+Evidence remains typed and attributable.
+
+Research adds evidence kinds only when existing kinds cannot represent the claim:
+
+```text
+source span
+source/sink/path
+configuration influence
+process effect
+filesystem effect
+network effect
+crash
+controlled output
+authorization decision
+observer receipt
+evaluator receipt
+reproducer artifact
+```
+
+Every evidence item binds to:
+
+- target identity;
+- producing run and attempt;
+- backend identity;
+- artifact digest;
+- observation boundary;
+- timestamp;
+- safe bounded summary.
+
+### 2.5 Proof plan
+
+A proof plan is the next-action projection for one finding.
 
 ```rust
-pub struct ResearchHypothesis {
-    pub id: HypothesisId,
-    pub question_id: ResearchQuestionId,
-    pub statement: BoundedText,
-    pub inspired_by: Vec<EvidenceRef>,
-    pub falsification: FalsificationPredicate,
-    pub expected_observations: Vec<ExpectedObservation>,
-    pub proposed_by: AuthorityPrincipal,
-    pub accepted_by: Option<AuthorityPrincipal>,
-    pub status: HypothesisStatus,
+struct FindingProofPlan {
+    finding_identity: FindingIdentity,
+    target_identity: TargetContentIdentity,
+    current_state: ExploitProofSnapshot,
+    next_step: Option<ProofStep>,
+    blocked_reason: Option<ProofBlocker>,
+    estimated_cost: Option<Money>,
+    estimated_runtime: Option<DurationRange>,
+    required_backend: Option<ProofBackendIdentity>,
+    plan_digest: Digest,
 }
 ```
 
-Statuses:
+The TUI uses it for:
+
+```text
+NEXT v establish attacker control
+```
+
+A proof plan is not proof. It is advisory host-owned planning state.
+
+### 2.6 Proof receipt
+
+A completed proof experiment produces a receipt:
 
 ```rust
-pub enum HypothesisStatus {
-    Proposed,
-    Accepted,
-    RejectedBeforeExperiment,
-    Active,
-    Reproduced,
-    Confirmed,
-    Falsified,
-    Inconclusive,
-    Superseded,
-    Expired,
+struct ProofReceipt {
+    receipt_id: ProofReceiptId,
+    finding_identity: FindingIdentity,
+    target_identity: TargetContentIdentity,
+    experiment_run_id: RunId,
+    backend: ProofBackendIdentity,
+    evaluator: EvaluatorIdentity,
+    input_artifacts: Vec<ArtifactRef>,
+    observation_boundary: ObservationBoundaryRef,
+    outcome: EvaluatorOutcome,
+    effect_evidence: Vec<EvidenceRef>,
+    receipt_digest: Digest,
 }
 ```
 
-`Reproduced` means a declared predicate was repeatedly observed. `Confirmed` should be reserved for a stronger domain-defined evaluator contract. The initial release may omit `Confirmed` rather than use it loosely.
+Only a valid receipt may advance runtime proof dimensions.
 
-### 2.4 Falsification predicate
+### 2.7 PoC bundle
 
-Free-form prose alone is insufficient. A predicate has a typed evaluator plus a bounded explanation.
+A PoC bundle is an export artifact, not new mutable state.
 
 ```rust
-pub struct FalsificationPredicate {
-    pub evaluator: EvaluatorSpec,
-    pub success_condition: PredicateExpression,
-    pub falsified_when: PredicateExpression,
-    pub inconclusive_when: Vec<InconclusiveCondition>,
-    pub rationale: BoundedText,
+struct PocBundleManifest {
+    finding_identity: FindingIdentity,
+    target_identity: TargetContentIdentity,
+    proof_snapshot: ExploitProofSnapshot,
+    reproduction_summary: ReproductionSummary,
+    artifacts: Vec<ArtifactRef>,
+    known_limits: Vec<ProofLimit>,
+    bundle_digest: Digest,
 }
 ```
+
+Export reads durable state. It does not manufacture stronger proof.
+
+## 3. Internal-only research state
+
+These objects may exist internally but should not become normal TUI pages.
+
+### 3.1 Research strategy
+
+A generated, ranked unit of work:
+
+```rust
+struct ResearchStrategy {
+    id: StrategyId,
+    target_identity: TargetContentIdentity,
+    surface: ResearchSurface,
+    template: StrategyTemplateIdentity,
+    rationale: SafeText,
+    expected_yield: Option<Score>,
+    expected_cost: Option<Money>,
+    expected_runtime: Option<DurationRange>,
+    risk: StrategyResourceRisk,
+    requirements: StrategyRequirements,
+    plan: Vec<PlannedToolCall>,
+}
+```
+
+It can reuse or extend the current Strategy Proposal domain.
+
+### 3.2 Experiment attempt
+
+An individual controlled variant inside a strategy:
+
+```rust
+struct ExperimentAttempt {
+    id: ExperimentAttemptId,
+    strategy_id: StrategyId,
+    run_id: RunId,
+    variant_identity: Digest,
+    changed_variables: Vec<ControlledVariable>,
+    held_constants: Vec<BoundIdentity>,
+    terminal: ExperimentTerminal,
+}
+```
+
+The operator normally sees aggregate progress and results, not one row per variant.
+
+### 3.3 Observation
+
+A bounded statement about an effect:
+
+```rust
+struct ResearchObservation {
+    id: ObservationId,
+    attempt_id: ExperimentAttemptId,
+    kind: ObservationKind,
+    evidence: Vec<EvidenceRef>,
+    boundary: ObservationBoundaryRef,
+    confidence: ObservationConfidence,
+}
+```
+
+An observation is not automatically a finding or proof transition.
+
+### 3.4 Evaluator receipt
+
+The evaluator answers a closed question over exact evidence.
 
 Examples:
 
-- no source-to-sink path exists under the declared CPG snapshot;
-- a sanitizer crash cannot be reproduced in three attempts;
-- a browser effect is absent after the exact interaction sequence;
-- the target rejects an adversarial protocol transition without writing outside the allowed root;
-- a deployment endpoint is not reachable from the declared vantage point.
+```text
+Did the process execute the expected marker?
+Did the write occur outside the admitted root?
+Did the crash reproduce under the exact harness?
+Did source data reach the sink under the specified guards?
+Did the patch remove the original primitive?
+```
 
-The predicate language should begin with a small closed set. Do not invent a general-purpose expression runtime in v1.
+The receipt is internal infrastructure projected into Prove and Replay.
 
-### 2.5 Experiment plan
+### 3.5 Cascade edge
+
+A completed observation may suggest another strategy or proof step.
 
 ```rust
-pub struct ExperimentPlan {
-    pub id: ExperimentPlanId,
-    pub hypothesis_id: HypothesisId,
-    pub tool: ToolIdentity,
-    pub canonical_input_digest: Digest,
-    pub target: TargetIdentity,
-    pub observation_boundary: ObservationBoundary,
-    pub requested_authority: RequestedAuthority,
-    pub expected_artifacts: Vec<ArtifactExpectation>,
-    pub evaluator: EvaluatorSpec,
-    pub repetition: RepetitionPolicy,
-    pub budget: ExperimentBudget,
-    pub created_by: AuthorityPrincipal,
-    pub status: ExperimentPlanStatus,
+struct ResearchCascadeEdge {
+    source_observation: ObservationId,
+    proposed_strategy: StrategyId,
+    rationale: SafeText,
 }
 ```
 
-The complete canonical input remains an artifact where appropriate. Events retain bounded semantics and digests.
+This supports automatic follow-up without creating a visible hypothesis tree.
 
-Plan statuses:
+## 4. State relationships
+
+```text
+Map evidence
+  -> generated ResearchStrategy
+  -> admitted Scan plan
+  -> ExperimentAttempt
+  -> ResearchObservation
+  -> candidate normalization
+  -> Finding observation
+  -> FindingProofPlan
+  -> ProofReceipt
+  -> ExploitProofSnapshot
+  -> PoC bundle
+```
+
+Durable source-of-truth ownership stays explicit:
+
+| State | Source of truth |
+| --- | --- |
+| Map evidence | Existing target artifacts, CAS, V3 log, projections |
+| Strategy proposal and correction | Existing strategy domain / V3-compatible durable queue |
+| Run lifecycle | `items.jsonl`, run summary, target log terminal bridge |
+| Finding identity and observations | Findings domain and target event log |
+| Human decision | Append-only finding decision event |
+| Runtime proof | Proof receipt and finding proof event |
+| SQLite rows | Rebuildable projection |
+| PoC bundle | Immutable export manifest and referenced artifacts |
+
+## 5. Proof snapshot
+
+The TUI needs one coherent projection:
 
 ```rust
-pub enum ExperimentPlanStatus {
-    Draft,
-    ReadyForAuthorization,
-    Authorized,
-    Denied,
-    Superseded,
-    Exhausted,
+struct ExploitProofSnapshot {
+    static_state: StaticProofState,
+    reproduction: ReproductionState,
+    attacker_control: AttackerControlState,
+    boundary_crossing: BoundaryCrossingState,
+    primitive: PrimitiveState,
+    reachability: ReachabilityState,
+    impact: ImpactState,
+    freshness: ProofFreshness,
+    observation_limits: Vec<ProofLimit>,
 }
 ```
 
-### 2.6 Experiment attempt
+These dimensions remain orthogonal.
 
-```rust
-pub struct ExperimentAttempt {
-    pub id: ExperimentAttemptId,
-    pub plan_id: ExperimentPlanId,
-    pub run_id: RunId,
-    pub target: TargetIdentity,
-    pub authority_manifest: AuthorityManifestRef,
-    pub started_at: Timestamp,
-    pub terminal: Option<ExperimentTerminal>,
-}
+A crash may be reproduced while attacker control is unknown.
+
+A write primitive may exist only in a local harness.
+
+An effect may cross a workspace boundary without proving a kernel sandbox escape.
+
+A model assessment may increase prioritization but cannot advance empirical dimensions.
+
+## 6. Candidate lifecycle
+
+```text
+signal
+  -> source-grounded candidate
+  -> linked/static candidate
+  -> reproduced anomaly
+  -> attacker-controlled behavior
+  -> boundary or primitive established
+  -> impact demonstrated
+  -> clean reproduction
 ```
 
-Terminal outcomes:
+Candidates may also terminate as:
 
-```rust
-pub enum ExperimentTerminal {
-    Completed,
-    Partial,
-    Blocked,
-    Failed,
-    Canceled,
-    Interrupted,
-    Skipped,
-}
+```text
+rejected false positive
+expected behavior
+not reachable
+not reproducible
+harness incomplete
+observer unavailable
+inconclusive
+duplicate
+out of scope
+superseded by stronger finding
 ```
 
-The research projection must reuse the canonical run outcome rather than inventing a divergent status.
+No candidate disappears without a terminal reason.
 
-### 2.7 Observation
+## 7. Invariants
 
-```rust
-pub struct ResearchObservation {
-    pub id: ObservationId,
-    pub attempt_id: ExperimentAttemptId,
-    pub kind: ObservationKind,
-    pub summary: BoundedText,
-    pub evidence: Vec<EvidenceRef>,
-    pub boundary_ref: ObservationBoundaryRef,
-    pub producer: ArtifactIdentity,
-    pub observed_at: Timestamp,
-}
+### 7.1 No second truth system
+
+- Internal strategies and experiments do not own findings.
+- External backends return untrusted candidates and evidence references.
+- The host writer actor commits canonical events.
+- SQLite is a projection.
+- Run sidecars are exports or receipts, not a second mutable database.
+
+### 7.2 Models propose; evaluators decide
+
+A model may:
+
+- rank surfaces;
+- draft a strategy;
+- draft a harness;
+- explain an observation;
+- propose a proof step;
+- summarize impact.
+
+A model may not assert that:
+
+- a process executed;
+- a boundary was crossed;
+- attacker control exists;
+- a crash reproduced;
+- a PoC succeeded;
+- a patch closed the primitive.
+
+Those require host-owned evidence and evaluator receipts.
+
+### 7.3 Missing is not negative
+
+```text
+observer unavailable != no effect
+harness build failed != not reproduced
+backend absent != rejected
+candidate not rediscovered != verified absent
+unknown cost != zero cost
 ```
 
-An observation records what happened. It does not decide the hypothesis.
+### 7.4 Exact identity binds proof
 
-Candidate kinds may include:
+Proof transitions bind to:
 
-```rust
-pub enum ObservationKind {
-    StaticPath,
-    SourceInvariant,
-    RuntimeCrash,
-    RuntimeEffect,
-    BrowserEffect,
-    ProtocolTrace,
-    FormalWitness,
-    ExposurePath,
-    PolicyBlock,
-    NegativeResult,
-    InfrastructureFailure,
-}
-```
+- target content identity;
+- finding identity;
+- backend and evaluator identity;
+- harness and input digests;
+- policy and authority digest;
+- observation boundary;
+- run receipt.
 
-Only the subset needed by the first vertical slice should ship initially.
+Relevant identity change makes the proof stale.
 
-### 2.8 Evaluator receipt
+### 7.5 Human decisions survive machine reruns
 
-```rust
-pub struct EvaluatorReceipt {
-    pub id: EvaluatorReceiptId,
-    pub attempt_id: ExperimentAttemptId,
-    pub evaluator: ArtifactIdentity,
-    pub evaluator_policy_digest: Digest,
-    pub input_artifacts: Vec<EvidenceRef>,
-    pub boundary_ref: ObservationBoundaryRef,
-    pub outcome: EvaluatorOutcome,
-    pub reasons: Vec<EvaluatorReason>,
-    pub deterministic: bool,
-    pub evaluated_at: Timestamp,
-}
-```
+A later scanner or model may add observations. It must not silently rewrite an explicit human decision.
 
-Outcomes:
+### 7.6 Bounded semantics only
 
-```rust
-pub enum EvaluatorOutcome {
-    PredicateSatisfied,
-    PredicateFalsified,
-    Inconclusive,
-    InvalidExperiment,
-    EvidenceUnavailable,
-}
-```
+Persist:
 
-The evaluator receipt is the only input allowed to promote a hypothesis disposition automatically.
+- safe summaries;
+- identities;
+- predicates;
+- outcomes;
+- artifact references;
+- costs;
+- timings;
+- terminal reasons.
 
-A model may be part of an evaluator pipeline, but a model-only result must be labeled non-deterministic and capped below empirical/formal proof. A multi-model vote does not become deterministic by repetition.
+Do not persist:
 
-### 2.9 Disposition
+- hidden reasoning;
+- raw model transcripts;
+- unrestricted stdout/stderr;
+- credentials;
+- target secrets;
+- unbounded mutation payloads in semantic events.
 
-```rust
-pub struct HypothesisDisposition {
-    pub hypothesis_id: HypothesisId,
-    pub status: HypothesisStatus,
-    pub evaluator_receipts: Vec<EvaluatorReceiptId>,
-    pub decided_by: AuthorityPrincipal,
-    pub reason: BoundedText,
-    pub decided_at: Timestamp,
-    pub expires_at: Option<Timestamp>,
-}
-```
+## 8. TUI projection mapping
 
-Machine-applied dispositions must name a host policy principal. Human overrides append a new decision; they do not rewrite the evaluator receipt.
+| Internal state | Default TUI projection |
+| --- | --- |
+| Research surface ranking | Map priority rows |
+| Generated strategy plan | Map NEXT summary and optional Strategy Queue |
+| Active experiment | Run Focus semantic step |
+| Experiment funnel | Scan |
+| Deduplicated candidate | Review finding row |
+| Current proof dimensions | Review compact snapshot and Prove |
+| Next proof plan | `NEXT v ...` |
+| Evaluator outcome | Prove receipt/replay |
+| Observation limitation | Scan coverage and Prove limits |
+| PoC manifest | Prove export surface |
+| Cascade proposal | Automatically generated next proof plan or advanced Strategy Queue |
 
-### 2.10 Cascade edge
+## 9. Compatibility approach
 
-```rust
-pub struct ResearchCascadeEdge {
-    pub id: CascadeEdgeId,
-    pub from_observation: ObservationId,
-    pub to_hypothesis: HypothesisId,
-    pub rationale: BoundedText,
-    pub proposed_by: AuthorityPrincipal,
-    pub accepted_by: Option<AuthorityPrincipal>,
-}
-```
+The first implementation should be additive:
 
-This is the durable form of “that result suggests we should test X next.”
+- add a Scan purpose/profile rather than a new workflow enum;
+- add proof dimensions without changing existing static proof labels;
+- add optional receipt and boundary references;
+- reuse existing finding identity;
+- reuse current strategy proposal and correction mechanics where possible;
+- preserve CLI, shell, and run preparation through `ModuleRegistry`;
+- preserve current `.kuzushi/v3` paths;
+- publish schemas only after one internal vertical slice stabilizes the shape.
 
-It stores a bounded rationale and evidence references, never hidden reasoning.
-
----
-
-## 3. Domain invariants
-
-The first implementation must enforce these invariants in pure domain code and at the persistence boundary.
-
-### 3.1 Truth ownership
-
-- A backend may emit observations and proposed findings.
-- A backend may not assign canonical finding identity.
-- A backend may not write research events directly.
-- A backend may not mark a hypothesis reproduced, confirmed, or falsified.
-- A model may propose a hypothesis or plan.
-- A model-only assessment may not create an empirical witness.
-- Only the host writer actor commits durable research state.
-
-### 3.2 Evaluator integrity
-
-- Every automated disposition references at least one evaluator receipt.
-- Every evaluator receipt references exact input artifacts and an observation boundary.
-- An evaluator cannot evaluate evidence produced after its receipt timestamp.
-- Unknown or unavailable evidence yields `Inconclusive` or `EvidenceUnavailable`, never success.
-- An unsupported evaluator version fails closed.
-- Contradictory evaluator receipts remain visible; they are not averaged into certainty.
-- A later receipt appends; it does not mutate an earlier receipt.
-
-### 3.3 Experiment integrity
-
-- Every attempt belongs to exactly one plan and one canonical run.
-- A plan's prepared tool identity and canonical input digest are immutable after authorization.
-- Revisions create a new plan identity.
-- Authorization binds the plan, target identity, requested authority, and policy digest.
-- A stale authorization cannot be reused after a material plan or target change.
-- Cancellation and interruption remain terminal and cannot be relabeled as completed.
-- A run may finish while an experiment is still invalid due to missing evidence; execution success is not evaluator success.
-
-### 3.4 Boundary honesty
-
-- Every evaluator receipt references one complete observation boundary.
-- Required but unobserved surfaces force a downgrade or invalid experiment.
-- A “clean” result always means “no predicate-satisfying observation within this boundary.”
-- Parser/index/tool failures are part of the boundary.
-- A partial boundary cannot be silently promoted to complete.
-- Boundary completeness is dimensioned; it is not one unqualified percentage.
-
-### 3.5 Research lineage
-
-- Every hypothesis belongs to one question.
-- Every accepted hypothesis has a falsification predicate.
-- Every cascade edge cites an originating observation.
-- Every terminal hypothesis has a reason.
-- Superseding a hypothesis preserves the old branch.
-- Closing a question requires an explicit decision and remaining-uncertainty summary.
-- Deleting durable research history is not a normal operation.
-
-### 3.6 Privacy and bounded content
-
-- Do not persist raw prompts, raw model responses, hidden reasoning, credentials, or unrestricted stdout/stderr in semantic events.
-- Store bounded summaries and artifact references.
-- Secret-looking values are redacted or represented only by set/unset and digest policy.
-- All free-form text uses the existing redaction, control escaping, and size bounds.
-- Large traces, corpora, screenshots, binaries, and captures live in CAS or declared artifacts.
-
----
+Compatibility shims are preferable to a migration that rewrites existing finding or proof rows.

@@ -1,292 +1,474 @@
-# Product Workflow — Kuzushi Security Research Control Plane
+# Product workflow: project in, proof out
 
-> **Status:** proposal for review
-> **Date:** 2026-08-19
-> **Plan index:** [security research control-plane productization](./README.md)
-> **Roadmap constraint:** the current [ROADMAP](../../../ROADMAP.md) remains authoritative.
+## 1. Product contract
 
----
+The operator supplies a project and nothing else that is specific to “research”:
 
-## 1. Target users and jobs to be done
-
-### 1.1 Primary user: senior AppSec or product-security engineer
-
-They are investigating a difficult repository-centered security question and need a result that can survive review.
-
-Jobs:
-
-- turn several noisy scanner/model outputs into one defensible conclusion;
-- prove or reject attacker reachability;
-- explain exactly why a finding is or is not confirmed;
-- preserve the work so another engineer can continue it;
-- generate a remediation plan and verify closure;
-- account for cost and time;
-- avoid granting broad authority to an autonomous agent.
-
-### 1.2 Vulnerability researcher
-
-They start from an observation and iteratively design experiments.
-
-Jobs:
-
-- capture a hypothesis without losing the inspiration source;
-- state what would falsify it;
-- run several bounded experiments;
-- keep negative and inconclusive evidence;
-- branch from a successful observation;
-- distinguish local harness behavior from real attack surface;
-- publish a reproducible artifact bundle.
-
-### 1.3 Security platform or detection engineer
-
-They maintain engines, policies, and benchmarks.
-
-Jobs:
-
-- integrate a specialist engine without giving it ownership of Kuzushi truth;
-- compare backends on the same corpus;
-- see where candidates disappear;
-- identify observation blind spots;
-- prevent benchmark regressions;
-- version evaluators and policies;
-- know when an engine changed a proof outcome.
-
-### 1.4 Security lead or reviewer
-
-They need governance and portfolio visibility without reading raw agent transcripts.
-
-Jobs:
-
-- review the question, evidence, authority, and remaining uncertainty;
-- approve dangerous experiments or deny them;
-- see which claims are stale;
-- compare cost and verified yield;
-- export a signed or digest-bound review package;
-- distinguish a model opinion from an empirical or formal witness.
-
-### 1.5 AI-agent platform security engineer, later
-
-They investigate agent/tool/credential paths and runtime trajectories.
-
-Jobs:
-
-- map delegated authority;
-- determine whether a sequence of allowed actions becomes a policy violation;
-- replay a malicious trajectory;
-- inspect startup configuration and tool provenance;
-- verify a remediation across the same path.
-
-This persona is strategically relevant, but it should not pull the first release away from repository security.
-
----
-
-## 2. Product promise and non-goals
-
-### 2.1 Product promise
-
-For every material security claim, Kuzushi should be able to show:
-
-1. the question and hypothesis;
-2. the target identity;
-3. the observation boundary;
-4. the authority manifest;
-5. the exact experiment plan and approval;
-6. the backend and evaluator identities;
-7. the observations and artifacts;
-8. the evaluator outcome;
-9. the proof dimensions changed;
-10. the human decision;
-11. the remediation and retest result;
-12. the cost, latency, and failure accounting;
-13. the remaining uncertainty.
-
-### 2.2 Non-goals
-
-Kuzushi should not:
-
-- become a generic coding assistant;
-- store hidden chain-of-thought or raw model transcripts as research state;
-- let a model or plugin mark its own hypothesis confirmed;
-- make “multi-agent consensus” a substitute for runtime or formal evidence;
-- expose arbitrary shell execution as a research backend;
-- create a second mutable source of truth beside the V3 event log;
-- replace findings with a new generic “claim” object;
-- add a new top-level workflow for each research domain;
-- promise full coverage when the observation boundary is partial;
-- conflate “not rediscovered” with “fixed”;
-- ship a broad external attack surface before the repository-security benchmark is credible;
-- require a Kuzushi cloud service for local evidence and replay;
-- create a plugin marketplace before the backend trust contract and conformance corpus exist.
-
----
-
-## 3. End-to-end product workflow
-
-### 3.1 Canonical lifecycle
-
-```mermaid
-flowchart LR
-  Q[Research question] --> H[Hypothesis]
-  H --> P[Experiment plan]
-  P --> A{Authorization}
-  A -->|denied| D[Denied / revised]
-  A -->|approved| X[Experiment attempt]
-  X --> O[Observation]
-  O --> E[Evaluator receipt]
-  E --> R{Disposition}
-  R -->|rejected| N[Negative evidence]
-  R -->|inconclusive| I[Next bounded experiment]
-  R -->|reproduced| F[Finding or proof update]
-  R -->|confirmed| F
-  F --> M[Remediation]
-  M --> T[Retest]
-  T --> C[Closure claim]
-  E --> B[New cascade hypothesis]
+```bash
+kz --target /work/target-project
 ```
 
-### 3.2 Example: repository finding
+Kuzushi reuses the current Target, Setup, Map, Scan, Review, Prove, Fix, Report, and Run Focus surfaces.
 
-1. A scan creates or corroborates finding `F-0042`.
-2. The operator opens a research case: “Can untrusted HTTP input reach the unsafe deserializer in `parser.rs`?”
-3. A model proposes a hypothesis and a static path experiment.
-4. The operator accepts the hypothesis; the host records the exact falsification predicate.
-5. Existing CPG/CodeQL/static tools execute under the normal module registry.
-6. The experiment records the repository snapshot, observed files, parser/index coverage, tool versions, warnings, and skipped surfaces.
-7. A host evaluator decides whether the path predicate was met.
-8. The hypothesis becomes `reproduced_static`, not “exploitable.”
-9. A second experiment uses the existing runtime proof path.
-10. A sanitizer witness reproduces a crash in a local harness.
-11. Proof changes: execution witness = sanitizer crash; reachability = local harness only; exploitability = not established.
-12. A third experiment establishes attacker-controlled entrypoint reachability.
-13. The finding report now says exactly what is proven and what remains unknown.
-14. A patch is applied.
-15. Retest executes the same experiments and records which predicates no longer hold.
+The default workflow must be useful without:
 
-### 3.3 Negative results are product value
+- creating a campaign;
+- writing a hypothesis;
+- selecting individual engines;
+- importing a contest rulebook;
+- creating a VM profile;
+- opening Strategy Queue;
+- copying results into a notebook;
+- manually choosing the next proof experiment.
 
-A rejected hypothesis is not deleted and is not a failed run.
+Advanced controls remain available, but they are not prerequisites.
 
-It should retain:
+## 2. First launch and Setup
 
-- why the hypothesis was plausible;
-- what experiment was run;
-- what was visible;
-- which evaluator rejected it;
-- whether the result is stable or environment-specific;
-- when it expires or needs revalidation;
-- whether it narrows the next hypothesis.
+Kuzushi should preserve the existing consent boundary. Pointing at a project selects the target; it does not silently authorize repository execution or model spend.
 
-This prevents repeated dead-end work and makes research transferable.
+A deterministic Map plan is preselected:
 
----
+```text
+KUZUSHI · target-project · SETUP
+READY THE MAP RUN
+────────────────────────────────────────────────────────────────────
 
-## 4. Operator experience
+  Target         CONFIRMED       /work/target-project
+> Map plan       READY           inventory · boundaries · entry points
+  Model          NOT NEEDED      deterministic Map plan
+  Credentials    NOT NEEDED      no selected task needs a provider
+  Prompt         BUILT IN        project-first defaults
+  Budget         NOT ENFORCED    applies to later model-backed research
+  Start Map      READY           commit the plan and open Run Focus
 
-### 4.1 Preserve the current phase cockpit
+────────────────────────────────────────────────────────────────────
+READY · Enter Start Map
+```
 
-Do not add a six- or seven-phase primary rail.
+No row asks for research goals, contest details, target product metadata, or hypothesis seeds.
 
-Research should project through the current phases:
+When the project has existing current-revision Map evidence, Setup should truthfully offer reuse rather than force a rebuild.
 
-| Current phase | Research projection |
+## 3. Map: explain where Kuzushi will spend effort
+
+Map remains a projection of durable project evidence.
+
+The Summary tab adds one research-priority section derived from the existing component, entry-point, route, dependency, threat, and authority evidence.
+
+```text
+KUZUSHI · target-project · MAP
+Map   Scan×   Review×   Prove×   Fix×
+────────────────────────────────────────────────────────────────────────
+[Summary] · DFD · Entry points · Components
+
+PROJECT SUMMARY                         RESEARCH PRIORITIES
+Coding-agent CLI and tool runtime       1. command and tool execution
+Repository data influences plans        2. project-controlled configuration
+Local filesystem/process effects        3. workspace path containment
+Native parser dependencies              4. parser and FFI boundaries
+Multiple delegated tools                5. child-process authority
+
+ATTACK-SURFACE FLOW
+project-controlled data
+    -> configuration / instructions
+    -> planner or model decision
+    -> tool arguments
+    -> approval / policy boundary
+    -> filesystem / process / network effect
+
+TOP SURFACES
+  91  tool argument normalization
+  88  project configuration loading
+  83  executable resolution
+  79  workspace path containment
+  74  native parser and FFI boundaries
+  69  child-process cleanup and inheritance
+
+COVERAGE LIMITS
+  source inventory complete
+  generated code partial
+  native dependency internals unavailable
+
+────────────────────────────────────────────────────────────────────────
+NEXT Enter start exploitability-first research
+```
+
+### 3.1 Research priority is not a vulnerability score
+
+The priority combines:
+
+- boundary importance;
+- attacker influence;
+- exposed entry-point reachability;
+- code complexity or parser sensitivity;
+- historical finding density;
+- existing test/harness leverage;
+- available proof backend;
+- estimated research cost.
+
+The TUI should expose the reasons for a selected surface. It must not claim that a high-priority surface is vulnerable.
+
+### 3.2 One primary action
+
+The default Map action starts a bounded research sweep.
+
+The operator may optionally change focus through the shared composer:
+
+```text
+focus repository trust and command execution
+```
+
+or open advanced strategy controls:
+
+```text
+strategies
+```
+
+Neither is required.
+
+## 4. Research launch
+
+Pressing Enter creates one governed Scan plan from the current Map.
+
+The plan is generated in this order:
+
+```text
+current Map evidence
+  -> candidate research surfaces
+  -> compatible strategy templates
+  -> preflight and budget
+  -> automatic low-risk selection
+  -> one visible plan receipt
+  -> Run Focus
+```
+
+The default plan may include:
+
+1. structural/static path analysis;
+2. cross-engine corroboration;
+3. dangerous-boundary review;
+4. differential or metamorphic variants;
+5. bounded repository mutation;
+6. harness generation;
+7. sandboxed reproduction;
+8. deterministic evaluator checks;
+9. candidate ranking.
+
+Only strategies whose requirements are met enter the run. Missing backends become explicit skipped rows, not silent degradation.
+
+## 5. Run Focus: one foreground execution view
+
+The existing Run Focus screen is the only live research presentation.
+
+```text
+RUN FOCUS · SCAN · sequence 3/8 · LIVE · $1.42 · queued 5
+────────────────────────────────────────────────────────────────────────
+STEPS                              │ OUTPUT · path-boundary research
+✓ map high-risk boundaries         │ 17 path-sensitive operations
+✓ generate candidate invariants    │ 6 permission/effect invariants
+> test path-resolution variants    │ variant 41/180
+o inspect authority chains         │ lexical path != resolved target: 3
+o build focused harnesses          │
+o reproduce promising effects      │
+o rank exploit candidates          │
+────────────────────────────────────────────────────────────────────────
+s steer       b background       Tab focus       Ctrl+C cancel
+```
+
+### 5.1 What the screen must show
+
+- the research surface or selected finding;
+- ordered semantic steps;
+- current strategy;
+- bounded progress;
+- cost and budget;
+- queue depth;
+- failures or policy blocks;
+- observation-boundary degradation;
+- terminal receipt.
+
+It must not stream hidden reasoning or raw model transcripts.
+
+### 5.2 Optional steering
+
+Steering is additive and uses the existing `run <tool> ...` contract.
+
+Examples:
+
+```text
+run research:focus --area "repository trust and command execution"
+run research:expand --finding F-0007
+run research:stop-surface --surface native-parser
+```
+
+A steer command enters after the current chain and plan work. It does not rewrite already committed history.
+
+### 5.3 Background by default for long work
+
+A research sweep may take minutes or hours. `b` backgrounds it without cancellation. Completion produces a durable notice and Scan receipt; it must not steal focus.
+
+## 6. Scan: account for the research funnel
+
+Scan remains a resting projection of one selected attempt.
+
+```text
+VIEW SCAN · EXPLOIT RESEARCH              ATTEMPT scan-20260819-07 · COMPLETE
+────────────────────────────────────────────────────────────────────────────
+Attack surfaces tested      14            candidates                23
+Harnesses executed          67            reproduced anomalies       5
+Rejected candidates         18            proof-ready candidates     2
+Duration                 1h42m            measured cost           $5.84
+
+RESEARCH COVERAGE                         RESULT
+static paths              complete         +23 candidate observations
+tool execution            complete         5 runtime anomalies
+path containment          complete         2 proof-ready findings
+native parser surface     partial          1 crash, not reproduced
+network behavior          skipped          no admitted harness
+
+FUNNEL
+proposed strategies        11
+preflight admitted          8
+completed                    7
+partial                      1
+candidate observations      23
+deduplicated findings         5
+proof-ready findings          2
+
+TOP RESULT
+F-0007 · project-controlled path reaches mismatched execution target
+7/8 reproductions · boundary implicated · arbitrary control unproven
+
+────────────────────────────────────────────────────────────────────────────
+NEXT use & review
+```
+
+### 6.1 Required honesty
+
+Scan must distinguish:
+
+- not selected;
+- preflight blocked;
+- skipped because a backend was unavailable;
+- execution failed;
+- execution partial;
+- completed with no observation;
+- candidate generated;
+- candidate deduplicated;
+- candidate rejected;
+- reproduced anomaly;
+- proof-ready finding.
+
+Every admitted strategy and every generated candidate receives a terminal reason.
+
+### 6.2 Clean does not mean complete
+
+A clean attempt says:
+
+```text
+No qualifying observation within the declared research and observation boundary.
+```
+
+It does not say:
+
+```text
+The project has no exploitable vulnerabilities.
+```
+
+## 7. Review: the exploit-candidate queue
+
+Review remains finding-centered.
+
+```text
+REVIEW · 5 NEED ACTION                         SELECTED · F-0007
+────────────────────────────────────────────────────────────────────────────
+> ? CRIT [ooo..] 4 src  91%                    execution target mismatch
+  ? HIGH [oo...] 3 src  84%                    pre-trust config execution
+  ? HIGH [oo...] 2 src  78%                    child process escapes cleanup
+  ! MED  [o....] 1 src  66%                    native parser crash
+  - LOW  [o....] 1 src  rejected               expected tool behavior
+
+SELECTED
+Project-controlled input influences a path shown in a policy decision.
+Runtime resolution reaches a different executable target.
+
+PROOF SNAPSHOT
+  static path                         established
+  runtime effect                      reproduced 7/8
+  attacker-controlled destination     partial
+  boundary violation                  unproven
+  arbitrary instruction execution    unproven
+
+WHY IT MATTERS
+A controlled target mismatch could turn a permitted project operation into
+execution outside the intended project boundary.
+
+NEXT v prove attacker control
+```
+
+### 7.1 Ranking
+
+Review should order by research value, not severity alone.
+
+A useful ranking model is:
+
+```text
+research value =
+  boundary importance
+  * attacker influence
+  * entry-point reachability
+  * current primitive strength
+  * reproduction reliability
+  * evidence quality
+  / estimated next-proof cost
+```
+
+The underlying factors must be inspectable. The score is advisory.
+
+### 7.2 Human decisions
+
+Existing decisions remain authoritative:
+
+- confirmed;
+- rejected false positive;
+- suppressed;
+- deferred;
+- accepted risk;
+- needs review.
+
+A machine rejection may reduce rank, but it does not overwrite a human decision attached to stable finding identity.
+
+## 8. `v` is the proof contract
+
+The operator should not design proof chains manually.
+
+Pressing `v` on a selected finding asks the proof planner for the smallest experiment that could change the current proof state.
+
+Examples:
+
+```text
+reproduced path mismatch
+  -> establish attacker control over the resolved target
+
+attacker-controlled crash
+  -> establish controlled corruption
+
+static source-to-sink path
+  -> execute a harness that proves the sink effect
+
+unexpected child process
+  -> prove that it survives or crosses the intended authority boundary
+```
+
+If no backend can run the experiment, Prove says what is missing. It does not substitute model opinion.
+
+## 9. Prove: one ladder, one next action
+
+```text
+PROVE · F-0007 · EXECUTION TARGET MISMATCH
+STATUS high-value candidate · proof [oooo..]
+NEXT v establish execution outside the authorized project root
+────────────────────────────────────────────────────────────────────────
+EVIDENCE                            │ EXPLOIT LADDER
+src/config/load.rs:184              │ suspicious behavior       complete
+policy display trace                │ runtime reproduction       complete
+process tree receipt                 │ attacker control           complete
+filesystem effect receipt            │ boundary crossing          partial
+harness and minimized project        │ arbitrary execution        missing
+                                     │ clean reproduction         missing
+
+REPRODUCTION
+  29 / 32 successful
+  median 1.8 seconds
+  target commit 71e3d02
+  harness digest sha256:9c42…
+
+OBSERVATION LIMITS
+  process and filesystem effects observed
+  kernel sandbox state not observed
+
+────────────────────────────────────────────────────────────────────────
+v run next proof step       r replay       e export current PoC
+```
+
+### 9.1 Proof and triage remain separate
+
+A human may believe the finding is real before runtime proof exists. That decision is Review truth.
+
+A runtime receipt may demonstrate an effect without proving security impact. That is Proof truth.
+
+Neither should overwrite the other.
+
+### 9.2 Staleness
+
+A project revision, harness, dependency, backend, evaluator, policy, or relevant environment change can stale proof.
+
+The screen must name exactly which identity changed and offer revalidation.
+
+## 10. PoC export is contextual, not a new phase
+
+Pressing `e` from Prove opens a focused export surface:
+
+```text
+EXPORT · F-0007 · POC BUNDLE
+────────────────────────────────────────────────────────────────────
+Status           READY WITH LIMITATIONS
+Finding          execution target mismatch
+Proof            attacker control established
+Missing          direct kernel sandbox observation
+Reproduction     29 / 32
+Destination      ./kuzushi-poc-F-0007/
+
+Enter export      e edit path      Esc return to Prove
+```
+
+The bundle contains only durable, attributable artifacts:
+
+```text
+kuzushi-poc-F-0007/
+├── README.md
+├── finding.json
+├── proof-summary.json
+├── reproducer/
+├── minimized-project/
+├── harness/
+├── trigger-input/
+├── traces/
+├── evaluator-receipts.jsonl
+├── target-identity.json
+├── observation-boundary.json
+└── SHA256SUMS
+```
+
+Unknown or missing proof remains explicit in `README.md` and `proof-summary.json`.
+
+Fix remains remediation. Report remains the existing engagement export. No sixth offensive phase is added.
+
+## 11. Advanced surfaces
+
+Advanced operators may open:
+
+- Strategy Queue to inspect, correct, keep, skip, or fire generated strategies;
+- Runs and Replay to inspect lineage;
+- Trace for bounded diagnostics;
+- Capabilities to see available proof backends;
+- permission and budget controls;
+- prompt overrides.
+
+The default journey must not require them.
+
+## 12. Failure behavior
+
+The TUI must fail honestly:
+
+| Condition | TUI behavior |
 | --- | --- |
-| Map | question context, target identity, observation boundary, startup authority, attack surface |
-| Scan | active hypotheses, planned/running experiments, candidate funnel |
-| Review | dispositions, disagreements, negative evidence, human decisions |
-| Prove | evaluator receipts, witnesses, reachability, exploitability, exposure, impact |
-| Fix | remediation attempts and exact re-experiment plan |
-| Report/export | full lineage, remaining uncertainty, reproducibility manifest |
-
-A dedicated Research view may later aggregate these objects, but it should not redefine the journey.
-
-### 4.2 CLI-first surface
-
-The first productized surface should be headless and scriptable.
-
-Illustrative commands—not yet a compatibility promise:
-
-```text
-kuzushi research start --target . --question "Can untrusted input reach parser X?"
-kuzushi research list --target .
-kuzushi research show RQ-0001 --target .
-kuzushi research tree RQ-0001 --target .
-kuzushi research hypothesis propose RQ-0001 --statement "..." --falsified-by "..."
-kuzushi research hypothesis accept H-0001
-kuzushi research experiment plan H-0001 --tool taint-iris-next:hunt --input plan.json
-kuzushi research experiment run E-0001
-kuzushi research disposition H-0001 --verdict inconclusive --reason "..."
-kuzushi research export RQ-0001 --format markdown-bundle --out research/
-```
-
-The earliest implementation can be smaller:
-
-```text
-research list
-research show
-research tree
-```
-
-Creation may initially happen through a single built-in tool or structured JSON input to keep the command surface narrow.
-
-### 4.3 Research tree projection
-
-The operator needs a compact projection:
-
-```text
-RQ-0001 Can attacker input reach unsafe deserialization?  OPEN
-├─ H-0001 HTTP body reaches parse_message                  REPRODUCED_STATIC
-│  ├─ E-0001 CPG path query                                SATISFIED
-│  └─ E-0002 source review                                 SATISFIED
-├─ H-0002 path is remotely triggerable                     INCONCLUSIVE
-│  ├─ E-0003 local harness                                 CRASH_OBSERVED
-│  └─ E-0004 route integration                             BLOCKED: fixture missing
-└─ H-0003 size check prevents controlled overwrite         REJECTED
-   └─ E-0005 boundary-value execution                      FALSIFIED
-```
-
-Every status must derive from durable events, not transient TUI state.
-
-### 4.4 Finding detail integration
-
-A finding detail should show:
-
-```text
-Research lineage
-  Question: RQ-0001
-  Hypotheses: 3
-  Confirmed/reproduced: 1
-  Rejected: 1
-  Inconclusive: 1
-
-Proof
-  Static: source_sink_linked
-  Execution witness: sanitizer_crash
-  Reachability: local_harness_only
-  Exploitability: uncontrolled_corruption
-  Exposure: unknown
-
-Boundary
-  Source: 97.4% indexed, generated code excluded
-  Runtime: local harness only
-  Network: not observed
-  Deployment: not observed
-
-Next action
-  Establish route-to-harness input equivalence
-```
-
-### 4.5 Dangerous experiments remain explicit
-
-Any experiment whose prepared tool effect is:
-
-- `target-write`;
-- `repository-execute`;
-- `external-action`;
-- network-enabled fuzzing;
-- a malicious peer;
-- credential use;
-- deployment mutation;
-
-must use the existing explicit authorization path. A research plan is not authorization.
-
----
+| Model unavailable | Model-backed strategies skipped or blocked; deterministic work continues only when independently valid. |
+| Sandbox unavailable | Execution strategies blocked; no runtime proof claim. |
+| Harness fails to build | `HarnessIncomplete`; never `NotReproduced`. |
+| Observer fails | Experiment inconclusive; no evaluator success. |
+| Candidate cannot be reproduced | Reproduction state recorded; static evidence retained. |
+| Budget exhausted | Current authorized work settles; queued work canceled or skipped with terminal reasons. |
+| Project changes | Current-revision Map/Scan/Proof state becomes stale according to exact identity. |
+| Run interrupted | Durable interrupted receipt and restart-safe recovery path. |
