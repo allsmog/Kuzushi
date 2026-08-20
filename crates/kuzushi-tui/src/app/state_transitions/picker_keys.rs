@@ -1138,6 +1138,22 @@ impl ShellApp {
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("closed {phase} picker"));
+        self.restore_planning_picker_origin(origin_view, origin_page);
+    }
+
+    fn restore_planning_picker_origin(
+        &mut self,
+        origin_view: Option<ShellView>,
+        origin_page: Option<WorkbenchPage>,
+    ) {
+        // Setup owns a Map-only projection of the shared planner. A phase
+        // detour replaces those rows, so a bare view restore would leak the
+        // foreign phase into Setup readiness and the embedded Map editor.
+        // Re-enter through the canonical Setup hydrator instead.
+        if origin_view == Some(ShellView::Setup) {
+            self.open_setup();
+            return;
+        }
         // Esc means "never mind" — restore the exact view the operator came
         // from. Non-workbench origins (Threat view, Home, a contextual
         // detour) go straight back; workbench origins restore their page,
@@ -1485,5 +1501,45 @@ mod tests {
             .log_lines()
             .iter()
             .any(|line| line.body == notice.message));
+    }
+
+    #[test]
+    fn closing_foreign_phase_picker_back_to_setup_rehydrates_map_plan() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+
+        app.open_setup();
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        assert!(app.engagement.planning_picker().returns_to_setup());
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == WorkflowPhase::Map));
+
+        assert!(app.try_open_phase_picker(WorkflowPhase::Scan));
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert!(!app.engagement.planning_picker().returns_to_setup());
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == WorkflowPhase::Scan));
+
+        app.close_planning_picker();
+
+        assert_eq!(app.shell_view(), ShellView::Setup);
+        assert!(app.engagement.current_phase().is_none());
+        assert!(app.engagement.planning_picker().returns_to_setup());
+        assert!(!app.engagement.planning_picker().tasks().is_empty());
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == WorkflowPhase::Map));
     }
 }
