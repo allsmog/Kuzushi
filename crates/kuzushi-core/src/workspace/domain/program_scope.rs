@@ -145,10 +145,34 @@ fn matches_any(patterns: &[HostPattern], host: &str) -> bool {
 fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
     match pattern {
         HostPattern::HostGlob(glob) => glob.compile_matcher().is_match(host),
-        HostPattern::Cidr(cidr) => match IpAddr::from_str(host) {
-            Ok(addr) => cidr.contains(&addr),
-            Err(_) => false,
-        },
+        HostPattern::Cidr(cidr) => cidr_contains_host(cidr, host),
+    }
+}
+
+/// `true` when a candidate host is an IP literal inside the rule's range.
+/// A candidate is tested in both of the families it can name: `::ffff:10.0.0.1`
+/// is the IPv4-mapped form of `10.0.0.1` (RFC 4291 §2.5.5.2), so a client that
+/// connects to it reaches the IPv4 host and an IPv4 rule has to cover it.
+/// `ipnet` compares families strictly, so without the mapped form a deny rule
+/// written `10.99.0.0/16` would let `[::ffff:10.99.0.1]:443` through.
+/// Both forms are tried, never one instead of the other, so a rule already
+/// written in the mapped IPv6 range keeps matching the addresses it named.
+fn cidr_contains_host(cidr: &IpNet, host: &str) -> bool {
+    let Ok(addr) = IpAddr::from_str(host) else {
+        return false;
+    };
+    cidr.contains(&addr) || mapped_ipv4(addr).is_some_and(|v4| cidr.contains(&v4))
+}
+
+/// The IPv4 address an IPv4-mapped IPv6 literal names, if it is one. The
+/// deprecated IPv4-compatible form (`::10.0.0.1`) is deliberately excluded:
+/// RFC 4291 §2.5.5.1 retired it and current stacks do not route it to the
+/// embedded IPv4 host, so treating it as that host would widen a rule past
+/// what an operator's file says.
+fn mapped_ipv4(addr: IpAddr) -> Option<IpAddr> {
+    match addr {
+        IpAddr::V6(v6) => v6.to_ipv4_mapped().map(IpAddr::V4),
+        IpAddr::V4(_) => None,
     }
 }
 
@@ -366,6 +390,63 @@ mod tests {
             ScopeVerdict::OutOfScope
         );
         assert_eq!(scope.verdict("2001:dead::1"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_literal_does_not_evade_a_deny_cidr() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.99.0.0/16"]
+            "#,
+        );
+        assert_eq!(scope.verdict("10.99.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("::ffff:10.99.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(
+            scope.verdict("https://[::ffff:10.99.0.1]:8443/panel"),
+            ScopeVerdict::OutOfScope
+        );
+        // Uppercase hex names the same address, and the host is normalized
+        // before it is parsed.
+        assert_eq!(scope.verdict("::FFFF:10.99.0.1"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("::ffff:10.98.0.1"), ScopeVerdict::Unknown);
+    }
+
+    #[test]
+    fn ipv4_mapped_ipv6_literal_matches_an_allow_cidr() {
+        let scope = scope(
+            r#"
+            [in_scope]
+            cidrs = ["10.0.0.0/8"]
+            "#,
+        );
+        assert_eq!(scope.verdict("::ffff:10.42.7.1"), ScopeVerdict::InScope);
+        assert_eq!(scope.verdict("::ffff:11.0.0.1"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_cidr_rule_written_in_the_mapped_range_still_matches() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["::ffff:10.99.0.0/112"]
+            "#,
+        );
+        assert_eq!(scope.verdict("::ffff:10.99.0.1"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn a_non_mapped_ipv6_literal_is_not_read_as_an_ipv4_address() {
+        // `::10.0.0.1` is the retired IPv4-compatible form and `::1` embeds no
+        // IPv4 host at all. Neither may borrow an IPv4 rule's verdict.
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            cidrs = ["10.0.0.0/8"]
+            "#,
+        );
+        assert_eq!(scope.verdict("::10.0.0.1"), ScopeVerdict::Unknown);
+        assert_eq!(scope.verdict("::1"), ScopeVerdict::Unknown);
     }
 
     #[test]
