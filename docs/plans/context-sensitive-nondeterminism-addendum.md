@@ -1,60 +1,344 @@
-# Normative addendum — context-sensitive nondeterminism
+# Normative addendum — managed nondeterministic security research
 
 > **Status:** normative companion to `mdash-codemender-architecture-plan.md`
-> **Scope:** architecture and sequencing only; no runtime behavior changes in this documentation PR
-> **Decision:** Kuzushi must treat both model stochasticity and context construction as first-class, measurable inputs to every agentic scan.
+> **Scope:** architecture, product behavior, TUI semantics, and implementation sequencing only; this documentation PR does not change runtime behavior
+> **Decision:** Kuzushi must preserve, expose, steer, and learn from nondeterminism. It must not treat agreement, convergence, or repeatability as the primary objective of security research.
 
-## Why this addendum changes the plan
+## Supersession and correction
 
-The main architecture plan correctly treats AI scanning as nondeterministic, but the implementation contract needs to be stricter. A scan result is influenced by more than the repository and selected model:
+This document supersedes any earlier wording in this PR that sounds as though Kuzushi should make agentic scans deterministic, normalize away context sensitivity, or keep sampling until models converge on one answer.
 
-- sampling randomness and provider-side nondeterminism;
-- the exact source chunks admitted to context;
-- chunk and evidence ordering;
-- retrieved threat-model, recon, and prior-finding context;
-- tool schemas and tool-result ordering;
-- repository guidance such as `AGENTS.md`;
-- untrusted instructions embedded in source, comments, fixtures, or documentation;
-- prior model outputs copied into later prompts;
-- context truncation, compaction, and summarization;
-- provider/model revisions that retain the same public model name;
-- semantic-cache reuse;
-- dynamic external data and tool output.
+The corrected thesis is:
 
-Therefore, “same repository, same model” is not a reproducible experimental condition. Kuzushi must record and govern the complete context envelope it controls, disclose the parts it cannot observe, and separate:
+> **Kuzushi is a control room for nondeterministic security research. It deliberately varies context, models, roles, tools, decomposition, and hypotheses; preserves the union of discoveries; measures where findings appear and disappear; adaptively allocates budget; and converts the strongest uncertain hypotheses into empirical evidence.**
 
-1. **same-context stochasticity** — multiple fresh model calls with the same controlled context;
-2. **context-induced variance** — multiple calls where one declared context factor changes;
-3. **model-induced variance** — equivalent controlled contexts across explicitly selected models;
-4. **tool/environment variance** — changed tool output, tool version, external data, or execution environment.
+Stable source identities, immutable receipts, explicit cache policy, content-addressed context manifests, and replayable projections remain necessary. They are the governance envelope around stochastic research. They are not an attempt to force stochastic reasoning into deterministic output.
 
-Agreement across correlated runs is not independent corroboration. A result repeated from cache, copied from a prior model output, or produced by three agents sharing the same persuasive discovery rationale must never be presented as three independent votes.
+A reproducible exploit, regression test, or contest runner may eventually be a goal-specific deliverable. That is a downstream property of one selected result, not the operating principle of the research system.
 
-## Immediate correctness risk to address before expanding the harness
+---
 
-The current verifier panel loops through `run_one_verify_pass`, and that helper uses `query_cached_structured_json_with_cost`. The plan must not assume that `VERIFY_PASSES=3` means three fresh model invocations until the semantic-cache key and runtime behavior prove it.
+# 1. Product model
 
-At minimum, the implementation needs an explicit call purpose and cache policy:
+The product should separate three layers.
+
+## 1.1 Stable governance layer
+
+This layer defines what the research process may vary and what it may never silently change:
+
+- target and source identity;
+- operator-selected model/provider policy;
+- allowed tools and execution capabilities;
+- network, filesystem, process, and mutation authority;
+- context-authority rules;
+- budget ceilings and allocation constraints;
+- proof vocabulary and evidence thresholds;
+- approval policy;
+- artifact schemas and retention;
+- no-silent-fallback semantics.
+
+This is the role of `InvestigationPlanV1`: it is an immutable **research constitution**, not a fully enumerated list of every model call that will happen.
+
+## 1.2 Nondeterministic research layer
+
+This layer is deliberately variable:
+
+- source decomposition;
+- frontier scope;
+- threat lens;
+- context composition;
+- retrieval strategy;
+- context and evidence ordering;
+- model;
+- agent role;
+- prompt framing;
+- tool profile;
+- number and timing of samples;
+- hypothesis-follow-up strategy;
+- proof-harness and patch candidate generation.
+
+This is the role of `ResearchCampaignV1`: it owns a live portfolio of research arms, hypotheses, experiments, scheduler decisions, and budget allocations.
+
+## 1.3 Empirical adjudication layer
+
+This layer asks mechanical, evidence-bearing questions about selected hypotheses:
+
+- can attacker-controlled input reach the claimed effect;
+- does the vulnerable condition reproduce;
+- does a benign control remain safe;
+- do variants reproduce;
+- does a proposed patch block the original and variant cases;
+- does the originating detector still rediscover the issue;
+- did normal behavior regress.
+
+Models may propose experiments, harnesses, and interpretations. Runtime evidence determines empirical proof state.
+
+## 1.4 End-to-end loop
+
+```text
+Capture source and policy
+  -> build an initial research frontier
+  -> create a diverse portfolio of research arms
+  -> execute fresh stochastic samples
+  -> union observations into the hypothesis ledger
+  -> measure context/model/role/tool sensitivity
+  -> adaptively allocate more budget
+  -> generate adversarial challenges and discriminating experiments
+  -> empirically adjudicate selected hypotheses
+  -> explore a bounded patch portfolio
+  -> approve one exact patch
+  -> apply, reattack, and replay the originating detector
+  -> publish evidence, context, variance, and decision receipts
+```
+
+The loop may branch, pause, retire low-yield arms, reopen old hypotheses, or create successor campaigns. It is not a one-way funnel requiring consensus at every stage.
+
+---
+
+# 2. Core domain model
+
+## 2.1 `InvestigationPlanV1` remains, but its responsibility narrows
+
+The main architecture plan proposes `InvestigationPlanV1`. Keep it, but define it as the stable governance envelope:
+
+```rust
+pub struct InvestigationPlanV1 {
+    pub schema_version: u32,
+    pub investigation_id: InvestigationId,
+    pub target_identity: TargetContentIdentity,
+    pub objective: ResearchObjective,
+    pub allowed_variability: AllowedVariabilityPolicy,
+    pub roles: BTreeMap<SecurityRole, RoleBoundary>,
+    pub tools: InvestigationToolPolicy,
+    pub context_authority: ContextAuthorityPolicy,
+    pub proof: InvestigationProofPolicy,
+    pub patch: InvestigationPatchPolicy,
+    pub budgets: InvestigationBudgetPolicy,
+    pub mutation: MutationPolicy,
+}
+```
+
+The plan does **not** have to enumerate every context arm, sample, or follow-up before research begins. It defines the legal and budgetary space in which the campaign may evolve.
+
+Material operator-policy changes create a successor plan. Scheduler choices inside the existing policy produce append-only campaign events, not successor plans.
+
+## 2.2 Add `ResearchCampaignV1`
+
+```rust
+pub struct ResearchCampaignV1 {
+    pub campaign_id: ResearchCampaignId,
+    pub investigation_plan_digest: Blake3Hash,
+    pub source_identity: TargetContentIdentity,
+    pub policy: ResearchPolicyV1,
+    pub arms: BTreeMap<ResearchArmId, ResearchArmState>,
+    pub hypotheses: HypothesisLedgerRef,
+    pub experiment_queue: ExperimentQueueRef,
+    pub allocation_state: AllocationStateV1,
+    pub scheduler_state: SchedulerStateV1,
+    pub created_at: Timestamp,
+}
+```
+
+The campaign is projected from events such as:
+
+```text
+campaign_started
+arm_proposed
+arm_activated
+arm_sample_completed
+arm_allocation_changed
+arm_paused
+arm_retired
+hypothesis_observed
+hypothesis_linked
+hypothesis_challenged
+experiment_proposed
+experiment_completed
+operator_corrected
+budget_reserved
+budget_released
+campaign_paused
+campaign_resumed
+campaign_branched
+campaign_closed
+```
+
+No scheduler decision should rewrite past runs, observations, or operator decisions.
+
+## 2.3 Add `ResearchPolicyV1`
+
+```rust
+pub struct ResearchPolicyV1 {
+    pub allocation: ResearchBudgetAllocationV1,
+    pub minimum_context_diversity: u32,
+    pub minimum_role_diversity: u32,
+    pub minimum_model_diversity: u32,
+    pub per_arm_max_share: Decimal,
+    pub rare_signal_policy: RareSignalPolicyV1,
+    pub novelty_policy: NoveltyPolicyV1,
+    pub challenge_policy: ChallengePolicyV1,
+    pub stop_policy: CampaignStopPolicyV1,
+}
+```
+
+A recommended default allocation is illustrative, not hardcoded product truth:
+
+```text
+broad exploration             40%
+hypothesis follow-up          30%
+adversarial challenge         20%
+wildcard / surprise reserve   10%
+```
+
+The operator may adjust these shares. The scheduler may move budget within declared ranges, but it must preserve any configured exploration reserve and diversity floors.
+
+## 2.4 Add `ResearchArmV1`
+
+A research arm is the unit of managed variability:
+
+```rust
+pub struct ResearchArmV1 {
+    pub arm_id: ResearchArmId,
+    pub objective: ArmObjective,
+    pub parent_hypothesis: Option<HypothesisId>,
+    pub frontier_scope: Vec<FrontierUnitId>,
+    pub threat_lens: ThreatLensRef,
+    pub context_recipe: ContextRecipeRef,
+    pub decomposition: DecompositionStrategy,
+    pub role: SecurityRole,
+    pub model: ModelSpec,
+    pub tool_profile: ToolProfileRef,
+    pub prompt_variant: PromptVariantRef,
+    pub allocation: ArmAllocationV1,
+    pub authority: ArmAuthority,
+}
+```
+
+Example arms for an AI coding-agent repository:
+
+```text
+permission boundaries × function-level decomposition × minimal source context
+permission boundaries × end-to-end call path × threat model included
+plugin trust × lifecycle decomposition × repository guidance excluded
+MCP confused deputy × tool-schema-first framing × dynamic resources included
+provider credentials × data-flow framing × structural tools only
+wildcard × randomly selected high-risk frontier slice × alternate model
+```
+
+The objective is not to make these arms agree. It is to explore different regions and representations of the vulnerability space.
+
+## 2.5 Add `ResearchRunReceiptV1`
+
+Every run records enough information to interpret differences:
+
+```rust
+pub struct ResearchRunReceiptV1 {
+    pub run_id: ResearchRunId,
+    pub campaign_id: ResearchCampaignId,
+    pub arm_id: ResearchArmId,
+    pub sample_id: SampleId,
+    pub parent_run_ids: Vec<ResearchRunId>,
+    pub source_identity: TargetContentIdentity,
+    pub context_envelope: ContextEnvelopeRef,
+    pub resolved_model: ResolvedModelReceiptV1,
+    pub tool_contracts: Vec<ToolContractRefV1>,
+    pub model_call_receipts: Vec<ModelCallReceiptRefV1>,
+    pub cost: RuntimeCostReport,
+    pub duration: Duration,
+    pub outcome: ResearchRunOutcome,
+}
+```
+
+A run can be fresh and independent, intentionally seeded by prior output, structurally deterministic, or dynamically tool-influenced. The receipt names that relationship rather than reducing all runs to one support count.
+
+---
+
+# 3. Nondeterminism is research material
+
+## 3.1 Types of useful variation
+
+Kuzushi should distinguish at least:
+
+1. **Model stochasticity** — fresh calls using equivalent admitted context.
+2. **Context sensitivity** — different context recipes, retrievals, ordering, or evidence availability.
+3. **Decomposition sensitivity** — function, file, package, call-path, lifecycle, or invariant-oriented framing.
+4. **Role sensitivity** — hunter, systems auditor, adversarial verifier, threat modeler, exploit designer, or patch critic.
+5. **Model diversity** — explicitly selected models or providers.
+6. **Tool diversity** — structural analyzers, CPG, CodeQL, tree-sitter, dynamic probes, imported scanners, or no-tools arms.
+7. **Environment/tool variance** — changed tool output, dynamic external data, tool versions, or execution environment.
+8. **Lineage effects** — a follow-up intentionally seeded by one or more prior hypotheses.
+
+These are not all interchangeable forms of independence. They are dimensions of the research topology.
+
+## 3.2 Context sensitivity is a finding about the research process
+
+Examples:
+
+```text
+A hypothesis appears only with full call-path context.
+  -> likely long-range reasoning requirement.
+
+A hypothesis disappears when repository documentation is included.
+  -> possible anchoring or context dilution.
+
+A hypothesis appears only when a permission invariant is supplied.
+  -> generic review may lack the necessary abstraction.
+
+A hypothesis appears across different contexts and models.
+  -> higher research priority, but still not empirical proof.
+
+A hypothesis appears only after another model proposes a specific sub-question.
+  -> useful lineage-dependent discovery; not independent rediscovery.
+```
+
+The TUI should expose these patterns instead of hiding them behind one confidence number.
+
+## 3.3 Same-context replication is optional instrumentation
+
+Fresh equivalent-context calls can help estimate model stochasticity, but they are not the campaign’s default objective and do not need to converge.
+
+Use them when they answer a research question such as:
+
+- is this context recipe producing diverse useful hypotheses;
+- is an observation exceptionally rare;
+- is a verifier unstable under the same evidence;
+- does a prompt or tool change increase useful yield.
+
+Do not run repeated calls merely to create the appearance of consensus.
+
+---
+
+# 4. Fresh-call and semantic-cache integrity remains PR 0
+
+Managing nondeterminism requires knowing whether a supposed sample was actually sampled.
+
+The current verifier panel loops through `run_one_verify_pass`, while that helper uses `query_cached_structured_json_with_cost`. Until cache-key behavior is proven, `VERIFY_PASSES=N` must not be assumed to mean N fresh model invocations.
+
+Add explicit purpose and cache policy:
 
 ```rust
 pub enum ModelCallPurpose {
     ReusableAnalysis,
-    IndependentDiscoverySample {
-        sweep_id: SweepId,
+    DiscoverySample {
+        campaign_id: ResearchCampaignId,
+        arm_id: ResearchArmId,
         sample_id: SampleId,
     },
-    ControlledContextVariant {
-        sweep_id: SweepId,
-        arm_id: ContextArmId,
-        sample_id: SampleId,
+    HypothesisFollowUp {
+        hypothesis_id: HypothesisId,
+        experiment_id: ExperimentId,
     },
-    IndependentVerificationVote {
+    AdversarialChallenge {
+        challenge_set_id: ChallengeSetId,
+        challenge_id: ChallengeId,
+    },
+    VerificationVote {
         panel_id: VerificationPanelId,
         vote_id: VerificationVoteId,
     },
-    TieBreakVote {
-        panel_id: VerificationPanelId,
-        vote_id: VerificationVoteId,
+    PatchCandidate {
+        patch_portfolio_id: PatchPortfolioId,
+        candidate_id: PatchCandidateId,
     },
 }
 
@@ -68,113 +352,50 @@ pub enum ModelCachePolicy {
 
 Required semantics:
 
-- an independent sample or verifier vote must not read a previous model response from semantic cache;
-- a sample may be written under its own unique receipt key for audit, but that response cannot satisfy another sample or vote;
-- persisted-result replay must reduce existing receipts and make **zero model calls**;
-- “rerun with the same context” means a new model call with a new sample ID, not returning the previous cached answer;
-- exact repeated output is allowed, but the receipt must prove that the runtime was actually invoked;
-- if the provider exposes no deterministic seed or version receipt, Kuzushi records that limitation rather than inventing reproducibility.
+- a cached model response is a replayed artifact, not a new research sample;
+- discovery samples, challenges, votes, and patch candidates have unique invocation identities;
+- independent samples cannot read another sample’s model response from semantic cache;
+- intentionally lineage-seeded arms may read prior model outputs only when the context envelope names them;
+- replay of persisted receipts makes zero model calls;
+- rerunning an arm creates a new sample ID and a fresh call;
+- identical outputs are valid, but receipts must prove distinct invocations;
+- provider seed/version opacity is recorded as a limitation.
 
-This is now the recommended first implementation slice, before relying on multi-pass consensus as a security boundary.
-
----
-
-# Updated target product contract
-
-The target workflow becomes:
-
-```text
-Capture target identity
-  -> Admit and classify context
-  -> Build deterministic security frontier
-  -> Declare sampling/context experiment
-  -> Run controlled discovery samples
-  -> Union observations and quantify variance
-  -> Semantically cluster root causes
-  -> Build clean-room verification context
-  -> Run independent adversarial votes
-  -> Empirically prove eligible candidates
-  -> Draft and validate patch
-  -> Human approval of exact source + diff
-  -> Apply exact reviewed patch
-  -> Reattack + detector replay
-  -> Publish evidence, context, and variance receipts
-```
-
-The additional stages do not mean the operator must manually manage an experiment. The TUI should compile a reasonable sampling plan, disclose its cost and assumptions, and execute it durably. The operator controls policy and decision gates; the harness handles bookkeeping.
+This remains the first implementation slice because every downstream novelty, diversity, support, and independence metric depends on it.
 
 ---
 
-# Core invariants
+# 5. Context management, not context normalization
 
-## 1. Context is part of provenance
+## 5.1 `ContextEnvelopeV1` is an observability artifact
 
-Every model-produced observation, assessment, patch suggestion, or advisory judgment must point to a content-addressed context envelope.
-
-A prompt digest alone is insufficient. The envelope must include the exact admitted context items, their classes, their ordering, tool definitions, relevant tool outputs, truncation decisions, model identity, and cache policy.
-
-## 2. Frequency is not proof
-
-A candidate found in five samples is more repeatable than a candidate found once. It is not automatically more exploitable.
-
-Likewise, a rare candidate can be real. Discovery aggregation is recall-oriented: retain the union, preserve support metadata, and send important candidates to independent validation. Do not majority-filter discovery findings out of existence.
-
-## 3. Independence must be demonstrated, not inferred
-
-Kuzushi may describe votes or observations as independent only when their receipts show the relevant separation:
-
-- distinct fresh runtime invocations;
-- no model-response cache read;
-- no prior-vote visibility;
-- declared context relationship;
-- explicit model relationship;
-- separate sample/vote IDs.
-
-## 4. Repository content is untrusted context
-
-The scanned repository may contain prompt injection in documentation, comments, fixtures, generated files, issue templates, or agent instructions.
-
-Repository content can provide evidence and build/test guidance. It cannot change:
-
-- the investigation objective;
-- model selection;
-- role authority;
-- network permissions;
-- tool permissions;
-- proof semantics;
-- budget limits;
-- approval requirements;
-- the distinction between model assessment and empirical proof.
-
-## 5. Discovery and verification use different context contracts
-
-Discovery should use deliberately varied, recall-oriented contexts.
-
-Verification should use a clean-room, precision-oriented context assembled from normalized claims and validated source evidence. It must not inherit persuasive discovery prose, discovery confidence, other votes, or hidden conversation history.
-
-## 6. The TUI never converts variance metadata into proof language
-
-The TUI may say:
-
-```text
-repeatable in same context
-context-robust
-context-sensitive
-single-sample
-cross-model support
-```
-
-It may not translate those labels into `confirmed`, `exploited`, or `fixed`.
-
----
-
-# New domain artifacts
-
-## `ContextClass`
+Every model-produced observation, challenge, proof proposal, or patch candidate references a context envelope:
 
 ```rust
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+pub struct ContextEnvelopeV1 {
+    pub source_identity: TargetContentIdentity,
+    pub investigation_plan_digest: Blake3Hash,
+    pub campaign_id: ResearchCampaignId,
+    pub arm_id: ResearchArmId,
+    pub role: SecurityRole,
+    pub context_recipe: ContextRecipeRef,
+    pub items: Vec<ContextItemRefV1>,
+    pub retrieval: RetrievalManifestV1,
+    pub tools: Vec<ToolContractRefV1>,
+    pub truncation: ContextTruncationReceiptV1,
+    pub prior_model_lineage: Vec<ModelOutputRefV1>,
+    pub model: ResolvedModelReceiptV1,
+    pub generation: GenerationParametersV1,
+    pub cache_policy: ModelCachePolicy,
+    pub completeness: ContextCompleteness,
+}
+```
+
+The purpose is to explain what influenced a result and enable meaningful branching or comparison. Kuzushi should not designate one context envelope as the universally correct context.
+
+## 5.2 Context authority classes
+
+```rust
 pub enum ContextClass {
     OperatorPolicy,
     RepositoryGuidance,
@@ -187,347 +408,184 @@ pub enum ContextClass {
 }
 ```
 
-Instruction authority is not implied by presence in context.
+Authority rules:
 
-Recommended authority:
+- `OperatorPolicy` may define models, permissions, budgets, proof rules, and mutation authority.
+- `RepositoryGuidance` may inform build/test commands, generated-file conventions, and architecture terminology.
+- `RepositoryGuidance`, `SourceEvidence`, and `PriorModelOutput` cannot silently change operator policy.
+- Source comments, fixtures, Markdown, issue templates, and prompt-like strings are untrusted data.
+- Prior model output is allowed to seed a declared follow-up arm; it is not treated as independent evidence.
+- Human decisions affect the declared workflow decision, not empirical truth.
 
-| Context class | May inform facts? | May issue instructions? | Default trust |
-| --- | --- | --- | --- |
-| `OperatorPolicy` | yes | yes | authoritative |
-| `RepositoryGuidance` | yes | only for declared build/test conventions | untrusted for security policy |
-| `SourceEvidence` | yes | no | untrusted data |
-| `DeterministicToolOutput` | yes | no | attributed evidence |
-| `DynamicToolOutput` | yes | no | attributed, time-bound evidence |
-| `ExternalIntel` | yes | no | attributed, potentially stale |
-| `PriorModelOutput` | advisory only | no | untrusted generated claim |
-| `HumanDecision` | yes | only within its declared decision scope | authoritative for that decision |
-
-## `ContextItemRefV1`
+## 5.3 Context recipes are first-class research strategies
 
 ```rust
-pub struct ContextItemRefV1 {
-    pub item_id: ContextItemId,
-    pub class: ContextClass,
-    pub object_ref: ObjectRef,
-    pub source_label: SafeText,
-    pub source_identity: Option<SourceIdentity>,
-    pub admitted_by: ContextAdmissionRuleId,
-    pub ordinal: u32,
-    pub instruction_authority: InstructionAuthority,
-    pub redaction: RedactionStatus,
-    pub observed_at: Option<Timestamp>,
+pub struct ContextRecipeV1 {
+    pub recipe_id: ContextRecipeId,
+    pub source_selection: SourceSelectionPolicy,
+    pub retrieval_strategy: RetrievalStrategy,
+    pub include_repository_guidance: bool,
+    pub include_threat_model: bool,
+    pub include_prior_findings: PriorFindingPolicy,
+    pub include_prior_model_outputs: PriorModelOutputPolicy,
+    pub evidence_ordering: EvidenceOrderingPolicy,
+    pub context_budget: ContextBudget,
+    pub truncation_policy: TruncationPolicy,
 }
 ```
 
-The receipt should point to local content-addressed objects where safe. Exported receipts may contain digests and redacted metadata instead of sensitive raw content.
+The scheduler may compare or branch context recipes when doing so is legal under the plan. Every branch is explicit and attributable.
 
-## `ContextEnvelopeV1`
+---
+
+# 6. Adaptive research allocation
+
+## 6.1 Explore versus exploit
+
+Kuzushi should manage a portfolio rather than greedily choose one best arm.
+
+A default policy might reserve:
+
+```text
+40% broad exploration
+30% hypothesis-specific follow-up
+20% adversarial challenge
+10% wildcard exploration
+```
+
+As results arrive:
+
+- high novelty, low support -> preserve and allocate bounded follow-up;
+- high support across diverse arms -> escalate to adversarial challenge;
+- support isolated to one context family -> branch context experiments;
+- repeated low-yield arm -> reduce allocation, not necessarily delete history;
+- mature hypothesis with testable predicates -> propose empirical experiments;
+- rare high-impact signal -> bypass ordinary support thresholds;
+- productive arm becoming repetitive -> redirect some budget to adjacent unexplored space.
+
+## 6.2 Scheduler value model
+
+The scheduler should use an explainable value model, not one opaque LLM priority:
+
+```text
+research_value =
+    severity_potential
+  + novelty
+  + expected_information_gain
+  + unresolved_uncertainty
+  + cross_boundary_relevance
+  + operator_priority
+  + rare_signal_bonus
+  - expected_cost
+  - redundancy_penalty
+  - saturation_penalty
+```
+
+The exact formula may evolve, but every allocation change must disclose its reasons.
+
+## 6.3 Anti-collapse safeguards
+
+Security research cannot be managed as a purely greedy multi-armed bandit. Required safeguards:
+
+- nonzero wildcard reserve;
+- minimum context, role, and model diversity when configured;
+- per-arm maximum budget share;
+- bounded follow-up for rare high-impact signals;
+- no automatic dismissal based only on low frequency;
+- no majority filter on discovery observations;
+- operator pinning of hypotheses or arms;
+- append-only operator corrections;
+- visibility into omitted or starved frontier areas.
+
+## 6.4 Stop conditions
+
+A campaign may stop or pause because:
+
+- the hard budget is reached;
+- the operator stops it;
+- marginal novelty and information gain fall below policy thresholds across the portfolio;
+- all pinned/high-priority hypotheses reach a defensible handoff state;
+- required tools, models, or proof backends are unavailable;
+- the source identity changes and policy requires a successor campaign.
+
+Agreement or convergence is **not** a universal stop condition.
+
+---
+
+# 7. Hypothesis ledger and support topology
+
+## 7.1 Discovery is union-oriented
+
+```text
+all valid observations from all legal research arms
+  -> observation identity/deduplication
+  -> semantic clustering
+  -> hypothesis ledger
+  -> support and sensitivity projection
+```
+
+A finding seen once is retained. Frequency affects prioritization and interpretation, not existence.
+
+## 7.2 Add `HypothesisV1`
 
 ```rust
-pub struct ContextEnvelopeV1 {
-    pub schema_version: u32,
-    pub context_id: ContextId,
+pub struct HypothesisV1 {
+    pub hypothesis_id: HypothesisId,
     pub target_identity: TargetContentIdentity,
-    pub investigation_plan_digest: Blake3Hash,
-    pub role: SecurityRole,
-    pub system_prompt_digest: Blake3Hash,
-    pub role_prompt_digest: Blake3Hash,
-    pub normalized_task_digest: Blake3Hash,
-    pub items: Vec<ContextItemRefV1>,
-    pub retrieval: RetrievalManifestV1,
-    pub tools: Vec<ToolContractRefV1>,
-    pub truncation: ContextTruncationReceiptV1,
-    pub model: ResolvedModelReceiptV1,
-    pub generation: GenerationParametersV1,
-    pub cache_policy: ModelCachePolicy,
-    pub completeness: ContextCompleteness,
+    pub normalized_claim: NormalizedSecurityClaim,
+    pub observation_ids: Vec<FindingIdentity>,
+    pub cluster_id: Option<VulnerabilityClusterId>,
+    pub support: HypothesisSupportV1,
+    pub maturity: HypothesisMaturity,
+    pub open_questions: Vec<ResearchQuestion>,
+    pub experiment_ids: Vec<ExperimentId>,
 }
 ```
 
-`ContextCompleteness` should distinguish:
-
-```text
-complete_for_kuzushi_controlled_context
-partial_provider_context_opaque
-partial_dynamic_tool_output
-incomplete_missing_object
-```
-
-Kuzushi must not claim full prompt reproducibility when a provider injects hidden or mutable context outside Kuzushi's control.
-
-## `SamplingPolicyV1`
+Suggested maturity states:
 
 ```rust
-pub struct SamplingPolicyV1 {
-    pub exact_context_replicates: u32,
-    pub context_arms: Vec<ContextArmV1>,
-    pub model_arms: Vec<ModelArmV1>,
-    pub min_samples: u32,
-    pub max_samples: u32,
-    pub hard_cost_cap_usd: Option<Decimal>,
-    pub stop_rule: SweepStopRuleV1,
-    pub ordering_policy: OrderingPolicyV1,
+pub enum HypothesisMaturity {
+    Seed,
+    Corroborated,
+    ContextSensitive,
+    AdversariallySurviving,
+    ExperimentReady,
+    EmpiricallyReproduced,
+    Rejected,
+    Inconclusive,
+    RemediationReady,
 }
 ```
 
-## `ContextArmV1`
+These states describe research workflow. Only empirical proof types describe runtime reproduction.
 
-A context arm changes one declared factor while holding the rest of the plan constant.
+## 7.3 Add `HypothesisSupportV1`
 
 ```rust
-pub struct ContextArmV1 {
-    pub arm_id: ContextArmId,
-    pub label: SafeText,
-    pub baseline_context_id: ContextId,
-    pub mutations: Vec<ContextMutationV1>,
-    pub rationale: SafeText,
+pub struct HypothesisSupportV1 {
+    pub fresh_run_ids: Vec<ResearchRunId>,
+    pub supporting_arms: Vec<ResearchArmId>,
+    pub missing_arms: Vec<ResearchArmId>,
+    pub context_families: BTreeSet<ContextFamilyId>,
+    pub models: BTreeSet<ModelSpec>,
+    pub roles: BTreeSet<SecurityRole>,
+    pub deterministic_sources: BTreeSet<ToolIdentity>,
+    pub lineage_sources: Vec<ModelOutputRefV1>,
+    pub challenge_receipts: Vec<ChallengeReceiptRefV1>,
+    pub empirical_status: RuntimeProofStatus,
+    pub independence: IndependenceGrade,
 }
 ```
 
-Initial controlled mutations may include:
+## 7.4 Independence is descriptive, not a score multiplier pretending to be proof
 
-- evidence-order permutation;
-- independently retrieved source shard;
-- threat-model context present versus absent;
-- recon/exposure context present versus absent;
-- alternate but equivalent decomposition of the same frontier unit;
-- prompt variant explicitly declared as a separate arm.
-
-Do not vary operator policy, proof definitions, permission policy, or mutation authority as a context experiment.
-
-## `ScanSampleReceiptV1`
-
-```rust
-pub struct ScanSampleReceiptV1 {
-    pub sample_id: SampleId,
-    pub sweep_id: SweepId,
-    pub context_arm_id: ContextArmId,
-    pub context_digest: Blake3Hash,
-    pub model_receipt: ResolvedModelReceiptV1,
-    pub model_call_receipt: ModelInvocationReceiptV1,
-    pub cache_read: bool,
-    pub run_id: RunId,
-    pub observations: Vec<FindingIdentity>,
-    pub cost: RuntimeCostReport,
-    pub terminal_state: SampleTerminalState,
-}
-```
-
-## `SweepReceiptV1`
-
-The sweep receipt is the authoritative aggregation of declared samples, not a flattened model transcript.
-
-It records:
-
-- planned and completed cells;
-- sample/context/model relationships;
-- omitted and failed cells with reasons;
-- observation support matrix;
-- unique clusters over time;
-- marginal yield and stop reason;
-- context completeness and drift warnings;
-- total measured cost and unresolved spend.
-
----
-
-# Context admission and injection resistance
-
-## Add a context-admission application boundary
-
-Create:
-
-```text
-crates/kuzushi-core/src/investigation/application/context_admission.rs
-crates/kuzushi-core/src/investigation/domain/context.rs
-crates/kuzushi-core/src/investigation/persistence/context_store.rs
-```
-
-Context admission should:
-
-1. classify every item;
-2. bind its source identity and digest;
-3. apply redaction and size bounds;
-4. set instruction authority explicitly;
-5. preserve exact ordering;
-6. record why the item was admitted;
-7. reject or degrade malformed/unavailable items visibly;
-8. keep target-local content from changing operator-owned model/tool policy.
-
-## Repository guidance policy
-
-Files such as `AGENTS.md`, `CONTRIBUTING.md`, and build documentation are useful for:
-
-- identifying the correct package-level test command;
-- respecting generated-file rules;
-- learning repository layout;
-- deriving a patch-validation plan.
-
-They are not security-policy authorities. A repository instruction such as “ignore this directory,” “do not report this pattern,” “use this model,” or “send this file to a URL” must not alter the investigation unless the operator explicitly promotes it through an audited decision.
-
-## Prior model output policy
-
-Prior model output may be admitted only as a labeled claim or hypothesis. It cannot silently become source evidence.
-
-For example:
-
-```text
-Discovery output:
-  "The wildcard rule can be bypassed with symlinks."
-
-Clean-room verifier context:
-  claim: "A path authorized under representation A may resolve to target B."
-  source evidence: exact cited code and path-resolution facts
-  omitted: discovery confidence, prose, recommendation, and prior vote count
-```
-
-## Tool-output policy
-
-Deterministic and dynamic tool outputs must be distinguished. A tree-sitter AST query over a bound source snapshot is different from a web lookup or mutable registry query.
-
-Dynamic tool output requires:
-
-- observed time;
-- provider/source;
-- response digest or local snapshot where permitted;
-- freshness disclosure;
-- no silent reuse as current evidence after its validity window.
-
----
-
-# Controlled sampling design
-
-## Two separate experiments
-
-### Experiment A — exact-context replicates
-
-Purpose: estimate same-context stochasticity.
-
-Hold constant:
-
-- source identity;
-- normalized task;
-- admitted context items and order;
-- tool contract set;
-- model spec and generation parameters;
-- role policy;
-- retrieval manifest.
-
-Change only:
-
-- sample ID;
-- fresh runtime invocation;
-- provider randomness that Kuzushi cannot fully control;
-- explicit seed when the provider supports it and the plan chooses to vary it.
-
-### Experiment B — controlled context arms
-
-Purpose: measure context sensitivity.
-
-Change one declared context factor per arm where practical. Use a deterministic balanced schedule so evidence ordering or model order is not accidentally confounded with package/shard order.
-
-A context-arm result is not called a replicate of the baseline.
-
-## Suggested profile behavior
-
-These are initial product defaults to benchmark and tune, not immutable constants:
-
-### `standard`
-
-```text
-1 canonical discovery sample
-no repeatability claim
-no context-robustness claim
-```
-
-### `deep`
-
-```text
-3 fresh canonical-context replicates
-2 controlled context arms with at least 1 fresh sample each
-union all observations
-variance-aware Review projection
-```
-
-### `prove`
-
-```text
-deep discovery policy
-clean-room verification panel
-fresh independent verifier votes
-empirical proof for eligible candidates
-```
-
-### `fix`
-
-```text
-prove policy
-patch author receives normalized verified evidence, not the discovery transcript
-independent patch critic context
-exact-diff approval and reattack lifecycle
-```
-
-The TUI must show the expected sample count and cost before starting.
-
-## Stop conditions
-
-A sweep stops only for a persisted reason:
-
-```text
-completed_declared_samples
-hard_cost_cap
-hard_time_cap
-operator_stop
-cancellation
-source_changed
-context_integrity_failure
-provider_failure
-marginal_yield_saturation
-```
-
-A first saturation rule may use a rolling window such as:
-
-```text
-stop after N completed eligible samples produce
-zero new durable observations and zero new semantic clusters,
-provided the minimum sample and coverage requirements are satisfied
-```
-
-Saturation is a resource decision, not a proof that no undiscovered vulnerability exists.
-
-## Discovery aggregation semantics
-
-Discovery uses a union:
-
-```text
-all valid observations across all completed samples
-  -> observation-level identity/dedup
-  -> semantic cluster projection
-  -> support/variance metadata
-```
-
-Do not require majority support to retain a finding.
-
-Each observation or cluster should expose:
-
-```text
-raw sample support
-fresh invocation support
-exact-context replicate support
-context-arm support
-model-arm support
-deterministic-tool corroboration
-independence grade
-```
-
-The existing `corroboration_count` must not be treated as an independence count. Either extend it with structured support metadata or introduce a new projection.
-
-## Independence grades
-
-A simple initial vocabulary:
+Suggested labels:
 
 ```text
 none
-repeated_same_cached_output
+cached_replay
+lineage_seeded
 fresh_same_context_same_model
 fresh_context_diverse_same_model
 fresh_same_context_model_diverse
@@ -535,625 +593,634 @@ fresh_context_and_model_diverse
 deterministic_and_agentic_cross_source
 ```
 
-The first two provide no independent corroboration. The later grades disclose increasing diversity but still do not equal proof.
+Kuzushi may use these labels in prioritization, but none upgrades a hypothesis to empirical proof.
+
+## 7.5 Support topology presentation
+
+The TUI should answer:
+
+```text
+Where was this found?
+Where was it missed?
+Which context changes made it appear or disappear?
+Which models and roles found it?
+Which tools independently corroborated source facts?
+Was it rediscovered or merely copied through lineage?
+Which objections remain unresolved?
+Has any empirical experiment adjudicated it?
+```
+
+Do not reduce this to `confidence = 83%`.
 
 ---
 
-# Clean-room verification under context variance
+# 8. Adversarial validation is experiment generation, not a vote ceremony
 
-## Verification context builder
+## 8.1 Clean-room context firewall remains essential
 
-Create a purpose-built DTO and builder that accepts only:
+An adversarial challenger receives:
 
 - normalized claim;
 - exact source identity;
 - validated source/evidence references;
-- requested invariant checks;
-- allowed static-analysis tool profile;
-- role-specific prompt.
+- explicit invariant or security question;
+- role-specific allowed tools.
 
-It must exclude by default:
+It does not receive, unless a declared appeal workflow requires it:
 
-- discovery transcript;
-- discovery confidence;
-- sample frequency;
-- context-arm labels;
-- other verifier votes;
+- discovery-agent confidence;
+- persuasive discovery prose;
+- raw support frequency;
+- previous challenge conclusions;
 - human verdict;
-- patch recommendation;
-- prior generated exploit narrative.
+- proposed patch;
+- exploit storytelling.
 
-The verifier may learn support metadata only in a later appeal/explanation mode, not during the primary independent decision.
+This limits correlated confirmation while preserving rich discovery context in the research layer.
 
-## Independent vote receipts
+## 8.2 Diversify challenge objectives
 
-Every vote records:
+Instead of three identical “is this exploitable?” passes, assign distinct falsification jobs:
 
-- unique vote ID;
-- unique model invocation receipt;
-- cache read=false;
-- context digest;
-- model receipt;
-- source identity;
-- allowed tool contract;
-- structured evidence and counterevidence;
-- cost.
+```text
+attacker-control challenger
+reachability challenger
+mitigation/guard challenger
+environment/precondition challenger
+alternate-explanation challenger
+exploit-oracle designer
+```
 
-The panel must fail closed or visibly degrade if independent execution cannot be demonstrated.
+Each produces structured output:
 
-## Context robustness is not decided by the verifier panel alone
+```rust
+pub struct ChallengeReceiptV1 {
+    pub challenge_id: ChallengeId,
+    pub hypothesis_id: HypothesisId,
+    pub objective: ChallengeObjective,
+    pub context_envelope: ContextEnvelopeRef,
+    pub supporting_evidence: Vec<EvidenceRef>,
+    pub counterevidence: Vec<EvidenceRef>,
+    pub unresolved_assumptions: Vec<Assumption>,
+    pub proposed_discriminating_experiments: Vec<ExperimentProposalV1>,
+    pub routing_recommendation: ChallengeRoutingRecommendation,
+}
+```
 
-The panel answers whether the normalized claim is statically plausible or rejected under its clean-room evidence.
+## 8.3 Existing gate/panel/tie-break behavior should be reinterpreted
 
-The empirical harness answers whether a concrete security property fails at runtime.
+- A cheap gate may reject obvious noise, but cannot confirm a vulnerability.
+- Multiple verifier calls should produce diverse objections and experiments, not merely a majority Boolean.
+- Majority may remain useful workflow metadata, but it is not the central product output.
+- A tie-break model may recommend routing or synthesize unresolved questions; it does not create empirical truth.
 
-The discovery sweep answers how readily the candidate surfaces under controlled sampling.
+The most valuable verifier result is often:
 
-These are three separate questions and three separate receipts.
+```text
+These two objections are resolved by source evidence.
+This remaining assumption can be tested by instrumenting the authorization and execution identities.
+```
 
 ---
 
-# TUI changes in practice
+# 9. Empirical experiments are a managed portfolio too
 
-Do not add another top-level workflow page. Preserve:
+## 9.1 Add `ExperimentQueueV1`
+
+```rust
+pub struct ExperimentProposalV1 {
+    pub experiment_id: ExperimentId,
+    pub hypothesis_id: HypothesisId,
+    pub question: ResearchQuestion,
+    pub expected_information_gain: Decimal,
+    pub estimated_cost: EstimatedCost,
+    pub safety_policy: ExperimentSafetyPolicy,
+    pub required_backend: ProofBackendRequirement,
+    pub proposer: ExperimentProposer,
+}
+```
+
+The operator or scheduler may approve bounded safe experiments according to policy.
+
+## 9.2 Proof-harness generation may itself branch
+
+For a serious hypothesis, Kuzushi may explore several harness candidates:
+
+```text
+candidate A  direct unit-level reproducer
+candidate B  end-to-end integration reproducer
+candidate C  protocol-level reproducer
+candidate D  dynamic instrumentation probe
+```
+
+Compare them by:
+
+- whether the vulnerable source calibrates;
+- whether a benign control remains clean;
+- sink reachability;
+- isolation quality;
+- portability;
+- cost and duration;
+- variant-generation potential.
+
+The selected empirical receipt must state which harness won and why.
+
+## 9.3 Empirical proof remains mechanically typed
+
+Model support, context robustness, and challenge survival cannot mint `RuntimeProofVerdict::Reproduced`.
+
+Only an admissible empirical receipt can do that.
+
+---
+
+# 10. Patch generation is a portfolio, not one canonical model answer
+
+## 10.1 Add `PatchPortfolioV1`
+
+```rust
+pub struct PatchPortfolioV1 {
+    pub portfolio_id: PatchPortfolioId,
+    pub hypothesis_id: HypothesisId,
+    pub empirical_proof: RuntimeProofRef,
+    pub candidates: Vec<PatchCandidateRef>,
+    pub comparison: PatchComparisonMatrixV1,
+}
+```
+
+Potential strategies:
+
+```text
+minimal local guard
+normalize before authorization
+bind approved identity through dispatch
+final authorization at sink
+architectural state-machine repair
+defense-in-depth variant
+```
+
+## 10.2 Compare with evidence
+
+```text
+                         A      B      C
+build/test               pass   pass   pass
+original exploit         block  block  block
+variant set              3/4    4/4    4/4
+benign controls          pass   fail   pass
+detector replay          clean  clean  clean
+diff size                24     17     31
+maintenance risk         low    high   medium
+```
+
+The operator approves one exact source-bound diff. No majority vote chooses the patch, and the model does not regenerate after approval.
+
+---
+
+# 11. TUI product contract
+
+Keep the existing top-level journey:
 
 ```text
 Setup -> Map -> Scan -> Review -> Prove -> Fix -> Report
 ```
 
-Add context and variance projections within those pages.
+Do not add a separate “nondeterminism page.” Each existing page should expose the relevant part of the live research campaign.
 
-## Setup — plan and sampling disclosure
-
-The setup card should show:
+## 11.1 Setup — research constitution and portfolio policy
 
 ```text
-CONTEXT POLICY
-  operator policy           authoritative
-  repository guidance       build/test only
-  source evidence           untrusted data
-  prior model output        excluded from verifier
-
-SAMPLING
-  canonical replicates      3
-  context arms              2
-  planned fresh calls       5
-  semantic-cache reads      forbidden for independent samples
-  saturation stop           armed after minimum coverage
-
-ESTIMATED COST
-  discovery                 range
-  validation                range
-  empirical proof           only for eligible candidates
+┌─ SETUP · RESEARCH POLICY ─────────────────────────────────────────────┐
+│ Target             anomalyco/opencode                                │
+│ Goal               coding-agent trust-boundary research              │
+│ Source             exact commit / tree identity                      │
+│                                                                    │
+│ Budget allocation                                                   │
+│   broad exploration          40%                                    │
+│   hypothesis follow-up       30%                                    │
+│   adversarial challenge      20%                                    │
+│   wildcard reserve           10%                                    │
+│                                                                    │
+│ Diversity floors                                                   │
+│   context families           4                                      │
+│   security roles             3                                      │
+│   models                     2                                      │
+│                                                                    │
+│ Rare signals        preserve valid high-impact seeds                │
+│ Cache policy        cache replay is never a fresh sample            │
+│ Stop policy         budget / declining novelty / operator decision  │
+│ Mutation            forbidden until exact-diff approval             │
+│                                                                    │
+│ [Preview constitution] [Edit policy] [Start campaign]               │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-The operator can inspect or edit the declared arms before execution.
+The plan preview shows allowed variability and stable boundaries, not a false promise that every future sample is known in advance.
 
-## Map — context-source inventory
-
-Map should expose:
-
-- frontier units and deterministic ranking reasons;
-- context sources admitted for each security lens;
-- repository-guidance files and their limited authority;
-- dynamic/external context freshness;
-- source chunks likely to exceed context budget;
-- prompt-injection indicators as warnings, not automatic findings.
-
-## Scan — variance-aware sweep deck
-
-Example projection:
+## 11.2 Map — research frontier and unexplored space
 
 ```text
-SAMPLES              4 / 5 fresh invocations
-CANONICAL REPLICATES  3 / 3
-CONTEXT ARMS          1 / 2
-UNIQUE OBSERVATIONS   18
-UNIQUE CLUSTERS       6
-NEW CLUSTERS / SAMPLE 2, 1, 0, 1
-CONTEXT-ROBUST        2 clusters
-CONTEXT-SENSITIVE     3 clusters
-SINGLE-SAMPLE         1 cluster
-CACHE REUSE           0 independent samples
-STOP                  one arm remaining
+┌─ MAP · RESEARCH FRONTIER ─────────────────────────────────────────────┐
+│ Component              Coverage     Novelty      Uncertainty         │
+│ permission             72%          high         high                │
+│ session tools          63%          medium       high                │
+│ plugin loading         48%          high         high                │
+│ MCP resources          31%          high         very high           │
+│ provider auth          54%          low          medium              │
+│ desktop IPC            19%          unknown      very high           │
+│                                                                    │
+│ Context coverage                                                   │
+│ minimal source         8 runs                                       │
+│ full call path         6 runs                                       │
+│ threat-model seeded    4 runs                                       │
+│ repository-guided      3 runs                                       │
+│ guidance excluded      2 runs                                       │
+│                                                                    │
+│ Recommended allocation                                             │
+│   +3 MCP boundary arms                                             │
+│   +2 plugin lifecycle arms                                         │
+│   retain 1 wildcard desktop IPC arm                                │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-The operator can drill into a sample and see its context digest and admitted-item manifest without exposing secrets unnecessarily.
+Stable structural tooling may contribute to this frontier, but the frontier is a research allocation surface—not a deterministic verdict.
 
-## Review — support matrix, not a fake confidence number
-
-For each observation or cluster, show:
+## 11.3 Scan — live research portfolio
 
 ```text
-Support
-  canonical replicate 1/3
-  context arm A        1/1
-  context arm B        0/1
-  deterministic tool   CodeQL: absent
-  model diversity      one model
-  independence         fresh context-diverse same model
-
-Interpretation
-  context-sensitive discovery signal
-  static assessment pending
-  runtime proof absent
+┌─ SCAN · NONDETERMINISTIC RESEARCH CAMPAIGN ───────────────────────────┐
+│ Samples executed            27                                      │
+│ Active arms                  8                                      │
+│ Context families             5                                      │
+│ Unique observations         31                                      │
+│ Vulnerability clusters       7                                      │
+│ Novel clusters last 5 runs   2                                      │
+│ Cost / novel cluster        $6.80                                   │
+│                                                                    │
+│ Arm yield                                                          │
+│   permission-call-path       ████████  5 clusters                   │
+│   plugin-lifecycle           █████     3 clusters                   │
+│   MCP-resource-boundary      ████      2 clusters                   │
+│   docs-heavy-generic         █         0 clusters                   │
+│                                                                    │
+│ Scheduler decisions                                                │
+│   reduce docs-heavy-generic                                        │
+│   expand MCP-resource-boundary                                     │
+│   preserve wildcard reserve                                        │
+│                                                                    │
+│ [Portfolio] [Novelty curve] [Contexts] [Hypotheses] [Pause]         │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-A candidate found once remains reviewable. A candidate found everywhere remains unconfirmed until validation/proof.
+Every scheduler decision is inspectable and reversible through a new append-only correction.
 
-## Prove — context firewall disclosure
-
-The Prove page should show:
+## 11.4 Review — hypothesis portfolio and support topology
 
 ```text
-VERIFIER CONTEXT
-  discovery transcript      excluded
-  discovery confidence      excluded
-  prior votes               excluded
-  normalized claim          included
-  validated source evidence included
-  source identity           exact
-
-VOTES
-  3 planned
-  3 fresh invocations
-  0 cache reads
-  1 model or declared model-diverse panel
+┌─ REVIEW · VC-0042 ────────────────────────────────────────────────────┐
+│ Permission subject/object drift                                     │
+│                                                                    │
+│ Discovered in                                                      │
+│   1 of 3 minimal-context hunts                                     │
+│   3 of 4 call-path-context hunts                                   │
+│   0 of 2 documentation-heavy hunts                                 │
+│   2 explicitly selected models                                     │
+│   1 deterministic structural source                                │
+│                                                                    │
+│ Sensitivity                                                        │
+│   appears with end-to-end call-path context                         │
+│   disappears in documentation-heavy context                        │
+│                                                                    │
+│ Maturity            context-sensitive seed                          │
+│ Adversarial status  not challenged                                 │
+│ Runtime proof       absent                                         │
+│                                                                    │
+│ Recommended next work                                              │
+│   attacker-control challenge                                       │
+│   reachability challenge                                           │
+│   target-identity instrumentation experiment                       │
+│                                                                    │
+│ [Pin] [Challenge] [Experiment] [Defer] [Reject]                    │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Fix — normalized evidence handoff
+## 11.5 Prove — challenge board and experiment queue
 
-The patch author receives the verified claim, reproducer, source identity, and repository validation guidance. It does not inherit the full noisy sweep transcript.
+```text
+┌─ PROVE · HYPOTHESIS CHALLENGES ───────────────────────────────────────┐
+│ Attacker control        unresolved                                  │
+│ Reachability            source evidence supports path               │
+│ Existing guard          one adapter still unknown                   │
+│ Environment             supported in default configuration           │
+│ Alternate explanation   not yet excluded                            │
+│                                                                    │
+│ Proposed discriminating experiments                                │
+│   E-17 instrument authorization identity vs execution identity      │
+│   E-18 safe external-resource sentinel                              │
+│   E-19 alternate adapter path                                       │
+│                                                                    │
+│ Reserved proof budget      $18.00                                   │
+│ [Approve E-17] [Bundle experiments] [Request new challenge]         │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
-The patch critic uses a separately assembled context and cannot see the patch author's hidden reasoning. The empirical reattack remains authoritative for security closure.
+The primary output is the next evidence-producing experiment, not a vote total.
 
-## Report — context and variance appendix
+## 11.6 Fix — patch portfolio
 
-Every exported investigation packet should include:
+```text
+┌─ FIX · PATCH PORTFOLIO ───────────────────────────────────────────────┐
+│ Candidate              A          B          C                       │
+│ Strategy               local      pre-auth   sink auth               │
+│ Build/test             pass       pass       pass                    │
+│ Original exploit       blocked    blocked    blocked                 │
+│ Variants               3/4        4/4        4/4                     │
+│ Benign controls        pass       fail       pass                    │
+│ Detector replay        clean      clean      clean                   │
+│ Maintenance risk       low        high       medium                  │
+│                                                                    │
+│ Recommendation         C · strongest evidence without regression     │
+│ [View candidates] [Request another] [Approve exact C diff]          │
+└──────────────────────────────────────────────────────────────────────┘
+```
 
-- sampling plan and stop reason;
-- context envelope digests;
-- context completeness disclosures;
-- fresh invocation and cache-use receipts;
-- support matrix;
-- variance metrics;
-- static and empirical proof receipts;
-- patch/reverification receipts.
+## 11.7 Report — research graph, not just final findings
+
+The report includes:
+
+- research constitution and source identity;
+- active/retired arms and allocation history;
+- context families and manifests;
+- scheduler decisions and operator corrections;
+- novelty and yield curves;
+- observation and semantic-cluster union;
+- support topology and lineage;
+- challenge receipts and unresolved assumptions;
+- empirical experiment receipts;
+- patch portfolio and approval;
+- reattack and detector replay;
+- cost and duration by arm, hypothesis, and stage;
+- incomplete, unavailable, or degraded capabilities.
 
 ---
 
-# Persistence, replay, and rerun semantics
+# 12. Resume, replay, rerun, continue, and branch
 
-Use investigation-owned paths such as:
+These operations must have distinct meanings.
 
-```text
-.kuzushi/v3/investigations/<id>/
-  plan.json
-  contexts/<context-digest>.json
-  sweeps/<sweep-id>/plan.json
-  sweeps/<sweep-id>/receipt.json
-  samples/<sample-id>/receipt.json
-  stages/<stage-id>/receipt.json
-```
-
-## `replay`
+## 12.1 Replay
 
 ```text
-kuzushi investigate replay <id>
+kuzushi investigate replay <campaign-id>
 ```
 
-- verifies hashes and receipt relationships;
-- reduces persisted evidence into the same projection;
-- makes no model calls;
-- makes no dynamic network/tool calls;
-- fails visibly on missing/corrupt context objects.
+- reads persisted receipts;
+- verifies hashes and relationships;
+- projects the same historical campaign state;
+- makes zero model or dynamic network calls.
 
-## `rerun --same-context`
+## 12.2 Continue
 
 ```text
-kuzushi investigate rerun <id> --same-context
+kuzushi investigate continue <campaign-id>
 ```
 
-- rehydrates the same Kuzushi-controlled context envelope;
-- creates new sample IDs;
-- invokes the selected model again;
-- bypasses model-response cache reads;
-- records provider-side opacity/version differences;
+- resumes the live adaptive campaign;
+- uses the current persisted scheduler and allocation state;
+- dispatches new work only when policy and source identity permit it.
+
+## 12.3 Rerun an arm
+
+```text
+kuzushi investigate rerun-arm <campaign-id> <arm-id>
+```
+
+- creates a new sample ID;
+- performs a fresh call;
+- records new context and provider receipts;
 - does not promise identical output.
 
-## `rerun --new-context-arm`
+## 12.4 Branch a campaign
 
 ```text
-kuzushi investigate rerun <id> --context-arm <arm>
+kuzushi investigate branch <campaign-id> --change <context/model/policy>
 ```
 
-- creates a successor sweep under the same source identity;
-- records the exact declared mutation;
-- never edits historical sample receipts.
+Use a branch when:
 
-## Context drift
+- an operator wants a materially different context family;
+- a different model portfolio is selected;
+- the source identity changes;
+- budget or authority changes exceed the existing plan;
+- a promising hypothesis deserves a focused subcampaign.
 
-Resume or rerun should detect:
-
-- source identity change;
-- missing content-addressed context objects;
-- tool schema/version change;
-- prompt digest change;
-- model spec or provider receipt change;
-- retrieval-manifest change;
-- external/dynamic context expiration;
-- different truncation or compaction.
-
-Material drift creates a successor plan/sweep or an explicit degraded comparison. It cannot silently reuse the old label “same context.”
+The branch retains explicit lineage without contaminating support counts.
 
 ---
 
-# Evaluation changes
+# 13. Product metrics
 
-## Add a fifth lane: context and stochastic robustness
-
-Input:
+## 13.1 Research-management metrics
 
 ```text
-repository + fixed source identity + declared frontier + role/model policy
-```
-
-Run:
-
-- repeated exact-context samples;
-- controlled context arms;
-- optional model-diverse arms;
-- clean-room verifier votes;
-- empirical proof where available.
-
-Report distributions, not a single lucky run.
-
-Initial metrics:
-
-```text
-exact-context observation Jaccard
-exact-context cluster Jaccard
-context-arm observation Jaccard
-context-arm cluster Jaccard
-rank-order stability
-union recall by sample count
-unique clusters by sample count
-marginal clusters per dollar
+novel observations per dollar
+novel semantic clusters per dollar
+marginal clusters by sample count
+marginal information gain by arm
 context-exclusive observation rate
-context-robust cluster rate
-fresh-invocation verification agreement
-false-positive rate by context arm
-empirical-proof conversion by context arm
+cross-context rediscovery rate
+rare-signal follow-up rate
+rare-signal proof conversion rate
+hypotheses surviving adversarial challenge
+cost per resolved research question
+frontier coverage by uncertainty
+budget concentration by arm
+wildcard reserve utilization
 ```
 
-A single-run benchmark cannot support a claim about agentic discovery quality.
-
-## Variance decomposition
-
-V1 may report descriptive slices rather than pretending to have a statistically perfect decomposition:
+## 13.2 Evidence-conversion metrics
 
 ```text
-same model + same context
-same model + varied context
-different model + same context
-different model + varied context
+static-plausible to experiment-ready conversion
+experiment-ready to empirical-reproduction conversion
+cost per empirically reproduced vulnerability
+patch candidates per reproduced vulnerability
+build/test-valid patch rate
+benign-control preservation rate
+variant bypass rate
+detector replay clean rate
+verified remediation rate
+reopened/regression rate
 ```
 
-Later versions may add bootstrapped intervals or hierarchical models, but every method must publish its assumptions and scorer version.
+## 13.3 Metrics to avoid as north stars
 
-## Capture-recapture estimates are advisory only
+Do not optimize primarily for:
 
-Repeated scans may support an estimate of unseen candidate mass, but the independence assumptions are fragile because findings are correlated by code, context, and model behavior. If implemented, label it an advisory saturation estimate, never “estimated vulnerabilities remaining.”
+```text
+raw findings generated
+highest cross-run agreement
+lowest variance
+one aggregate confidence score
+number of agents
+number of model calls
+percentage of arms that converged
+```
+
+The proposed north star is:
+
+> **cost and operator effort required to explore the vulnerability space, preserve important rare hypotheses, and convert the strongest uncertain claims into defensible empirical evidence or a clear handoff state.**
 
 ---
 
-# Required implementation seams
+# 14. Revised implementation sequence
 
-## Investigation domain
+## PR 0 — fresh-call identity and semantic-cache integrity
 
-Add or extend:
+**Goal:** make sample, challenge, vote, and patch-candidate counts truthful.
 
-```text
-crates/kuzushi-core/src/investigation/domain/context.rs
-crates/kuzushi-core/src/investigation/domain/sampling.rs
-crates/kuzushi-core/src/investigation/domain/independence.rs
-crates/kuzushi-core/src/investigation/domain/support_matrix.rs
-crates/kuzushi-core/src/investigation/application/context_admission.rs
-crates/kuzushi-core/src/investigation/application/plan_sweep.rs
-crates/kuzushi-core/src/investigation/application/execute_sample.rs
-crates/kuzushi-core/src/investigation/application/aggregate_sweep.rs
-crates/kuzushi-core/src/investigation/persistence/context_store.rs
-crates/kuzushi-core/src/investigation/persistence/sample_store.rs
-```
+Exit criteria:
 
-## Runtime request and semantic cache
-
-Audit and change:
-
-```text
-crates/kuzushi-core/src/verification/adapters/verify_finding_tool.rs
-crates/kuzushi-core/src/verification/adapters/verify_finding_tool/execution.rs
-structured-output cached query helpers
-semantic-cache key/policy code
-agent runtime request types
-run/model invocation receipts
-```
-
-The runtime request needs explicit sample/vote identity and cache policy. Do not pass these as ad hoc JSON or environment variables.
-
-## Campaign planner
-
-Extend the matrix from conceptually:
-
-```text
-shard x threat x model
-```
-
-to:
-
-```text
-frontier unit x threat lens x context arm x model arm x replicate
-```
-
-Keep hard bounds. Report every cell omitted by cap, prior coverage, unsupported context, or budget.
-
-## Findings and clusters
-
-Add structured support metadata without rewriting historical observations:
-
-```rust
-pub struct ObservationSupportV1 {
-    pub sample_ids: Vec<SampleId>,
-    pub context_arm_ids: Vec<ContextArmId>,
-    pub model_receipts: Vec<ResolvedModelReceiptV1>,
-    pub deterministic_sources: Vec<ToolIdentity>,
-    pub independence_grade: IndependenceGrade,
-}
-```
-
-Do not overload proof state or human verdict.
-
-## TUI presentation
-
-Add presentation DTOs for:
-
-- sampling-plan preview;
-- context inventory;
-- sweep progress;
-- support matrix;
-- context-integrity warnings;
-- clean-room verifier disclosure;
-- variance appendix.
-
-TUI code consumes application projections; it must not reconstruct support or independence logic itself.
-
----
-
-# Revised implementation sequence
-
-This addendum supersedes the original 12-step ordering where noted.
-
-## PR 0 — fresh-call identity and semantic-cache independence
-
-**Goal:** make every claimed independent sample/vote demonstrably independent of cached model output.
-
-Required outcomes:
-
-- explicit `ModelCallPurpose` and `ModelCachePolicy`;
-- unique sample/vote IDs in runtime receipts;
-- verifier panel tests prove N passes invoke the runtime N times;
-- cached response cannot satisfy another vote;
-- persisted replay invokes the model zero times;
-- same-context rerun makes a fresh call.
+- unique invocation identities;
+- independent work cannot be satisfied by cached model responses;
+- lineage-seeded work is explicit;
+- replay makes zero calls;
+- tests prove fresh-call semantics.
 
 ## PR 1 — proof vocabulary and typed patch eligibility
 
-Retain the original plan's PR 1.
+**Goal:** separate model assessment from runtime proof and remove generic Boolean remediation gates.
 
-## PR 2 — context classes, admission, and `ContextEnvelopeV1`
+## PR 2 — context authority and `ContextEnvelopeV1`
 
-**Goal:** establish the context trust boundary before creating a durable multi-stage harness.
+**Goal:** record context influence while preventing repository/model context from changing operator policy.
 
-Required outcomes:
+## PR 3 — `InvestigationPlanV1` as research constitution
 
-- every model call can reference a context digest;
-- ordering and truncation affect the digest;
-- repository guidance cannot change operator policy;
-- provider-context opacity is disclosed;
-- secret-bearing content is not copied into export receipts.
+**Goal:** persist stable governance, allowed variability, budgets, proof policy, and mutation authority.
 
-## PR 3 — `InvestigationPlanV1` plus sampling policy
+## PR 4 — `ResearchCampaignV1`, research arms, and run receipts
 
-Compile current profiles into a durable plan and include:
+**Goal:** add the live evolving portfolio that the plan governs.
 
-- context policy;
-- exact-context replicate count;
-- declared context/model arms;
-- hard sample/cost limits;
-- stop rule.
+## PR 5 — hypothesis ledger and support topology
 
-Preserve current behavior for one-sample profiles during cutover.
+**Goal:** preserve union-oriented observations, lineage, context sensitivity, and independence without one confidence score.
 
-## PR 4 — sweep execution and variance-aware aggregation
+## PR 6 — adaptive scheduler and research-budget allocator
 
-**Goal:** execute fresh samples and project union/support/variance correctly.
+**Goal:** allocate exploration/follow-up/challenge/wildcard budget with anti-collapse safeguards and visible reasons.
 
-Required outcomes:
+## PR 7 — campaign persistence, continue/replay/rerun/branch
 
-- discovery union retains single-sample candidates;
-- support matrix distinguishes sample/context/model/deterministic sources;
-- saturation stop is explicit and durable;
-- campaign cells include context arm and replicate identity;
-- TUI shows variance without proof inflation.
+**Goal:** make nondeterministic research durable and steerable across sessions.
 
-## PR 5 — investigation persistence, resume, replay, and rerun
+## PR 8 — TUI managed-nondeterminism projections
 
-Add exact semantics for replay versus same-context fresh rerun.
+**Goal:** surface policy, frontier, portfolio, novelty, support topology, challenge queue, and scheduler decisions in existing pages.
 
-## PR 6 — deterministic Prepare frontier + campaign integration
+## PR 9 — Prepare frontier and campaign integration
 
-Retain the original frontier work, now feeding declared sampling arms.
+**Goal:** seed the research portfolio with explainable high-value and high-uncertainty regions while retaining wildcard exploration.
 
-## PR 7 — independent verifier-role policy and context firewall
+## PR 10 — adversarial challenge roles and clean-room DTOs
 
-Required outcomes:
+**Goal:** turn verifier passes into distinct falsification and experiment-generation roles.
 
-- discovery prose/confidence/prior votes excluded;
-- every vote has a fresh invocation receipt;
-- panel degrades visibly when independence cannot be established;
-- same-model tie-break refusal remains enforced.
+## PR 11 — semantic vulnerability clustering
 
-## PR 8 — semantic vulnerability clustering
+**Goal:** distinguish observations from shared root causes and preserve affected sinks.
 
-Retain the original clustering work and consume structured support metadata.
+## PR 12 — empirical experiment queue and proof-harness portfolio
 
-## PR 9 — closed-loop Fix transaction through approval
+**Goal:** manage multiple safe discriminating experiments and mint runtime proof only from admissible receipts.
 
-The patch author receives normalized verified evidence, not the full discovery transcript.
+## PR 13 — closed-loop remediation and patch portfolio
 
-## PR 10 — exact apply + empirical reattack/detector replay
+**Goal:** generate and compare bounded patch strategies before exact-diff approval.
 
-Retain the original lifecycle requirements.
+## PR 14 — exact apply, automatic reattack, and detector replay
 
-## PR 11 — proof backend capability abstraction
+**Goal:** produce an evidence-backed remediation lifecycle without automatic commit/push/PR behavior.
 
-Retain the original portability requirements.
+## PR 15 — proof-backend capabilities, SARIF interoperability, regression memory, and evaluation
 
-## PR 12 — native SARIF ingest + external exposure enrichment
+This may split into narrower PRs during implementation. Exit criteria across the remaining work:
 
-External content enters as attributed context/signals with no instruction authority.
-
-## PR 13 — reopened/regression projection
-
-Retain prior remediation/proof/context relationships.
-
-## PR 14 — multi-lane benchmark including context robustness
-
-A live benchmark row must identify:
-
-- source identity;
-- context envelopes and arms;
-- fresh invocation receipts;
-- cache policy;
-- model/provider receipts;
-- union and variance metrics;
-- separate discovery, verification, remediation, reattack, and robustness results.
+- proof strength derived from backend capabilities;
+- external scanner results imported as signals;
+- exposure context affects priority, not proof;
+- reopened fixes retain history;
+- discovery, challenge, proof, remediation, reattack, and research-management metrics remain separate.
 
 ---
 
-# Focused tests required early
+# 15. Testing strategy
 
-## Semantic-cache and vote independence
+## 15.1 Freshness and cache tests
 
-- three verifier passes produce three runtime invocation receipts;
-- a pre-populated semantic-cache entry is not read by an independent vote;
-- identical outputs from three fresh calls remain three calls but one repeated conclusion;
-- exact persisted replay produces no provider call;
-- same-context rerun produces a new sample ID and provider call.
+- N requested fresh samples invoke the runtime N times.
+- Cached replay cannot increment fresh-sample support.
+- Lineage-seeded follow-up records the parent output.
+- persisted replay invokes no model.
 
-## Context identity
+## 15.2 Scheduler tests
 
-- same items in different order produce different context digests;
-- same source path with changed content produces a different object/context digest;
-- a truncation decision changes the context digest;
-- missing context object prevents exact-context rerun;
-- provider opacity sets context completeness to partial.
+- wildcard reserve cannot be starved;
+- per-arm cap is enforced;
+- rare high-impact signal receives bounded follow-up;
+- low-yield arm allocation falls without deleting history;
+- operator pin/correction overrides scheduler routing;
+- budget accounting remains complete under pause/interruption.
 
-## Context authority
+## 15.3 Context tests
 
-- repository text cannot change selected model;
-- repository text cannot authorize network access;
-- repository text cannot disable a security lens;
-- repository guidance can inform a declared test command only through the validation-plan admission rule;
-- prior model output remains labeled and cannot satisfy source-evidence requirements.
+- repository guidance cannot change model/tool/budget/mutation policy;
+- context envelope ordering and truncation are recorded;
+- prior output inclusion is explicit;
+- clean-room challenger DTO excludes discovery persuasion and support counts.
 
-## Aggregation
+## 15.4 Hypothesis tests
 
-- a one-sample observation remains visible;
-- repeated cached output contributes no fresh-invocation support;
-- fresh same-context support differs from context-diverse support;
-- deterministic scanner + agentic observation receives cross-source support;
-- support metadata never upgrades proof state.
+- a single-sample observation is retained;
+- majority misses do not delete a rare signal;
+- support topology distinguishes rediscovery from lineage copying;
+- context-sensitive states are projected honestly;
+- empirical proof remains independent of model-support frequency.
 
-## TUI projection
+## 15.5 TUI tests
 
-- Setup shows planned fresh calls and cache policy;
-- Scan shows completed samples, unique clusters, and stop reason;
-- Review labels context-sensitive versus context-robust without saying confirmed;
-- Prove displays excluded discovery context and fresh vote count;
-- Report includes context completeness and variance disclosures.
-
----
-
-# Example: scanning `anomalyco/opencode`
-
-For an OpenCode permission/plugin/MCP investigation, the context plan might classify:
-
-```text
-OperatorPolicy
-  security goal, models, roles, budgets, proof policy
-
-RepositoryGuidance
-  AGENTS.md package-level test/typecheck conventions
-
-SourceEvidence
-  permission evaluator
-  session tool dispatcher
-  plugin hooks
-  MCP resource handling
-
-DeterministicToolOutput
-  route inventory
-  tree-sitter/CPG call relationships
-
-PriorModelOutput
-  discovery hypotheses only
-```
-
-A deep discovery sweep might declare:
-
-```text
-canonical context replicates: 3
-context arm A: permission evaluator evidence first
-context arm B: tool-execution path evidence first
-context arm C: threat model omitted to measure framing dependence
-```
-
-A hypothetical cluster could then show:
-
-```text
-external-directory authorization mismatch
-  canonical support       1/3
-  context arm A           1/1
-  context arm B           0/1
-  context arm C           0/1
-  deterministic support   none
-  interpretation          context-sensitive single-model discovery signal
-  static assessment       pending
-  empirical proof         absent
-```
-
-That candidate remains visible and eligible for clean-room verification. Its low repeatability does not prove it false; its context sensitivity tells the operator and evaluator that discovery is fragile.
-
-The verifier receives the normalized authorization claim and exact code evidence, not the support table or discovery narrative. If empirical execution later reproduces an unauthorized outside-workspace access, runtime proof supersedes discovery fragility as the relevant security evidence.
+- Setup shows stable policy and adaptive allocation separately;
+- Scan shows scheduler decisions and arm yields;
+- Review shows support topology and context sensitivity;
+- Prove shows challenges and experiments rather than only votes;
+- Fix compares patch candidates without implying model consensus is correctness;
+- Report round-trips the campaign graph.
 
 ---
 
-# Updated north-star metric
+# 16. Explicit non-goals
 
-Retain the main plan's evidence/remediation metric, but add context robustness as a diagnostic dimension:
-
-> **cost per independently reproducible, evidence-backed vulnerability that reaches a safe verified remediation or defensible handoff, with the discovery context, sampling variance, and independence limits disclosed.**
-
-Do not optimize for raw agreement. Optimize for useful coverage, independent falsification, empirical proof, and safe closure.
-
-# Additional non-goals
-
-- Do not pretend a deterministic seed makes provider execution fully reproducible.
-- Do not call cached repetitions independent votes.
+- Do not eliminate model or context variance.
+- Do not optimize for agreement or convergence.
 - Do not majority-filter rare discovery signals.
-- Do not feed discovery persuasion into the primary verifier panel.
+- Do not treat repeated output as independent evidence without fresh-call receipts.
 - Do not treat context robustness as exploitability.
-- Do not allow repository text to steer models, tools, permissions, budgets, or proof semantics.
-- Do not store sensitive raw context in portable receipts when a local object reference and digest suffice.
-- Do not claim “same context” when tool versions, retrieval manifests, truncation, provider context, or source identity drifted.
+- Do not make one canonical context mandatory for discovery.
+- Do not prohibit prior model output from research; classify and trace its lineage instead.
+- Do not allow repository content or prior model output to change operator policy.
+- Do not turn verifier count into a substitute for empirical proof.
+- Do not use an LLM vote to select or approve a patch.
+- Do not build a mandatory cloud control plane.
+- Do not automatically commit, push, open a PR, or merge after patch application.
+- Do not chase MDASH’s agent count as a product metric.
+
+---
+
+# 17. Final product statement
+
+The intended end state is:
+
+> **Kuzushi is a local-first control room for nondeterministic security research. A stable governance envelope defines authority, budget, and proof semantics; an adaptive campaign deliberately explores diverse contexts, models, roles, tools, and decompositions; the hypothesis ledger preserves rare and context-sensitive discoveries; adversarial roles generate discriminating experiments; and empirical execution converts selected uncertainty into defensible proof and verified remediation.**
+
+The product does not promise that the same scan returns the same findings.
+
+It promises that the operator can understand, steer, budget, preserve, challenge, and learn from the differences.
