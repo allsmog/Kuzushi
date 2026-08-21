@@ -5,7 +5,6 @@ use super::{
 use crate::WorkflowPhase;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const RUN_ITEM_SCHEMA_VERSION: u16 = 1;
@@ -226,7 +225,7 @@ impl RunItemEnvelopeV1 {
 
     fn calculate_hash(&self) -> Result<String> {
         let bytes = serde_json::to_vec(&self.hash_payload()).context("serialize run item hash")?;
-        Ok(format!("sha256:{:x}", Sha256::digest(bytes)))
+        Ok(super::sha256_content_digest(&bytes))
     }
 
     fn hash_payload(&self) -> HashPayload<'_> {

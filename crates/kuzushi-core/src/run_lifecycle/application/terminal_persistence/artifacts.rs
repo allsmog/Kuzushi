@@ -1,11 +1,10 @@
 use crate::modules::ToolCallIdentity;
 use crate::run_artifacts::{read_run_artifact_bytes, RunArtifact, RunArtifactRead};
 use crate::run_lifecycle::{
-    ArtifactReference, RunItemId, RunItemRecord, RunItemSource, RunItemV1, RunObservationHandle,
-    SafeText,
+    sha256_content_digest, ArtifactReference, RunItemId, RunItemRecord, RunItemSource, RunItemV1,
+    RunObservationHandle, SafeText,
 };
 use anyhow::Result;
-use sha2::{Digest, Sha256};
 use std::path::Path;
 
 pub(super) fn emit_artifact_references(
@@ -111,7 +110,7 @@ fn artifact_reference(
     value: &[u8],
     producing_item_id: RunItemId,
 ) -> ArtifactReference {
-    let digest = format!("sha256:{:x}", Sha256::digest(value));
+    let digest = sha256_content_digest(value);
     let line_count = std::str::from_utf8(value)
         .ok()
         .map(|text| text.lines().count() as u64);

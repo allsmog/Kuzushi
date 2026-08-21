@@ -2,10 +2,9 @@ use super::{
     load_run_summary, read_run_artifact_bytes, read_run_artifact_text, RunArtifact, RunArtifactRead,
 };
 use crate::module_result::{tool_result_status, ToolResultStatus};
-use crate::run_lifecycle::{ArtifactReference, RunItemId};
+use crate::run_lifecycle::{sha256_content_digest, ArtifactReference, RunItemId};
 use anyhow::{Context, Result};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::path::Path;
 
 const MAX_OUTPUT_LINES: usize = 12;
@@ -132,7 +131,7 @@ fn validate_reference_bytes(reference: &ArtifactReference, bytes: &[u8]) -> Resu
         reference.byte_count == bytes.len() as u64,
         "correlated result size does not match its reference"
     );
-    let digest = format!("sha256:{:x}", Sha256::digest(bytes));
+    let digest = sha256_content_digest(bytes);
     anyhow::ensure!(
         reference.digest.as_str() == digest,
         "correlated result digest does not match its reference"

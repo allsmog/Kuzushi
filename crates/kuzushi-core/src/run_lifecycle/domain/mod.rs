@@ -1,9 +1,11 @@
+mod digest;
 mod envelope;
 mod ids;
 mod item;
 mod policy;
 mod safe_text;
 
+pub use digest::sha256_content_digest;
 pub use envelope::{RunItemEnvelopeV1, RunItemRecord, RunItemSource, RUN_ITEM_SCHEMA_VERSION};
 pub use ids::*;
 pub use item::*;

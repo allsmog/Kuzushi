@@ -63,7 +63,7 @@ schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde-saphyr = { version = "0.0.29", default-features = false, features = ["deserialize"] }
-sha2 = "0.10"
+sha2 = "0.11"
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
