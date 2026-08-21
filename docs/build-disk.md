@@ -7,7 +7,7 @@ Cargo build roots rather than one corrupt cache:
 - the checkout's normal `target/` tree;
 - a legacy `target-dev/` tree left by older DevEx gate runs;
 - cargo-llvm-cov's instrumented `target/llvm-cov-target/` tree;
-- one `target/` tree for each Git, Claude, or Codex worktree;
+- one `target/` tree for each Git or coding-agent worktree;
 - incremental and test executables accumulated under each of those roots.
 
 The evidence-loop gate now reuses the checkout's normal Cargo target by default.
