@@ -151,7 +151,7 @@ fn lint_pack_manifest(pack_dir: &Path, rows: &mut Vec<LintRow>) -> Option<toml::
             return None;
         }
     };
-    let manifest = match body.parse::<toml::Value>() {
+    let manifest = match toml::from_str::<toml::Value>(&body) {
         Ok(manifest) => manifest,
         Err(error) => {
             rows.push(row(LintLevel::Error, "pack.toml", "pack.toml", format!("parse error: {error}")));
@@ -277,9 +277,10 @@ fn lint_shards_file(
     target_root: Option<&Path>,
     rows: &mut Vec<LintRow>,
 ) {
-    let manifest = match std::fs::read_to_string(path).map_err(|e| e.to_string()).and_then(|body| {
-        body.parse::<toml::Value>().map_err(|e| e.to_string())
-    }) {
+    let manifest = match std::fs::read_to_string(path)
+        .map_err(|e| e.to_string())
+        .and_then(|body| toml::from_str::<toml::Value>(&body).map_err(|e| e.to_string()))
+    {
         Ok(manifest) => manifest,
         Err(error) => {
             rows.push(row(LintLevel::Error, "shards", product, format!("{}: {error}", path.display())));

@@ -37,8 +37,7 @@ pub(super) fn load_campaign_shards(root: &Path) -> Result<Vec<CampaignShard>> {
     }
     let text = std::fs::read_to_string(&manifest_path)
         .with_context(|| format!("Could not read {}", manifest_path.display()))?;
-    let manifest = text
-        .parse::<toml::Value>()
+    let manifest = toml::from_str::<toml::Value>(&text)
         .with_context(|| format!("{} is not valid TOML", manifest_path.display()))?;
     manifest_shards(&manifest, &manifest_path)
 }

@@ -84,7 +84,7 @@ fn load_shard_manifest(path: &Path) -> Result<toml::Value> {
             path.display()
         )
     })?;
-    text.parse::<toml::Value>()
+    toml::from_str::<toml::Value>(&text)
         .with_context(|| format!("shard manifest {} is not valid TOML", path.display()))
 }
 

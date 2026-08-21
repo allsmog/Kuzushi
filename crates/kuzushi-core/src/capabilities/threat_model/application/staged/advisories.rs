@@ -105,7 +105,7 @@ fn cargo_toml_dependencies(target: &Path) -> Vec<(String, String)> {
     else {
         return Vec::new();
     };
-    let Ok(parsed) = text.parse::<toml::Value>() else {
+    let Ok(parsed) = toml::from_str::<toml::Value>(&text) else {
         return Vec::new();
     };
     parsed

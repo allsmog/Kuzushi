@@ -248,7 +248,7 @@ fn shard_manifest_rejects_blank_and_non_string_paths() {
     // A blank path would silently widen the shard to the whole workspace.
     std::fs::write(dir.join("shards.toml"), "[shards.a]\npaths = [\"\"]\n").unwrap();
     let error = run_plan(temp.path(), json!({"campaignId": "c1"})).unwrap_err();
-    assert!(error.to_string().contains("blank path"));
+    assert!(error.to_string().contains("blank path"), "{error:#}");
 
     // A non-string entry would silently shrink the shard's scope.
     std::fs::write(
@@ -361,7 +361,7 @@ fn plan_rejects_a_shard_missing_from_the_manifest() {
     )
     .unwrap_err();
 
-    assert!(error.to_string().contains("nope"));
+    assert!(error.to_string().contains("nope"), "{error:#}");
 }
 
 #[test]
