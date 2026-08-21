@@ -284,6 +284,20 @@ impl WorkbenchPage {
         }
     }
 
+    /// The digit that reaches this page in the Workbench keymap. Operator
+    /// hint strips render this instead of a literal digit, so a hint can never
+    /// advertise a key that lands on a different page. `page_key_follows_all_order`
+    /// binds it to `ALL`, which is what the keymap enumerates.
+    pub const fn page_key(self) -> char {
+        match self {
+            Self::Map => '1',
+            Self::Scan => '2',
+            Self::Review => '3',
+            Self::Prove => '4',
+            Self::Fix => '5',
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Self::Map => "MAP",
@@ -424,6 +438,21 @@ mod workbench_page_tests {
             assert_eq!(page.findings_surface().page(), page);
             assert_eq!(page.detail_surface().page(), page);
         }
+    }
+
+    /// Item: hint strips render `page_key()`, so it must stay the digit the
+    /// keymap derives from `ALL`. A reordered `ALL` fails here rather than
+    /// silently sending the operator to the wrong page.
+    #[test]
+    fn page_key_follows_all_order() {
+        for (index, page) in WorkbenchPage::ALL.iter().enumerate() {
+            assert_eq!(
+                page.page_key(),
+                char::from_digit(index as u32 + 1, 10).expect("page digit"),
+                "{page:?}"
+            );
+        }
+        assert_eq!(WorkbenchPage::Review.page_key(), '3');
     }
 
     #[test]
