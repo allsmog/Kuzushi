@@ -146,12 +146,29 @@ fn run_verify_panel(
     let mut result = super::super::verify_consensus::combine_verify_passes(
         passes.into_iter().map(|pass| pass.value).collect(),
     )?;
+    annotate_fresh_sample_support(&mut result, execution.input.passes);
     if let Some(gate_model) = execution.input.gate_model.as_deref() {
         annotate_gate_stage(&mut result, gate_model, true);
     }
     let cost = resolve_split_verdict(execution, &mut result, cost)?;
     bind_verification_result(result, execution.finding, &execution.source_identity)
         .and_then(|result| verify_finding_response(result, cost))
+}
+
+/// Record only what this execution boundary can prove. Every panel pass below
+/// is forced through a live runtime call, so the count is fresh-sample support;
+/// it deliberately does not claim statistical independence between samples.
+fn annotate_fresh_sample_support(result: &mut Value, fresh_sample_support: u32) {
+    let Some(consensus) = result
+        .get_mut("consensus")
+        .and_then(Value::as_object_mut)
+    else {
+        return;
+    };
+    consensus.insert(
+        "freshSampleSupport".to_string(),
+        json!(fresh_sample_support),
+    );
 }
 
 /// When the panel splits evenly, an operator-named DIFFERENT model may break the
@@ -266,6 +283,30 @@ fn emit_escalation_failure(trace: Option<&crate::run_artifacts::TraceHandle>, er
     }
 }
 
+/// Panel evidence must represent actual runtime observations. In particular,
+/// an explicit tool-free (`mcps: false`) request is otherwise cacheable and
+/// repeated passes can collapse to one paid call. Bypass the semantic cache at
+/// this boundary so every requested panel pass is a fresh runtime invocation.
+fn run_fresh_verify_pass(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    workspace_root: &Path,
+    prompt: &str,
+    fingerprint: &str,
+    input: &VerifyFindingInput,
+) -> Result<CostedStructuredJson<Value>> {
+    crate::structured_output::query_required_structured_json_with_cost(
+        runtime,
+        verify_agent_query_request(model, workspace_root, prompt, input)?,
+        StructuredJsonContract::new(
+            "verify:finding",
+            "VerificationResult",
+            verification_result_schema(),
+        ),
+        |raw| normalize_verification_result(raw, fingerprint),
+    )
+}
+
 fn run_verify_passes(
     runtime: &dyn AgentRuntime,
     model: &str,
@@ -276,7 +317,7 @@ fn run_verify_passes(
 ) -> Result<Vec<CostedStructuredJson<Value>>> {
     let mut passes = Vec::with_capacity(input.passes as usize);
     for _ in 0..input.passes {
-        passes.push(run_one_verify_pass(
+        passes.push(run_fresh_verify_pass(
             runtime,
             model,
             workspace_root,
@@ -286,4 +327,89 @@ fn run_verify_passes(
         )?);
     }
     Ok(passes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::findings::TriageOutcome;
+    use crate::runtime::{AgentQueryResponse, TriageRequest};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingRuntime {
+        calls: AtomicUsize,
+    }
+
+    impl AgentRuntime for CountingRuntime {
+        fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(AgentQueryResponse {
+                text: String::new(),
+                structured: Some(json!({
+                    "fingerprint": "fp-1",
+                    "exploitable": true,
+                    "confidence": 0.8,
+                    "proofLevel": 2,
+                    "proofVerdict": "exploited"
+                })),
+                cost_usd: 0.5,
+                cost_usd_reported: true,
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("not used by verifier-panel tests")
+        }
+    }
+
+    fn tool_free_input(passes: u32) -> VerifyFindingInput {
+        VerifyFindingInput {
+            fingerprint: "fp-1".to_string(),
+            prompt_template: None,
+            passes,
+            mcps: false,
+            mcp_tool_timeout_ms: None,
+            gate_model: None,
+            escalation_model: None,
+        }
+    }
+
+    #[test]
+    fn tool_free_panel_runs_every_requested_pass_live() {
+        let target = tempfile::tempdir().unwrap();
+        let runtime = CountingRuntime {
+            calls: AtomicUsize::new(0),
+        };
+        let input = tool_free_input(3);
+
+        let passes = run_verify_passes(
+            &runtime,
+            "test-model",
+            target.path(),
+            "verify this finding",
+            "fp-1",
+            &input,
+        )
+        .unwrap();
+
+        assert_eq!(passes.len(), 3);
+        assert_eq!(runtime.calls.load(Ordering::SeqCst), 3);
+        assert!(passes.iter().all(|pass| pass.cost_usd == 0.5));
+    }
+
+    #[test]
+    fn fresh_sample_support_is_explicit_without_claiming_independence() {
+        let mut result = super::super::super::verify_consensus::combine_verify_passes(vec![
+            json!({"exploitable": true, "confidence": 0.9}),
+            json!({"exploitable": true, "confidence": 0.8}),
+            json!({"exploitable": false, "confidence": 0.6}),
+        ])
+        .unwrap();
+
+        annotate_fresh_sample_support(&mut result, 3);
+
+        assert_eq!(result["consensus"]["freshSampleSupport"], json!(3));
+        assert!(result["consensus"].get("independent").is_none());
+    }
 }
