@@ -43,6 +43,21 @@ fn native_alias(name: &str) -> (tempfile::TempDir, PathBuf) {
     (temp, alias_path)
 }
 
+fn npm_wrapper_fixture(temp: &tempfile::TempDir, name: &str) -> PathBuf {
+    let bin_dir = temp.path().join("bin");
+    let scripts_dir = temp.path().join("scripts");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&scripts_dir).unwrap();
+    let wrapper = bin_dir.join(name);
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &wrapper).unwrap();
+    fs::copy(
+        repo_root().join("scripts/native-runtime-contract.mjs"),
+        scripts_dir.join("native-runtime-contract.mjs"),
+    )
+    .unwrap();
+    wrapper
+}
+
 fn latest_run_dir(root: &Path) -> PathBuf {
     kuzushi_core::run_artifacts::run_dir(root, &latest_run_id(root))
 }
@@ -972,8 +987,7 @@ fn npm_wrapper_help_reaches_the_rust_binary() {
 #[test]
 fn npm_wrapper_kz_alias_reaches_the_compact_rust_binary() {
     let tmp = tempfile::tempdir().unwrap();
-    let alias_path = tmp.path().join("kz");
-    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
+    let alias_path = npm_wrapper_fixture(&tmp, "kz");
 
     let output = Command::new("node")
         .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kuzushi"))
@@ -1016,8 +1030,7 @@ fn npm_wrapper_kz_alias_accepts_the_single_kuzushi_binary_override() {
     // The npm package ships one binary per platform: `kz` resolves to the
     // `kuzushi` binary and argv0 names the usage line.
     let tmp = tempfile::tempdir().unwrap();
-    let alias_path = tmp.path().join("kz");
-    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
+    let alias_path = npm_wrapper_fixture(&tmp, "kz");
 
     let output = Command::new("node")
         .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kuzushi"))
@@ -1083,12 +1096,9 @@ fn npm_wrapper_rejects_non_file_native_override() {
 #[test]
 fn npm_wrapper_skips_non_file_fallback_candidate() {
     let tmp = tempfile::tempdir().unwrap();
-    let bin_dir = tmp.path().join("bin");
     let fake_binary = tmp.path().join("target/release/kuzushi");
-    fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&fake_binary).unwrap();
-    let wrapper = bin_dir.join("kuzushi-rs.mjs");
-    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &wrapper).unwrap();
+    let wrapper = npm_wrapper_fixture(&tmp, "kuzushi-rs.mjs");
 
     let output = Command::new("node")
         .arg(wrapper)
@@ -1117,13 +1127,10 @@ fn npm_wrapper_owns_cli_name_environment() {
     use std::os::unix::fs::PermissionsExt;
 
     let tmp = tempfile::tempdir().unwrap();
-    let bin_dir = tmp.path().join("bin");
     let native_dir = tmp.path().join("target/release");
-    fs::create_dir_all(&bin_dir).unwrap();
     fs::create_dir_all(&native_dir).unwrap();
-    let wrapper = bin_dir.join("kuzushi-rs.mjs");
+    let wrapper = npm_wrapper_fixture(&tmp, "kuzushi-rs.mjs");
     let fake_binary = native_dir.join("kuzushi");
-    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &wrapper).unwrap();
     fs::write(
         &fake_binary,
         "#!/usr/bin/env node\nprocess.stdout.write(process.env.KUZUSHI_CLI_NAME || '');\n",
@@ -1165,7 +1172,8 @@ fn npm_package_runtime_surface_is_rust_only() {
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    assert!(files.contains(&"native"));
+    assert!(files.contains(&"scripts/native-runtime-contract.mjs"));
+    assert!(!files.contains(&"native"));
     assert!(files.contains(&"NOTICE"));
     assert!(files.contains(&"UPSTREAM_CODEX.md"));
     assert!(files.contains(&"LICENSES"));
@@ -1173,6 +1181,20 @@ fn npm_package_runtime_surface_is_rust_only() {
         files.iter().all(|entry| !entry.starts_with("dist/cli")),
         "package files should not publish the deleted TS CLI"
     );
+
+    let optional_dependencies = package
+        .get("optionalDependencies")
+        .and_then(Value::as_object)
+        .unwrap();
+    for platform_package in [
+        "@kuzushi/darwin-arm64",
+        "@kuzushi/darwin-x64",
+        "@kuzushi/linux-arm64",
+        "@kuzushi/linux-x64",
+        "@kuzushi/win32-x64",
+    ] {
+        assert!(optional_dependencies.contains_key(platform_package));
+    }
 
     let dependencies = package
         .get("dependencies")

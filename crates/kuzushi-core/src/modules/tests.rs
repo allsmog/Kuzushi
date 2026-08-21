@@ -5354,10 +5354,9 @@ OUT
             result.pointer("/data/proofLevel").and_then(Value::as_u64),
             Some(3)
         );
-        assert!(result
-            .get("output")
-            .and_then(Value::as_str)
-            .is_some_and(|output| output.contains("VULNERABLE")));
+        let rendered = result.get("output").and_then(Value::as_str).unwrap();
+        assert!(rendered.contains("likely-exploitable (model assessment)"));
+        assert!(!rendered.contains("VULNERABLE"));
 
         let queries = runtime.queries();
         assert_eq!(queries.len(), 1);

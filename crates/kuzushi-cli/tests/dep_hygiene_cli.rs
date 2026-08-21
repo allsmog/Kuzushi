@@ -2738,10 +2738,9 @@ fn run_verify_finding_reaches_langgraph_runtime_bridge() {
         body.pointer("/data/attackVector").and_then(Value::as_str),
         Some("curl POST /admin")
     );
-    assert!(body
-        .get("output")
-        .and_then(Value::as_str)
-        .is_some_and(|output| output.contains("VULNERABLE")));
+    let rendered = body.get("output").and_then(Value::as_str).unwrap();
+    assert!(rendered.contains("likely-exploitable (model assessment)"));
+    assert!(!rendered.contains("VULNERABLE"));
 }
 
 #[test]

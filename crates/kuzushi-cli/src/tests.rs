@@ -1579,10 +1579,20 @@ mod tests {
         (before, after)
     }
 
+    fn write_uncertain_pair_source(target: &Path) {
+        let source_path = target.join("src/db.rs");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        let mut lines = vec!["// unchanged"; 60];
+        lines[19] = "query(request_input);";
+        lines[59] = "query(attacker_parameters);";
+        std::fs::write(source_path, lines.join("\n")).unwrap();
+    }
+
     #[test]
     fn runs_diff_exposes_unique_uncertain_identity_matches() {
         use kuzushi_core::findings::ScanComparisonClass;
         let temp = tempfile::tempdir().unwrap();
+        write_uncertain_pair_source(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let (before, after) = uncertain_pair();
@@ -1620,6 +1630,7 @@ mod tests {
     #[test]
     fn runs_diff_does_not_carry_decisions_to_uncertain_matches() {
         let temp = tempfile::tempdir().unwrap();
+        write_uncertain_pair_source(temp.path());
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let (before, after) = uncertain_pair();
