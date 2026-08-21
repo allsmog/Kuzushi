@@ -39,6 +39,13 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   printf '%s\n' 'build-disk must run inside a Git worktree' >&2
   exit 2
 }
+repo_root=$(cd "$repo_root" && pwd -P)
+home_root=${HOME:-}
+if [ ! -d "$home_root" ]; then
+  printf '%s\n' 'build-disk requires HOME to name an existing directory' >&2
+  exit 2
+fi
+home_root=$(cd "$home_root" && pwd -P)
 
 worktrees_file=$(mktemp "${TMPDIR:-/tmp}/kuzushi-worktrees.XXXXXX")
 targets_file=$(mktemp "${TMPDIR:-/tmp}/kuzushi-targets.XXXXXX")
@@ -161,7 +168,7 @@ report_targets() {
 validate_prune_path() {
   local path=$1
   case "$path" in
-    ''|/|"$HOME"|"$repo_root")
+    ''|/|"$home_root"|"$repo_root")
       printf 'refusing unsafe prune path: %s\n' "$path" >&2
       exit 2
       ;;

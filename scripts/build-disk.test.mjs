@@ -144,6 +144,7 @@ test("refuses every prune mode for a configured unsafe root", async () => {
     for (const mode of ["--prune-aux", "--prune-incremental", "--prune-all"]) {
       const result = buildDiskResult(fixture, [mode, "--apply"], {
         CARGO_TARGET_DIR: fixture.home,
+        HOME: `${fixture.home}/`,
       });
       assert.equal(result.status, 2, mode);
       assert.match(result.stderr, /refusing unsafe prune path/);
