@@ -5,8 +5,23 @@ use crate::app::{
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::path::PathBuf;
 
 use super::rank::PlanProposal;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PendingCredentialWork {
+    CommittedPlan(Vec<PlanningTaskId>),
+    DeferredStep(PlanningRunStep),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingCredentialContinuation {
+    pub(crate) target: PathBuf,
+    pub(crate) phase: WorkflowPhase,
+    pub(crate) model: String,
+    pub(crate) work: PendingCredentialWork,
+}
 
 #[derive(Debug, Default)]
 pub struct EngagementState {
@@ -14,7 +29,9 @@ pub struct EngagementState {
     planning_expanded_queue: VecDeque<PlanningRunStep>,
     planning_running_tool: Option<String>,
     planning_running_task: Option<PlanningTaskId>,
+    planning_running_step: Option<PlanningRunStep>,
     planning_paused: bool,
+    pending_credential_continuation: Option<PendingCredentialContinuation>,
     planning_picker_route: PlanningPickerRouteState,
     pending_chain: Option<PrereqChain>,
     pending_prereq_prompt: Option<PendingPrereqPrompt>,
@@ -373,6 +390,10 @@ impl EngagementState {
         self.planning_expanded_queue = VecDeque::from(steps);
     }
 
+    pub(crate) fn push_expanded_step_front(&mut self, step: PlanningRunStep) {
+        self.planning_expanded_queue.push_front(step);
+    }
+
     pub(crate) fn queue_plan(&mut self, plan: Vec<PlanningTaskId>) {
         self.planning_run_queue = plan.into_iter().collect();
         self.planning_expanded_queue.clear();
@@ -388,6 +409,27 @@ impl EngagementState {
     pub(crate) fn pause_planning_queue(&mut self) {
         self.planning_paused = true;
         self.clear_running_tool();
+    }
+
+    pub(crate) fn resume_planning_queue(&mut self) {
+        self.planning_paused = false;
+    }
+
+    pub(crate) fn set_pending_credential_continuation(
+        &mut self,
+        pending: PendingCredentialContinuation,
+    ) {
+        self.pending_credential_continuation = Some(pending);
+    }
+
+    pub(crate) fn pending_credential_continuation(&self) -> Option<&PendingCredentialContinuation> {
+        self.pending_credential_continuation.as_ref()
+    }
+
+    pub(crate) fn take_pending_credential_continuation(
+        &mut self,
+    ) -> Option<PendingCredentialContinuation> {
+        self.pending_credential_continuation.take()
     }
 
     pub(crate) fn planning_paused(&self) -> bool {
@@ -482,16 +524,33 @@ impl EngagementState {
     pub(crate) fn set_running_tool(&mut self, tool_name: String) {
         self.planning_running_tool = Some(tool_name);
         self.planning_running_task = None;
+        self.planning_running_step = None;
     }
 
+    #[cfg(test)]
     pub(crate) fn set_running_planning_step(&mut self, task: PlanningTaskId, tool_name: String) {
         self.planning_running_tool = Some(tool_name);
         self.planning_running_task = Some(task);
+        self.planning_running_step = None;
+    }
+
+    pub(crate) fn set_running_planning_run_step(&mut self, step: PlanningRunStep) {
+        self.planning_running_tool = Some(step.tool_name.clone());
+        self.planning_running_task = Some(step.task);
+        self.planning_running_step = Some(step);
+    }
+
+    pub(crate) fn take_running_planning_run_step(&mut self) -> Option<PlanningRunStep> {
+        let step = self.planning_running_step.take();
+        self.planning_running_tool = None;
+        self.planning_running_task = None;
+        step
     }
 
     pub(crate) fn clear_running_tool(&mut self) {
         self.planning_running_tool = None;
         self.planning_running_task = None;
+        self.planning_running_step = None;
     }
 
     pub(crate) fn planning_picker(&self) -> &PlanningPickerRouteState {

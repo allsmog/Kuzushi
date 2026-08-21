@@ -77,7 +77,10 @@ impl DispatchLifecycle {
     }
 
     pub(super) fn rejected(self, error: anyhow::Error) -> Result<ObservedDispatchOutcome> {
-        self.emit_rejection("dispatch_policy", &error.to_string())?;
+        let reason_class = crate::runtime::runtime_failure_metadata(&error)
+            .map(|metadata| metadata.error_class.as_str())
+            .unwrap_or("dispatch_policy");
+        self.emit_rejection(reason_class, &error.to_string())?;
         let completion = self.rejected_completion();
         Ok(ObservedDispatchOutcome {
             execution: Err(error),

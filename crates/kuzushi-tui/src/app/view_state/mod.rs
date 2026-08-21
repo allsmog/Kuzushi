@@ -66,6 +66,7 @@ pub use context_screen::{ContextScreenFooter, ContextScreenSnapshot, ContextScre
 pub use cost_screen::{CostScreenFooter, CostScreenSnapshot, CostScreenStatus};
 pub use coverage_deck::CoverageRouteState;
 pub use engagement::EngagementState;
+pub(crate) use engagement::{PendingCredentialContinuation, PendingCredentialWork};
 pub use health::{HealthFooter, HealthSnapshot, HealthStatus};
 pub use help_screen::{HelpScreenFooter, HelpScreenSnapshot, HelpScreenStatus};
 pub use input_mode::InputMode;

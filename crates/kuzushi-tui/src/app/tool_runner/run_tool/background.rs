@@ -373,7 +373,18 @@ impl ShellApp {
         {
             return None;
         }
-        langgraph_bridge_preflight_error(self.config(), tool_name)
+        if let Some(error) = langgraph_bridge_preflight_error(self.config(), tool_name) {
+            return Some(error);
+        }
+        let model = kuzushi_core::modules::tool_execution_model(tool_name, input, self.config())?;
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        match kuzushi_openai::LangGraphRuntime::from_config(self.config(), cwd) {
+            Ok(runtime) => runtime
+                .preflight_model_blocking(&model)
+                .err()
+                .map(|error| error.to_string()),
+            Err(error) => Some(error.to_string()),
+        }
     }
 
     fn open_activity_for_started_background_tool(&mut self) {

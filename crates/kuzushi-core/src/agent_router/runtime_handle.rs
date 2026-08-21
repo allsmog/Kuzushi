@@ -17,6 +17,10 @@ impl<'a> RuntimeHandle<'a> {
 
 #[async_trait]
 impl<'a> AgentRuntime for RuntimeHandle<'a> {
+    fn preflight_model_blocking(&self, model: &str) -> Result<()> {
+        self.inner().preflight_model_blocking(model)
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.inner()
             .query_blocking(request)

@@ -12,6 +12,14 @@ use super::bridge_payloads::{
 };
 
 const LEGACY_ERROR_PATTERNS: &[(&[&str], &str)] = &[
+    (
+        &[
+            "missing credentials",
+            "missing api key",
+            "api key not found",
+        ],
+        "authentication",
+    ),
     (&["timed out", "timeout"], "timeout"),
     (&["cancelled", "canceled"], "cancelled"),
     (&["fetch failed", "econnreset"], "transport"),

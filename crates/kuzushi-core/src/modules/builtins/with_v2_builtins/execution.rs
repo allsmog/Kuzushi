@@ -637,7 +637,89 @@ fn authorize_prepared_execution(
     enforce_autonomy_posture(descriptor, input, ctx.config.autonomy)?;
     enforce_descriptor_approval(descriptor, ctx, operation_binding)?;
     registry.enforce_runtime_requirement(name, input, runtime)?;
+    preflight_execution_model(registry, name, input, ctx, runtime)?;
     enforce_descriptor_finding_store(descriptor, ctx)
+}
+
+fn preflight_execution_model(
+    registry: &ModuleRegistry,
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
+    if !registry.tool_wants_runtime(name, input, ctx.config) {
+        return Ok(());
+    }
+    let runtime = runtime.context("model-backed execution requires an agent runtime")?;
+    let model = crate::modules::tool_execution_model(name, input, ctx.config)
+        .with_context(|| format!("{name} requires an explicit model before execution"))?;
+    runtime.preflight_model_blocking(&model)
+}
+
+#[cfg(test)]
+mod model_preflight_tests {
+    use super::*;
+    use crate::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct AuthenticationMissingRuntime {
+        preflight_calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl AgentRuntime for AuthenticationMissingRuntime {
+        fn preflight_model_blocking(&self, _model: &str) -> Result<()> {
+            self.preflight_calls.fetch_add(1, Ordering::SeqCst);
+            Err(anyhow::Error::new(RuntimeFailure::new(
+                RuntimeFailureMetadata::new(RuntimeFailureClass::Authentication, None, None),
+            )))
+        }
+
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            unreachable!("executor must not start after failed model preflight")
+        }
+    }
+
+    #[test]
+    fn model_authentication_is_rejected_before_executor_start() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(target.path()).unwrap();
+        let mut config = crate::V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
+        let runtime = AuthenticationMissingRuntime {
+            preflight_calls: AtomicUsize::new(0),
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_dispatch_input("agentic-sast:scan", json!({}), &ctx, None)
+            .unwrap()
+            .authorize_explicit_headless();
+
+        let error = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+            .unwrap_err();
+
+        assert_eq!(runtime.preflight_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            crate::runtime::runtime_failure_metadata(&error)
+                .unwrap()
+                .error_class,
+            RuntimeFailureClass::Authentication
+        );
+        assert!(!target.path().join(".kuzushi/v3/runs").exists());
+    }
 }
 
 fn bind_repository_execution_input(

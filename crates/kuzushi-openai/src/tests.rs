@@ -100,6 +100,51 @@ mod tests {
     }
 
     #[test]
+    fn model_preflight_distinguishes_openai_api_key_from_oauth() {
+        let tmp = tempfile::tempdir().unwrap();
+        let credentials = tmp.path().join("oauth.json");
+        std::fs::write(
+            &credentials,
+            r#"{"openai-codex":{"access":"oauth-access","refresh":"oauth-refresh","expires":99999999999999}}"#,
+        )
+        .unwrap();
+        let config = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
+            anthropic_oauth: Some(kuzushi_core::AnthropicOauthConfig {
+                credentials_path: Some(credentials),
+                allow_env_token: false,
+            }),
+        };
+        let mut runtime = LangGraphRuntime::from_runtime_config(&config, ".").unwrap();
+        runtime.api_key = None;
+
+        let error = runtime
+            .preflight_model_blocking("openai:gpt-5.5")
+            .unwrap_err();
+        let metadata = kuzushi_core::runtime::runtime_failure_metadata(&error).unwrap();
+        assert_eq!(
+            metadata.error_class,
+            kuzushi_core::RuntimeFailureClass::Authentication
+        );
+        assert!(error.to_string().contains("requires OPENAI_API_KEY"));
+        assert!(runtime
+            .preflight_model_blocking("openai-codex:gpt-5.5")
+            .is_ok());
+
+        runtime.api_key = Some("api-key-present".to_string());
+        assert!(runtime.preflight_model_blocking("openai:gpt-5.5").is_ok());
+    }
+
+    #[test]
     fn anthropic_model_rejects_openai_env_without_explicit_operator_config() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,

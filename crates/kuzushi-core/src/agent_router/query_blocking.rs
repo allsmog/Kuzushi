@@ -3,6 +3,11 @@ use crate::runtime::AgentQueryControl;
 
 #[async_trait]
 impl AgentRuntime for RoutedRuntime<'_> {
+    fn preflight_model_blocking(&self, model: &str) -> Result<()> {
+        validate_routed_request_model("preflight", model)?;
+        self.inner.preflight_model_blocking(model)
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         validate_routed_request_model("query", &request.model)?;
         self.inner

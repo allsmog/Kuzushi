@@ -1,5 +1,8 @@
 use super::*;
-use crate::app::{auth_method_rows, auth_provider_label, AuthMethodRow, AuthMethodRowKind};
+use crate::app::{
+    auth_method_rows, auth_provider_label, credential_recovery_rows, AuthMethodRow,
+    AuthMethodRowKind,
+};
 
 type HintBinding = (&'static str, &'static str);
 
@@ -29,7 +32,11 @@ pub(crate) fn auth_method_picker_lines(
         return auth_snapshot_lines(snapshot.clone(), area.width as usize);
     }
 
-    let rows = auth_method_rows(provider);
+    let rows = if app.router.auth_picker().is_recovery() {
+        credential_recovery_rows(provider)
+    } else {
+        auth_method_rows(provider)
+    };
     let lines = expanded_auth_picker_lines(app, area, provider, &rows);
     if lines.len() > area.height as usize {
         return compact_auth_picker_lines(app, area, provider, &rows);

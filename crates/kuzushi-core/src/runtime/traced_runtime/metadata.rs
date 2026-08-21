@@ -27,7 +27,9 @@ pub(super) fn safe_error_label(verb: &str, error: &anyhow::Error) -> String {
 }
 
 pub(super) fn model_error_class(error: &anyhow::Error) -> &'static str {
-    model_error_class_from_message(&error.to_string())
+    crate::runtime::runtime_failure_metadata(error)
+        .map(|metadata| metadata.error_class.as_str())
+        .unwrap_or_else(|| model_error_class_from_message(&error.to_string()))
 }
 
 pub fn model_error_class_from_message(message: &str) -> &'static str {
@@ -181,5 +183,18 @@ mod error_label_tests {
         let persistence = format!("{message}; additionally, terminal run persistence failed");
         assert_eq!(safe_model_failure_message(&persistence), persistence);
         assert!(!message.contains(sentinel));
+    }
+
+    #[test]
+    fn wrapped_typed_failures_keep_their_runtime_class() {
+        let metadata = crate::runtime::RuntimeFailureMetadata::new(
+            crate::runtime::RuntimeFailureClass::Authentication,
+            None,
+            None,
+        );
+        let error = anyhow::Error::new(crate::runtime::RuntimeFailure::new(metadata))
+            .context("structured output failed");
+
+        assert_eq!(safe_error_label("query", &error), "query failed (authentication)");
     }
 }

@@ -1150,12 +1150,28 @@ impl ShellApp {
         if update.handled {
             return update;
         }
-        if self.is_picker_view() && self.handle_notice_dismiss_key(key) {
-            return InputUpdate::handled();
-        }
-        let update = self.handle_picker_key(key);
+        self.handle_picker_deferred_modal_key(key)
+    }
+
+    fn handle_picker_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.handle_credential_recovery_escape(key);
         if update.handled {
             return update;
+        }
+        if self.handle_picker_notice_dismiss(key) {
+            return InputUpdate::handled();
+        }
+        self.handle_picker_key(key)
+    }
+
+    fn handle_picker_notice_dismiss(&mut self, key: KeyEvent) -> bool {
+        self.is_picker_view() && self.handle_notice_dismiss_key(key)
+    }
+
+    fn handle_credential_recovery_escape(&mut self, key: KeyEvent) -> InputUpdate {
+        let recovery_open = self.engagement.pending_credential_continuation().is_some();
+        if key.code == KeyCode::Esc && recovery_open {
+            return self.handle_picker_key(key);
         }
         InputUpdate::ignored()
     }

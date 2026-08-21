@@ -80,7 +80,7 @@ pub(crate) fn preflight_tool_loop_blocking(
     runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
 ) -> Result<()> {
-    validate_runtime_model(runtime, &request.model)?;
+    runtime.validated_model_credential(&request.model)?;
     let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
     bridge_request.envelope_type = "next-step-preflight";
     let response = run_next_step_preflight_bridge(

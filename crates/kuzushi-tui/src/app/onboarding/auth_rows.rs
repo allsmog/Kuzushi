@@ -39,8 +39,8 @@ const OFFLINE_DEMO_ROW: AuthMethodRow = AuthMethodRow {
 /// offers the offline demo as a keyless escape hatch, so it is always the
 /// last row. Providers with no OAuth flow render `[ApiKey, OfflineDemo]`.
 pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
-    match AuthProvider::from_scene_provider(provider) {
-        Some(AuthProvider::Anthropic) => vec![
+    match provider {
+        "anthropic" => vec![
             AuthMethodRow {
                 kind: AuthMethodRowKind::ApiKey,
                 label: "API key (ANTHROPIC_API_KEY)",
@@ -53,12 +53,15 @@ pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
             },
             OFFLINE_DEMO_ROW,
         ],
-        Some(AuthProvider::OpenAi) => vec![
+        "openai" => vec![
             AuthMethodRow {
                 kind: AuthMethodRowKind::ApiKey,
                 label: "API key (OPENAI_API_KEY)",
                 hint: "paste key here, Enter accepts for this session",
             },
+            OFFLINE_DEMO_ROW,
+        ],
+        "openai-codex" => vec![
             AuthMethodRow {
                 kind: AuthMethodRowKind::OAuth,
                 label: "OpenAI OAuth login",
@@ -66,8 +69,18 @@ pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
             },
             OFFLINE_DEMO_ROW,
         ],
-        Some(AuthProvider::GitHubCopilot) | None => Vec::new(),
+        _ => match AuthProvider::from_scene_provider(provider) {
+            Some(AuthProvider::GitHubCopilot) | None => Vec::new(),
+            Some(AuthProvider::Anthropic | AuthProvider::OpenAi) => unreachable!(),
+        },
     }
+}
+
+pub fn credential_recovery_rows(provider: &str) -> Vec<AuthMethodRow> {
+    auth_method_rows(provider)
+        .into_iter()
+        .filter(|row| row.kind != AuthMethodRowKind::OfflineDemo)
+        .collect()
 }
 
 /// Just the ordered row kinds — consumed by the picker route state so it can
@@ -79,24 +92,42 @@ pub fn auth_method_row_kinds(provider: &str) -> Vec<AuthMethodRowKind> {
         .collect()
 }
 
+pub fn credential_recovery_row_kinds(provider: &str) -> Vec<AuthMethodRowKind> {
+    credential_recovery_rows(provider)
+        .iter()
+        .map(|row| row.kind)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn credentialed_providers_end_with_the_offline_demo_row() {
+    fn ordinary_credential_screens_end_with_the_offline_demo_row() {
         for provider in ["anthropic", "openai", "openai-codex"] {
             let rows = auth_method_rows(provider);
-            assert_eq!(
-                rows.first().map(|row| row.kind),
-                Some(AuthMethodRowKind::ApiKey)
-            );
             assert_eq!(
                 rows.last().map(|row| row.kind),
                 Some(AuthMethodRowKind::OfflineDemo)
             );
-            assert!(rows.iter().any(|row| row.kind == AuthMethodRowKind::OAuth));
         }
+    }
+
+    #[test]
+    fn openai_namespaces_offer_only_compatible_credentials() {
+        assert_eq!(
+            auth_method_row_kinds("openai"),
+            vec![AuthMethodRowKind::ApiKey, AuthMethodRowKind::OfflineDemo]
+        );
+        assert_eq!(
+            auth_method_row_kinds("openai-codex"),
+            vec![AuthMethodRowKind::OAuth, AuthMethodRowKind::OfflineDemo]
+        );
+        assert_eq!(
+            credential_recovery_row_kinds("openai"),
+            vec![AuthMethodRowKind::ApiKey]
+        );
     }
 
     #[test]

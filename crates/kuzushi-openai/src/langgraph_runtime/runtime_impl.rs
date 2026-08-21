@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use kuzushi_core::{
     runtime::RuntimeCostReport, AgentLoopStep, AgentQueryControl, AgentQueryRequest,
     AgentQueryResponse, AgentRuntime, AgentStructuredOutput, AgentToolLoopRequest,
-    LoopHistoryEntry, ModelTokenUsage, Observed, ScanCancellation, TriageOutcome, TriageRequest,
+    LoopHistoryEntry, ModelTokenUsage, Observed, RuntimeFailure, RuntimeFailureClass,
+    RuntimeFailureMetadata, ScanCancellation, TriageOutcome, TriageRequest,
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
@@ -27,6 +28,10 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
+    fn preflight_model_blocking(&self, model: &str) -> Result<()> {
+        self.validated_model_credential(model).map(|_| ())
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.query_observed_blocking(request)
             .map(Observed::into_value)
@@ -277,6 +282,57 @@ impl LangGraphRuntime {
         };
         Ok(ModelCredential { env, value })
     }
+
+    pub(crate) fn validated_model_credential(&self, model: &str) -> Result<ModelCredential> {
+        let credential = self.credential_for_model(model)?;
+        let provider = model
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or("");
+        let ready = match provider {
+            "openai" => credential.value.is_some(),
+            "openai-codex" => oauth_is_ready(crate::oauth::probe_openai_path(
+                &self.oauth_credentials_path,
+            )?),
+            "anthropic" => {
+                credential.value.is_some()
+                    || (self.oauth_allow_env_token && crate::oauth::has_env_token())
+                    || oauth_is_ready(crate::oauth::probe_path(&self.oauth_credentials_path)?)
+            }
+            // Vertex resolves Application Default Credentials and project
+            // identity inside the SDK, including workload metadata identities.
+            "vertex-anthropic" => true,
+            _ => false,
+        };
+        if ready {
+            return Ok(credential);
+        }
+        Err(missing_model_credential(model, provider))
+    }
+}
+
+fn oauth_is_ready(readiness: crate::oauth::OauthReadiness) -> bool {
+    matches!(
+        readiness,
+        crate::oauth::OauthReadiness::Ready { .. } | crate::oauth::OauthReadiness::Expired { .. }
+    )
+}
+
+fn missing_model_credential(model: &str, provider: &str) -> anyhow::Error {
+    let guidance = match provider {
+        "openai" => format!(
+            "{model} requires OPENAI_API_KEY; stored OpenAI OAuth works only with openai-codex models"
+        ),
+        "openai-codex" => {
+            format!("{model} requires stored OpenAI OAuth; run `kuzushi auth login openai`")
+        }
+        "anthropic" => {
+            format!("{model} requires ANTHROPIC_API_KEY or stored Anthropic OAuth")
+        }
+        _ => format!("{model} has no compatible configured credential"),
+    };
+    let metadata = RuntimeFailureMetadata::new(RuntimeFailureClass::Authentication, None, None);
+    anyhow::Error::new(RuntimeFailure::new(metadata)).context(guidance)
 }
 
 fn run_bridge_with_transport_retries(

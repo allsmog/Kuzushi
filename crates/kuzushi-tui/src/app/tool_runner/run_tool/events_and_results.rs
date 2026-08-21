@@ -114,21 +114,52 @@ impl ShellApp {
                 tool_name,
                 result,
                 completion,
-            } => self.apply_result_tool_event(
-                with_tool_completion(state, completion),
-                tool_name,
-                result,
-            ),
+            } => self.apply_observed_result_tool_event(state, tool_name, result, completion),
             ToolEvent::ObservedFailed {
                 tool_name,
                 error,
                 completion,
-            } => self.apply_failed_tool_event(
-                with_tool_completion(state, completion),
+            } => self.apply_observed_failed_tool_event(state, tool_name, error, completion),
+            ToolEvent::AuthenticationFailed {
                 tool_name,
                 error,
-            ),
+                completion,
+            } => self.apply_observed_authentication_failure(state, tool_name, error, completion),
         }
+    }
+
+    fn apply_observed_result_tool_event(
+        &mut self,
+        state: ToolEventState,
+        tool_name: String,
+        result: serde_json::Value,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    ) -> Vec<ShellEffect> {
+        self.apply_result_tool_event(with_tool_completion(state, completion), tool_name, result)
+    }
+
+    fn apply_observed_failed_tool_event(
+        &mut self,
+        state: ToolEventState,
+        tool_name: String,
+        error: String,
+        completion: kuzushi_core::PendingToolCallCompletion,
+    ) -> Vec<ShellEffect> {
+        self.apply_failed_tool_event(with_tool_completion(state, completion), tool_name, error)
+    }
+
+    fn apply_observed_authentication_failure(
+        &mut self,
+        state: ToolEventState,
+        tool_name: String,
+        error: String,
+        completion: Option<kuzushi_core::PendingToolCallCompletion>,
+    ) -> Vec<ShellEffect> {
+        let state = match completion {
+            Some(completion) => with_tool_completion(state, completion),
+            None => state,
+        };
+        self.apply_authentication_failed_tool_event(state, tool_name, error)
     }
 
     fn apply_result_tool_event(
@@ -433,6 +464,44 @@ impl ShellApp {
         if self.engagement.running_tool_is(&tool_name) {
             self.pause_planning_task_after_failure(&tool_name, &error);
         }
+        effects
+    }
+
+    fn apply_authentication_failed_tool_event(
+        &mut self,
+        mut state: ToolEventState,
+        tool_name: String,
+        error: String,
+    ) -> Vec<ShellEffect> {
+        if let Some(reason) = state.abort_reason {
+            return self.apply_aborted_tool_event(state, tool_name, error, reason);
+        }
+        let target = state.target.clone();
+        let effects = vec![tool_run_record_effect(
+            &mut state,
+            &tool_name,
+            ToolRunRecordOutcome::Failed {
+                error: error.clone(),
+            },
+        )];
+        self.record_failed_tool_spent_cost(&state);
+        self.mark_tool_activity_failed(&tool_name, &error);
+        if self.pause_running_planning_step_for_credentials(&tool_name, target, error.clone()) {
+            self.set_failed_activity(tool_name.clone(), "credentials rejected; plan paused");
+            self.log_tool_failure(
+                &tool_name,
+                with_next_step(error, "update credentials to resume this Scan plan"),
+                false,
+            );
+            return effects;
+        }
+        self.abort_pending_chain(&tool_name);
+        self.log_tool_failure(
+            &tool_name,
+            with_next_step(error, "update credentials before retrying"),
+            false,
+        );
+        self.set_failed_activity(tool_name, "provider rejected credentials");
         effects
     }
 

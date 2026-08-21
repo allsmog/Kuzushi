@@ -175,10 +175,11 @@ pub(crate) use log::{LogState, LOG_LINE_CAPACITY};
 pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
-    auth_method_rows, build_execution_plan, cli_is_on_path, direct_dependencies, direct_dependents,
-    discover_target_candidates, initial_onboarding_phase, initial_onboarding_phase_for,
-    model_recommended_in_phase, recommended_tasks_for_phase, record_recent_target, row_disposition,
-    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
+    auth_method_rows, build_execution_plan, cli_is_on_path, credential_recovery_row_kinds,
+    credential_recovery_rows, direct_dependencies, direct_dependents, discover_target_candidates,
+    initial_onboarding_phase, initial_onboarding_phase_for, model_recommended_in_phase,
+    recommended_tasks_for_phase, record_recent_target, row_disposition, skip_onboarding_env,
+    toggle_planning_row, topological_order, transitive_dependencies,
     ArtifactState as PlanningArtifactState, AuthMethodRow, AuthMethodRowKind, FailedPlanningTask,
     InitialOnboardingPhase, LastAttempt, OnboardingInputs, PendingRetry, PickerFocus,
     PlanningOptionEdit, PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition,

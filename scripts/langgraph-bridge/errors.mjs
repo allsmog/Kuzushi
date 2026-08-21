@@ -115,9 +115,21 @@ function errorClassFromShape(error) {
     rateLimitClass(name, message) ??
     timeoutClass(code, message) ??
     transportClass(name, code, message) ??
+    authenticationClass(message) ??
     sdkClientValidationClass(name, message) ??
     "bridge_internal"
   );
+}
+
+// Provider SDKs sometimes reject absent local credentials before making a
+// request and expose neither an HTTP status nor a stable error code. Keep the
+// match deliberately narrow and surface only the generic public auth message.
+function authenticationClass(message) {
+  const missingCredential =
+    message.includes("missing credentials") ||
+    message.includes("missing api key") ||
+    message.includes("api key not found");
+  return missingCredential ? "authentication" : undefined;
 }
 
 // LangChain provider adapters validate invocation params client-side (e.g.

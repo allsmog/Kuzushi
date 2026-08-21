@@ -1,6 +1,6 @@
 use crate::app::{
-    auth_method_row_kinds, AuthMethodRowKind, PickerFocus, PlanningArtifactState,
-    PlanningOptionEdit, PlanningTaskId, PlanningTaskRow, WorkflowPhase,
+    auth_method_row_kinds, credential_recovery_row_kinds, AuthMethodRowKind, PickerFocus,
+    PlanningArtifactState, PlanningOptionEdit, PlanningTaskId, PlanningTaskRow, WorkflowPhase,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -164,6 +164,7 @@ pub struct AuthPickerRouteState {
     provider: String,
     key_draft: String,
     rows: Vec<AuthMethodRowKind>,
+    recovery: bool,
 }
 
 impl AuthPickerRouteState {
@@ -171,8 +172,22 @@ impl AuthPickerRouteState {
         self.cursor = 0;
         self.focus = PickerFocus::List;
         self.rows = auth_method_row_kinds(&provider);
+        self.recovery = false;
         self.provider = provider;
         self.key_draft.clear();
+    }
+
+    pub(crate) fn open_recovery(&mut self, provider: String) {
+        self.cursor = 0;
+        self.focus = PickerFocus::List;
+        self.rows = credential_recovery_row_kinds(&provider);
+        self.recovery = true;
+        self.provider = provider;
+        self.key_draft.clear();
+    }
+
+    pub(crate) fn is_recovery(&self) -> bool {
+        self.recovery
     }
 
     pub(crate) fn provider(&self) -> &str {

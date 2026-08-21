@@ -3,6 +3,21 @@ use crate::app::{
     auth_ready_for_provider, build_execution_plan, display_model_selector, toggle_planning_row,
     visible_model_choices, AuthMethodRowKind, ToggleOutcome,
 };
+use std::path::PathBuf;
+
+struct PlanningCredentialContext {
+    target: PathBuf,
+    phase: WorkflowPhase,
+    model: String,
+    provider: String,
+    guidance: String,
+}
+
+enum PlanningCredentialGate {
+    Ready,
+    Blocked,
+    Recover(PlanningCredentialContext),
+}
 
 impl ShellApp {
     /// The first-run model/auth/planning pickers are modal selection screens.
@@ -460,7 +475,7 @@ impl ShellApp {
             return;
         }
         // A credentialed provider with no wired credentials opens the inline
-        // credential-entry step (API key / OAuth / offline demo) instead of
+        // credential-entry step with compatible auth methods instead of
         // stranding the operator on the Workbench. Session readiness also
         // recognizes a key accepted moments earlier, before its environment
         // effect is drained.
@@ -654,8 +669,7 @@ impl ShellApp {
                     api_key_env_var(api_key_provider)
                 ),
             );
-            self.transition_after_auth_ready();
-            return Vec::new();
+            return self.transition_after_auth_ready();
         }
         let env_var = api_key_env_var(api_key_provider);
         let message =
@@ -673,11 +687,12 @@ impl ShellApp {
             "onboarding",
             format!("{env_var} accepted for this session; value hidden"),
         );
-        self.transition_after_auth_ready();
-        vec![ShellEffect::SetSessionEnv(SessionEnvVar {
+        let mut effects = vec![ShellEffect::SetSessionEnv(SessionEnvVar {
             key: env_var.to_string(),
             value: key,
-        })]
+        })];
+        effects.extend(self.transition_after_auth_ready());
+        effects
     }
 
     fn accept_auth_oauth_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
@@ -690,8 +705,7 @@ impl ShellApp {
                     auth_provider_label(provider)
                 ),
             );
-            self.transition_after_auth_ready();
-            return Vec::new();
+            return self.transition_after_auth_ready();
         }
         self.clear_credential_notice();
         self.log(
@@ -717,6 +731,20 @@ impl ShellApp {
 
     fn return_to_model_picker(&mut self) {
         self.router.auth_picker_mut().clear_key_draft();
+        if let Some(pending) = self.engagement.take_pending_credential_continuation() {
+            self.router.setup_mut().finish_editor();
+            self.engagement.set_phase(pending.phase);
+            if let PendingCredentialWork::DeferredStep(step) = pending.work {
+                self.engagement.push_expanded_step_front(step);
+                self.engagement.pause_planning_queue();
+            }
+            self.set_shell_view(ShellView::PlanningPicker);
+            self.set_warn_notice(
+                "planning",
+                "Scan not started · credentials are still missing; selection kept.",
+            );
+            return;
+        }
         if self.router.setup().editor() == Some(SetupEditor::Credentials) {
             self.return_to_setup_from_editor();
         } else {
@@ -724,12 +752,17 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn transition_after_auth_ready(&mut self) {
+    pub(crate) fn transition_after_auth_ready(&mut self) -> Vec<ShellEffect> {
+        if self.engagement.pending_credential_continuation().is_some() {
+            self.router.setup_mut().finish_editor();
+            return vec![ShellEffect::ResumeCredentialContinuation];
+        }
         if self.router.setup().editor() == Some(SetupEditor::Credentials) {
             self.return_to_setup_from_editor();
         } else {
             self.open_fresh_planner_or_workbench();
         }
+        Vec::new()
     }
 
     fn return_to_setup_from_editor(&mut self) {
@@ -977,12 +1010,8 @@ impl ShellApp {
     }
 
     pub(crate) fn accept_planning_picker(&mut self) -> InputUpdate {
-        if self.engagement.planning_picker().returns_to_setup() {
-            self.return_to_setup_from_editor();
-            return InputUpdate::handled();
-        }
-        if self.open_file_picker_for_attach_only_plan() {
-            return InputUpdate::handled();
+        if let Some(update) = self.planning_accept_navigation() {
+            return update;
         }
         self.drop_failed_dependency_selection();
         let plan = build_execution_plan(
@@ -992,6 +1021,9 @@ impl ShellApp {
         );
         if plan.is_empty() {
             return InputUpdate::handled_with_effects(self.explain_empty_planning_confirm());
+        }
+        if self.open_credentials_for_planning_plan(&plan) {
+            return InputUpdate::handled();
         }
         let labels = plan
             .iter()
@@ -1014,6 +1046,104 @@ impl ShellApp {
                 success_view: Some(PlanningDispatchView::Activity),
             },
         )])
+    }
+
+    fn planning_accept_navigation(&mut self) -> Option<InputUpdate> {
+        if self.engagement.planning_picker().returns_to_setup() {
+            self.return_to_setup_from_editor();
+            return Some(InputUpdate::handled());
+        }
+        self.open_file_picker_for_attach_only_plan()
+            .then(InputUpdate::handled)
+    }
+
+    fn open_credentials_for_planning_plan(&mut self, plan: &[PlanningTaskId]) -> bool {
+        if !plan.iter().any(|task| task.is_model_backed()) {
+            return false;
+        }
+        match self.planning_credential_gate() {
+            PlanningCredentialGate::Ready => false,
+            PlanningCredentialGate::Blocked => true,
+            PlanningCredentialGate::Recover(context) => {
+                self.open_planning_credential_recovery(plan, context);
+                true
+            }
+        }
+    }
+
+    fn planning_credential_gate(&mut self) -> PlanningCredentialGate {
+        let Some(model) = self.config().model.clone() else {
+            self.set_warn_notice(
+                "planning",
+                "This plan needs a model before it can start; choose one in Model.",
+            );
+            self.open_model_picker();
+            return PlanningCredentialGate::Blocked;
+        };
+        if self.configured_model_auth_ready() {
+            return PlanningCredentialGate::Ready;
+        }
+        let Some(target) = self.target_owned() else {
+            self.set_error_notice(
+                "planning",
+                "Return to Target and select a target before starting this Scan.",
+            );
+            return PlanningCredentialGate::Blocked;
+        };
+        let Some(phase) = self.engagement.current_phase() else {
+            self.set_error_notice(
+                "planning",
+                "Reopen Scan before continuing; this selection has not started.",
+            );
+            return PlanningCredentialGate::Blocked;
+        };
+        PlanningCredentialGate::Recover(Self::planning_credential_context(target, phase, model))
+    }
+
+    fn planning_credential_context(
+        target: PathBuf,
+        phase: WorkflowPhase,
+        model: String,
+    ) -> PlanningCredentialContext {
+        let provider = model
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or_default()
+            .to_string();
+        let guidance = AuthProvider::from_scene_provider(&provider)
+            .map(|auth| auth.missing_credential_guidance(&model, &provider))
+            .unwrap_or_else(|| format!("{model} has no compatible configured credential"));
+        PlanningCredentialContext {
+            target,
+            phase,
+            model,
+            provider,
+            guidance,
+        }
+    }
+
+    fn open_planning_credential_recovery(
+        &mut self,
+        plan: &[PlanningTaskId],
+        context: PlanningCredentialContext,
+    ) {
+        self.engagement
+            .set_pending_credential_continuation(PendingCredentialContinuation {
+                target: context.target,
+                phase: context.phase,
+                model: context.model,
+                work: PendingCredentialWork::CommittedPlan(plan.to_vec()),
+            });
+        self.open_credential_recovery(context.provider);
+        self.set_warn_notice(
+            "planning",
+            format!(
+                "{} plan ready · {}. Add credentials to continue this {}-step plan.",
+                context.phase.label(),
+                context.guidance,
+                plan.len()
+            ),
+        );
     }
 
     fn drop_failed_dependency_selection(&mut self) {

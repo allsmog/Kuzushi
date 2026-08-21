@@ -343,6 +343,10 @@ fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelU
 
 #[async_trait]
 impl AgentRuntime for TracedRuntime<'_> {
+    fn preflight_model_blocking(&self, model: &str) -> Result<()> {
+        self.inner.preflight_model_blocking(model)
+    }
+
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         self.query_observed_blocking(request)
             .map(Observed::into_value)

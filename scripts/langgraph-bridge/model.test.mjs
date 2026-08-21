@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AIMessage } from "@langchain/core/messages";
+import { BridgePublicError } from "./errors.mjs";
 import {
   bridgeQueryResult,
+  credentialForRequest,
   isTruncatedStopReason,
   openAiAccountIdFromJwt,
   openAiCredentialFromRefreshResponse,
@@ -23,6 +25,22 @@ test("forced conclusions remain structured but are marked truncated", () => {
 test("natural completion is not marked truncated", () => {
   assert.equal(isTruncatedStopReason(undefined), false);
   assert.equal(isTruncatedStopReason("stop"), false);
+});
+
+test("API model credentials fail as typed authentication before SDK invocation", () => {
+  assert.throws(
+    () =>
+      credentialForRequest(
+        { apiKeyEnv: "KUZUSHI_TEST_DEFINITELY_MISSING_OPENAI_KEY" },
+        "openai",
+        "OPENAI_API_KEY",
+      ),
+    (error) => error instanceof BridgePublicError && error.errorClass === "authentication",
+  );
+  assert.equal(
+    credentialForRequest({ apiKey: "test-present" }, "openai", "OPENAI_API_KEY"),
+    "test-present",
+  );
 });
 
 test("OpenAI refresh response rotates credentials and retains the account identity", () => {

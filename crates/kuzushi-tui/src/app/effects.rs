@@ -61,6 +61,7 @@ pub(crate) enum ShellEffect {
     PersistPlanningOptionOverride(PlanningOptionOverridePersist),
     PersistOptions(OptionScope),
     ResetPromptOverride(PromptOverrideReset),
+    ResumeCredentialContinuation,
     ResumeSession(ResumeSession),
     RequestExitAbort,
     RequestShellQuit,

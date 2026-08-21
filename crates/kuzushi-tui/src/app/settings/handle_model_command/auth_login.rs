@@ -111,11 +111,18 @@ impl ShellApp {
     /// the read-only Auth view with no exit — the exact keyless dead-end
     /// this onboarding surface exists to remove.
     fn recover_from_missing_auth_login_bridge(&mut self, provider: &str) -> Vec<ShellEffect> {
-        self.set_error_notice(
-            "auth",
-            "OAuth bridge unavailable — choose API key, retry OAuth after fixing the bridge, or move to Offline demo and press Enter",
-        );
-        self.open_credential_entry(provider.to_string());
+        let recovering_plan = self.engagement.pending_credential_continuation().is_some();
+        let message = if recovering_plan {
+            "OAuth login unavailable · retry after fixing authentication, or press Esc to return to the preserved Scan"
+        } else {
+            "OAuth login unavailable · choose API key, retry OAuth after fixing authentication, or move to Offline demo and press Enter"
+        };
+        self.set_error_notice("auth", message);
+        if recovering_plan {
+            self.open_credential_recovery(provider.to_string());
+        } else {
+            self.open_credential_entry(provider.to_string());
+        }
         Vec::new()
     }
 
@@ -126,11 +133,14 @@ impl ShellApp {
             // stranding them on the read-only Auth view — the reopen is
             // one-shot per Enter, and Esc always exits.
             self.report_incomplete_picker_oauth(provider);
-            self.open_credential_entry(provider.to_string());
+            if self.engagement.pending_credential_continuation().is_some() {
+                self.open_credential_recovery(provider.to_string());
+            } else {
+                self.open_credential_entry(provider.to_string());
+            }
             return Vec::new();
         }
-        self.transition_after_auth_ready();
-        Vec::new()
+        self.transition_after_auth_ready()
     }
 
     fn report_incomplete_picker_oauth(&mut self, provider: &str) {

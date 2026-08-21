@@ -13,8 +13,8 @@ use super::prereq_chain::{
 pub(crate) use extract_cost_usd::*;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    config_hash, failed_tool_output, new_run_id, AgenticSastReport, CarliniThreatHuntReport,
-    ReconHost, ReconNote, ReconService, TraceHandle, WorkspaceTarget,
+    config_hash, failed_tool_output, new_run_id, AgentRuntime, AgenticSastReport,
+    CarliniThreatHuntReport, ReconHost, ReconNote, ReconService, TraceHandle, WorkspaceTarget,
 };
 pub(crate) use run_tool::*;
 pub(crate) use tool_run_records::*;

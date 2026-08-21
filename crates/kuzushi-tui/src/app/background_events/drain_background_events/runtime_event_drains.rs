@@ -608,7 +608,8 @@ impl ShellApp {
                 | ToolEvent::Failed { .. }
                 | ToolEvent::Refused { .. }
                 | ToolEvent::ObservedFinished { .. }
-                | ToolEvent::ObservedFailed { .. },
+                | ToolEvent::ObservedFailed { .. }
+                | ToolEvent::AuthenticationFailed { .. },
             ) => !self.scan().is_some_and(|scan| scan.running),
             ShellEvent::Agent(_) | ShellEvent::Plan(_) | ShellEvent::Threat(_) => {
                 event.is_terminal()
@@ -1395,6 +1396,7 @@ fn run_focus_event_outcome(event: &ShellEvent) -> String {
         ShellEvent::Scan(ScanEvent::Failed { .. })
         | ShellEvent::Tool(ToolEvent::Failed { .. })
         | ShellEvent::Tool(ToolEvent::ObservedFailed { .. })
+        | ShellEvent::Tool(ToolEvent::AuthenticationFailed { .. })
         | ShellEvent::Agent(AgentEvent::Failed { .. })
         | ShellEvent::Plan(PlanEvent::Failed { .. })
         | ShellEvent::Threat(ThreatPatchEvent::Failed { .. }) => "failed",

@@ -96,7 +96,8 @@ impl ShellEvent {
                 | ToolEvent::Failed { .. }
                 | ToolEvent::Refused { .. }
                 | ToolEvent::ObservedFinished { .. }
-                | ToolEvent::ObservedFailed { .. },
+                | ToolEvent::ObservedFailed { .. }
+                | ToolEvent::AuthenticationFailed { .. },
             ) => true,
             Self::Agent(AgentEvent::Answered { .. } | AgentEvent::Failed { .. }) => true,
             Self::Plan(PlanEvent::Proposed { .. } | PlanEvent::Failed { .. }) => true,

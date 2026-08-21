@@ -65,11 +65,14 @@ impl ShellApp {
             .setup_mut()
             .begin_editor(SetupEditor::Credentials);
         let label = auth_provider_label(&provider);
+        let methods = crate::app::auth_method_rows(&provider)
+            .iter()
+            .map(|row| row.label)
+            .collect::<Vec<_>>()
+            .join(", ");
         self.log(
             "onboarding",
-            format!(
-                "{label} needs credentials — paste an API key, or move to OAuth or Offline demo and press Enter"
-            ),
+            format!("{label} needs credentials · choose {methods} and press Enter"),
         );
         self.set_shell_view(ShellView::Setup);
     }
@@ -77,11 +80,19 @@ impl ShellApp {
     /// Inline credential-entry step for a credentialed provider whose
     /// credentials are missing. Replaces the old "log and dump to the
     /// Workbench" dead-end: the operator stays in an actionable surface with
-    /// three exits (API key, OAuth, offline demo). No provider or model is
-    /// picked here — every mutation stays behind an explicit Enter on a
-    /// labeled row, preserving no-silent-fallback.
+    /// only the compatible credential methods plus the offline demo. No
+    /// provider or model is picked here — every mutation stays behind an
+    /// explicit Enter on a labeled row, preserving no-silent-fallback.
     pub(crate) fn open_credential_entry(&mut self, provider: String) {
         self.open_auth_method_picker(provider);
+    }
+
+    pub(crate) fn open_credential_recovery(&mut self, provider: String) {
+        self.router.auth_picker_mut().open_recovery(provider);
+        self.router
+            .setup_mut()
+            .begin_editor(SetupEditor::Credentials);
+        self.set_shell_view(ShellView::Setup);
     }
 
     /// Aggregate pre-engagement readiness surface for a fresh target. Map

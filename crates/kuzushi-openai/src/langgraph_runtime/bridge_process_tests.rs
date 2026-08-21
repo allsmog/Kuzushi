@@ -253,6 +253,23 @@ fn public_bridge_error_rewrites_internal_provider_tokens() {
 }
 
 #[test]
+fn legacy_missing_api_key_is_classified_as_authentication() {
+    let metadata = bridge_failure_metadata(
+        None,
+        None,
+        Some("Missing credentials. Please pass an apiKey"),
+        None,
+    );
+
+    assert_eq!(
+        metadata.error_class,
+        kuzushi_core::RuntimeFailureClass::Authentication
+    );
+    assert_eq!(metadata.public_message(), "Provider authentication failed.");
+    assert!(metadata.detail.is_none());
+}
+
+#[test]
 fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
     let sentinel = "raw-provider-stderr-sentinel";
     let request = test_next_step_request();

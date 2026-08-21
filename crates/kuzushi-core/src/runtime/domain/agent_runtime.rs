@@ -108,6 +108,13 @@ mod agent_loop_outcome_serde_tests {
 
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
+    /// Verify that `model` can authenticate before any tool executor performs
+    /// local setup or starts a provider bridge. Runtimes that do not own
+    /// credential resolution retain the compatibility no-op.
+    fn preflight_model_blocking(&self, _model: &str) -> Result<()> {
+        Ok(())
+    }
+
     fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         anyhow::bail!("agent runtime does not support generic LangGraph queries")
     }

@@ -57,6 +57,7 @@ impl EffectRuntime {
                 | ShellEffect::RecordProofDeferral(_)
                 | ShellEffect::RecordSuppression(_)
                 | ShellEffect::RecordStrategyCorrection(_)
+                | ShellEffect::ResumeCredentialContinuation
                 | ShellEffect::SelectComponent(_)
                 | ShellEffect::StartOfflineDemoFixtureScan
                 | ShellEffect::SwitchTargetRevision(_)
@@ -114,6 +115,9 @@ impl EffectRuntime {
             ShellEffect::RecordSuppression(apply) => app.record_suppression_effect(apply),
             ShellEffect::RecordStrategyCorrection(record) => {
                 app.record_strategy_correction_effect(record)
+            }
+            ShellEffect::ResumeCredentialContinuation => {
+                app.resume_credential_continuation_effect()
             }
             ShellEffect::SelectComponent(selection) => app.select_component_effect(selection),
             ShellEffect::StartOfflineDemoFixtureScan => {

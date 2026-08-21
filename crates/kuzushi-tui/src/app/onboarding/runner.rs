@@ -10,15 +10,16 @@ use super::planning_task_explicit_input;
 use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
 use crate::app::{
-    workspace_for_target, DeterministicRecommendationRefresh, PlanningDispatchView,
-    PlanningTaskDispatch, ShellEffect, WorkflowPhase,
+    workspace_for_target, DeterministicRecommendationRefresh, PendingCredentialContinuation,
+    PendingCredentialWork, PlanningDispatchView, PlanningTaskDispatch, ShellEffect, WorkflowPhase,
 };
 use crate::{ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::modules::PathSemantics;
+use kuzushi_core::runtime::runtime_failure_metadata;
 use kuzushi_core::{
-    ExecutionAuthorization, Finding, NestedProjectKind, ToolExecutionContext, TriageVerdict,
-    WorkspaceTarget,
+    AgentRuntime, ExecutionAuthorization, Finding, NestedProjectKind, RuntimeFailureClass,
+    ToolExecutionContext, TriageVerdict, WorkspaceTarget,
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -32,6 +33,85 @@ pub struct PlanningRunStep {
 }
 
 impl ShellApp {
+    pub(crate) fn resume_credential_continuation_effect(&mut self) -> Vec<ShellEffect> {
+        let Some(pending) = self.engagement.take_pending_credential_continuation() else {
+            return Vec::new();
+        };
+        if !self.credential_continuation_context_matches(&pending) {
+            self.restore_unresumed_credential_work(pending);
+            self.set_warn_notice(
+                "planning",
+                "Target or model changed while credentials were open · review the Scan selection before starting.",
+            );
+            return Vec::new();
+        }
+        if !self.configured_model_auth_ready() {
+            self.reopen_unready_credential_continuation(pending);
+            return Vec::new();
+        }
+        self.activate_credential_continuation(pending);
+        vec![self.credential_continuation_dispatch_effect()]
+    }
+
+    fn credential_continuation_context_matches(
+        &self,
+        pending: &PendingCredentialContinuation,
+    ) -> bool {
+        self.target_owned().as_ref() == Some(&pending.target)
+            && self.config().model.as_deref() == Some(pending.model.as_str())
+    }
+
+    fn reopen_unready_credential_continuation(&mut self, pending: PendingCredentialContinuation) {
+        let provider = pending
+            .model
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or_default()
+            .to_string();
+        self.engagement.set_pending_credential_continuation(pending);
+        self.open_credential_recovery(provider);
+        self.set_warn_notice(
+            "planning",
+            "Credentials are still unavailable for the selected model; update them to continue.",
+        );
+    }
+
+    fn activate_credential_continuation(&mut self, pending: PendingCredentialContinuation) {
+        self.router.setup_mut().finish_editor();
+        self.engagement.set_phase(pending.phase);
+        match pending.work {
+            PendingCredentialWork::CommittedPlan(plan) => self.engagement.queue_plan(plan),
+            PendingCredentialWork::DeferredStep(step) => {
+                self.engagement.push_expanded_step_front(step);
+                self.engagement.resume_planning_queue();
+            }
+        }
+        self.set_shell_view(ShellView::PlanningPicker);
+        self.log(
+            "planning",
+            "credentials ready · resuming the selected Scan steps",
+        );
+    }
+
+    fn credential_continuation_dispatch_effect(&self) -> ShellEffect {
+        ShellEffect::DispatchNextPlanningTask(PlanningTaskDispatch {
+            target: self.target_owned(),
+            missing_workspace_message:
+                "Scan paused: the active target became unavailable after authentication",
+            success_view: Some(PlanningDispatchView::Activity),
+        })
+    }
+
+    fn restore_unresumed_credential_work(&mut self, pending: PendingCredentialContinuation) {
+        self.router.setup_mut().finish_editor();
+        self.engagement.set_phase(pending.phase);
+        if let PendingCredentialWork::DeferredStep(step) = pending.work {
+            self.engagement.push_expanded_step_front(step);
+            self.engagement.pause_planning_queue();
+        }
+        self.set_shell_view(ShellView::PlanningPicker);
+    }
+
     pub(crate) fn dispatch_next_planning_task_effect(
         &mut self,
         dispatch: PlanningTaskDispatch,
@@ -112,8 +192,15 @@ impl ShellApp {
         step: PlanningRunStep,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
-        self.engagement
-            .set_running_planning_step(step.task, step.tool_name.clone());
+        if let Some((model, error)) = self.planning_step_credential_blocker(&step) {
+            return self.pause_planning_step_for_credentials(
+                step,
+                workspace.root().to_path_buf(),
+                model,
+                error,
+            );
+        }
+        self.engagement.set_running_planning_run_step(step.clone());
         if let Some(error) =
             self.langgraph_background_tool_launch_blocker(&step.tool_name, &step.input)
         {
@@ -139,6 +226,87 @@ impl ShellApp {
             authorization,
         );
         Vec::new()
+    }
+
+    fn planning_step_credential_blocker(&self, step: &PlanningRunStep) -> Option<(String, String)> {
+        if !self
+            .registry()
+            .tool_wants_runtime(&step.tool_name, &step.input, self.config())
+        {
+            return None;
+        }
+        let model = kuzushi_core::modules::tool_execution_model(
+            &step.tool_name,
+            &step.input,
+            self.config(),
+        )?;
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let runtime = kuzushi_openai::LangGraphRuntime::from_config(self.config(), cwd).ok()?;
+        let error = runtime.preflight_model_blocking(&model).err()?;
+        let authentication = runtime_failure_metadata(&error)
+            .is_some_and(|metadata| metadata.error_class == RuntimeFailureClass::Authentication);
+        authentication.then(|| (model, error.to_string()))
+    }
+
+    fn pause_planning_step_for_credentials(
+        &mut self,
+        step: PlanningRunStep,
+        target: PathBuf,
+        model: String,
+        error: String,
+    ) -> Vec<ShellEffect> {
+        let phase = self
+            .engagement
+            .current_phase()
+            .unwrap_or(WorkflowPhase::Scan);
+        let provider = model
+            .split_once(':')
+            .map(|(provider, _)| provider)
+            .unwrap_or_default()
+            .to_string();
+        let tool_name = step.tool_name.clone();
+        self.engagement.pause_planning_queue();
+        self.engagement
+            .set_pending_credential_continuation(PendingCredentialContinuation {
+                target,
+                phase,
+                model,
+                work: PendingCredentialWork::DeferredStep(step),
+            });
+        self.open_credential_recovery(provider);
+        self.set_warn_notice(
+            "planning",
+            format!("{tool_name} is waiting for credentials · {error}"),
+        );
+        Vec::new()
+    }
+
+    pub(crate) fn pause_running_planning_step_for_credentials(
+        &mut self,
+        tool_name: &str,
+        target: Option<PathBuf>,
+        error: String,
+    ) -> bool {
+        if !self.engagement.running_tool_is(tool_name) {
+            return false;
+        }
+        let Some(step) = self.engagement.take_running_planning_run_step() else {
+            return false;
+        };
+        let Some(model) = kuzushi_core::modules::tool_execution_model(
+            &step.tool_name,
+            &step.input,
+            self.config(),
+        ) else {
+            self.engagement.set_running_planning_run_step(step);
+            return false;
+        };
+        let Some(target) = target.or_else(|| self.target_owned()) else {
+            self.engagement.set_running_planning_run_step(step);
+            return false;
+        };
+        self.pause_planning_step_for_credentials(step, target, model, error);
+        true
     }
 
     /// True when the step's prepared input sets a write-capable path option

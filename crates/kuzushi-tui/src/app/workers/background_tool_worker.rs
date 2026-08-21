@@ -32,6 +32,11 @@ pub(crate) enum ToolEvent {
         error: String,
         completion: kuzushi_core::PendingToolCallCompletion,
     },
+    AuthenticationFailed {
+        tool_name: String,
+        error: String,
+        completion: Option<kuzushi_core::PendingToolCallCompletion>,
+    },
 }
 
 #[derive(Debug)]
@@ -212,6 +217,11 @@ fn tool_result_event(
                 result,
                 completion: outcome.completion,
             },
+            Err(error) if is_authentication_failure(&error) => ToolEvent::AuthenticationFailed {
+                tool_name,
+                error: format!("{error:#}"),
+                completion: Some(outcome.completion),
+            },
             Err(error) => ToolEvent::ObservedFailed {
                 tool_name,
                 error: format!("{error:#}"),
@@ -233,6 +243,13 @@ fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
             error: format!("{error:#}"),
         };
     }
+    if is_authentication_failure(&error) {
+        return ToolEvent::AuthenticationFailed {
+            tool_name,
+            error: format!("{error:#}"),
+            completion: None,
+        };
+    }
     ToolEvent::Failed {
         tool_name,
         // `{:#}` walks the full anyhow chain so operators see the
@@ -243,4 +260,10 @@ fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
         // `.kuzushi/v3/runs/<id>/items.jsonl` or rerunning under `kuzushi run`.
         error: format!("{error:#}"),
     }
+}
+
+fn is_authentication_failure(error: &anyhow::Error) -> bool {
+    kuzushi_core::runtime::runtime_failure_metadata(error).is_some_and(|metadata| {
+        metadata.error_class == kuzushi_core::runtime::RuntimeFailureClass::Authentication
+    })
 }

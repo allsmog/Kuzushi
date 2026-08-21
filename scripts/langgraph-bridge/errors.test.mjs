@@ -48,3 +48,15 @@ test("arbitrary provider detail is omitted even when it contains no secret patte
   assert.equal(response.detail, undefined);
   assert.equal(JSON.stringify(response).includes("proprietary source excerpt"), false);
 });
+
+test("provider SDK missing-key shapes are classified as authentication", () => {
+  for (const message of [
+    "Missing credentials. Please pass an apiKey",
+    "Anthropic API key not found",
+  ]) {
+    const response = bridgeErrorResponse(new Error(message));
+    assert.equal(response.errorClass, "authentication");
+    assert.equal(response.error, "Provider authentication failed.");
+    assert.equal(JSON.stringify(response).includes(message), false);
+  }
+});

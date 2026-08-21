@@ -18,7 +18,10 @@ mod target_candidates;
 mod task_id;
 mod task_row;
 
-pub use auth_rows::{auth_method_row_kinds, auth_method_rows, AuthMethodRow, AuthMethodRowKind};
+pub use auth_rows::{
+    auth_method_row_kinds, auth_method_rows, credential_recovery_row_kinds,
+    credential_recovery_rows, AuthMethodRow, AuthMethodRowKind,
+};
 pub use controls::{
     build_execution_plan, row_disposition, toggle_planning_row, RowDisposition, ToggleOutcome,
 };

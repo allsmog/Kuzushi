@@ -119,7 +119,9 @@ function optionalOauthModel(request, provider, modelName) {
 }
 
 export function credentialForRequest(request, provider, defaultEnv) {
-  return apiKeyCredential(request, defaultEnv);
+  const credential = apiKeyCredential(request, defaultEnv);
+  if (!credential) throw new BridgePublicError("authentication");
+  return credential;
 }
 
 function apiKeyCredential(request, defaultEnv) {
