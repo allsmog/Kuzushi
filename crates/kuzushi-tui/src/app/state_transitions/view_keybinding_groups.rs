@@ -337,10 +337,9 @@ fn workbench_zoom_keybindings() -> [ViewKeybinding; 2] {
 fn workbench_page_keybindings() -> Vec<ViewKeybinding> {
     WorkbenchPage::ALL
         .iter()
-        .enumerate()
-        .map(|(index, page)| {
+        .map(|page| {
             bind_char(
-                char::from_digit((index + 1) as u32, 10).unwrap(),
+                page.page_key(),
                 "1..5",
                 "page",
                 ViewHotkeyAction::WorkbenchPage(*page),

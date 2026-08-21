@@ -19009,8 +19009,10 @@ fn seed_ready_map_target(target: &Path, run_id: &str) {
     persist_selected_test_phase_attempt(target, WorkflowPhase::Map, run_id);
 }
 
-/// Item: the Map command bar may only name `Tab` while the embedded gallery
-/// owns keys. On an action-required Map, Tab reaches no handler.
+/// Item: the Map command bar may only name `Tab` and `z zoom` while the
+/// embedded gallery owns keys. On an action-required Map, Tab reaches no
+/// handler and there is no selected view to zoom — `z` opens the Map viz
+/// deck, which is what the Navigate footer and the keymap both say.
 #[test]
 fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
     let pre_ready_target = tempfile::tempdir().unwrap();
@@ -19022,7 +19024,8 @@ fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
     assert!(!crate::ui_view_models::map_gallery_is_primary(&pre_ready));
     let hints = map_command_bar_hints(&pre_ready);
     assert!(!hints.contains("Tab cycle map views"), "{hints}");
-    assert!(hints.contains("z zoom selected view"), "{hints}");
+    assert!(!hints.contains("zoom selected view"), "{hints}");
+    assert!(hints.contains("z open map viz"), "{hints}");
     assert!(hints.contains("jobs inspect Map runs"), "{hints}");
 
     let target = tempfile::tempdir().unwrap();
@@ -19036,6 +19039,7 @@ fn map_command_bar_advertises_tab_only_when_the_gallery_owns_keys() {
     assert!(crate::ui_view_models::map_gallery_is_primary(&ready));
     let hints = map_command_bar_hints(&ready);
     assert!(hints.contains("Tab cycle map views"), "{hints}");
+    assert!(hints.contains("z zoom selected view"), "{hints}");
 }
 
 fn map_command_bar_hints(app: &ShellApp) -> String {

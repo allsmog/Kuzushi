@@ -90,10 +90,11 @@ static PROVE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
 ];
 
 const MAP_GALLERY_CYCLE_VERB: &str = "Tab";
+const MAP_GALLERY_ZOOM_VERB: &str = "z";
 
 static MAP_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     hint(MAP_GALLERY_CYCLE_VERB, "cycle map views"),
-    hint("z", "zoom selected view"),
+    hint(MAP_GALLERY_ZOOM_VERB, "zoom selected view"),
     hint("next", "continue to Scan"),
     hint("jobs", "inspect Map runs"),
 ];
@@ -123,6 +124,16 @@ const REPORT_HINT: WorkbenchHint = WorkbenchHint {
     verb: Cow::Borrowed("report"),
     label: Cow::Borrowed("open Report"),
 };
+
+/// A hint that sends the operator to Review. The verb is derived from the
+/// page keymap rather than written out, so it always names the digit that
+/// actually reaches Review.
+fn review_page_hint(label: &'static str) -> WorkbenchHint {
+    WorkbenchHint {
+        verb: Cow::Owned(WorkbenchPage::Review.page_key().to_string()),
+        label: Cow::Borrowed(label),
+    }
+}
 
 const fn hint(verb: &'static str, label: &'static str) -> WorkbenchHint {
     WorkbenchHint {
@@ -282,7 +293,7 @@ fn command_bar_hints(
     let mut hints = page_command_bar_hints(app, page);
     customize_phase_hints(&mut hints, app, page, finding_reference);
     if page == WorkbenchPage::Prove && !has_detail {
-        hints[0] = hint("2", "choose a finding in Review");
+        hints[0] = review_page_hint("choose a finding in Review");
     }
     append_report_hint(&mut hints, report_cta);
     hints
@@ -402,9 +413,12 @@ fn replace_patch_hint(hints: &mut [WorkbenchHint], finding_reference: Option<&st
     hint.verb = Cow::Owned(format!("patch {reference}"));
 }
 
-/// `Tab` cycles the Map projection only while the embedded gallery owns keys.
-/// A Map that still requires action consumes `Tab` nowhere, so the hint row
-/// must not name it; the remaining Map hints stay true in both states.
+/// `Tab` cycles the Map projection, and `z` zooms the selected projection,
+/// only while the embedded gallery owns keys. A Map that still requires action
+/// consumes `Tab` nowhere and has no selected view to zoom — there `z` opens
+/// the Map viz deck, which is what the Navigate footer and the keymap already
+/// say. The hint row must promise neither; the remaining Map hints stay true
+/// in both states.
 fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchHint> {
     let hints = page_command_bar_hint_slice(page).to_vec();
     if page != WorkbenchPage::Map || super::map_gallery_is_primary(app) {
@@ -413,7 +427,18 @@ fn page_command_bar_hints(app: &ShellApp, page: WorkbenchPage) -> Vec<WorkbenchH
     hints
         .into_iter()
         .filter(|hint| hint.verb != MAP_GALLERY_CYCLE_VERB)
+        .map(map_hint_without_gallery)
         .collect()
+}
+
+fn map_hint_without_gallery(hint: WorkbenchHint) -> WorkbenchHint {
+    if hint.verb != MAP_GALLERY_ZOOM_VERB {
+        return hint;
+    }
+    WorkbenchHint {
+        verb: hint.verb,
+        label: Cow::Borrowed("open map viz"),
+    }
 }
 
 fn page_command_bar_hint_slice(page: WorkbenchPage) -> &'static [WorkbenchHint] {
@@ -584,6 +609,22 @@ mod tests {
         assert!(map
             .iter()
             .any(|hint| hint.verb == "jobs" && hint.label == "inspect Map runs"));
+    }
+
+    /// Item: a Prove page with nothing selected sends the operator to Review,
+    /// so the hint must carry Review's own page key. `2` reaches Scan, which
+    /// has no finding to choose.
+    #[test]
+    fn detail_free_prove_hint_names_the_review_page_key() {
+        let hints = command_bar_hints(&app(), WorkbenchPage::Prove, None, false, None);
+
+        assert_eq!(
+            hints[0],
+            WorkbenchHint {
+                verb: Cow::Owned(WorkbenchPage::Review.page_key().to_string()),
+                label: Cow::Borrowed("choose a finding in Review"),
+            }
+        );
     }
 
     #[test]

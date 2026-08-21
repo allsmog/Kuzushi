@@ -6319,6 +6319,45 @@ fn render_missing_fix_diagrams() -> String {
     render_plain_app(&app, 120)
 }
 
+/// Item: the Prove and Fix empty-state panels must name the digit that
+/// actually reaches Review. `2` reaches Scan, which holds no finding to
+/// choose, and "Hunt" is the retired name for Scan.
+#[test]
+fn empty_prove_and_fix_panels_route_the_operator_to_review() {
+    let review_key = WorkbenchPage::Review.page_key().to_string();
+
+    for page in [WorkbenchPage::Prove, WorkbenchPage::Fix] {
+        let target = tempfile::tempdir().expect("finding-free target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(target.path().to_path_buf()));
+        app.set_shell_view(ShellView::Workbench);
+        app.router.workbench_mut().set_page(Some(page));
+        app.router.workbench_mut().set_focus(page.primary_surface());
+
+        let rendered = render_phase_app(&app, 120, 36);
+
+        assert!(!rendered.contains("open Hunt"), "{page:?}: {rendered}");
+        assert_eq!(
+            empty_panel_cta_key(&rendered, "open Review and choose a finding"),
+            review_key,
+            "{page:?}: {rendered}"
+        );
+    }
+}
+
+/// The key an `empty_state_panel` CTA row advertises for `label`.
+fn empty_panel_cta_key(rendered: &str, label: &str) -> String {
+    let row = rendered
+        .lines()
+        .find(|line| line.contains(label))
+        .unwrap_or_else(|| panic!("no CTA row for {label}: {rendered}"));
+    row.split('▸')
+        .nth(1)
+        .and_then(|rest| rest.split_whitespace().next())
+        .unwrap_or_default()
+        .to_string()
+}
+
 #[test]
 fn prove_and_fix_zoom_reach_every_reference_pane() {
     let cases = [

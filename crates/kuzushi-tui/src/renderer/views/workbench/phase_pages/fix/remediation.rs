@@ -219,10 +219,11 @@ fn unstaged_patch_lines(finding: &FindingDetailModel, width: usize) -> Vec<Line<
 }
 
 fn no_finding_lines() -> Vec<Line<'static>> {
+    let review_key = crate::app::WorkbenchPage::Review.page_key().to_string();
     empty_state_panel(
         "no remediation selected",
         &["select a finding before drafting a patch"],
-        &[("2", "open Hunt and choose a finding")],
+        &[(review_key.as_str(), "open Review and choose a finding")],
     )
 }
 

@@ -547,13 +547,14 @@ fn render_empty(
 }
 
 fn empty_selection_lines(model: &ProvePhaseModel) -> Vec<Line<'static>> {
+    let review_key = crate::app::WorkbenchPage::Review.page_key().to_string();
     empty_state_panel(
         "no finding selected",
         &[model
             .empty_hint
             .as_deref()
             .unwrap_or("select a finding in Review")],
-        &[("2", "open Review and choose a finding")],
+        &[(review_key.as_str(), "open Review and choose a finding")],
     )
 }
 
