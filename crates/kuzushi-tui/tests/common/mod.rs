@@ -5,7 +5,7 @@
 //! configured" expectations. Runs before `main`, while the process is still
 //! single-threaded; scoped overrides like `ScopedHome` still apply on top.
 
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn isolate_operator_home_from_tests() {
     let home = std::env::temp_dir().join(format!("kuzushi-tui-test-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).expect("create isolated test HOME");

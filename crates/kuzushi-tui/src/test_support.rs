@@ -151,7 +151,7 @@ pub(crate) fn attach_verified_patch_receipt(
 /// Runs before `main`, while the process is still single-threaded, so every
 /// test in this binary resolves global config against a disposable HOME.
 /// Tests that need a specific HOME still override it per-test on top.
-#[ctor::ctor]
+#[ctor::ctor(unsafe)]
 fn isolate_operator_home_from_tests() {
     let home = std::env::temp_dir().join(format!("kuzushi-tui-test-home-{}", std::process::id()));
     std::fs::create_dir_all(&home).expect("create isolated test HOME");
