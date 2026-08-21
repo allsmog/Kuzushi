@@ -453,7 +453,9 @@ deny rules, unmatched targets remain unknown rather than explicitly allowed.
 Host matching is case-insensitive and ignores a trailing root dot, so one rule
 covers `admin.example.com`, `ADMIN.example.com`, and `admin.example.com.`. CIDR
 rules match bare IPv6 literals (`2001:db8::1`) as well as bracketed ones
-(`[2001:db8::1]:8443`).
+(`[2001:db8::1]:8443`), and an IPv4 rule also covers the IPv4-mapped IPv6
+spelling of the addresses it names, so `10.99.0.0/16` denies `::ffff:10.99.0.1`
+too.
 
 ## Patch application and re-verification
 
