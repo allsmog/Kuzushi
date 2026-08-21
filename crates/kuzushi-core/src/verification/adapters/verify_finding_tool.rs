@@ -362,21 +362,21 @@ fn require_verify_finding_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<
 
 fn verify_finding_response(result: Value, cost: RuntimeCostReport) -> Result<Value> {
     let exploitable = required_result_bool(&result, "exploitable")?;
-    let verdict = if exploitable {
-        "VULNERABLE"
+    let assessment = if exploitable {
+        "likely-exploitable (model assessment)"
     } else {
-        "not-exploitable"
+        "likely-not-exploitable (model assessment)"
     };
     let mut lines = vec![
         "[+] verify:finding complete".to_string(),
-        format!("      {verdict}"),
+        format!("      {assessment}"),
     ];
     append_vector_line(&mut lines, &result);
     if let Some(ladder) = stage_ladder_line(&result) {
         lines.push(ladder);
     }
     append_cost_line(&mut lines, &cost);
-    let summary = format!("verify:finding complete ({verdict})");
+    let summary = format!("verify:finding complete ({assessment})");
     let proof = verification_proof_snapshot(&result)?;
     let refusal_warning = escalation_refusal_warning(&result);
     let data = verification_response_data(result, &proof, &summary)?;
@@ -564,6 +564,15 @@ mod tests {
         assert_eq!(response["proof"]["verifiedScanId"], json!("scan-1"));
         assert_eq!(response["costUsd"], json!(0.25));
         assert!(response["artifacts"].as_array().unwrap().is_empty());
+        assert_eq!(
+            response["summary"],
+            json!("verify:finding complete (likely-exploitable (model assessment))")
+        );
+        assert!(response["output"]
+            .as_str()
+            .unwrap()
+            .contains("likely-exploitable (model assessment)"));
+        assert!(!response["output"].as_str().unwrap().contains("VULNERABLE"));
     }
 
     #[test]
@@ -623,6 +632,14 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("cost unavailable"));
+        assert_eq!(
+            response["summary"],
+            json!("verify:finding complete (likely-not-exploitable (model assessment))")
+        );
+        assert!(response["output"]
+            .as_str()
+            .unwrap()
+            .contains("likely-not-exploitable (model assessment)"));
     }
 
     #[test]
