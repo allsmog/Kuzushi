@@ -10,15 +10,24 @@ git-fetch-with-cli = true
 # full debugger metadata for every crate. Keep line-numbered panic backtraces
 # for workspace code while omitting dependency debug data; this substantially
 # reduces target/ growth and link work during normal builds and tests.
+#
+# Incremental compilation is off by default: rustc mints one multi-GiB
+# incremental session tree per crate compile-unit/flag variant and never
+# garbage-collects stale variants, which is the measured driver of runaway
+# target/ growth (see docs/build-disk.md). Re-enable it per invocation with
+# CARGO_INCREMENTAL=1 (the env var overrides this profile setting) or use the
+# debugging profile below.
 [profile.dev]
 debug = "line-tables-only"
+incremental = false
 
 [profile.dev.package."*"]
 debug = false
 
-# Full debugger metadata remains an explicit opt-in:
+# Full debugger metadata and incremental rebuilds remain an explicit opt-in:
 #   cargo build --profile debugging
 #   cargo test --profile debugging
 [profile.debugging]
 inherits = "dev"
 debug = true
+incremental = true
