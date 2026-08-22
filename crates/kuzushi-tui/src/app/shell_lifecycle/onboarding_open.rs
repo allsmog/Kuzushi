@@ -546,9 +546,21 @@ impl ShellApp {
         if !self.engagement.planning_picker().profile_pending() {
             return;
         }
-        let Some(phase) = self.engagement.current_phase().or_else(|| {
-            matches!(self.shell_view(), ShellView::Setup).then_some(crate::app::WorkflowPhase::Map)
-        }) else {
+        // The rows being replaced belong to the picker's phase, and
+        // `refresh_profiled` swaps rows without touching that stored phase. The
+        // engagement can advance past it while profiling is still pending, so
+        // rebuilding against the ledger phase would leave the picker holding
+        // one phase's rows under another phase's name.
+        let Some(phase) = self
+            .engagement
+            .planning_picker()
+            .phase()
+            .or_else(|| self.engagement.current_phase())
+            .or_else(|| {
+                matches!(self.shell_view(), ShellView::Setup)
+                    .then_some(crate::app::WorkflowPhase::Map)
+            })
+        else {
             return;
         };
         let (rows, selected) = self.phase_picker_input(phase, profile, target_root, false);
