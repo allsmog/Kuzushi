@@ -159,12 +159,17 @@ fn push_target_profile_status(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
     }
 }
 
+/// Name the phase these rows belong to, exactly as the expanded header does.
+/// The compact divider is the only phase vocabulary a small terminal gets, so
+/// it must read the picker's own phase and never the engagement's: completing a
+/// phase from Run Focus advances the ledger without rebuilding the checklist.
 fn compact_phase_title(app: &ShellApp) -> &'static str {
     if app.engagement.planning_picker().returns_to_setup() {
         return "SETUP · MAP PLAN";
     }
     app.engagement
-        .current_phase()
+        .planning_picker()
+        .phase()
         .map(WorkflowPhase::label)
         .unwrap_or("PLAN THE WORKSPACE")
 }

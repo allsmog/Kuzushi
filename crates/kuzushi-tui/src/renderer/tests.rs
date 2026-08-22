@@ -236,6 +236,44 @@ fn planning_picker_header_names_the_phase_whose_rows_it_shows() {
 }
 
 #[test]
+fn compact_phase_title_names_the_picker_phase_not_the_advanced_engagement() {
+    // A canonical 80x24 terminal renders the compact layout, whose divider is
+    // the only phase vocabulary on screen. It must name the phase these rows
+    // were built for — the one Enter runs — after Run Focus advanced the ledger.
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.set_target(Some(dir.path().to_path_buf()));
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Cached,
+    )];
+    app.engagement.planning_picker_mut().open_phase_profiled(
+        WorkflowPhase::Map,
+        rows,
+        [PlanningTaskId::GatherRepoContext].into_iter().collect(),
+        false,
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    app.set_shell_view(ShellView::PlanningPicker);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("── MAP ─"),
+        "compact divider titles the picker's own phase: {rendered}"
+    );
+    assert!(
+        !rendered.contains("SCAN"),
+        "compact divider must not title the advanced engagement phase: {rendered}"
+    );
+}
+
+#[test]
 fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
     use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
 
