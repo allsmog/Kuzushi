@@ -295,7 +295,13 @@ function openAiInputMessage(message, originalToSafe = new Map()) {
     return [...assistant, ...calls];
   }
   if (message?._getType?.() === "tool") {
-    return [{ type: "function_call_output", call_id: message.tool_call_id, output: messageText(message) }];
+    return [
+      {
+        type: "function_call_output",
+        call_id: requiredProviderIdentifier(message.tool_call_id),
+        output: messageText(message),
+      },
+    ];
   }
   return [{ role: "user", content: messageText(message) }];
 }
@@ -303,7 +309,7 @@ function openAiInputMessage(message, originalToSafe = new Map()) {
 function openAiFunctionCallInput(call, originalToSafe = new Map()) {
   return {
     type: "function_call",
-    call_id: call.id ?? call.callId ?? call.name,
+    call_id: requiredProviderIdentifier(call?.id ?? call?.callId),
     name: originalToSafe.get(call.name) ?? safeOpenAiBaseName(call.name),
     arguments: JSON.stringify(call.args ?? {}),
   };
