@@ -522,8 +522,12 @@ impl ShellApp {
         if !tasks.is_empty() {
             let count = tasks.len();
             self.engagement.set_model_recommendations(tasks);
+            // Refinement filters the rows the operator is looking at, so it is
+            // keyed off the picker's own phase. The engagement may already have
+            // advanced past it without those rows being rebuilt, and every
+            // recommendation for the newer phase would then be filtered away.
             if matches!(self.shell_view(), ShellView::PlanningPicker) {
-                if let Some(phase) = self.engagement.current_phase() {
+                if let Some(phase) = self.engagement.planning_picker().phase() {
                     self.refine_open_picker_with_model(phase);
                 }
             }
@@ -1232,6 +1236,51 @@ mod tests {
         assert!(tasks.contains(&ScanSemgrep));
         // sast:scan has no planning task and is dropped.
         assert_eq!(tasks.len(), 2);
+    }
+
+    #[test]
+    fn model_refinement_follows_the_open_picker_phase_not_the_advanced_engagement() {
+        // Run Focus finished Map and advanced the engagement to Scan without
+        // rebuilding the checklist. Refinement must still resolve against the
+        // Map rows on screen, or every recommendation is filtered away.
+        let tmp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(tmp.path().to_path_buf()));
+        app.engagement.planning_picker_mut().open_phase_profiled(
+            WorkflowPhase::Map,
+            vec![planning_row(BuildCodePropertyGraph)],
+            BTreeSet::new(),
+            false,
+        );
+        app.set_shell_view(ShellView::PlanningPicker);
+        app.engagement.set_phase(WorkflowPhase::Scan);
+
+        app.apply_model_recommendations(&json!({
+            "data": { "recommendations": [{ "tool": "cpg:build" }] }
+        }));
+
+        assert!(app
+            .engagement
+            .planning_picker()
+            .selected()
+            .contains(&BuildCodePropertyGraph));
+    }
+
+    fn planning_row(id: PlanningTaskId) -> crate::app::PlanningTaskRow {
+        crate::app::PlanningTaskRow {
+            id,
+            label: id.label(),
+            tool_name: id.tool_name(),
+            artifact_path: PathBuf::from("/dev/null"),
+            artifact_state: crate::app::PlanningArtifactState::Missing,
+            artifact_modified: None,
+            model_backed: id.is_model_backed(),
+            required_cli: None,
+            cli_available: true,
+            blocker: None,
+            cached_detail: None,
+            last_attempt: None,
+        }
     }
 
     #[test]

@@ -159,12 +159,17 @@ fn push_target_profile_status(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
     }
 }
 
+/// Name the phase these rows belong to, exactly as the expanded header does.
+/// The compact divider is the only phase vocabulary a small terminal gets, so
+/// it must read the picker's own phase and never the engagement's: completing a
+/// phase from Run Focus advances the ledger without rebuilding the checklist.
 fn compact_phase_title(app: &ShellApp) -> &'static str {
     if app.engagement.planning_picker().returns_to_setup() {
         return "SETUP · MAP PLAN";
     }
     app.engagement
-        .current_phase()
+        .planning_picker()
+        .phase()
         .map(WorkflowPhase::label)
         .unwrap_or("PLAN THE WORKSPACE")
 }
@@ -379,13 +384,16 @@ fn planning_row_selected(app: &ShellApp, row: &PlanningTaskRow) -> bool {
         .contains(&row.id)
 }
 
-/// Announce the current phase and its intent.
+/// Announce the phase these rows belong to and its intent. The title names the
+/// picker's own phase, never the engagement's: completing a phase from Run
+/// Focus advances the engagement without rebuilding the checklist, and a title
+/// taken from the ledger would then head another phase's task rows.
 fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
     if app.engagement.planning_picker().returns_to_setup() {
         push_setup_plan_header(app, width, lines);
         return;
     }
-    match app.engagement.current_phase() {
+    match app.engagement.planning_picker().phase() {
         Some(phase) => push_active_phase_header(app, phase, width, lines),
         None => push_unphased_plan_header(app, width, lines),
     }

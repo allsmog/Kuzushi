@@ -11748,6 +11748,38 @@ fn scan_phase_keeps_c_family_specific_hunts_for_cpp_source() {
     assert!(!tasks.contains(&PlanningTaskId::HuntUseAfterFree));
 }
 
+#[test]
+fn profile_refresh_rebuilds_the_picker_phase_not_the_advanced_engagement() {
+    // Profiling is asynchronous, so the engagement can advance while it is
+    // still pending. `refresh_profiled` swaps rows without touching the stored
+    // phase, so the rebuild has to use the picker's phase or the picker ends up
+    // holding Scan's rows under Map's name.
+    let dir = tempfile::tempdir().expect("temp target");
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_phase_picker(WorkflowPhase::Map);
+    assert!(app.engagement.planning_picker().profile_pending());
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    wait_for_target_profile(&mut app);
+
+    let tasks: BTreeSet<PlanningTaskId> = app
+        .engagement
+        .planning_picker()
+        .tasks()
+        .iter()
+        .map(|row| row.id)
+        .collect();
+    assert_eq!(
+        app.engagement.planning_picker().phase(),
+        Some(WorkflowPhase::Map)
+    );
+    assert!(tasks.contains(&PlanningTaskId::GatherRepoContext));
+    assert!(!tasks.contains(&PlanningTaskId::HuntSystems));
+}
+
 fn wait_for_target_profile(app: &mut ShellApp) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     while app.engagement.planning_picker().profile_pending() && std::time::Instant::now() < deadline

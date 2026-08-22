@@ -628,6 +628,15 @@ impl PlanningPickerRouteState {
         self.profile_pending
     }
 
+    /// The phase the displayed rows were built for, and the phase whose steps
+    /// Enter runs. It is not always the engagement's current phase: finishing a
+    /// phase from Run Focus advances the engagement without rebuilding these
+    /// rows, so anything that names or filters what is on screen must read this
+    /// rather than the ledger-derived phase.
+    pub(crate) fn phase(&self) -> Option<WorkflowPhase> {
+        self.phase
+    }
+
     pub(crate) fn tasks(&self) -> &[PlanningTaskRow] {
         &self.tasks
     }
