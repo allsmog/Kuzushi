@@ -64,7 +64,8 @@ pnpm disk:report          # or: bash scripts/build-disk.sh --report
 ```
 
 The report includes all worktrees registered with Git, known local agent
-worktree directories (`.claude/worktrees`, `.codex/worktrees`, `.worktrees`),
+worktree directories (`.worktrees` plus the per-agent `.<agent>/worktrees`
+roots listed in `collect_worktrees` in `scripts/build-disk.sh`),
 `CARGO_TARGET_DIR`, and an explicitly configured
 `KUZUSHI_EVIDENCE_LOOP_TARGET_DIR`. Relative configured targets are resolved
 from the current worktree root. Each build root is broken down into

@@ -194,6 +194,48 @@ fn planning_row_fixture(
 }
 
 #[test]
+fn planning_picker_header_names_the_phase_whose_rows_it_shows() {
+    // Finishing a phase from Run Focus advances the engagement without
+    // rebuilding the checklist. The header must keep naming the phase these
+    // rows were built for — the one Enter runs — not the newer ledger phase.
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(110, 44);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.set_target(Some(dir.path().to_path_buf()));
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Cached,
+    )];
+    app.engagement.planning_picker_mut().open_phase_profiled(
+        WorkflowPhase::Map,
+        rows,
+        [PlanningTaskId::GatherRepoContext].into_iter().collect(),
+        false,
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    app.set_shell_view(ShellView::PlanningPicker);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("── MAP ─"),
+        "header titles the picker's own phase: {rendered}"
+    );
+    assert!(
+        !rendered.contains("── SCAN ─"),
+        "header must not title the advanced engagement phase: {rendered}"
+    );
+    assert!(
+        rendered.contains(PlanningTaskId::GatherRepoContext.tool_name()),
+        "Map's rows are the ones on screen: {rendered}"
+    );
+}
+
+#[test]
 fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
     use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
 
@@ -219,11 +261,13 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         ),
         planning_row_fixture(PlanningTaskId::BuildXRay, PlanningArtifactState::Missing),
     ];
-    app.engagement.planning_picker_mut().open(
+    app.engagement.planning_picker_mut().open_phase_profiled(
+        WorkflowPhase::Map,
         rows,
         [PlanningTaskId::GatherRepoContext, PlanningTaskId::BuildXRay]
             .into_iter()
             .collect(),
+        false,
     );
     app.set_shell_view(ShellView::PlanningPicker);
 
@@ -705,9 +749,11 @@ fn planning_picker_pins_operator_attention_to_the_top() {
         PlanningTaskId::GatherRepoContext,
         PlanningArtifactState::Missing,
     )];
-    app.engagement.planning_picker_mut().open(
+    app.engagement.planning_picker_mut().open_phase_profiled(
+        WorkflowPhase::Map,
         rows,
         [PlanningTaskId::GatherRepoContext].into_iter().collect(),
+        false,
     );
     app.set_shell_view(ShellView::PlanningPicker);
 

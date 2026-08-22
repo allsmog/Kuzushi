@@ -67,10 +67,8 @@ async function exists(candidate) {
 
 async function writeProcessTable(fixture, rows) {
   const table = path.join(fixture.root, "process-table");
-  await writeFile(
-    table,
-    rows.map(({ pid, cwd, exe }) => `${pid}\t${cwd}\t${exe}`).join("\n") + "\n",
-  );
+  const lines = rows.map(({ pid, cwd, exe }) => `${pid}\t${cwd}\t${exe}`);
+  await writeFile(table, `${lines.join("\n")}\n`);
   return table;
 }
 
