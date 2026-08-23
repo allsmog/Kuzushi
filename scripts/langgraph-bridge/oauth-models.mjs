@@ -266,15 +266,45 @@ function contentWithCacheBreakpoint(content) {
 }
 
 function anthropicMessage(message) {
-  if (message?._getType?.() === "ai") return { role: "assistant", content: messageText(message) };
+  if (message?._getType?.() === "ai") return anthropicAssistantMessage(message);
   if (message?._getType?.() === "tool") return anthropicToolResultMessage(message);
   return { role: "user", content: messageText(message) };
+}
+
+function anthropicAssistantMessage(message) {
+  const text = messageText(message);
+  const calls = Array.isArray(message.tool_calls)
+    ? message.tool_calls.map(anthropicToolUseInput)
+    : [];
+  if (!calls.length) return { role: "assistant", content: text };
+  return {
+    role: "assistant",
+    content: [
+      ...(text ? [{ type: "text", text }] : []),
+      ...calls,
+    ],
+  };
+}
+
+function anthropicToolUseInput(call) {
+  return {
+    type: "tool_use",
+    id: requiredProviderIdentifier(call?.id ?? call?.callId),
+    name: requiredProviderIdentifier(call?.name),
+    input: requiredProviderObject(call?.args),
+  };
 }
 
 function anthropicToolResultMessage(message) {
   return {
     role: "user",
-    content: [{ type: "tool_result", tool_use_id: message.tool_call_id, content: messageText(message) }],
+    content: [
+      {
+        type: "tool_result",
+        tool_use_id: requiredProviderIdentifier(message.tool_call_id),
+        content: messageText(message),
+      },
+    ],
   };
 }
 
@@ -295,7 +325,13 @@ function openAiInputMessage(message, originalToSafe = new Map()) {
     return [...assistant, ...calls];
   }
   if (message?._getType?.() === "tool") {
-    return [{ type: "function_call_output", call_id: message.tool_call_id, output: messageText(message) }];
+    return [
+      {
+        type: "function_call_output",
+        call_id: requiredProviderIdentifier(message.tool_call_id),
+        output: messageText(message),
+      },
+    ];
   }
   return [{ role: "user", content: messageText(message) }];
 }
@@ -303,7 +339,7 @@ function openAiInputMessage(message, originalToSafe = new Map()) {
 function openAiFunctionCallInput(call, originalToSafe = new Map()) {
   return {
     type: "function_call",
-    call_id: call.id ?? call.callId ?? call.name,
+    call_id: requiredProviderIdentifier(call?.id ?? call?.callId),
     name: originalToSafe.get(call.name) ?? safeOpenAiBaseName(call.name),
     arguments: JSON.stringify(call.args ?? {}),
   };
