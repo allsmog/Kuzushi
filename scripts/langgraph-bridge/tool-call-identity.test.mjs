@@ -2,6 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { oauthModelForRequest } from "./oauth-models.mjs";
 
+function anthropicOauthModel() {
+  return oauthModelForRequest("anthropic", "claude-test", "access", {});
+}
+
 function openAiOauthModel() {
   return oauthModelForRequest("openai-codex", "gpt-test", "access", {});
 }
@@ -30,6 +34,97 @@ function assertInvalidProviderResponse(invoke) {
     return true;
   });
 }
+
+test("Anthropic OAuth history preserves the assistant tool-use block that a tool result references", () => {
+  const model = anthropicOauthModel();
+  const body = model.body([
+    aiMessage([
+      {
+        id: "anthropic-tool-1",
+        name: "read_file",
+        args: { path: "README.md" },
+        type: "tool_call",
+      },
+    ]),
+    toolMessage("anthropic-tool-1"),
+  ]);
+
+  assert.deepEqual(body.messages[0], {
+    role: "assistant",
+    content: [
+      {
+        type: "tool_use",
+        id: "anthropic-tool-1",
+        name: "read_file",
+        input: { path: "README.md" },
+      },
+    ],
+  });
+  assert.equal(body.messages[1].role, "user");
+  assert.equal(body.messages[1].content[0].type, "tool_result");
+  assert.equal(body.messages[1].content[0].tool_use_id, "anthropic-tool-1");
+});
+
+test("Anthropic OAuth history rejects tool calls without explicit correlation identity", () => {
+  const model = anthropicOauthModel();
+
+  for (const invalidId of [undefined, "", "   ", 42]) {
+    assertInvalidProviderResponse(() =>
+      model.body([
+        aiMessage([
+          {
+            id: invalidId,
+            name: "read_file",
+            args: { path: "README.md" },
+            type: "tool_call",
+          },
+        ]),
+      ]),
+    );
+  }
+});
+
+test("Anthropic OAuth history rejects malformed replayed tool names and input objects", () => {
+  const model = anthropicOauthModel();
+
+  for (const invalidName of [undefined, "", "   ", 42]) {
+    assertInvalidProviderResponse(() =>
+      model.body([
+        aiMessage([
+          {
+            id: "anthropic-tool-1",
+            name: invalidName,
+            args: {},
+            type: "tool_call",
+          },
+        ]),
+      ]),
+    );
+  }
+
+  for (const invalidArgs of [undefined, null, [], "path", 1, true]) {
+    assertInvalidProviderResponse(() =>
+      model.body([
+        aiMessage([
+          {
+            id: "anthropic-tool-1",
+            name: "read_file",
+            args: invalidArgs,
+            type: "tool_call",
+          },
+        ]),
+      ]),
+    );
+  }
+});
+
+test("Anthropic OAuth tool results require the matching correlation id", () => {
+  const model = anthropicOauthModel();
+
+  for (const invalidId of [undefined, "", "   ", 42]) {
+    assertInvalidProviderResponse(() => model.body([toolMessage(invalidId)]));
+  }
+});
 
 test("OpenAI OAuth history rejects tool calls without an explicit correlation id", () => {
   const model = openAiOauthModel();
