@@ -36,6 +36,35 @@ mod tests {
     }
 
     #[test]
+    fn bare_digit_does_not_complete_to_a_finding_suppression() {
+        // Regression: the earlier fix only excluded examples that extend
+        // their own base command's head, so `"/x F-0001 --reason
+        // false-positive"` — the usage example written against `suppress`'s
+        // short synonym `/x` — still reached the completion pool. A bare `1`
+        // is a subsequence of it, so a digit typed in Prompt mode (rather
+        // than Navigate mode) put the operator one Tab+Enter away from
+        // drafting a suppression of a finding id nobody named. See #172
+        // finding 6, 2026-08-22 run.
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let candidates = app.completion_candidates("1");
+        assert!(
+            candidates.is_empty(),
+            "a bare digit names no command: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn argument_bearing_alias_completes_to_its_routed_head() {
+        // The example's own command form is real and stays reachable: `x`
+        // routes to suppress and `v` to verify (argument_commands/nested.rs).
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert!(app.completion_candidates("/x").contains(&"/x".to_string()));
+        assert!(app.completion_candidates("/v").contains(&"/v".to_string()));
+    }
+
+    #[test]
     fn routed_synonym_aliases_still_complete() {
         // Regression: the fix for the above must not, in turn, drop real
         // routed synonyms that happen to share their base command's word

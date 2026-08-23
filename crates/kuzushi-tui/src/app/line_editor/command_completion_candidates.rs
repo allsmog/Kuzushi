@@ -5,29 +5,65 @@ pub(crate) fn command_completion_candidates(prefix: &str, slash: bool) -> Vec<St
     for spec in shell_command_specs() {
         let base_head = command_completion_head(spec.command);
         values.extend(candidate_for_prefix(spec.command, prefix, slash));
-        let aliases = spec
+        let forms = spec
             .aliases
             .iter()
             .copied()
-            .filter(|alias| !is_value_filled_example(base_head.as_deref(), alias));
-        values.extend(aliases.filter_map(|alias| candidate_for_prefix(alias, prefix, slash)));
+            .filter_map(|alias| alias_completion_form(base_head.as_deref(), alias));
+        values.extend(forms.filter_map(|form| candidate_for_prefix(&form, prefix, slash)));
     }
     rank_fuzzy(dedupe_sorted(values), prefix)
+}
+
+/// Project an alias onto the command form an operator can actually type.
+///
+/// `/help` lists aliases as filled-in usage examples, so an alias routinely
+/// carries concrete argument values that its routed form never contains:
+/// `"model 1"`, `"/x F-0001 --reason false-positive"`. Completing into one
+/// drafts a command with no relation to what was typed — a bare `1` is a
+/// subsequence of both, and the second suppresses a finding nobody named.
+/// Keep the alias's head up to its first filled-in value, then drop whatever
+/// survives when it is only a value-filled restatement of the base command.
+/// `None` when nothing routable is left. See #172 finding 6.
+fn alias_completion_form(base_head: Option<&str>, alias: &str) -> Option<String> {
+    let head = command_completion_head(alias)?;
+    let words: Vec<&str> = head
+        .split_whitespace()
+        .take_while(|word| !is_filled_in_value(word))
+        .collect();
+    if words.is_empty() {
+        return None;
+    }
+    let form = words.join(" ");
+    (!is_value_filled_example(base_head, &form)).then_some(form)
+}
+
+/// Shell command words are lowercase and digit-free (`show aliases`,
+/// `taint-iris:hunt`), so a word carrying a digit or an uppercase letter is a
+/// value substituted into a usage example (`1`, `F-0001`), never part of the
+/// routed form. Truncating there is what keeps an example written against a
+/// short synonym (`/x` for `suppress`) out of the completion pool, which the
+/// base-head comparison below cannot see.
+fn is_filled_in_value(word: &str) -> bool {
+    word.chars()
+        .any(|ch| ch.is_ascii_digit() || ch.is_ascii_uppercase())
 }
 
 /// An alias is a value-filled `/help` usage example — not a distinct
 /// routable form — when its own (placeholder-truncated) head has strictly
 /// more words than the base command's own head and shares that head as a
 /// literal word-for-word prefix (ignoring a leading `/`). That is exactly
-/// the shape produced by substituting a concrete value for the command's
-/// own placeholder: `"model 1"` extends `"model [choice]"`'s truncated
-/// head `"model"` with the filled-in choice.
+/// the shape produced by spelling out the command's own placeholder in
+/// words: `"dismiss false_positive not reachable in prod"` extends
+/// `"dismiss <reason> <note>"`'s truncated head `"dismiss"`.
 ///
 /// A genuine routed synonym instead REPLACES one of the base head's own
 /// words in place and keeps the same word count — `"patch discard"` vs.
 /// `"patch reject"`, `"strategy run"` vs. `"strategy fire"`, `"threats
-/// history"` vs. `"threats versions"` — so it is left untouched. See #172
-/// finding 6 and its follow-up review comment.
+/// history"` vs. `"threats versions"` — so it is left untouched, as is a
+/// synonym that names more words than the base command does (`"show
+/// modules"` for `"modules"`). See #172 finding 6 and its follow-up review
+/// comment.
 fn is_value_filled_example(base_head: Option<&str>, alias: &str) -> bool {
     let Some(base_head) = base_head else {
         return false;
@@ -148,4 +184,59 @@ pub(crate) fn config_completion_keys() -> &'static [&'static str] {
         "target",
         "workspace",
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn no_alias_completes_into_a_filled_in_example_value() {
+        // Repo-wide guard: the hazard resurfaces whenever a spec author adds
+        // an example alias carrying a concrete value, so pin the invariant
+        // over every registered spec rather than over the one alias that
+        // happened to be dangerous this time.
+        for spec in shell_command_specs() {
+            let base_head = command_completion_head(spec.command);
+            for alias in spec.aliases {
+                let Some(form) = alias_completion_form(base_head.as_deref(), alias) else {
+                    continue;
+                };
+                assert!(
+                    !form.split_whitespace().any(is_filled_in_value),
+                    "alias {alias:?} completes into example values: {form:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn alias_completion_form_keeps_routed_heads_and_drops_example_values() {
+        assert_eq!(
+            alias_completion_form(Some("suppress"), "/x F-0001 --reason false-positive"),
+            Some("/x".to_string()),
+            "a short synonym stays reachable without its example arguments"
+        );
+        assert_eq!(
+            alias_completion_form(Some("model"), "model 1"),
+            Some("model".to_string())
+        );
+        assert_eq!(
+            alias_completion_form(Some("modules"), "show modules"),
+            Some("show modules".to_string()),
+            "a synonym may name more words than the base command"
+        );
+        assert_eq!(
+            alias_completion_form(Some("patch reject"), "patch discard"),
+            Some("patch discard".to_string())
+        );
+        assert_eq!(
+            alias_completion_form(
+                Some("dismiss"),
+                "dismiss false_positive not reachable in prod"
+            ),
+            None,
+            "a spelled-out restatement of the base command is not a routed form"
+        );
+    }
 }
