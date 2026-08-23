@@ -266,15 +266,45 @@ function contentWithCacheBreakpoint(content) {
 }
 
 function anthropicMessage(message) {
-  if (message?._getType?.() === "ai") return { role: "assistant", content: messageText(message) };
+  if (message?._getType?.() === "ai") return anthropicAssistantMessage(message);
   if (message?._getType?.() === "tool") return anthropicToolResultMessage(message);
   return { role: "user", content: messageText(message) };
+}
+
+function anthropicAssistantMessage(message) {
+  const text = messageText(message);
+  const calls = Array.isArray(message.tool_calls)
+    ? message.tool_calls.map(anthropicToolUseInput)
+    : [];
+  if (!calls.length) return { role: "assistant", content: text };
+  return {
+    role: "assistant",
+    content: [
+      ...(text ? [{ type: "text", text }] : []),
+      ...calls,
+    ],
+  };
+}
+
+function anthropicToolUseInput(call) {
+  return {
+    type: "tool_use",
+    id: requiredProviderIdentifier(call?.id ?? call?.callId),
+    name: requiredProviderIdentifier(call?.name),
+    input: requiredProviderObject(call?.args),
+  };
 }
 
 function anthropicToolResultMessage(message) {
   return {
     role: "user",
-    content: [{ type: "tool_result", tool_use_id: message.tool_call_id, content: messageText(message) }],
+    content: [
+      {
+        type: "tool_result",
+        tool_use_id: requiredProviderIdentifier(message.tool_call_id),
+        content: messageText(message),
+      },
+    ],
   };
 }
 
