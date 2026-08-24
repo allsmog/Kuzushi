@@ -113,6 +113,82 @@ fn uri_scheme_detection_ignores_relative_invalid_and_windows_paths() {
     assert!(!has_uri_scheme("bad_scheme:value"));
 }
 
+#[test]
+fn ordinary_relative_paths_reach_sarif_unchanged() {
+    // The encoder must not churn the paths every existing export already emits.
+    assert_eq!(relative_uri_reference("src/main.rs"), "src/main.rs");
+    assert_eq!(
+        relative_uri_reference("crates/kuzushi-core/src/lib.rs"),
+        "crates/kuzushi-core/src/lib.rs"
+    );
+}
+
+#[test]
+fn relative_paths_needing_escapes_become_valid_uri_references() {
+    assert_eq!(
+        relative_uri_reference("docs/My Notes.md"),
+        "docs/My%20Notes.md"
+    );
+    assert_eq!(relative_uri_reference("src/a#b%c.rs"), "src/a%23b%25c.rs");
+    assert_eq!(relative_uri_reference("src/caf\u{e9}.rs"), "src/caf%C3%A9.rs");
+    assert_eq!(relative_uri_reference("src?q=1.rs"), "src%3Fq%3D1.rs");
+}
+
+#[test]
+fn a_backslash_is_escaped_rather_than_read_as_a_separator() {
+    // On Unix `\` is an ordinary filename character and `secret_relative_path`
+    // preserves it verbatim, so splitting on it would aim the consumer at a
+    // path that does not exist. `%5C` decodes back to the reported name.
+    assert_eq!(relative_uri_reference(r"src/a\b.rs"), "src/a%5Cb.rs");
+    assert_eq!(
+        relative_uri_reference(r"src\app\main.rs"),
+        "src%5Capp%5Cmain.rs"
+    );
+    // A drive-letter path is not a URI scheme (`has_uri_scheme` rejects it), so
+    // the colon is escaped rather than left to look like one.
+    assert_eq!(
+        relative_uri_reference(r"C:\work dir\a.rs"),
+        "C%3A%5Cwork%20dir%5Ca.rs"
+    );
+}
+
+#[test]
+fn a_space_in_a_path_survives_the_full_result_location() {
+    let physical = physical_location_of("docs/My Notes.md", 3, None);
+
+    assert_eq!(physical["artifactLocation"]["uri"], "docs/My%20Notes.md");
+    assert_eq!(physical["artifactLocation"]["uriBaseId"], "WORKSPACE_ROOT");
+}
+
+#[test]
+fn absolute_uri_locations_are_not_re_encoded() {
+    let physical = physical_location_of("https://api.lab.test/orders?id=1#f", 0, None);
+
+    assert_eq!(
+        physical["artifactLocation"]["uri"],
+        "https://api.lab.test/orders?id=1#f"
+    );
+}
+
+#[test]
+fn workspace_root_base_uri_is_an_encoded_file_uri_with_a_trailing_slash() {
+    let temp = tempfile::Builder::new()
+        .prefix("kuzushi export ")
+        .tempdir()
+        .unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    let uri = workspace_root_uri(&workspace).unwrap();
+
+    assert!(uri.starts_with("file:///"), "unexpected base uri: {uri}");
+    assert!(uri.ends_with('/'), "base uri must be a directory: {uri}");
+    assert!(
+        uri.contains("kuzushi%20export%20"),
+        "space must be percent-encoded: {uri}"
+    );
+    assert!(!uri.contains(' '), "base uri must contain no raw space: {uri}");
+}
+
 fn sarif_record(rule_id: &str, severity: &str, fingerprint: &str) -> WorkspaceFindingExportRecord {
     WorkspaceFindingExportRecord {
         rule_id: rule_id.to_string(),

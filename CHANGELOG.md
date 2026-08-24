@@ -25,6 +25,17 @@ Notable changes to Kuzushi. Release procedure lives in
   not split one defect, distinct same-rule sinks remain separate, and
   cross-tool corroboration still converges.
 
+**Fixed:**
+
+- `workspace:export-findings format=sarif` now emits spec-valid URIs. The
+  `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
+  interpolated path, so a workspace root containing a space, a non-ASCII
+  character, or a Windows drive letter no longer produces a document SARIF
+  consumers reject. Result locations percent-encode their workspace-relative
+  path, so a repository file such as `docs/My Notes.md` resolves instead of
+  breaking the location. A `\` in a path is escaped rather than treated as a
+  separator, because on Unix it is an ordinary filename character.
+
 ## v0.24.0-alpha.13 · operator experience and descriptor boundaries
 
 **Additive:**
