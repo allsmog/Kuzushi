@@ -213,7 +213,9 @@ mod tests {
 
         let error = validate_patch(&worktree, rename_demo_diff(), &plan, control).unwrap_err();
 
-        assert!(error.to_string().contains("requires at least one build or test validation command"));
+        assert!(error
+            .to_string()
+            .contains("requires at least one build or test validation command"));
         assert_eq!(
             std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
             "before\n"

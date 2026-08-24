@@ -89,7 +89,9 @@ mod binding_tests {
 
         let error = bind_patch_validation_plan(repo.path(), &mut input).unwrap_err();
 
-        assert!(error.to_string().contains("requires at least one build or test validation command"));
+        assert!(error
+            .to_string()
+            .contains("requires at least one build or test validation command"));
         assert!(input.get("buildCmd").is_none());
         assert!(input.get("testCmd").is_none());
     }
