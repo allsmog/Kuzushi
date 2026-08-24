@@ -47,7 +47,7 @@ pub(in crate::workspace::application) fn findings_to_sarif_with_benchmark_spend(
     let mut runs = group_findings_by_tool(records)
         .into_iter()
         .map(|(tool, tool_records)| build_sarif_run(&tool, &tool_records, workspace, &metadata))
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>>>()?;
     if runs.is_empty() {
         runs.push(empty_sarif_run(&metadata, scan_run_id));
     }
@@ -121,13 +121,13 @@ fn build_sarif_run(
     records: &[&WorkspaceFindingExportRecord],
     workspace: &WorkspaceTarget,
     metadata: &serde_json::Value,
-) -> serde_json::Value {
+) -> Result<serde_json::Value> {
     let rules = sarif_rules(records);
     let results = records
         .iter()
         .map(|record| sarif_result(record))
         .collect::<Vec<_>>();
-    json!({
+    Ok(json!({
         "tool": {
             "driver": {
                 "name": tool,
@@ -137,13 +137,30 @@ fn build_sarif_run(
         },
         "originalUriBaseIds": {
             "WORKSPACE_ROOT": {
-                "uri": format!("file://{}/", workspace.root().display()),
+                "uri": workspace_root_uri(workspace)?,
             }
         },
         "results": results,
         "properties": {
             "kuzushiExport": metadata,
         },
+    }))
+}
+
+/// The `file:` URI every relative result location resolves against. SARIF
+/// 2.1.0 §3.4.3 requires a real URI here, so the root has to be percent-encoded
+/// and `/`-separated, and on Windows the drive letter belongs in the path
+/// rather than the authority. `url` is the same encoder the clangd MCP client
+/// already uses for its own file URIs; interpolating `Path::display()` produced
+/// a valid URI only when the root happened to contain no character needing an
+/// escape.
+fn workspace_root_uri(workspace: &WorkspaceTarget) -> Result<String> {
+    let root = workspace.root();
+    url::Url::from_directory_path(root).map(String::from).map_err(|_| {
+        anyhow::anyhow!(
+            "Could not encode a file URI for the workspace root: {}",
+            root.display()
+        )
     })
 }
 
@@ -266,7 +283,30 @@ fn sarif_artifact_location(file: &str) -> serde_json::Value {
     if has_uri_scheme(file) {
         return json!({ "uri": file });
     }
-    json!({ "uri": file, "uriBaseId": "WORKSPACE_ROOT" })
+    json!({ "uri": relative_uri_reference(file), "uriBaseId": "WORKSPACE_ROOT" })
+}
+
+/// Turn a workspace-relative path into the URI reference SARIF 2.1.0 §3.4.2
+/// asks for: `/` separates segments even for a Windows-style path, and every
+/// byte outside the RFC 3986 unreserved set is percent-encoded. A repository
+/// file named `docs/My Notes.md` is otherwise emitted as a `uri` containing a
+/// space, which consumers reject. Non-ASCII names encode per UTF-8 byte, so the
+/// escaped form still names the same file. `:` is escaped too, so a first
+/// segment like `C:` cannot be misread as a scheme. Reading `\` as a separator
+/// is the same rule finding identity already applies
+/// (`identity::finding_identity::normalize_path`).
+fn relative_uri_reference(file: &str) -> String {
+    file.bytes().map(encoded_path_byte).collect()
+}
+
+fn encoded_path_byte(byte: u8) -> String {
+    if matches!(byte, b'/' | b'\\') {
+        return "/".to_string();
+    }
+    if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+        return char::from(byte).to_string();
+    }
+    format!("%{byte:02X}")
 }
 
 fn has_uri_scheme(file: &str) -> bool {
