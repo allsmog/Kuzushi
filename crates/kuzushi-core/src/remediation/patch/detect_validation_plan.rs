@@ -16,11 +16,13 @@ pub(crate) fn bind_patch_validation_plan(repo_root: &Path, input: &mut Value) ->
         .or(detected.build);
     let test =
         optional_string_alias(input, &["testCmd", "testCommand", "test_cmd"])?.or(detected.test);
+    let plan = PatchValidationPlan { build, test };
+    ensure_patch_validation_plan(&plan)?;
     let object = input
         .as_object_mut()
         .context("patch:finding input must be an object")?;
-    bind_optional_command(object, "buildCmd", build);
-    bind_optional_command(object, "testCmd", test);
+    bind_optional_command(object, "buildCmd", plan.build);
+    bind_optional_command(object, "testCmd", plan.test);
     Ok(())
 }
 
@@ -32,16 +34,23 @@ fn bind_optional_command(object: &mut Map<String, Value>, key: &str, command: Op
     }
 }
 
+pub(crate) fn ensure_patch_validation_plan(plan: &PatchValidationPlan) -> Result<()> {
+    anyhow::ensure!(
+        plan.build.is_some() || plan.test.is_some(),
+        "patch:finding requires at least one build or test validation command; repository validation was not detected, provide buildCmd or testCmd explicitly"
+    );
+    Ok(())
+}
+
 /// Operator-facing disclosure for the repository-owned commands that
 /// `patch:finding` will execute after synthesizing a candidate diff.
 pub fn patch_validation_disclosure(_repo_root: &Path, input: &Value) -> Result<String> {
     let build = optional_string_alias(input, &["buildCmd", "buildCommand", "build_cmd"])?;
     let test = optional_string_alias(input, &["testCmd", "testCommand", "test_cmd"])?;
     let source_commit = patch_source_commit(input)?;
-    Ok(validation_plan_disclosure(
-        &PatchValidationPlan { build, test },
-        &source_commit,
-    ))
+    let plan = PatchValidationPlan { build, test };
+    ensure_patch_validation_plan(&plan)?;
+    Ok(validation_plan_disclosure(&plan, &source_commit))
 }
 
 #[cfg(test)]
@@ -69,6 +78,36 @@ mod binding_tests {
         assert!(disclosure.contains("cargo build ; cargo test"));
         assert!(!disclosure.contains("npm"));
     }
+
+    #[test]
+    fn unknown_repository_requires_an_explicit_validation_command() {
+        let repo = tempfile::tempdir().unwrap();
+        let mut input = json!({
+            "fingerprint": "abc",
+            (PATCH_SOURCE_COMMIT_INPUT_KEY): "0123456789012345678901234567890123456789",
+        });
+
+        let error = bind_patch_validation_plan(repo.path(), &mut input).unwrap_err();
+
+        assert!(error.to_string().contains("requires at least one build or test validation command"));
+        assert!(input.get("buildCmd").is_none());
+        assert!(input.get("testCmd").is_none());
+    }
+
+    #[test]
+    fn unknown_repository_accepts_an_explicit_test_command() {
+        let repo = tempfile::tempdir().unwrap();
+        let mut input = json!({
+            "fingerprint": "abc",
+            (PATCH_SOURCE_COMMIT_INPUT_KEY): "0123456789012345678901234567890123456789",
+            "testCmd": "custom-test",
+        });
+
+        bind_patch_validation_plan(repo.path(), &mut input).unwrap();
+
+        assert_eq!(input["testCmd"], "custom-test");
+        assert!(input.get("buildCmd").is_none());
+    }
 }
 
 pub(crate) fn validation_plan_disclosure(
@@ -80,7 +119,7 @@ pub(crate) fn validation_plan_disclosure(
         .flatten()
         .collect::<Vec<_>>();
     let commands = if commands.is_empty() {
-        "git apply --check only".to_string()
+        "no build/test validation configured".to_string()
     } else {
         commands.join(" ; ")
     };
