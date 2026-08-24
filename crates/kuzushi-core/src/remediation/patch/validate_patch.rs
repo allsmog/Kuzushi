@@ -6,6 +6,7 @@ pub(crate) fn validate_patch(
     plan: &PatchValidationPlan,
     control: PatchCommandControl<'_>,
 ) -> Result<ValidationResult> {
+    ensure_patch_validation_plan(plan)?;
     let mut logs = Vec::new();
 
     if let Some(result) = validate_git_apply_steps(worktree_path, diff, &mut logs, control)? {
@@ -106,7 +107,7 @@ fn validate_optional_shell_step(
 }
 
 fn validation_success(mut logs: Vec<String>) -> ValidationResult {
-    logs.push("All validations passed.".to_string());
+    logs.push("All configured validations passed.".to_string());
     ValidationResult {
         status: PatchStatus::Sound,
         output: logs.join("\n"),
@@ -193,7 +194,7 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
-    fn validation_applies_diff_only_inside_disposable_worktree() {
+    fn validation_refuses_apply_only_plan_before_touching_worktree() {
         if git_is_unavailable() {
             return;
         }
@@ -210,16 +211,16 @@ mod tests {
             test: None,
         };
 
-        let result = validate_patch(&worktree, rename_demo_diff(), &plan, control).unwrap();
+        let error = validate_patch(&worktree, rename_demo_diff(), &plan, control).unwrap_err();
 
-        assert_eq!(result.status, PatchStatus::Sound);
+        assert!(error.to_string().contains("requires at least one build or test validation command"));
         assert_eq!(
             std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
             "before\n"
         );
         assert_eq!(
             std::fs::read_to_string(worktree.join("demo.txt")).unwrap(),
-            "after\n"
+            "before\n"
         );
         cleanup_worktree(repo, &worktree, control).unwrap();
     }
