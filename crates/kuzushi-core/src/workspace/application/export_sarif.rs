@@ -287,23 +287,26 @@ fn sarif_artifact_location(file: &str) -> serde_json::Value {
 }
 
 /// Turn a workspace-relative path into the URI reference SARIF 2.1.0 §3.4.2
-/// asks for: `/` separates segments even for a Windows-style path, and every
-/// byte outside the RFC 3986 unreserved set is percent-encoded. A repository
-/// file named `docs/My Notes.md` is otherwise emitted as a `uri` containing a
-/// space, which consumers reject. Non-ASCII names encode per UTF-8 byte, so the
-/// escaped form still names the same file. `:` is escaped too, so a first
-/// segment like `C:` cannot be misread as a scheme. Reading `\` as a separator
-/// is the same rule finding identity already applies
-/// (`identity::finding_identity::normalize_path`).
+/// asks for: `/` stays the separator and every other byte outside the RFC 3986
+/// unreserved set is percent-encoded. A repository file named
+/// `docs/My Notes.md` is otherwise emitted as a `uri` containing a space, which
+/// consumers reject. Non-ASCII names encode per UTF-8 byte, so the escaped form
+/// still names the same file, and `:` is escaped so a first segment like `C:`
+/// cannot be misread as a scheme.
+///
+/// `\` is escaped rather than read as a separator. On Unix it is an ordinary
+/// filename character that detectors preserve verbatim — `secret_relative_path`
+/// builds its path straight from `Path::display()` — so splitting on it would
+/// point a consumer at a file that does not exist. Producers that do run on
+/// Windows paths (`incremental_index`, `inspect_entrypoints`) already normalize
+/// to `/` where the path is produced, so nothing is lost by declining to guess
+/// here. `%5C` is reversible; a wrong split is not.
 fn relative_uri_reference(file: &str) -> String {
     file.bytes().map(encoded_path_byte).collect()
 }
 
 fn encoded_path_byte(byte: u8) -> String {
-    if matches!(byte, b'/' | b'\\') {
-        return "/".to_string();
-    }
-    if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+    if byte == b'/' || byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
         return char::from(byte).to_string();
     }
     format!("%{byte:02X}")

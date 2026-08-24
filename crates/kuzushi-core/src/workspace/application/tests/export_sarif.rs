@@ -135,13 +135,20 @@ fn relative_paths_needing_escapes_become_valid_uri_references() {
 }
 
 #[test]
-fn windows_separators_become_uri_separators() {
-    assert_eq!(relative_uri_reference(r"src\app\main.rs"), "src/app/main.rs");
+fn a_backslash_is_escaped_rather_than_read_as_a_separator() {
+    // On Unix `\` is an ordinary filename character and `secret_relative_path`
+    // preserves it verbatim, so splitting on it would aim the consumer at a
+    // path that does not exist. `%5C` decodes back to the reported name.
+    assert_eq!(relative_uri_reference(r"src/a\b.rs"), "src/a%5Cb.rs");
+    assert_eq!(
+        relative_uri_reference(r"src\app\main.rs"),
+        "src%5Capp%5Cmain.rs"
+    );
     // A drive-letter path is not a URI scheme (`has_uri_scheme` rejects it), so
     // the colon is escaped rather than left to look like one.
     assert_eq!(
         relative_uri_reference(r"C:\work dir\a.rs"),
-        "C%3A/work%20dir/a.rs"
+        "C%3A%5Cwork%20dir%5Ca.rs"
     );
 }
 

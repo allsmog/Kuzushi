@@ -32,8 +32,9 @@ Notable changes to Kuzushi. Release procedure lives in
   interpolated path, so a workspace root containing a space, a non-ASCII
   character, or a Windows drive letter no longer produces a document SARIF
   consumers reject. Result locations percent-encode their workspace-relative
-  path and use `/` as the separator, so a repository file such as
-  `docs/My Notes.md` resolves instead of breaking the location.
+  path, so a repository file such as `docs/My Notes.md` resolves instead of
+  breaking the location. A `\` in a path is escaped rather than treated as a
+  separator, because on Unix it is an ordinary filename character.
 
 ## v0.24.0-alpha.13 · operator experience and descriptor boundaries
 
