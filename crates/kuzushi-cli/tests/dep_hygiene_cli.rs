@@ -2847,7 +2847,10 @@ fn run_patch_finding_without_model_fails_without_silent_fallback() {
         .arg("run")
         .arg("patch:finding")
         .arg("--input")
-        .arg(format!(r#"{{"fingerprint":"{}"}}"#, finding.fingerprint))
+        .arg(format!(
+            r#"{{"fingerprint":"{}","testCmd":"true"}}"#,
+            finding.fingerprint
+        ))
         .output()
         .unwrap();
 

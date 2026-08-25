@@ -2087,7 +2087,7 @@ mod autonomy_gate_dispatch_tests {
         let error = registry
             .dispatch_prepared_tool_with_runtime(
                 "patch:finding",
-                json!({"fingerprint": "finding-1"}),
+                json!({"fingerprint": "finding-1", "testCmd": "true"}),
                 &ctx,
                 None,
             )
@@ -2149,7 +2149,7 @@ mod autonomy_gate_dispatch_tests {
         let error = registry
             .dispatch_prepared_tool_with_runtime(
                 "patch:finding",
-                json!({"fingerprint": "finding-1"}),
+                json!({"fingerprint": "finding-1", "testCmd": "true"}),
                 &ctx,
                 None,
             )
