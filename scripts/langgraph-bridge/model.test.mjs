@@ -154,6 +154,32 @@ test("Anthropic OAuth preserves valid tool-use identity and empty-object input",
   assert.deepEqual(message.tool_calls[0].args, {});
 });
 
+test("Anthropic OAuth leaves absent usage unreported instead of inventing zero tokens", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    anthropicOauthResponse({ content: [{ type: "text", text: "done" }], stop_reason: "end_turn" }),
+  );
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  const result = bridgeQueryResult([await model.invoke([])]);
+
+  assert.equal(result.input_tokens, undefined);
+  assert.equal(result.output_tokens, undefined);
+  assert.equal(result.input_reported_calls, 0);
+  assert.equal(result.output_reported_calls, 0);
+});
+
+test("Anthropic OAuth rejects malformed usage instead of coercing it to zero", async (t) => {
+  t.mock.method(globalThis, "fetch", async () =>
+    anthropicOauthResponse({
+      content: [{ type: "text", text: "done" }],
+      usage: { input_tokens: "not-a-number", output_tokens: 2 },
+    }),
+  );
+  const model = oauthModelForRequest("anthropic", "claude-test", "access", {});
+
+  await assertInvalidProviderResponse(() => model.invoke([]));
+});
+
 test("OpenAI OAuth rejects malformed tool-call arguments instead of defaulting to an empty object", async (t) => {
   t.mock.method(globalThis, "fetch", async () => oauthSseResponse('{"path":'));
   const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
@@ -210,6 +236,30 @@ test("OpenAI OAuth preserves a valid empty-object tool call", async (t) => {
   assert.equal(message.tool_calls[0].id, "call-1");
   assert.equal(message.tool_calls[0].name, "Read");
   assert.deepEqual(message.tool_calls[0].args, {});
+});
+
+test("OpenAI OAuth leaves absent usage unreported instead of inventing zero tokens", async (t) => {
+  const event = JSON.stringify({ type: "response.output_text.done", text: "complete" });
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(`data: ${event}\n\n`));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  const result = bridgeQueryResult([await model.invoke([])]);
+
+  assert.equal(result.input_tokens, undefined);
+  assert.equal(result.output_tokens, undefined);
+  assert.equal(result.input_reported_calls, 0);
+  assert.equal(result.output_reported_calls, 0);
+});
+
+test("OpenAI OAuth rejects malformed usage instead of coercing it to zero", async (t) => {
+  const event = JSON.stringify({
+    type: "response.completed",
+    response: { usage: { input_tokens: -1, output_tokens: 2 } },
+  });
+  t.mock.method(globalThis, "fetch", async () => oauthRawSseResponse(`data: ${event}\n\n`));
+  const model = oauthModelForRequest("openai-codex", "gpt-test", "access", {});
+
+  await assertInvalidProviderResponse(() => model.invoke([]));
 });
 
 test("OpenAI OAuth rejects malformed SSE JSON instead of dropping a corrupted event", async (t) => {
