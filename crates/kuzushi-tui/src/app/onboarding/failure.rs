@@ -4,6 +4,9 @@
 
 use super::task_id::PlanningTaskId;
 
+pub(crate) const CONTEXT_ENRICHMENT_RECOVERY_ERROR: &str =
+    "context:build Rust native executor does not support LLM enrichment yet";
+
 /// A planning task that failed during the engagement.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FailedPlanningTask {
@@ -20,4 +23,19 @@ pub struct FailedPlanningTask {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PendingRetry {
     pub tasks: Vec<FailedPlanningTask>,
+}
+
+impl FailedPlanningTask {
+    pub(crate) fn needs_repository_only_map_recovery(&self) -> bool {
+        self.task == PlanningTaskId::GatherRepoContext
+            && self.error.contains(CONTEXT_ENRICHMENT_RECOVERY_ERROR)
+    }
+}
+
+impl PendingRetry {
+    pub(crate) fn needs_repository_only_map_recovery(&self) -> bool {
+        self.tasks
+            .iter()
+            .any(FailedPlanningTask::needs_repository_only_map_recovery)
+    }
 }

@@ -511,28 +511,46 @@ fn phase_result_card_model(
     phase: WorkflowPhase,
     presentation: crate::app::PhaseResultPresentation,
 ) -> PhaseResultCardModel {
+    let repository_only_map = is_repository_only_map_recovery(phase, &presentation);
     if let Some(review) = app
         .engagement
         .pending_phase_rerun()
         .filter(|review| review.phase == phase)
     {
-        return phase_rerun_review_card(review);
+        return phase_rerun_review_card(review, repository_only_map);
     }
     let verified_remediation = app.verified_remediation_result_is_open(phase);
     // The strip renders `recommended` as its own trailing `next:` row, so
     // the identical row inside the presentation details would print twice.
     let trailing_next = format!("next: {}", presentation.recommended_next);
-    let detail_rows = presentation
-        .detail_rows
-        .into_iter()
-        .filter(|row| row.text != trailing_next)
-        .collect();
+    let detail_rows = if repository_only_map {
+        repository_only_map_detail_rows(&presentation.semantic_keys)
+    } else {
+        presentation
+            .detail_rows
+            .into_iter()
+            .filter(|row| row.text != trailing_next)
+            .collect()
+    };
     PhaseResultCardModel {
         attempt_id: presentation.attempt_id,
-        outcome: presentation.outcome.clone(),
+        outcome: if repository_only_map {
+            "recovery ready".to_string()
+        } else {
+            presentation.outcome.clone()
+        },
         emphasis: presentation.emphasis,
-        compact_summary: compact_result_summary(&presentation.compact_summary),
-        detail: presentation.detail_lines.join("\n"),
+        compact_summary: if repository_only_map {
+            "Map stopped before unsupported enrichment".to_string()
+        } else {
+            compact_result_summary(&presentation.compact_summary)
+        },
+        detail: if repository_only_map {
+            "Repository-only Map is ready. Technical failure detail remains available from Open."
+                .to_string()
+        } else {
+            presentation.detail_lines.join("\n")
+        },
         detail_rows,
         semantic_keys: presentation.semantic_keys,
         control_hint: phase_result_control_hint(
@@ -541,13 +559,48 @@ fn phase_result_card_model(
             phase,
             &presentation.outcome,
             verified_remediation,
+            repository_only_map,
         ),
         actions: presentation.actions,
-        recommended: presentation.recommended_next,
+        recommended: if repository_only_map {
+            "run repository-only Map; open technical details; or change runtime in Config"
+                .to_string()
+        } else {
+            presentation.recommended_next
+        },
     }
 }
 
-fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResultCardModel {
+pub(super) fn is_repository_only_map_recovery(
+    phase: WorkflowPhase,
+    presentation: &crate::app::PhaseResultPresentation,
+) -> bool {
+    phase == WorkflowPhase::Map
+        && presentation.outcome == "failed"
+        && presentation
+            .detail_lines
+            .iter()
+            .chain(presentation.detail_rows.iter().map(|row| &row.text))
+            .any(|line| line.contains(crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR))
+}
+
+fn repository_only_map_detail_rows(
+    semantic_keys: &std::collections::BTreeSet<kuzushi_core::run_lifecycle::RunCellKey>,
+) -> Vec<crate::app::PhaseResultDetailRow> {
+    vec![
+        phase_rerun_detail_row("Repository indexing can run without LLM enrichment.".to_string()),
+        crate::app::PhaseResultDetailRow {
+            key: None,
+            disclosed_keys: semantic_keys.clone(),
+            text: "Technical details · Open the failed run".to_string(),
+        },
+    ]
+}
+
+fn phase_rerun_review_card(
+    review: &crate::app::PhaseRerunReview,
+    repository_only_map: bool,
+) -> PhaseResultCardModel {
     let detail_rows = phase_rerun_review_rows(review);
     let detail = detail_rows
         .iter()
@@ -563,11 +616,17 @@ fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResult
         detail_rows,
         semantic_keys: std::collections::BTreeSet::new(),
         actions: Vec::new(),
-        control_hint: "Enter dispatch exact saved input · e edit in Options · Esc cancel"
-            .to_string(),
-        recommended:
+        control_hint: if repository_only_map {
+            "Enter run repository-only Map · e edit in Options · Esc cancel".to_string()
+        } else {
+            "Enter dispatch exact saved input · e edit in Options · Esc cancel".to_string()
+        },
+        recommended: if repository_only_map {
+            "enrichment=false; Enter runs repository context only".to_string()
+        } else {
             "review changed options; raw run JSON is available only from the expert command surface"
-                .to_string(),
+                .to_string()
+        },
     }
 }
 
@@ -653,9 +712,17 @@ fn phase_result_control_hint(
     phase: WorkflowPhase,
     outcome: &str,
     verified_remediation: bool,
+    repository_only_map: bool,
 ) -> String {
     if app.input_mode() == InputMode::Navigate {
-        return result_action_labels_for(app, actions, phase, outcome, verified_remediation);
+        return result_action_labels_for(
+            app,
+            actions,
+            phase,
+            outcome,
+            verified_remediation,
+            repository_only_map,
+        );
     }
     prompt_result_control_hint(app)
 }
@@ -679,7 +746,7 @@ fn prompt_result_control_hint(app: &ShellApp) -> String {
 fn result_action_labels(phase: WorkflowPhase, outcome: &str) -> String {
     let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     let actions = fallback_result_policy(phase, outcome).actions;
-    result_action_labels_for(&app, &actions, phase, outcome, false)
+    result_action_labels_for(&app, &actions, phase, outcome, false, false)
 }
 
 #[cfg(test)]
@@ -697,10 +764,20 @@ fn result_action_labels_for(
     phase: WorkflowPhase,
     outcome: &str,
     verified_remediation: bool,
+    repository_only_map: bool,
 ) -> String {
     actions
         .iter()
-        .map(|action| result_action_label(app, *action, phase, outcome, verified_remediation))
+        .map(|action| {
+            result_action_label(
+                app,
+                *action,
+                phase,
+                outcome,
+                verified_remediation,
+                repository_only_map,
+            )
+        })
         .collect::<Vec<_>>()
         .join(" · ")
 }
@@ -711,6 +788,7 @@ fn result_action_label(
     phase: WorkflowPhase,
     outcome: &str,
     verified_remediation: bool,
+    repository_only_map: bool,
 ) -> String {
     use kuzushi_core::workflow_attempts::PhaseResultAction::*;
     let verb = match action {
@@ -720,8 +798,10 @@ fn result_action_label(
         SelectAndContinue => continue_action_label(phase).to_string(),
         SelectAndReport => "Use & Report".to_string(),
         ContinueRun => "Continue".to_string(),
+        Open if repository_only_map => "Technical details".to_string(),
         Open => "Open".to_string(),
         Refine => "Refine".to_string(),
+        RunAgain if repository_only_map => "Run repository-only Map".to_string(),
         RunAgain => "Run again".to_string(),
         Regenerate => "Regenerate".to_string(),
         // One verb per action everywhere: the guided card, the disposition

@@ -173,6 +173,29 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     assert!(rendered.contains("retry"));
 }
 
+#[test]
+fn map_recovery_card_offers_repository_only_run_without_raw_failure_detail() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
+        tasks: vec![crate::app::FailedPlanningTask {
+            task: crate::app::PlanningTaskId::GatherRepoContext,
+            error: crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR.to_string(),
+            blocked: Vec::new(),
+        }],
+    });
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("MAP RECOVERY"), "{rendered}");
+    assert!(rendered.contains("repository-only map"), "{rendered}");
+    assert!(rendered.contains("change runtime"), "{rendered}");
+    assert!(rendered.contains("stopped before running"), "{rendered}");
+    assert!(!rendered.contains("does not support LLM enrichment yet"));
+}
+
 fn planning_row_fixture(
     id: crate::app::PlanningTaskId,
     state: crate::app::PlanningArtifactState,
@@ -913,6 +936,26 @@ fn plain_retry_gate_explains_y_n_intercept() {
     assert!(rendered.contains("n/Esc skip"));
     assert!(rendered.contains("cpg:build"));
     assert!(rendered.contains("graph build failed"));
+}
+
+#[test]
+fn plain_map_recovery_offers_repository_only_run_without_raw_failure_detail() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
+        tasks: vec![crate::app::FailedPlanningTask {
+            task: crate::app::PlanningTaskId::GatherRepoContext,
+            error: crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR.to_string(),
+            blocked: Vec::new(),
+        }],
+    });
+
+    let rendered = render_plain_app(&app, 110);
+
+    assert!(rendered.contains("MAP RECOVERY"));
+    assert!(rendered.contains("run repository-only map"));
+    assert!(rendered.contains("change runtime"));
+    assert!(rendered.contains("stopped before running"));
+    assert!(!rendered.contains("does not support LLM enrichment yet"));
 }
 
 #[test]

@@ -581,7 +581,7 @@ impl ShellApp {
     ) -> Option<PhaseRerunDraft> {
         let record = self.current_phase_result_record()?;
         let target = self.target_owned()?;
-        let Some((tool, input)) = record
+        let Some((tool, mut input)) = record
             .completed
             .run_refs
             .iter()
@@ -594,6 +594,8 @@ impl ShellApp {
             );
             return None;
         };
+        let repository_only_map =
+            recover_failed_native_map_input(&record.completed, &tool, &mut input);
         let descriptor = self.registry().resolve_tool(&tool)?;
         Some(PhaseRerunDraft {
             review: PhaseRerunReview {
@@ -606,18 +608,26 @@ impl ShellApp {
                 derivation,
             },
             derivation,
+            repository_only_map,
         })
     }
 
     fn apply_phase_rerun_draft(&mut self, draft: PhaseRerunDraft) {
         self.engagement.set_pending_phase_rerun(draft.review);
-        self.log(
-            "workflow",
-            format!(
-                "{} review opened from canonical input.json — Enter dispatches the exact saved input; e opens Options",
-                phase_rerun_action(draft.derivation)
-            ),
-        );
+        if draft.repository_only_map {
+            self.log(
+                "workflow",
+                "repository-only Map review opened · enrichment=false · Enter runs the recovered input",
+            );
+        } else {
+            self.log(
+                "workflow",
+                format!(
+                    "{} review opened from canonical input.json — Enter dispatches the exact saved input; e opens Options",
+                    phase_rerun_action(draft.derivation)
+                ),
+            );
+        }
     }
 
     fn handle_mode_or_control_key(
@@ -1218,6 +1228,11 @@ impl ShellApp {
     /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
     /// (with auto-adjustments), `n`/Esc skips them.
     fn handle_retry_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let repository_only_recovery = self
+            .advisory()
+            .pending_retry
+            .as_ref()
+            .is_some_and(|retry| retry.needs_repository_only_map_recovery());
         if self.advisory().pending_retry.is_none() || !key.modifiers.is_empty() {
             return InputUpdate::ignored();
         }
@@ -1227,6 +1242,10 @@ impl ShellApp {
             }
             KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
                 self.decline_retry();
+                InputUpdate::handled()
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') if repository_only_recovery => {
+                self.open_retry_runtime_settings();
                 InputUpdate::handled()
             }
             _ => InputUpdate::ignored(),
@@ -1529,6 +1548,25 @@ fn inactive_composer_mode_action(mode: InputMode) -> ViewHotkeyAction {
 struct PhaseRerunDraft {
     review: PhaseRerunReview,
     derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+    repository_only_map: bool,
+}
+
+fn recover_failed_native_map_input(
+    completed: &kuzushi_core::workflow_attempts::PhaseAttemptCompleted,
+    tool: &str,
+    input: &mut serde_json::Value,
+) -> bool {
+    let recover = completed.phase == WorkflowPhase::Map
+        && completed.outcome == kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Failed
+        && tool == "context:build"
+        && input
+            .get("enrichment")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+    if recover {
+        input["enrichment"] = serde_json::Value::Bool(false);
+    }
+    recover
 }
 
 fn rerun_specification(
@@ -2484,6 +2522,45 @@ mod tests {
         assert!(app.input().is_empty());
         assert_exact_saved_input_dispatch(&mut app, &input);
         assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn failed_enriched_map_rerun_is_explicitly_recovered_without_enrichment() {
+        use kuzushi_core::workflow_attempts::PhaseAttemptOutcome;
+        let target = tempfile::tempdir().unwrap();
+        seed_indexed_map_run(
+            target.path(),
+            "map-run",
+            serde_json::json!({"enrichment": true}),
+        );
+        crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Map,
+            "map-run",
+            PhaseAttemptOutcome::Failed,
+        );
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(target.path().to_path_buf()));
+        app.refresh_phase_attempt_projection();
+        app.set_shell_view(ShellView::Workbench);
+        app.router
+            .workbench_mut()
+            .set_page(Some(WorkbenchPage::Map));
+        app.set_input_mode(InputMode::Navigate);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
+
+        let review = app
+            .engagement
+            .pending_phase_rerun()
+            .expect("repository-only Map review");
+        assert_eq!(
+            review.prepared_input["enrichment"],
+            serde_json::json!(false)
+        );
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "workflow" && line.body.contains("repository-only Map review")
+        }));
     }
 
     fn rerun_review_input() -> serde_json::Value {

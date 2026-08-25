@@ -187,17 +187,27 @@ fn plain_run_projection_lines(model: PlainRunProjectionModel, width: usize) -> V
 }
 
 fn plain_retry_card_lines(model: RetryCardModel, width: usize) -> Vec<String> {
-    let mut lines = vec![plain_section_divider("RETRY", width)];
-    lines.push(format!(
-        "{} task(s) failed. y/Enter retry; n/Esc skip.",
-        model.failed_count
-    ));
-    lines.extend(
-        model
-            .rows
-            .into_iter()
-            .map(|row| format!("- {}: {}", row.tool, row.error)),
-    );
+    let title = if model.repository_only_map {
+        "MAP RECOVERY"
+    } else {
+        "RETRY"
+    };
+    let mut lines = vec![plain_section_divider(title, width)];
+    lines.push(if model.repository_only_map {
+        "LLM enrichment is unavailable in the Rust native executor. y/Enter run repository-only map; r change runtime; n/Esc skip.".to_string()
+    } else {
+        format!(
+            "{} task(s) failed. y/Enter retry; n/Esc skip.",
+            model.failed_count
+        )
+    });
+    lines.extend(model.rows.into_iter().map(|row| {
+        if model.repository_only_map {
+            format!("- {}: previous Map stopped before running", row.tool)
+        } else {
+            format!("- {}: {}", row.tool, row.error)
+        }
+    }));
     lines
 }
 

@@ -51,9 +51,51 @@ fn result_action_labels_follow_phase_result_key_overrides() {
         WorkflowPhase::Map,
         "completed",
         false,
+        false,
     );
 
     assert_eq!(label, "ctrl+u Use map");
+}
+
+#[test]
+fn failed_native_enrichment_becomes_a_repository_only_map_recovery() {
+    let presentation = crate::app::PhaseResultPresentation {
+        attempt_id: "map-attempt".to_string(),
+        outcome: "failed".to_string(),
+        emphasis: crate::PhaseResultEmphasis::DominantDecision,
+        compact_summary: crate::PhaseResultCompactSummary {
+            phase: WorkflowPhase::Map,
+            outcome: PhaseAttemptOutcome::Failed,
+            run_count: 1,
+            artifact_count: 8,
+            changed_findings: 0,
+            cost: None,
+            revision_recorded: true,
+            receipt_recorded: true,
+        },
+        detail_lines: vec![format!(
+            "context:build failed · {}",
+            crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR
+        )],
+        detail_rows: vec![crate::app::PhaseResultDetailRow {
+            key: None,
+            disclosed_keys: std::collections::BTreeSet::new(),
+            text: crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR.to_string(),
+        }],
+        semantic_keys: std::collections::BTreeSet::new(),
+        actions: vec![PhaseResultAction::Open, PhaseResultAction::RunAgain],
+        recommended_next: "retry".to_string(),
+    };
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let card = phase_result_card_model(&app, WorkflowPhase::Map, presentation);
+
+    assert_eq!(card.outcome, "recovery ready");
+    assert!(card.control_hint.contains("Run repository-only Map"));
+    assert!(card.control_hint.contains("Technical details"));
+    assert!(card.recommended.contains("change runtime in Config"));
+    assert!(!card.detail.contains("does not support LLM enrichment yet"));
 }
 
 fn unresolved_map_result_app(config: V2Config) -> (tempfile::TempDir, ShellApp) {

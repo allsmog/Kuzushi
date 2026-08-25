@@ -36,3 +36,21 @@ fn planning_overrides_are_scoped_to_the_task_preset() {
     assert_eq!(pasta["methodology"], json!("pasta"));
     assert!(pasta.get("model").is_none());
 }
+
+#[test]
+fn ordinary_map_options_hide_advanced_enrichment() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let option_names = app
+        .standard_planning_options(PlanningTaskId::GatherRepoContext.tool_name())
+        .into_iter()
+        .map(|spec| spec.name)
+        .collect::<Vec<_>>();
+
+    assert_eq!(option_names, vec!["sampleLimit", "discovery", "scope"]);
+    let enrichment = app
+        .planning_option_spec(PlanningTaskId::GatherRepoContext, "enrichment")
+        .expect("context enrichment descriptor");
+    assert!(enrichment.advanced);
+    assert_eq!(enrichment.default, Some(json!(false)));
+}

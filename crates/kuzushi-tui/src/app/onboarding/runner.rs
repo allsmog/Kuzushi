@@ -5,7 +5,7 @@
 //! tool-event handler).
 
 use super::dependencies::{topological_order, transitive_dependencies};
-use super::failure::{FailedPlanningTask, PendingRetry};
+use super::failure::{FailedPlanningTask, PendingRetry, CONTEXT_ENRICHMENT_RECOVERY_ERROR};
 use super::planning_task_explicit_input;
 use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
@@ -30,6 +30,15 @@ pub struct PlanningRunStep {
     pub(crate) task: PlanningTaskId,
     pub(crate) tool_name: String,
     pub(crate) input: Value,
+}
+
+fn planning_step_requests_unsupported_enrichment(step: &PlanningRunStep) -> bool {
+    step.task == PlanningTaskId::GatherRepoContext
+        && step
+            .input
+            .get("enrichment")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 impl ShellApp {
@@ -192,6 +201,9 @@ impl ShellApp {
         step: PlanningRunStep,
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
+        if let Some(effects) = self.reject_unsupported_map_enrichment(&step) {
+            return effects;
+        }
         if let Some((model, error)) = self.planning_step_credential_blocker(&step) {
             return self.pause_planning_step_for_credentials(
                 step,
@@ -207,6 +219,11 @@ impl ShellApp {
             self.log("error", error.clone());
             return self.fail_planning_task(&step.tool_name, &error);
         }
+        self.start_planning_run_step(step, workspace);
+        Vec::new()
+    }
+
+    fn start_planning_run_step(&mut self, step: PlanningRunStep, workspace: WorkspaceTarget) {
         self.log(
             "planning",
             format!(
@@ -225,7 +242,20 @@ impl ShellApp {
             self.session_thinking_level_owned(),
             authorization,
         );
-        Vec::new()
+    }
+
+    fn reject_unsupported_map_enrichment(
+        &mut self,
+        step: &PlanningRunStep,
+    ) -> Option<Vec<ShellEffect>> {
+        if !planning_step_requests_unsupported_enrichment(step) {
+            return None;
+        }
+        self.log(
+            "planning",
+            "context:build paused before dispatch · repository-only recovery available",
+        );
+        Some(self.fail_planning_task_id(step.task, CONTEXT_ENRICHMENT_RECOVERY_ERROR))
     }
 
     fn planning_step_credential_blocker(&self, step: &PlanningRunStep) -> Option<(String, String)> {
@@ -841,6 +871,17 @@ impl ShellApp {
         let Some(pending) = self.advisory_mut().pending_retry.take() else {
             return Vec::new();
         };
+        if pending.needs_repository_only_map_recovery() {
+            if let Err(error) = self.apply_repository_only_map_recovery() {
+                self.log("error", format!("map recovery failed: {error:#}"));
+                self.advisory_mut().pending_retry = Some(pending);
+                return Vec::new();
+            }
+            self.log(
+                "planning",
+                "operator chose repository-only Map · enrichment=false",
+            );
+        }
         self.reset_retry_state();
         let tasks = self.retryable_tasks_from_failures(&pending.tasks);
         if tasks.is_empty() {
@@ -856,6 +897,22 @@ impl ShellApp {
 
     fn reset_retry_state(&mut self) {
         self.engagement.clear_failures();
+    }
+
+    fn apply_repository_only_map_recovery(&mut self) -> Result<()> {
+        let task = PlanningTaskId::GatherRepoContext;
+        let spec = self
+            .planning_option_spec(task, "enrichment")
+            .ok_or_else(|| anyhow::anyhow!("context:build enrichment option is unavailable"))?;
+        self.set_planning_option_override(task, &spec, Value::Bool(false))
+    }
+
+    pub(crate) fn open_retry_runtime_settings(&mut self) {
+        self.handle_backend_command(None);
+        self.set_warn_notice(
+            "map recovery",
+            "LLM enrichment needs a configured LangGraph-backed context adapter. The Rust native Map remains repository-only.",
+        );
     }
 
     fn retryable_tasks_from_failures(
@@ -1177,6 +1234,7 @@ fn model_tasks_from_recommendation_result(result: &Value) -> BTreeSet<PlanningTa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::{FailedPlanningTask, PendingRetry};
     use kuzushi_core::{Severity, TriageOutcome, V2Config};
     use PlanningTaskId::*;
 
@@ -1205,6 +1263,48 @@ mod tests {
                 "threat-model:build[pasta]".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn map_enrichment_is_classified_before_native_dispatch() {
+        let enriched = PlanningRunStep {
+            task: GatherRepoContext,
+            tool_name: "context:build".to_string(),
+            input: json!({"enrichment": true}),
+        };
+        let repository_only = PlanningRunStep {
+            input: json!({"enrichment": false}),
+            ..enriched.clone()
+        };
+
+        assert!(planning_step_requests_unsupported_enrichment(&enriched));
+        assert!(!planning_step_requests_unsupported_enrichment(
+            &repository_only
+        ));
+    }
+
+    #[test]
+    fn accepting_map_recovery_records_repository_only_override() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory_mut().pending_retry = Some(PendingRetry {
+            tasks: vec![FailedPlanningTask {
+                task: GatherRepoContext,
+                error: CONTEXT_ENRICHMENT_RECOVERY_ERROR.to_string(),
+                blocked: Vec::new(),
+            }],
+        });
+
+        let effects = app.retry_failed_tasks();
+
+        assert_eq!(
+            app.engagement
+                .option_override_value(GatherRepoContext, "enrichment"),
+            Some(json!(false))
+        );
+        assert!(!effects.is_empty());
+        assert!(app.log_lines().iter().any(|line| {
+            line.prefix == "planning" && line.body.contains("repository-only Map")
+        }));
     }
 
     #[test]

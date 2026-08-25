@@ -34,9 +34,7 @@ pub struct PlanningOptionEdit {
 
 impl ShellApp {
     pub(crate) fn planning_option_count_for_current_row(&self) -> usize {
-        self.current_planning_tool_options()
-            .map(|options| options.len())
-            .unwrap_or(0)
+        self.current_planning_tool_options().len()
     }
 
     pub(crate) fn planning_override_count(&self, task: PlanningTaskId) -> usize {
@@ -212,17 +210,31 @@ impl ShellApp {
             .is_some_and(|object| object.contains_key(option_name))
     }
 
-    fn current_planning_tool_options(&self) -> Option<&[OptionSpec]> {
-        let row = self.engagement.planning_picker().current_row()?;
-        let tool = self.registry().resolve_tool(row.tool_name)?;
-        Some(tool.options.as_slice())
+    pub(crate) fn standard_planning_options(&self, tool_name: &str) -> Vec<OptionSpec> {
+        self.registry()
+            .resolve_tool(tool_name)
+            .map(|tool| {
+                tool.options
+                    .iter()
+                    .filter(|spec| !spec.advanced && !spec.evasion)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn current_planning_tool_options(&self) -> Vec<OptionSpec> {
+        self.engagement
+            .planning_picker()
+            .current_row()
+            .map(|row| self.standard_planning_options(row.tool_name))
+            .unwrap_or_default()
     }
 
     pub(super) fn selected_planning_option_spec(&self) -> Option<(PlanningTaskId, OptionSpec)> {
         let row = self.engagement.planning_picker().current_row()?;
-        let tool = self.registry().resolve_tool(row.tool_name)?;
-        let spec = tool
-            .options
+        let spec = self
+            .standard_planning_options(row.tool_name)
             .get(self.engagement.planning_picker().option_cursor())?
             .clone();
         Some((row.id, spec))

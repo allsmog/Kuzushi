@@ -19946,11 +19946,11 @@ fn planning_picker_tab_and_backtab_cycle_list_and_options_focus() {
     assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
 }
 
-fn open_stride_planning_options_with_model_override(app: &mut ShellApp) -> serde_json::Value {
+fn open_map_planning_options_with_sample_limit_override(app: &mut ShellApp) -> serde_json::Value {
     open_test_planning_picker(
         app,
         vec![planning_test_row(
-            PlanningTaskId::BuildStrideThreatModel,
+            PlanningTaskId::GatherRepoContext,
             PlanningArtifactState::Missing,
         )],
     );
@@ -19958,15 +19958,15 @@ fn open_stride_planning_options_with_model_override(app: &mut ShellApp) -> serde
         .planning_picker_mut()
         .set_focus(PickerFocus::OptionsPane);
     let option_index = app
-        .registry()
-        .resolve_tool(PlanningTaskId::BuildStrideThreatModel.tool_name())
-        .and_then(|tool| tool.options.iter().position(|spec| spec.name == "model"))
-        .expect("threat-model model option");
+        .standard_planning_options(PlanningTaskId::GatherRepoContext.tool_name())
+        .iter()
+        .position(|spec| spec.name == "sampleLimit")
+        .expect("context sample limit option");
     app.move_planning_option_cursor(option_index as isize);
-    let value = serde_json::json!("openai:gpt-5.5");
+    let value = serde_json::json!(350);
     app.engagement.set_option_override(
-        PlanningTaskId::BuildStrideThreatModel,
-        "model".to_string(),
+        PlanningTaskId::GatherRepoContext,
+        "sampleLimit".to_string(),
         value.clone(),
     );
     value
@@ -19979,7 +19979,7 @@ fn planning_option_ctrl_s_returns_effect_without_persisting() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.replace_option_store_for_test(ToolOptionStore::new());
     app.disable_option_persistence_for_test();
-    let expected = open_stride_planning_options_with_model_override(&mut app);
+    let expected = open_map_planning_options_with_sample_limit_override(&mut app);
     let before_store = app.option_store().clone();
 
     let result = update(
@@ -19994,15 +19994,15 @@ fn planning_option_ctrl_s_returns_effect_without_persisting() {
     assert!(matches!(
         &result.effects[0],
         ShellEffect::PersistPlanningOptionOverride(persist)
-            if persist.task == PlanningTaskId::BuildStrideThreatModel
-                && persist.tool_name == "threat-model:build"
-                && persist.option_name == "model"
+            if persist.task == PlanningTaskId::GatherRepoContext
+                && persist.tool_name == "context:build"
+                && persist.option_name == "sampleLimit"
                 && persist.value == expected
     ));
     assert_eq!(app.option_store(), &before_store);
     assert_eq!(
         app.engagement
-            .option_override_value(PlanningTaskId::BuildStrideThreatModel, "model"),
+            .option_override_value(PlanningTaskId::GatherRepoContext, "sampleLimit"),
         Some(expected)
     );
 }
@@ -20014,8 +20014,8 @@ fn planning_option_ctrl_s_persists_when_executed() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.replace_option_store_for_test(ToolOptionStore::new());
     app.disable_option_persistence_for_test();
-    let expected = open_stride_planning_options_with_model_override(&mut app);
-    let target = OptionTarget::Tool("threat-model:build".to_string());
+    let expected = open_map_planning_options_with_sample_limit_override(&mut app);
+    let target = OptionTarget::Tool("context:build".to_string());
 
     update_and_execute_effects(
         &mut app,
@@ -20028,18 +20028,18 @@ fn planning_option_ctrl_s_persists_when_executed() {
     assert_eq!(
         app.option_store()
             .values_for(OptionScope::Global, &target)
-            .and_then(|values| values.get("model")),
+            .and_then(|values| values.get("sampleLimit")),
         Some(&expected)
     );
     assert_eq!(
         app.engagement
-            .option_override_value(PlanningTaskId::BuildStrideThreatModel, "model"),
+            .option_override_value(PlanningTaskId::GatherRepoContext, "sampleLimit"),
         None
     );
     assert!(app
         .log_lines()
         .iter()
-        .any(|line| line.prefix == "setg" && line.body.contains("threat-model:build.model")));
+        .any(|line| line.prefix == "setg" && line.body.contains("context:build.sampleLimit")));
 }
 
 #[test]

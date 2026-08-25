@@ -187,7 +187,8 @@ pub use onboarding::{
 };
 pub(crate) use onboarding::{
     bound_target_candidate, immediate_target_candidate, large_repository_needs_decomposition,
-    planning_task_explicit_input, PlanningOperation, DECOMPOSE_FIRST_FILE_THRESHOLD,
+    planning_task_explicit_input, PlanningOperation, CONTEXT_ENRICHMENT_RECOVERY_ERROR,
+    DECOMPOSE_FIRST_FILE_THRESHOLD,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,

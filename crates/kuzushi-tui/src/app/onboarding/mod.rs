@@ -28,6 +28,7 @@ pub use controls::{
 pub use dependencies::{
     direct_dependencies, direct_dependents, topological_order, transitive_dependencies,
 };
+pub(crate) use failure::CONTEXT_ENRICHMENT_RECOVERY_ERROR;
 pub use failure::{FailedPlanningTask, PendingRetry};
 pub use initial_view::{
     initial_onboarding_phase, initial_onboarding_phase_for, skip_onboarding_env,

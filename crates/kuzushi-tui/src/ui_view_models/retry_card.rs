@@ -9,6 +9,7 @@ const MAX_RETRY_ROWS: usize = 6;
 pub(crate) struct RetryCardModel {
     pub(crate) failed_count: usize,
     pub(crate) rows: Vec<RetryCardRow>,
+    pub(crate) repository_only_map: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +32,7 @@ pub(crate) fn retry_card_model(app: &ShellApp) -> Option<RetryCardModel> {
     Some(RetryCardModel {
         failed_count: pending.tasks.len(),
         rows,
+        repository_only_map: pending.needs_repository_only_map_recovery(),
     })
 }
 
@@ -53,6 +55,7 @@ mod tests {
 
         let model = retry_card_model(&app).expect("retry card");
         assert_eq!(model.failed_count, 1);
+        assert!(!model.repository_only_map);
         assert_eq!(model.rows[0].tool, "cpg:build");
         assert!(model.rows[0].error.contains("graph build failed"));
     }
@@ -61,5 +64,20 @@ mod tests {
     fn retry_card_model_absent_without_pending_retry() {
         let app = ShellApp::new(V2Config::default(), None);
         assert!(retry_card_model(&app).is_none());
+    }
+
+    #[test]
+    fn retry_card_model_identifies_repository_only_map_recovery() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.advisory_mut().pending_retry = Some(PendingRetry {
+            tasks: vec![FailedPlanningTask {
+                task: PlanningTaskId::GatherRepoContext,
+                error: crate::app::CONTEXT_ENRICHMENT_RECOVERY_ERROR.to_string(),
+                blocked: Vec::new(),
+            }],
+        });
+
+        let model = retry_card_model(&app).expect("map recovery card");
+        assert!(model.repository_only_map);
     }
 }

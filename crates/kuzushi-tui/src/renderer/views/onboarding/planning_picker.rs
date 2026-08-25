@@ -270,13 +270,8 @@ fn compact_option_detail(app: &ShellApp) -> String {
     let Some(row) = app.engagement.planning_picker().current_row() else {
         return "No focused option".to_string();
     };
-    let Some(tool) = app.registry().resolve_tool(row.tool_name) else {
-        return "This inline action has no editable tool options".to_string();
-    };
-    let Some(spec) = tool
-        .options
-        .get(app.engagement.planning_picker().option_cursor())
-    else {
+    let options = app.standard_planning_options(row.tool_name);
+    let Some(spec) = options.get(app.engagement.planning_picker().option_cursor()) else {
         return "This step has no declared options".to_string();
     };
     let resolved = app.resolved_input_for_planning_task(row.id).ok();
@@ -961,15 +956,16 @@ fn planning_options_pane_lines(app: &ShellApp, width: usize, height: usize) -> V
     if row.id.is_inline_action() {
         return inline_action_pane_lines(app, row, &title, width, height, border_style);
     }
-    let Some(tool) = app.registry().resolve_tool(row.tool_name) else {
+    if app.registry().resolve_tool(row.tool_name).is_none() {
         return bordered_message(&title, "options unavailable for this step", width, height);
-    };
+    }
+    let options = app.standard_planning_options(row.tool_name);
     let mut lines = option_pane_header(&title, focused, border_style, width);
     let body_height = height.saturating_sub(2);
     lines.extend(option_pane_body_lines(
         app,
         row,
-        &tool.options,
+        &options,
         width,
         body_height,
         border_style,
@@ -1978,7 +1974,7 @@ mod tests {
     }
 
     #[test]
-    fn option_rows_show_readable_advanced_and_locked_badges() {
+    fn option_rows_hide_advanced_and_keep_locked_badges() {
         let mut advanced = planning_app(&[PlanningTaskId::GatherRepoContext]);
         advanced
             .engagement
@@ -1986,7 +1982,8 @@ mod tests {
             .set_focus(PickerFocus::OptionsPane);
         advanced.move_planning_option_cursor(2);
         let rendered = planning_text_lines(&advanced, 120, 36).join("\n");
-        assert!(rendered.contains("Enrichment [ADVANCED]"), "{rendered}");
+        assert!(!rendered.contains("Enrichment"), "{rendered}");
+        assert!(rendered.contains("Scope"), "{rendered}");
 
         let mut locked = planning_app(&[PlanningTaskId::BuildStrideThreatModel]);
         locked
@@ -2003,7 +2000,7 @@ mod tests {
 
     #[test]
     fn option_window_tracks_the_cursor_on_option_rich_rows() {
-        let mut app = planning_app(&[PlanningTaskId::BuildThreatModel]);
+        let mut app = planning_app(&[PlanningTaskId::GatherRepoContext]);
         app.engagement
             .planning_picker_mut()
             .set_focus(PickerFocus::OptionsPane);
@@ -2013,11 +2010,10 @@ mod tests {
         let rendered = planning_text_lines(&app, 120, 36).join("\n");
 
         assert!(rendered.contains(&format!("OPTION {option_count}/{option_count}")));
-        assert!(rendered.contains("> Model [ADVANCED]"), "{rendered}");
-        assert!(rendered.contains("Key: model"), "{rendered}");
-        assert!(rendered.contains("Description: Explicit provider:model"));
-        assert!(rendered.contains("override for this tool run."));
-        assert!(!rendered.contains("> Target ="), "{rendered}");
+        assert!(rendered.contains("> Scope"), "{rendered}");
+        assert!(rendered.contains("Key: scope"), "{rendered}");
+        assert!(rendered.contains("Description: Context slice to build."));
+        assert!(!rendered.contains("> Sample limit ="), "{rendered}");
         assert!(!rendered.contains("CANONICAL INPUT 1-2/"), "{rendered}");
     }
 

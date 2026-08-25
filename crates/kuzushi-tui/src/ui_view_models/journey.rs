@@ -770,10 +770,11 @@ pub(super) fn unresolved_attempt_action(
     if let Some(reason) = app.effective_phase_attempt_blocker(completed) {
         return reason;
     }
-    let outcome = app
-        .phase_result_presentation_for(completed)
-        .compact_summary
-        .outcome;
+    let presentation = app.phase_result_presentation_for(completed);
+    if super::phase_cockpit::is_repository_only_map_recovery(completed.phase, &presentation) {
+        return "run repository-only Map, open technical details, or change runtime".to_string();
+    }
+    let outcome = presentation.compact_summary.outcome;
     match outcome {
         PhaseAttemptOutcome::Completed => format!(
             "accept, continue with, or discard the completed {} result",
