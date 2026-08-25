@@ -28,25 +28,32 @@ pub(crate) fn status_footer_findings_summary_with_total(
     status_footer_findings_summary_from_counts_with_loaded(findings.len(), total, counts)
 }
 
-/// A view projection narrows the ledger (engagement dedupe, component scope,
-/// backlog preset, search) without unloading anything, so `shown` is the only
-/// number these counts describe. Callers pass the ledger `total` alongside it
-/// because chrome that prints a bare projection count cannot be told apart
-/// from chrome that prints the ledger — and both render on the same frame.
+/// The counts a findings segment has to reconcile. `shown` is what the view
+/// projection rendered, `loaded` is what the session holds, and `total` is
+/// what the ledger matched. Each step narrows for a different reason, so one
+/// ratio spanning them would attribute every missing row to the last step.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FindingsNarrowing {
+    pub(crate) shown: usize,
+    pub(crate) loaded: usize,
+    pub(crate) total: usize,
+}
+
+/// Chrome that prints a bare projection count cannot be told apart from chrome
+/// that prints the ledger, and both render on the same frame — so the
+/// projection names what it narrows.
 pub(crate) fn status_footer_findings_summary_from_counts(
-    shown: usize,
-    total: usize,
+    narrowing: FindingsNarrowing,
     counts: SeverityCounts,
 ) -> String {
-    status_footer_findings_parts(shown_findings_label(shown, total), counts)
+    status_footer_findings_parts(findings_narrowing_label(narrowing), counts)
 }
 
 pub(crate) fn compact_status_footer_findings_summary_from_counts(
-    shown: usize,
-    total: usize,
+    narrowing: FindingsNarrowing,
     counts: SeverityCounts,
 ) -> String {
-    compact_status_footer_findings_parts(shown_findings_label(shown, total), counts)
+    compact_status_footer_findings_parts(findings_narrowing_label(narrowing), counts)
 }
 
 pub(crate) fn compact_status_footer_findings_summary_with_total(
@@ -140,9 +147,9 @@ mod tests {
     fn an_unnarrowed_count_reads_as_a_plain_total() {
         assert_eq!(shown_findings_label(1, 1), "1 finding".to_string());
         assert_eq!(shown_findings_label(4, 4), "4 findings".to_string());
-        // A projection can only hide rows, so a `total` below `shown` is not a
-        // reachable state; report the rendered count rather than a negative
-        // remainder.
+        // A projection can only hide loaded rows, so a `loaded` below `shown`
+        // is not a reachable state; report the rendered count rather than a
+        // negative remainder.
         assert_eq!(shown_findings_label(4, 2), "4 findings".to_string());
     }
 
@@ -153,14 +160,67 @@ mod tests {
             medium: 2,
             ..SeverityCounts::default()
         };
+        let narrowing = FindingsNarrowing {
+            shown: 27,
+            loaded: 31,
+            total: 31,
+        };
 
         assert_eq!(
-            status_footer_findings_summary_from_counts(27, 31, counts),
+            status_footer_findings_summary_from_counts(narrowing, counts),
             "27/31 findings shown / 25 high / 2 med"
         );
         assert_eq!(
-            compact_status_footer_findings_summary_from_counts(27, 31, counts),
+            compact_status_footer_findings_summary_from_counts(narrowing, counts),
             "27/31 findings shown · 25 H · 2 M"
+        );
+    }
+
+    /// `FindingListFilter::MAX_LIMIT` caps a reload at 500 rows while the
+    /// report still counts every match, so a big ledger narrows twice. Blaming
+    /// the projection for the rows the limit dropped would restate the bug
+    /// this label exists to fix.
+    #[test]
+    fn a_doubly_narrowed_count_separates_hidden_rows_from_unloaded_ones() {
+        assert_eq!(
+            findings_narrowing_label(FindingsNarrowing {
+                shown: 450,
+                loaded: 500,
+                total: 700,
+            }),
+            "450/500 findings shown of 700 matched"
+        );
+    }
+
+    #[test]
+    fn each_narrowing_alone_reads_as_itself() {
+        // Loaded everything, projection hid some.
+        assert_eq!(
+            findings_narrowing_label(FindingsNarrowing {
+                shown: 27,
+                loaded: 31,
+                total: 31,
+            }),
+            "27/31 findings shown"
+        );
+        // Projection hid nothing, the limit dropped rows — the rail renders
+        // this same phrase from the ledger, so the two must agree verbatim.
+        assert_eq!(
+            findings_narrowing_label(FindingsNarrowing {
+                shown: 500,
+                loaded: 500,
+                total: 700,
+            }),
+            "500/700 findings loaded"
+        );
+        // Neither narrowed.
+        assert_eq!(
+            findings_narrowing_label(FindingsNarrowing {
+                shown: 4,
+                loaded: 4,
+                total: 4,
+            }),
+            "4 findings"
         );
     }
 }
@@ -179,10 +239,28 @@ fn loaded_findings_label(loaded: usize, total: usize) -> String {
     narrowed_findings_label(loaded, total, "loaded")
 }
 
-/// `shown` came off a view projection over rows that are all loaded, so the
-/// difference is hidden, not missing.
-fn shown_findings_label(shown: usize, total: usize) -> String {
-    narrowed_findings_label(shown, total, "shown")
+/// `shown` came off a view projection, which can only hide rows the session
+/// already loaded — so it is measured against `loaded`, never the ledger.
+fn shown_findings_label(shown: usize, loaded: usize) -> String {
+    narrowed_findings_label(shown, loaded, "shown")
+}
+
+/// A projection hides loaded rows; a list limit leaves rows unloaded. A frame
+/// that hit both has to name both, because the single ratio `shown/total`
+/// would report rows that were never loaded as rows the projection hid.
+fn findings_narrowing_label(narrowing: FindingsNarrowing) -> String {
+    let FindingsNarrowing {
+        shown,
+        loaded,
+        total,
+    } = narrowing;
+    if shown < loaded && loaded < total {
+        return format!("{shown}/{loaded} findings shown of {total} matched");
+    }
+    if shown < loaded {
+        return shown_findings_label(shown, loaded);
+    }
+    loaded_findings_label(loaded, total)
 }
 
 fn narrowed_findings_label(visible: usize, total: usize, qualifier: &str) -> String {

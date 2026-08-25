@@ -3,7 +3,7 @@ use super::{
     compact_status_footer_findings_summary_from_counts,
     compact_status_footer_findings_summary_with_total, findings_model, journey_footer_segment,
     routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
-    status_footer_findings_summary_with_total, view_status_segment, ShellApp,
+    status_footer_findings_summary_with_total, view_status_segment, FindingsNarrowing, ShellApp,
 };
 use crate::app::ReviewMode;
 use crate::ShellView;
@@ -162,20 +162,26 @@ fn status_footer_findings_segment(app: &ShellApp) -> String {
     if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
         return status_footer_findings_summary_from_counts(
-            findings.total,
-            app.findings_total_count(),
+            workbench_findings_narrowing(app, findings.total),
             findings.counts,
         );
     }
     status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
 }
 
+fn workbench_findings_narrowing(app: &ShellApp, shown: usize) -> FindingsNarrowing {
+    FindingsNarrowing {
+        shown,
+        loaded: app.findings().len(),
+        total: app.findings_total_count(),
+    }
+}
+
 fn compact_status_footer_findings_segment(app: &ShellApp) -> String {
     if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
         return compact_status_footer_findings_summary_from_counts(
-            findings.total,
-            app.findings_total_count(),
+            workbench_findings_narrowing(app, findings.total),
             findings.counts,
         );
     }
