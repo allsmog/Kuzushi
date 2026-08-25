@@ -176,10 +176,10 @@ pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, auth_method_row_kinds,
     auth_method_rows, build_execution_plan, cli_is_on_path, credential_recovery_row_kinds,
-    credential_recovery_rows, direct_dependencies, direct_dependents, discover_target_candidates,
-    initial_onboarding_phase, initial_onboarding_phase_for, model_recommended_in_phase,
-    recommended_tasks_for_phase, record_recent_target, row_disposition, skip_onboarding_env,
-    toggle_planning_row, topological_order, transitive_dependencies,
+    credential_recovery_rows, cycle_planning_row, direct_dependencies, direct_dependents,
+    discover_target_candidates, initial_onboarding_phase, initial_onboarding_phase_for,
+    model_recommended_in_phase, recommended_tasks_for_phase, record_recent_target, row_disposition,
+    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
     ArtifactState as PlanningArtifactState, AuthMethodRow, AuthMethodRowKind, FailedPlanningTask,
     InitialOnboardingPhase, LastAttempt, OnboardingInputs, PendingRetry, PickerFocus,
     PlanningOptionEdit, PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RowDisposition,
@@ -198,8 +198,9 @@ pub use runtime::{
     run_shell_with_plain, ShellLaunchContext, ShellTargetSource,
 };
 pub(crate) use settings::{
-    auth_provider_label, bridge_command_status, display_model_selector, model_choice_index_by_id,
-    model_choices, oauth_provider_status, preferred_visible_model_choice_cursor,
+    auth_provider_label, bridge_command_status, display_model_selector, env_credential_is_ready,
+    model_choice_index_by_id, model_choices, oauth_credential_is_ready,
+    oauth_model_switch_for_provider, oauth_provider_status, preferred_visible_model_choice_cursor,
     runtime_backend_label, validate_shell_model_id, AuthProvider, ModelChoice,
 };
 pub use shellapp::ShellApp;

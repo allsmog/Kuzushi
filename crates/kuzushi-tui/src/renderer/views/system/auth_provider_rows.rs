@@ -52,8 +52,7 @@ fn auth_provider_tone_styles(
     match tone {
         AuthProviderTone::Connected => (" ✓ ", theme::success(), theme::success()),
         AuthProviderTone::Missing => (" ✗ ", theme::danger(), theme::danger()),
-        AuthProviderTone::Expired => (" ! ", theme::warn(), theme::warn()),
+        AuthProviderTone::Refreshable => (" ! ", theme::warn(), theme::warn()),
         AuthProviderTone::Incomplete => (" ! ", theme::warn(), theme::warn()),
-        AuthProviderTone::Inactive => (" · ", theme::subtle(), theme::muted()),
     }
 }

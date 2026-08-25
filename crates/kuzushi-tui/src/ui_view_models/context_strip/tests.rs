@@ -36,6 +36,8 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(PathBuf::from("/tmp/acme")));
     app.domain_mut().context_view_mut().exists = true;
+    app.domain_mut().context_view_mut().freshness =
+        Some(kuzushi_core::context::ContextSnapshotFreshness::Current);
     app.config_mut().model = Some("openai:gpt-5.2".to_string());
     app.session_mut().mark_session_api_key_ready("openai");
     app.session_mut().set_session_cost_usd_for_test(0.42);
@@ -44,7 +46,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
 
     assert_eq!(model.target, "./acme");
     assert!(model.context_present);
-    assert_eq!(model.context_state, "present");
+    assert_eq!(model.context_state, "current");
     assert_eq!(model.model, "openai:gpt-5.2");
     assert_eq!(model.phase.as_deref(), Some("Map 1/5"));
     assert_eq!(model.cost, Some("$0.42".to_string()));

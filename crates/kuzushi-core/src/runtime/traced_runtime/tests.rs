@@ -327,6 +327,45 @@ fn typed_runtime_failure_keeps_stage_call_model_class_status_and_safe_detail() {
 }
 
 #[test]
+fn mcp_unavailable_failure_records_exact_zero_provider_cost() {
+    use crate::runtime::{RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata};
+    let target = tempfile::tempdir().unwrap();
+    let failure = RuntimeFailure::new(RuntimeFailureMetadata::new(
+        RuntimeFailureClass::McpUnavailable,
+        None,
+        None,
+    ));
+    let runtime = runtime_with(Err(anyhow::Error::new(failure)));
+
+    let _ = traced(&runtime, target.path(), "mcp-unavailable")
+        .query_blocking(AgentQueryRequest::new(
+            "openai:gpt-test",
+            ".",
+            "system",
+            "prompt",
+        ))
+        .unwrap_err();
+
+    let read = crate::run_lifecycle::read_run_items(target.path(), "mcp-unavailable")
+        .unwrap()
+        .unwrap();
+    let (cost, failure) = read
+        .items
+        .iter()
+        .find_map(|item| match &item.item {
+            RunItemV1::ModelCallFinished {
+                cost,
+                failure: Some(failure),
+                ..
+            } => Some((*cost, failure)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(cost.exact_usd(), Some(0.0));
+    assert_eq!(failure.error_class, RuntimeFailureClass::McpUnavailable);
+}
+
+#[test]
 fn next_step_records_typed_model_calls_and_safe_agent_actions() {
     let target = tempfile::tempdir().unwrap();
     let runtime = runtime_with(Ok(AgentQueryResponse::default()));

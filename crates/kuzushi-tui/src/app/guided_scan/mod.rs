@@ -230,7 +230,11 @@ pub(super) fn guided_option_is_visible(
     task: PlanningTaskId,
     spec: &OptionSpec,
 ) -> bool {
-    if spec.advanced || spec.evasion || app.option_locked_by_planning_preset(task, &spec.name) {
+    if !crate::app::option_is_operator_editable(spec)
+        || spec.advanced
+        || spec.evasion
+        || app.option_locked_by_planning_preset(task, &spec.name)
+    {
         return false;
     }
     let name = spec.name.to_ascii_lowercase();

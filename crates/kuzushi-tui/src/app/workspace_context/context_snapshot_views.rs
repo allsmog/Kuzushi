@@ -1,10 +1,12 @@
 use super::*;
 use anyhow::Context;
+use std::path::Path;
 
 pub(crate) fn default_context_snapshot_view(snapshot_path: Option<PathBuf>) -> ContextSnapshotView {
     ContextSnapshotView {
         snapshot_path,
         exists: false,
+        freshness: None,
         status: "missing. Next: context build".to_string(),
         target: None,
         discovery: None,
@@ -14,6 +16,8 @@ pub(crate) fn default_context_snapshot_view(snapshot_path: Option<PathBuf>) -> C
         frameworks: Vec::new(),
         generated_slices: Vec::new(),
         stale_slices: Vec::new(),
+        enrichment_claims: 0,
+        enrichment_model: None,
     }
 }
 
@@ -56,9 +60,11 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         }
     };
     match read_context_snapshot_json(&body) {
-        ContextSnapshotRead::Present(snapshot) => {
-            Ok(present_context_snapshot_view(snapshot_path, &snapshot))
-        }
+        ContextSnapshotRead::Present(snapshot) => Ok(present_context_snapshot_view(
+            snapshot_path,
+            &workspace_root,
+            &snapshot,
+        )),
         ContextSnapshotRead::Malformed => Ok(malformed_context_snapshot_view(snapshot_path)),
     }
 }
@@ -79,31 +85,23 @@ fn context_snapshot_workspace_root(snapshot_path: &std::path::Path) -> Result<Pa
 
 fn present_context_snapshot_view(
     snapshot_path: PathBuf,
+    workspace_root: &Path,
     snapshot: &serde_json::Value,
 ) -> ContextSnapshotView {
-    let files_indexed = snapshot
-        .get("filesIndexed")
-        .and_then(serde_json::Value::as_u64);
-    let total_files = snapshot
-        .pointer("/fileIndex/totalFiles")
-        .and_then(serde_json::Value::as_u64);
+    let (files_indexed, total_files) = context_snapshot_file_counts(snapshot);
     let generated_slices = json_string_array(snapshot.get("generatedSlices"));
     let stale_slices = json_string_array(snapshot.get("staleSlices"));
     let languages = json_string_array(snapshot.pointer("/repoContext/languages"));
     let frameworks = json_string_array(snapshot.pointer("/repoContext/frameworks"));
-    let target = snapshot
-        .get("target")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
-    let discovery = snapshot
-        .get("discovery")
-        .and_then(serde_json::Value::as_str)
-        .map(ToString::to_string);
-    let status = context_snapshot_status(files_indexed, total_files);
+    let (target, discovery) = context_snapshot_labels(snapshot);
+    let freshness = kuzushi_core::context::context_snapshot_freshness(workspace_root, snapshot);
+    let (enrichment_claims, enrichment_model) = context_enrichment_details(snapshot);
+    let status = context_snapshot_status(files_indexed, total_files, &freshness);
 
     ContextSnapshotView {
         snapshot_path: Some(snapshot_path),
         exists: true,
+        freshness: Some(freshness),
         status,
         target,
         discovery,
@@ -113,7 +111,39 @@ fn present_context_snapshot_view(
         frameworks,
         generated_slices,
         stale_slices,
+        enrichment_claims,
+        enrichment_model,
     }
+}
+
+fn context_snapshot_file_counts(snapshot: &serde_json::Value) -> (Option<u64>, Option<u64>) {
+    (
+        snapshot
+            .get("filesIndexed")
+            .and_then(serde_json::Value::as_u64),
+        snapshot
+            .pointer("/fileIndex/totalFiles")
+            .and_then(serde_json::Value::as_u64),
+    )
+}
+
+fn context_snapshot_labels(snapshot: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let text = |key| {
+        snapshot
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    (text("target"), text("discovery"))
+}
+
+fn context_enrichment_details(snapshot: &serde_json::Value) -> (usize, Option<String>) {
+    let claims = context_enrichment_claim_count(snapshot);
+    let model = snapshot
+        .pointer("/provenance/enrichment/model")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    (claims, model)
 }
 
 fn read_context_snapshot_json(body: &str) -> ContextSnapshotRead {
@@ -132,6 +162,7 @@ fn malformed_context_snapshot_view(snapshot_path: PathBuf) -> ContextSnapshotVie
     ContextSnapshotView {
         snapshot_path: Some(snapshot_path),
         exists: false,
+        freshness: None,
         status: "malformed context snapshot. Next: context build".to_string(),
         target: None,
         discovery: None,
@@ -141,6 +172,8 @@ fn malformed_context_snapshot_view(snapshot_path: PathBuf) -> ContextSnapshotVie
         frameworks: Vec::new(),
         generated_slices: Vec::new(),
         stale_slices: Vec::new(),
+        enrichment_claims: 0,
+        enrichment_model: None,
     }
 }
 
@@ -148,6 +181,7 @@ fn invalid_context_snapshot_view(snapshot_path: PathBuf, reason: &str) -> Contex
     ContextSnapshotView {
         snapshot_path: Some(snapshot_path),
         exists: false,
+        freshness: None,
         status: format!("malformed context snapshot ({reason}). Next: context build"),
         target: None,
         discovery: None,
@@ -157,14 +191,47 @@ fn invalid_context_snapshot_view(snapshot_path: PathBuf, reason: &str) -> Contex
         frameworks: Vec::new(),
         generated_slices: Vec::new(),
         stale_slices: Vec::new(),
+        enrichment_claims: 0,
+        enrichment_model: None,
     }
 }
 
-fn context_snapshot_status(files_indexed: Option<u64>, total_files: Option<u64>) -> String {
-    format!(
-        "snapshot present; {} indexed file(s). Next: context regen repo",
-        files_indexed.or(total_files).unwrap_or(0)
-    )
+fn context_enrichment_claim_count(snapshot: &serde_json::Value) -> usize {
+    [
+        "customMiddleware",
+        "customSanitizers",
+        "trustBoundaries",
+        "dataClassifications",
+        "architecturalNotes",
+    ]
+    .iter()
+    .map(|key| {
+        snapshot
+            .pointer(&format!("/enrichedContext/{key}"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0)
+    })
+    .sum()
+}
+
+fn context_snapshot_status(
+    files_indexed: Option<u64>,
+    total_files: Option<u64>,
+    freshness: &kuzushi_core::context::ContextSnapshotFreshness,
+) -> String {
+    let count = files_indexed.or(total_files).unwrap_or(0);
+    match freshness {
+        kuzushi_core::context::ContextSnapshotFreshness::Current => {
+            format!("snapshot current; {count} indexed file(s). Next: context regen repo")
+        }
+        kuzushi_core::context::ContextSnapshotFreshness::Stale(reason) => {
+            format!("stale · {reason}; {count} indexed file(s). Next: context build")
+        }
+        kuzushi_core::context::ContextSnapshotFreshness::Unverifiable(reason) => {
+            format!("freshness unverified · {reason}; {count} indexed file(s). Next: context build")
+        }
+    }
 }
 
 pub(crate) fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
@@ -236,6 +303,46 @@ mod tests {
         );
         assert!(view.languages.is_empty());
         assert!(view.frameworks.is_empty());
+    }
+
+    #[test]
+    fn load_context_snapshot_view_marks_changed_source_as_stale() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("source.rs"), "fn first() {}\n").unwrap();
+        let snapshot_path = kuzushi_core::context_snapshot_path(temp.path());
+        fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        let tree_hash =
+            kuzushi_core::incremental_index::current_workspace_tree_hash(temp.path()).unwrap();
+        fs::write(
+            &snapshot_path,
+            serde_json::json!({
+                "target": temp.path(),
+                "provenance": {
+                    "treeHash": tree_hash,
+                    "enrichment": {"model": "openai:gpt-test"}
+                },
+                "filesIndexed": 1,
+                "fileIndex": {"totalFiles": 1},
+                "enrichedContext": {
+                    "customMiddleware": [{"name": "guard"}],
+                    "architecturalNotes": [{"note": "single tenant"}]
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        fs::write(temp.path().join("source.rs"), "fn changed() {}\n").unwrap();
+
+        let view = load_context_snapshot_view(snapshot_path).unwrap();
+
+        assert!(matches!(
+            view.freshness,
+            Some(kuzushi_core::context::ContextSnapshotFreshness::Stale(_))
+        ));
+        assert!(view.status.starts_with("stale ·"), "{}", view.status);
+        assert!(view.status.contains("Next: context build"));
+        assert_eq!(view.enrichment_claims, 2);
+        assert_eq!(view.enrichment_model.as_deref(), Some("openai:gpt-test"));
     }
 
     #[cfg(unix)]

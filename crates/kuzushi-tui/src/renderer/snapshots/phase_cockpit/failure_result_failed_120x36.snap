@@ -5,7 +5,7 @@ scenario: result_failed
 size: 120x36
 ---
 KUZUSHI · Viewing Map · target ./failure-target · ○ idle · context not built · model unconfigured · module all
- Map ● · Scan × · Review × · Prove × · Fix ×
+ Map ! · Scan × · Review × · Prove × · Fix ×
  ▸ NEXT inspect, rerun, or discard the failed Map result
  z open map viz · next → Map · jobs inspect Map runs
 │PROJECT CONTEXT

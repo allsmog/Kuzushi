@@ -255,6 +255,10 @@ impl SessionState {
         self.session_api_key_providers.insert(provider.to_string());
     }
 
+    pub(crate) fn clear_session_api_key_ready(&mut self, provider: &str) {
+        self.session_api_key_providers.remove(provider);
+    }
+
     pub(crate) fn session_api_key_ready(&self, provider: &str) -> bool {
         self.session_api_key_providers.contains(provider)
     }

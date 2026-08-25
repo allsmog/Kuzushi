@@ -10,7 +10,6 @@ use kuzushi_core::{OptionScope, OptionTarget, RuntimeKind, V2Config};
 use kuzushi_openai::LangGraphRuntime;
 pub(crate) use model_choices::*;
 pub(crate) use preferred_model_choice_index_for_state::*;
-use std::env;
 use std::fs;
 use std::io;
 use std::path::PathBuf;

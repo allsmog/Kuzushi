@@ -14,19 +14,12 @@ impl ShellApp {
 
     fn reduce_context_regen(&mut self, slice: &str) -> Vec<ShellEffect> {
         match slice {
-            "all" | "repo" | "app-model" => self.reduce_context_build(Some(slice)),
-            "enrichment" => {
-                self.log(
-                    "error",
-                    "context regen enrichment is not supported by the native Rust context builder yet. Next: context build",
-                );
-                Vec::new()
-            }
+            "all" | "repo" | "enrichment" | "app-model" => self.reduce_context_build(Some(slice)),
             other => {
                 self.log(
                     "error",
                     format!(
-                        "unknown context slice {other:?}. Valid slices: all, repo, app-model. Next: context regen repo"
+                        "unknown context slice {other:?}. Valid slices: all, repo, enrichment, app-model. Next: context regen repo"
                     ),
                 );
                 Vec::new()

@@ -342,6 +342,17 @@ fn mcp_timeout_failure_is_safe_and_not_mislabeled_as_provider_timeout() {
 }
 
 #[test]
+fn mcp_unavailable_failure_is_safe_and_actionable() {
+    let sentinel = "spawn /private/kuzushi-mcp-treesitter ENOENT";
+
+    let public =
+        public_bridge_failure_with_detail(Some("mcp_unavailable"), None, Some(sentinel), None);
+
+    assert!(public.contains("cargo build --workspace"));
+    assert!(!public.contains(sentinel));
+}
+
+#[test]
 fn structured_bridge_failure_preserves_redacted_typed_metadata() {
     let metadata = bridge_failure_metadata(
         Some("sdk_client_validation"),

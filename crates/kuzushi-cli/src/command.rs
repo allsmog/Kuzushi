@@ -272,7 +272,8 @@ pub(crate) enum Command {
     Run {
         /// Tool to execute, as `module:tool` (e.g. `context:build`).
         tool: String,
-        /// Tool input as JSON. Use `@path` to read a file or `-` to read stdin.
+        /// Advanced structured input from `@path` or stdin (`-`). For ordinary
+        /// values, repeat `--option key=value` instead.
         #[arg(long, default_value = "{}")]
         input: String,
         /// Override a canonical tool option. Repeat as `--option key=value`.

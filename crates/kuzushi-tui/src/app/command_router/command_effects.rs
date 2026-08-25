@@ -1479,7 +1479,7 @@ mod run_focus_steer_tests {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         workspace.ensure_state_dir().unwrap();
-        std::fs::write(target.path().join(".kuzushi/context-snapshot.json"), "{}").unwrap();
+        crate::test_support::write_current_context_snapshot(target.path(), serde_json::json!({}));
         std::fs::write(target.path().join(".kuzushi/entry-points.json"), "{}").unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 

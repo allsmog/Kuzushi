@@ -16,6 +16,7 @@ import { existsSync, lstatSync, renameSync, symlinkSync, unlinkSync } from "node
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { cargoReleaseBuildArgs } from "./native-runtime-contract.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const restore = process.argv.includes("--restore");
@@ -43,7 +44,7 @@ function linkLocalBinary(binaryPath, backupPath) {
   }
   symlinkSync(localBinary, binaryPath);
   log(`global kuzushi now points at ${localBinary}`);
-  log("future `cargo build --release -p kuzushi-cli` runs are picked up automatically");
+  log("future `pnpm link:local` runs rebuild the complete native runtime");
   reportVersion(binaryPath);
 }
 
@@ -62,20 +63,28 @@ function restorePublishedBinary(binaryPath, backupPath) {
 }
 
 function buildLocalRelease() {
-  log("building release binary (cargo build --release -p kuzushi-cli)…");
-  const result = spawnSync("cargo", ["build", "--release", "-p", "kuzushi-cli"], {
+  log("building the release CLI and MCP sidecars…");
+  runCargoReleaseBuild();
+  const localBinary = localReleaseBinary();
+  requireRegularFile(localBinary);
+  return localBinary;
+}
+
+function runCargoReleaseBuild() {
+  const result = spawnSync("cargo", cargoReleaseBuildArgs(), {
     cwd: repoRoot,
     stdio: "inherit",
   });
-  if (result.status !== 0) {
-    fail("cargo build failed");
-  }
+  if (result.status !== 0) fail("cargo build failed");
+}
+
+function localReleaseBinary() {
   const exe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
-  const localBinary = join(repoRoot, "target", "release", exe);
-  if (!isRegularFile(localBinary)) {
-    fail(`expected build output at ${localBinary}`);
-  }
-  return localBinary;
+  return join(repoRoot, "target", "release", exe);
+}
+
+function requireRegularFile(path) {
+  if (!isRegularFile(path)) fail(`expected build output at ${path}`);
 }
 
 function globalNativeBinaryPath() {

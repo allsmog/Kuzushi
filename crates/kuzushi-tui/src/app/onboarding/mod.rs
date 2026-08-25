@@ -23,7 +23,8 @@ pub use auth_rows::{
     credential_recovery_rows, AuthMethodRow, AuthMethodRowKind,
 };
 pub use controls::{
-    build_execution_plan, row_disposition, toggle_planning_row, RowDisposition, ToggleOutcome,
+    build_execution_plan, cycle_planning_row, row_disposition, toggle_planning_row, RowDisposition,
+    ToggleOutcome,
 };
 pub use dependencies::{
     direct_dependencies, direct_dependents, topological_order, transitive_dependencies,

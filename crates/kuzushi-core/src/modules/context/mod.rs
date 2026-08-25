@@ -1,10 +1,12 @@
 use super::*;
 
 pub(in crate::modules) use attack_surface_routes::*;
+pub(in crate::modules) use enrichment::*;
 pub(in crate::modules) use package_json_dependency_names::*;
 pub(in crate::modules) use register_context_modules::*;
 mod attack_surface_routes;
 mod build_context_snapshot;
+mod enrichment;
 mod ingest_file;
 mod package_json_dependency_names;
 use serde_json::json;

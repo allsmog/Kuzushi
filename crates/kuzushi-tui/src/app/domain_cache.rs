@@ -736,6 +736,7 @@ fn empty_context_view(root: &std::path::Path) -> ContextSnapshotView {
     ContextSnapshotView {
         snapshot_path: Some(kuzushi_core::context_snapshot_path(root)),
         exists: false,
+        freshness: None,
         status: "missing. Next: context build".to_string(),
         target: None,
         discovery: None,
@@ -745,6 +746,8 @@ fn empty_context_view(root: &std::path::Path) -> ContextSnapshotView {
         frameworks: Vec::new(),
         generated_slices: Vec::new(),
         stale_slices: Vec::new(),
+        enrichment_claims: 0,
+        enrichment_model: None,
     }
 }
 

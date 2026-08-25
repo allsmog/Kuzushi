@@ -8,7 +8,7 @@ pub(super) fn readiness_rows(
 ) -> Vec<SetupReadinessRow> {
     vec![
         target_row(app),
-        plan_row(app, selected_rows),
+        plan_row(app, selected_rows, selected_model_tasks),
         model_row(app, selected_model_tasks),
         credential_row(app, selected_model_tasks, credential_readiness),
         prompt_row(app, selected_rows),
@@ -33,18 +33,21 @@ fn target_row(app: &ShellApp) -> SetupReadinessRow {
     }
 }
 
-fn plan_row(app: &ShellApp, selected_rows: &[&crate::app::PlanningTaskRow]) -> SetupReadinessRow {
+fn plan_row(
+    app: &ShellApp,
+    selected_rows: &[&crate::app::PlanningTaskRow],
+    selected_model_tasks: usize,
+) -> SetupReadinessRow {
     if let Some(row) = plan_blocker(app, selected_rows) {
         return row;
     }
-    let deterministic = selected_rows.iter().filter(|row| !row.model_backed).count();
-    let model = selected_rows.len().saturating_sub(deterministic);
+    let deterministic = selected_rows.len().saturating_sub(selected_model_tasks);
     ready_row(
         SetupRowId::Plan,
         "Map plan",
         "READY",
         format!(
-            "{} selected · {deterministic} deterministic · {model} model-backed",
+            "{} selected · {deterministic} deterministic · {selected_model_tasks} model-backed",
             selected_rows.len()
         ),
     )
@@ -79,7 +82,7 @@ fn empty_plan_row(app: &ShellApp) -> SetupReadinessRow {
             "Map plan",
             "NOTHING TO RUN",
             format!(
-                "{cached} cached Map artifact(s) will be reused · Enter to add work or rebuild"
+                "{cached} cached Map artifact(s) will be reused · Enter to choose reuse, run, or skip"
             ),
         ),
         None => blocked_row(

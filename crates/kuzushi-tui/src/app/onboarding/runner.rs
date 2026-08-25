@@ -10,7 +10,8 @@ use super::planning_task_explicit_input;
 use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
 use crate::app::{
-    workspace_for_target, DeterministicRecommendationRefresh, PendingCredentialContinuation,
+    env_credential_is_ready, workspace_for_target, DeterministicRecommendationRefresh,
+    PendingCredentialContinuation, PendingCredentialModelBinding, PendingCredentialRequirement,
     PendingCredentialWork, PlanningDispatchView, PlanningTaskDispatch, ShellEffect, WorkflowPhase,
 };
 use crate::{ShellApp, ShellView};
@@ -32,6 +33,31 @@ pub struct PlanningRunStep {
     pub(crate) input: Value,
 }
 
+fn credential_model_binding(step: &PlanningRunStep) -> PendingCredentialModelBinding {
+    if step
+        .input
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|model| !model.trim().is_empty())
+    {
+        PendingCredentialModelBinding::DeferredStepInput
+    } else {
+        PendingCredentialModelBinding::Config
+    }
+}
+
+fn rejected_credential_requirement(model: &str) -> PendingCredentialRequirement {
+    match model.split_once(':').map(|(provider, _)| provider) {
+        Some("openai") => PendingCredentialRequirement::ReplaceApiKey,
+        Some("openai-codex") => PendingCredentialRequirement::ReconnectOauth,
+        Some("anthropic") if env_credential_is_ready("ANTHROPIC_API_KEY") => {
+            PendingCredentialRequirement::ReplaceApiKey
+        }
+        Some("anthropic") => PendingCredentialRequirement::ReconnectOauth,
+        _ => PendingCredentialRequirement::AnyCompatible,
+    }
+}
+
 impl ShellApp {
     pub(crate) fn resume_credential_continuation_effect(&mut self) -> Vec<ShellEffect> {
         let Some(pending) = self.engagement.take_pending_credential_continuation() else {
@@ -45,7 +71,7 @@ impl ShellApp {
             );
             return Vec::new();
         }
-        if !self.configured_model_auth_ready() {
+        if !self.credential_continuation_auth_ready(&pending) {
             self.reopen_unready_credential_continuation(pending);
             return Vec::new();
         }
@@ -58,7 +84,32 @@ impl ShellApp {
         pending: &PendingCredentialContinuation,
     ) -> bool {
         self.target_owned().as_ref() == Some(&pending.target)
-            && self.config().model.as_deref() == Some(pending.model.as_str())
+            && self.credential_continuation_model_matches(pending)
+    }
+
+    fn credential_continuation_model_matches(
+        &self,
+        pending: &PendingCredentialContinuation,
+    ) -> bool {
+        match (&pending.model_binding, &pending.work) {
+            (PendingCredentialModelBinding::Config, _) => {
+                self.config().model.as_deref() == Some(pending.model.as_str())
+            }
+            (
+                PendingCredentialModelBinding::DeferredStepInput,
+                PendingCredentialWork::DeferredStep(step),
+            ) => step.input.get("model").and_then(Value::as_str) == Some(pending.model.as_str()),
+            _ => false,
+        }
+    }
+
+    fn credential_continuation_auth_ready(&self, pending: &PendingCredentialContinuation) -> bool {
+        pending.credential_requirement == PendingCredentialRequirement::AnyCompatible
+            && pending
+                .model
+                .split_once(':')
+                .map(|(provider, _)| provider)
+                .is_some_and(|provider| self.provider_auth_ready_for(provider))
     }
 
     fn reopen_unready_credential_continuation(&mut self, pending: PendingCredentialContinuation) {
@@ -193,12 +244,7 @@ impl ShellApp {
         workspace: WorkspaceTarget,
     ) -> Vec<ShellEffect> {
         if let Some((model, error)) = self.planning_step_credential_blocker(&step) {
-            return self.pause_planning_step_for_credentials(
-                step,
-                workspace.root().to_path_buf(),
-                model,
-                error,
-            );
+            return self.pause_preflight_step_for_credentials(step, workspace, model, error);
         }
         self.engagement.set_running_planning_run_step(step.clone());
         if let Some(error) =
@@ -228,6 +274,22 @@ impl ShellApp {
         Vec::new()
     }
 
+    fn pause_preflight_step_for_credentials(
+        &mut self,
+        step: PlanningRunStep,
+        workspace: WorkspaceTarget,
+        model: String,
+        error: String,
+    ) -> Vec<ShellEffect> {
+        self.pause_planning_step_for_credentials(
+            step,
+            workspace.root().to_path_buf(),
+            model,
+            error,
+            PendingCredentialRequirement::AnyCompatible,
+        )
+    }
+
     fn planning_step_credential_blocker(&self, step: &PlanningRunStep) -> Option<(String, String)> {
         if !self
             .registry()
@@ -254,6 +316,7 @@ impl ShellApp {
         target: PathBuf,
         model: String,
         error: String,
+        credential_requirement: PendingCredentialRequirement,
     ) -> Vec<ShellEffect> {
         let phase = self
             .engagement
@@ -271,6 +334,8 @@ impl ShellApp {
                 target,
                 phase,
                 model,
+                model_binding: credential_model_binding(&step),
+                credential_requirement,
                 work: PendingCredentialWork::DeferredStep(step),
             });
         self.open_credential_recovery(provider);
@@ -305,7 +370,8 @@ impl ShellApp {
             self.engagement.set_running_planning_run_step(step);
             return false;
         };
-        self.pause_planning_step_for_credentials(step, target, model, error);
+        let requirement = rejected_credential_requirement(&model);
+        self.pause_planning_step_for_credentials(step, target, model, error, requirement);
         true
     }
 

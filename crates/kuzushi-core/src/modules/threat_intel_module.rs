@@ -141,7 +141,12 @@ fn threat_intel_harvest_tool() -> ToolDescriptor {
         "threat-intel:harvest",
         "Build a catalog TOML from CVE IDs and extracted fix patterns.",
         vec![
-            opt("cves", OptionType::Json, "CVE IDs to harvest.").required(),
+            opt(
+                "cves",
+                OptionType::StringList,
+                "Comma-separated CVE IDs to harvest.",
+            )
+            .required(),
             threat_intel_output_path_option(),
             threat_intel_regression_gate_option(),
             threat_intel_accept_rejected_option(),

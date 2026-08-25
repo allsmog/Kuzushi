@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{
-    format_option_value, row_disposition, PickerFocus, PlanningArtifactState, PlanningTaskRow,
-    WorkflowPhase,
+    format_option_value, option_edit_hint, option_input_kind, option_is_operator_editable,
+    row_disposition, PickerFocus, PlanningArtifactState, PlanningTaskRow, WorkflowPhase,
 };
 use crate::ui_view_models::{
     enter_plan, format_relative_age, journey_model, latest_cached_modified, option_display_name,
@@ -97,8 +97,10 @@ fn expanded_planning_panes(
 
 fn stacked_planning_panes(app: &ShellApp, width: u16, height: usize) -> Vec<Line<'static>> {
     let content_height = height.saturating_sub(1);
-    let task_height = content_height / 2;
-    let option_height = content_height.saturating_sub(task_height);
+    let (task_height, option_height) = stacked_pane_heights(
+        app.engagement.planning_picker().tasks().len(),
+        content_height,
+    );
     let mut lines = task_list_pane_lines(app, width, task_height);
     lines.push(blank());
     lines.extend(planning_options_pane_lines(
@@ -107,6 +109,17 @@ fn stacked_planning_panes(app: &ShellApp, width: u16, height: usize) -> Vec<Line
         option_height,
     ));
     lines
+}
+
+fn stacked_pane_heights(task_count: usize, content_height: usize) -> (usize, usize) {
+    if content_height < 12 {
+        let task_height = content_height / 2;
+        return (task_height, content_height.saturating_sub(task_height));
+    }
+    let task_needed = task_count.saturating_add(3);
+    let task_max = content_height.saturating_sub(10);
+    let task_height = task_needed.clamp(4, task_max.max(4));
+    (task_height, content_height.saturating_sub(task_height))
 }
 
 fn compact_planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -275,7 +288,9 @@ fn compact_option_detail(app: &ShellApp) -> String {
     };
     let Some(spec) = tool
         .options
-        .get(app.engagement.planning_picker().option_cursor())
+        .iter()
+        .filter(|spec| option_is_operator_editable(spec))
+        .nth(app.engagement.planning_picker().option_cursor())
     else {
         return "This step has no declared options".to_string();
     };
@@ -291,9 +306,10 @@ fn compact_option_detail(app: &ShellApp) -> String {
     }
     let source = option_provenance(app, row, spec, resolved.as_ref());
     format!(
-        "Option: {} ({}) = {value} · {source}",
+        "Option · {} = {value} · {source} · {} · {}",
         option_display_name(&spec.name),
-        spec.name
+        option_input_kind(spec),
+        option_edit_hint(spec)
     )
 }
 
@@ -324,7 +340,7 @@ fn planning_controls_line(app: &ShellApp, width: usize) -> Line<'static> {
 
 fn ultra_compact_planning_controls(app: &ShellApp) -> &'static str {
     if app.engagement.planning_picker().returns_to_setup() {
-        return " ↑/↓  Space check  Enter save  Esc setup";
+        return " ↑/↓  Space outcome  Enter save  Esc setup";
     }
     match app.engagement.planning_picker().focus() {
         PickerFocus::OptionsPane => " ↑/↓  Space cycle  Enter edit  Esc",
@@ -332,7 +348,7 @@ fn ultra_compact_planning_controls(app: &ShellApp) -> &'static str {
         PickerFocus::List => match current_inline_action_selected(app) {
             Some(true) => " ↑/↓  Space uncheck  Enter attach  Esc",
             Some(false) => " ↑/↓  Space select  Enter run  Esc",
-            None => " ↑/↓  Space check  Enter run  Esc",
+            None => " ↑/↓  Space outcome  Enter run  Esc",
         },
     }
 }
@@ -349,16 +365,16 @@ fn planning_list_controls(app: &ShellApp, width: usize) -> &'static str {
 
 fn default_planning_controls(_app: &ShellApp, width: usize) -> &'static str {
     if width < 92 {
-        return " ↑/↓ move  Space check  Tab  Enter run  type cmd  Esc exit";
+        return " ↑/↓ move  Space outcome  Tab  Enter run  type cmd  Esc exit";
     }
-    " ↑/↓ move  Space check  Tab pane  ←/→ phase  Enter run  type command  Esc exit  F5 rebuild"
+    " ↑/↓ move  Space outcome  Tab pane  ←/→ phase  Enter run  type command  Esc exit"
 }
 
 fn setup_planning_controls(width: usize) -> &'static str {
     if width < 76 {
-        " ↑/↓ move  Space check  Tab  Enter save  type cmd  Esc return"
+        " ↑/↓ move  Space outcome  Tab  Enter save  type cmd  Esc return"
     } else {
-        " ↑/↓ move  Space check  Tab pane  Enter save  type command  Esc return"
+        " ↑/↓ move  Space outcome  Tab pane  Enter save  type command  Esc return"
     }
 }
 
@@ -592,7 +608,7 @@ fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
         return Line::from(vec![
             Span::styled("▌ ", theme::accent()),
             Span::styled(
-                "Revisiting — artifacts cached; press g to rebuild".to_string(),
+                "Revisiting · Space cycles cached work through reuse, run, and skip".to_string(),
                 theme::accent().add_modifier(Modifier::BOLD),
             ),
             Span::styled(format!(" ({headline})"), theme::muted()),
@@ -605,19 +621,12 @@ fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
             theme::success().add_modifier(Modifier::BOLD),
         ),
         Span::styled(headline, theme::primary()),
-        Span::styled(fresh_pass_hint(app), theme::muted()),
+        Span::styled(fresh_pass_hint(), theme::muted()),
     ])
 }
 
-/// The fresh-pass affordance names the phase this picker is actually on;
-/// the old static "phase map" clause claimed a Map reset on every phase.
-fn fresh_pass_hint(app: &ShellApp) -> String {
-    let phase = app
-        .engagement
-        .current_phase()
-        .map(|phase| phase.label().to_ascii_lowercase())
-        .unwrap_or_else(|| "map".to_string());
-    format!(" · next fresh restarts the pass · phase {phase} reopens this planner")
+fn fresh_pass_hint() -> &'static str {
+    " · Space: reuse → run → skip"
 }
 
 fn revisiting_cached_artifact_phase(app: &ShellApp) -> bool {
@@ -677,11 +686,11 @@ fn column_header(width: u16) -> Option<Line<'static>> {
     let w = width as usize;
     let body = if w >= WIDE {
         format!(
-            "    {:<7} {:<30} {:<22} {}",
+            "    {:<8} {:<30} {:<22} {}",
             "OUTCOME", "TASK", "TOOL", "WHY"
         )
     } else if w >= MEDIUM {
-        format!("    {:<7} {:<28} {}", "OUTCOME", "TASK", "WHY")
+        format!("    {:<8} {:<28} {}", "OUTCOME", "TASK", "WHY")
     } else {
         return None;
     };
@@ -812,17 +821,17 @@ fn planning_row_body(
 ) -> String {
     if width >= WIDE {
         return format!(
-            "  {marker} {outcome:<7} {label:<30} {tool_name:<22} {note}",
+            "  {marker} {outcome:<8} {label:<30} {tool_name:<22} {note}",
             outcome = outcome.word(),
         );
     }
     if width >= MEDIUM {
         return format!(
-            "  {marker} {outcome:<7} {label:<28} {note}",
+            "  {marker} {outcome:<8} {label:<28} {note}",
             outcome = outcome.word(),
         );
     }
-    format!("  {marker} {outcome:<7} {label}", outcome = outcome.word())
+    format!("  {marker} {outcome:<8} {label}", outcome = outcome.word())
 }
 
 fn planning_row_label(app: &ShellApp, row: &PlanningTaskRow) -> String {
@@ -867,14 +876,19 @@ fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String>
     if let Some(cli) = row.required_cli.filter(|_| !row.cli_available) {
         return Some(format!("{cached} — rebuild needs {cli}"));
     }
-    (outcome == RowOutcome::Reuse).then(|| format!("{cached} — press g to rebuild"))
+    (outcome == RowOutcome::Reuse).then(|| format!("{cached} · Space runs fresh"))
 }
 
 fn model_readiness_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
+    let model = app.planning_task_model(row.id);
+    let auth_ready = model
+        .as_deref()
+        .and_then(|model| model.split_once(':').map(|(provider, _)| provider))
+        .is_some_and(|provider| app.provider_auth_ready_for(provider));
     model_readiness_message(
-        row.model_backed,
-        app.config().model.is_some(),
-        app.configured_model_auth_ready(),
+        app.planning_task_model_backed(row.id),
+        model.is_some(),
+        auth_ready,
     )
 }
 
@@ -894,13 +908,13 @@ fn model_readiness_message(
 
 fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
     if let Some(note) = last_attempt_note(row) {
-        return with_cost(row, &note);
+        return with_cost(app, row, &note);
     }
     match outcome {
         RowOutcome::Run if app.engagement.planning_picker().rebuild().contains(&row.id) => {
-            with_cost(row, "rebuild (overwrites cache)")
+            with_cost(app, row, "runs fresh")
         }
-        RowOutcome::Run | RowOutcome::Skip => with_cost(row, artifact_reason(row)),
+        RowOutcome::Run | RowOutcome::Skip => with_cost(app, row, artifact_reason(row)),
         RowOutcome::Reuse | RowOutcome::Blocked => unreachable!("handled above"),
     }
 }
@@ -936,9 +950,9 @@ fn artifact_reason(row: &PlanningTaskRow) -> &'static str {
     }
 }
 
-fn with_cost(row: &PlanningTaskRow, base: &str) -> String {
+fn with_cost(app: &ShellApp, row: &PlanningTaskRow, base: &str) -> String {
     let mut parts = vec![base.to_string()];
-    if row.model_backed {
+    if app.planning_task_model_backed(row.id) {
         parts.push("model-backed".to_string());
     }
     if let Some(cli) = row.required_cli.filter(|_| row.cli_available) {
@@ -965,11 +979,17 @@ fn planning_options_pane_lines(app: &ShellApp, width: usize, height: usize) -> V
         return bordered_message(&title, "options unavailable for this step", width, height);
     };
     let mut lines = option_pane_header(&title, focused, border_style, width);
+    let options = tool
+        .options
+        .iter()
+        .filter(|spec| option_is_operator_editable(spec))
+        .cloned()
+        .collect::<Vec<_>>();
     let body_height = height.saturating_sub(2);
     lines.extend(option_pane_body_lines(
         app,
         row,
-        &tool.options,
+        &options,
         width,
         body_height,
         border_style,
@@ -1074,7 +1094,7 @@ fn option_pane_body_lines(
 ) -> Vec<Line<'static>> {
     if options.is_empty() {
         return vec![pane_body_line(
-            "no declared options",
+            "no editable options · workflow-supplied settings stay with the workflow",
             width,
             theme::muted(),
             border_style,
@@ -1105,30 +1125,23 @@ fn compact_option_pane_body_lines(
         resolved.as_ref(),
         width,
     )];
+    lines.push(pane_body_line("", width, theme::muted(), border_style));
     let detail = compact_selected_option_detail(app, row, spec, resolved.as_ref());
-    lines.push(pane_body_line(&detail, width, theme::muted(), border_style));
-    append_compact_input_preview(&mut lines, app, row, spec, width, height, border_style);
+    lines.push(pane_body_line(
+        &detail,
+        width,
+        theme::primary(),
+        border_style,
+    ));
+    lines.push(pane_body_line(
+        &option_edit_hint(spec),
+        width,
+        theme::accent(),
+        border_style,
+    ));
     append_option_error(&mut lines, app, width, border_style);
     lines.truncate(height);
     lines
-}
-
-#[allow(clippy::too_many_arguments)]
-fn append_compact_input_preview(
-    lines: &mut Vec<Line<'static>>,
-    app: &ShellApp,
-    row: &PlanningTaskRow,
-    spec: &OptionSpec,
-    width: usize,
-    height: usize,
-    border_style: Style,
-) {
-    let error_rows = usize::from(app.engagement.planning_picker().option_error().is_some());
-    let preview_budget = height.saturating_sub(lines.len() + error_rows + 1);
-    if preview_budget == 0 {
-        return;
-    }
-    append_input_preview(lines, app, row, spec, width, preview_budget, border_style);
 }
 
 fn rich_option_pane_body_lines(
@@ -1144,6 +1157,7 @@ fn rich_option_pane_body_lines(
     let resolved = app.resolved_input_for_planning_task(row.id).ok();
     let index = selected_option_index(app, options);
     let mut lines = visible_option_rows(app, row, options, resolved.as_ref(), width, budgets.list);
+    lines.push(pane_body_line("", width, theme::muted(), border_style));
     append_selected_option_detail(
         &mut lines,
         app,
@@ -1156,15 +1170,6 @@ fn rich_option_pane_body_lines(
         budgets.detail,
         border_style,
     );
-    append_input_preview(
-        &mut lines,
-        app,
-        row,
-        &options[index],
-        width,
-        budgets.preview,
-        border_style,
-    );
     append_option_error(&mut lines, app, width, border_style);
     lines.truncate(height);
     lines
@@ -1174,16 +1179,13 @@ fn rich_option_pane_body_lines(
 struct OptionPaneBudgets {
     list: usize,
     detail: usize,
-    preview: usize,
 }
 
 fn option_pane_budgets(height: usize) -> OptionPaneBudgets {
-    let list = if height >= 16 { 3 } else { 2 };
-    let preview = if height >= 13 { 2 } else { 1 };
+    let list = if height >= 16 { 4 } else { 3 };
     OptionPaneBudgets {
         list,
-        preview,
-        detail: height.saturating_sub(list + preview + 2),
+        detail: height.saturating_sub(list + 2),
     }
 }
 
@@ -1319,9 +1321,9 @@ fn compact_selected_option_detail(
     let value = option_display_value(app, spec, resolved, false);
     let source = option_provenance(app, row, spec, resolved);
     format!(
-        "{} · key {} · {value} · {source}",
+        "{} · {value} · {source} · {}",
         option_display_name(&spec.name),
-        spec.name
+        option_input_kind(spec)
     )
 }
 
@@ -1357,13 +1359,16 @@ fn selected_option_detail_lines(
     resolved: Option<&Value>,
     width: usize,
 ) -> Vec<String> {
-    let mut lines = Vec::new();
-    push_wrapped_detail(&mut lines, &option_name_label(app, row, spec), width);
-    push_wrapped_detail(&mut lines, &format!("Key: {}", spec.name), width);
+    let mut lines = vec![option_name_label(app, row, spec), String::new()];
     let value = option_display_value(app, spec, resolved, false);
-    push_wrapped_detail(&mut lines, &format!("Value: {value}"), width);
+    push_wrapped_detail(&mut lines, &format!("Current: {value}"), width);
     let source = option_provenance(app, row, spec, resolved);
-    push_wrapped_detail(&mut lines, &format!("Source: {source}"), width);
+    push_wrapped_detail(&mut lines, &format!("From: {source}"), width);
+    push_wrapped_detail(
+        &mut lines,
+        &format!("Input: {}", option_input_kind(spec)),
+        width,
+    );
     if !spec.choices.is_empty() {
         push_wrapped_detail(
             &mut lines,
@@ -1371,11 +1376,9 @@ fn selected_option_detail_lines(
             width,
         );
     }
-    push_wrapped_detail(
-        &mut lines,
-        &format!("Description: {}", spec.description),
-        width,
-    );
+    push_wrapped_detail(&mut lines, &option_edit_hint(spec), width);
+    lines.push(String::new());
+    push_wrapped_detail(&mut lines, &spec.description, width);
     lines
 }
 
@@ -1481,105 +1484,6 @@ fn stored_scope_label(scope: OptionScope) -> &'static str {
         OptionScope::Workspace => "workspace",
         OptionScope::Session => "set",
     }
-}
-
-fn append_input_preview(
-    lines: &mut Vec<Line<'static>>,
-    app: &ShellApp,
-    row: &PlanningTaskRow,
-    spec: &OptionSpec,
-    width: usize,
-    budget: usize,
-    border_style: Style,
-) {
-    let preview = canonical_input_preview(app, row, spec, width.saturating_sub(4), budget);
-    lines.push(pane_section_separator(&preview.title, width, border_style));
-    let style = if preview.error {
-        theme::danger()
-    } else {
-        theme::muted()
-    };
-    lines.extend(
-        preview
-            .lines
-            .into_iter()
-            .map(|text| pane_body_line(&text, width, style, border_style)),
-    );
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct CanonicalInputPreview {
-    title: String,
-    lines: Vec<String>,
-    error: bool,
-}
-
-fn canonical_input_preview(
-    app: &ShellApp,
-    row: &PlanningTaskRow,
-    spec: &OptionSpec,
-    width: usize,
-    budget: usize,
-) -> CanonicalInputPreview {
-    match app.resolved_input_for_planning_task(row.id) {
-        Ok(input) => canonical_json_preview(&input, &spec.name, width, budget),
-        Err(error) => canonical_input_error_preview(&error, width, budget),
-    }
-}
-
-fn canonical_json_preview(
-    input: &Value,
-    option_name: &str,
-    width: usize,
-    budget: usize,
-) -> CanonicalInputPreview {
-    let json = serde_json::to_string(input).unwrap_or_else(|_| "{}".to_string());
-    let wrapped = wrap_text(&json, width.max(1));
-    let focus = canonical_input_focus_line(input, option_name, &wrapped);
-    let range = visible_task_range(wrapped.len(), focus, budget.max(1));
-    CanonicalInputPreview {
-        title: input_preview_title(range.start, range.end, wrapped.len()),
-        lines: wrapped[range].to_vec(),
-        error: false,
-    }
-}
-
-fn canonical_input_focus_line(input: &Value, option_name: &str, lines: &[String]) -> usize {
-    if let Some(line) = input_line_for_key(lines, option_name) {
-        return line;
-    }
-    let nearby = input
-        .as_object()
-        .and_then(|object| object.keys().find(|key| key.as_str() >= option_name));
-    nearby
-        .and_then(|key| input_line_for_key(lines, key))
-        .unwrap_or_else(|| lines.len().saturating_sub(1))
-}
-
-fn input_line_for_key(lines: &[String], key: &str) -> Option<usize> {
-    let needle = format!("\"{key}\":");
-    lines.iter().position(|line| line.contains(&needle))
-}
-
-fn canonical_input_error_preview(
-    error: &anyhow::Error,
-    width: usize,
-    budget: usize,
-) -> CanonicalInputPreview {
-    let wrapped = wrap_text(&format!("input error: {error:#}"), width.max(1));
-    let end = wrapped.len().min(budget.max(1));
-    CanonicalInputPreview {
-        title: " CANONICAL INPUT ERROR ".to_string(),
-        lines: wrapped[..end].to_vec(),
-        error: true,
-    }
-}
-
-fn input_preview_title(start: usize, end: usize, total: usize) -> String {
-    if start == 0 && end == total {
-        return " CANONICAL INPUT ".to_string();
-    }
-    format!(" CANONICAL INPUT {}-{}/{} ", start + 1, end, total)
 }
 
 fn pane_section_separator(title: &str, width: usize, border_style: Style) -> Line<'static> {
@@ -1737,7 +1641,7 @@ fn compact_count_clause(label: &str, count: usize) -> Option<String> {
 fn compact_nothing_runs_summary(plan: crate::ui_view_models::EnterPlan) -> String {
     if plan.reuse > 0 {
         return format!(
-            "Enter: runs nothing · reuse {} cached · g rebuild",
+            "Enter: runs nothing · reuse {} cached · Space runs",
             plan.reuse
         );
     }
@@ -1835,7 +1739,7 @@ mod tests {
     fn assert_essential_planning_controls(rendered: &str) {
         for control in [
             "↑/↓ move",
-            "Space check",
+            "Space outcome",
             "Tab pane",
             "←/→ phase",
             "Enter run",
@@ -1859,11 +1763,14 @@ mod tests {
     #[test]
     fn legend_drops_glosses_when_it_cannot_fit() {
         let wide = legend_line(200);
-        assert!(line_text(&wide).contains("runs now"), "wide keeps glosses");
+        assert!(
+            line_text(&wide).contains("runs fresh"),
+            "wide keeps glosses"
+        );
         let narrow = legend_line(30);
         let text = line_text(&narrow);
         assert!(text.contains("RUN"), "narrow keeps the words");
-        assert!(!text.contains("runs now"), "narrow drops the glosses");
+        assert!(!text.contains("runs fresh"), "narrow drops the glosses");
     }
 
     #[test]
@@ -1894,8 +1801,8 @@ mod tests {
 
     #[test]
     fn mutation_survivor_option_pane_allocates_extra_list_row_at_sixteen_lines() {
-        assert_eq!(option_pane_budgets(15).list, 2);
-        assert_eq!(option_pane_budgets(16).list, 3);
+        assert_eq!(option_pane_budgets(15).list, 3);
+        assert_eq!(option_pane_budgets(16).list, 4);
     }
 
     #[test]
@@ -1940,7 +1847,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_option_renders_human_label_metadata_and_canonical_input() {
+    fn selected_option_renders_primitive_guidance_without_json() {
         let mut app = planning_app(&[PlanningTaskId::GatherRepoContext]);
         app.engagement
             .planning_picker_mut()
@@ -1951,30 +1858,18 @@ mod tests {
         let rendered = lines.join("\n");
 
         assert!(rendered.contains("Discovery"), "{rendered}");
-        assert!(rendered.contains("Key: discovery"), "{rendered}");
-        assert!(rendered.contains("Value: auto"), "{rendered}");
-        assert!(rendered.contains("Source: default"), "{rendered}");
+        assert!(rendered.contains("Current: auto"), "{rendered}");
+        assert!(rendered.contains("From: default"), "{rendered}");
+        assert!(rendered.contains("Input: choice"), "{rendered}");
         assert!(
             rendered.contains("Choices: auto, flat, modules"),
             "{rendered}"
         );
-        assert!(
-            rendered.contains("Description: Repository discovery"),
-            "{rendered}"
-        );
+        assert!(rendered.contains("Repository discovery"), "{rendered}");
         assert!(rendered.contains("mode."), "{rendered}");
-        assert!(rendered.contains("CANONICAL INPUT"), "{rendered}");
-
-        let row = app.engagement.planning_picker().current_row().unwrap();
-        let spec = &app.registry().resolve_tool(row.tool_name).unwrap().options[1];
-        let bounded = canonical_input_preview(&app, row, spec, 36, 1);
-        assert!(bounded.title.contains('/'));
-        assert!(!bounded.lines.join("").contains("..."));
-
-        let full = canonical_input_preview(&app, row, spec, 36, 8);
-        let expected =
-            serde_json::to_string(&app.resolved_input_for_planning_task(row.id).unwrap()).unwrap();
-        assert_eq!(full.lines.join(""), expected);
+        assert!(rendered.contains("Space cycles auto / flat / modules"));
+        assert!(!rendered.contains("CANONICAL INPUT"), "{rendered}");
+        assert!(!rendered.contains("{\""), "{rendered}");
     }
 
     #[test]
@@ -2014,11 +1909,17 @@ mod tests {
 
         assert!(rendered.contains(&format!("OPTION {option_count}/{option_count}")));
         assert!(rendered.contains("> Model [ADVANCED]"), "{rendered}");
-        assert!(rendered.contains("Key: model"), "{rendered}");
-        assert!(rendered.contains("Description: Explicit provider:model"));
-        assert!(rendered.contains("override for this tool run."));
+        assert!(rendered.contains("Input: text"), "{rendered}");
+        assert!(rendered.contains("Explicit provider:model"));
+        assert!(rendered.contains("this tool run."), "{rendered}");
         assert!(!rendered.contains("> Target ="), "{rendered}");
-        assert!(!rendered.contains("CANONICAL INPUT 1-2/"), "{rendered}");
+        assert!(!rendered.contains("CANONICAL INPUT"), "{rendered}");
+    }
+
+    #[test]
+    fn stacked_layout_gives_unused_task_space_to_options() {
+        assert_eq!(stacked_pane_heights(8, 30), (11, 19));
+        assert_eq!(stacked_pane_heights(1, 20), (4, 16));
     }
 
     #[test]

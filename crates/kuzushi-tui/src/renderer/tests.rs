@@ -513,7 +513,7 @@ fn compact_planning_picker_keeps_confirmation_and_controls_visible() {
             "{width}x{height}: {rendered}"
         );
         assert!(
-            rendered.contains("Space check"),
+            rendered.contains("Space outcome"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -556,7 +556,7 @@ fn compact_planning_picker_scrolls_to_keep_the_focused_task_legible() {
 
     assert!(rendered.contains("TASKS 5-10/10"), "{rendered}");
     assert!(
-        rendered.contains("> SKIP    Inventory deps for CVE harvest"),
+        rendered.contains("> SKIP     Inventory deps for CVE harvest"),
         "{rendered}"
     );
     assert!(rendered.contains("Enter:"), "{rendered}");
@@ -593,7 +593,7 @@ fn ultra_compact_planning_picker_keeps_the_primary_controls_visible() {
         rendered.contains("Focused: Gather repo context"),
         "{rendered}"
     );
-    assert!(rendered.contains("Space check"), "{rendered}");
+    assert!(rendered.contains("Space outcome"), "{rendered}");
     assert!(rendered.contains("Enter run"), "{rendered}");
     assert!(rendered.contains("Esc"), "{rendered}");
 }
@@ -630,7 +630,7 @@ fn planning_picker_preserves_confirmation_at_common_mid_sizes() {
             "{width}x{height}: {rendered}"
         );
         assert!(
-            rendered.contains("Space check"),
+            rendered.contains("Space outcome"),
             "{width}x{height}: {rendered}"
         );
         assert!(
@@ -672,7 +672,7 @@ fn option_rich_planning_row_preserves_confirmation_at_100x32() {
 
     assert!(rendered.contains("Build threat model"), "{rendered}");
     assert!(rendered.contains("Enter: run"), "{rendered}");
-    assert!(rendered.contains("Space check"), "{rendered}");
+    assert!(rendered.contains("Space outcome"), "{rendered}");
     assert!(rendered.contains("Enter run"), "{rendered}");
 }
 
@@ -834,7 +834,7 @@ fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("Revisiting"), "{rendered}");
-    assert!(rendered.contains("press g to rebuild"), "{rendered}");
+    assert!(rendered.contains("Space cycles cached work"), "{rendered}");
     assert!(!rendered.contains("Resuming"), "{rendered}");
 }
 
@@ -1470,6 +1470,8 @@ fn catalog_next_hint_steers_through_context_then_findings() {
 
     // After context exists but no findings: first-finding scan hint.
     app.domain_mut().context_view_mut().exists = true;
+    app.domain_mut().context_view_mut().freshness =
+        Some(kuzushi_core::context::ContextSnapshotFreshness::Current);
     let hint = catalog_model(&app).collapsed.next_hint;
     assert!(
         hint.contains("First finding") || hint.contains("scan"),
@@ -2266,7 +2268,7 @@ fn renders_options_table_readably_at_80_columns() {
     assert!(rendered.contains("tasks"));
     assert!(rendered.contains("disabledTasks"));
     assert!(rendered.contains("triage"));
-    assert!(rendered.contains("true"));
+    assert!(rendered.contains("yes"));
     assert!(rendered.contains("set <key> <value>"));
     assert!(rendered.contains("lost on exit"));
     assert!(!rendered.contains("┌"));
@@ -2451,6 +2453,7 @@ fn renders_context_status_readably_at_80_columns() {
         .set_context_view(crate::app::ContextSnapshotView {
             snapshot_path: Some(context_snapshot_fixture_path()),
             exists: true,
+            freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
             status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
             target: Some("/tmp/demo".to_string()),
             discovery: Some("auto".to_string()),
@@ -2460,6 +2463,8 @@ fn renders_context_status_readably_at_80_columns() {
             frameworks: vec!["Cargo".to_string()],
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
+            enrichment_claims: 0,
+            enrichment_model: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -2628,7 +2633,7 @@ fn plain_options_table_has_no_ansi_or_box_drawing() {
     assert!(rendered.contains("OPTIONS"));
     assert!(rendered.contains("sast:scan"));
     assert!(rendered.contains("triage"));
-    assert!(rendered.contains("true"));
+    assert!(rendered.contains("yes"));
     assert!(rendered.contains("lost on exit"));
     assert!(rendered.contains("Next: set <key> <value>"));
     assert_strict_plain_80(&rendered);
@@ -2675,6 +2680,7 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
         .set_context_view(crate::app::ContextSnapshotView {
             snapshot_path: Some(context_snapshot_fixture_path()),
             exists: true,
+            freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
             status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
             target: Some("/tmp/demo".to_string()),
             discovery: Some("auto".to_string()),
@@ -2684,6 +2690,8 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
             frameworks: vec!["Cargo".to_string()],
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
+            enrichment_claims: 0,
+            enrichment_model: None,
         });
     app.set_shell_view(ShellView::Context);
 
@@ -5026,7 +5034,7 @@ fn ultra_compact_auth_picker_keeps_selected_method_and_valid_actions_visible() {
                 "{rendered}"
             );
             assert!(!rendered.contains("d demo"), "{rendered}");
-            assert!(rendered.contains("q Setup"), "{rendered}");
+            assert!(!rendered.contains("q Setup"), "{rendered}");
         }
     }
 }
@@ -5253,7 +5261,7 @@ fn module_detail_renders_options_when_stored_values_exist() {
 
     assert!(rendered.contains("OPTIONS"));
     assert!(rendered.contains("triage"));
-    assert!(rendered.contains("true"));
+    assert!(rendered.contains("yes"));
 }
 
 #[test]

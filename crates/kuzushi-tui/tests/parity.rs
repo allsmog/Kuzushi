@@ -2318,7 +2318,7 @@ fn help_handoff_rows() -> Vec<String> {
             .to_string(),
         " /full [target] · /pipeline [target]         guided Map → Scan; hand off to Review or Report; full . selects cwd"
             .to_string(),
-        " /run <tool> [json] · run . [json]           execute a registered tool with typed input"
+        " /run <tool> [key=value ...] · run .         execute a registered tool with primitive input"
             .to_string(),
         " /ask <question>, ?text                      explicit agent route · never silent".to_string(),
         " /options [tool] · show missing              inspect typed options · see what's required"

@@ -171,6 +171,29 @@ pub(crate) fn with_indexed_snapshot(target: &Path, mut output: Value) -> Value {
     output
 }
 
+pub(crate) fn write_current_context_snapshot(target: &Path, mut snapshot: Value) {
+    let state_dir = target.join(".kuzushi");
+    std::fs::create_dir_all(&state_dir).expect("create test state directory");
+    let tree_hash = kuzushi_core::incremental_index::current_workspace_tree_hash(target)
+        .expect("hash test workspace");
+    let object = snapshot
+        .as_object_mut()
+        .expect("test context snapshot object");
+    object.insert(
+        "target".to_string(),
+        Value::String(target.to_string_lossy().into_owned()),
+    );
+    object.insert(
+        "provenance".to_string(),
+        serde_json::json!({ "treeHash": tree_hash }),
+    );
+    std::fs::write(
+        state_dir.join("context-snapshot.json"),
+        serde_json::to_vec_pretty(&snapshot).expect("serialize test context snapshot"),
+    )
+    .expect("write current test context snapshot");
+}
+
 pub(crate) fn record_indexed_run(target: &Path, run_id: &str, tool: &str, output: Value) {
     record_indexed_run_with_input(target, run_id, tool, Value::Object(Map::new()), output);
 }

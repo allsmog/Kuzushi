@@ -1,4 +1,4 @@
-use crate::{OptionsFilter, OptionsView, ShellApp};
+use crate::{app::format_option_value, OptionsFilter, OptionsView, ShellApp};
 use kuzushi_core::modules::{OptionSpec, OptionType};
 use kuzushi_core::OptionScope;
 
@@ -189,7 +189,7 @@ fn plain_options_table(table: OptionsTable) -> PlainOptionsTable {
     PlainOptionsTable {
         headers: table.headers,
         rows: table.rows.into_iter().map(plain_option_row).collect(),
-        note: "set is session-only (lost on exit); setg is persistent for this tool.",
+        note: "set <key> <value> · session only, lost on exit · setg saves it",
         next_hint: "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
     }
 }
@@ -209,8 +209,7 @@ fn options_model_body(view: &OptionsView, body: OptionsBody) -> OptionsModel {
 
 fn options_table(rows: Vec<OptionsTableRow>) -> OptionsTable {
     OptionsTable {
-        hint:
-            "set <key> <value>: session-only (lost on exit); setg <key> <value>: global for this tool.",
+        hint: "set <key> <value> · session only, lost on exit · setg saves it",
         headers: [
             "option",
             "value · scope",
@@ -253,7 +252,7 @@ fn option_row(
             stored_value_label(current, scope),
             spec.default
                 .as_ref()
-                .map(format_json_value)
+                .map(format_option_value)
                 .unwrap_or_else(dash),
             required_label(spec, current).to_string(),
             option_type_label(spec.option_type).to_string(),
@@ -274,7 +273,7 @@ fn stored_value_label(current: Option<&serde_json::Value>, scope: Option<OptionS
         Some(OptionScope::Session) => "session",
         None => "unknown source",
     };
-    format!("{} · {scope}", format_json_value(current))
+    format!("{} · {scope}", format_option_value(current))
 }
 
 fn options_filter_label(filter: OptionsFilter) -> &'static str {
@@ -295,12 +294,13 @@ fn unknown_tool_body() -> OptionsBody {
 fn empty_options_body(filter: OptionsFilter) -> OptionsBody {
     match filter {
         OptionsFilter::Standard => OptionsBody::Message {
-            message: "No standard options. Run show advanced for hidden controls.",
+            message: "No standard options. Run show advanced for more controls.",
             plain_message: "No standard options. Next: show advanced",
         },
         OptionsFilter::Advanced => OptionsBody::Message {
-            message: "No advanced options for this tool.",
-            plain_message: "No advanced options for this tool.",
+            message: "No editable advanced options. Workflow-supplied settings do not appear here.",
+            plain_message:
+                "No editable advanced options. Workflow-supplied settings do not appear here.",
         },
         OptionsFilter::Missing => OptionsBody::Message {
             message: "No missing required options for this tool.",
@@ -310,6 +310,9 @@ fn empty_options_body(filter: OptionsFilter) -> OptionsBody {
 }
 
 fn option_visible(spec: &OptionSpec, filter: OptionsFilter, has_stored_value: bool) -> bool {
+    if !crate::app::option_is_operator_editable(spec) {
+        return false;
+    }
     match filter {
         OptionsFilter::Standard => !spec.advanced && !spec.evasion,
         OptionsFilter::Advanced => spec.advanced || spec.evasion,
@@ -329,14 +332,14 @@ fn required_label(spec: &OptionSpec, current: Option<&serde_json::Value>) -> &'s
 
 fn option_type_label(option_type: OptionType) -> &'static str {
     match option_type {
-        OptionType::String => "string",
-        OptionType::Bool => "bool",
-        OptionType::Int => "int",
-        OptionType::Float => "float",
+        OptionType::String => "text",
+        OptionType::Bool => "yes/no",
+        OptionType::Int => "whole number",
+        OptionType::Float => "number",
         OptionType::Path => "path",
-        OptionType::Enum => "enum",
-        OptionType::StringList => "list",
-        OptionType::Json => "json",
+        OptionType::Enum => "choice",
+        OptionType::StringList => "comma list",
+        OptionType::Json => "workflow",
     }
 }
 
@@ -365,16 +368,6 @@ fn option_alias_values(spec: &OptionSpec) -> Vec<String> {
             .map(|alias| format!("{alias} (deprecated)")),
     );
     aliases
-}
-
-fn format_json_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Number(number) => number.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        other => serde_json::to_string(other).unwrap_or_else(|_| "<json>".to_string()),
-    }
 }
 
 fn dash() -> String {

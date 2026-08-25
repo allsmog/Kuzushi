@@ -91,8 +91,9 @@ pub(in crate::modules) fn save_context_snapshot(
 /// trailing newline and filesystem rounding.
 const SNAPSHOT_WRITE_BUDGET: usize = crate::context::MAX_CONTEXT_SNAPSHOT_BYTES - 1024;
 
-const SNAPSHOT_ARRAY_CAPS: [usize; 11] =
-    [50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20];
+const SNAPSHOT_ARRAY_CAPS: [usize; 11] = [
+    50_000, 20_000, 10_000, 5_000, 2_000, 1_000, 500, 200, 100, 50, 20,
+];
 
 /// Serialize within `budget`: an oversized snapshot has its arrays capped at
 /// the largest cap that fits, mutated in place so the caller's response and
@@ -128,7 +129,11 @@ fn cap_arrays_in_place(value: &mut Value, cap: usize) -> u64 {
         Value::Array(items) => {
             let dropped = items.len().saturating_sub(cap) as u64;
             items.truncate(cap);
-            dropped + items.iter_mut().map(|item| cap_arrays_in_place(item, cap)).sum::<u64>()
+            dropped
+                + items
+                    .iter_mut()
+                    .map(|item| cap_arrays_in_place(item, cap))
+                    .sum::<u64>()
         }
         Value::Object(map) => map
             .values_mut()
@@ -171,7 +176,6 @@ pub(in crate::modules) fn generated_context_slices(
 pub(in crate::modules) fn stale_context_slices(scope: &str) -> Vec<&'static str> {
     match scope {
         "repo" => vec!["enrichment", "app-model"],
-        "enrichment" => vec!["app-model"],
         _ => vec![],
     }
 }

@@ -6,6 +6,8 @@ const PUBLIC_FAILURES = Object.freeze({
   bridge_internal: "Bridge operation failed; raw error details were suppressed.",
   cancelled: "Bridge operation was cancelled.",
   mcp_timeout: "MCP tool request timed out.",
+  mcp_unavailable:
+    "Restore the missing code-analysis component: from source run `cargo build --workspace`; otherwise reinstall Kuzushi.",
   provider_rejected: "Provider rejected the request.",
   provider_response_invalid: "Provider returned an invalid response.",
   provider_unavailable: "Provider is temporarily unavailable.",
@@ -25,8 +27,8 @@ const STATUS_ERROR_CLASSES = new Map([
 ]);
 
 export class BridgePublicError extends Error {
-  constructor(errorClass, status) {
-    super(publicFailureMessage(errorClass, status));
+  constructor(errorClass, status, options) {
+    super(publicFailureMessage(errorClass, status), options);
     this.name = "BridgePublicError";
     this.errorClass = allowedErrorClass(errorClass) ?? "bridge_internal";
     this.status = httpStatus(status);

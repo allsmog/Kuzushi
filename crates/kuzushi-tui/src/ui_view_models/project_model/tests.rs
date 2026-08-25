@@ -55,12 +55,26 @@ fn project_model_origin_labels_are_stable() {
 #[test]
 fn project_model_aggregates_context_threat_dfd_and_findings() {
     let temp = tempfile::tempdir().unwrap();
+    crate::test_support::write_current_context_snapshot(
+        temp.path(),
+        serde_json::json!({
+            "discovery": "auto",
+            "filesIndexed": 2,
+            "fileIndex": { "totalFiles": 3 },
+            "repoContext": {
+                "languages": ["Rust"],
+                "frameworks": ["Cargo"]
+            },
+            "generatedSlices": ["repo"]
+        }),
+    );
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.domain_mut()
         .set_context_view(crate::app::ContextSnapshotView {
             snapshot_path: Some(kuzushi_core::context_snapshot_path(temp.path())),
             exists: true,
+            freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
             status: "snapshot present; 2 indexed file(s)".to_string(),
             target: Some(temp.path().display().to_string()),
             discovery: Some("auto".to_string()),
@@ -70,6 +84,8 @@ fn project_model_aggregates_context_threat_dfd_and_findings() {
             frameworks: vec!["Cargo".to_string()],
             generated_slices: vec!["repo".to_string()],
             stale_slices: Vec::new(),
+            enrichment_claims: 0,
+            enrichment_model: None,
         });
     write_threat_model(temp.path());
     *app.findings_mut() = vec![kuzushi_core::Finding::new_tool(
@@ -91,12 +107,15 @@ fn project_model_aggregates_context_threat_dfd_and_findings() {
             .and_then(|name| name.to_str())
             .unwrap()
     ));
-    assert!(model.rows.iter().any(|row| {
-        row.section == "inventory"
-            && row.origin == ProjectModelOrigin::Local
-            && row.summary.contains("Rust")
-            && row.summary.contains("Cargo")
-    }));
+    assert!(
+        model.rows.iter().any(|row| {
+            row.section == "inventory"
+                && row.origin == ProjectModelOrigin::Local
+                && row.summary.contains("Rust")
+                && row.summary.contains("Cargo")
+        }),
+        "{model:?}"
+    );
     assert!(model.rows.iter().any(|row| {
         row.section == "threat model"
             && row.origin == ProjectModelOrigin::Local

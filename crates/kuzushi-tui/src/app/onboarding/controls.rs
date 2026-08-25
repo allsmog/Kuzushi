@@ -62,6 +62,71 @@ pub fn toggle_planning_row(
     }
 }
 
+/// Advance one row through the outcomes the operator sees. Cached runnable
+/// work cycles REUSE -> RUN -> SKIP; other runnable work toggles between RUN
+/// and SKIP. Selection and regeneration are changed together so a
+/// hidden rebuild flag can never survive a skipped row.
+pub fn cycle_planning_row(
+    task: PlanningTaskId,
+    rows: &[PlanningTaskRow],
+    selected: &mut BTreeSet<PlanningTaskId>,
+    rebuild: &mut BTreeSet<PlanningTaskId>,
+) -> ToggleOutcome {
+    let Some(row) = rows.iter().find(|row| row.id == task) else {
+        rebuild.remove(&task);
+        return ToggleOutcome::Off { task };
+    };
+    if is_cached(row) {
+        return cycle_cached_row(row, rows, selected, rebuild);
+    }
+    rebuild.remove(&task);
+    toggle_planning_row(task, rows, selected)
+}
+
+fn cycle_cached_row(
+    row: &PlanningTaskRow,
+    rows: &[PlanningTaskRow],
+    selected: &mut BTreeSet<PlanningTaskId>,
+    rebuild: &mut BTreeSet<PlanningTaskId>,
+) -> ToggleOutcome {
+    if !row.cli_available {
+        rebuild.remove(&row.id);
+        return toggle_planning_row(row.id, rows, selected);
+    }
+    match row_disposition(row, selected, rebuild) {
+        RowDisposition::Reused => mark_row_for_generation(row.id, rows, selected, rebuild),
+        RowDisposition::WillRun => skip_run_row(row.id, selected, rebuild),
+        RowDisposition::Off => {
+            rebuild.remove(&row.id);
+            toggle_planning_row(row.id, rows, selected)
+        }
+        RowDisposition::Unavailable => unreachable!("cached rows remain reusable"),
+    }
+}
+
+fn mark_row_for_generation(
+    task: PlanningTaskId,
+    rows: &[PlanningTaskRow],
+    selected: &mut BTreeSet<PlanningTaskId>,
+    rebuild: &mut BTreeSet<PlanningTaskId>,
+) -> ToggleOutcome {
+    let outcome = toggle_on(task, rows, selected);
+    rebuild.insert(task);
+    outcome
+}
+
+fn skip_run_row(
+    task: PlanningTaskId,
+    selected: &mut BTreeSet<PlanningTaskId>,
+    rebuild: &mut BTreeSet<PlanningTaskId>,
+) -> ToggleOutcome {
+    let outcome = toggle_off(task, selected);
+    if matches!(outcome, ToggleOutcome::Off { .. }) {
+        rebuild.remove(&task);
+    }
+    outcome
+}
+
 fn toggle_on(
     task: PlanningTaskId,
     rows: &[PlanningTaskRow],
@@ -102,8 +167,7 @@ fn toggle_off(task: PlanningTaskId, selected: &mut BTreeSet<PlanningTaskId>) -> 
 pub enum RowDisposition {
     /// Checked and runnable: Enter includes it in the execution plan.
     WillRun,
-    /// Checked but its cached artifact is reused — Enter does NOT run it
-    /// (press `g` to rebuild).
+    /// Checked but its cached artifact is reused — Enter does NOT run it.
     Reused,
     /// Unchecked: not part of this phase's plan.
     Off,
@@ -296,6 +360,89 @@ mod tests {
         let plan = build_execution_plan(&rows, &selected, &rebuild);
         // context is cached but explicitly rebuilt, so it runs before its dependent.
         assert_eq!(plan, vec![GatherRepoContext, BuildXRay]);
+    }
+
+    #[test]
+    fn cached_row_space_cycles_reuse_run_skip() {
+        let rows = vec![row(GatherRepoContext, ArtifactState::Cached)];
+        let mut selected = BTreeSet::from([GatherRepoContext]);
+        let mut rebuild = BTreeSet::new();
+
+        cycle_planning_row(GatherRepoContext, &rows, &mut selected, &mut rebuild);
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::WillRun
+        );
+
+        cycle_planning_row(GatherRepoContext, &rows, &mut selected, &mut rebuild);
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::Off
+        );
+        assert!(!rebuild.contains(&GatherRepoContext));
+
+        cycle_planning_row(GatherRepoContext, &rows, &mut selected, &mut rebuild);
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::Reused
+        );
+    }
+
+    #[test]
+    fn cached_unavailable_row_cycles_between_reuse_and_skip() {
+        let mut cached = row(BuildCodeQlDatabase, ArtifactState::Cached);
+        cached.cli_available = false;
+        let rows = vec![cached];
+        let mut selected = BTreeSet::from([BuildCodeQlDatabase]);
+        let mut rebuild = BTreeSet::new();
+
+        cycle_planning_row(BuildCodeQlDatabase, &rows, &mut selected, &mut rebuild);
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::Off
+        );
+        cycle_planning_row(BuildCodeQlDatabase, &rows, &mut selected, &mut rebuild);
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::Reused
+        );
+    }
+
+    #[test]
+    fn running_cached_row_adds_visible_dependencies() {
+        let rows = vec![
+            row(GatherRepoContext, ArtifactState::Cached),
+            row(BuildXRay, ArtifactState::Cached),
+        ];
+        let mut selected = BTreeSet::from([BuildXRay]);
+        let mut rebuild = BTreeSet::new();
+
+        let outcome = cycle_planning_row(BuildXRay, &rows, &mut selected, &mut rebuild);
+
+        assert_eq!(
+            outcome,
+            ToggleOutcome::On {
+                task: BuildXRay,
+                auto_added: vec![GatherRepoContext]
+            }
+        );
+        assert!(selected.contains(&GatherRepoContext));
+        assert!(rebuild.contains(&BuildXRay));
+    }
+
+    #[test]
+    fn selecting_skipped_cached_row_clears_orphan_rebuild_flag() {
+        let rows = vec![row(GatherRepoContext, ArtifactState::Cached)];
+        let mut selected = BTreeSet::new();
+        let mut rebuild = BTreeSet::from([GatherRepoContext]);
+
+        cycle_planning_row(GatherRepoContext, &rows, &mut selected, &mut rebuild);
+
+        assert_eq!(
+            row_disposition(&rows[0], &selected, &rebuild),
+            RowDisposition::Reused
+        );
+        assert!(!rebuild.contains(&GatherRepoContext));
     }
 
     #[test]

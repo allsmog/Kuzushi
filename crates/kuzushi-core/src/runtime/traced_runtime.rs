@@ -106,7 +106,7 @@ impl<'a> TracedRuntime<'a> {
             .as_ref()
             .ok()
             .and_then(|outcome| crate::runtime::triage_cost_report(&outcome.value).ok())
-            .unwrap_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+            .unwrap_or_else(|| failed_call_cost(result));
         let usage = result.as_ref().map_or_else(
             |_| ModelTokenUsage::unavailable_call(),
             |outcome| outcome.usage,
@@ -311,7 +311,7 @@ fn observed_step_telemetry(
         .as_ref()
         .ok()
         .and_then(|step| step.value.checked_cost_report().ok())
-        .unwrap_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+        .unwrap_or_else(|| failed_call_cost(result));
     let usage = result
         .as_ref()
         .map_or_else(|_| ModelTokenUsage::unavailable_call(), |step| step.usage);
@@ -325,12 +325,27 @@ fn observed_query_telemetry(
         .as_ref()
         .ok()
         .and_then(|response| response.value.checked_cost_report().ok())
-        .unwrap_or(crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO);
+        .unwrap_or_else(|| failed_call_cost(result));
     let usage = result.as_ref().map_or_else(
         |_| ModelTokenUsage::unavailable_call(),
         |response| response.usage,
     );
     (cost, usage)
+}
+
+fn failed_call_cost<T>(result: &Result<T>) -> crate::runtime::RuntimeCostReport {
+    let mcp_unavailable = result
+        .as_ref()
+        .err()
+        .and_then(crate::runtime::runtime_failure_metadata)
+        .is_some_and(|failure| {
+            failure.error_class == crate::runtime::RuntimeFailureClass::McpUnavailable
+        });
+    if mcp_unavailable {
+        crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO)
+    } else {
+        crate::runtime::RuntimeCostReport::INCOMPLETE_ZERO
+    }
 }
 
 fn persisted_model_usage(usage: ModelTokenUsage) -> crate::run_lifecycle::ModelUsage {

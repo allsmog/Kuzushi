@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context;
 
 impl ShellApp {
     pub(crate) fn reduce_run_tool(
@@ -181,20 +182,19 @@ impl ShellApp {
         workspace: &WorkspaceTarget,
         raw: &str,
     ) -> Option<serde_json::Value> {
-        match serde_json::from_str(raw) {
+        match parse_run_input_value(self.registry(), tool_name, raw) {
             Ok(input) => Some(input),
             Err(error) => {
-                let error = anyhow::Error::new(error).context("run input must be JSON");
                 let error = self.background_tool_preparation_error(
                     workspace,
                     tool_name,
-                    &serde_json::json!({"inputState": "invalid_json"}),
+                    &serde_json::json!({"inputState": "invalid_options"}),
                     error,
                 );
                 self.log(
                     "error",
                     format!(
-                        "{error}. Next: run {tool_name} (no JSON needed — defaults apply), or browse knobs with options {tool_name} and set <name> <value>"
+                        "{error}. Next: run {tool_name} with defaults, or use options {tool_name} and key=value inputs"
                     ),
                 );
                 None
@@ -293,10 +293,102 @@ impl ShellApp {
     }
 }
 
+fn parse_run_input_value(
+    registry: &kuzushi_core::ModuleRegistry,
+    tool_name: &str,
+    raw: &str,
+) -> anyhow::Result<serde_json::Value> {
+    const OBJECT_START: u8 = 123;
+    if raw.trim_start().as_bytes().first() == Some(&OBJECT_START) {
+        return serde_json::from_str(raw).context("legacy structured run input is invalid");
+    }
+    let assignments = shlex::split(raw).context("run options contain an unmatched quote")?;
+    let tool = registry
+        .resolve_tool(tool_name)
+        .with_context(|| format!("unknown tool {tool_name}"))?;
+    primitive_run_input(tool, assignments)
+}
+
+fn primitive_run_input(
+    tool: &kuzushi_core::modules::ToolDescriptor,
+    assignments: Vec<String>,
+) -> anyhow::Result<serde_json::Value> {
+    let mut input = serde_json::Map::new();
+    for assignment in assignments {
+        let (name, raw) = assignment
+            .split_once('=')
+            .with_context(|| format!("{assignment:?} must use key=value"))?;
+        let spec = crate::app::find_option_spec(tool, name)
+            .with_context(|| crate::app::unknown_option_message(tool, name))?;
+        anyhow::ensure!(
+            crate::app::option_is_operator_editable(spec),
+            "{} is supplied by its workflow and cannot be typed in run",
+            spec.name
+        );
+        let value = crate::app::coerce_raw_option_value(spec, raw)?;
+        anyhow::ensure!(
+            input.insert(spec.name.clone(), value).is_none(),
+            "{} was provided more than once",
+            spec.name
+        );
+    }
+    Ok(serde_json::Value::Object(input))
+}
+
 fn initialized_run_workspace(target: Option<&PathBuf>) -> anyhow::Result<WorkspaceTarget> {
     let workspace = workspace_for_target(target)?;
     workspace.ensure_state_dir()?;
     Ok(workspace)
+}
+
+#[cfg(test)]
+mod primitive_run_input_tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn run_assignments_use_descriptor_primitive_types() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let input = parse_run_input_value(
+            app.registry(),
+            "context:build",
+            "sampleLimit=42 enrichment=yes discovery=modules",
+        )
+        .unwrap();
+
+        assert_eq!(input["sampleLimit"], 42);
+        assert_eq!(input["enrichment"], true);
+        assert_eq!(input["discovery"], "modules");
+    }
+
+    #[test]
+    fn run_assignments_preserve_quoted_text() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let input = parse_run_input_value(
+            app.registry(),
+            "pwn:run-candidates",
+            "target='local challenge'",
+        )
+        .unwrap();
+
+        assert_eq!(input["target"], "local challenge");
+    }
+
+    #[test]
+    fn run_assignments_refuse_unstructured_workflow_values() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let error = parse_run_input_value(
+            app.registry(),
+            "threat-model:build",
+            "advisoryFixtures=value",
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("supplied by its workflow"));
+    }
 }
 
 fn patch_validation_confirm(

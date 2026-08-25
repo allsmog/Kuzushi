@@ -75,30 +75,60 @@ fn push_enrichment_blocks(
     enrichment: &PromptEnrichment,
     review_context: Option<&str>,
 ) {
-    if let Some(threat_context) = &enrichment.threat_context {
-        prompt.push(String::new());
-        prompt.push(
-            "Threat-model handoff: prioritize hunting paths that realize the modeled threats \
+    push_threat_model_digest(prompt, enrichment.threat_context.as_deref());
+    push_context_enrichment_digest(prompt, enrichment.context_enrichment.as_deref());
+    push_optional_block(prompt, mcp_guidance_line(&enrichment.attached_mcps));
+    push_review_context(prompt, review_context);
+}
+
+fn push_threat_model_digest(prompt: &mut Vec<String>, threat_context: Option<&str>) {
+    let Some(threat_context) = threat_context else {
+        return;
+    };
+    prompt.push(String::new());
+    prompt.push(
+        "Threat-model handoff: prioritize hunting paths that realize the modeled threats \
 and cross-check the listed entry points and sinks. The digest is derived context, not \
 ground truth — verify against source before reporting."
-                .to_string(),
-        );
-        prompt.push(render_untrusted_derived_block(
-            "threat-model-digest",
-            threat_context,
-        ));
-    }
-    if let Some(guidance) = mcp_guidance_line(&enrichment.attached_mcps) {
+            .to_string(),
+    );
+    prompt.push(render_untrusted_derived_block(
+        "threat-model-digest",
+        threat_context,
+    ));
+}
+
+fn push_context_enrichment_digest(prompt: &mut Vec<String>, context: Option<&str>) {
+    let Some(context) = context else {
+        return;
+    };
+    prompt.push(String::new());
+    prompt.push(
+        "Map enrichment: use these source-cited claims only as hunt guidance. Re-open and verify the cited source before reporting a finding."
+            .to_string(),
+    );
+    prompt.push(render_untrusted_derived_block(
+        "context-enrichment-digest",
+        context,
+    ));
+}
+
+fn push_optional_block(prompt: &mut Vec<String>, block: Option<String>) {
+    if let Some(block) = block {
         prompt.push(String::new());
-        prompt.push(guidance);
+        prompt.push(block);
     }
-    if let Some(review_context) = review_context {
-        prompt.push(String::new());
-        prompt.push(render_untrusted_derived_block(
-            "agentic-sast-first-pass-findings",
-            review_context,
-        ));
-    }
+}
+
+fn push_review_context(prompt: &mut Vec<String>, review_context: Option<&str>) {
+    let Some(review_context) = review_context else {
+        return;
+    };
+    prompt.push(String::new());
+    prompt.push(render_untrusted_derived_block(
+        "agentic-sast-first-pass-findings",
+        review_context,
+    ));
 }
 
 /// Advertise only the MCP servers the tool policy actually attached, with
@@ -150,7 +180,12 @@ mod enrichment_tests {
     fn threat_digest_and_attached_mcps_reach_the_prompt() {
         let enrichment = PromptEnrichment {
             threat_context: Some("Modeled threats:\n- [high] spec reaches execve".to_string()),
-            attached_mcps: vec!["treesitter".to_string(), "threat-model".to_string(), "findings".to_string()],
+            context_enrichment: None,
+            attached_mcps: vec![
+                "treesitter".to_string(),
+                "threat-model".to_string(),
+                "findings".to_string(),
+            ],
         };
 
         let prompt = build_agentic_sast_prompt(
@@ -182,5 +217,26 @@ mod enrichment_tests {
 
         assert!(!prompt.contains("threat-model-digest"));
         assert!(!prompt.contains("Attached MCP toolsets"));
+    }
+
+    #[test]
+    fn context_enrichment_is_untrusted_guidance_with_a_source_check() {
+        let enrichment = PromptEnrichment {
+            context_enrichment: Some("- middleware: operator guard · src/auth.rs:42".to_string()),
+            ..PromptEnrichment::default()
+        };
+
+        let prompt = build_agentic_sast_prompt(
+            Path::new("/tmp/target"),
+            &minimal_options(),
+            &[],
+            None,
+            false,
+            &enrichment,
+        );
+
+        assert!(prompt.contains("context-enrichment-digest"));
+        assert!(prompt.contains("Re-open and verify the cited source"));
+        assert!(prompt.contains("src/auth.rs:42"));
     }
 }

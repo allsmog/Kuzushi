@@ -225,7 +225,7 @@ fn credential_row(app: &ShellApp, checks: Option<&ViewHealthChecks>) -> HealthRo
 fn configured_credential_row(app: &ShellApp, api_key_env: &str) -> Option<HealthRow> {
     let detail = match configured_model_credential_readiness(app) {
         CredentialReadiness::Session => "session credential accepted; value hidden".to_string(),
-        CredentialReadiness::StoredOAuth => "stored OAuth ready; value hidden".to_string(),
+        CredentialReadiness::OAuth => "OAuth ready; value hidden".to_string(),
         CredentialReadiness::ApiKey => format!("{api_key_env}=set; value hidden"),
         CredentialReadiness::NotRequired => {
             return Some(health_row(

@@ -69,12 +69,7 @@ impl ThreatModelSourceBundle {
         Ok(())
     }
 
-    fn authenticate_loaded_source(
-        &self,
-        label: &str,
-        expected: &str,
-        payload: bool,
-    ) -> Result<()> {
+    fn authenticate_loaded_source(&self, label: &str, expected: &str, payload: bool) -> Result<()> {
         let Some(record) = self.records.iter().find(|record| record.label == label) else {
             return Ok(());
         };
@@ -333,6 +328,7 @@ fn load_context_source(
             build_context_source_content(input)?
         }
     };
+    authenticate_context_source_content(&input.target, &content)?;
     Ok(ThreatModelSourceRecord::loaded(
         "artifact",
         "context",
@@ -342,12 +338,21 @@ fn load_context_source(
     ))
 }
 
+fn authenticate_context_source_content(target: &Path, content: &str) -> Result<()> {
+    let snapshot: Value =
+        serde_json::from_str(content).context("context snapshot source is not valid JSON")?;
+    match crate::context::context_snapshot_freshness(target, &snapshot) {
+        crate::context::ContextSnapshotFreshness::Current => Ok(()),
+        freshness => anyhow::bail!(
+            "context snapshot source is not current: {}; run `context:build`",
+            freshness.disclosure().unwrap_or("freshness unverified")
+        ),
+    }
+}
+
 fn build_context_source_content(input: &BuildInput) -> Result<String> {
-    crate::modules::context::build_context_snapshot_for_root(
-        &input.target,
-        input.context_limit,
-    )
-    .with_context(|| "Could not build context snapshot for threat-model:build")?;
+    crate::modules::context::build_context_snapshot_for_root(&input.target, input.context_limit)
+        .with_context(|| "Could not build context snapshot for threat-model:build")?;
     let path = crate::context::context_snapshot_path(&input.target);
     read_context_json_source(&input.target, &path)
 }
@@ -677,12 +682,7 @@ mod source_size_contract_tests {
             "entry-points",
             PathBuf::from("entry-points.json"),
             "{}",
-            catalog_pair_digest(
-                "sha256:catalog-payload",
-                "sha256:context-content",
-                9,
-                None,
-            ),
+            catalog_pair_digest("sha256:catalog-payload", "sha256:context-content", 9, None),
             "{}".to_string(),
             false,
         );
@@ -712,7 +712,12 @@ mod source_size_contract_tests {
             "entry-points",
             PathBuf::from("entry-points.json"),
             "{}",
-            catalog_pair_digest("sha256:different", receipt.context_sha256.as_deref().unwrap(), 9, None),
+            catalog_pair_digest(
+                "sha256:different",
+                receipt.context_sha256.as_deref().unwrap(),
+                9,
+                None,
+            ),
             "{}".to_string(),
             false,
         );
@@ -757,6 +762,26 @@ mod source_size_contract_tests {
                 .contains("Could not read context snapshot"),
             "{error:#}"
         );
+    }
+
+    #[test]
+    fn threat_model_rejects_context_from_a_changed_target_tree() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("source.rs"), "fn first() {}\n").unwrap();
+        let tree_hash =
+            crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap();
+        let content = json!({
+            "target": target.path(),
+            "provenance": {"treeHash": tree_hash}
+        })
+        .to_string();
+        authenticate_context_source_content(target.path(), &content).unwrap();
+
+        std::fs::write(target.path().join("source.rs"), "fn changed() {}\n").unwrap();
+        let error = authenticate_context_source_content(target.path(), &content).unwrap_err();
+
+        assert!(error.to_string().contains("is not current"));
+        assert!(error.to_string().contains("run `context:build`"));
     }
 
     #[test]

@@ -43,7 +43,7 @@ fn options_model_formats_stored_option_rows() {
         .unwrap();
 
     assert_eq!(model.title, "OPTIONS");
-    assert!(table.hint.contains("session-only"));
+    assert!(table.hint.contains("session only"));
     assert!(table.hint.contains("lost on exit"));
     assert_eq!(
         table.headers,
@@ -60,8 +60,8 @@ fn options_model_formats_stored_option_rows() {
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
         cells: ["view".to_string(), "options".to_string()],
     }));
-    assert_eq!(triage.cells[1], "true · session");
-    assert_eq!(triage.cells[4], "bool");
+    assert_eq!(triage.cells[1], "yes · session");
+    assert_eq!(triage.cells[4], "yes/no");
     assert!(triage.has_stored_value);
 }
 
@@ -174,6 +174,33 @@ fn standard_filter_hides_escalation_model() {
 }
 
 #[test]
+fn options_views_hide_unstructured_workflow_inputs() {
+    let app = ShellApp::new(V2Config::default(), None);
+    let standard = options_model(
+        &app,
+        &options_view("threat-model:import", OptionsFilter::Standard),
+    );
+    let OptionsBody::Table(standard) = standard.body else {
+        panic!("expected standard options");
+    };
+    assert!(standard.rows.iter().any(|row| row.cells[0] == "path"));
+    assert!(!standard.rows.iter().any(|row| row.cells[0] == "document"));
+
+    let advanced = options_model(
+        &app,
+        &options_view("threat-model:build", OptionsFilter::Advanced),
+    );
+    let OptionsBody::Table(advanced) = advanced.body else {
+        panic!("expected advanced options");
+    };
+    assert!(advanced.rows.iter().any(|row| row.cells[0] == "model"));
+    assert!(!advanced
+        .rows
+        .iter()
+        .any(|row| row.cells[0] == "advisoryFixtures"));
+}
+
+#[test]
 fn plain_options_model_projects_ready_table() {
     let app = ShellApp::new(V2Config::default(), None);
 
@@ -202,7 +229,7 @@ fn plain_options_model_projects_ready_table() {
     assert!(table.rows.iter().any(|row| row.cells[0] == "triage"));
     assert_eq!(
         table.note,
-        "set is session-only (lost on exit); setg is persistent for this tool."
+        "set <key> <value> · session only, lost on exit · setg saves it"
     );
     assert_eq!(
         table.next_hint,

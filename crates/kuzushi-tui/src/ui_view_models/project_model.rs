@@ -293,8 +293,8 @@ fn review_surface_row(findings: &super::FindingsModel) -> ProjectModelRow {
 
 fn origin_for_context_state(state: &str) -> ProjectModelOrigin {
     match state {
-        "present" => ProjectModelOrigin::Local,
-        "malformed" => ProjectModelOrigin::Stale,
+        "current" => ProjectModelOrigin::Local,
+        "stale" | "unverifiable" | "malformed" => ProjectModelOrigin::Stale,
         _ => ProjectModelOrigin::Missing,
     }
 }

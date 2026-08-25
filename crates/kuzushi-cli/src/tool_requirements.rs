@@ -20,7 +20,7 @@ pub(crate) fn resolve_run_target(global_target: Option<PathBuf>) -> Option<PathB
 pub(crate) fn reject_shell_only_run_dot(tool: &str) -> Result<()> {
     if tool == "." {
         anyhow::bail!(
-            "`kuzushi run .` is shell-only because the terminal command has no focused module. Use `kuzushi shell`, then `use <module>` and `run .`; from a terminal run an explicit tool such as `kuzushi --target . run context:build --input '{{}}'`."
+            "`kuzushi run .` is shell-only because the terminal command has no focused module. Use `kuzushi shell`, then `use <module>` and `run .`; from a terminal run an explicit tool such as `kuzushi --target . run context:build`."
         );
     }
     Ok(())

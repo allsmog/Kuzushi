@@ -6,7 +6,7 @@ mod readiness_rows;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CredentialReadiness {
     ApiKey,
-    StoredOAuth,
+    OAuth,
     Session,
     Missing,
     NotRequired,
@@ -16,7 +16,7 @@ impl CredentialReadiness {
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::ApiKey => "API key ready",
-            Self::StoredOAuth => "stored OAuth ready",
+            Self::OAuth => "OAuth ready",
             Self::Session => "session credential ready",
             Self::Missing => "credentials required",
             Self::NotRequired => "not required by this plan",
@@ -58,7 +58,10 @@ pub(crate) struct SetupReadinessModel {
 
 pub(crate) fn setup_readiness_model(app: &ShellApp) -> SetupReadinessModel {
     let selected_rows = selected_setup_rows(app);
-    let selected_model_tasks = selected_rows.iter().filter(|row| row.model_backed).count();
+    let selected_model_tasks = selected_rows
+        .iter()
+        .filter(|row| app.planning_task_model_backed(row.id))
+        .count();
     let credential_readiness = credential_readiness(app, selected_model_tasks > 0);
     let mut rows = readiness_rows::readiness_rows(
         app,
@@ -186,9 +189,18 @@ pub(crate) fn credential_readiness_for_provider(
 ) -> CredentialReadiness {
     classify_credential_readiness(
         app.session().session_api_key_ready(provider),
-        provider == "openai-codex" || oauth_provider_status(provider).starts_with("stored"),
-        auth_ready_for_provider(provider),
+        oauth_provider_for_model(provider)
+            .is_some_and(|oauth| crate::app::oauth_credential_is_ready(app.config(), oauth)),
+        auth_ready_for_provider(app.config(), provider),
     )
+}
+
+fn oauth_provider_for_model(provider: &str) -> Option<&str> {
+    match provider {
+        "anthropic" => Some("anthropic"),
+        "openai-codex" => Some("openai-codex"),
+        _ => None,
+    }
 }
 
 fn classify_credential_readiness(
@@ -198,7 +210,7 @@ fn classify_credential_readiness(
 ) -> CredentialReadiness {
     match (session_ready, stored_oauth, provider_ready) {
         (true, _, _) => CredentialReadiness::Session,
-        (false, true, true) => CredentialReadiness::StoredOAuth,
+        (false, true, true) => CredentialReadiness::OAuth,
         (false, false, true) => CredentialReadiness::ApiKey,
         _ => CredentialReadiness::Missing,
     }
@@ -232,9 +244,8 @@ mod tests {
         )
         .unwrap();
         std::fs::create_dir_all(target.path().join(".kuzushi")).unwrap();
-        for artifact in ["context-snapshot.json", "entry-points.json"] {
-            std::fs::write(target.path().join(".kuzushi").join(artifact), "{}").unwrap();
-        }
+        crate::test_support::write_current_context_snapshot(target.path(), serde_json::json!({}));
+        std::fs::write(target.path().join(".kuzushi/entry-points.json"), "{}").unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(config, Some(&workspace));
         app.open_setup();
@@ -303,7 +314,7 @@ mod tests {
         );
         assert_eq!(
             classify_credential_readiness(false, true, true),
-            CredentialReadiness::StoredOAuth
+            CredentialReadiness::OAuth
         );
         assert_eq!(
             classify_credential_readiness(true, false, false),

@@ -55,7 +55,7 @@ impl RowOutcome {
     /// One-glance gloss for the legend so the word is never load-bearing alone.
     pub fn gloss(self) -> &'static str {
         match self {
-            RowOutcome::Run => "runs now",
+            RowOutcome::Run => "runs fresh",
             RowOutcome::Reuse => "cached, reused as-is",
             RowOutcome::Skip => "unchecked, won't run",
             RowOutcome::Blocked => "needs a tool on PATH",
@@ -122,12 +122,12 @@ impl EnterPlan {
     fn nothing_runs_line(&self) -> String {
         if self.reuse > 0 {
             return format!(
-                "Enter runs nothing — all {} checked step{} are cached (reused as-is); press g to rebuild one",
+                "Enter runs nothing · all {} checked step{} reuse cached work; press Space to run one",
                 self.reuse,
                 plural(self.reuse)
             );
         }
-        "Enter runs nothing — no steps checked; it skips to the next phase".to_string()
+        "Enter runs nothing · no steps checked; it skips to the next phase".to_string()
     }
 }
 
@@ -357,7 +357,7 @@ mod tests {
             blocked: 0,
         };
         assert!(plan.summary_line().contains("runs nothing"));
-        assert!(plan.summary_line().contains("press g to rebuild"));
+        assert!(plan.summary_line().contains("press Space to run"));
     }
 
     #[test]

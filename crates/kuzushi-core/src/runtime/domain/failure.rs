@@ -17,6 +17,7 @@ pub enum RuntimeFailureClass {
     BridgeInternal,
     Cancelled,
     McpTimeout,
+    McpUnavailable,
     ProviderRejected,
     ProviderResponseInvalid,
     ProviderUnavailable,
@@ -45,11 +46,12 @@ impl RuntimeFailureClass {
     }
 }
 
-const FAILURE_CLASS_NAMES: [&str; 12] = [
+const FAILURE_CLASS_NAMES: [&str; 13] = [
     "authentication",
     "bridge_internal",
     "cancelled",
     "mcp_timeout",
+    "mcp_unavailable",
     "provider_rejected",
     "provider_response_invalid",
     "provider_unavailable",
@@ -60,11 +62,12 @@ const FAILURE_CLASS_NAMES: [&str; 12] = [
     "runtime_error",
 ];
 
-const PUBLIC_FAILURE_MESSAGES: [&str; 12] = [
+const PUBLIC_FAILURE_MESSAGES: [&str; 13] = [
     "Provider authentication failed",
     "Bridge operation failed",
     "Model operation was cancelled",
     "MCP tool request timed out",
+    "Restore the missing code-analysis component: from source run `cargo build --workspace`; otherwise reinstall Kuzushi",
     "Provider rejected the request",
     "Provider returned an invalid response",
     "Provider is temporarily unavailable",
@@ -77,11 +80,12 @@ const PUBLIC_FAILURE_MESSAGES: [&str; 12] = [
 
 fn runtime_failure_class_at(index: usize) -> RuntimeFailureClass {
     use RuntimeFailureClass::*;
-    const CLASSES: [RuntimeFailureClass; 12] = [
+    const CLASSES: [RuntimeFailureClass; 13] = [
         Authentication,
         BridgeInternal,
         Cancelled,
         McpTimeout,
+        McpUnavailable,
         ProviderRejected,
         ProviderResponseInvalid,
         ProviderUnavailable,

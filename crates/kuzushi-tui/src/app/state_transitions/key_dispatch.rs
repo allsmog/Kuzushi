@@ -3,6 +3,9 @@ use super::confirmation_keys::{
 };
 use super::control_keys::control_key_action;
 use super::*;
+use anyhow::Context;
+use kuzushi_core::modules::OptionType;
+use serde_json::Value;
 
 #[derive(Clone, Copy)]
 enum JourneyPhaseEntry {
@@ -602,7 +605,13 @@ impl ShellApp {
                 tool: tool.clone(),
                 tool_description: descriptor.description.clone(),
                 changed_options: rerun_option_review(descriptor, &input),
+                original_input: input.clone(),
                 prepared_input: input,
+                option_editor_open: false,
+                option_cursor: 0,
+                option_edit: None,
+                option_error: None,
+                draft_modified: false,
                 derivation,
             },
             derivation,
@@ -614,7 +623,7 @@ impl ShellApp {
         self.log(
             "workflow",
             format!(
-                "{} review opened from canonical input.json — Enter dispatches the exact saved input; e opens Options",
+                "{} review opened from saved run input · Enter dispatches the draft; e edits rerun options",
                 phase_rerun_action(draft.derivation)
             ),
         );
@@ -722,6 +731,17 @@ impl ShellApp {
         if is_quit_chord(key) {
             return InputUpdate::ignored();
         }
+        if self
+            .engagement
+            .pending_phase_rerun()
+            .is_some_and(|review| review.option_editor_open)
+        {
+            return self.handle_phase_rerun_option_key(key);
+        }
+        self.handle_closed_phase_rerun_review_key(key)
+    }
+
+    fn handle_closed_phase_rerun_review_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !key.modifiers.is_empty() {
             return InputUpdate::handled();
         }
@@ -734,10 +754,242 @@ impl ShellApp {
     }
 
     fn edit_phase_rerun_review(&mut self) -> InputUpdate {
-        if let Some(review) = self.engagement.take_pending_phase_rerun() {
-            self.show_options(Some(review.tool), OptionsFilter::Standard);
+        let option_count = self.phase_rerun_editable_options().len();
+        if option_count == 0 {
+            if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+                review.option_error =
+                    Some("this saved run has no primitive editable options".to_string());
+            }
+            return InputUpdate::handled();
+        }
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.option_editor_open = true;
+            review.option_cursor = review.option_cursor.min(option_count.saturating_sub(1));
+            review.option_error = None;
         }
         InputUpdate::handled()
+    }
+
+    fn handle_phase_rerun_option_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.phase_rerun_text_edit_is_open() {
+            return self.handle_phase_rerun_text_edit_key(key);
+        }
+        if !key.modifiers.is_empty() {
+            return InputUpdate::handled();
+        }
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => self.move_phase_rerun_option_cursor(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.move_phase_rerun_option_cursor(1),
+            KeyCode::Char(' ') => self.cycle_phase_rerun_option(),
+            KeyCode::Enter => self.begin_phase_rerun_text_edit(),
+            KeyCode::Esc => self.close_phase_rerun_option_editor(),
+            _ => {}
+        }
+        InputUpdate::handled()
+    }
+
+    fn phase_rerun_text_edit_is_open(&self) -> bool {
+        self.engagement
+            .pending_phase_rerun()
+            .is_some_and(|review| review.option_edit.is_some())
+    }
+
+    fn handle_phase_rerun_text_edit_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.modifiers.contains(KeyModifiers::CONTROL)
+            || key.modifiers.contains(KeyModifiers::ALT)
+        {
+            return InputUpdate::handled();
+        }
+        self.handle_phase_rerun_text_edit_code(key.code);
+        InputUpdate::handled()
+    }
+
+    fn handle_phase_rerun_text_edit_code(&mut self, code: KeyCode) {
+        match code {
+            KeyCode::Enter => self.commit_phase_rerun_text_edit(),
+            KeyCode::Esc => self.cancel_phase_rerun_text_edit(),
+            KeyCode::Backspace => self.edit_phase_rerun_draft(|draft| {
+                draft.pop();
+            }),
+            KeyCode::Char(ch) => self.edit_phase_rerun_draft(|draft| draft.push(ch)),
+            _ => {}
+        }
+    }
+
+    fn cancel_phase_rerun_text_edit(&mut self) {
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.option_edit = None;
+            review.option_error = None;
+        }
+    }
+
+    fn edit_phase_rerun_draft(&mut self, edit: impl FnOnce(&mut String)) {
+        let Some(draft) = self
+            .engagement
+            .pending_phase_rerun_mut()
+            .and_then(|review| review.option_edit.as_mut())
+            .map(|edit| &mut edit.draft)
+        else {
+            return;
+        };
+        edit(draft);
+    }
+
+    fn move_phase_rerun_option_cursor(&mut self, delta: isize) {
+        let count = self.phase_rerun_editable_options().len();
+        let Some(review) = self.engagement.pending_phase_rerun_mut() else {
+            return;
+        };
+        if count == 0 {
+            return;
+        }
+        review.option_cursor = review
+            .option_cursor
+            .saturating_add_signed(delta)
+            .min(count - 1);
+        review.option_error = None;
+    }
+
+    fn close_phase_rerun_option_editor(&mut self) {
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.option_editor_open = false;
+            review.option_edit = None;
+            review.option_error = None;
+        }
+    }
+
+    fn phase_rerun_editable_options(&self) -> Vec<kuzushi_core::modules::OptionSpec> {
+        let Some(review) = self.engagement.pending_phase_rerun() else {
+            return Vec::new();
+        };
+        self.registry()
+            .resolve_tool(&review.tool)
+            .map(|descriptor| {
+                descriptor
+                    .options
+                    .iter()
+                    .filter(|spec| crate::app::option_is_operator_editable(spec))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn selected_phase_rerun_option(&self) -> Option<kuzushi_core::modules::OptionSpec> {
+        let cursor = self.engagement.pending_phase_rerun()?.option_cursor;
+        self.phase_rerun_editable_options().get(cursor).cloned()
+    }
+
+    fn begin_phase_rerun_text_edit(&mut self) {
+        let Some(spec) = self.selected_phase_rerun_option() else {
+            return;
+        };
+        if matches!(spec.option_type, OptionType::Bool | OptionType::Enum) {
+            self.cycle_phase_rerun_option();
+            return;
+        }
+        let draft = self
+            .engagement
+            .pending_phase_rerun()
+            .and_then(|review| review.prepared_input.get(&spec.name))
+            .map(crate::app::format_option_value)
+            .unwrap_or_default();
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.option_edit = Some(PhaseRerunOptionEdit {
+                option_name: spec.name,
+                draft,
+            });
+            review.option_error = None;
+        }
+    }
+
+    fn commit_phase_rerun_text_edit(&mut self) {
+        let Some(edit) = self
+            .engagement
+            .pending_phase_rerun()
+            .and_then(|review| review.option_edit.clone())
+        else {
+            return;
+        };
+        let Some(spec) = self
+            .phase_rerun_editable_options()
+            .into_iter()
+            .find(|spec| spec.name == edit.option_name)
+        else {
+            return;
+        };
+        match crate::app::coerce_raw_option_value(&spec, &edit.draft)
+            .and_then(|value| self.apply_phase_rerun_option(&spec, value))
+        {
+            Ok(()) => {
+                if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+                    review.option_edit = None;
+                    review.option_error = None;
+                }
+            }
+            Err(error) => {
+                if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+                    review.option_error = Some(error.to_string());
+                }
+            }
+        }
+    }
+
+    fn cycle_phase_rerun_option(&mut self) {
+        let Some(spec) = self.selected_phase_rerun_option() else {
+            return;
+        };
+        let current = self
+            .engagement
+            .pending_phase_rerun()
+            .and_then(|review| review.prepared_input.get(&spec.name));
+        let next = match next_phase_rerun_option_value(&spec, current) {
+            Ok(next) => next,
+            Err(error) => {
+                self.set_phase_rerun_option_error(error.to_string());
+                return;
+            }
+        };
+        if let Err(error) = self.apply_phase_rerun_option(&spec, next) {
+            self.set_phase_rerun_option_error(error.to_string());
+        }
+    }
+
+    fn set_phase_rerun_option_error(&mut self, error: String) {
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.option_error = Some(error);
+        }
+    }
+
+    fn apply_phase_rerun_option(
+        &mut self,
+        spec: &kuzushi_core::modules::OptionSpec,
+        value: Value,
+    ) -> anyhow::Result<()> {
+        let review = self
+            .engagement
+            .pending_phase_rerun()
+            .context("rerun draft is unavailable")?;
+        let tool = review.tool.clone();
+        let original = review.original_input.clone();
+        let mut candidate = review.prepared_input.clone();
+        candidate
+            .as_object_mut()
+            .context("saved rerun input is not an object")?
+            .insert(spec.name.clone(), value);
+        let prepared = self.registry().prepare_tool_input(&tool, candidate, None)?;
+        let descriptor = self
+            .registry()
+            .resolve_tool(&tool)
+            .context("rerun tool descriptor disappeared")?;
+        let changed_options = rerun_option_diff(descriptor, &original, &prepared);
+        if let Some(review) = self.engagement.pending_phase_rerun_mut() {
+            review.prepared_input = prepared;
+            review.changed_options = changed_options;
+            review.draft_modified = review.prepared_input != review.original_input;
+            review.option_error = None;
+        }
+        Ok(())
     }
 
     fn cancel_phase_rerun_review(&mut self) -> InputUpdate {
@@ -761,6 +1013,14 @@ impl ShellApp {
 
     fn phase_rerun_launch(&mut self, review: PhaseRerunReview) -> Option<RunToolLaunch> {
         let workspace = self.phase_rerun_workspace()?;
+        let current =
+            kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(workspace.root());
+        if let Some(reason) =
+            self.phase_recovery_prerequisite_blocker_for_snapshot(review.phase, &current)
+        {
+            self.log("workflow", reason);
+            return None;
+        }
         let prepared = match self.prepare_background_tool_input(
             &review.tool,
             review.prepared_input.clone(),
@@ -1154,12 +1414,12 @@ impl ShellApp {
     }
 
     fn handle_picker_deferred_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.handle_picker_notice_dismiss(key) {
+            return InputUpdate::handled();
+        }
         let update = self.handle_credential_recovery_escape(key);
         if update.handled {
             return update;
-        }
-        if self.handle_picker_notice_dismiss(key) {
-            return InputUpdate::handled();
         }
         self.handle_picker_key(key)
     }
@@ -1548,6 +1808,33 @@ fn rerun_specification(
     Some((tool, input))
 }
 
+fn next_phase_rerun_option_value(
+    spec: &kuzushi_core::modules::OptionSpec,
+    current: Option<&Value>,
+) -> anyhow::Result<Value> {
+    match spec.option_type {
+        OptionType::Bool => Ok(Value::Bool(
+            !current.and_then(Value::as_bool).unwrap_or(false),
+        )),
+        OptionType::Enum => next_phase_rerun_enum_value(spec, current),
+        _ => anyhow::bail!("Enter edits this option; Space cycles yes/no and choices"),
+    }
+}
+
+fn next_phase_rerun_enum_value(
+    spec: &kuzushi_core::modules::OptionSpec,
+    current: Option<&Value>,
+) -> anyhow::Result<Value> {
+    anyhow::ensure!(!spec.choices.is_empty(), "this option has no choices");
+    let position = current
+        .and_then(Value::as_str)
+        .and_then(|value| spec.choices.iter().position(|choice| choice == value))
+        .unwrap_or(spec.choices.len() - 1);
+    Ok(Value::String(
+        spec.choices[(position + 1) % spec.choices.len()].clone(),
+    ))
+}
+
 fn rerun_option_review(
     descriptor: &kuzushi_core::modules::ToolDescriptor,
     input: &serde_json::Value,
@@ -1566,6 +1853,33 @@ fn rerun_option_review(
             Some(PhaseRerunOptionReview {
                 label: option.name.clone(),
                 value: review_option_value(&option.name, value),
+                description: option.description.clone(),
+            })
+        })
+        .collect()
+}
+
+fn rerun_option_diff(
+    descriptor: &kuzushi_core::modules::ToolDescriptor,
+    original: &serde_json::Value,
+    draft: &serde_json::Value,
+) -> Vec<PhaseRerunOptionReview> {
+    descriptor
+        .options
+        .iter()
+        .filter(|option| crate::app::option_is_operator_editable(option))
+        .filter_map(|option| {
+            let before = original
+                .get(&option.name)
+                .unwrap_or(&serde_json::Value::Null);
+            let after = draft.get(&option.name).unwrap_or(&serde_json::Value::Null);
+            (before != after).then(|| PhaseRerunOptionReview {
+                label: option.name.clone(),
+                value: format!(
+                    "{} -> {}",
+                    review_option_value(&option.name, before),
+                    review_option_value(&option.name, after)
+                ),
                 description: option.description.clone(),
             })
         })
@@ -2474,6 +2788,20 @@ mod tests {
     }
 
     #[test]
+    fn failed_map_result_cannot_be_skipped_before_resolution() {
+        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+
+        assert!(!app.record_current_phase_skip());
+
+        assert!(!app.engagement.phase_is_skipped(WorkflowPhase::Map));
+        assert!(app.log_lines().iter().any(|line| {
+            line.body.contains("REFUSED · RESULT")
+                && line.body.contains("resolve the Map result")
+                && line.body.contains("inspect, rerun, or discard")
+        }));
+    }
+
+    #[test]
     fn rerun_review_is_human_readable_and_enter_dispatches_exact_saved_input() {
         let input = rerun_review_input();
         let (_target, mut app, _) =
@@ -2484,6 +2812,60 @@ mod tests {
         assert!(app.input().is_empty());
         assert_exact_saved_input_dispatch(&mut app, &input);
         assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn rerun_dispatch_rechecks_stale_prerequisites_after_review_opens() {
+        use kuzushi_core::workflow_attempts::{
+            PhaseAttemptCompleted, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
+            PhaseAttemptEvent, PhaseAttemptLedger, PhaseAttemptOutcome, PhaseTargetSnapshot,
+        };
+        let target = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut projected = PhaseTargetSnapshot::capture(target.path());
+        projected.revision = Some("projected-revision".to_string());
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-run".to_string()],
+            projected.clone(),
+            PhaseAttemptOutcome::Completed,
+        );
+        let ledger = PhaseAttemptLedger::from_events([
+            PhaseAttemptEvent::PhaseAttemptCompleted(map.clone()),
+            PhaseAttemptEvent::PhaseAttemptDispositionRecorded(
+                PhaseAttemptDispositionRecorded::new(
+                    map.attempt_id,
+                    PhaseAttemptDisposition::Selected {
+                        acknowledged_partial: false,
+                    },
+                ),
+            ),
+        ])
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.engagement
+            .set_phase_attempt_projection(Some(projected), ledger);
+        let review = PhaseRerunReview {
+            phase: WorkflowPhase::Scan,
+            parent_attempt_id: "scan-attempt".to_string(),
+            tool: "context:build".to_string(),
+            tool_description: "build context".to_string(),
+            original_input: serde_json::json!({}),
+            prepared_input: serde_json::json!({}),
+            changed_options: Vec::new(),
+            option_editor_open: false,
+            option_cursor: 0,
+            option_edit: None,
+            option_error: None,
+            draft_modified: false,
+            derivation: None,
+        };
+
+        assert!(app.phase_rerun_launch(review).is_none());
+        assert!(app.log_lines().iter().any(|line| {
+            line.body
+                .contains("rerun Map because the accepted Map is stale, then retry Scan")
+        }));
     }
 
     fn rerun_review_input() -> serde_json::Value {
@@ -2528,16 +2910,64 @@ mod tests {
     }
 
     #[test]
-    fn rerun_review_edit_action_opens_existing_options_without_touching_composer() {
-        let (_target, mut app, _) = app_with_unresolved_map_result(V2Config::default());
+    fn rerun_review_edits_primitive_draft_in_place_without_touching_composer() {
+        let input = rerun_review_input();
+        let (_target, mut app, _) =
+            app_with_unresolved_map_result_input(V2Config::default(), input);
         assert!(app.reduce_key(plain_key(KeyCode::Char('r'))).handled);
 
         assert!(app.reduce_key(plain_key(KeyCode::Char('e'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Enter)).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Backspace)).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Backspace)).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char('2'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char('5'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Enter)).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char('j'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char('j'))).handled);
+        assert!(app.reduce_key(plain_key(KeyCode::Char(' '))).handled);
 
-        assert_eq!(app.shell_view(), ShellView::Options);
-        assert_eq!(app.router.options().tool_name, "context:build");
+        assert_ne!(app.shell_view(), ShellView::Options);
         assert!(app.input().is_empty());
-        assert!(app.engagement.pending_phase_rerun().is_none());
+        let review = app.engagement.pending_phase_rerun().unwrap();
+        assert!(review.option_editor_open);
+        assert_eq!(
+            review
+                .prepared_input
+                .get("sampleLimit")
+                .and_then(serde_json::Value::as_u64),
+            Some(25)
+        );
+        assert_eq!(
+            review
+                .prepared_input
+                .get("enrichment")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert!(review.draft_modified);
+
+        assert!(app.reduce_key(plain_key(KeyCode::Esc)).handled);
+        let update = app.reduce_key(plain_key(KeyCode::Enter));
+        let [ShellEffect::DispatchRunTool(launch)] = update.effects.as_slice() else {
+            panic!("expected edited rerun dispatch");
+        };
+        assert_eq!(
+            launch
+                .input
+                .value()
+                .get("sampleLimit")
+                .and_then(serde_json::Value::as_u64),
+            Some(25)
+        );
+        assert_eq!(
+            launch
+                .input
+                .value()
+                .get("enrichment")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
     }
 
     #[test]

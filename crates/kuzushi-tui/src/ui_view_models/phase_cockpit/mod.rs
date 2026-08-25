@@ -516,7 +516,7 @@ fn phase_result_card_model(
         .pending_phase_rerun()
         .filter(|review| review.phase == phase)
     {
-        return phase_rerun_review_card(review);
+        return phase_rerun_review_card(app, review);
     }
     let verified_remediation = app.verified_remediation_result_is_open(phase);
     // The strip renders `recommended` as its own trailing `next:` row, so
@@ -547,8 +547,15 @@ fn phase_result_card_model(
     }
 }
 
-fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResultCardModel {
-    let detail_rows = phase_rerun_review_rows(review);
+fn phase_rerun_review_card(
+    app: &ShellApp,
+    review: &crate::app::PhaseRerunReview,
+) -> PhaseResultCardModel {
+    let detail_rows = if review.option_editor_open {
+        phase_rerun_editor_rows(app, review)
+    } else {
+        phase_rerun_review_rows(review)
+    };
     let detail = detail_rows
         .iter()
         .map(|row| row.text.as_str())
@@ -563,12 +570,70 @@ fn phase_rerun_review_card(review: &crate::app::PhaseRerunReview) -> PhaseResult
         detail_rows,
         semantic_keys: std::collections::BTreeSet::new(),
         actions: Vec::new(),
-        control_hint: "Enter dispatch exact saved input · e edit in Options · Esc cancel"
-            .to_string(),
-        recommended:
-            "review changed options; raw run JSON is available only from the expert command surface"
-                .to_string(),
+        control_hint: phase_rerun_control_hint(review),
+        recommended: if review.draft_modified {
+            "review the draft changes; the saved run input remains unchanged".to_string()
+        } else {
+            "review the saved settings; the historical run remains unchanged".to_string()
+        },
     }
+}
+
+fn phase_rerun_control_hint(review: &crate::app::PhaseRerunReview) -> String {
+    if review.option_edit.is_some() {
+        return "type primitive value · Enter save · Esc cancel edit".to_string();
+    }
+    if review.option_editor_open {
+        return "j/k move · Space cycle yes/no or choice · Enter edit · Esc review".to_string();
+    }
+    "Enter dispatch draft · e edit rerun options · Esc cancel".to_string()
+}
+
+fn phase_rerun_editor_rows(
+    app: &ShellApp,
+    review: &crate::app::PhaseRerunReview,
+) -> Vec<crate::app::PhaseResultDetailRow> {
+    let mut rows = vec![phase_rerun_detail_row(format!(
+        "{} · rerun draft options",
+        review.tool
+    ))];
+    if let Some(descriptor) = app.registry().resolve_tool(&review.tool) {
+        rows.extend(
+            descriptor
+                .options
+                .iter()
+                .filter(|spec| crate::app::option_is_operator_editable(spec))
+                .enumerate()
+                .map(|(index, spec)| {
+                    let marker = if index == review.option_cursor {
+                        ">"
+                    } else {
+                        " "
+                    };
+                    let value = review
+                        .option_edit
+                        .as_ref()
+                        .filter(|edit| edit.option_name == spec.name)
+                        .map(|edit| edit.draft.clone())
+                        .or_else(|| {
+                            review
+                                .prepared_input
+                                .get(&spec.name)
+                                .map(crate::app::format_option_value)
+                        })
+                        .unwrap_or_else(|| "unset".to_string());
+                    phase_rerun_detail_row(format!(
+                        "{marker} {} = {value} · {}",
+                        crate::ui_view_models::option_display_name(&spec.name),
+                        spec.description
+                    ))
+                }),
+        );
+    }
+    if let Some(error) = review.option_error.as_deref() {
+        rows.push(phase_rerun_detail_row(format!("REFUSED · INPUT · {error}")));
+    }
+    rows
 }
 
 fn compact_result_summary(summary: &crate::PhaseResultCompactSummary) -> String {

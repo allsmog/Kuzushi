@@ -25,7 +25,7 @@ impl ShellApp {
         // row (the non-primary OpenAI entry), which the renderer collapses to the
         // first visible row — so the highlight and the Enter-selected model would
         // disagree. Navigating the visible set keeps them in lockstep.
-        let visible = visible_model_choice_indexes(self.config().model.as_deref());
+        let visible = visible_model_choice_indexes(self.config());
         self.router
             .model_catalog_mut()
             .move_selection(&visible, delta);

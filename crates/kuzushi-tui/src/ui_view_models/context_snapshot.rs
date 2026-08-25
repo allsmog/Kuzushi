@@ -30,6 +30,7 @@ pub(crate) struct ContextSnapshotDetails {
     pub(crate) frameworks: String,
     pub(crate) generated: String,
     pub(crate) stale: String,
+    pub(crate) enrichment: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,6 +140,7 @@ fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {
         format!("frameworks: {}", details.frameworks),
         format!("generated: {}", details.generated),
         format!("stale: {}", details.stale),
+        format!("enrichment: {}", details.enrichment),
     ]
 }
 
@@ -166,9 +168,14 @@ fn context_status(app: &ShellApp, running: Option<&ContextSnapshotRunning>) -> S
 
 pub(crate) fn context_snapshot_state(app: &ShellApp) -> &'static str {
     let view = app.domain().context_view();
-    if view.exists {
-        "present"
-    } else if view.status.starts_with("malformed context snapshot") {
+    if let Some(freshness) = view.freshness.as_ref() {
+        return match freshness {
+            kuzushi_core::context::ContextSnapshotFreshness::Current => "current",
+            kuzushi_core::context::ContextSnapshotFreshness::Stale(_) => "stale",
+            kuzushi_core::context::ContextSnapshotFreshness::Unverifiable(_) => "unverifiable",
+        };
+    }
+    if view.status.starts_with("malformed context snapshot") {
         "malformed"
     } else {
         "missing"
@@ -189,7 +196,18 @@ impl ContextSnapshotDetails {
             frameworks: join_or_dash(&view.frameworks),
             generated: join_or_dash(&view.generated_slices),
             stale: join_or_dash(&view.stale_slices),
+            enrichment: enrichment_label(view.enrichment_claims, view.enrichment_model.as_deref()),
         }
+    }
+}
+
+fn enrichment_label(claims: usize, model: Option<&str>) -> String {
+    if claims == 0 {
+        return "not run".to_string();
+    }
+    match model {
+        Some(model) => format!("{claims} source-cited claim(s) · {model}"),
+        None => format!("{claims} source-cited claim(s) · model unrecorded"),
     }
 }
 

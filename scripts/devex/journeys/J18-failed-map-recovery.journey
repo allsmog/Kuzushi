@@ -25,6 +25,7 @@ nav-mode:
 snap: failed-map-result
 expect: NAVIGATE
 expect: RESULT failed
+expect: Map !
 expect: 1 RESULT
 expect: open the failed run
 expect-not: returned partial evidence

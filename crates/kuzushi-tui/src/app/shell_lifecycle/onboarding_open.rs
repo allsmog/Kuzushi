@@ -46,7 +46,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_model_picker(&mut self) {
-        let visible = visible_model_choices(self.config().model.as_deref());
+        let visible = visible_model_choices(self.config());
         let selected_index = preferred_visible_model_choice_cursor(self.config());
         self.router
             .model_picker_mut()
@@ -233,7 +233,7 @@ impl ShellApp {
     /// Open the picker for one engagement phase: announce the phase, list only
     /// its tasks, and pre-check the recommended (target-aware) set. Cached
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
-    /// presses `g` to regenerate.
+    /// selects RUN with Space.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
         self.try_open_phase_picker_with_freshness(phase, false);
     }
@@ -600,7 +600,8 @@ impl ShellApp {
     /// probing stays in `auth_ready_for_provider`; session state contributes
     /// only a non-secret marker for a key accepted during this process.
     pub(crate) fn provider_auth_ready_for(&self, provider: &str) -> bool {
-        auth_ready_for_provider(provider) || self.session().session_api_key_ready(provider)
+        auth_ready_for_provider(self.config(), provider)
+            || self.session().session_api_key_ready(provider)
     }
 
     pub(crate) fn configured_model_auth_ready(&self) -> bool {
@@ -716,30 +717,28 @@ fn phase_preselection(
 
 /// Returns true if the operator has credentials wired for `provider` —
 /// either via environment variables or via the stored OAuth credentials.
-pub(crate) fn auth_ready_for_provider(provider: &str) -> bool {
+pub(crate) fn auth_ready_for_provider(config: &V2Config, provider: &str) -> bool {
     match provider {
         "anthropic" => provider_auth_ready(
             provider,
-            std::env::var_os("ANTHROPIC_API_KEY").is_some(),
-            &oauth_provider_status("anthropic"),
+            env_credential_is_ready("ANTHROPIC_API_KEY"),
+            oauth_credential_is_ready(config, "anthropic"),
         ),
-        "openai" => provider_auth_ready(
+        "openai" => provider_auth_ready(provider, env_credential_is_ready("OPENAI_API_KEY"), false),
+        "openai-codex" => provider_auth_ready(
             provider,
-            std::env::var_os("OPENAI_API_KEY").is_some(),
-            &oauth_provider_status("openai-codex"),
+            false,
+            oauth_credential_is_ready(config, "openai-codex"),
         ),
-        "openai-codex" => {
-            provider_auth_ready(provider, false, &oauth_provider_status("openai-codex"))
-        }
         _ => true,
     }
 }
 
-fn provider_auth_ready(provider: &str, api_key_ready: bool, oauth_status: &str) -> bool {
+fn provider_auth_ready(provider: &str, api_key_ready: bool, oauth_ready: bool) -> bool {
     match provider {
-        "anthropic" => api_key_ready || oauth_status.starts_with("stored"),
+        "anthropic" => api_key_ready || oauth_ready,
         "openai" => api_key_ready,
-        "openai-codex" => oauth_status.starts_with("stored"),
+        "openai-codex" => oauth_ready,
         _ => true,
     }
 }
@@ -767,17 +766,9 @@ mod tests {
 
     #[test]
     fn openai_oauth_does_not_satisfy_plain_openai_api_key_auth() {
-        assert!(!provider_auth_ready(
-            "openai",
-            false,
-            "stored; value hidden"
-        ));
-        assert!(provider_auth_ready(
-            "openai-codex",
-            false,
-            "stored; value hidden"
-        ));
-        assert!(provider_auth_ready("openai", true, "missing"));
+        assert!(!provider_auth_ready("openai", false, true));
+        assert!(provider_auth_ready("openai-codex", false, true));
+        assert!(provider_auth_ready("openai", true, false));
     }
 
     #[test]

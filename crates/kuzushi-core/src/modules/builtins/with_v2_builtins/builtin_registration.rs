@@ -128,9 +128,12 @@ fn execute_context_workspace_tool(
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-    _runtime: Option<&dyn AgentRuntime>,
+    runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_context_workspace_tool(name, input, ctx), name)
+    dispatch_result(
+        dispatch_context_workspace_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_native_security_tool(

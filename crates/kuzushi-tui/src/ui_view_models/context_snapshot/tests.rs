@@ -22,6 +22,7 @@ fn context_snapshot_model_projects_present_snapshot() {
         .set_context_view(crate::app::ContextSnapshotView {
             snapshot_path: Some(context_snapshot_fixture_path()),
             exists: true,
+            freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
             status: "snapshot present; 2 indexed file(s)".to_string(),
             target: Some("/tmp/demo".to_string()),
             discovery: Some("auto".to_string()),
@@ -31,13 +32,15 @@ fn context_snapshot_model_projects_present_snapshot() {
             frameworks: vec!["Cargo".to_string()],
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
+            enrichment_claims: 0,
+            enrichment_model: None,
         });
 
     let model = context_snapshot_model(&app);
 
     assert_eq!(model.snapshot, "./.kuzushi/context-snapshot.json");
     assert!(model.snapshot_present);
-    assert_eq!(model.state, "present");
+    assert_eq!(model.state, "current");
     assert_eq!(model.status, "snapshot present; 2 indexed file(s)");
     let details = model.details.expect("present details");
     assert_eq!(details.target, "/tmp/demo");
@@ -131,6 +134,7 @@ fn plain_context_model_projects_present_snapshot_details() {
         .set_context_view(crate::app::ContextSnapshotView {
             snapshot_path: Some(context_snapshot_fixture_path()),
             exists: true,
+            freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
             status: "snapshot present; 2 indexed file(s)".to_string(),
             target: Some("/tmp/demo".to_string()),
             discovery: Some("auto".to_string()),
@@ -140,11 +144,13 @@ fn plain_context_model_projects_present_snapshot_details() {
             frameworks: vec!["Cargo".to_string()],
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
+            enrichment_claims: 0,
+            enrichment_model: None,
         });
 
     let model = plain_context_model(&app);
 
-    assert!(model.summary_rows.contains(&"state: present".to_string()));
+    assert!(model.summary_rows.contains(&"state: current".to_string()));
     assert!(model.body_rows.contains(&"target: /tmp/demo".to_string()));
     assert!(model
         .body_rows

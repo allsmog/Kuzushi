@@ -60,9 +60,21 @@ pub(crate) struct PhaseRerunReview {
     pub(crate) parent_attempt_id: String,
     pub(crate) tool: String,
     pub(crate) tool_description: String,
+    pub(crate) original_input: serde_json::Value,
     pub(crate) prepared_input: serde_json::Value,
     pub(crate) changed_options: Vec<PhaseRerunOptionReview>,
+    pub(crate) option_editor_open: bool,
+    pub(crate) option_cursor: usize,
+    pub(crate) option_edit: Option<PhaseRerunOptionEdit>,
+    pub(crate) option_error: Option<String>,
+    pub(crate) draft_modified: bool,
     pub(crate) derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PhaseRerunOptionEdit {
+    pub(crate) option_name: String,
+    pub(crate) draft: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,8 +369,41 @@ impl ShellApp {
         } else {
             receipt.authoritative_policy()
         };
+        if let Some(reason) = self.phase_recovery_prerequisite_blocker(completed.phase) {
+            return prerequisite_blocked_result_policy(&reason);
+        }
         self.offer_continue_run(completed, &mut policy);
         policy
+    }
+
+    pub(crate) fn phase_recovery_prerequisite_blocker(
+        &self,
+        phase: WorkflowPhase,
+    ) -> Option<String> {
+        let snapshot = self.engagement.phase_target_snapshot()?;
+        self.phase_recovery_prerequisite_blocker_for_snapshot(phase, snapshot)
+    }
+
+    pub(crate) fn phase_recovery_prerequisite_blocker_for_snapshot(
+        &self,
+        phase: WorkflowPhase,
+        snapshot: &kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+    ) -> Option<String> {
+        let stale = WorkflowPhase::ORDER
+            .iter()
+            .copied()
+            .take_while(|candidate| *candidate != phase)
+            .find(|candidate| {
+                self.engagement
+                    .stale_selected_phase_attempt_for_snapshot(*candidate, snapshot)
+                    .is_some()
+            })?;
+        Some(format!(
+            "rerun {} because the accepted {} is stale, then retry {}",
+            stale.title(),
+            stale.title(),
+            phase.title()
+        ))
     }
 
     /// A failed/canceled attempt whose run left resumable checkpoint state
@@ -831,6 +876,14 @@ fn selection_blocked_result_policy(reason: &str) -> PhaseResultPolicy {
     use PhaseResultAction::{Discard, Open, RunAgain};
     PhaseResultPolicy {
         actions: vec![Open, RunAgain, Discard],
+        recommended_next: Some(reason.to_string()),
+    }
+}
+
+fn prerequisite_blocked_result_policy(reason: &str) -> PhaseResultPolicy {
+    use PhaseResultAction::{Discard, Open};
+    PhaseResultPolicy {
+        actions: vec![Open, Discard],
         recommended_next: Some(reason.to_string()),
     }
 }
@@ -2008,6 +2061,79 @@ mod tests {
                 presentation.detail_lines
             );
         }
+    }
+
+    #[test]
+    fn stale_map_blocks_scan_recovery_until_a_fresh_map_is_selected() {
+        use kuzushi_core::workflow_attempts::{
+            PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptEvent,
+            PhaseAttemptLedger, PhaseTargetSnapshot,
+        };
+        let target = tempfile::tempdir().unwrap();
+        let mut current = PhaseTargetSnapshot::capture(target.path());
+        current.revision = Some("current-revision".to_string());
+        let mut stale = current.clone();
+        stale.revision = Some("accepted-revision".to_string());
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-old".to_string()],
+            stale,
+            PhaseAttemptOutcome::Completed,
+        );
+        let scan = PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["scan-failed".to_string()],
+            current.clone(),
+            PhaseAttemptOutcome::Failed,
+        );
+        let selected = |attempt_id: String| {
+            PhaseAttemptEvent::PhaseAttemptDispositionRecorded(
+                PhaseAttemptDispositionRecorded::new(
+                    attempt_id,
+                    PhaseAttemptDisposition::Selected {
+                        acknowledged_partial: false,
+                    },
+                ),
+            )
+        };
+        let events = vec![
+            PhaseAttemptEvent::PhaseAttemptCompleted(map.clone()),
+            selected(map.attempt_id.clone()),
+            PhaseAttemptEvent::PhaseAttemptCompleted(scan.clone()),
+        ];
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.engagement.set_phase_attempt_projection(
+            Some(current.clone()),
+            PhaseAttemptLedger::from_events(events.clone()).unwrap(),
+        );
+
+        let blocked = app.phase_result_presentation(WorkflowPhase::Scan).unwrap();
+        assert_eq!(blocked.compact_summary.outcome, PhaseAttemptOutcome::Failed);
+        assert_eq!(
+            blocked.actions,
+            vec![PhaseResultAction::Open, PhaseResultAction::Discard]
+        );
+        assert_eq!(
+            blocked.recommended_next,
+            "rerun Map because the accepted Map is stale, then retry Scan"
+        );
+
+        let fresh_map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-current".to_string()],
+            current.clone(),
+            PhaseAttemptOutcome::Completed,
+        );
+        let mut refreshed_events = events;
+        refreshed_events.push(PhaseAttemptEvent::PhaseAttemptCompleted(fresh_map.clone()));
+        refreshed_events.push(selected(fresh_map.attempt_id));
+        app.engagement.set_phase_attempt_projection(
+            Some(current),
+            PhaseAttemptLedger::from_events(refreshed_events).unwrap(),
+        );
+
+        let restored = app.phase_result_presentation(WorkflowPhase::Scan).unwrap();
+        assert!(restored.actions.contains(&PhaseResultAction::RunAgain));
     }
 
     #[test]

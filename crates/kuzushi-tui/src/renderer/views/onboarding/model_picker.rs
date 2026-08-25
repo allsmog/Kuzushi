@@ -3,7 +3,7 @@ use crate::app::{visible_model_choices, ModelChoice};
 
 pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = model_picker_intro(app, area.width);
-    let choices = visible_model_choices(app.config().model.as_deref());
+    let choices = visible_model_choices(app.config());
     let widths = picker_column_widths(&choices);
     let footer = model_picker_footer(area);
     let candidate_budget = (area.height as usize)

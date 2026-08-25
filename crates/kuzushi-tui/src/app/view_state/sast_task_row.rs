@@ -25,6 +25,7 @@ pub struct KnowledgeBaseView {
 pub struct ContextSnapshotView {
     pub snapshot_path: Option<PathBuf>,
     pub exists: bool,
+    pub freshness: Option<kuzushi_core::context::ContextSnapshotFreshness>,
     pub status: String,
     pub target: Option<String>,
     pub discovery: Option<String>,
@@ -34,6 +35,8 @@ pub struct ContextSnapshotView {
     pub frameworks: Vec<String>,
     pub generated_slices: Vec<String>,
     pub stale_slices: Vec<String>,
+    pub enrichment_claims: usize,
+    pub enrichment_model: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

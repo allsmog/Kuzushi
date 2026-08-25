@@ -35,40 +35,53 @@ const OFFLINE_DEMO_ROW: AuthMethodRow = AuthMethodRow {
     hint: "run bundled offline fixture now; no key, model, or scanner binary",
 };
 
+const ANTHROPIC_AUTH_ROWS: [AuthMethodRow; 3] = [
+    AuthMethodRow {
+        kind: AuthMethodRowKind::ApiKey,
+        label: "API key (ANTHROPIC_API_KEY)",
+        hint: "paste key here, Enter accepts for this session",
+    },
+    AuthMethodRow {
+        kind: AuthMethodRowKind::OAuth,
+        label: "Claude.ai OAuth login",
+        hint: "opens a browser flow (or headless link in non-TTY)",
+    },
+    OFFLINE_DEMO_ROW,
+];
+
+const OPENAI_API_AUTH_ROWS: [AuthMethodRow; 3] = [
+    AuthMethodRow {
+        kind: AuthMethodRowKind::ApiKey,
+        label: "API key (OPENAI_API_KEY)",
+        hint: "paste key here, Enter accepts for this session",
+    },
+    AuthMethodRow {
+        kind: AuthMethodRowKind::OAuth,
+        label: "Use OpenAI OAuth (switch model)",
+        hint: "reuse or sign in; selects OpenAI OAuth GPT-5.4",
+    },
+    OFFLINE_DEMO_ROW,
+];
+
+const OPENAI_OAUTH_AUTH_ROWS: [AuthMethodRow; 2] = [
+    AuthMethodRow {
+        kind: AuthMethodRowKind::OAuth,
+        label: "OpenAI OAuth login",
+        hint: "opens a browser flow (or headless link in non-TTY)",
+    },
+    OFFLINE_DEMO_ROW,
+];
+
 /// Ordered credential-entry rows for a provider. Every credentialed provider
 /// offers the offline demo as a keyless escape hatch, so it is always the
-/// last row. Providers with no OAuth flow render `[ApiKey, OfflineDemo]`.
+/// last row. OpenAI API models keep their API-key requirement, but also expose
+/// an explicit switch to an OAuth-compatible model so a stored connection is
+/// reachable without pretending it authenticates the current API model.
 pub fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
     match provider {
-        "anthropic" => vec![
-            AuthMethodRow {
-                kind: AuthMethodRowKind::ApiKey,
-                label: "API key (ANTHROPIC_API_KEY)",
-                hint: "paste key here, Enter accepts for this session",
-            },
-            AuthMethodRow {
-                kind: AuthMethodRowKind::OAuth,
-                label: "Claude.ai OAuth login",
-                hint: "opens a browser flow (or headless link in non-TTY)",
-            },
-            OFFLINE_DEMO_ROW,
-        ],
-        "openai" => vec![
-            AuthMethodRow {
-                kind: AuthMethodRowKind::ApiKey,
-                label: "API key (OPENAI_API_KEY)",
-                hint: "paste key here, Enter accepts for this session",
-            },
-            OFFLINE_DEMO_ROW,
-        ],
-        "openai-codex" => vec![
-            AuthMethodRow {
-                kind: AuthMethodRowKind::OAuth,
-                label: "OpenAI OAuth login",
-                hint: "opens a browser flow (or headless link in non-TTY)",
-            },
-            OFFLINE_DEMO_ROW,
-        ],
+        "anthropic" => ANTHROPIC_AUTH_ROWS.to_vec(),
+        "openai" => OPENAI_API_AUTH_ROWS.to_vec(),
+        "openai-codex" => OPENAI_OAUTH_AUTH_ROWS.to_vec(),
         _ => match AuthProvider::from_scene_provider(provider) {
             Some(AuthProvider::GitHubCopilot) | None => Vec::new(),
             Some(AuthProvider::Anthropic | AuthProvider::OpenAi) => unreachable!(),
@@ -118,7 +131,11 @@ mod tests {
     fn openai_namespaces_offer_only_compatible_credentials() {
         assert_eq!(
             auth_method_row_kinds("openai"),
-            vec![AuthMethodRowKind::ApiKey, AuthMethodRowKind::OfflineDemo]
+            vec![
+                AuthMethodRowKind::ApiKey,
+                AuthMethodRowKind::OAuth,
+                AuthMethodRowKind::OfflineDemo,
+            ]
         );
         assert_eq!(
             auth_method_row_kinds("openai-codex"),
@@ -126,7 +143,7 @@ mod tests {
         );
         assert_eq!(
             credential_recovery_row_kinds("openai"),
-            vec![AuthMethodRowKind::ApiKey]
+            vec![AuthMethodRowKind::ApiKey, AuthMethodRowKind::OAuth]
         );
     }
 

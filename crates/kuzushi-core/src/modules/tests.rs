@@ -160,9 +160,7 @@ mod tests {
         );
         // No snapshot in a bare workspace: the attack-surface ranker is
         // honestly unavailable and no rows are fabricated.
-        assert!(result
-            .pointer("/data/contributors/attackSurface")
-            .is_some());
+        assert!(result.pointer("/data/contributors/attackSurface").is_some());
         assert!(result
             .pointer("/data/rows")
             .and_then(Value::as_array)
@@ -173,6 +171,52 @@ mod tests {
     struct MockRuntime {
         requests: Mutex<Vec<TriageRequest>>,
         queries: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    struct ContextEnrichmentRuntime {
+        queries: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    impl ContextEnrichmentRuntime {
+        fn new() -> Self {
+            Self {
+                queries: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn queries(&self) -> Vec<AgentQueryRequest> {
+            self.queries.lock().unwrap().clone()
+        }
+    }
+
+    impl AgentRuntime for ContextEnrichmentRuntime {
+        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+            self.queries.lock().unwrap().push(request);
+            Ok(AgentQueryResponse {
+                structured: Some(json!({
+                    "schemaVersion": 1,
+                    "customMiddleware": [{
+                        "name": "request guard",
+                        "purpose": "reject requests without an operator token",
+                        "appliesTo": ["HTTP routes"],
+                        "evidence": [{
+                            "filePath": "src/lib.rs",
+                            "line": 1,
+                            "detail": "the guard checks the operator token"
+                        }]
+                    }],
+                    "customSanitizers": [],
+                    "trustBoundaries": [],
+                    "dataClassifications": [],
+                    "architecturalNotes": []
+                })),
+                ..Default::default()
+            })
+        }
+
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            anyhow::bail!("context enrichment runtime only supports structured queries")
+        }
     }
 
     struct MutatingPatchRuntime {
@@ -986,9 +1030,7 @@ OUT
     }
 
     fn seed_completed_detector_run(target: &Path, run_id: &str, tool_name: &str) {
-        let record = crate::run_artifacts::ToolRunRecord::new(
-            target, run_id, "tool", tool_name,
-        );
+        let record = crate::run_artifacts::ToolRunRecord::new(target, run_id, "tool", tool_name);
         crate::run_artifacts::record_tool_run_started(
             record,
             &json!({"fixture": "detector input"}),
@@ -1819,6 +1861,45 @@ OUT
     }
 
     #[test]
+    fn context_build_descriptor_declares_primitive_enrichment_controls() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let context = registry.resolve_tool("context:build").unwrap();
+        let context_lite = registry.resolve_tool("context-lite:index").unwrap();
+
+        assert_eq!(context.runtime_requirement, RuntimeRequirement::InputAware);
+        assert_eq!(context_lite.runtime_requirement, RuntimeRequirement::Never);
+        assert_eq!(
+            context
+                .options
+                .iter()
+                .find(|option| option.name == "enrichment")
+                .map(|option| option.option_type),
+            Some(OptionType::Bool)
+        );
+        assert_eq!(
+            context
+                .options
+                .iter()
+                .find(|option| option.name == "scope")
+                .map(|option| option.choices.clone()),
+            Some(
+                ["all", "repo", "enrichment", "app-model"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect()
+            )
+        );
+        assert!(context
+            .options
+            .iter()
+            .all(|option| option.option_type != OptionType::Json));
+        assert!(context_lite
+            .options
+            .iter()
+            .all(|option| option.name != "enrichment"));
+    }
+
+    #[test]
     fn context_build_marks_file_index_truncation() {
         let temp = tempdir().unwrap();
         fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
@@ -2060,11 +2141,14 @@ OUT
     }
 
     #[test]
-    fn context_build_enrichment_request_fails_explicitly() {
+    fn context_build_enrichment_requires_an_agent_runtime() {
         let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/lib.rs"), "pub fn guard() {}\n").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config::default();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -2079,8 +2163,100 @@ OUT
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("does not support LLM enrichment yet"));
-        assert!(err.contains(r#""enrichment":false"#));
+        assert!(err.contains("requires an agent runtime"), "{err}");
+        assert!(err.contains("configure a model/runtime"), "{err}");
+    }
+
+    #[test]
+    fn context_build_persists_source_cited_enrichment() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/lib.rs"), "pub fn guard() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
+        let runtime = ContextEnrichmentRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let result = execute_authorized_tool_with_runtime(
+            &registry,
+            "context:build",
+            json!({"enrichment": true}),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/enrichedContext/customMiddleware/0/evidence/0/filePath")
+                .and_then(Value::as_str),
+            Some("src/lib.rs")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/provenance/enrichment/model")
+                .and_then(Value::as_str),
+            Some("openai:gpt-test")
+        );
+        assert!(result
+            .pointer("/data/snapshot/provenance/enrichment/treeHash")
+            .and_then(Value::as_str)
+            .is_some());
+        let queries = runtime.queries();
+        assert_eq!(queries.len(), 1);
+        assert_eq!(queries[0].model, "openai:gpt-test");
+        assert_eq!(queries[0].stage.as_deref(), Some("context-enrichment"));
+    }
+
+    #[test]
+    fn context_build_enrichment_scope_updates_a_current_snapshot() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/lib.rs"), "pub fn guard() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-test".to_string());
+        let runtime = ContextEnrichmentRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        registry
+            .execute_tool("context:build", json!({}), &ctx)
+            .unwrap();
+        let result = execute_authorized_tool_with_runtime(
+            &registry,
+            "context:build",
+            json!({"scope": "enrichment"}),
+            &ctx,
+            Some(&runtime),
+        )
+        .unwrap();
+
+        assert!(result
+            .pointer("/data/snapshot/repositoryInventory")
+            .is_some());
+        assert!(result.pointer("/data/snapshot/appModel").is_some());
+        assert_eq!(
+            result.pointer("/data/snapshot/generatedSlices"),
+            Some(&json!(["enrichment"]))
+        );
+        assert!(result.pointer("/data/snapshot/enrichedContext").is_some());
     }
 
     // ----- TriageOutcome cost field round-trips through persistence
@@ -2095,7 +2271,9 @@ OUT
         let finding = Finding::new_tool("test", "rule", "src/x.c", 1, None, Severity::High, "msg");
         let finding_id = store.insert_finding("run-cost-test", &finding).unwrap();
 
-        let outcome = TriageOutcome { first_link: None, refute_reason: None,
+        let outcome = TriageOutcome {
+            first_link: None,
+            refute_reason: None,
             verdict: TriageVerdict::TruePositive,
             confidence: 0.9,
             rationale: "test".to_string(),
@@ -3910,7 +4088,10 @@ OUT
             .provenance
             .as_ref()
             .expect("new SAST patches must retain detector provenance");
-        assert_eq!(provenance.detector_tool.as_deref(), Some("agentic-sast:scan"));
+        assert_eq!(
+            provenance.detector_tool.as_deref(),
+            Some("agentic-sast:scan")
+        );
         let detector_run_id = provenance
             .detector_run_id
             .as_deref()
@@ -3973,8 +4154,7 @@ OUT
             )
             .unwrap();
         let delegated_tools = sast_scan_delegated_tools(prepared.value());
-        let prepared =
-            prepared.authorize_explicit_headless_with_delegated_tools(&delegated_tools);
+        let prepared = prepared.authorize_explicit_headless_with_delegated_tools(&delegated_tools);
 
         let result = registry
             .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
@@ -5493,10 +5673,8 @@ OUT
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
         let runtime = MockRuntime::new();
-        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
-            workspace.root(),
-            "patch-direct-run",
-        );
+        let patch_trace =
+            crate::run_artifacts::TraceHandle::jsonl(workspace.root(), "patch-direct-run");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -5621,10 +5799,8 @@ OUT
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
         let runtime = MutatingPatchRuntime::new(temp.path().to_path_buf());
-        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
-            workspace.root(),
-            "patch-mutation-run",
-        );
+        let patch_trace =
+            crate::run_artifacts::TraceHandle::jsonl(workspace.root(), "patch-mutation-run");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -5693,10 +5869,8 @@ OUT
 
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
-        let patch_trace = crate::run_artifacts::TraceHandle::jsonl(
-            workspace.root(),
-            "patch-policy-run",
-        );
+        let patch_trace =
+            crate::run_artifacts::TraceHandle::jsonl(workspace.root(), "patch-policy-run");
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),

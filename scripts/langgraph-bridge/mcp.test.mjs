@@ -167,6 +167,48 @@ test("an explicitly disabled MCP request never creates a live client", async (t)
   await result.close();
 });
 
+test("MCP discovery failure closes the partial client and becomes permanently typed", async (t) => {
+  const root = temporaryDirectory(t);
+  let closeCalls = 0;
+  const createClient = () => ({
+    getTools: async () => {
+      throw new Error("spawn kuzushi-mcp-treesitter ENOENT");
+    },
+    close: async () => {
+      closeCalls += 1;
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      mcpToolsForRequest(
+        requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+        createClient,
+      ),
+    (error) =>
+      error.errorClass === "mcp_unavailable" &&
+      error.message.includes("cargo build --workspace") &&
+      !error.message.includes("ENOENT"),
+  );
+  assert.equal(closeCalls, 1);
+});
+
+test("MCP client construction failures are typed before provider work", async (t) => {
+  const root = temporaryDirectory(t);
+  const createClient = () => {
+    throw new Error("invalid MCP startup configuration");
+  };
+
+  await assert.rejects(
+    () =>
+      mcpToolsForRequest(
+        requestForRoot(root, { toolPolicy: { mcps: true, mcpReadRoots: [root] } }),
+        createClient,
+      ),
+    (error) => error.errorClass === "mcp_unavailable",
+  );
+});
+
 test("connection failures select bounded diagnostics and survive circular causes", () => {
   const message = mcpConnectionFailureMessage(
     { server: { name: "cpg" }, config: { command: "ignored-command" } },

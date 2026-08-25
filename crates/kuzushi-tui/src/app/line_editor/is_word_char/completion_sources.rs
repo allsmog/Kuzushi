@@ -29,7 +29,13 @@ impl ShellApp {
         self.resolve_options_tool(None)
             .ok()
             .and_then(|tool_name| self.registry().resolve_tool(&tool_name))
-            .map(|tool| tool.options.iter().map(|spec| spec.name.clone()).collect())
+            .map(|tool| {
+                tool.options
+                    .iter()
+                    .filter(|spec| crate::app::option_is_operator_editable(spec))
+                    .map(|spec| spec.name.clone())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

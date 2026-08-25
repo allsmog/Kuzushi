@@ -44,10 +44,11 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
         "context:build" | "context-lite:index" => {
-            Some(context::build_context_snapshot(input.clone(), ctx))
+            dispatch_context_snapshot_tool(name, input, ctx, runtime)
         }
         "config:show" => Some(Ok(config_show_json(ctx))),
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
@@ -74,6 +75,21 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => dispatch_finding_ledger_tool(name, input, ctx),
     }
+}
+
+fn dispatch_context_snapshot_tool(
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> ToolDispatchResult {
+    let enricher = context_enrichment_adapter::RuntimeContextEnrichment::new(runtime);
+    Some(context::build_context_snapshot(
+        name,
+        input.clone(),
+        ctx,
+        Some(&enricher),
+    ))
 }
 
 fn dispatch_fleet_tool(name: &str, input: &Value) -> ToolDispatchResult {

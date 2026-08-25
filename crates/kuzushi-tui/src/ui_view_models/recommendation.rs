@@ -13,7 +13,7 @@ const RECOMMENDATION_COLUMN_COUNT: usize = 5;
 const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
-    ["run <tool> [json]", "trace <run>", "runs", "back"];
+    ["run <tool> [key=value]", "trace <run>", "runs", "back"];
 const RECOMMENDATION_COMPONENT_COMMANDS: [&str; 4] =
     ["Enter component", "p promote", "run <tool>", "back"];
 const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
@@ -813,7 +813,7 @@ mod tests {
         );
         assert_eq!(
             model.report_commands,
-            ["run <tool> [json]", "trace <run>", "runs", "back"]
+            ["run <tool> [key=value]", "trace <run>", "runs", "back"]
         );
         assert_eq!(model.empty_state.title, "choose a target first");
         assert_eq!(

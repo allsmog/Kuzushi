@@ -1,5 +1,5 @@
 use super::{auth_env_summary, model_auth_status, oauth_summary};
-use crate::ShellApp;
+use crate::{app::format_option_value, ShellApp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigModel {
@@ -214,7 +214,7 @@ fn base_config_summary_rows(
         ),
         config_summary_row("reasoning", reasoning_detail(app, reasoning, sources)),
         config_summary_row("auth envs", auth_env_summary(app)),
-        config_summary_row("oauth", oauth_summary()),
+        config_summary_row("oauth", oauth_summary(app)),
         config_summary_row(
             "base url",
             value_with_source(
@@ -389,10 +389,7 @@ fn stored_option_detail(
 }
 
 fn option_value_summary(value: &serde_json::Value) -> String {
-    let rendered = match value {
-        serde_json::Value::String(value) => value.clone(),
-        other => other.to_string(),
-    };
+    let rendered = format_option_value(value);
     if rendered.chars().count() <= 120 {
         return rendered;
     }
@@ -522,7 +519,7 @@ fn onboarding_detail(app: &ShellApp) -> Option<String> {
 
 fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
     let configured = canonical_configured_model(app);
-    let visible_indexes = crate::app::visible_model_choice_indexes(app.config().model.as_deref());
+    let visible_indexes = crate::app::visible_model_choice_indexes(app.config());
     let configured_index = configured
         .as_deref()
         .and_then(crate::app::model_choice_index_by_id);
@@ -535,7 +532,7 @@ fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
                 choice.index.to_string(),
                 crate::app::model_choice_display_selector(choice),
                 choice.thinking_level.to_string(),
-                model_auth_status(choice),
+                model_auth_status(app, choice),
             ],
         })
     }));

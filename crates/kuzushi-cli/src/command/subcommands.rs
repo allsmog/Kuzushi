@@ -329,6 +329,8 @@ pub(crate) enum McpBackend {
     /// Read-only entry-points.json queries (list, filter by framework
     /// or method).
     EntryPoints,
+    /// Read-only queries over the current findings database.
+    Findings,
     /// Read-only threat-model.json queries (full doc, threats by
     /// severity, DFD elements).
     ThreatModel,
@@ -351,6 +353,7 @@ impl McpBackend {
             Self::Revng => "kuzushi-mcp-revng",
             Self::Context => "kuzushi-mcp-context",
             Self::EntryPoints => "kuzushi-mcp-entry-points",
+            Self::Findings => "kuzushi-mcp-findings",
             Self::ThreatModel => "kuzushi-mcp-threat-model",
             Self::ThreatIntel => "kuzushi-mcp-threat-intel",
             Self::XRay => "kuzushi-mcp-x-ray",

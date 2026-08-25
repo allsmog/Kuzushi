@@ -87,9 +87,9 @@ pub fn tool_needs_finding_store(tool_name: &str) -> bool {
 }
 
 pub fn tool_defaults_to_workspace(tool_name: &str) -> bool {
-    shared_tool_policies().get(tool_name).is_some_and(|policy| {
-        policy.workspace == crate::modules::WorkspaceRequirement::Required
-    })
+    shared_tool_policies()
+        .get(tool_name)
+        .is_some_and(|policy| policy.workspace == crate::modules::WorkspaceRequirement::Required)
 }
 
 /// Input-aware variant of `tool_uses_agent_runtime`. Adds the
@@ -97,7 +97,10 @@ pub fn tool_defaults_to_workspace(tool_name: &str) -> bool {
 /// a triage / verify / autoPatch pass or an agentic sub-task. The CLI
 /// uses this in `kuzushi run`, the TUI in its background-tool worker.
 pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
-    match shared_tool_policies().get(tool_name).map(|policy| policy.runtime) {
+    match shared_tool_policies()
+        .get(tool_name)
+        .map(|policy| policy.runtime)
+    {
         Some(crate::modules::RuntimeRequirement::Always) => true,
         Some(crate::modules::RuntimeRequirement::InputAware) => {
             input_aware_tool_needs_runtime(tool_name, input)
@@ -111,18 +114,13 @@ pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
 /// can optionally use a runtime when the operator has configured a model while
 /// still running deterministically without one.
 pub fn tool_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
-    tool_needs_runtime(tool_name, input)
-        || tool_optionally_wants_runtime(tool_name, input, config)
+    tool_needs_runtime(tool_name, input) || tool_optionally_wants_runtime(tool_name, input, config)
 }
 
 /// Model that this invocation will actually execute, for durable receipts.
 /// Runtime-free tools must not inherit the operator's configured model merely
 /// because one is available in the profile.
-pub fn tool_execution_model(
-    tool_name: &str,
-    input: &Value,
-    config: &V2Config,
-) -> Option<String> {
+pub fn tool_execution_model(tool_name: &str, input: &Value, config: &V2Config) -> Option<String> {
     if !tool_wants_runtime(tool_name, input, config) {
         return None;
     }
@@ -159,6 +157,7 @@ fn threat_model_build_needs_runtime(input: &Value) -> bool {
 
 fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
     match tool_name {
+        "context:build" => Some(context_build_needs_runtime(input)),
         "offense:chain" => Some(
             input
                 .get("goal")
@@ -171,6 +170,17 @@ fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<
         "sast:scan" => Some(wants_sast_runtime(input)),
         _ => None,
     }
+}
+
+fn context_build_needs_runtime(input: &Value) -> bool {
+    input
+        .get("enrichment")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || input
+            .get("scope")
+            .and_then(Value::as_str)
+            .is_some_and(|scope| scope == "enrichment")
 }
 
 fn patch_reverify_needs_runtime(input: &Value) -> bool {
@@ -209,9 +219,7 @@ pub fn agent_runtime_tool_names() -> &'static [&'static str] {
         .get_or_init(|| {
             shared_tool_policies()
                 .iter()
-                .filter(|(_, policy)| {
-                    policy.runtime != crate::modules::RuntimeRequirement::Never
-                })
+                .filter(|(_, policy)| policy.runtime != crate::modules::RuntimeRequirement::Never)
                 .map(|(name, _)| name.as_str())
                 .collect()
         })
@@ -311,6 +319,21 @@ mod tests {
     }
 
     #[test]
+    fn context_build_runtime_tracks_enrichment_inputs() {
+        assert!(tool_uses_agent_runtime("context:build"));
+        assert!(!tool_requires_agent_runtime("context:build"));
+        assert!(!tool_needs_runtime("context:build", &json!({})));
+        assert!(tool_needs_runtime(
+            "context:build",
+            &json!({"enrichment": true})
+        ));
+        assert!(tool_needs_runtime(
+            "context:build",
+            &json!({"scope": "enrichment"})
+        ));
+    }
+
+    #[test]
     fn tool_needs_runtime_covers_sast_scan_input_nuance() {
         assert!(tool_needs_runtime("sast:scan", &json!({"triage": true})));
         assert!(tool_needs_runtime("sast:scan", &json!({"verify": true})));
@@ -395,7 +418,11 @@ mod tests {
             &json!({"pipeline": "deterministic"}),
             &config
         ));
-        assert!(tool_wants_runtime("threat-model:build", &json!({}), &config));
+        assert!(tool_wants_runtime(
+            "threat-model:build",
+            &json!({}),
+            &config
+        ));
     }
 
     #[test]
@@ -468,10 +495,9 @@ mod tests {
     #[test]
     fn finding_store_tools_always_receive_workspace_resolution() {
         let registry = crate::modules::registry::ModuleRegistry::with_v2_builtins();
-        for tool in registry
-            .tools()
-            .filter(|tool| tool.finding_store_requirement == crate::modules::FindingStoreRequirement::Required)
-        {
+        for tool in registry.tools().filter(|tool| {
+            tool.finding_store_requirement == crate::modules::FindingStoreRequirement::Required
+        }) {
             assert!(tool_defaults_to_workspace(&tool.name), "{}", tool.name);
         }
     }

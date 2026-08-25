@@ -20,10 +20,14 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
             "guide Map → Scan, then hand off to Review or Report; `full .` explicitly selects cwd",
     },
     ShellCommandSpec {
-        command: "run <tool> [json]",
-        aliases: &["run .", "/run <tool> [json]", "run . [json]"],
+        command: "run <tool> [key=value ...]",
+        aliases: &[
+            "run .",
+            "/run <tool> [key=value ...]",
+            "run . [key=value ...]",
+        ],
         category: ShellCommandCategory::RunScan,
-        description: "dispatch a tool; run . is shell-only focused-module shorthand",
+        description: "run a tool with key=value options; run . uses the focused module",
     },
     ShellCommandSpec {
         command: "recon:import <amass|httpx|nuclei|nmap-xml|burp-xml|har> <path>",

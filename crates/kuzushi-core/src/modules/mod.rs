@@ -59,6 +59,7 @@ mod builtins;
 mod catalog_query;
 mod chrome_rce;
 pub(crate) mod context;
+mod context_enrichment_adapter;
 mod contracts;
 mod descriptor;
 pub mod display_name;

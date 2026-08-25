@@ -22,19 +22,72 @@ pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<se
 
 fn raw_value_for_core_coercion(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
     if spec.option_type == OptionType::Json {
-        return serde_json::from_str(raw).with_context(|| "must be valid JSON");
+        anyhow::bail!(
+            "this setting comes from its workflow and cannot be edited here; use the owning workflow or a file option"
+        );
     }
     Ok(serde_json::Value::String(raw.to_string()))
+}
+
+pub(crate) fn option_is_operator_editable(spec: &OptionSpec) -> bool {
+    spec.option_type != OptionType::Json
+}
+
+pub(crate) fn option_input_kind(spec: &OptionSpec) -> &'static str {
+    match spec.option_type {
+        OptionType::String => "text",
+        OptionType::Bool => "yes / no",
+        OptionType::Int => "whole number",
+        OptionType::Float => "number",
+        OptionType::Path => "path",
+        OptionType::Enum => "choice",
+        OptionType::StringList => "comma-separated list",
+        OptionType::Json => "workflow supplied",
+    }
+}
+
+pub(crate) fn option_edit_hint(spec: &OptionSpec) -> String {
+    match spec.option_type {
+        OptionType::Bool => "Space switches between yes and no".to_string(),
+        OptionType::Enum => format!("Space cycles {}", spec.choices.join(" / ")),
+        OptionType::Int => bounded_number_hint(spec, "whole number"),
+        OptionType::Float => "Enter edits this number".to_string(),
+        OptionType::String => "Enter edits this text".to_string(),
+        OptionType::Path => "Enter edits this path".to_string(),
+        OptionType::StringList => "Enter edits comma-separated values".to_string(),
+        OptionType::Json => "This value is supplied by its workflow".to_string(),
+    }
+}
+
+fn bounded_number_hint(spec: &OptionSpec, kind: &str) -> String {
+    match (spec.minimum, spec.maximum) {
+        (Some(min), Some(max)) => format!("Enter edits this {kind} · {min} to {max}"),
+        (Some(min), None) => format!("Enter edits this {kind} · minimum {min}"),
+        (None, Some(max)) => format!("Enter edits this {kind} · maximum {max}"),
+        (None, None) => format!("Enter edits this {kind}"),
+    }
 }
 
 pub(crate) fn format_option_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::String(value) => value.clone(),
         serde_json::Value::Number(number) => number.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        other => serde_json::to_string(other).unwrap_or_else(|_| "<json>".to_string()),
+        serde_json::Value::Bool(true) => "yes".to_string(),
+        serde_json::Value::Bool(false) => "no".to_string(),
+        serde_json::Value::Null => "not set".to_string(),
+        serde_json::Value::Array(items) if items.iter().all(serde_json::Value::is_string) => items
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect::<Vec<_>>()
+            .join(", "),
+        serde_json::Value::Array(items) => counted_label(items.len(), "workflow value"),
+        serde_json::Value::Object(fields) => counted_label(fields.len(), "workflow field"),
     }
+}
+
+fn counted_label(count: usize, noun: &str) -> String {
+    let suffix = if count == 1 { "" } else { "s" };
+    format!("{count} {noun}{suffix}")
 }
 
 pub(crate) fn unknown_option_message(tool: &ToolDescriptor, name: &str) -> String {

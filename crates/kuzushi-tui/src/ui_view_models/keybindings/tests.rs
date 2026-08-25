@@ -46,12 +46,7 @@ fn allowlistable_approval_footer_keeps_remembered_allow() {
 
 #[test]
 fn unmapped_leaf_views_advertise_only_reachable_mode_actions() {
-    for view in [
-        ShellView::Auth,
-        ShellView::Cost,
-        ShellView::Patch,
-        ShellView::FailureHandoff,
-    ] {
+    for view in [ShellView::Cost, ShellView::Patch, ShellView::FailureHandoff] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.set_shell_view(view);
         let prompt = footer_keybindings(&app);
@@ -75,6 +70,18 @@ fn unmapped_leaf_views_advertise_only_reachable_mode_actions() {
             "{view:?}: {navigate:?}"
         );
     }
+}
+
+#[test]
+fn auth_view_advertises_a_reachable_back_action() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Auth);
+
+    assert!(footer_keybindings(&app).contains(&bind("Esc", "nav mode")));
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let navigate = footer_keybindings(&app);
+    assert!(navigate.contains(&bind("q", "back")));
 }
 
 #[test]

@@ -65,31 +65,49 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
     MODEL_CHOICES
 }
 
-pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
+/// The explicit model change offered when a credential screen belongs to a
+/// provider namespace whose OAuth transport uses a different model namespace.
+/// Merely opening the picker never applies this selection.
+pub(crate) fn oauth_model_switch_for_provider(provider: &str) -> Option<AuthModelSwitch> {
+    let oauth_provider = AuthProvider::from_scene_provider(provider)?.oauth_model_provider();
+    if oauth_provider == provider {
+        return None;
+    }
+    MODEL_CHOICES
+        .iter()
+        .find(|choice| choice.provider == oauth_provider)
+        .map(|choice| AuthModelSwitch {
+            model: choice.id.to_string(),
+            thinking_level: choice.thinking_level.to_string(),
+        })
+}
+
+pub(crate) fn visible_model_choice_indexes(config: &V2Config) -> Vec<usize> {
+    let configured = config.model.as_deref();
     let canonical =
-        configured_model.and_then(|model| kuzushi_core::runtime::canonical_model_spec(model).ok());
-    let configured_model = canonical.as_deref().or(configured_model);
+        configured.and_then(|model| kuzushi_core::runtime::canonical_model_spec(model).ok());
+    let configured_model = canonical.as_deref().or(configured);
     let preferred = configured_model
         .and_then(model_choice_index_by_id)
-        .unwrap_or_else(|| visible_primary_openai_choice(configured_model));
+        .unwrap_or_else(|| visible_primary_openai_choice(config, configured_model));
     std::iter::once(preferred)
         .chain((0..MODEL_CHOICES.len()).filter(|index| *index != preferred))
         .collect()
 }
 
-pub(crate) fn visible_model_choices(configured_model: Option<&str>) -> Vec<&'static ModelChoice> {
-    visible_model_choice_indexes(configured_model)
+pub(crate) fn visible_model_choices(config: &V2Config) -> Vec<&'static ModelChoice> {
+    visible_model_choice_indexes(config)
         .into_iter()
         .filter_map(|index| MODEL_CHOICES.get(index))
         .collect()
 }
 
-fn visible_primary_openai_choice(configured_model: Option<&str>) -> usize {
+fn visible_primary_openai_choice(config: &V2Config, configured_model: Option<&str>) -> usize {
     match configured_model {
         Some("openai-codex:gpt-5.3-codex-spark") => 3,
         Some("openai-codex:gpt-5.4") => 2,
         Some("openai:gpt-5.5") => 0,
-        _ if auth_ready_for_provider("openai-codex") => 2,
+        _ if auth_ready_for_provider(config, "openai-codex") => 2,
         _ => 0,
     }
 }
@@ -112,9 +130,9 @@ pub(crate) fn model_choice_display_selector(choice: &ModelChoice) -> String {
 pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
     preferred_model_choice_index_for_state(
         config.model.as_deref(),
-        auth_ready_for_provider("openai-codex"),
-        auth_ready_for_provider("openai"),
-        auth_ready_for_provider("anthropic"),
+        auth_ready_for_provider(config, "openai-codex"),
+        auth_ready_for_provider(config, "openai"),
+        auth_ready_for_provider(config, "anthropic"),
     )
 }
 
@@ -125,7 +143,7 @@ pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
 /// selects another.
 pub(crate) fn preferred_visible_model_choice_cursor(config: &V2Config) -> usize {
     let preferred = preferred_model_choice_index(config);
-    visible_model_choice_indexes(config.model.as_deref())
+    visible_model_choice_indexes(config)
         .iter()
         .position(|index| *index == preferred)
         .unwrap_or(0)

@@ -30,7 +30,8 @@ fn auth_env_summary_names_keys_without_secret_values() {
 
 #[test]
 fn oauth_summary_reports_both_provider_slots() {
-    let summary = oauth_summary();
+    let app = ShellApp::new(V2Config::default(), None);
+    let summary = oauth_summary(&app);
 
     assert!(summary.contains("openai"));
     assert!(summary.contains("anthropic"));
@@ -50,17 +51,34 @@ fn model_auth_status_reports_choice_auth_for_unknown_provider() {
         auth: "manual",
     };
 
-    assert_eq!(model_auth_status(&choice), "manual");
+    let app = ShellApp::new(V2Config::default(), None);
+    assert_eq!(model_auth_status(&app, &choice), "manual");
 }
 
 #[test]
 fn model_oauth_status_preserves_expired_and_invalid_states() {
-    assert_eq!(oauth_model_status("stored in keychain"), "OAuth ready");
-    assert_eq!(oauth_model_status("expired 2h ago"), "OAuth expired");
-    assert_eq!(oauth_model_status("unreadable"), "OAuth invalid");
-    assert_eq!(oauth_model_status("missing"), "OAuth missing");
     assert_eq!(
-        anthropic_model_auth_status(false, "expired yesterday"),
-        "OAuth expired"
+        oauth_model_status(OauthCredentialStatus::Ready),
+        "OAuth ready"
+    );
+    assert_eq!(
+        oauth_model_status(OauthCredentialStatus::Refreshable),
+        "OAuth ready (refreshes on use)"
+    );
+    assert_eq!(
+        oauth_model_status(OauthCredentialStatus::Environment),
+        "OAuth ready (environment token)"
+    );
+    assert_eq!(
+        oauth_model_status(OauthCredentialStatus::Invalid),
+        "OAuth invalid"
+    );
+    assert_eq!(
+        oauth_model_status(OauthCredentialStatus::Missing),
+        "OAuth missing"
+    );
+    assert_eq!(
+        anthropic_model_auth_status(false, OauthCredentialStatus::Refreshable),
+        "OAuth ready (refreshes on use)"
     );
 }

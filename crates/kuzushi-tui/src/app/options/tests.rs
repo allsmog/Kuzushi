@@ -56,10 +56,10 @@ mod tests {
             json!("manual")
         );
         assert!(coerce_raw_option_value(&enum_spec, "other").is_err());
-        assert_eq!(
-            coerce_raw_option_value(&option_spec(OptionType::Json), r#"{"enabled":true}"#).unwrap(),
-            json!({"enabled": true})
-        );
+        let structured =
+            coerce_raw_option_value(&option_spec(OptionType::Json), r#"{"enabled":true}"#)
+                .unwrap_err();
+        assert!(structured.to_string().contains("cannot be edited here"));
     }
 
     #[test]
@@ -67,5 +67,16 @@ mod tests {
         assert!(coerce_raw_option_value(&option_spec(OptionType::Bool), "maybe").is_err());
         assert!(coerce_raw_option_value(&option_spec(OptionType::Int), "many").is_err());
         assert!(coerce_raw_option_value(&option_spec(OptionType::Float), "NaN").is_err());
+    }
+
+    #[test]
+    fn option_values_render_without_serialized_json() {
+        assert_eq!(format_option_value(&json!(true)), "yes");
+        assert_eq!(format_option_value(&json!(["src", "tests"])), "src, tests");
+        assert_eq!(format_option_value(&json!([1, 2])), "2 workflow values");
+        assert_eq!(
+            format_option_value(&json!({"token": "hidden"})),
+            "1 workflow field"
+        );
     }
 }

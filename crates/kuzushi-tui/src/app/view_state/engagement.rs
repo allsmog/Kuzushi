@@ -15,11 +15,26 @@ pub enum PendingCredentialWork {
     DeferredStep(PlanningRunStep),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingCredentialModelBinding {
+    Config,
+    DeferredStepInput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingCredentialRequirement {
+    AnyCompatible,
+    ReplaceApiKey,
+    ReconnectOauth,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PendingCredentialContinuation {
     pub(crate) target: PathBuf,
     pub(crate) phase: WorkflowPhase,
     pub(crate) model: String,
+    pub(crate) model_binding: PendingCredentialModelBinding,
+    pub(crate) credential_requirement: PendingCredentialRequirement,
     pub(crate) work: PendingCredentialWork,
 }
 
@@ -146,6 +161,14 @@ impl EngagementState {
         phase: WorkflowPhase,
     ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
         let snapshot = self.phase_target_snapshot.as_ref()?;
+        self.stale_selected_phase_attempt_for_snapshot(phase, snapshot)
+    }
+
+    pub(crate) fn stale_selected_phase_attempt_for_snapshot(
+        &self,
+        phase: WorkflowPhase,
+        snapshot: &kuzushi_core::workflow_attempts::PhaseTargetSnapshot,
+    ) -> Option<&kuzushi_core::workflow_attempts::PhaseAttemptRecord> {
         if self
             .phase_attempt_ledger
             .selected_for(phase, snapshot)
@@ -274,6 +297,10 @@ impl EngagementState {
 
     pub(crate) fn pending_phase_rerun(&self) -> Option<&crate::app::PhaseRerunReview> {
         self.pending_phase_rerun.as_ref()
+    }
+
+    pub(crate) fn pending_phase_rerun_mut(&mut self) -> Option<&mut crate::app::PhaseRerunReview> {
+        self.pending_phase_rerun.as_mut()
     }
 
     pub(crate) fn set_pending_phase_rerun(&mut self, review: crate::app::PhaseRerunReview) {
@@ -424,6 +451,38 @@ impl EngagementState {
 
     pub(crate) fn pending_credential_continuation(&self) -> Option<&PendingCredentialContinuation> {
         self.pending_credential_continuation.as_ref()
+    }
+
+    /// Retarget only the credential-blocked work after the operator explicitly
+    /// chooses a labeled auth/model switch. Ordinary model changes do not call
+    /// this, so the continuation's context-mismatch guard remains fail-closed.
+    pub(crate) fn retarget_pending_credential_model(&mut self, model: &str) -> bool {
+        let Some(pending) = self.pending_credential_continuation.as_mut() else {
+            return false;
+        };
+        match (&pending.model_binding, &mut pending.work) {
+            (PendingCredentialModelBinding::Config, _) => {
+                pending.model = model.to_string();
+                true
+            }
+            (
+                PendingCredentialModelBinding::DeferredStepInput,
+                PendingCredentialWork::DeferredStep(step),
+            ) if step.input.get("model").and_then(Value::as_str)
+                == Some(pending.model.as_str()) =>
+            {
+                step.input["model"] = Value::String(model.to_string());
+                pending.model = model.to_string();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn satisfy_pending_credential_requirement(&mut self) {
+        if let Some(pending) = self.pending_credential_continuation.as_mut() {
+            pending.credential_requirement = PendingCredentialRequirement::AnyCompatible;
+        }
     }
 
     pub(crate) fn take_pending_credential_continuation(

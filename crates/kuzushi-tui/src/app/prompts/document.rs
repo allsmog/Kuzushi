@@ -80,6 +80,7 @@ impl ShellApp {
         picker
             .current_row()
             .filter(|row| picker.selected().contains(&row.id))
+            .filter(|row| self.planning_task_model_backed(row.id))
             .map(|row| self.prompt_specs_for_tool(row.tool_name))
             .filter(|prompts| !prompts.is_empty())
     }

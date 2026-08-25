@@ -1,37 +1,265 @@
 use super::*;
 
 pub(in crate::modules) fn build_context_snapshot(
+    tool_name: &str,
     input: Value,
     ctx: &ToolExecutionContext<'_>,
+    enricher: Option<&dyn ContextEnrichmentProvider>,
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
         .context(crate::workspace::active_workspace_required_message(
-            "context:build",
+            tool_name,
         ))?;
-    let options = context_build_options(&input)?;
+    let options = context_build_options(tool_name, &input)?;
     emit_context_build_start(ctx, workspace.root());
     let starting = trace_snapshot_provenance(workspace, ctx, ContextBuildStage::ScanFiles)?;
-    let (file_sample, mut snapshot) = assemble_context_snapshot(workspace.root(), &options, ctx)?;
+    let mut artifact = build_context_artifact(workspace.root(), &options, ctx)?;
+    let (snapshot_path, provenance, cost) = finalize_context_artifact(
+        &mut artifact,
+        &input,
+        &options,
+        &starting,
+        workspace,
+        ctx,
+        enricher,
+    )?;
+    Ok(context_artifact_response(
+        workspace,
+        snapshot_path,
+        provenance,
+        cost,
+        artifact,
+        ctx,
+    ))
+}
+
+fn finalize_context_artifact(
+    artifact: &mut ContextBuildArtifact,
+    input: &Value,
+    options: &ContextBuildOptions,
+    starting: &SnapshotProvenance,
+    workspace: &crate::workspace::WorkspaceTarget,
+    ctx: &ToolExecutionContext<'_>,
+    enricher: Option<&dyn ContextEnrichmentProvider>,
+) -> Result<(
+    PathBuf,
+    SnapshotProvenance,
+    Option<crate::runtime::RuntimeCostReport>,
+)> {
+    emit_context_build_stage(
+        ctx,
+        ContextBuildStage::FinalizeSlices,
+        Some(if options.enrichment_requested() {
+            "running model enrichment".to_string()
+        } else {
+            "deterministic slices only".to_string()
+        }),
+    );
+    let cost = apply_requested_enrichment(
+        &mut artifact.snapshot,
+        &input,
+        &options,
+        workspace.root(),
+        ctx,
+        enricher,
+    )?;
     let provenance =
         trace_snapshot_provenance(workspace, ctx, ContextBuildStage::RegisterTreeIdentity)?;
     require_unchanged_context_tree(&starting.tree_hash, &provenance.tree_hash)?;
-    stamp_context_tree_hash(&mut snapshot, &provenance.tree_hash)?;
+    stamp_context_tree_hash(&mut artifact.snapshot, &provenance.tree_hash)?;
     emit_context_build_stage(ctx, ContextBuildStage::WriteSnapshot, None);
-    let snapshot_path = save_context_snapshot(workspace.root(), &mut snapshot)?;
-    let partial = context_partial(&file_sample, &snapshot);
-    emit_context_build_done(ctx, file_sample.files_indexed, partial);
-    let state_dir = workspace.state_dir();
+    let snapshot_path = save_context_snapshot(workspace.root(), &mut artifact.snapshot)?;
+    Ok((snapshot_path, provenance, cost))
+}
 
-    Ok(context_build_response(
+fn context_artifact_response(
+    workspace: &crate::workspace::WorkspaceTarget,
+    snapshot_path: PathBuf,
+    provenance: SnapshotProvenance,
+    cost: Option<crate::runtime::RuntimeCostReport>,
+    mut artifact: ContextBuildArtifact,
+    ctx: &ToolExecutionContext<'_>,
+) -> Value {
+    artifact.partial = context_partial_from_snapshot(artifact.partial, &artifact.snapshot);
+    emit_context_build_done(ctx, artifact.files_indexed, artifact.partial);
+    let mut response = context_build_response(
         workspace.root(),
-        &state_dir,
+        &workspace.state_dir(),
         &snapshot_path,
-        snapshot,
-        file_sample.files_indexed,
-        partial,
+        artifact.snapshot,
+        artifact.files_indexed,
+        artifact.partial,
         Some(provenance),
-    ))
+    );
+    if let Some(cost) = cost {
+        crate::module_result::apply_runtime_cost_report(&mut response, cost);
+    }
+    response
+}
+
+struct ContextBuildArtifact {
+    snapshot: Value,
+    files_indexed: usize,
+    partial: bool,
+}
+
+fn build_context_artifact(
+    root: &Path,
+    options: &ContextBuildOptions,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<ContextBuildArtifact> {
+    match options.scope.as_str() {
+        "enrichment" | "app-model" => update_existing_context_artifact(root, options),
+        _ => rebuild_context_artifact(root, options, ctx),
+    }
+}
+
+fn rebuild_context_artifact(
+    root: &Path,
+    options: &ContextBuildOptions,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<ContextBuildArtifact> {
+    let (file_sample, mut snapshot) = assemble_context_snapshot(root, options, ctx)?;
+    if options.scope == "repo" {
+        remove_snapshot_slice(&mut snapshot, "appModel");
+        remove_snapshot_enrichment(&mut snapshot);
+    }
+    apply_scope_metadata(&mut snapshot, options)?;
+    Ok(ContextBuildArtifact {
+        partial: context_partial(&file_sample, &snapshot),
+        files_indexed: file_sample.files_indexed,
+        snapshot,
+    })
+}
+
+fn update_existing_context_artifact(
+    root: &Path,
+    options: &ContextBuildOptions,
+) -> Result<ContextBuildArtifact> {
+    let mut snapshot = read_current_context_snapshot(root, &options.scope)?;
+    if options.scope == "app-model" {
+        let map: crate::attack_surface::AttackSurfaceMap = serde_json::from_value(
+            snapshot
+                .get("attackSurfaceMap")
+                .cloned()
+                .context("context snapshot has no attack-surface map")?,
+        )
+        .context("context snapshot attack-surface map is malformed")?;
+        snapshot["appModel"] = app_model(&map);
+    }
+    snapshot["timestamp"] = json!(now_ms()?);
+    apply_scope_metadata(&mut snapshot, options)?;
+    let files_indexed = snapshot
+        .get("filesIndexed")
+        .or_else(|| snapshot.pointer("/fileIndex/totalFiles"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    Ok(ContextBuildArtifact {
+        partial: context_partial_from_snapshot(false, &snapshot),
+        files_indexed,
+        snapshot,
+    })
+}
+
+fn read_current_context_snapshot(root: &Path, scope: &str) -> Result<Value> {
+    let path = crate::context::context_snapshot_path(root);
+    let body = crate::bounded_file::read_utf8_text_within(
+        root,
+        &path,
+        crate::context::MAX_CONTEXT_SNAPSHOT_BYTES,
+    )
+    .with_context(|| {
+        format!(
+            "context:build scope={scope} requires a current deterministic snapshot; run scope=all first"
+        )
+    })?;
+    let snapshot: Value = serde_json::from_str(&body)
+        .context("current context snapshot is not valid JSON; run scope=all")?;
+    match crate::context::context_snapshot_freshness(root, &snapshot) {
+        crate::context::ContextSnapshotFreshness::Current => Ok(snapshot),
+        freshness => anyhow::bail!(
+            "context:build scope={scope} requires a current deterministic snapshot: {}; run scope=all",
+            freshness.disclosure().unwrap_or("freshness unverified")
+        ),
+    }
+}
+
+fn apply_requested_enrichment(
+    snapshot: &mut Value,
+    input: &Value,
+    options: &ContextBuildOptions,
+    root: &Path,
+    ctx: &ToolExecutionContext<'_>,
+    enricher: Option<&dyn ContextEnrichmentProvider>,
+) -> Result<Option<crate::runtime::RuntimeCostReport>> {
+    if !options.enrichment_requested() {
+        if options.scope == "all" {
+            remove_snapshot_enrichment(snapshot);
+        }
+        return Ok(None);
+    }
+    let outcome = enricher
+        .context("context:build enrichment provider is unavailable")?
+        .enrich(snapshot, input, root, ctx)?;
+    snapshot["enrichedContext"] = serde_json::to_value(&outcome.value)?;
+    stamp_enrichment_provenance(snapshot, &outcome)?;
+    snapshot["options"]["enrichment"] = json!(true);
+    Ok(Some(outcome.cost))
+}
+
+fn stamp_enrichment_provenance(snapshot: &mut Value, outcome: &EnrichmentOutcome) -> Result<()> {
+    let provenance = snapshot
+        .get_mut("provenance")
+        .and_then(Value::as_object_mut)
+        .context("context snapshot provenance is not an object")?;
+    provenance.insert(
+        "enrichment".to_string(),
+        json!({
+            "schemaVersion": 1,
+            "model": outcome.model,
+            "promptSha256": outcome.prompt_sha256,
+            "generatedAt": now_ms()?,
+        }),
+    );
+    Ok(())
+}
+
+fn remove_snapshot_slice(snapshot: &mut Value, key: &str) {
+    if let Some(object) = snapshot.as_object_mut() {
+        object.remove(key);
+    }
+}
+
+fn remove_snapshot_enrichment(snapshot: &mut Value) {
+    remove_snapshot_slice(snapshot, "enrichedContext");
+    if let Some(provenance) = snapshot
+        .get_mut("provenance")
+        .and_then(Value::as_object_mut)
+    {
+        provenance.remove("enrichment");
+    }
+}
+
+fn apply_scope_metadata(snapshot: &mut Value, options: &ContextBuildOptions) -> Result<()> {
+    let object = snapshot
+        .as_object_mut()
+        .context("context snapshot is not an object")?;
+    object.insert(
+        "generatedSlices".to_string(),
+        json!(generated_context_slices(
+            &options.scope,
+            options.enrichment_requested()
+        )),
+    );
+    object.insert(
+        "staleSlices".to_string(),
+        json!(stale_context_slices(&options.scope)),
+    );
+    object
+        .entry("options".to_string())
+        .or_insert_with(|| json!({}))["enrichment"] = json!(options.enrichment_requested());
+    Ok(())
 }
 
 fn assemble_context_snapshot(
@@ -74,11 +302,7 @@ fn trace_snapshot_provenance(
     let mut heartbeat = crate::progress::HeartbeatGate::new(INVENTORY_HEARTBEAT);
     let mut on_files_hashed = |files: usize| {
         if heartbeat.ready() {
-            emit_context_build_stage(
-                ctx,
-                stage,
-                Some(format!("{files} files hashed")),
-            );
+            emit_context_build_stage(ctx, stage, Some(format!("{files} files hashed")));
         }
     };
     index_snapshot_provenance(workspace, &mut on_files_hashed).map_err(|error| {
@@ -127,6 +351,12 @@ fn stamp_context_tree_hash(snapshot: &mut Value, tree_hash: &str) -> Result<()> 
         .and_then(Value::as_object_mut)
         .context("context snapshot provenance is not an object")?;
     provenance.insert("treeHash".to_string(), json!(tree_hash));
+    if let Some(enrichment) = provenance
+        .get_mut("enrichment")
+        .and_then(Value::as_object_mut)
+    {
+        enrichment.insert("treeHash".to_string(), json!(tree_hash));
+    }
     Ok(())
 }
 
@@ -141,16 +371,17 @@ fn require_unchanged_context_tree(starting: &str, ending: &str) -> Result<()> {
 /// True when any walk budget stopped short: the snapshot is usable but must
 /// be presented as partial coverage, never as a complete map.
 fn context_partial(file_sample: &ContextFileSample, snapshot: &Value) -> bool {
-    file_sample.walk_truncated
+    context_partial_from_snapshot(file_sample.walk_truncated, snapshot)
+}
+
+fn context_partial_from_snapshot(walk_truncated: bool, snapshot: &Value) -> bool {
+    walk_truncated
         || snapshot
             .pointer("/repositoryInventory/truncation")
             .is_some_and(|value| !value.is_null())
 }
 
-pub(crate) fn build_context_snapshot_for_root(
-    root: &Path,
-    sample_limit: usize,
-) -> Result<()> {
+pub(crate) fn build_context_snapshot_for_root(root: &Path, sample_limit: usize) -> Result<()> {
     let options = ContextBuildOptions {
         sample_limit: sample_limit.min(2_000),
         discovery: "auto".to_string(),
@@ -183,21 +414,28 @@ struct ContextBuildOptions {
     scope: String,
 }
 
+impl ContextBuildOptions {
+    fn enrichment_requested(&self) -> bool {
+        self.enrichment || self.scope == "enrichment"
+    }
+}
+
 struct ContextFileSample {
     files_indexed: usize,
     files_sample: Vec<String>,
     walk_truncated: bool,
 }
 
-fn context_build_options(input: &Value) -> Result<ContextBuildOptions> {
+fn context_build_options(tool_name: &str, input: &Value) -> Result<ContextBuildOptions> {
     let enrichment = read_enrichment(input);
-    reject_enrichment(enrichment)?;
-    Ok(ContextBuildOptions {
+    let options = ContextBuildOptions {
         sample_limit: read_sample_limit(input),
         discovery: read_discovery(input),
         enrichment,
         scope: read_scope(input),
-    })
+    };
+    validate_context_build_options(tool_name, &options)?;
+    Ok(options)
 }
 
 fn read_sample_limit(input: &Value) -> usize {
@@ -234,10 +472,14 @@ fn read_scope(input: &Value) -> String {
         .to_string()
 }
 
-fn reject_enrichment(enrichment: bool) -> Result<()> {
-    if enrichment {
+fn validate_context_build_options(tool_name: &str, options: &ContextBuildOptions) -> Result<()> {
+    if tool_name == "context-lite:index" && options.enrichment_requested() {
+        anyhow::bail!("context-lite:index is deterministic; use context:build for enrichment");
+    }
+    if options.enrichment && matches!(options.scope.as_str(), "repo" | "app-model") {
         anyhow::bail!(
-            "context:build Rust native executor does not support LLM enrichment yet; run with {{\"enrichment\":false}} or use a LangGraph-backed context adapter once configured"
+            "Enrichment cannot be combined with scope={}; choose scope=all or scope=enrichment, or set Enrichment to no",
+            options.scope
         );
     }
     Ok(())
@@ -407,11 +649,12 @@ enum ContextBuildStage {
     InferRepository,
     BuildInventory,
     MapAttackSurface,
+    FinalizeSlices,
     WriteSnapshot,
     RegisterTreeIdentity,
 }
 
-const CONTEXT_BUILD_STAGE_COUNT: usize = 6;
+const CONTEXT_BUILD_STAGE_COUNT: usize = 7;
 
 impl ContextBuildStage {
     fn position(self) -> usize {
@@ -420,8 +663,9 @@ impl ContextBuildStage {
             Self::InferRepository => 2,
             Self::BuildInventory => 3,
             Self::MapAttackSurface => 4,
-            Self::RegisterTreeIdentity => 5,
-            Self::WriteSnapshot => 6,
+            Self::FinalizeSlices => 5,
+            Self::RegisterTreeIdentity => 6,
+            Self::WriteSnapshot => 7,
         }
     }
 
@@ -431,6 +675,7 @@ impl ContextBuildStage {
             Self::InferRepository => "inferring repository context",
             Self::BuildInventory => "building repository inventory",
             Self::MapAttackSurface => "mapping attack surface",
+            Self::FinalizeSlices => "finalizing context slices",
             Self::WriteSnapshot => "writing context snapshot",
             Self::RegisterTreeIdentity => "registering tree identity",
         }
@@ -539,13 +784,21 @@ fn context_build_response(
     partial: bool,
     provenance: Option<SnapshotProvenance>,
 ) -> Value {
-    let output = context_build_output(root, snapshot_path, files_indexed, partial);
+    let enrichment_claims = context_enrichment_claim_count(&snapshot);
+    let mut output = context_build_output(root, snapshot_path, files_indexed, partial);
+    if enrichment_claims > 0 {
+        output.push_str(&format!(
+            "\n  Enrichment: {enrichment_claims} source-cited security context claim{}",
+            plural_suffix(enrichment_claims)
+        ));
+    }
     let mut data = json!({
         "root": root.display().to_string(),
         "stateDir": state_dir.display().to_string(),
         "snapshotPath": snapshot_path.display().to_string(),
         "snapshot": result_snapshot_view(snapshot),
         "partialCoverage": partial,
+        "enrichmentClaimCount": enrichment_claims,
     });
     // The identity verifier rejects a null hash claim, so the keys exist
     // only when the indexed snapshot was actually registered.
@@ -558,6 +811,25 @@ fn context_build_response(
     // multi-line detail belongs to `output` only.
     let summary = output.lines().next().unwrap_or_default().to_string();
     crate::module_result::completed_output_result(summary, output, data)
+}
+
+fn context_enrichment_claim_count(snapshot: &Value) -> usize {
+    [
+        "customMiddleware",
+        "customSanitizers",
+        "trustBoundaries",
+        "dataClassifications",
+        "architecturalNotes",
+    ]
+    .iter()
+    .map(|key| {
+        snapshot
+            .pointer(&format!("/enrichedContext/{key}"))
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0)
+    })
+    .sum()
 }
 
 const RESULT_EMBED_LIST_CAP: usize = 500;

@@ -1,4 +1,4 @@
-use crate::{app::DirectoryListingState, ShellApp, ViewDataState};
+use crate::{app::format_option_value, app::DirectoryListingState, ShellApp, ViewDataState};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,7 +214,7 @@ fn module_stored_options(app: &ShellApp, tools: &[ModuleToolRow]) -> Vec<(String
         let tool_name = &tool.cells[0];
         let stored = app.option_store().effective_stored_values(tool_name);
         for (name, value) in stored.iter() {
-            out.push((format!("{tool_name}::{name}"), format_json_value(value)));
+            out.push((format!("{tool_name}::{name}"), format_option_value(value)));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -230,16 +230,6 @@ fn module_log_count(app: &ShellApp, module_id: &str) -> usize {
 
 fn is_module_log_line(line: &crate::app::LogLine, module_id: &str) -> bool {
     line.prefix == module_id || line.prefix.starts_with(&format!("{module_id}:"))
-}
-
-fn format_json_value(value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(value) => value.clone(),
-        serde_json::Value::Number(number) => number.to_string(),
-        serde_json::Value::Bool(value) => value.to_string(),
-        serde_json::Value::Null => "null".to_string(),
-        other => serde_json::to_string(other).unwrap_or_else(|_| "<json>".to_string()),
-    }
 }
 
 #[cfg(test)]
@@ -308,7 +298,7 @@ mod tests {
         assert_eq!(options.header, "OPTIONS · 1");
         assert_eq!(
             options.rows,
-            vec![("sast:scan::triage".to_string(), "true".to_string())]
+            vec![("sast:scan::triage".to_string(), "yes".to_string())]
         );
     }
 

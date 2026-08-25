@@ -125,6 +125,7 @@ const requiredIdentityReferences = [
       '("bridge_internal", Class::BridgeInternal)',
       '("cancelled", Class::Cancelled)',
       '("mcp_timeout", Class::McpTimeout)',
+      '("mcp_unavailable", Class::McpUnavailable)',
       '("provider_rejected", Class::ProviderRejected)',
       '("provider_response_invalid", Class::ProviderResponseInvalid)',
       '("provider_unavailable", Class::ProviderUnavailable)',

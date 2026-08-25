@@ -81,6 +81,7 @@
         "bridge_internal",
         "cancelled",
         "mcp_timeout",
+        "mcp_unavailable",
         "provider_rejected",
         "provider_response_invalid",
         "provider_unavailable",

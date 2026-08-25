@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { bridgeErrorResponse } from "./errors.mjs";
+import { BridgePublicError, bridgeErrorResponse } from "./errors.mjs";
 import { modelOptions } from "./model.mjs";
 
 test("adaptive-thinking temperature validation has an actionable safe class", () => {
@@ -59,4 +59,17 @@ test("provider SDK missing-key shapes are classified as authentication", () => {
     assert.equal(response.error, "Provider authentication failed.");
     assert.equal(JSON.stringify(response).includes(message), false);
   }
+});
+
+test("typed MCP startup failures expose only actionable canonical guidance", () => {
+  const error = new BridgePublicError("mcp_unavailable", undefined, {
+    cause: new Error("spawn kuzushi-mcp-treesitter ENOENT at /private/target"),
+  });
+
+  const response = bridgeErrorResponse(error);
+
+  assert.equal(response.errorClass, "mcp_unavailable");
+  assert.match(response.error, /cargo build --workspace/);
+  assert.equal(response.detail, undefined);
+  assert.equal(JSON.stringify(response).includes("/private/target"), false);
 });

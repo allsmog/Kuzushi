@@ -134,11 +134,12 @@ pub(crate) fn bridge_runtime_failure(
 
 fn runtime_failure_class(class: &str) -> Option<kuzushi_core::runtime::RuntimeFailureClass> {
     use kuzushi_core::runtime::RuntimeFailureClass as Class;
-    const CLASSES: [(&str, Class); 11] = [
+    const CLASSES: [(&str, Class); 12] = [
         ("authentication", Class::Authentication),
         ("bridge_internal", Class::BridgeInternal),
         ("cancelled", Class::Cancelled),
         ("mcp_timeout", Class::McpTimeout),
+        ("mcp_unavailable", Class::McpUnavailable),
         ("provider_rejected", Class::ProviderRejected),
         ("provider_response_invalid", Class::ProviderResponseInvalid),
         ("provider_unavailable", Class::ProviderUnavailable),

@@ -4,7 +4,8 @@ use super::view_keybinding_groups::{
     tune_keybindings, workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
-    back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
+    back_keybinding, bind, bind_char, pause_scan_keybindings, resume_scan_keybindings,
+    scroll_keybindings,
 };
 use super::*;
 
@@ -61,6 +62,7 @@ impl ShellApp {
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
             ShellView::Activity => self.activity_view_keybindings(),
+            ShellView::Auth => vec![bind_char('q', "q", "back", ViewHotkeyAction::Back)],
             ShellView::Logs => logs_keybindings(),
             _ => Vec::new(),
         }

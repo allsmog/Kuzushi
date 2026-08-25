@@ -355,6 +355,9 @@ pub fn artifact_state(target: &Path, path: &Path) -> ArtifactState {
 /// build's debris is NOT a usable graph and every cpg_taint_paths call would
 /// error, so it must read as not-Cached rather than a false "Cached".
 fn cpg_aware_artifact_state(task: PlanningTaskId, target: &Path, path: &Path) -> ArtifactState {
+    if task == PlanningTaskId::GatherRepoContext {
+        return current_context_artifact_state(target, path);
+    }
     if task == PlanningTaskId::BuildCodePropertyGraph {
         return if kuzushi_core::cpg_has_artifacts(target) {
             ArtifactState::Cached
@@ -363,6 +366,31 @@ fn cpg_aware_artifact_state(task: PlanningTaskId, target: &Path, path: &Path) ->
         };
     }
     artifact_state(target, path)
+}
+
+fn current_context_artifact_state(target: &Path, path: &Path) -> ArtifactState {
+    let state = artifact_state(target, path);
+    if state != ArtifactState::Cached {
+        return state;
+    }
+    let Ok(body) = kuzushi_core::workspace::read_optional_workspace_text(
+        target,
+        path,
+        kuzushi_core::context::MAX_CONTEXT_SNAPSHOT_BYTES,
+    ) else {
+        return ArtifactState::Invalid;
+    };
+    let Some(body) = body else {
+        return ArtifactState::Missing;
+    };
+    let Ok(snapshot) = serde_json::from_str(&body) else {
+        return ArtifactState::Invalid;
+    };
+    if kuzushi_core::context::context_snapshot_freshness(target, &snapshot).is_current() {
+        ArtifactState::Cached
+    } else {
+        ArtifactState::Invalid
+    }
 }
 
 pub fn cli_is_on_path(name: &str) -> bool {
@@ -432,6 +460,32 @@ mod tests {
         let path = tmp.path().join("bad.json");
         std::fs::write(&path, "{not-json").unwrap();
         assert_eq!(artifact_state(tmp.path(), &path), ArtifactState::Invalid);
+    }
+
+    #[test]
+    fn context_row_reuses_only_a_current_snapshot() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("source.rs"), "fn first() {}\n").unwrap();
+        let path = kuzushi_core::context_snapshot_path(target.path());
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let tree_hash =
+            kuzushi_core::incremental_index::current_workspace_tree_hash(target.path()).unwrap();
+        std::fs::write(
+            &path,
+            serde_json::json!({
+                "target": target.path(),
+                "provenance": {"treeHash": tree_hash}
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let current = PlanningTaskRow::for_task(PlanningTaskId::GatherRepoContext, target.path());
+        assert_eq!(current.artifact_state, ArtifactState::Cached);
+
+        std::fs::write(target.path().join("source.rs"), "fn changed() {}\n").unwrap();
+        let stale = PlanningTaskRow::for_task(PlanningTaskId::GatherRepoContext, target.path());
+        assert_eq!(stale.artifact_state, ArtifactState::Invalid);
     }
 
     #[cfg(unix)]

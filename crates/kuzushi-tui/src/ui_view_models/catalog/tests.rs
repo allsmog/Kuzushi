@@ -16,6 +16,8 @@ fn catalog_collapsed_model_steers_context_then_findings() {
 
     app.set_target(Some(PathBuf::from(".")));
     app.domain_mut().context_view_mut().exists = true;
+    app.domain_mut().context_view_mut().freshness =
+        Some(kuzushi_core::context::ContextSnapshotFreshness::Current);
     let model = catalog_model(&app);
     assert!(model.collapsed.next_hint.contains("First finding"));
     assert_eq!(
@@ -43,6 +45,8 @@ fn catalog_collapsed_model_surfaces_malformed_context_snapshot() {
 fn catalog_collapsed_model_prioritizes_critical_alias_hint() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.domain_mut().context_view_mut().exists = true;
+    app.domain_mut().context_view_mut().freshness =
+        Some(kuzushi_core::context::ContextSnapshotFreshness::Current);
     *app.findings_mut() = vec![
         Finding::new_semgrep("demo.medium", "src/a.rs", 1, None, Severity::Medium, "x"),
         Finding::new_semgrep(

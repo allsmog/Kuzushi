@@ -10,18 +10,15 @@
 
 use std::path::{Path, PathBuf};
 
-/// Audited 2026-07-21 (wave-4 X1). Relative to `src/`.
+/// Audited 2026-08-21. Relative to `src/`.
 const AUDITED_ENV_READ_FILES: &[&str] = &[
     // Terminal / accessibility / presentation mode.
     "app/runtime/run_shell.rs", // KUZUSHI_PLAIN/SCREEN_READER/LOW_BANDWIDTH
     "app/runtime/render_plain_scripted_session.rs", // KUZUSHI_MOUSE_CAPTURE
     "ui_view_models/prompt.rs", // KUZUSHI_CLI_NAME branding compat
     "app/onboarding/initial_view.rs", // KUZUSHI_SKIP_ONBOARDING presentation toggle
-    // Credential presence probes (is_some only; values never surface).
-    "app/settings/handle_model_command/auth_login.rs",
-    "app/settings/normalize_thinking_level/oauth_status.rs", // HOME for oauth path
-    "app/shell_lifecycle/onboarding_open.rs",
-    "ui_view_models/auth.rs",
+    // Credential presence and canonical OAuth-path adapter; values never surface.
+    "app/settings/normalize_thinking_level/oauth_status.rs",
     // PATH / HOME process integration.
     "app/tool_runner/run_tool/background/preflight.rs", // PATH
     "app/onboarding/task_row.rs", // PATH + KUZUSHI_CODEQL_BIN CLI presence probe

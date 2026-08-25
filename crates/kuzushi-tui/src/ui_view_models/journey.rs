@@ -225,8 +225,12 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     let target = app.target()?;
     let map_artifacts_built = cached_map_artifacts_built(app, target);
     let progress = journey_progress(app, map_artifacts_built);
-    let destination = progress.destination();
-    let current = progress.current_phase();
+    let unresolved_phase = earliest_unresolved_phase(app);
+    let destination = journey_destination(progress, unresolved_phase);
+    let current = match destination {
+        JourneyDestination::Phase(phase) => phase,
+        JourneyDestination::Report(_) => progress.current_phase(),
+    };
     let failed = failed_phase_set(app);
     let explicitly_skipped = app.engagement.projected_skipped_phases();
     let next_action = projected_next_action(app, destination, progress);
@@ -240,6 +244,27 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         next_tools: projected_next_tools(app, destination),
         checkpoint_drift: checkpoint_drift(app, current),
     })
+}
+
+fn journey_destination(
+    progress: JourneyProgress,
+    unresolved_phase: Option<WorkflowPhase>,
+) -> JourneyDestination {
+    let required = progress.destination();
+    match (required, unresolved_phase) {
+        (JourneyDestination::Phase(required), Some(unresolved)) if required <= unresolved => {
+            JourneyDestination::Phase(required)
+        }
+        (_, Some(unresolved)) => JourneyDestination::Phase(unresolved),
+        (required, None) => required,
+    }
+}
+
+fn earliest_unresolved_phase(app: &ShellApp) -> Option<WorkflowPhase> {
+    WorkflowPhase::ORDER
+        .iter()
+        .copied()
+        .find(|phase| app.engagement.unresolved_phase_attempt(*phase).is_some())
 }
 
 fn checkpoint_drift(app: &ShellApp, phase: WorkflowPhase) -> Option<CheckpointDrift> {
@@ -561,11 +586,26 @@ pub(crate) fn finding_is_review_actionable(
 }
 
 fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
-    app.engagement
+    let mut failed: BTreeSet<WorkflowPhase> = app
+        .engagement
         .failed_tasks()
         .iter()
         .map(|failed| failed.task.phase())
-        .collect()
+        .collect();
+    for &phase in WorkflowPhase::ORDER {
+        let Some(record) = app.engagement.unresolved_phase_attempt(phase) else {
+            continue;
+        };
+        if matches!(
+            app.effective_phase_attempt_outcome(&record.completed),
+            PhaseAttemptOutcome::Blocked
+                | PhaseAttemptOutcome::Failed
+                | PhaseAttemptOutcome::Canceled
+        ) {
+            failed.insert(phase);
+        }
+    }
+    failed
 }
 
 fn phase_statuses(
@@ -708,8 +748,7 @@ fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
 fn destination_next_action(destination: JourneyDestination, progress: JourneyProgress) -> String {
     match destination {
         JourneyDestination::Phase(WorkflowPhase::Map) if progress.map_artifacts_built => {
-            "choose whether to use, rebuild, or explicitly skip current-revision Map evidence"
-                .to_string()
+            "choose whether to reuse, run, or skip current-revision Map evidence".to_string()
         }
         JourneyDestination::Phase(WorkflowPhase::Map) => {
             "build or explicitly skip the current-revision map".to_string()
@@ -767,6 +806,9 @@ pub(super) fn unresolved_attempt_action(
     record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
 ) -> String {
     let completed = &record.completed;
+    if let Some(reason) = app.phase_recovery_prerequisite_blocker(completed.phase) {
+        return reason;
+    }
     if let Some(reason) = app.effective_phase_attempt_blocker(completed) {
         return reason;
     }
@@ -1155,7 +1197,7 @@ mod tests {
             assert!(!journey.progress.legacy_inferred, "discarded={discarded}");
             assert_eq!(journey.current, WorkflowPhase::Map);
             let expected = if discarded {
-                "choose whether to use, rebuild, or explicitly skip current-revision Map evidence"
+                "choose whether to reuse, run, or skip current-revision Map evidence"
             } else {
                 "accept, continue with, or discard the completed Map result"
             };
@@ -1285,6 +1327,38 @@ mod tests {
     }
 
     #[test]
+    fn failed_map_stays_the_current_failed_phase_until_resolved() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-failed".to_string()],
+            PhaseTargetSnapshot::capture(target.path()),
+            PhaseAttemptOutcome::Failed,
+        );
+        append_phase_attempt_completed(target.path(), map).unwrap();
+
+        let journey = journey_model(&hydrated_app(&workspace, Vec::new())).unwrap();
+        let map_status = journey
+            .phases
+            .iter()
+            .find(|status| status.phase == WorkflowPhase::Map)
+            .unwrap();
+
+        assert_eq!(
+            journey.destination,
+            JourneyDestination::Phase(WorkflowPhase::Map)
+        );
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(map_status.state, JourneyPhaseState::Failed);
+        assert_eq!(map_status.state_symbol, "!");
+        assert_eq!(
+            journey.next_action,
+            "inspect, rerun, or discard the failed Map result"
+        );
+    }
+
+    #[test]
     fn unresolved_blocked_scan_outranks_missing_map_guidance() {
         let target = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
@@ -1301,6 +1375,15 @@ mod tests {
         assert_eq!(
             journey.destination,
             JourneyDestination::Phase(WorkflowPhase::Map)
+        );
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(
+            journey
+                .phases
+                .iter()
+                .find(|status| status.phase == WorkflowPhase::Scan)
+                .map(|status| status.state),
+            Some(JourneyPhaseState::Failed)
         );
         assert_eq!(
             journey.next_action,
@@ -1533,6 +1616,56 @@ mod tests {
             drift.accepted_revision.as_deref(),
             Some("accepted-revision")
         );
+    }
+
+    #[test]
+    fn stale_selected_map_outranks_failed_scan_recovery_guidance() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let mut current = PhaseTargetSnapshot::capture(target.path());
+        current.revision = Some("current-revision".to_string());
+        let mut stale = current.clone();
+        stale.revision = Some("accepted-revision".to_string());
+        let map = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["map-old".to_string()],
+            stale,
+            PhaseAttemptOutcome::Completed,
+        );
+        let scan = PhaseAttemptCompleted::new(
+            WorkflowPhase::Scan,
+            vec!["scan-failed".to_string()],
+            current.clone(),
+            PhaseAttemptOutcome::Failed,
+        );
+        let ledger = PhaseAttemptLedger::from_events([
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptCompleted(map.clone()),
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptDispositionRecorded(
+                PhaseAttemptDispositionRecorded::new(
+                    map.attempt_id,
+                    PhaseAttemptDisposition::Selected {
+                        acknowledged_partial: false,
+                    },
+                ),
+            ),
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptCompleted(scan),
+        ])
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.engagement
+            .set_phase_attempt_projection(Some(current), ledger);
+
+        let journey = journey_model(&app).unwrap();
+
+        assert_eq!(
+            journey.destination,
+            JourneyDestination::Phase(WorkflowPhase::Map)
+        );
+        assert_eq!(
+            journey.next_action,
+            "rerun Map because the accepted Map is stale, then retry Scan"
+        );
+        assert!(journey.next_tools.is_empty());
     }
 
     #[test]

@@ -43,7 +43,7 @@ mod tests {
         ] {
             let mut config = V2Config::default();
             config.model = Some(configured.to_string());
-            let visible = visible_model_choices(config.model.as_deref());
+            let visible = visible_model_choices(&config);
             let cursor = preferred_visible_model_choice_cursor(&config);
             assert_eq!(
                 visible.get(cursor).map(|choice| choice.id),
@@ -56,7 +56,9 @@ mod tests {
     #[test]
     fn visible_catalog_contains_every_choice_once_with_configured_choice_first() {
         let configured = "anthropic:claude-opus-4-7";
-        let visible = visible_model_choices(Some(" anthropic:claude-opus-4-7 "));
+        let mut config = V2Config::default();
+        config.model = Some(" anthropic:claude-opus-4-7 ".to_string());
+        let visible = visible_model_choices(&config);
         let ids = visible.iter().map(|choice| choice.id).collect::<Vec<_>>();
         let unique = ids
             .iter()

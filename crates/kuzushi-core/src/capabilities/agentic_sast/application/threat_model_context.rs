@@ -10,6 +10,7 @@ const MAX_DIGEST_FIELD_CHARS: usize = 200;
 #[derive(Debug, Default, Clone)]
 pub(crate) struct PromptEnrichment {
     pub(crate) threat_context: Option<String>,
+    pub(crate) context_enrichment: Option<String>,
     pub(crate) attached_mcps: Vec<String>,
 }
 
@@ -17,12 +18,103 @@ impl PromptEnrichment {
     pub(crate) fn for_run(target: &Path, tool_policy: &AgentToolPolicy) -> Self {
         Self {
             threat_context: threat_model_scan_context(target),
+            context_enrichment: context_enrichment_scan_context(target),
             attached_mcps: tool_policy
                 .mcps_attached
                 .iter()
                 .map(|attachment| attachment.name.clone())
                 .collect(),
         }
+    }
+}
+
+fn context_enrichment_scan_context(target: &Path) -> Option<String> {
+    let path = crate::context::context_snapshot_path(target);
+    let raw = crate::bounded_file::read_utf8_text_within(
+        target,
+        &path,
+        crate::context::MAX_CONTEXT_SNAPSHOT_BYTES,
+    )
+    .ok()?;
+    let snapshot: Value = serde_json::from_str(&raw).ok()?;
+    if !crate::context::context_snapshot_freshness(target, &snapshot).is_current() {
+        return None;
+    }
+    render_context_enrichment_digest(snapshot.get("enrichedContext")?)
+}
+
+fn render_context_enrichment_digest(enrichment: &Value) -> Option<String> {
+    let mut lines = Vec::new();
+    push_context_claims(
+        &mut lines,
+        enrichment.get("customMiddleware"),
+        "middleware",
+        &["name", "purpose"],
+    );
+    push_context_claims(
+        &mut lines,
+        enrichment.get("customSanitizers"),
+        "sanitizer",
+        &["name", "sanitizationType"],
+    );
+    push_context_claims(
+        &mut lines,
+        enrichment.get("trustBoundaries"),
+        "trust boundary",
+        &["name", "description"],
+    );
+    push_context_claims(
+        &mut lines,
+        enrichment.get("dataClassifications"),
+        "data",
+        &["dataType", "sensitivity"],
+    );
+    push_context_claims(
+        &mut lines,
+        enrichment.get("architecturalNotes"),
+        "architecture",
+        &["note"],
+    );
+    (!lines.is_empty()).then(|| lines.into_iter().take(20).collect::<Vec<_>>().join("\n"))
+}
+
+fn push_context_claims(
+    lines: &mut Vec<String>,
+    claims: Option<&Value>,
+    label: &str,
+    fields: &[&str],
+) {
+    let Some(claims) = claims.and_then(Value::as_array) else {
+        return;
+    };
+    for claim in claims {
+        let text = fields
+            .iter()
+            .filter_map(|field| claim.get(field).and_then(Value::as_str))
+            .filter(|value| !value.trim().is_empty())
+            .map(str::trim)
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if !text.is_empty() {
+            lines.push(format!("- {label}: {text}{}", first_evidence_suffix(claim)));
+        }
+    }
+}
+
+fn first_evidence_suffix(claim: &Value) -> String {
+    let Some(evidence) = claim
+        .get("evidence")
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+    else {
+        return String::new();
+    };
+    let Some(path) = evidence.get("filePath").and_then(Value::as_str) else {
+        return String::new();
+    };
+    match evidence.get("line").and_then(Value::as_u64) {
+        Some(line) => format!(" · {path}:{line}"),
+        None => format!(" · {path}"),
     }
 }
 
@@ -78,7 +170,8 @@ fn threat_lines(document: &Value) -> Vec<String> {
 
 fn threat_line(threat: &Value) -> String {
     let severity = field(threat, &["severity", "likelihood"]).unwrap_or_else(|| "unrated".into());
-    let title = field(threat, &["title", "description", "id"]).unwrap_or_else(|| "(untitled)".into());
+    let title =
+        field(threat, &["title", "description", "id"]).unwrap_or_else(|| "(untitled)".into());
     let mut line = format!("- [{severity}] {title}");
     if let Some(cwe) = field(threat, &["relatedCwe", "relatedCwes", "cwe"]) {
         line.push_str(&format!(" · {cwe}"));
@@ -89,15 +182,17 @@ fn threat_line(threat: &Value) -> String {
     line
 }
 
-fn attack_surface_lines(
-    document: &Value,
-    key: &str,
-    render: fn(&Value) -> String,
-) -> Vec<String> {
+fn attack_surface_lines(document: &Value, key: &str, render: fn(&Value) -> String) -> Vec<String> {
     document
         .pointer(&format!("/attackSurface/{key}"))
         .and_then(Value::as_array)
-        .map(|entries| entries.iter().take(MAX_DIGEST_ENTRIES).map(render).collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .take(MAX_DIGEST_ENTRIES)
+                .map(render)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -170,7 +265,9 @@ mod tests {
 
         let digest = render_threat_model_digest(&document).unwrap();
 
-        assert!(digest.contains("[high] Command spec reaches execve unchecked · CWE-78 · files: execd_lib.cpp"));
+        assert!(digest.contains(
+            "[high] Command spec reaches execve unchecked · CWE-78 · files: execd_lib.cpp"
+        ));
         assert!(digest.contains("- HandleRequest (rpc) — execd_server.cpp:42"));
         assert!(digest.contains("- execve [exec]"));
     }
@@ -180,5 +277,23 @@ mod tests {
         assert!(render_threat_model_digest(&json!({})).is_none());
         assert!(render_threat_model_digest(&json!({"threats": []})).is_none());
         assert!(render_threat_model_digest(&json!({"threats": "not-a-list"})).is_none());
+    }
+
+    #[test]
+    fn context_enrichment_digest_keeps_claims_tied_to_source() {
+        let enrichment = json!({
+            "customMiddleware": [{
+                "name": "operator guard",
+                "purpose": "requires an operator token",
+                "evidence": [{"filePath": "src/auth.rs", "line": 42}]
+            }]
+        });
+
+        let digest = render_context_enrichment_digest(&enrichment).unwrap();
+
+        assert_eq!(
+            digest,
+            "- middleware: operator guard · requires an operator token · src/auth.rs:42"
+        );
     }
 }

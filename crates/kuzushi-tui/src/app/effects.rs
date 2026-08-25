@@ -265,7 +265,25 @@ pub(crate) struct AuthStatusShow {
 pub(crate) struct AuthLoginStart {
     pub(crate) provider: String,
     pub(crate) method: String,
-    pub(crate) continue_after_success: bool,
+    pub(crate) picker_continuation: Option<PickerAuthContinuation>,
+    pub(crate) origin: AuthLoginOrigin,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct AuthLoginOrigin {
+    pub(crate) view: ShellView,
+    pub(crate) input_mode: InputMode,
+}
+
+pub(crate) struct PickerAuthContinuation {
+    pub(crate) credential_provider: String,
+    pub(crate) model_switch: Option<AuthModelSwitch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthModelSwitch {
+    pub(crate) model: String,
+    pub(crate) thinking_level: String,
 }
 
 pub(crate) struct GlobalModelSelectionPersist {

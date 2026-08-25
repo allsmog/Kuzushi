@@ -238,7 +238,7 @@ fn config_lists_every_stored_option_with_scope_and_redacts_sensitive_values() {
     assert_eq!(stored.len(), 2);
     assert!(stored
         .iter()
-        .any(|row| row.contains("operator options · tool semgrep:scan · paths=[\"src\"]")));
+        .any(|row| row.contains("operator options · tool semgrep:scan · paths=src")));
     assert!(stored.iter().any(|row| {
         row.contains("session option · module agentic-sast · api_token=[hidden]")
             && !row.contains("do-not-render")

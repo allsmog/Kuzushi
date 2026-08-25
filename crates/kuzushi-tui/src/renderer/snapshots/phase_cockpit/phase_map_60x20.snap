@@ -18,7 +18,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom
 │declared boundary. Rebuild to add a source-grounded       │
 │product summary.                                          │
 └──────────────────────────────────────────────────────────┘
-./phase-target · rev:unknown · context:present · indexed=3...
+./phase-target · rev:unknown · context:current · indexed=3...
 run route · notify:unavailab... 6 findings · 1 C · 2 H · 2 M
 ────────────────────────────────────────────────────────────
  Ctrl+C request abort

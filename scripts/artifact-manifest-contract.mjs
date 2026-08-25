@@ -886,7 +886,7 @@ export function checkOauthCredentialPathHelper(root) {
   return [
     ...oauthCredentialHelperFailures(config),
     ...oauthCredentialConsumerFailures(statusFile, status),
-    ...oauthCredentialConsumerFailures(processFile, process),
+    ...oauthCredentialProcessFailures(processFile, process),
   ];
 }
 
@@ -2135,6 +2135,20 @@ function oauthCredentialConsumerFailures(file, source) {
     source.includes("default_oauth_credentials_path_display")
       ? null
       : `OAuth credential path consumer must use default_oauth_credentials_path: ${file}`,
+    source.includes("oauth-credentials.json") && !source.includes("OAUTH_CREDENTIALS_FILE")
+      ? `OAuth credential path consumer must not hardcode oauth-credentials.json: ${file}`
+      : null,
+  ].filter(Boolean);
+}
+
+function oauthCredentialProcessFailures(file, source) {
+  return [
+    source.includes("credentials_path: &Path")
+      ? null
+      : `OAuth login process must receive the resolved credential path: ${file}`,
+    source.includes('.env("KUZUSHI_OAUTH_CREDENTIALS", credentials_path)')
+      ? null
+      : `OAuth login process must pass the resolved credential path to the child: ${file}`,
     source.includes("oauth-credentials.json") && !source.includes("OAUTH_CREDENTIALS_FILE")
       ? `OAuth credential path consumer must not hardcode oauth-credentials.json: ${file}`
       : null,

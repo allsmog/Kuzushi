@@ -5,7 +5,7 @@ scenario: result_canceled
 size: 120x36
 ---
 KUZUSHI · Viewing Scan · next required Map · target ./failure-target · ○ idle · context not built · model unconfigured
- Map ● · Scan ○ · Review × · Prove × · Fix ×
+ Map ● · Scan ! · Review × · Prove × · Fix ×
  ▸ NEXT inspect, rerun, or discard the canceled Scan result
  run sast:scan {} scan now · next → Map · z open findings heatmap · jobs inspect run receipts
 │RECORDED ENGINE OUTCOMES

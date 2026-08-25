@@ -138,6 +138,7 @@ fn context_view(snapshot: PathBuf, target: &Path) -> ContextSnapshotView {
     ContextSnapshotView {
         snapshot_path: Some(snapshot),
         exists: true,
+        freshness: Some(kuzushi_core::context::ContextSnapshotFreshness::Current),
         status: "snapshot present; 3 indexed files".to_string(),
         target: Some(target.display().to_string()),
         discovery: Some("bounded roots".to_string()),
@@ -147,6 +148,8 @@ fn context_view(snapshot: PathBuf, target: &Path) -> ContextSnapshotView {
         frameworks: vec!["Axum".to_string()],
         generated_slices: vec!["repo".to_string(), "routes".to_string()],
         stale_slices: Vec::new(),
+        enrichment_claims: 0,
+        enrichment_model: None,
     }
 }
 

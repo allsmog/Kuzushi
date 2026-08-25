@@ -131,7 +131,6 @@ fn planning_picker_list_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("KEYS", "↑/↓ move"),
         bind("←/→", "phase"),
         bind("type", "command"),
-        bind("F5", "toggle rebuild"),
     ];
     match inline_selected {
         Some(true) => {
@@ -144,7 +143,7 @@ fn planning_picker_list_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         }
         None => {
             bindings.push(bind("Tab/Shift+Tab", "focus pane"));
-            bindings.push(bind("Space", "check"));
+            bindings.push(bind("Space", "cycle outcome"));
             bindings.push(bind("Enter", "run checked"));
         }
     }
@@ -156,8 +155,7 @@ fn setup_plan_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("KEYS", "↑/↓ move"),
         bind("type", "command"),
-        bind("Space", "check"),
-        bind("F5", "toggle rebuild"),
+        bind("Space", "cycle outcome"),
         bind("Tab/Shift+Tab", "focus pane"),
         bind("Enter", "save to Setup"),
         bind("Esc", "return to Setup"),

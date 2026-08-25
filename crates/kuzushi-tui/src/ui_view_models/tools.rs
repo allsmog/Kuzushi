@@ -150,10 +150,14 @@ fn concise_tool_description(description: &str) -> String {
 }
 
 fn tool_next_command(tool: &ToolDescriptor) -> String {
-    if tool.options.is_empty() {
-        format!("run {}", tool.name)
-    } else {
+    if tool
+        .options
+        .iter()
+        .any(crate::app::option_is_operator_editable)
+    {
         format!("options {}", tool.name)
+    } else {
+        format!("run {}", tool.name)
     }
 }
 

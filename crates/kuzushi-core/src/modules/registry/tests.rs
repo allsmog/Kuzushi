@@ -480,8 +480,8 @@ mod tests {
         let ctx = kwp_context(&config, None, None, None);
         let input = json!({});
 
-        assert!(dispatch_context_workspace_tool("report:build", &input, &ctx).is_none());
-        assert!(dispatch_context_workspace_tool("report:sarif", &input, &ctx).is_none());
+        assert!(dispatch_context_workspace_tool("report:build", &input, &ctx, None).is_none());
+        assert!(dispatch_context_workspace_tool("report:sarif", &input, &ctx, None).is_none());
         assert!(registry.executors.contains_key("report:build"));
     }
 
@@ -2162,7 +2162,10 @@ export default {
             ("dynphases:review", ToolPhase::Review),
             ("dynphases:prove", ToolPhase::Prove),
         ] {
-            assert_eq!(registry.resolve_tool(name).expect("dynamic tool").phase, phase);
+            assert_eq!(
+                registry.resolve_tool(name).expect("dynamic tool").phase,
+                phase
+            );
         }
     }
 
@@ -2508,7 +2511,7 @@ process.stdin.on("end", () => {
 
         let threat_intel_harvest = registry.resolve_tool("threat-intel:harvest").unwrap();
         assert!(threat_intel_harvest.options.iter().any(|option| {
-            option.name == "cves" && option.option_type == OptionType::Json && option.required
+            option.name == "cves" && option.option_type == OptionType::StringList && option.required
         }));
         let threat_intel_research = registry.resolve_tool("threat-intel:research").unwrap();
         assert_eq!(threat_intel_research.effect, ToolEffect::ExternalAction);

@@ -72,6 +72,6 @@ fn append_shortcuts(lines: &mut Vec<Line<'static>>) {
         Span::styled("model", theme::accent()),
     ]));
     lines.push(muted(
-        "Type help, modules, use <module>, scan, or run <tool> [json].",
+        "Type help, modules, use <module>, scan, or run <tool> [key=value].",
     ));
 }

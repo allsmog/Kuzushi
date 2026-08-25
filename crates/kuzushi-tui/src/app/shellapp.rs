@@ -595,12 +595,26 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn record_current_phase_skip(&mut self) {
+    pub(crate) fn record_current_phase_skip(&mut self) -> bool {
+        let unresolved = WorkflowPhase::ORDER
+            .iter()
+            .copied()
+            .find(|phase| self.engagement.unresolved_phase_attempt(*phase).is_some());
+        if let Some(phase) = unresolved {
+            self.log(
+                "workflow",
+                format!(
+                    "REFUSED · RESULT · resolve the {} result before skipping it; inspect, rerun, or discard",
+                    phase.title()
+                ),
+            );
+            return false;
+        }
         let Some(phase) = self.engagement.mark_current_phase_skipped() else {
-            return;
+            return false;
         };
         let Some(target) = self.target_owned() else {
-            return;
+            return false;
         };
         let checkpoint = kuzushi_core::workflow_attempts::PhaseCheckpointSkipped::new(
             phase,
@@ -608,11 +622,17 @@ impl ShellApp {
         );
         match kuzushi_core::workflow_attempts::append_phase_checkpoint_skipped(&target, checkpoint)
         {
-            Ok(_) => self.refresh_phase_attempt_projection(),
-            Err(error) => self.log(
-                "workflow",
-                format!("could not persist explicit {} skip: {error}", phase.label()),
-            ),
+            Ok(_) => {
+                self.refresh_phase_attempt_projection();
+                true
+            }
+            Err(error) => {
+                self.log(
+                    "workflow",
+                    format!("could not persist explicit {} skip: {error}", phase.label()),
+                );
+                false
+            }
         }
     }
 
@@ -1339,8 +1359,8 @@ mod tests {
         app.engagement.planning_picker_mut().mark_artifacts_stale();
 
         let artifact = task.artifact_path(target.path()).unwrap();
-        std::fs::create_dir_all(artifact.parent().unwrap()).unwrap();
-        std::fs::write(&artifact, "{}").unwrap();
+        crate::test_support::write_current_context_snapshot(target.path(), serde_json::json!({}));
+        assert_eq!(artifact, kuzushi_core::context_snapshot_path(target.path()));
         app.set_shell_view(ShellView::Activity);
 
         app.set_shell_view(ShellView::Setup);
@@ -1456,10 +1476,12 @@ mod tests {
         assert!(effects.is_empty());
         let notice = app.advisory().notice.as_ref().expect("visible notice");
         assert_eq!(notice.severity, NoticeSeverity::Error);
-        assert!(notice.message.contains("run input must be JSON"));
         assert!(notice
             .message
-            .contains("Next: run semgrep:scan (no JSON needed — defaults apply)"));
+            .contains("legacy structured run input is invalid"));
+        assert!(notice
+            .message
+            .contains("Next: run semgrep:scan with defaults"));
         assert!(notice.message.contains("options semgrep:scan"));
         assert_blocked_preparation_run(temp.path(), &expected_title);
     }

@@ -185,11 +185,19 @@ mod tests {
     }
 
     #[test]
-    fn deterministic_tools_skip_runtime() {
+    fn deterministic_tools_and_input_aware_context_report_runtime_truthfully() {
         assert!(!tool_uses_agent_runtime("semgrep:scan"));
         assert!(!tool_uses_agent_runtime("cargo-audit:scan"));
         assert!(!tool_uses_agent_runtime("secret-scan:scan"));
-        assert!(!tool_uses_agent_runtime("context:build"));
+        assert!(tool_uses_agent_runtime("context:build"));
+        let registry = kuzushi_core::ModuleRegistry::with_v2_builtins();
+        let config = kuzushi_core::V2Config::default();
+        assert!(!registry.tool_wants_runtime("context:build", &serde_json::json!({}), &config));
+        assert!(registry.tool_wants_runtime(
+            "context:build",
+            &serde_json::json!({ "enrichment": true }),
+            &config,
+        ));
         assert!(!tool_uses_agent_runtime("module-recommender:recommend"));
         assert!(!tool_uses_agent_runtime("findings:list"));
         assert!(!tool_uses_agent_runtime("taint-iris-next:dataflow-plan"));

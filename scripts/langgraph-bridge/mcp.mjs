@@ -2,6 +2,7 @@ import { realpathSync, statSync } from "node:fs";
 import { sep } from "node:path";
 import process from "node:process";
 import { MultiServerMCPClient } from "@langchain/mcp-adapters";
+import { BridgePublicError } from "./errors.mjs";
 
 const MCP_TOOL_TIMEOUT_CODE = "KUZUSHI_MCP_TOOL_TIMEOUT";
 const MCP_CLOSE_GRACE_MS = 1_000;
@@ -51,19 +52,30 @@ async function ignoreMcpCloseFailure(close, timeoutMs) {
   }
 }
 
-export async function mcpToolsForRequest(request) {
+export async function mcpToolsForRequest(request, createClient = createMcpClient) {
   if (!agentMcpsEnabled(request)) return { tools: [], close: async () => {} };
   const mcpServers = mcpServerConfig(request);
   if (Object.keys(mcpServers).length === 0) return { tools: [], close: async () => {} };
-  const client = new MultiServerMCPClient({
-    mcpServers,
-    defaultToolTimeout: mcpToolTimeoutForRequest(request),
-    onConnectionError: (server, error) => {
-      throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
-    },
-  });
-  const tools = providerSafeToolNames(await client.getTools());
-  return { tools, close: async () => client.close?.() };
+  const defaultToolTimeout = mcpToolTimeoutForRequest(request);
+  let client;
+  try {
+    client = createClient({
+      mcpServers,
+      defaultToolTimeout,
+      onConnectionError: (server, error) => {
+        throw new Error(mcpConnectionFailureMessage(server, error, mcpServers));
+      },
+    });
+    const tools = providerSafeToolNames(await client.getTools());
+    return { tools, close: async () => client.close?.() };
+  } catch (error) {
+    await ignoreMcpCloseFailure(() => client?.close?.(), MCP_CLOSE_GRACE_MS);
+    throw new BridgePublicError("mcp_unavailable", undefined, { cause: error });
+  }
+}
+
+function createMcpClient(options) {
+  return new MultiServerMCPClient(options);
 }
 
 // Anthropic (direct and Vertex) rejects tool names outside

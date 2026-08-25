@@ -47,7 +47,7 @@ views  [summary] · dfd  ·  Tab cycles · z zoom                               
 │                                                                                                                          ││
 │                                                                                                                          ││
 └──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘│
-./phase-target · rev:unknown · context:present · indexed=3 total=3 · 3 nodes · 2 flows                                        │
+./phase-target · rev:unknown · context:current · indexed=3 total=3 · 3 nodes · 2 flows                                        │
 run route · ⠋ context:build · 42s · 1/2 · notify:unavailable · focus unknown ·...       6 findings / 1 crit / 2 high / 2 med│
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────│
  Ctrl+C request abort   Esc prompt                                                                                          │

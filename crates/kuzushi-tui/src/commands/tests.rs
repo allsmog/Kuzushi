@@ -1259,6 +1259,7 @@ mod tests {
                 "<verb>" => "show run".to_string(),
                 "<n>" => "1".to_string(),
                 "[json]" => String::new(),
+                "[key=value" | "...]" => String::new(),
                 "[format]" => String::new(),
                 "[tool]" => "sast:scan".to_string(),
                 "[target]" => "./repo".to_string(),

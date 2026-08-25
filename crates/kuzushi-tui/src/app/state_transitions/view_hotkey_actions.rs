@@ -341,7 +341,7 @@ impl ShellApp {
         let (command, note) = if map.context.state.eq_ignore_ascii_case("stale") {
             (
                 "next",
-                "Map planner loaded — review cached artifacts and mark rebuilds before launch",
+                "Map planner loaded · press Space to choose reuse, run, or skip",
             )
         } else {
             (

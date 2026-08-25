@@ -20,6 +20,7 @@ export const nativeRuntimePackages = Object.freeze([
     packageName: "kuzushi-mcp-entry-points",
     binaryName: "kuzushi-mcp-entry-points",
   },
+  { packageName: "kuzushi-mcp-findings", binaryName: "kuzushi-mcp-findings" },
   {
     packageName: "kuzushi-mcp-threat-model",
     binaryName: "kuzushi-mcp-threat-model",
@@ -88,10 +89,14 @@ export function nativePlatformSlug(platform = process.platform, arch = process.a
 }
 
 export function cargoReleaseBuildArgs() {
+  return cargoNativeBuildArgs({ release: true });
+}
+
+export function cargoNativeBuildArgs({ release = false } = {}) {
   return [
     "build",
     "--locked",
-    "--release",
+    ...(release ? ["--release"] : []),
     ...nativeRuntimePackages.flatMap(({ packageName }) => ["--package", packageName]),
   ];
 }

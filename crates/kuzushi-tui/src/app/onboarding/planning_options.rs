@@ -1,5 +1,5 @@
 use super::task_id::PlanningTaskId;
-use crate::app::{coerce_raw_option_value, format_option_value};
+use crate::app::{coerce_raw_option_value, format_option_value, option_is_operator_editable};
 use crate::ShellApp;
 use anyhow::{Context, Result};
 use kuzushi_core::modules::{OptionSpec, OptionType};
@@ -35,7 +35,7 @@ pub struct PlanningOptionEdit {
 impl ShellApp {
     pub(crate) fn planning_option_count_for_current_row(&self) -> usize {
         self.current_planning_tool_options()
-            .map(|options| options.len())
+            .map(|options| options.count())
             .unwrap_or(0)
     }
 
@@ -191,6 +191,20 @@ impl ShellApp {
         self.input_for_planning_task_with_options(task)
     }
 
+    pub(crate) fn planning_task_model_backed(&self, task: PlanningTaskId) -> bool {
+        self.resolved_input_for_planning_task(task)
+            .map(|input| {
+                self.registry()
+                    .tool_wants_runtime(task.tool_name(), &input, self.config())
+            })
+            .unwrap_or_else(|_| task.is_model_backed())
+    }
+
+    pub(crate) fn planning_task_model(&self, task: PlanningTaskId) -> Option<String> {
+        let input = self.resolved_input_for_planning_task(task).ok()?;
+        kuzushi_core::tool_execution_model(task.tool_name(), &input, self.config())
+    }
+
     pub(crate) fn planning_option_stored_scope(
         &self,
         tool_name: &str,
@@ -212,10 +226,14 @@ impl ShellApp {
             .is_some_and(|object| object.contains_key(option_name))
     }
 
-    fn current_planning_tool_options(&self) -> Option<&[OptionSpec]> {
+    fn current_planning_tool_options(&self) -> Option<impl Iterator<Item = &OptionSpec>> {
         let row = self.engagement.planning_picker().current_row()?;
         let tool = self.registry().resolve_tool(row.tool_name)?;
-        Some(tool.options.as_slice())
+        Some(
+            tool.options
+                .iter()
+                .filter(|spec| option_is_operator_editable(spec)),
+        )
     }
 
     pub(super) fn selected_planning_option_spec(&self) -> Option<(PlanningTaskId, OptionSpec)> {
@@ -223,7 +241,9 @@ impl ShellApp {
         let tool = self.registry().resolve_tool(row.tool_name)?;
         let spec = tool
             .options
-            .get(self.engagement.planning_picker().option_cursor())?
+            .iter()
+            .filter(|spec| option_is_operator_editable(spec))
+            .nth(self.engagement.planning_picker().option_cursor())?
             .clone();
         Some((row.id, spec))
     }

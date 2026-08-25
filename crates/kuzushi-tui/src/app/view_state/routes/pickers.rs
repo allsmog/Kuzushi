@@ -659,15 +659,10 @@ impl PlanningPickerRouteState {
         &self.rebuild
     }
 
-    pub(crate) fn toggle_rebuild(&mut self, task: PlanningTaskId) -> bool {
-        if self.rebuild.remove(&task) {
-            self.selected.remove(&task);
-            false
-        } else {
-            self.rebuild.insert(task);
-            self.selected.insert(task);
-            true
-        }
+    pub(crate) fn outcome_sets_mut(
+        &mut self,
+    ) -> (&mut BTreeSet<PlanningTaskId>, &mut BTreeSet<PlanningTaskId>) {
+        (&mut self.selected, &mut self.rebuild)
     }
 
     pub(crate) fn mark_rebuild(&mut self, task: PlanningTaskId) {
@@ -861,7 +856,7 @@ mod tests {
             false,
         );
         route.selected_mut().remove(&PlanningTaskId::MapEntryPoints);
-        route.toggle_rebuild(PlanningTaskId::GatherRepoContext);
+        route.mark_rebuild(PlanningTaskId::GatherRepoContext);
 
         route.open_phase_profiled(
             WorkflowPhase::Map,

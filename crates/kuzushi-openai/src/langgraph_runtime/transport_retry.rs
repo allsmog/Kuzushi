@@ -175,6 +175,17 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_mcp_sidecars_are_permanent_failures() {
+        assert!(response_transient_failure(
+            None,
+            Some("mcp_unavailable"),
+            Some("Restore the missing code-analysis component."),
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
     fn provider_retry_after_raises_but_never_lowers_the_delay() {
         let declared = TransientFailure {
             rate_limited: true,

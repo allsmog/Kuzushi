@@ -92,6 +92,27 @@ fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+fn write_refreshable_openai_oauth(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(
+        path,
+        r#"{"openai-codex":{"access":"oauth-access-secret","refresh":"oauth-refresh-secret","expires":1}}"#,
+    )
+    .unwrap();
+}
+
+fn openai_api_config_with_oauth_store(path: &Path) -> V2Config {
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(path.to_path_buf()),
+        allow_env_token: false,
+    });
+    config
+}
+
 fn wait_for_file_text(path: &Path, expected: &str) -> String {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     loop {
@@ -5053,7 +5074,7 @@ fn context_status_displays_existing_snapshot_or_missing_state() {
         .domain()
         .context_view()
         .status
-        .contains("snapshot present"));
+        .contains("snapshot current"));
 }
 
 #[test]
@@ -7023,8 +7044,65 @@ fn auth_login_reducer_returns_login_effect_without_spawning_process() {
     let effect = auth_login_effect(&result.effects).expect("auth login effect");
     assert_eq!(effect.provider, "openai-codex");
     assert_eq!(effect.method, "headless");
-    assert!(!effect.continue_after_success);
+    assert!(effect.picker_continuation.is_none());
     assert!(!app.ui().force_full_redraw());
+}
+
+#[cfg(unix)]
+#[test]
+fn settled_manual_oauth_login_restores_its_exact_workbench_origin() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.runtime.langgraph_bridge_command = Some(vec!["/usr/bin/true".to_string()]);
+    let mut app = ShellApp::new(config, None);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Scan));
+    app.set_shell_view(ShellView::Workbench);
+    app.set_input_mode(InputMode::Navigate);
+    app.sync_view_change();
+
+    let result = update(
+        &mut app,
+        Msg::Cmd(ShellCommand::AuthLogin(Some("openai".to_string()))),
+    );
+    let login = result
+        .effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            ShellEffect::AuthLogin(login) => Some(login),
+            _ => None,
+        })
+        .expect("OAuth login effect");
+    assert_eq!(app.shell_view(), ShellView::Auth);
+
+    let followup = app.start_auth_login_effect(login);
+
+    assert!(followup.is_empty());
+    assert_eq!(app.shell_view(), ShellView::Workbench);
+    assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Scan));
+    assert_eq!(app.input_mode(), InputMode::Navigate);
+}
+
+#[test]
+fn auth_view_q_returns_to_the_previous_tui_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.sync_view_change();
+    app.set_shell_view(ShellView::Auth);
+    app.sync_view_change();
+    app.set_input_mode(InputMode::Navigate);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.shell_view(), ShellView::Workbench);
 }
 
 #[test]
@@ -7040,7 +7118,14 @@ fn auth_login_effect_with_missing_bridge_reopens_credential_entry() {
     let effects = app.start_auth_login_effect(AuthLoginStart {
         provider: "openai-codex".to_string(),
         method: "browser".to_string(),
-        continue_after_success: true,
+        picker_continuation: Some(PickerAuthContinuation {
+            credential_provider: "openai-codex".to_string(),
+            model_switch: None,
+        }),
+        origin: AuthLoginOrigin {
+            view: ShellView::Workbench,
+            input_mode: InputMode::Prompt,
+        },
     });
 
     assert!(effects.is_empty());
@@ -7155,7 +7240,7 @@ fn auth_picker_oauth_returns_login_effect_with_continuation() {
     let effect = auth_login_effect(&result.effects).expect("auth login effect");
     assert_eq!(effect.provider, "openai-codex");
     assert_eq!(effect.method, "browser");
-    assert!(effect.continue_after_success);
+    assert!(effect.picker_continuation.is_some());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "onboarding" && line.body.contains("dispatching OAuth login for openai")
     }));
@@ -7182,7 +7267,7 @@ fn auth_picker_oauth_accepts_the_openai_model_provider_id() {
     let effect = auth_login_effect(&result.effects).expect("auth login effect");
     assert_eq!(effect.provider, "openai-codex");
     assert_eq!(effect.method, "browser");
-    assert!(effect.continue_after_success);
+    assert!(effect.picker_continuation.is_some());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "onboarding" && line.body.contains("OAuth login for openai;")
     }));
@@ -7219,7 +7304,7 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
         &mut app,
         ShellCommand::AuthLogin(Some("not-a-provider".to_string())),
     );
-    assert_eq!(app.shell_view(), ShellView::Auth);
+    assert_eq!(app.shell_view(), ShellView::Setup);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("unsupported auth login provider")
     }));
@@ -7303,6 +7388,9 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
         "anthropic",
         "browser",
         Ok(std::process::ExitStatus::from_raw(0)),
+        "/tmp/operator-oauth.json",
+        false,
+        true,
     );
     assert_eq!(prefix, "auth");
     assert!(success.contains("Next: model 5"));
@@ -7311,6 +7399,9 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
         "openai-codex",
         "browser",
         Ok(std::process::ExitStatus::from_raw(0)),
+        "/tmp/operator-oauth.json",
+        false,
+        false,
     );
     assert_eq!(prefix, "auth");
     assert!(openai_success.contains("Next: model 3 (openai-oauth:gpt-5.4)"));
@@ -7321,11 +7412,15 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
         "openai-codex",
         "headless",
         Ok(std::process::ExitStatus::from_raw(1 << 8)),
+        "/tmp/operator-oauth.json",
+        false,
+        false,
     );
     assert_eq!(prefix, "error");
     assert!(failed.contains("exited"));
     assert!(failed.contains("openai OAuth"));
-    assert!(failed.contains("choose API key, retry OAuth"));
+    assert!(!failed.contains("choose API key"));
+    assert!(failed.contains("retry OAuth"));
     assert!(failed.contains("move to Offline demo and press Enter"));
     assert!(!failed.contains("press d"));
 
@@ -7333,10 +7428,24 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
         "openai-codex",
         "browser",
         Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
+        "/tmp/operator-oauth.json",
+        false,
+        false,
     );
     assert_eq!(prefix, "error");
     assert!(spawn.contains("could not start"));
     assert!(spawn.contains("move to Offline demo and press Enter"));
+
+    let (_, recovery_failure) = auth_login_status_message(
+        "openai-codex",
+        "browser",
+        Ok(std::process::ExitStatus::from_raw(1 << 8)),
+        "/tmp/operator-oauth.json",
+        true,
+        false,
+    );
+    assert!(recovery_failure.contains("preserved Scan"));
+    assert!(!recovery_failure.contains("Offline demo"));
 }
 
 #[test]
@@ -7704,7 +7813,7 @@ fn config_view_onboards_with_keyboard_model_selection() {
     // state), so navigation steps the *visible* set — derive expectations from
     // it rather than hardcoding an index, and assert the Enter target is exactly
     // the highlighted (visible) row, not a hidden one.
-    let visible = super::settings::visible_model_choice_indexes(app.config().model.as_deref());
+    let visible = super::settings::visible_model_choice_indexes(app.config());
     let choices = super::settings::model_choices();
     app.router
         .model_catalog_mut()
@@ -7835,7 +7944,7 @@ fn credential_entry_guidance_uses_nonconflicting_offline_demo_control() {
         .expect("credential entry guidance");
     assert!(guidance
         .body
-        .contains("choose API key (OPENAI_API_KEY), Offline demo and press Enter"));
+        .contains("choose API key (OPENAI_API_KEY), Use OpenAI OAuth (switch model), Offline demo and press Enter"));
     assert!(!guidance.body.contains("press d"));
 }
 
@@ -8114,13 +8223,150 @@ fn stored_oauth_gets_visible_secret_safe_acknowledgement() {
     assert_eq!(notice.severity, NoticeSeverity::Success);
     assert!(notice
         .message
-        .contains("anthropic OAuth already stored; credentials hidden"));
+        .contains("anthropic OAuth connection reused; credentials hidden"));
     assert!(!notice.message.contains("oauth-access-secret"));
     assert!(!notice.message.contains("oauth-refresh-secret"));
 }
 
 #[test]
-fn explicit_openai_api_model_does_not_offer_oauth_as_compatible() {
+fn stored_anthropic_oauth_does_not_masquerade_as_an_api_key() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    fs::write(
+        &credentials_path,
+        r#"{"anthropic":{"access":"oauth-secret","refresh":"oauth-refresh"}}"#,
+    )
+    .unwrap();
+    let mut config = V2Config::default();
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(credentials_path),
+        allow_env_token: false,
+    });
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("anthropic".to_string());
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(result.effects.is_empty());
+    assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+    let notice = app.advisory().notice.as_ref().expect("missing-key notice");
+    assert!(notice.message.contains("API key is empty"));
+    assert!(!notice.message.contains("already available"));
+}
+
+#[test]
+fn configured_anthropic_oauth_environment_token_is_reported_as_oauth() {
+    let _env_lock = env_test_lock();
+    let _api_key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let _oauth = EnvVarGuard::set("ANTHROPIC_OAUTH_TOKEN", "oauth-env-secret");
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = V2Config::default();
+    config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(temp.path().join("missing-oauth.json")),
+        allow_env_token: true,
+    });
+    let app = ShellApp::new(config, None);
+
+    assert_eq!(
+        oauth_provider_status(app.config(), "anthropic"),
+        OauthCredentialStatus::Environment
+    );
+    assert_eq!(
+        crate::ui_view_models::configured_model_credential_readiness(&app),
+        crate::ui_view_models::CredentialReadiness::OAuth
+    );
+    let choice = model_choices()
+        .iter()
+        .find(|choice| choice.provider == "anthropic")
+        .expect("Anthropic model");
+    assert_eq!(
+        crate::ui_view_models::model_auth_status(&app, choice),
+        "OAuth ready (environment token)"
+    );
+}
+
+#[test]
+fn explicitly_selected_anthropic_oauth_suppresses_the_api_key_transport() {
+    let _env_lock = env_test_lock();
+    let _api_key = EnvVarGuard::set("ANTHROPIC_API_KEY", "rejected-api-secret");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    fs::write(
+        &credentials_path,
+        r#"{"anthropic":{"access":"oauth-secret","refresh":"oauth-refresh"}}"#,
+    )
+    .unwrap();
+    let mut config = V2Config::default();
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(credentials_path),
+        allow_env_token: false,
+    });
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    let [ShellEffect::SetSessionEnv(env)] = result.effects.as_slice() else {
+        panic!("OAuth selection must suppress the competing API-key transport")
+    };
+    assert_eq!(env.key, "ANTHROPIC_API_KEY");
+    assert!(env.value.is_empty());
+    EffectRuntime::execute(&mut app, result.effects);
+    assert!(!env_credential_is_ready("ANTHROPIC_API_KEY"));
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("rejected-api-secret")));
+}
+
+#[test]
+fn anthropic_api_key_does_not_skip_a_requested_oauth_login() {
+    let _env_lock = env_test_lock();
+    let _api_key = EnvVarGuard::set("ANTHROPIC_API_KEY", "api-secret");
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = V2Config::default();
+    config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+        credentials_path: Some(temp.path().join("missing-oauth.json")),
+        allow_env_token: false,
+    });
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("anthropic".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    let login = auth_login_effect(&result.effects).expect("Anthropic OAuth login effect");
+    assert_eq!(login.provider, "anthropic");
+    assert!(result
+        .effects
+        .iter()
+        .all(|effect| !matches!(effect, ShellEffect::SetSessionEnv(_))));
+}
+
+#[test]
+fn explicit_openai_api_model_offers_a_labeled_oauth_switch_without_mutating_on_open() {
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -8140,10 +8386,260 @@ fn explicit_openai_api_model_does_not_offer_oauth_as_compatible() {
 
     assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
     assert_eq!(app.session_thinking_level(), Some("high"));
-    assert_eq!(app.router.auth_picker().row_count(), 2);
+    assert_eq!(app.router.auth_picker().row_count(), 3);
     assert!(app.router.auth_picker().is_api_key_row());
     app.router.auth_picker_mut().set_cursor(1);
+    assert_eq!(
+        app.router.auth_picker().selected_kind(),
+        Some(AuthMethodRowKind::OAuth)
+    );
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.session_thinking_level(), Some("high"));
+    app.router.auth_picker_mut().set_cursor(2);
     assert!(app.router.auth_picker().is_offline_demo_row());
+}
+
+#[test]
+fn stored_openai_oauth_explicitly_switches_the_configured_api_model_without_login() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, None);
+    app.set_session_thinking_level(Some("high".to_string()));
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(auth_login_effect(&result.effects).is_none());
+    let persist = global_model_persist_effect(&result.effects).expect("model persist effect");
+    assert_eq!(persist.model, "openai-codex:gpt-5.4");
+    assert_eq!(persist.thinking_level.as_deref(), Some("xhigh"));
+    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    assert_eq!(app.session_thinking_level(), Some("xhigh"));
+    assert_eq!(app.router.setup().editor(), None);
+    let notice = app.advisory().notice.as_ref().expect("OAuth reuse notice");
+    assert!(notice.message.contains("OAuth connection reused"));
+    assert!(notice.message.contains("openai-oauth:gpt-5.4"));
+    assert!(!notice.message.contains("oauth-access-secret"));
+    assert!(!notice.message.contains("oauth-refresh-secret"));
+}
+
+#[test]
+fn native_openai_oauth_model_reuses_connection_without_switching_model() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.model = Some("openai-codex:gpt-5.3-codex-spark".to_string());
+    let mut app = ShellApp::new(config, None);
+    app.set_session_thinking_level(Some("medium".to_string()));
+    app.open_credential_entry("openai-codex".to_string());
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(auth_login_effect(&result.effects).is_none());
+    assert!(global_model_persist_effect(&result.effects).is_none());
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("openai-codex:gpt-5.3-codex-spark")
+    );
+    assert_eq!(app.session_thinking_level(), Some("medium"));
+}
+
+#[test]
+fn missing_openai_oauth_carries_the_explicit_switch_through_the_existing_login_effect() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("missing-oauth.json");
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, None);
+    app.set_session_thinking_level(Some("high".to_string()));
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    let login = auth_login_effect(&result.effects).expect("shared OAuth login effect");
+    assert_eq!(login.provider, "openai-codex");
+    let continuation = login
+        .picker_continuation
+        .as_ref()
+        .expect("picker continuation");
+    assert_eq!(continuation.credential_provider, "openai");
+    assert_eq!(
+        continuation
+            .model_switch
+            .as_ref()
+            .map(|switch| switch.model.as_str()),
+        Some("openai-codex:gpt-5.4")
+    );
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.session_thinking_level(), Some("high"));
+    assert!(global_model_persist_effect(&result.effects).is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn successful_picker_login_writes_and_reprobes_the_configured_oauth_store() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let _credentials_env = EnvVarGuard::unset("KUZUSHI_OAUTH_CREDENTIALS");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("custom/operator-oauth.json");
+    let script_path = temp.path().join("oauth-login.sh");
+    fs::write(
+        &script_path,
+        concat!(
+            "mkdir -p \"$(dirname \"$KUZUSHI_OAUTH_CREDENTIALS\")\"\n",
+            "printf '%s\\n' '{\"openai-codex\":{\"access\":\"child-secret\",",
+            "\"refresh\":\"child-refresh\",\"expires\":4102444800000}}' ",
+            "> \"$KUZUSHI_OAUTH_CREDENTIALS\"\n",
+        ),
+    )
+    .unwrap();
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.runtime.langgraph_bridge_command = Some(vec![
+        "/bin/sh".to_string(),
+        script_path.display().to_string(),
+    ]);
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+    let update_result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    let login = update_result
+        .effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            ShellEffect::AuthLogin(login) => Some(login),
+            _ => None,
+        })
+        .expect("shared OAuth login effect");
+
+    let followup = app.start_auth_login_effect(login);
+
+    assert!(credentials_path.is_file());
+    assert_eq!(
+        oauth_provider_status(app.config(), "openai-codex"),
+        OauthCredentialStatus::Ready
+    );
+    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    assert!(global_model_persist_effect(&followup).is_some());
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert!(std::env::var_os("KUZUSHI_OAUTH_CREDENTIALS").is_none());
+    assert!(app.log_lines().iter().all(|line| {
+        !line.body.contains("child-secret") && !line.body.contains("child-refresh")
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn oauth_login_exit_zero_without_usable_credentials_is_not_success() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("missing-oauth.json");
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.runtime.langgraph_bridge_command = Some(vec!["/usr/bin/true".to_string()]);
+    let mut app = ShellApp::new(config, None);
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+    let update_result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    let login = update_result
+        .effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            ShellEffect::AuthLogin(login) => Some(login),
+            _ => None,
+        })
+        .expect("OAuth login effect");
+
+    let followup = app.start_auth_login_effect(login);
+
+    assert!(followup.is_empty());
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("OAuth failure notice");
+    assert!(notice
+        .message
+        .contains("finished without producing usable credentials"));
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("stored at")));
+}
+
+#[cfg(unix)]
+#[test]
+fn failed_openai_oauth_login_preserves_the_api_model_and_returns_to_its_picker() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let temp = tempfile::tempdir().unwrap();
+    let credentials_path = temp.path().join("missing-oauth.json");
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.runtime.langgraph_bridge_command = Some(vec!["/usr/bin/false".to_string()]);
+    let mut app = ShellApp::new(config, None);
+    app.set_session_thinking_level(Some("high".to_string()));
+    app.open_credential_entry("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.session_thinking_level(), Some("high"));
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert_eq!(app.router.auth_picker().provider(), "openai");
+    assert_eq!(app.router.auth_picker().row_count(), 3);
+    let notice = app
+        .advisory()
+        .notice
+        .as_ref()
+        .expect("OAuth failure notice");
+    assert_eq!(notice.severity, NoticeSeverity::Error);
+    assert!(notice.message.contains("OAuth login exited"));
 }
 
 #[test]
@@ -8173,7 +8669,9 @@ fn setup_explains_when_openai_oauth_is_incompatible_with_selected_model() {
 
     assert_eq!(credentials.status, "MISSING");
     assert!(credentials.detail.contains("requires OPENAI_API_KEY"));
-    assert!(credentials.detail.contains("openai-codex models only"));
+    assert!(credentials
+        .detail
+        .contains("explicit switch to OpenAI OAuth GPT-5.4"));
 }
 
 #[test]
@@ -8322,10 +8820,22 @@ fn missing_provider_auth_unchecks_model_backed_planning_tasks() {
 }
 
 #[test]
+fn empty_openai_api_key_matches_runtime_missing_credential_semantics() {
+    let _env_lock = env_test_lock();
+    let _guard = EnvVarGuard::set("OPENAI_API_KEY", "   ");
+    let temp = tempfile::tempdir().unwrap();
+    let config = openai_api_config_with_oauth_store(&temp.path().join("missing-oauth.json"));
+    let app = ShellApp::new(config, None);
+
+    assert!(!app.provider_auth_ready_for("openai"));
+    assert!(!app.configured_model_auth_ready());
+}
+
+#[test]
 fn model_picker_shows_openai_oauth_before_login() {
     let _env_lock = env_test_lock();
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
-    let choices = super::settings::visible_model_choices(None);
+    let choices = super::settings::visible_model_choices(&V2Config::default());
     assert!(
         choices
             .iter()
@@ -11961,7 +12471,7 @@ fn model_picker_enter_with_keyless_provider_returns_to_setup() {
     let _home = EnvVarGuard::set("HOME", tmp.path().to_string_lossy().as_ref());
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_model_picker();
-    let choices = super::settings::visible_model_choices(app.config().model.as_deref());
+    let choices = super::settings::visible_model_choices(app.config());
     let idx = choices
         .iter()
         .position(|choice| choice.provider == "anthropic")
@@ -18052,7 +18562,7 @@ fn move_model_selection_only_visits_visible_rows() {
     // The Config view hides the non-primary OpenAI row, so navigation must never
     // park the selection on a hidden index (which the renderer would collapse to
     // the first visible row, desyncing the highlight from the Enter target).
-    let visible = super::settings::visible_model_choice_indexes(app.config().model.as_deref());
+    let visible = super::settings::visible_model_choice_indexes(app.config());
     app.router
         .model_catalog_mut()
         .set_selected_index(visible[0]);
@@ -19601,6 +20111,29 @@ fn open_test_planning_picker(app: &mut ShellApp, rows: Vec<PlanningTaskRow>) {
 }
 
 #[test]
+fn planning_picker_space_cycles_cached_outcomes() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let task = PlanningTaskId::GatherRepoContext;
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(task, PlanningArtifactState::Cached)],
+    );
+    let space = KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty());
+
+    press_key(&mut app, space);
+    assert!(app.engagement.planning_picker().selected().contains(&task));
+    assert!(app.engagement.planning_picker().rebuild().contains(&task));
+
+    press_key(&mut app, space);
+    assert!(!app.engagement.planning_picker().selected().contains(&task));
+    assert!(!app.engagement.planning_picker().rebuild().contains(&task));
+
+    press_key(&mut app, space);
+    assert!(app.engagement.planning_picker().selected().contains(&task));
+    assert!(!app.engagement.planning_picker().rebuild().contains(&task));
+}
+
+#[test]
 fn planning_picker_starts_on_the_first_selected_runnable_row() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let rows = vec![
@@ -19680,7 +20213,7 @@ fn confirming_with_nothing_selected_names_the_skipped_phase() {
     assert!(
         app.log_lines()
             .iter()
-            .any(|line| line.body.contains("nothing selected — skipping")),
+            .any(|line| line.body.contains("nothing selected · skipping")),
         "names the skip"
     );
     assert_ne!(
@@ -19960,7 +20493,12 @@ fn open_stride_planning_options_with_model_override(app: &mut ShellApp) -> serde
     let option_index = app
         .registry()
         .resolve_tool(PlanningTaskId::BuildStrideThreatModel.tool_name())
-        .and_then(|tool| tool.options.iter().position(|spec| spec.name == "model"))
+        .and_then(|tool| {
+            tool.options
+                .iter()
+                .filter(|spec| crate::app::option_is_operator_editable(spec))
+                .position(|spec| spec.name == "model")
+        })
         .expect("threat-model model option");
     app.move_planning_option_cursor(option_index as isize);
     let value = serde_json::json!("openai:gpt-5.5");
@@ -20121,13 +20659,352 @@ fn model_backed_scan_opens_credential_recovery_without_starting_a_run() {
     assert_eq!(app.shell_view(), ShellView::Setup);
     assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
     assert!(app.router.auth_picker().is_recovery());
-    assert_eq!(app.router.auth_picker().row_count(), 1);
+    assert_eq!(app.router.auth_picker().row_count(), 2);
     assert!(app.router.auth_picker().is_api_key_row());
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Scan));
     assert_eq!(app.engagement.planning_picker().selected(), &selected);
     assert!(app.engagement.planning_queues_empty());
     assert!(app.engagement.pending_credential_continuation().is_some());
     assert!(!target.path().join(".kuzushi/v3/runs").exists());
+}
+
+#[test]
+fn explicit_task_model_avoids_the_unrelated_config_model_credential_gate() {
+    let _env_lock = env_test_lock();
+    let _openai_key = EnvVarGuard::set("OPENAI_API_KEY", "task-model-secret");
+    let _anthropic_key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let mut config = V2Config::default();
+    config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+    let mut app = ShellApp::new(config, Some(&workspace));
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(
+            PlanningTaskId::ScanAgenticSast,
+            PlanningArtifactState::Action,
+        )],
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    app.engagement.set_option_override(
+        PlanningTaskId::ScanAgenticSast,
+        "model".to_string(),
+        serde_json::json!("openai:gpt-5.5"),
+    );
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(matches!(
+        result.effects.as_slice(),
+        [ShellEffect::DispatchNextPlanningTask(_)]
+    ));
+    assert!(app.engagement.pending_credential_continuation().is_none());
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("requires ANTHROPIC_API_KEY")));
+}
+
+#[test]
+fn stored_openai_oauth_retargets_and_resumes_the_preserved_scan_plan() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let credentials_path = target.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    open_test_planning_picker(
+        &mut app,
+        vec![
+            planning_test_row(
+                PlanningTaskId::ScanAgenticSast,
+                PlanningArtifactState::Action,
+            ),
+            planning_test_row(PlanningTaskId::ScanSecrets, PlanningArtifactState::Action),
+        ],
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(auth_login_effect(&result.effects).is_none());
+    assert!(global_model_persist_effect(&result.effects).is_some());
+    assert!(result
+        .effects
+        .iter()
+        .any(|effect| matches!(effect, ShellEffect::ResumeCredentialContinuation)));
+    let pending = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("preserved continuation");
+    assert_eq!(pending.model, "openai-codex:gpt-5.4");
+    assert_eq!(pending.model_binding, PendingCredentialModelBinding::Config);
+    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+
+    let resume = app.resume_credential_continuation_effect();
+
+    assert!(matches!(
+        resume.as_slice(),
+        [ShellEffect::DispatchNextPlanningTask(_)]
+    ));
+    assert_eq!(app.engagement.queued_task_count(), 2);
+    assert!(app.engagement.pending_credential_continuation().is_none());
+}
+
+#[cfg(unix)]
+#[test]
+fn new_openai_oauth_login_resumes_the_exact_committed_scan_plan() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let credentials_path = target.path().join("custom/operator-oauth.json");
+    let script_path = target.path().join("oauth-login.sh");
+    fs::write(
+        &script_path,
+        concat!(
+            "mkdir -p \"$(dirname \"$KUZUSHI_OAUTH_CREDENTIALS\")\"\n",
+            "printf '%s\\n' '{\"openai-codex\":{\"access\":\"new-secret\",",
+            "\"refresh\":\"new-refresh\",\"expires\":4102444800000}}' ",
+            "> \"$KUZUSHI_OAUTH_CREDENTIALS\"\n",
+        ),
+    )
+    .unwrap();
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.runtime.langgraph_bridge_command = Some(vec![
+        "/bin/sh".to_string(),
+        script_path.display().to_string(),
+    ]);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    let active_target = app.target_owned().expect("active target");
+    let plan = vec![PlanningTaskId::ScanSecrets, PlanningTaskId::ScanAgenticSast];
+    open_test_planning_picker(
+        &mut app,
+        plan.iter()
+            .copied()
+            .map(|task| planning_test_row(task, PlanningArtifactState::Action))
+            .collect(),
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    let preserved = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("committed plan continuation")
+        .clone();
+    assert_eq!(preserved.target, active_target);
+    assert_eq!(preserved.phase, WorkflowPhase::Scan);
+    assert_eq!(preserved.work, PendingCredentialWork::CommittedPlan(plan));
+    app.router.auth_picker_mut().set_cursor(1);
+    let picker_result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    let login = picker_result
+        .effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            ShellEffect::AuthLogin(login) => Some(login),
+            _ => None,
+        })
+        .expect("OAuth login effect");
+
+    let followup = app.start_auth_login_effect(login);
+
+    assert!(matches!(
+        followup.as_slice(),
+        [
+            ShellEffect::PersistGlobalModelSelection(selection),
+            ShellEffect::ResumeCredentialContinuation
+        ] if selection.model == "openai-codex:gpt-5.4"
+            && selection.thinking_level.as_deref() == Some("xhigh")
+    ));
+    let retargeted = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("retargeted plan continuation");
+    assert_eq!(retargeted.target, preserved.target);
+    assert_eq!(retargeted.phase, preserved.phase);
+    assert_eq!(retargeted.work, preserved.work);
+    assert_eq!(retargeted.model, "openai-codex:gpt-5.4");
+
+    let dispatch = app.resume_credential_continuation_effect();
+
+    assert!(matches!(
+        dispatch.as_slice(),
+        [ShellEffect::DispatchNextPlanningTask(_)]
+    ));
+    assert_eq!(app.engagement.pending_planning_step_count(), 2);
+}
+
+#[test]
+fn stored_openai_oauth_switches_only_an_explicitly_bound_deferred_step() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let credentials_path = target.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.set_session_thinking_level(Some("high".to_string()));
+    let active_target = app.target_owned().expect("active target");
+    app.engagement.set_option_override(
+        PlanningTaskId::ScanAgenticSast,
+        "model".to_string(),
+        serde_json::json!("openai:gpt-5.5"),
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    app.engagement
+        .queue_plan(vec![PlanningTaskId::ScanAgenticSast]);
+
+    let preflight = app.dispatch_next_planning_task(workspace);
+
+    assert!(preflight.is_empty());
+    let pending = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("preflight continuation");
+    assert_eq!(
+        pending.model_binding,
+        PendingCredentialModelBinding::DeferredStepInput
+    );
+    assert_eq!(pending.model, "openai:gpt-5.5");
+    let PendingCredentialWork::DeferredStep(step) = &pending.work else {
+        panic!("expected deferred step")
+    };
+    assert_eq!(
+        step.input.get("model").and_then(serde_json::Value::as_str),
+        Some("openai:gpt-5.5")
+    );
+    app.router.auth_picker_mut().set_cursor(1);
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(global_model_persist_effect(&result.effects).is_none());
+    assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+    assert_eq!(app.session_thinking_level(), Some("high"));
+    let pending = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("retargeted continuation");
+    assert_eq!(pending.model, "openai-codex:gpt-5.4");
+    let PendingCredentialWork::DeferredStep(step) = &pending.work else {
+        panic!("expected deferred step")
+    };
+    assert_eq!(
+        step.input.get("model").and_then(serde_json::Value::as_str),
+        Some("openai-codex:gpt-5.4")
+    );
+    assert_eq!(app.target_owned().as_ref(), Some(&active_target));
+    assert!(app.provider_auth_ready_for("openai-codex"));
+    assert_eq!(
+        app.engagement
+            .option_override_value(PlanningTaskId::ScanAgenticSast, "model"),
+        Some(serde_json::json!("openai:gpt-5.5"))
+    );
+
+    let resume = app.resume_credential_continuation_effect();
+
+    assert!(matches!(
+        resume.as_slice(),
+        [ShellEffect::DispatchNextPlanningTask(_)]
+    ));
+    assert_eq!(app.engagement.pending_planning_step_count(), 1);
+    let resumed_step = app.engagement.pop_expanded_step().expect("resumed step");
+    assert_eq!(
+        resumed_step
+            .input
+            .get("model")
+            .and_then(serde_json::Value::as_str),
+        Some("openai-codex:gpt-5.4")
+    );
+    assert!(app.log_lines().iter().any(|line| {
+        line.body.contains("paused step explicitly switched")
+            && line.body.contains("global model unchanged")
+    }));
+}
+
+#[test]
+fn oauth_switch_refuses_to_clobber_a_model_changed_while_recovery_was_open() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let credentials_path = target.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let config = openai_api_config_with_oauth_store(&credentials_path);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    let active_target = app.target_owned().expect("active target");
+    app.engagement
+        .set_pending_credential_continuation(PendingCredentialContinuation {
+            target: active_target,
+            phase: WorkflowPhase::Scan,
+            model: "openai:gpt-5.5".to_string(),
+            model_binding: PendingCredentialModelBinding::Config,
+            credential_requirement: PendingCredentialRequirement::AnyCompatible,
+            work: PendingCredentialWork::CommittedPlan(vec![PlanningTaskId::ScanAgenticSast]),
+        });
+    app.open_credential_recovery("openai".to_string());
+    app.router.auth_picker_mut().set_cursor(1);
+    app.config_mut().model = Some("anthropic:claude-sonnet-4-6".to_string());
+
+    let result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+
+    assert!(result.effects.is_empty());
+    assert_eq!(
+        app.config().model.as_deref(),
+        Some("anthropic:claude-sonnet-4-6")
+    );
+    assert_eq!(
+        app.engagement
+            .pending_credential_continuation()
+            .map(|pending| pending.model.as_str()),
+        Some("openai:gpt-5.5")
+    );
+    assert!(app
+        .advisory()
+        .notice
+        .as_ref()
+        .is_some_and(|notice| notice.message.contains("target or model changed")));
 }
 
 #[test]
@@ -20229,6 +21106,7 @@ fn escaping_credential_recovery_returns_to_the_unchanged_scan_plan() {
     assert!(app.engagement.pending_credential_continuation().is_some());
     assert!(app.router.auth_picker().is_recovery());
     assert_eq!(app.router.setup().editor(), Some(SetupEditor::Credentials));
+    app.clear_notice();
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
@@ -20242,6 +21120,41 @@ fn escaping_credential_recovery_returns_to_the_unchanged_scan_plan() {
         .log_lines()
         .iter()
         .all(|line| !line.body.contains("draft-secret")));
+}
+
+#[test]
+fn recovery_notice_owns_the_first_escape_before_returning_to_scan() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, Some(&workspace));
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(
+            PlanningTaskId::ScanAgenticSast,
+            PlanningArtifactState::Action,
+        )],
+    );
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
+    assert!(app.advisory().notice.is_some());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.advisory().notice.is_none());
+    assert_eq!(app.shell_view(), ShellView::Setup);
+    assert!(app.engagement.pending_credential_continuation().is_some());
+
+    press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+    assert!(app.engagement.pending_credential_continuation().is_none());
 }
 
 #[test]
@@ -20276,6 +21189,8 @@ fn missing_credentials_between_planning_steps_pause_without_a_failed_task() {
 
 #[test]
 fn rejected_credentials_pause_and_preserve_the_running_planning_step() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::set("OPENAI_API_KEY", "rejected-key-secret");
     let target = tempfile::tempdir().expect("temp target");
     let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
     let mut config = V2Config::default();
@@ -20312,8 +21227,136 @@ fn rejected_credentials_pause_and_preserve_the_running_planning_step() {
         Some(PendingCredentialWork::DeferredStep(step))
             if step.task == PlanningTaskId::ScanAgenticSast
     ));
+    let pending = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("rejected credential continuation");
+    assert_eq!(
+        pending.credential_requirement,
+        PendingCredentialRequirement::ReplaceApiKey
+    );
+    assert_eq!(
+        pending.model_binding,
+        PendingCredentialModelBinding::DeferredStepInput
+    );
     assert_eq!(app.shell_view(), ShellView::Setup);
     assert!(app.router.auth_picker().is_recovery());
+
+    let empty = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    assert!(empty.effects.is_empty());
+    assert!(app.engagement.pending_credential_continuation().is_some());
+    assert!(app.advisory().notice.as_ref().is_some_and(|notice| notice
+        .message
+        .contains("previous OPENAI_API_KEY was rejected")));
+
+    paste_text(&mut app, "replacement-key-secret");
+    let replacement = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    assert!(matches!(
+        replacement.effects.as_slice(),
+        [
+            ShellEffect::SetSessionEnv(_),
+            ShellEffect::ResumeCredentialContinuation
+        ]
+    ));
+    assert_eq!(
+        app.engagement
+            .pending_credential_continuation()
+            .map(|pending| pending.credential_requirement),
+        Some(PendingCredentialRequirement::AnyCompatible)
+    );
+    assert!(app.log_lines().iter().all(|line| {
+        !line.body.contains("rejected-key-secret") && !line.body.contains("replacement-key-secret")
+    }));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejected_stored_openai_oauth_requires_a_changed_connection_before_resume() {
+    let _env_lock = env_test_lock();
+    let _key = EnvVarGuard::unset("OPENAI_API_KEY");
+    let target = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+    let credentials_path = target.path().join("operator-oauth.json");
+    write_refreshable_openai_oauth(&credentials_path);
+    let mut config = openai_api_config_with_oauth_store(&credentials_path);
+    config.model = Some("openai-codex:gpt-5.4".to_string());
+    config.runtime.langgraph_bridge_command = Some(vec!["/usr/bin/true".to_string()]);
+    let mut app = ShellApp::new(config, Some(&workspace));
+    app.engagement.set_phase(WorkflowPhase::Scan);
+    app.engagement.queue_plan(vec![PlanningTaskId::ScanSecrets]);
+    app.engagement
+        .set_running_planning_run_step(PlanningRunStep {
+            task: PlanningTaskId::ScanAgenticSast,
+            tool_name: "agentic-sast:scan".to_string(),
+            input: serde_json::json!({"model": "openai-codex:gpt-5.4"}),
+        });
+
+    app.apply_tool_event(ToolEvent::AuthenticationFailed {
+        tool_name: "agentic-sast:scan".to_string(),
+        error: "Stored OAuth was rejected.".to_string(),
+        completion: None,
+    });
+
+    let preserved = app
+        .engagement
+        .pending_credential_continuation()
+        .expect("OAuth reconnect continuation")
+        .clone();
+    assert_eq!(
+        preserved.credential_requirement,
+        PendingCredentialRequirement::ReconnectOauth
+    );
+    assert_eq!(app.router.auth_picker().provider(), "openai-codex");
+    let picker_result = update(
+        &mut app,
+        Msg::Term(TermEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::empty(),
+        ))),
+    );
+    assert!(picker_result
+        .effects
+        .iter()
+        .all(|effect| !matches!(effect, ShellEffect::ResumeCredentialContinuation)));
+    let login = picker_result
+        .effects
+        .into_iter()
+        .find_map(|effect| match effect {
+            ShellEffect::AuthLogin(login) => Some(login),
+            _ => None,
+        })
+        .expect("forced OAuth reconnect effect");
+
+    let followup = app.start_auth_login_effect(login);
+
+    assert!(followup.is_empty());
+    assert_eq!(
+        app.engagement.pending_credential_continuation(),
+        Some(&preserved)
+    );
+    assert!(app
+        .engagement
+        .queued_task_contains(PlanningTaskId::ScanSecrets));
+    assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+    assert!(app.advisory().notice.as_ref().is_some_and(|notice| notice
+        .message
+        .contains("did not replace the rejected credential")));
+    assert!(app
+        .log_lines()
+        .iter()
+        .all(|line| !line.body.contains("oauth-access-secret")));
 }
 
 #[test]

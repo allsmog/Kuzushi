@@ -2278,6 +2278,7 @@ dependencies = [
  "ratatui",
  "serde",
  "serde_json",
+ "shlex",
  "strum",
  "tempfile",
  "unicode-width",

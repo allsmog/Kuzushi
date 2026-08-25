@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{
-    auth_ready_for_provider, build_execution_plan, display_model_selector, toggle_planning_row,
+    auth_ready_for_provider, build_execution_plan, cycle_planning_row, display_model_selector,
     visible_model_choices, AuthMethodRowKind, ToggleOutcome,
 };
 use std::path::PathBuf;
@@ -443,12 +443,12 @@ impl ShellApp {
     }
 
     fn move_model_picker_cursor(&mut self, delta: isize) {
-        let len = visible_model_choices(self.config().model.as_deref()).len();
+        let len = visible_model_choices(self.config()).len();
         self.router.model_picker_mut().move_cursor(delta, len);
     }
 
     fn accept_model_picker_choice(&mut self) -> Vec<ShellEffect> {
-        let choices = visible_model_choices(self.config().model.as_deref());
+        let choices = visible_model_choices(self.config());
         let Some(choice) = choices.get(self.router.model_picker().cursor()).copied() else {
             self.log("error", "no model choices available");
             return Vec::new();
@@ -661,7 +661,10 @@ impl ShellApp {
         if !self.router.auth_picker().key_draft_trimmed().is_empty() {
             return self.accept_pasted_auth_api_key(api_key_provider);
         }
-        if self.provider_auth_ready_for(api_key_provider) {
+        if self.api_key_ready_for_picker(api_key_provider)
+            && !self.pending_api_key_replacement_required()
+        {
+            self.engagement.satisfy_pending_credential_requirement();
             self.set_success_notice(
                 "onboarding",
                 format!(
@@ -672,8 +675,15 @@ impl ShellApp {
             return self.transition_after_auth_ready();
         }
         let env_var = api_key_env_var(api_key_provider);
-        let message =
-            format!("API key is empty — paste {env_var}, then press Enter; it stays session-only and hidden");
+        let message = if self.pending_api_key_replacement_required() {
+            format!(
+                "The previous {env_var} was rejected · paste a replacement, then press Enter; it stays session-only and hidden"
+            )
+        } else {
+            format!(
+                "API key is empty · paste {env_var}, then press Enter; it stays session-only and hidden"
+            )
+        };
         self.set_warn_notice("onboarding", message);
         Vec::new()
     }
@@ -683,6 +693,7 @@ impl ShellApp {
         let key = self.router.auth_picker_mut().take_key_draft_trimmed();
         self.session_mut()
             .mark_session_api_key_ready(api_key_provider);
+        self.engagement.satisfy_pending_credential_requirement();
         self.set_success_notice(
             "onboarding",
             format!("{env_var} accepted for this session; value hidden"),
@@ -697,25 +708,72 @@ impl ShellApp {
 
     fn accept_auth_oauth_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
         let oauth_provider = oauth_credential_provider(provider);
-        if auth_ready_for_provider(oauth_provider) {
-            self.set_success_notice(
-                "onboarding",
-                format!(
-                    "{} OAuth already stored; credentials hidden",
-                    auth_provider_label(provider)
-                ),
-            );
-            return self.transition_after_auth_ready();
+        let model_switch = oauth_model_switch_for_provider(provider);
+        if !self.pending_oauth_reconnect_required()
+            && oauth_credential_is_ready(self.config(), oauth_provider)
+        {
+            return self.reuse_auth_oauth_choice(provider, model_switch);
         }
         self.clear_credential_notice();
         self.log(
             "onboarding",
             format!(
-                "dispatching OAuth login for {}; complete in the browser, then re-run /onboarding",
+                "dispatching OAuth login for {}; complete it in the browser and Kuzushi will resume automatically",
                 auth_provider_label(provider)
             ),
         );
         self.reduce_picker_auth_login(provider)
+    }
+
+    fn reuse_auth_oauth_choice(
+        &mut self,
+        provider: &str,
+        model_switch: Option<AuthModelSwitch>,
+    ) -> Vec<ShellEffect> {
+        let destination = model_switch
+            .as_ref()
+            .map(|selection| {
+                format!(
+                    "; switching to {}",
+                    display_model_selector(&selection.model)
+                )
+            })
+            .unwrap_or_default();
+        self.set_success_notice(
+            "onboarding",
+            format!(
+                "{} OAuth connection reused{destination}; credentials hidden",
+                auth_provider_label(provider),
+            ),
+        );
+        let Some(mut model_effects) = self.apply_auth_model_switch(model_switch) else {
+            return Vec::new();
+        };
+        let mut effects = self.select_oauth_transport_effects(provider);
+        effects.append(&mut model_effects);
+        self.engagement.satisfy_pending_credential_requirement();
+        effects.extend(self.transition_after_auth_ready());
+        effects
+    }
+
+    fn api_key_ready_for_picker(&self, provider: &str) -> bool {
+        self.session().session_api_key_ready(provider)
+            || env_credential_is_ready(api_key_env_var(provider))
+    }
+
+    pub(crate) fn select_oauth_transport_effects(&mut self, provider: &str) -> Vec<ShellEffect> {
+        if provider != "anthropic" || !self.api_key_ready_for_picker(provider) {
+            return Vec::new();
+        }
+        self.session_mut().clear_session_api_key_ready(provider);
+        self.log(
+            "auth",
+            "Anthropic OAuth selected explicitly; ignoring ANTHROPIC_API_KEY for this session",
+        );
+        vec![ShellEffect::SetSessionEnv(SessionEnvVar {
+            key: api_key_env_var(provider).to_string(),
+            value: String::new(),
+        })]
     }
 
     pub(crate) fn clear_credential_notice(&mut self) {
@@ -856,7 +914,7 @@ impl ShellApp {
     fn handle_planning_step_selection_key(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Char(' ') => {
-                self.toggle_planning_current_row();
+                self.cycle_planning_current_row();
                 true
             }
             _ => false,
@@ -866,7 +924,7 @@ impl ShellApp {
     fn handle_planning_step_action_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::F(5) => {
-                self.toggle_rebuild_current_row();
+                self.cycle_planning_current_row();
                 InputUpdate::handled()
             }
             KeyCode::Tab | KeyCode::BackTab => {
@@ -923,41 +981,6 @@ impl ShellApp {
         }
     }
 
-    /// F5 on a cached artifact toggles it between reuse and rebuild without
-    /// taking a printable byte away from command entry.
-    fn toggle_rebuild_current_row(&mut self) {
-        let Some(row) = self.engagement.planning_picker().current_row().cloned() else {
-            return;
-        };
-        let id = row.id;
-        if !matches!(
-            row.artifact_state,
-            crate::app::PlanningArtifactState::Cached
-        ) {
-            self.log(
-                "phase",
-                format!("{} has no cached artifact to rebuild", id.label()),
-            );
-            return;
-        }
-        if !row.cli_available {
-            self.log(
-                "phase",
-                format!(
-                    "{} is cached; rebuild requires `{}` on PATH",
-                    id.label(),
-                    row.required_cli.unwrap_or("required binary")
-                ),
-            );
-            return;
-        }
-        if self.engagement.planning_picker_mut().toggle_rebuild(id) {
-            self.log("phase", format!("[rebuild] {}", id.label()));
-        } else {
-            self.log("phase", format!("[reuse] {} (cached)", id.label()));
-        }
-    }
-
     fn move_planning_cursor(&mut self, delta: isize) {
         if self.engagement.planning_picker().tasks().is_empty() {
             return;
@@ -982,7 +1005,7 @@ impl ShellApp {
         self.open_phase_picker(next);
     }
 
-    fn toggle_planning_current_row(&mut self) {
+    fn cycle_planning_current_row(&mut self) {
         let Some(task) = self
             .engagement
             .planning_picker()
@@ -992,12 +1015,26 @@ impl ShellApp {
             return;
         };
         let tasks = self.engagement.planning_picker().tasks().to_vec();
-        let outcome = toggle_planning_row(
-            task,
-            &tasks,
-            self.engagement.planning_picker_mut().selected_mut(),
+        let picker = self.engagement.planning_picker_mut();
+        let (selected, rebuild) = picker.outcome_sets_mut();
+        let outcome = cycle_planning_row(task, &tasks, selected, rebuild);
+        let disposition = row_disposition(
+            tasks
+                .iter()
+                .find(|row| row.id == task)
+                .expect("current row"),
+            picker.selected(),
+            picker.rebuild(),
         );
-        self.log_toggle_outcome(&outcome);
+        self.log_cycle_outcome(&outcome, disposition);
+    }
+
+    fn log_cycle_outcome(&mut self, outcome: &ToggleOutcome, disposition: RowDisposition) {
+        if toggle_outcome_is_refusal(outcome) {
+            self.log_toggle_outcome(outcome);
+            return;
+        }
+        self.log("planning", cycle_outcome_message(outcome, disposition));
     }
 
     fn log_toggle_outcome(&mut self, outcome: &ToggleOutcome) {
@@ -1061,7 +1098,7 @@ impl ShellApp {
         if !plan.iter().any(|task| task.is_model_backed()) {
             return false;
         }
-        match self.planning_credential_gate() {
+        match self.planning_credential_gate(plan) {
             PlanningCredentialGate::Ready => false,
             PlanningCredentialGate::Blocked => true,
             PlanningCredentialGate::Recover(context) => {
@@ -1071,7 +1108,14 @@ impl ShellApp {
         }
     }
 
-    fn planning_credential_gate(&mut self) -> PlanningCredentialGate {
+    fn planning_credential_gate(&mut self, plan: &[PlanningTaskId]) -> PlanningCredentialGate {
+        if !plan
+            .iter()
+            .copied()
+            .any(|task| self.planning_task_uses_config_model(task))
+        {
+            return PlanningCredentialGate::Ready;
+        }
         let Some(model) = self.config().model.clone() else {
             self.set_warn_notice(
                 "planning",
@@ -1098,6 +1142,20 @@ impl ShellApp {
             return PlanningCredentialGate::Blocked;
         };
         PlanningCredentialGate::Recover(Self::planning_credential_context(target, phase, model))
+    }
+
+    fn planning_task_uses_config_model(&self, task: PlanningTaskId) -> bool {
+        if !task.is_model_backed() {
+            return false;
+        }
+        self.resolved_input_for_planning_task(task)
+            .ok()
+            .is_some_and(|input| {
+                !input
+                    .get("model")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|model| !model.trim().is_empty())
+            })
     }
 
     fn planning_credential_context(
@@ -1132,6 +1190,8 @@ impl ShellApp {
                 target: context.target,
                 phase: context.phase,
                 model: context.model,
+                model_binding: PendingCredentialModelBinding::Config,
+                credential_requirement: PendingCredentialRequirement::AnyCompatible,
                 work: PendingCredentialWork::CommittedPlan(plan.to_vec()),
             });
         self.open_credential_recovery(context.provider);
@@ -1233,15 +1293,17 @@ impl ShellApp {
                 .current_phase()
                 .map(|phase| phase.label())
                 .unwrap_or("planning");
-            self.log("phase", format!("nothing selected — skipping {phase}"));
-            self.record_current_phase_skip();
-            return self.advance_to_next_phase();
+            if self.record_current_phase_skip() {
+                self.log("phase", format!("nothing selected · skipping {phase}"));
+                return self.advance_to_next_phase();
+            }
+            return Vec::new();
         }
         self.log(
             "phase",
             format!(
-                "nothing to run — all {} checked {} are cached and will be reused; \
-                 type `next fresh` to rebuild defaults, or uncheck all and press Enter to skip",
+                "nothing to run · all {} checked {} are cached and will be reused; \
+                 press Space on a cached task to run it fresh, or skip every task and press Enter",
                 self.engagement.planning_picker().selected().len(),
                 task_word(self.engagement.planning_picker().selected().len())
             ),
@@ -1386,6 +1448,26 @@ fn toggle_outcome_message(outcome: &ToggleOutcome) -> String {
             format!("{} unavailable — {reason}", task.label())
         }
     }
+}
+
+fn cycle_outcome_message(outcome: &ToggleOutcome, disposition: RowDisposition) -> String {
+    let task = match outcome {
+        ToggleOutcome::On { task, .. } | ToggleOutcome::Off { task } => *task,
+        _ => return toggle_outcome_message(outcome),
+    };
+    let verb = match disposition {
+        RowDisposition::WillRun => "run",
+        RowDisposition::Reused => "reuse",
+        RowDisposition::Off => "skip",
+        RowDisposition::Unavailable => "blocked",
+    };
+    let dependencies = match outcome {
+        ToggleOutcome::On { auto_added, .. } if !auto_added.is_empty() => {
+            format!(" · includes {}", planning_task_labels(auto_added))
+        }
+        _ => String::new(),
+    };
+    format!("[{verb}] {}{dependencies}", task.label())
 }
 
 fn toggle_outcome_is_refusal(outcome: &ToggleOutcome) -> bool {

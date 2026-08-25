@@ -307,7 +307,9 @@ impl CliToolRunSetup {
         match serde_json::from_str(input) {
             Ok(input) => Ok(input),
             Err(error) => {
-                let error = anyhow::Error::new(error).context("--input must be JSON");
+                let error = anyhow::Error::new(error).context(
+                    "--input must contain structured JSON; use --option key=value for ordinary options",
+                );
                 let persisted = self.record_prepare_failure(
                     &serde_json::json!({ "rawInput": input }),
                     &error.to_string(),

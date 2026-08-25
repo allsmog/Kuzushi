@@ -109,6 +109,33 @@ fn numeric_option_always_offers_validated_other() {
 }
 
 #[test]
+fn guided_questions_hide_unstructured_workflow_inputs() {
+    let app = ShellApp::new(V2Config::default(), None);
+    let spec = OptionSpec {
+        name: "document".to_string(),
+        option_type: OptionType::Json,
+        description: "Internal handoff".to_string(),
+        required: false,
+        advanced: false,
+        evasion: false,
+        path_semantics: None,
+        file_reference_semantics: None,
+        default: None,
+        minimum: None,
+        maximum: None,
+        choices: Vec::new(),
+        aliases: Vec::new(),
+        deprecated_aliases: Vec::new(),
+    };
+
+    assert!(!guided_option_is_visible(
+        &app,
+        PlanningTaskId::BuildThreatModel,
+        &spec
+    ));
+}
+
+#[test]
 fn optional_option_without_a_value_offers_automatic_and_other() {
     let spec = OptionSpec {
         name: "target".to_string(),

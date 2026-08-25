@@ -1,15 +1,18 @@
 use super::*;
+use std::path::Path;
 
 pub(crate) fn spawn_auth_login_process(
     program: &str,
     args: &[String],
     provider: &str,
     method: &str,
+    credentials_path: &Path,
 ) -> io::Result<std::process::ExitStatus> {
     let suspension = crate::app::ExternalTerminalSuspension::begin().map_err(terminal_io_error)?;
     let mut command = ProcessCommand::new(program);
     command
         .args(args)
+        .env("KUZUSHI_OAUTH_CREDENTIALS", credentials_path)
         .arg("--oauth-login")
         .arg(auth_login_process_provider_arg(provider));
     if !method.is_empty() {
@@ -40,6 +43,9 @@ pub(in crate::app) fn auth_login_status_message(
     provider: &str,
     method: &str,
     status: io::Result<std::process::ExitStatus>,
+    credentials_path: &str,
+    recovering_plan: bool,
+    api_key_available: bool,
 ) -> (&'static str, String) {
     let display_provider = auth_provider_display_name(provider);
     let method_suffix = if method.is_empty() {
@@ -52,9 +58,7 @@ pub(in crate::app) fn auth_login_status_message(
             "auth",
             format!(
                 "{display_provider} OAuth{method_suffix} stored at {}. Next: {}",
-                oauth_credentials_path()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(default_oauth_credentials_path_display),
+                credentials_path,
                 auth_login_next_step(provider),
             ),
         ),
@@ -62,21 +66,48 @@ pub(in crate::app) fn auth_login_status_message(
             "error",
             format!(
                 "{display_provider} OAuth login exited with {status}. {}",
-                auth_login_failure_next_step()
+                auth_login_failure_next_step(recovering_plan, api_key_available)
             ),
         ),
         Err(error) => (
             "error",
             format!(
                 "could not start {display_provider} OAuth login: {error}. {}",
-                auth_login_failure_next_step()
+                auth_login_failure_next_step(recovering_plan, api_key_available)
             ),
         ),
     }
 }
 
-fn auth_login_failure_next_step() -> &'static str {
-    "Next: choose API key, retry OAuth, move to Offline demo and press Enter, or run auth status"
+pub(in crate::app) fn incomplete_auth_login_message(
+    provider: &str,
+    credentials_path: &str,
+    reason: &str,
+    recovering_plan: bool,
+    api_key_available: bool,
+) -> String {
+    format!(
+        "{} OAuth login {reason} at {credentials_path}. {}",
+        auth_provider_display_name(provider),
+        auth_login_failure_next_step(recovering_plan, api_key_available)
+    )
+}
+
+fn auth_login_failure_next_step(recovering_plan: bool, api_key_available: bool) -> &'static str {
+    match (recovering_plan, api_key_available) {
+        (true, true) => {
+        "Next: choose API key, retry OAuth, press Esc to return to the preserved Scan, or run auth status"
+        }
+        (true, false) => {
+            "Next: retry OAuth, press Esc to return to the preserved Scan, or run auth status"
+        }
+        (false, true) => {
+        "Next: choose API key, retry OAuth, move to Offline demo and press Enter, or run auth status"
+        }
+        (false, false) => {
+            "Next: retry OAuth, move to Offline demo and press Enter, or run auth status"
+        }
+    }
 }
 
 pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
