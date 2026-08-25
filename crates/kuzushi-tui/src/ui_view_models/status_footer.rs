@@ -3,7 +3,7 @@ use super::{
     compact_status_footer_findings_summary_from_counts,
     compact_status_footer_findings_summary_with_total, findings_model, journey_footer_segment,
     routing_mode_segment, scan_status, status_footer_findings_summary_from_counts,
-    status_footer_findings_summary_with_total, view_status_segment, ShellApp,
+    status_footer_findings_summary_with_total, view_status_segment, FindingsNarrowing, ShellApp,
 };
 use crate::app::ReviewMode;
 use crate::ShellView;
@@ -153,18 +153,37 @@ fn compact_status_footer_right_segments(app: &ShellApp) -> Vec<String> {
     vec![compact_status_footer_findings_segment(app)]
 }
 
+// Workbench counts the projection the operator is actually looking at, while
+// the context rail beside it counts the unfiltered ledger. Both are true, and
+// both used to print as a bare `N findings`, so a narrowed Workbench put two
+// contradicting totals on one frame. Carrying the ledger total into the
+// segment lets the narrower number disclose what it is narrowed from.
 fn status_footer_findings_segment(app: &ShellApp) -> String {
     if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
-        return status_footer_findings_summary_from_counts(findings.total, findings.counts);
+        return status_footer_findings_summary_from_counts(
+            workbench_findings_narrowing(app, findings.total),
+            findings.counts,
+        );
     }
     status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
+}
+
+fn workbench_findings_narrowing(app: &ShellApp, shown: usize) -> FindingsNarrowing {
+    FindingsNarrowing {
+        shown,
+        loaded: app.findings().len(),
+        total: app.findings_total_count(),
+    }
 }
 
 fn compact_status_footer_findings_segment(app: &ShellApp) -> String {
     if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
-        return compact_status_footer_findings_summary_from_counts(findings.total, findings.counts);
+        return compact_status_footer_findings_summary_from_counts(
+            workbench_findings_narrowing(app, findings.total),
+            findings.counts,
+        );
     }
     compact_status_footer_findings_summary_with_total(app.findings(), app.findings_total_count())
 }

@@ -26,10 +26,45 @@ fn status_footer_model_reports_idle_shell_segments() {
     assert_eq!(model.right_segments, ["0 findings"]);
 }
 
+/// The rail renders unfiltered ledger truth on the same frame as this footer,
+/// so a bare projection count here reads as a second, contradicting ledger
+/// total. The projection stays the headline; the ledger it narrows is named.
 #[test]
-fn status_footer_uses_projected_findings_count_on_workbench() {
+fn workbench_findings_segment_discloses_the_ledger_it_narrows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::Workbench);
+    *app.findings_mut() = vec![
+        engagement_duplicate_semgrep_finding(),
+        engagement_duplicate_systems_finding(),
+    ];
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(model.right_segments, ["1/2 findings shown / 1 high"]);
+    assert_eq!(
+        crate::ui_view_models::rail_sections(&app, 33)
+            .iter()
+            .find(|section| section.title == "FINDINGS")
+            .expect("findings rail section")
+            .rows[0]
+            .to_string(),
+        "2 findings · 1 H · 1 M"
+    );
+}
+
+/// A projection that hides nothing must not manufacture a narrowing.
+#[test]
+fn workbench_findings_segment_stays_bare_when_nothing_is_hidden() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    *app.findings_mut() = vec![engagement_duplicate_semgrep_finding()];
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(model.right_segments, ["1 finding / 1 med"]);
+}
+
+fn engagement_duplicate_semgrep_finding() -> Finding {
     let mut semgrep = Finding::new_semgrep(
         "demo.sql",
         "src/search.ts",
@@ -39,6 +74,10 @@ fn status_footer_uses_projected_findings_count_on_workbench() {
         "SQL injection CWE-89 reaches db.query",
     );
     semgrep.scan_id = Some("scan-a".to_string());
+    semgrep
+}
+
+fn engagement_duplicate_systems_finding() -> Finding {
     let mut systems = Finding::new_tool(
         "systems-hunt",
         "systems/cwe-89",
@@ -49,11 +88,7 @@ fn status_footer_uses_projected_findings_count_on_workbench() {
         "SQL injection CWE-89 reaches db.query",
     );
     systems.scan_id = Some("scan-b".to_string());
-    *app.findings_mut() = vec![semgrep, systems];
-
-    let model = status_footer_model(&app);
-
-    assert_eq!(model.right_segments, ["1 finding / 1 high"]);
+    systems
 }
 
 #[test]

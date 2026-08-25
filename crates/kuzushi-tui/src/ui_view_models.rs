@@ -162,7 +162,7 @@ pub(crate) use finding_summary::{
     ci_result_findings_summary, compact_status_footer_findings_summary_from_counts,
     compact_status_footer_findings_summary_with_total, findings_count_summary_with_total,
     status_footer_findings_summary, status_footer_findings_summary_from_counts,
-    status_footer_findings_summary_with_total, SeverityCounts,
+    status_footer_findings_summary_with_total, FindingsNarrowing, SeverityCounts,
 };
 #[cfg(test)]
 pub(crate) use findings::projected_visible_finding_pairs;
