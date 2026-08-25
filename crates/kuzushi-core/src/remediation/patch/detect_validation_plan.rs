@@ -37,7 +37,7 @@ fn bind_optional_command(object: &mut Map<String, Value>, key: &str, command: Op
 pub(crate) fn ensure_patch_validation_plan(plan: &PatchValidationPlan) -> Result<()> {
     anyhow::ensure!(
         plan.build.is_some() || plan.test.is_some(),
-        "patch:finding requires at least one build or test validation command; repository validation was not detected, provide buildCmd or testCmd explicitly"
+        "patch validation requires at least one build or test validation command; repository validation was not detected, provide buildCmd or testCmd explicitly"
     );
     Ok(())
 }

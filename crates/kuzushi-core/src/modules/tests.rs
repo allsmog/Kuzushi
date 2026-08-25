@@ -3965,7 +3965,8 @@ OUT
                     "tasks": ["agentic"],
                     "verify": true,
                     "pocExecution": true,
-                    "autoPatch": true
+                    "autoPatch": true,
+                    "testCmd": "true"
                 }),
                 &ctx,
                 None,
@@ -5639,7 +5640,8 @@ OUT
             json!({
                 "fingerprint": finding.fingerprint,
                 "model": "openai:gpt-patch",
-                "maxIterations": 1
+                "maxIterations": 1,
+                "testCmd": "true"
             }),
             &ctx,
             Some(&runtime),
@@ -5707,7 +5709,7 @@ OUT
         let result = execute_authorized_tool(
             &registry,
             "patch:finding",
-            json!({"fingerprint": finding.fingerprint.clone()}),
+            json!({"fingerprint": finding.fingerprint.clone(), "testCmd": "true"}),
             &ctx,
         )
         .unwrap();
@@ -5731,7 +5733,7 @@ OUT
         let err = execute_authorized_tool(
             &registry,
             "patch:finding",
-            json!({"fingerprint": finding.fingerprint.clone()}),
+            json!({"fingerprint": finding.fingerprint.clone(), "testCmd": "true"}),
             &ctx,
         )
         .unwrap_err()
@@ -5742,7 +5744,7 @@ OUT
         let err = execute_authorized_tool_with_runtime(
             &registry,
             "patch:finding",
-            json!({"fingerprint": finding.fingerprint}),
+            json!({"fingerprint": finding.fingerprint, "testCmd": "true"}),
             &ctx,
             Some(&runtime),
         )

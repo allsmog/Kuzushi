@@ -194,18 +194,34 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
+    fn validation_applies_diff_only_inside_disposable_worktree() {
+        if git_is_unavailable() {
+            return;
+        }
+        let control = unattended_patch_control();
+        let (temp, worktree) = disposable_worktree_fixture(control);
+        let repo = temp.path();
+        let plan = PatchValidationPlan {
+            build: None,
+            test: Some("true".to_string()),
+        };
+
+        let result = validate_patch(&worktree, rename_demo_diff(), &plan, control).unwrap();
+
+        assert_eq!(result.status, PatchStatus::Sound);
+        assert_demo_contents(repo, "before\n");
+        assert_demo_contents(&worktree, "after\n");
+        cleanup_worktree(repo, &worktree, control).unwrap();
+    }
+
+    #[test]
     fn validation_refuses_apply_only_plan_before_touching_worktree() {
         if git_is_unavailable() {
             return;
         }
-        let temp = tempfile::tempdir().unwrap();
-        let repo = temp.path();
-        initialize_repo(repo);
         let control = unattended_patch_control();
-        let mut input = json!({"fingerprint": "finding-1"});
-        bind_repository_source_snapshot(repo, &mut input).unwrap();
-        let source_commit = patch_source_commit(&input).unwrap();
-        let worktree = create_disposable_worktree(repo, &source_commit, control).unwrap();
+        let (temp, worktree) = disposable_worktree_fixture(control);
+        let repo = temp.path();
         let plan = PatchValidationPlan {
             build: None,
             test: None,
@@ -216,15 +232,30 @@ mod tests {
         assert!(error
             .to_string()
             .contains("requires at least one build or test validation command"));
-        assert_eq!(
-            std::fs::read_to_string(repo.join("demo.txt")).unwrap(),
-            "before\n"
-        );
-        assert_eq!(
-            std::fs::read_to_string(worktree.join("demo.txt")).unwrap(),
-            "before\n"
-        );
+        assert_demo_contents(repo, "before\n");
+        assert_demo_contents(&worktree, "before\n");
         cleanup_worktree(repo, &worktree, control).unwrap();
+    }
+
+    /// Commit `demo.txt` in a throwaway repository and check out the
+    /// disposable worktree that patch validation is allowed to mutate.
+    fn disposable_worktree_fixture(
+        control: PatchCommandControl<'_>,
+    ) -> (tempfile::TempDir, PathBuf) {
+        let temp = tempfile::tempdir().unwrap();
+        initialize_repo(temp.path());
+        let mut input = json!({"fingerprint": "finding-1"});
+        bind_repository_source_snapshot(temp.path(), &mut input).unwrap();
+        let source_commit = patch_source_commit(&input).unwrap();
+        let worktree = create_disposable_worktree(temp.path(), &source_commit, control).unwrap();
+        (temp, worktree)
+    }
+
+    fn assert_demo_contents(root: &Path, expected: &str) {
+        assert_eq!(
+            std::fs::read_to_string(root.join("demo.txt")).unwrap(),
+            expected
+        );
     }
 
     fn initialize_repo(repo: &Path) {
