@@ -288,8 +288,7 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         let Some(run_id) = self.continuable_failed_run(&record.completed) else {
-            self.log(
-                "result",
+            self.refuse_phase_result_action(
                 "no resumable checkpoint found for this attempt — use r to run again",
             );
             return InputUpdate::handled();
@@ -331,6 +330,15 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    /// A refused result-card action leaves the card exactly as it was, so a
+    /// transcript line under any other prefix cannot tell the operator their
+    /// keypress was read at all. `log("error", ..)` is what already raises the
+    /// Workbench banner, and result-card keys only dispatch on the Workbench,
+    /// so every refusal here can reach it.
+    fn refuse_phase_result_action(&mut self, reason: impl Into<String>) {
+        self.log("error", reason);
+    }
+
     fn materialize_phase_result_reality(
         &mut self,
         phase: WorkflowPhase,
@@ -340,13 +348,13 @@ impl ShellApp {
             return true;
         }
         let Some(target) = self.target_owned() else {
-            self.log("workflow", "Prove selection requires an active target");
+            self.refuse_phase_result_action("Prove selection requires an active target");
             return false;
         };
         match self.materialize_selected_proof(&target, record) {
             Ok(()) => true,
             Err(error) => {
-                self.log("error", format!("Prove selection blocked: {error}"));
+                self.refuse_phase_result_action(format!("Prove selection blocked: {error}"));
                 false
             }
         }
@@ -437,18 +445,23 @@ impl ShellApp {
         &mut self,
         record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
     ) -> Option<PendingPatch> {
-        let target = self.target_owned()?;
+        let Some(target) = self.target_owned() else {
+            self.refuse_phase_result_action(
+                "Fix selection blocked: no active target — reopen the engagement against its target",
+            );
+            return None;
+        };
         let workspace = match kuzushi_core::WorkspaceTarget::new(&target) {
             Ok(workspace) => workspace,
             Err(error) => {
-                self.log("patch", format!("Fix selection blocked: {error}"));
+                self.refuse_phase_result_action(format!("Fix selection blocked: {error}"));
                 return None;
             }
         };
         match validate_fix_attempt_candidate(&workspace, record) {
             Ok(patch) => Some(patch),
             Err(error) => {
-                self.log("patch", format!("Fix selection blocked: {error}"));
+                self.refuse_phase_result_action(format!("Fix selection blocked: {error}"));
                 None
             }
         }
@@ -492,7 +505,7 @@ impl ShellApp {
         disposition: kuzushi_core::workflow_attempts::PhaseAttemptDispositionRecorded,
     ) -> bool {
         let Some(target) = self.target_owned() else {
-            self.log("workflow", "phase result requires an active target");
+            self.refuse_phase_result_action("phase result requires an active target");
             return false;
         };
         match kuzushi_core::workflow_attempts::append_phase_attempt_disposition(
@@ -505,10 +518,9 @@ impl ShellApp {
                 true
             }
             Err(error) => {
-                self.log(
-                    "workflow",
-                    format!("phase result could not be recorded: {error}"),
-                );
+                self.refuse_phase_result_action(format!(
+                    "phase result could not be recorded: {error}"
+                ));
                 false
             }
         }
@@ -558,7 +570,12 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         let Some(run_id) = record.completed.run_refs.last().cloned() else {
-            self.log("workflow", "phase attempt has no canonical run reference");
+            // Unreachable today: `validate_completed` rejects an empty
+            // `run_refs` on append and again on every ledger load, so no
+            // attempt reaches this code without one. Kept on the same helper
+            // as the reachable refusals so the invariant holds uniformly if
+            // that ever changes.
+            self.refuse_phase_result_action("phase attempt has no canonical run reference");
             return InputUpdate::handled();
         };
         self.push_nav_history(self.shell_view());
@@ -578,25 +595,39 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    /// The tool and input an exact rerun would replay, taken from the latest
+    /// referenced run that still has both. Refuses out loud, because `r` is
+    /// advertised on the card whether or not a rerun can be reconstructed.
+    fn rerun_specification_for(
+        &mut self,
+        record: &kuzushi_core::workflow_attempts::PhaseAttemptRecord,
+    ) -> Option<(String, Value)> {
+        let Some(target) = self.target_owned() else {
+            self.refuse_phase_result_action("rerun requires an active target");
+            return None;
+        };
+        let specification = record
+            .completed
+            .run_refs
+            .iter()
+            .rev()
+            .find_map(|run_id| rerun_specification(self.registry(), &target, run_id));
+        if specification.is_none() {
+            // `rerun_specification` also refuses a run whose tool is no longer
+            // loaded, so the message names both halves of what it needs.
+            self.refuse_phase_result_action(
+                "exact rerun unavailable — no referenced run has a readable input for a loaded tool",
+            );
+        }
+        specification
+    }
+
     fn phase_rerun_draft(
         &mut self,
         derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
     ) -> Option<PhaseRerunDraft> {
         let record = self.current_phase_result_record()?;
-        let target = self.target_owned()?;
-        let Some((tool, input)) = record
-            .completed
-            .run_refs
-            .iter()
-            .rev()
-            .find_map(|run_id| rerun_specification(self.registry(), &target, run_id))
-        else {
-            self.log(
-                "workflow",
-                "exact rerun unavailable — no referenced run has a readable tool input",
-            );
-            return None;
-        };
+        let (tool, input) = self.rerun_specification_for(&record)?;
         let descriptor = self.registry().resolve_tool(&tool)?;
         Some(PhaseRerunDraft {
             review: PhaseRerunReview {
@@ -1930,6 +1961,9 @@ fn phase_result_command_allowed(
 fn quit_choice_matches(key: KeyEvent, lowercase: char, uppercase: char) -> bool {
     HotkeyTrigger::Char(lowercase).matches(key) || HotkeyTrigger::Char(uppercase).matches(key)
 }
+
+#[cfg(test)]
+mod phase_result_tests;
 
 #[cfg(test)]
 mod tests {
