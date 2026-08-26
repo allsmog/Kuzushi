@@ -570,7 +570,12 @@ impl ShellApp {
             return InputUpdate::handled();
         };
         let Some(run_id) = record.completed.run_refs.last().cloned() else {
-            self.log("workflow", "phase attempt has no canonical run reference");
+            // Unreachable today: `validate_completed` rejects an empty
+            // `run_refs` on append and again on every ledger load, so no
+            // attempt reaches this code without one. Kept on the same helper
+            // as the reachable refusals so the invariant holds uniformly if
+            // that ever changes.
+            self.refuse_phase_result_action("phase attempt has no canonical run reference");
             return InputUpdate::handled();
         };
         self.push_nav_history(self.shell_view());
