@@ -3,6 +3,17 @@ use crate::scene3d::VizPage;
 
 const AUTO_OPEN_INTERACTION_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
 
+/// Summary and DFD are operator guidance surfaces as well as artifact views.
+/// Keep them reachable even before a threat model exists so the gallery can
+/// explain what evidence is missing and how to generate it.
+fn viz_page_is_permanent_surface(page: VizPage) -> bool {
+    matches!(page, VizPage::Summary | VizPage::Dfd)
+}
+
+fn viz_page_is_available(page: VizPage, has_content: bool) -> bool {
+    viz_page_is_permanent_surface(page) || has_content
+}
+
 /// Map a completed tool to the gallery page that visualizes its artifact, if
 /// any. Pure so the auto-open hooks stay testable. Matched exactly on the verbs
 /// that actually *emit* the structured artifact the page draws — prereq steps
@@ -194,18 +205,19 @@ impl ShellApp {
         }
     }
 
-    /// Tabs that have real backing data, plus the permanent DFD generation
-    /// surface. Unavailable artifacts do not appear or consume Tab stops.
+    /// Tabs that have real backing data, plus the permanent Summary and DFD
+    /// guidance surfaces. Unavailable optional artifacts do not appear or
+    /// consume Tab stops.
     pub(crate) fn available_viz_pages(&self) -> Vec<VizPage> {
         VizPage::ALL
             .into_iter()
-            .filter(|page| *page == VizPage::Dfd || self.viz_page_has_content(*page))
+            .filter(|page| viz_page_is_available(*page, self.viz_page_has_content(*page)))
             .collect()
     }
 
-    /// Map owns a smaller artifact vocabulary than the global gallery. The
-    /// DFD remains as the generation surface; every other tab is backed by a
-    /// real persisted artifact.
+    /// Map owns a smaller artifact vocabulary than the global gallery. Summary
+    /// and DFD remain as guidance surfaces; every other tab is backed by a real
+    /// persisted artifact.
     pub(crate) fn available_map_viz_pages(&self) -> Vec<VizPage> {
         [
             VizPage::Summary,
@@ -214,7 +226,7 @@ impl ShellApp {
             VizPage::Components,
         ]
         .into_iter()
-        .filter(|page| *page == VizPage::Dfd || self.viz_page_has_content(*page))
+        .filter(|page| viz_page_is_available(*page, self.viz_page_has_content(*page)))
         .collect()
     }
 
@@ -245,15 +257,13 @@ impl ShellApp {
         next
     }
 
-    /// Resolve a requested landing page, redirecting empty pages to the always-
-    /// available DFD. `Dfd` (the permanent generation surface) and `Worklist`
-    /// (whose empty state is its own `context:build → worklist:rank` guidance
-    /// panel) are exempt, so the explicit `worklist` verb lands on the worklist
-    /// even before any artifact exists instead of dumping a first-timer on the
-    /// DFD with no explanation. The tab still stays hidden from the rail while
-    /// empty (see `available_viz_pages`).
+    /// Resolve a requested landing page, redirecting empty optional pages to
+    /// the always-available DFD. `Summary` and `Dfd` are permanent guidance
+    /// surfaces. `Worklist` keeps its own empty `context:build → worklist:rank`
+    /// guidance panel, so its explicit verb also lands before an artifact
+    /// exists. Optional empty tabs still stay hidden from the rail.
     fn available_viz_page(&self, requested: VizPage) -> VizPage {
-        if requested == VizPage::Dfd
+        if viz_page_is_permanent_surface(requested)
             || requested == VizPage::Worklist
             || self.viz_page_has_content(requested)
         {
@@ -292,4 +302,31 @@ fn cycle_available_page(pages: &[VizPage], current: VizPage, direction: i32) -> 
         pages.len().saturating_sub(1)
     };
     pages[(index + offset) % pages.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_and_dfd_are_reachable_without_backing_content() {
+        assert!(viz_page_is_available(VizPage::Summary, false));
+        assert!(viz_page_is_available(VizPage::Dfd, false));
+    }
+
+    #[test]
+    fn optional_viz_pages_still_require_backing_content() {
+        for page in [
+            VizPage::AttackSurface,
+            VizPage::AttackPath,
+            VizPage::EntryPoints,
+            VizPage::Components,
+            VizPage::Heatmap,
+            VizPage::ExploitChain,
+            VizPage::Worklist,
+        ] {
+            assert!(!viz_page_is_available(page, false), "{page:?}");
+            assert!(viz_page_is_available(page, true), "{page:?}");
+        }
+    }
 }
