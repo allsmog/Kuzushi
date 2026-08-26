@@ -452,15 +452,27 @@ function anthropicToolCall(block) {
 }
 
 function anthropicUsage(usage) {
-  return {
-    input_tokens: Number(usage?.input_tokens ?? 0) || 0,
-    output_tokens: Number(usage?.output_tokens ?? 0) || 0,
-  };
+  return providerUsage(usage);
 }
 
 function openAiUsage(usage) {
+  return providerUsage(usage);
+}
+
+function providerUsage(usage) {
+  if (usage === undefined || usage === null) return undefined;
+  requiredProviderObject(usage);
+  const inputTokens = optionalProviderTokenCount(usage.input_tokens);
+  const outputTokens = optionalProviderTokenCount(usage.output_tokens);
+  if (inputTokens === undefined && outputTokens === undefined) return undefined;
   return {
-    input_tokens: Number(usage?.input_tokens ?? 0) || 0,
-    output_tokens: Number(usage?.output_tokens ?? 0) || 0,
+    ...(inputTokens === undefined ? {} : { input_tokens: inputTokens }),
+    ...(outputTokens === undefined ? {} : { output_tokens: outputTokens }),
   };
+}
+
+function optionalProviderTokenCount(value) {
+  if (value === undefined || value === null) return undefined;
+  if (!Number.isSafeInteger(value) || value < 0) throw invalidProviderResponseError();
+  return value;
 }
