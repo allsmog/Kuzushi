@@ -124,6 +124,10 @@ fn incomplete_provenance_cannot_cross_the_select_action() {
     assert!(app.log_lines().iter().any(
         |line| line.body.contains("Fix selection blocked") && line.body.contains("regenerate")
     ));
+    // The card does not change on a refusal, so the transcript line alone
+    // leaves `u` looking dead. The banner is the on-screen half.
+    let notice = app.advisory().notice.as_ref().expect("refusal notice");
+    assert!(notice.message.contains("Fix selection blocked"));
     assert_demo_file_unchanged(&fixture);
 }
 
