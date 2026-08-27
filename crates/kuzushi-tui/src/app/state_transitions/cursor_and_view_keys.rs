@@ -406,13 +406,19 @@ impl ShellApp {
         if model.empty_hint.is_some()
             || model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild
         {
-            return self.reduce_hotkey_command(ShellCommand::RunTool {
-                tool: Some("threat-model:build".to_string()),
-                input: None,
-            });
+            return self.request_threat_model_build();
         }
         self.router.scene_mut().toggle_dfd_focus();
         InputUpdate::handled()
+    }
+
+    /// The generate affordance shared by every threat-model-backed viz page.
+    /// No inline input: descriptor defaults and runtime gates own the build.
+    fn request_threat_model_build(&mut self) -> InputUpdate {
+        self.reduce_hotkey_command(ShellCommand::RunTool {
+            tool: Some("threat-model:build".to_string()),
+            input: None,
+        })
     }
 
     fn cycle_summary_component_selection(&mut self, direction: i32) {
@@ -434,6 +440,12 @@ impl ShellApp {
 
     fn activate_summary_component_selection(&mut self) -> InputUpdate {
         let dfd = crate::ui_view_models::dfd_model(self);
+        // No threat model at all is a different state from a model whose
+        // component has no resolved node: offer the build the empty DFD offers
+        // rather than telling the operator to rebuild something that is absent.
+        if dfd.empty_hint.is_some() {
+            return self.request_threat_model_build();
+        }
         let overview = crate::ui_view_models::dfd_overview(&dfd);
         let selected = self.router.scene().summary_component_selection();
         let target = crate::ui_view_models::dfd_overview_component_at(&overview, selected)

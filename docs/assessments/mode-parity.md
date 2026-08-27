@@ -200,8 +200,10 @@ nondeterministic absence is `NotRediscovered` and unavailable comparison is
   completion ordering without deleting findings.
 - **Durable phase pages are shell-only presentation over shared truth.** Map
   never reads live Run Focus state. A ready Map embeds the shared real-data
-  gallery as its primary body: Summary by default after acceptance, then DFD,
-  Entry points, and Components when backed by artifacts. `Tab` changes that
+  gallery as its primary body: Summary by default after acceptance, then DFD —
+  both permanent guidance surfaces that stay reachable with an honest empty
+  state and a `threat-model:build` affordance — then Entry points and
+  Components, which appear only when backed by artifacts. `Tab` changes that
   local projection and `z` opens a Map-scoped full-frame zoom; project context
   is a compact receipt, while missing/stale/blocked evidence retains one action
   drawer. Scan is a resting cockpit over selected attempt, scope, engine

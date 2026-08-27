@@ -565,12 +565,18 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
+    // This app has no threat model, so Summary shows its empty state: there is
+    // nothing to select and nothing to scroll. Advertise only the generate
+    // affordance, matching the empty DFD above.
     app.router.scene_mut().set_page(VizPage::Summary);
     let summary_bindings = footer_keybindings(&app);
-    assert!(summary_bindings.contains(&bind("PgUp/PgDn", "scroll")));
-    assert!(summary_bindings.contains(&bind("j/k/↑/↓", "component")));
-    assert!(summary_bindings.contains(&bind("g/G", "ends")));
-    assert!(summary_bindings.contains(&bind("Enter", "DFD target")));
+    assert!(summary_bindings.contains(&bind("Enter", "generate DFD")));
+    assert!(!summary_bindings.contains(&bind("PgUp/PgDn", "scroll")));
+    assert!(!summary_bindings.contains(&bind("j/k/↑/↓", "component")));
+    assert!(!summary_bindings.contains(&bind("g/G", "ends")));
+    assert!(!summary_bindings.contains(&bind("Enter", "DFD target")));
+    assert!(summary_bindings.contains(&bind("Tab", "next page")));
+    assert!(summary_bindings.contains(&bind("Esc/q", "leave")));
     app.router.scene_mut().set_page(VizPage::Dfd);
 
     app.router.scene_mut().toggle_dfd_focus();
@@ -603,6 +609,59 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(entry_bindings.contains(&bind("PgUp/PgDn", "detail")));
     assert!(entry_bindings.contains(&bind("Enter", "DFD target")));
     assert!(!entry_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+}
+
+/// The empty-Summary footer above must not be the only Summary contract: once a
+/// threat model exists the component tree is real, so the navigation keys come
+/// back and the generate affordance goes away.
+#[test]
+fn populated_summary_footer_restores_component_navigation() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    kuzushi_core::capabilities::save_persistent_threat_model(
+        workspace.root(),
+        &serde_json::json!({
+            "systemContext": "Operators review records.",
+            "dfd": {
+                "nodes": [
+                    {"id": "operator", "name": "Operator", "trustZone": "local"},
+                    {"id": "app", "name": "Desktop app", "trustZone": "desktop"}
+                ],
+                "flows": [{"id": "open", "sourceId": "operator", "targetId": "app"}],
+                "trustBoundaries": []
+            },
+            "attackSurface": {"entryPoints": []},
+            "assets": [],
+            "threats": []
+        }),
+        true,
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
+    app.router.scene_mut().set_page(VizPage::Summary);
+    app.set_shell_view(ShellView::Scene);
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(
+        bindings.contains(&bind("j/k/↑/↓", "component")),
+        "{bindings:?}"
+    );
+    assert!(bindings.contains(&bind("g/G", "ends")), "{bindings:?}");
+    assert!(
+        bindings.contains(&bind("PgUp/PgDn", "scroll")),
+        "{bindings:?}"
+    );
+    assert!(
+        bindings.contains(&bind("Enter", "DFD target")),
+        "{bindings:?}"
+    );
+    assert!(
+        !bindings.contains(&bind("Enter", "generate DFD")),
+        "{bindings:?}"
+    );
 }
 
 #[test]

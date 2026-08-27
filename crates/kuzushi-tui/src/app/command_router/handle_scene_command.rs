@@ -10,8 +10,10 @@ fn viz_page_is_permanent_surface(page: VizPage) -> bool {
     matches!(page, VizPage::Summary | VizPage::Dfd)
 }
 
-fn viz_page_is_available(page: VizPage, has_content: bool) -> bool {
-    viz_page_is_permanent_surface(page) || has_content
+/// `has_content` is lazy: `viz_page_has_content` clones the cached DFD model,
+/// and a permanent surface never needs the answer.
+fn viz_page_is_available(page: VizPage, has_content: impl FnOnce() -> bool) -> bool {
+    viz_page_is_permanent_surface(page) || has_content()
 }
 
 /// Map a completed tool to the gallery page that visualizes its artifact, if
@@ -93,6 +95,10 @@ impl ShellApp {
     /// the deck renders from, so re-hydrate and re-check content before
     /// opening — never land the operator on an empty deck.
     pub(crate) fn open_deferred_viz_page(&mut self, page: VizPage) {
+        // These are the threat-model-backed pages, which need the persisted doc
+        // re-read before the content check. That they currently equal the
+        // permanent set is a coincidence — do not fold this into
+        // `viz_page_is_permanent_surface`.
         if matches!(page, VizPage::Summary | VizPage::Dfd) {
             self.hydrate_latest_threat_model_for_dfd();
         }
@@ -211,7 +217,7 @@ impl ShellApp {
     pub(crate) fn available_viz_pages(&self) -> Vec<VizPage> {
         VizPage::ALL
             .into_iter()
-            .filter(|page| viz_page_is_available(*page, self.viz_page_has_content(*page)))
+            .filter(|page| viz_page_is_available(*page, || self.viz_page_has_content(*page)))
             .collect()
     }
 
@@ -226,7 +232,7 @@ impl ShellApp {
             VizPage::Components,
         ]
         .into_iter()
-        .filter(|page| viz_page_is_available(*page, self.viz_page_has_content(*page)))
+        .filter(|page| viz_page_is_available(*page, || self.viz_page_has_content(*page)))
         .collect()
     }
 
@@ -273,16 +279,16 @@ impl ShellApp {
         }
     }
 
+    /// Fall back to Map's first available tab when the requested one has no
+    /// artifact. Summary and Dfd are permanent members of the Map set and lead
+    /// it, so that first entry is always Summary and the list is never empty —
+    /// `VizPage::Dfd` is only the unreachable type-level floor.
     fn available_map_viz_page(&self, requested: VizPage) -> VizPage {
         let pages = self.available_map_viz_pages();
         if pages.contains(&requested) {
             return requested;
         }
-        if pages.contains(&VizPage::Summary) {
-            VizPage::Summary
-        } else {
-            VizPage::Dfd
-        }
+        pages.first().copied().unwrap_or(VizPage::Dfd)
     }
 
     /// Switch to a specific gallery page and reflect it in the open view.
@@ -310,8 +316,18 @@ mod tests {
 
     #[test]
     fn summary_and_dfd_are_reachable_without_backing_content() {
-        assert!(viz_page_is_available(VizPage::Summary, false));
-        assert!(viz_page_is_available(VizPage::Dfd, false));
+        assert!(viz_page_is_available(VizPage::Summary, || false));
+        assert!(viz_page_is_available(VizPage::Dfd, || false));
+    }
+
+    #[test]
+    fn permanent_surfaces_never_evaluate_the_content_probe() {
+        for page in [VizPage::Summary, VizPage::Dfd] {
+            assert!(
+                viz_page_is_available(page, || panic!("{page:?} must short-circuit")),
+                "{page:?}"
+            );
+        }
     }
 
     #[test]
@@ -325,8 +341,8 @@ mod tests {
             VizPage::ExploitChain,
             VizPage::Worklist,
         ] {
-            assert!(!viz_page_is_available(page, false), "{page:?}");
-            assert!(viz_page_is_available(page, true), "{page:?}");
+            assert!(!viz_page_is_available(page, || false), "{page:?}");
+            assert!(viz_page_is_available(page, || true), "{page:?}");
         }
     }
 }

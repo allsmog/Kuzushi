@@ -12803,6 +12803,34 @@ fn empty_dfd_enter_requests_the_normal_model_backed_build_without_pipeline_overr
 }
 
 #[test]
+fn empty_summary_enter_requests_the_same_build_as_the_empty_dfd() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.open_scene_to_page(crate::scene3d::VizPage::Summary);
+    assert_eq!(
+        app.router.scene().page(),
+        crate::scene3d::VizPage::Summary,
+        "Summary is a permanent surface and must not redirect"
+    );
+    // Summary's cursor keys are letters, so the page takes them only in
+    // Navigate mode; Enter belongs to the same set.
+    app.set_input_mode(crate::InputMode::Navigate);
+
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let prepare = run_tool_prepare(&update.effects).expect("Summary Enter prepares a tool");
+
+    assert_eq!(prepare.tool_name, "threat-model:build");
+    assert!(prepare.input.is_none());
+    assert!(
+        !app.log_lines()
+            .iter()
+            .any(|line| line.body.contains("no resolved DFD node")),
+        "a missing model is not an unresolved component"
+    );
+}
+
+#[test]
 fn linked_dfd_enter_toggles_local_graph_and_escape_collapses_before_leaving() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();

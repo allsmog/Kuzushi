@@ -302,14 +302,7 @@ fn interruption_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let page = app.router.scene().page();
     if matches!(page, crate::scene3d::VizPage::Summary) {
-        let mut bindings = vec![
-            bind("j/k/↑/↓", "component"),
-            bind("g/G", "ends"),
-            bind("PgUp/PgDn", "scroll"),
-            bind("Enter", "DFD target"),
-        ];
-        push_scene_cycle_and_exit(&mut bindings, app);
-        return bindings;
+        return summary_keybindings(app);
     }
     if matches!(page, crate::scene3d::VizPage::Dfd) {
         let mut bindings = Vec::new();
@@ -320,6 +313,25 @@ fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return entry_point_keybindings(app);
     }
     non_dfd_scene_keybindings(app, page)
+}
+
+// Summary is reachable before a threat model exists. With no model there are no
+// components to select and the empty-state panel ignores scrolling, so advertise
+// the one key that does something — the same generate affordance the empty DFD
+// offers — instead of four dead navigation binds.
+fn summary_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = if crate::ui_view_models::dfd_model(app).empty_hint.is_some() {
+        vec![bind("Enter", "generate DFD")]
+    } else {
+        vec![
+            bind("j/k/↑/↓", "component"),
+            bind("g/G", "ends"),
+            bind("PgUp/PgDn", "scroll"),
+            bind("Enter", "DFD target"),
+        ]
+    };
+    push_scene_cycle_and_exit(&mut bindings, app);
+    bindings
 }
 
 fn entry_point_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
