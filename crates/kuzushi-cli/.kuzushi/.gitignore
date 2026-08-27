@@ -1,0 +1,7 @@
+*
+!scope.toml
+!prompts/
+!prompts/**
+!v3/
+v3/*
+!v3/config.toml

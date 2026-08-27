@@ -1,5 +1,5 @@
 # J17 — Canonical five-phase cockpit reference
-# Governing reference: /Users/operator/Desktop/Kuzushi TUI.pdf
+# Governing reference: <operator-reference>/Kuzushi TUI.pdf
 # SHA-256: fad7e9bc324572ccf3e03b2e5c71878d1a6eba2795493f4a12005f0178a6f545
 #
 # The explicit DevEx hook enriches only the canonical offline-demo target with

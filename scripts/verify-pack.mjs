@@ -326,6 +326,7 @@ if (
   process.exit(1);
 }
 
+runPrivateContextCheck();
 runArchitectureContractChecks();
 
 process.stdout.write(
@@ -347,6 +348,13 @@ process.stdout.write(
 function runArchitectureContractChecks() {
   const pnpm = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
   execFileSync(pnpm, ["run", "quality:architecture"], {
+    cwd: repo,
+    stdio: "inherit",
+  });
+}
+
+function runPrivateContextCheck() {
+  execFileSync(process.execPath, ["scripts/check-private-context.mjs"], {
     cwd: repo,
     stdio: "inherit",
   });

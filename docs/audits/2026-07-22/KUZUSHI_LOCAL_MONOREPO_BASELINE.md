@@ -1,7 +1,7 @@
 # Kuzushi Local Monorepo Acceptance — Phase A Baseline (SEALED)
 
 Date: 2026-07-22 · Engagement: local monorepo acceptance (MONOREPO)
-Author: repository maintainer
+Author: automated audit loop, per the local-monorepo
 acceptance contract. This report is immutable baseline evidence: it records
 what production Kuzushi does against the operator's real checkout **before
 any repair**. The companion gap ledger is

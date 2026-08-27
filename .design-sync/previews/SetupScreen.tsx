@@ -11,7 +11,7 @@ const facts = [
 
 export const A_ReadySetup120x36 = () => (
   <SetupScreen
-    target="/Users/operator/vibe-code/Kuzushi"
+    target="/workspace/Kuzushi"
     readiness={[
       { id: "target", label: "Target", status: "CONFIRMED", detail: "Kuzushi · ccb29fa · clean", tone: "ready" },
       { id: "plan", label: "Map plan", status: "READY", detail: "2 deterministic tasks selected", tone: "ready" },
@@ -30,7 +30,7 @@ export const A_ReadySetup120x36 = () => (
 
 export const B_ModelAndCredentialBlocked80x24 = () => (
   <SetupScreen
-    target="/Users/operator/vibe-code/Kuzushi"
+    target="/workspace/Kuzushi"
     readiness={[
       { id: "target", label: "Target", status: "CONFIRMED", detail: "Kuzushi · ccb29fa · clean", tone: "ready" },
       { id: "plan", label: "Map plan", status: "READY", detail: "context:build + threat-model:build", tone: "ready" },

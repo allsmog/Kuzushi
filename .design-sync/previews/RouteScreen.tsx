@@ -12,7 +12,7 @@ export const A_TargetSelection120x36 = () => (
     title="CHOOSE TARGET"
     context="cwd is never assumed · Enter activates selection · Esc browses capabilities without a target"
     rows={[
-      { id: "kuzushi", cells: ["Kuzushi", "git · ccb29fa · clean"], detail: "/Users/operator/vibe-code/Kuzushi" },
+      { id: "kuzushi", cells: ["Kuzushi", "git · ccb29fa · clean"], detail: "/workspace/Kuzushi" },
       { id: "recent", cells: ["phase-target", "git · 19ac321 · dirty"], detail: "/tmp/phase-target" },
       { id: "browse", cells: ["Choose another folder", "picker"], detail: "explicit selection required" },
     ]}

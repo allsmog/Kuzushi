@@ -151,7 +151,7 @@ core/TUI/CLI Clippy invocation passes with warnings denied.
 
 | Item | Recorded value |
 |---|---|
-| Repository | `/Users/operator/vibe-code/Kuzushi` |
+| Repository | `/workspace/Kuzushi` |
 | Branch | code&#120;/atlas-native-cockpit |
 | HEAD / upstream | `ed5e6db27c4aebd7b7ef9397d0de7ebdd5223f88` / origin/code&#120;/atlas-native-cockpit at the same commit |
 | Version | `0.24.0-alpha.8` |

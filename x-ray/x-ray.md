@@ -1,7 +1,7 @@
 # Kuzushi Pashov X-Ray
 
 Repository: `Kuzushi`
-Path: `/Users/operator/vibe-code/Kuzushi`
+Path: `/workspace/Kuzushi`
 
 ## X-Ray Verdict
 WATCH

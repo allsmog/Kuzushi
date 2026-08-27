@@ -2,7 +2,7 @@
 
 > **Status:** review + concrete next-increment spec. No product code changed by this
 > document. Read-only pass over the current working tree (2026-07-09) and the external
-> cannon crate (`/Users/operator/vibe-code/vuln-scan-cannon-harness`, v0.2.0).
+> cannon crate (`/workspace/vuln-scan-cannon-harness`, v0.2.0).
 > **Supersedes nothing** — it selects and details the single highest-leverage wedge
 > from `cannon-kuzushi-port-plan.md` (Phase 5) and `control-room-build-or-cut-plan.md`
 > (Wave F3), after validating both against real code.
