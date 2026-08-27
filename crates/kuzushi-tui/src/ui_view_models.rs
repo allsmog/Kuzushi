@@ -194,8 +194,9 @@ pub(crate) use jobs_registry::{
 pub(crate) use journey::{
     attach_proof_deferral_counts, attach_remediation_counts, autonomy_footer_segment,
     finding_is_review_actionable, finding_ledger_counts, journey_footer_segment, journey_model,
-    journey_phase_segment, CheckpointDrift, JourneyDestination, JourneyModel, JourneyPhaseAccess,
-    JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone, ReportReason,
+    journey_phase_segment, journey_reality_projection, CheckpointDrift, JourneyDestination,
+    JourneyModel, JourneyPhaseAccess, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
+    JourneyRealityProjection, ReportReason,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use keymap::{keymap_model, KeymapModel};
@@ -371,10 +372,10 @@ pub(crate) use viz_data::{
     WorklistRowModel, WorklistViewModel,
 };
 pub(crate) use workbench::{
-    active_review_queue_mode, active_workbench_page, work_liveness,
-    workbench_presentation_snapshot, workbench_report_command, workbench_reverify_control_hint,
-    WorkLiveness, WorkbenchChromeModel, WorkbenchHint, WorkbenchPresentationSnapshot,
-    WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
+    active_review_queue_mode, active_workbench_page, active_workbench_page_with_reality_phase,
+    work_liveness, workbench_presentation_snapshot, workbench_report_command,
+    workbench_reverify_control_hint, WorkLiveness, WorkbenchChromeModel, WorkbenchHint,
+    WorkbenchPresentationSnapshot, WorkbenchState, WorkbenchTopBar, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_projection, workspace_model,

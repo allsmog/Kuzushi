@@ -6,6 +6,23 @@ use kuzushi_core::WorkflowPhase;
 
 use super::{RunFocusReceipt, RunSummaryEntriesState, ShellApp, ViewDataState};
 
+#[cfg(test)]
+thread_local! {
+    static PHASE_RESULT_PRESENTATION_CALLS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn take_phase_result_presentation_calls() -> usize {
+    PHASE_RESULT_PRESENTATION_CALLS.with(|calls| calls.replace(0))
+}
+
+#[cfg(test)]
+fn record_phase_result_presentation_call() {
+    PHASE_RESULT_PRESENTATION_CALLS.with(|calls| calls.set(calls.get() + 1));
+}
+
 #[path = "phase_results/typed_receipt.rs"]
 mod typed_receipt;
 use typed_receipt::TypedReceiptResolution;
@@ -252,6 +269,8 @@ impl ShellApp {
         &self,
         completed: &PhaseAttemptCompleted,
     ) -> PhaseResultPresentation {
+        #[cfg(test)]
+        record_phase_result_presentation_call();
         let typed_receipt = TypedReceiptResolution::resolve(completed);
         let policy = self.phase_result_policy_with_receipt(completed, &typed_receipt);
         let live = self.matching_live_result_receipt(&completed.attempt_id);

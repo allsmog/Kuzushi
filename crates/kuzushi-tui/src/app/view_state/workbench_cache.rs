@@ -434,6 +434,21 @@ impl WorkbenchCache {
         self.clear_view_hydration_loading();
     }
 
+    /// Refresh data derived from live target source without evicting durable
+    /// `.kuzushi` artifacts. Editor saves can arrive several times per second;
+    /// dropping Map, run, JSON, or revision caches here makes accepted phase
+    /// evidence oscillate through Loading even though those files did not
+    /// change.
+    pub(crate) fn invalidate_source_file_changes(&mut self) {
+        self.source_file = None;
+        self.mark_git_metadata_stale();
+        self.file_completion_values = None;
+        self.bump_completion_generation();
+        self.finding_patch_truth.invalidate(None);
+        self.scan_recommendations = None;
+        self.clear_view_hydration_loading();
+    }
+
     fn trim_large_run_caches(&mut self, keep: &LargeRunCacheKey) {
         self.trim_large_run_caches_to(keep, MAX_LARGE_RUN_CACHE_BYTES);
     }

@@ -287,8 +287,13 @@ pub(crate) fn terminal_shell_loop(
 #[derive(Debug)]
 pub(crate) struct TerminalLoopState {
     pub(crate) needs_redraw: bool,
-    /// When the last full frame was painted; gates draws to
-    /// `MIN_FRAME_INTERVAL` so event floods cannot monopolize the loop.
+    pub(crate) redraw_priority: RedrawPriority,
+    /// One queued terminal batch may preempt background refresh. The next
+    /// loop must service background work so sustained typing cannot starve
+    /// hydration, watcher, or job progress.
+    background_refresh_due: bool,
+    /// When the last full frame was painted; gates background and interactive
+    /// frames independently so neither event floods nor typing monopolize the loop.
     pub(crate) last_draw: Option<Instant>,
     pub(crate) last_title: Option<String>,
     /// Attention ids active on the previous broker snapshot. This suppresses
@@ -305,12 +310,24 @@ impl Default for TerminalLoopState {
     fn default() -> Self {
         Self {
             needs_redraw: true,
+            redraw_priority: RedrawPriority::Background,
+            background_refresh_due: false,
             last_draw: None,
             last_title: None,
             active_attention_ids: std::collections::BTreeSet::new(),
             focus_unknown_notice_emitted: false,
             run_focus_hold: RunFocusVisibilityHold::default(),
         }
+    }
+}
+
+impl TerminalLoopState {
+    pub(crate) fn request_redraw(&mut self, changed: bool, priority: RedrawPriority) {
+        if !changed {
+            return;
+        }
+        self.needs_redraw = true;
+        self.redraw_priority = self.redraw_priority.max(priority);
     }
 }
 
@@ -323,26 +340,56 @@ pub(crate) fn terminal_shell_step(
     watcher: Option<&mut WorkspaceWatcherRuntime>,
 ) -> Result<()> {
     if let Some(input_changed) = state.run_focus_hold.intercept_input(app, input)? {
-        state.needs_redraw |= input_changed;
+        state.request_redraw(input_changed, RedrawPriority::Interactive);
         draw_terminal_if_needed(terminal, app, state)?;
         return Ok(());
     }
+    if let Some(input_batch) = take_queued_input_batch(app, state, input)? {
+        finish_terminal_input_batch(terminal, app, state, wake, input_batch)?;
+        return Ok(());
+    }
     let work_tail_may_remain = refresh_terminal_redraw_state(terminal, app, state, watcher)?;
+    state.background_refresh_due = false;
     rearm_work_tail(wake, work_tail_may_remain);
-    let view_before_input = app.shell_view();
     let timeout = deferred_frame_timeout(
         terminal_event_timeout(app),
         state.needs_redraw,
+        state.redraw_priority,
         state.last_draw,
         Instant::now(),
     );
-    let input_changed = wait_for_terminal_loop_event_within(app, input, timeout)?;
-    state.needs_redraw |= input_changed;
-    if input_changed {
-        draw_terminal_if_needed(terminal, app, state)?;
-        state
-            .run_focus_hold
-            .begin_after_transition(view_before_input, app);
+    let input_batch = wait_for_terminal_event_batch_within(app, input, timeout)?;
+    finish_terminal_input_batch(terminal, app, state, wake, input_batch)
+}
+
+pub(crate) fn take_queued_input_batch(
+    app: &mut ShellApp,
+    state: &mut TerminalLoopState,
+    input: &TerminalLoopInbox,
+) -> Result<Option<TerminalEventBatchOutcome>> {
+    if state.background_refresh_due {
+        return Ok(None);
+    }
+    let input_batch = wait_for_terminal_event_batch_within(app, input, Duration::ZERO)?;
+    if input_batch.terminal_event_count == 0 {
+        return Ok(None);
+    }
+    state.background_refresh_due = true;
+    Ok(Some(input_batch))
+}
+
+fn finish_terminal_input_batch(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    app: &mut ShellApp,
+    state: &mut TerminalLoopState,
+    wake: &TerminalLoopWake,
+    input_batch: TerminalEventBatchOutcome,
+) -> Result<()> {
+    rearm_work_tail(wake, input_batch.hit_batch_bound);
+    state.request_redraw(input_batch.changed, RedrawPriority::Interactive);
+    draw_terminal_if_needed(terminal, app, state)?;
+    if let Some(prior_view) = input_batch.run_focus_transition_from {
+        state.run_focus_hold.begin_after_transition(prior_view, app);
     }
     Ok(())
 }

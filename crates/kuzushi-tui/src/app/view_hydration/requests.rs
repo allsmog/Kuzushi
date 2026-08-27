@@ -1,39 +1,50 @@
 use super::*;
 
 pub(super) fn active_view_hydration_keys(app: &ShellApp) -> Vec<ViewHydrationKey> {
+    let reality = crate::ui_view_models::journey_reality_projection(app);
+    let workbench_page = crate::ui_view_models::active_workbench_page_with_reality_phase(
+        app,
+        reality.as_ref().map(|reality| reality.current),
+    );
     let mut keys = app
         .target()
         .is_some()
         .then(common_target_keys)
         .unwrap_or_default();
-    append_checkpoint_revision_key(app, &mut keys);
+    append_checkpoint_revision_key(
+        reality
+            .as_ref()
+            .and_then(|reality| reality.checkpoint_drift.as_ref()),
+        &mut keys,
+    );
     append_project_document_key(app, &mut keys);
-    append_view_hydration_keys(app, app.shell_view(), &mut keys);
+    append_view_hydration_keys(app, app.shell_view(), workbench_page, &mut keys);
     if let Some(origin) = app
         .router
         .overlay_origin()
         .filter(|origin| *origin != app.shell_view())
     {
-        append_view_hydration_keys(app, origin, &mut keys);
+        append_view_hydration_keys(app, origin, workbench_page, &mut keys);
     }
     keys.sort();
     keys.dedup();
     keys
 }
 
-fn append_checkpoint_revision_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
-    let Some(journey) = crate::ui_view_models::journey_model(app) else {
-        return;
-    };
-    let Some(drift) = journey.checkpoint_drift else {
+fn append_checkpoint_revision_key(
+    drift: Option<&crate::ui_view_models::CheckpointDrift>,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
+    let Some(drift) = drift else {
         return;
     };
     if drift.accepted_revision == drift.current_revision {
         return;
     }
-    let (Some(accepted_revision), Some(current_revision)) =
-        (drift.accepted_revision, drift.current_revision)
-    else {
+    let (Some(accepted_revision), Some(current_revision)) = (
+        drift.accepted_revision.clone(),
+        drift.current_revision.clone(),
+    ) else {
         return;
     };
     keys.push(ViewHydrationKey::RevisionRelationship {
@@ -42,12 +53,17 @@ fn append_checkpoint_revision_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKe
     });
 }
 
-fn append_view_hydration_keys(app: &ShellApp, view: ShellView, keys: &mut Vec<ViewHydrationKey>) {
+fn append_view_hydration_keys(
+    app: &ShellApp,
+    view: ShellView,
+    workbench_page: WorkbenchPage,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
     match view {
         ShellView::Home => append_home_keys(app, keys),
         ShellView::Recommend => append_latest_run_keys(app, keys),
         ShellView::Module => append_module_keys(app, keys),
-        ShellView::Workbench => append_workbench_keys(app, keys),
+        ShellView::Workbench => append_workbench_keys(app, workbench_page, keys),
         ShellView::Tune | ShellView::PromptsEditor => append_prompt_keys(app, keys),
         ShellView::Threat | ShellView::ThreatEditor | ShellView::Scene => {
             append_threat_model_key(app, keys);
@@ -125,7 +141,11 @@ fn append_module_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     });
 }
 
-fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
+fn append_workbench_keys(
+    app: &ShellApp,
+    workbench_page: WorkbenchPage,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
     append_latest_run_keys(app, keys);
     append_threat_model_key(app, keys);
     append_entry_point_catalog_key(app, keys);
@@ -133,13 +153,13 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
     append_scanned_snippet_key(app, keys);
     append_selected_proof_key(app, keys);
     append_finding_audit_dataflow_key(app, keys);
-    append_finding_patch_truth_key(app, keys);
+    append_finding_patch_truth_key(app, workbench_page, keys);
     keys.extend([
         ViewHydrationKey::StrategyQueue,
         ViewHydrationKey::HarnessFile,
     ]);
-    append_scan_receipt_keys(app, keys);
-    append_scan_recommendation_key(app, keys);
+    append_scan_receipt_keys(app, workbench_page, keys);
+    append_scan_recommendation_key(workbench_page, keys);
     let Some(target) = app.target() else {
         return;
     };
@@ -150,8 +170,8 @@ fn append_workbench_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
 
 /// The recommender fold runs git diffs and a repo walk, so it hydrates only
 /// while the Map page could actually show the rows.
-fn append_scan_recommendation_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
-    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Map {
+fn append_scan_recommendation_key(workbench_page: WorkbenchPage, keys: &mut Vec<ViewHydrationKey>) {
+    if workbench_page != WorkbenchPage::Map {
         return;
     }
     keys.push(ViewHydrationKey::ScanRecommendations);
@@ -169,8 +189,12 @@ fn append_finding_audit_dataflow_key(app: &ShellApp, keys: &mut Vec<ViewHydratio
     });
 }
 
-fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
-    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Fix {
+fn append_finding_patch_truth_key(
+    app: &ShellApp,
+    workbench_page: WorkbenchPage,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
+    if workbench_page != WorkbenchPage::Fix {
         return;
     }
     let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(app) else {
@@ -187,8 +211,12 @@ fn append_finding_patch_truth_key(app: &ShellApp, keys: &mut Vec<ViewHydrationKe
     });
 }
 
-fn append_scan_receipt_keys(app: &ShellApp, keys: &mut Vec<ViewHydrationKey>) {
-    if crate::ui_view_models::active_workbench_page(app) != WorkbenchPage::Scan {
+fn append_scan_receipt_keys(
+    app: &ShellApp,
+    workbench_page: WorkbenchPage,
+    keys: &mut Vec<ViewHydrationKey>,
+) {
+    if workbench_page != WorkbenchPage::Scan {
         return;
     }
     let attempt = app

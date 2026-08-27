@@ -3,7 +3,7 @@ mod tests {
     use super::super::*;
     use crate::ui_view_models::PhaseSurfaceId;
     use crossterm::event::{
-        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+        KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
     use ratatui::{
         backend::{ClearType, TestBackend, WindowSize},
@@ -336,7 +336,7 @@ mod tests {
         let inbox = TerminalLoopInbox::from_receiver(rx);
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        assert!(wait_for_terminal_loop_event(&mut app, &inbox).unwrap());
+        assert!(wait_for_terminal_event_batch(&mut app, &inbox).unwrap());
 
         assert_eq!(app.input(), "abc");
     }
@@ -348,9 +348,285 @@ mod tests {
         let inbox = TerminalLoopInbox::from_receiver(rx);
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        assert!(!wait_for_terminal_loop_event(&mut app, &inbox).unwrap());
+        assert!(!wait_for_terminal_event_batch(&mut app, &inbox).unwrap());
 
         assert!(app.input().is_empty());
+    }
+
+    #[test]
+    fn terminal_event_batch_applies_a_printable_burst_in_arrival_order() {
+        let (tx, rx) = mpsc::channel();
+        let expected = (0..80)
+            .map(|index| char::from(b'a' + (index % 26) as u8))
+            .collect::<String>();
+        for character in expected.chars() {
+            tx.send(Ok(TerminalLoopEvent::Terminal(TermEvent::Key(
+                KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE),
+            ))))
+            .unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let outcome = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.received_count, 80);
+        assert_eq!(outcome.terminal_event_count, 80);
+        assert!(!outcome.hit_batch_bound);
+        assert_eq!(app.input(), expected);
+    }
+
+    #[test]
+    fn terminal_event_batch_preserves_mixed_event_order_and_ignores_wakes() {
+        let (tx, rx) = mpsc::channel();
+        for event in [
+            TerminalLoopEvent::Terminal(TermEvent::Paste("ab".to_string())),
+            TerminalLoopEvent::Wake,
+            TerminalLoopEvent::Terminal(TermEvent::Resize {
+                columns: 144,
+                rows: 52,
+            }),
+            TerminalLoopEvent::Terminal(TermEvent::Key(KeyEvent::new(
+                KeyCode::Char('c'),
+                KeyModifiers::NONE,
+            ))),
+        ] {
+            tx.send(Ok(event)).unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let outcome = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.received_count, 4);
+        assert_eq!(outcome.terminal_event_count, 3);
+        assert_eq!(app.input(), "abc");
+        assert_eq!(app.viewport(), TerminalViewport::new(144, 52));
+    }
+
+    #[test]
+    fn command_submit_non_press_does_not_confirm_the_new_planning_picker() {
+        for (command, phase) in [("/map", WorkflowPhase::Map), ("/scan", WorkflowPhase::Scan)] {
+            for kind in [KeyEventKind::Release, KeyEventKind::Repeat] {
+                assert_command_submit_non_press_stays_in_picker(command, phase, kind);
+            }
+        }
+    }
+
+    fn assert_command_submit_non_press_stays_in_picker(
+        command: &str,
+        phase: WorkflowPhase,
+        kind: KeyEventKind,
+    ) {
+        let target = tempfile::tempdir().expect("temp target");
+        let workspace = WorkspaceTarget::new(target.path()).expect("workspace");
+        let (tx, rx) = mpsc::channel();
+        for event in [
+            TerminalLoopEvent::Terminal(TermEvent::Paste(command.to_string())),
+            TerminalLoopEvent::Terminal(TermEvent::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))),
+            TerminalLoopEvent::Terminal(TermEvent::Key(KeyEvent::new_with_kind(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+                kind,
+            ))),
+        ] {
+            tx.send(Ok(event)).unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let outcome = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.received_count, 3, "{command} {kind:?}");
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
+        assert_eq!(app.engagement.current_phase(), Some(phase));
+        assert!(!app.has_running_work(), "{command} {kind:?}");
+    }
+
+    #[test]
+    fn terminal_event_batch_limit_leaves_the_tail_for_the_next_batch() {
+        let (tx, rx) = mpsc::channel();
+        for _ in 0..300 {
+            tx.send(Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(
+                "x".to_string(),
+            ))))
+            .unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let first = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+        let second = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(first.received_count, TERMINAL_EVENT_BATCH_LIMIT);
+        assert!(first.hit_batch_bound);
+        assert_eq!(second.received_count, 300 - TERMINAL_EVENT_BATCH_LIMIT);
+        assert!(!second.hit_batch_bound);
+        assert_eq!(app.input().len(), 300);
+    }
+
+    #[test]
+    fn queued_input_preempts_one_background_refresh_but_not_two() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(
+            "first".to_string(),
+        ))))
+        .unwrap();
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut state = TerminalLoopState::default();
+
+        let first = take_queued_input_batch(&mut app, &mut state, &inbox)
+            .unwrap()
+            .expect("queued input bypasses background refresh");
+        tx.send(Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(
+            "second".to_string(),
+        ))))
+        .unwrap();
+
+        assert_eq!(first.terminal_event_count, 1);
+        assert_eq!(app.input(), "first");
+        assert!(take_queued_input_batch(&mut app, &mut state, &inbox)
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            app.input(),
+            "first",
+            "the next loop must service background work before more queued input"
+        );
+    }
+
+    #[test]
+    fn queued_wake_never_spends_the_input_preemption() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(TerminalLoopEvent::Wake)).unwrap();
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let mut state = TerminalLoopState::default();
+
+        assert!(take_queued_input_batch(&mut app, &mut state, &inbox)
+            .unwrap()
+            .is_none());
+        tx.send(Ok(TerminalLoopEvent::Terminal(TermEvent::Paste(
+            "ready".to_string(),
+        ))))
+        .unwrap();
+
+        assert!(take_queued_input_batch(&mut app, &mut state, &inbox)
+            .unwrap()
+            .is_some());
+        assert_eq!(app.input(), "ready");
+    }
+
+    #[test]
+    fn running_activity_transition_stops_the_current_batch() {
+        let (tx, rx) = mpsc::channel();
+        for event in [
+            TerminalLoopEvent::Terminal(TermEvent::Paste("activity".to_string())),
+            TerminalLoopEvent::Terminal(TermEvent::Key(KeyEvent::new(
+                KeyCode::Enter,
+                KeyModifiers::NONE,
+            ))),
+            TerminalLoopEvent::Terminal(TermEvent::Paste("tail".to_string())),
+        ] {
+            tx.send(Ok(event)).unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_running_tool_for_test("context:build");
+        app.set_shell_view(ShellView::Workbench);
+
+        let outcome = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.received_count, 2);
+        assert_eq!(
+            outcome.run_focus_transition_from,
+            Some(ShellView::Workbench)
+        );
+        assert!(!outcome.hit_batch_bound);
+        assert_eq!(app.shell_view(), ShellView::Activity);
+        assert!(matches!(
+            inbox.recv_timeout(Duration::ZERO).unwrap(),
+            Some(TerminalLoopEvent::Terminal(TermEvent::Paste(tail))) if tail == "tail"
+        ));
+    }
+
+    #[test]
+    fn quit_request_stops_before_consuming_queued_tail_input() {
+        let (tx, rx) = mpsc::channel();
+        for event in [
+            TerminalLoopEvent::Terminal(TermEvent::Key(KeyEvent::new(
+                KeyCode::Char('c'),
+                KeyModifiers::CONTROL,
+            ))),
+            TerminalLoopEvent::Terminal(TermEvent::Paste("tail".to_string())),
+        ] {
+            tx.send(Ok(event)).unwrap();
+        }
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let outcome = wait_for_terminal_event_batch_with_limits(
+            &mut app,
+            &inbox,
+            Duration::ZERO,
+            TERMINAL_EVENT_BATCH_LIMIT,
+            Duration::from_secs(1),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.received_count, 1);
+        assert!(!outcome.hit_batch_bound);
+        assert!(app.should_quit());
+        assert!(matches!(
+            inbox.recv_timeout(Duration::ZERO).unwrap(),
+            Some(TerminalLoopEvent::Terminal(TermEvent::Paste(tail))) if tail == "tail"
+        ));
     }
 
     #[test]
@@ -407,45 +683,86 @@ mod tests {
         let inbox = TerminalLoopInbox::from_receiver(rx);
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        let error = wait_for_terminal_loop_event(&mut app, &inbox)
+        let error = wait_for_terminal_event_batch(&mut app, &inbox)
             .unwrap_err()
             .to_string();
 
         assert!(error.contains("terminal event reader failed: boom"));
     }
 
-    /// Event floods must not monopolize the loop with imperceptible draws:
-    /// a dirty frame inside the minimum interval defers, and the deferred
-    /// frame shortens the next wait so it still paints on time.
+    /// Event floods must not monopolize the loop with imperceptible draws,
+    /// while input-driven frames retain a tighter latency budget.
     #[test]
-    fn frame_cap_defers_flood_draws_but_schedules_the_deferred_repaint() {
+    fn redraw_priority_caps_background_work_without_throttling_input() {
         let base = std::time::Instant::now();
         let just_drawn = Some(base);
-        let long_ago = Some(base - MIN_FRAME_INTERVAL * 2);
+        let long_ago = Some(base - BACKGROUND_FRAME_INTERVAL * 2);
 
         // Draw gating: clean frames never draw; dirty frames draw when the
         // interval elapsed (or nothing was drawn yet), defer when inside it.
-        assert!(!should_draw_frame(false, None, base));
-        assert!(should_draw_frame(true, None, base));
-        assert!(should_draw_frame(true, long_ago, base));
-        assert!(!should_draw_frame(true, just_drawn, base));
+        assert!(!should_draw_frame(
+            false,
+            RedrawPriority::Background,
+            None,
+            base
+        ));
         assert!(should_draw_frame(
             true,
+            RedrawPriority::Background,
+            None,
+            base
+        ));
+        assert!(should_draw_frame(
+            true,
+            RedrawPriority::Background,
+            long_ago,
+            base
+        ));
+        assert!(!should_draw_frame(
+            true,
+            RedrawPriority::Background,
             just_drawn,
-            base + MIN_FRAME_INTERVAL
+            base + INTERACTIVE_FRAME_INTERVAL
+        ));
+        assert!(should_draw_frame(
+            true,
+            RedrawPriority::Interactive,
+            just_drawn,
+            base + INTERACTIVE_FRAME_INTERVAL
         ));
 
-        // Timeout capping: an idle 250ms wait shrinks to the remaining frame
-        // interval while a deferred frame is pending, and only then.
         let idle = Duration::from_millis(250);
-        assert_eq!(deferred_frame_timeout(idle, false, just_drawn, base), idle);
-        assert_eq!(deferred_frame_timeout(idle, true, None, base), idle);
-        let capped = deferred_frame_timeout(idle, true, just_drawn, base);
-        assert!(capped <= MIN_FRAME_INTERVAL, "{capped:?}");
-        assert!(capped >= Duration::from_millis(1), "{capped:?}");
+        assert_eq!(
+            deferred_frame_timeout(idle, false, RedrawPriority::Background, just_drawn, base),
+            idle
+        );
+        assert_eq!(
+            deferred_frame_timeout(idle, true, RedrawPriority::Background, None, base),
+            Duration::ZERO
+        );
+        assert_eq!(
+            deferred_frame_timeout(idle, true, RedrawPriority::Interactive, just_drawn, base),
+            INTERACTIVE_FRAME_INTERVAL
+        );
         // A view cadence faster than the frame cap is never slowed down.
         let scene = Duration::from_millis(5);
-        assert_eq!(deferred_frame_timeout(scene, true, just_drawn, base), scene);
+        assert_eq!(
+            deferred_frame_timeout(scene, true, RedrawPriority::Interactive, just_drawn, base),
+            scene
+        );
+    }
+
+    #[test]
+    fn interactive_redraw_request_upgrades_a_pending_background_frame() {
+        let mut state = TerminalLoopState::default();
+        state.needs_redraw = false;
+
+        state.request_redraw(true, RedrawPriority::Background);
+        state.request_redraw(true, RedrawPriority::Interactive);
+        state.request_redraw(true, RedrawPriority::Background);
+
+        assert!(state.needs_redraw);
+        assert_eq!(state.redraw_priority, RedrawPriority::Interactive);
     }
 
     /// The panic hook must restore the terminal exactly once (the guard is
