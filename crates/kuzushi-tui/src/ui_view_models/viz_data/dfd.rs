@@ -101,6 +101,19 @@ pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
     model
 }
 
+/// Whether the DFD has no topology to show — the question the scene footers ask
+/// every frame. Served from the cached model without cloning it. The threat
+/// document itself is still cloned by `threat_model_doc`, which every viz_data
+/// builder shares; only that shared read can remove the remaining copy.
+pub(crate) fn dfd_model_is_empty(app: &ShellApp) -> bool {
+    let doc = super::super::threat_model_doc(app);
+    let key = DfdModelCacheKey::from_threat_doc(doc.as_ref());
+    if let Some(is_empty) = app.workbench_cache().borrow().dfd_model_is_empty(&key) {
+        return is_empty;
+    }
+    dfd_model(app).empty_hint.is_some()
+}
+
 fn dfd_model_from_doc(
     doc: Option<&serde_json::Value>,
     target: Option<&std::path::Path>,

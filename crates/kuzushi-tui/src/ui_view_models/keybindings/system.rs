@@ -320,7 +320,7 @@ fn scene_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 // the one key that does something — the same generate affordance the empty DFD
 // offers — instead of four dead navigation binds.
 fn summary_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    let mut bindings = if crate::ui_view_models::dfd_model(app).empty_hint.is_some() {
+    let mut bindings = if crate::ui_view_models::dfd_model_is_empty(app) {
         vec![bind("Enter", "generate DFD")]
     } else {
         vec![
@@ -389,21 +389,25 @@ fn push_dfd_keybindings(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
         bindings.push(bind("q", "leave"));
         return;
     }
+    // Unlike Summary, both branches here read the model — `link_state` picks the
+    // Enter label — and an empty model is an empty `DfdModel`, so the cheap
+    // `dfd_model_is_empty` probe would buy nothing.
     let model = crate::ui_view_models::dfd_model(app);
-    bindings.push(bind("j/k/↑/↓", "select"));
     if model.empty_hint.is_some() {
+        // `dfd_selectable_count` is 0 and there is no selection to detail, so
+        // the cursor keys are inert. Advertise only the build that fills them.
         bindings.push(bind("Enter", "generate DFD"));
-    } else if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
+        push_scene_cycle_and_exit(bindings, app);
+        return;
+    }
+    bindings.push(bind("j/k/↑/↓", "select"));
+    if model.link_state == crate::ui_view_models::DfdLinkState::LegacyNeedsRebuild {
         bindings.push(bind("Enter", "rebuild linked context"));
     } else {
         bindings.push(bind("Enter", "context"));
     }
     bindings.push(bind("PgUp/PgDn", "detail"));
-    if app.active_viz_pages().len() > 1 {
-        bindings.push(bind("Tab", "next page"));
-        bindings.push(bind("Shift+Tab", "prev page"));
-    }
-    bindings.push(bind("Esc/q", "leave"));
+    push_scene_cycle_and_exit(bindings, app);
 }
 
 // SAST Tasks looks like a multi-select but is command-driven — advertise the

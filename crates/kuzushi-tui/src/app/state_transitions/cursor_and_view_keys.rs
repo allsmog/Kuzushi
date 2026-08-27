@@ -292,6 +292,14 @@ impl ShellApp {
         if self.handle_summary_arrow_or_scroll_key(key) {
             return InputUpdate::handled();
         }
+        // The Navigate gate below exists for `j/k/g/G`, which are printable and
+        // must reach the prompt. Enter on an empty Summary is not ambiguous —
+        // there is no cursor to move and the footer advertises it as the
+        // generate affordance — so it stays modeless like the empty DFD's
+        // Enter. `handle_scene_view_key` has already proved the composer empty.
+        if key.code == KeyCode::Enter && crate::ui_view_models::dfd_model_is_empty(self) {
+            return self.activate_summary_component_selection();
+        }
         if self.input_mode() != InputMode::Navigate {
             return InputUpdate::ignored();
         }

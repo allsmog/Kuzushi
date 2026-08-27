@@ -12813,9 +12813,11 @@ fn empty_summary_enter_requests_the_same_build_as_the_empty_dfd() {
         crate::scene3d::VizPage::Summary,
         "Summary is a permanent surface and must not redirect"
     );
-    // Summary's cursor keys are letters, so the page takes them only in
-    // Navigate mode; Enter belongs to the same set.
-    app.set_input_mode(crate::InputMode::Navigate);
+    assert_eq!(
+        app.input_mode(),
+        crate::InputMode::Prompt,
+        "the footer advertises Enter in the default mode, so it must work there"
+    );
 
     let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
     let prepare = run_tool_prepare(&update.effects).expect("Summary Enter prepares a tool");
@@ -12828,6 +12830,13 @@ fn empty_summary_enter_requests_the_same_build_as_the_empty_dfd() {
             .any(|line| line.body.contains("no resolved DFD node")),
         "a missing model is not an unresolved component"
     );
+
+    // Navigate mode reaches the same build, so the affordance never depends on
+    // which mode the operator happens to be in.
+    app.set_input_mode(crate::InputMode::Navigate);
+    let navigate = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let prepare = run_tool_prepare(&navigate.effects).expect("Navigate Enter prepares a tool");
+    assert_eq!(prepare.tool_name, "threat-model:build");
 }
 
 #[test]

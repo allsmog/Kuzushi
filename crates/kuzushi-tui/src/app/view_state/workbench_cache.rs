@@ -813,6 +813,10 @@ impl WorkbenchCache {
         self.view_models.dfd_model(key)
     }
 
+    pub(crate) fn dfd_model_is_empty(&self, key: &DfdModelCacheKey) -> Option<bool> {
+        self.view_models.dfd_model_is_empty(key)
+    }
+
     pub(crate) fn worklist(&self, key: &WorklistCacheKey) -> Option<WorklistViewModel> {
         self.view_models.worklist(key)
     }
