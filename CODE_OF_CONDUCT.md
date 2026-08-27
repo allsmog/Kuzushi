@@ -30,8 +30,10 @@ Examples of unacceptable behavior:
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers at **security@kuzushi.dev**. All complaints
-will be reviewed and investigated promptly and fairly.
+reported only through a private channel documented by the project. No such
+channel is currently published, so do not put sensitive conduct reports in a
+public issue or discussion. Maintainers must configure and document that
+channel before opening the project to public participation.
 
 ## Attribution
 

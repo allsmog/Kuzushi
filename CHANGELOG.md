@@ -5,6 +5,13 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+No changes recorded after the Alpha14 candidate.
+
+## v0.24.0-alpha.14 · candidate integrity and release preparation
+
+_Release status: candidate only. This preparation change does not publish npm
+packages, create a tag, or create a GitHub Release._
+
 **Additive:**
 
 - Successful phase attempts now keep the durable phase workspace primary with
@@ -36,7 +43,36 @@ Notable changes to Kuzushi. Release procedure lives in
   breaking the location. A `\` in a path is escaped rather than treated as a
   separator, because on Unix it is an ordinary filename character.
 
+**Security and reliability:**
+
+- A nonpublishing candidate workflow now binds the requested version and full
+  commit SHA to reusable full CI, five required native builds, and five local
+  installs of the exact root and platform tarballs.
+- One release receipt records the commit, version, filename, byte size,
+  SHA-256, and npm integrity for the root package, all five platform packages,
+  all five native archives, and the exact-commit source archive. Publishing
+  rehashes the same files and stops on any difference.
+- Package checks now inspect the files actually reported by `npm pack`, reject
+  unsafe paths and links, exclude bridge tests from the root package, and keep
+  the existing 10 MiB root and 60 MiB platform package limits.
+- Source export now refuses tracked `.kuzushi` runtime state and verifies that
+  the archive is complete for its embedded commit before writing the final
+  output.
+
+**Release operations:**
+
+- The tag workflow accepts only the package-version tag at current
+  `origin/main`, reruns the complete candidate, publishes exact matching
+  platform packages before the thin launcher, and applies npm's `latest`
+  dist-tag explicitly.
+- Public-release instructions now separate private candidate verification from
+  publishing and require verified cleanup of quarantined historical root
+  artifacts before repository visibility changes.
+
 ## v0.24.0-alpha.13 · operator experience and descriptor boundaries
+
+_Release status: failed and unpublished. This version was superseded by
+`0.24.0-alpha.14`; do not create or reuse an Alpha13 release tag._
 
 **Additive:**
 

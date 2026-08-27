@@ -59,19 +59,19 @@ importers:
         version: 17.3.0
     optionalDependencies:
       '@kuzushi/darwin-arm64':
-        specifier: 0.24.0-alpha.13
+        specifier: 0.24.0-alpha.14
         version: link:npm/platform-packages/darwin-arm64
       '@kuzushi/darwin-x64':
-        specifier: 0.24.0-alpha.13
+        specifier: 0.24.0-alpha.14
         version: link:npm/platform-packages/darwin-x64
       '@kuzushi/linux-arm64':
-        specifier: 0.24.0-alpha.13
+        specifier: 0.24.0-alpha.14
         version: link:npm/platform-packages/linux-arm64
       '@kuzushi/linux-x64':
-        specifier: 0.24.0-alpha.13
+        specifier: 0.24.0-alpha.14
         version: link:npm/platform-packages/linux-x64
       '@kuzushi/win32-x64':
-        specifier: 0.24.0-alpha.13
+        specifier: 0.24.0-alpha.14
         version: link:npm/platform-packages/win32-x64
 
   npm/platform-packages/darwin-arm64: {}

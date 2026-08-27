@@ -154,8 +154,15 @@ Release platform policy is explicit:
 | Platform payload | Release status |
 | --- | --- |
 | `linux-x64` | Required; a failed build blocks publication. |
+| `linux-arm64` | Required; a failed build blocks publication. |
+| `darwin-x64` | Required; a failed build blocks publication. |
 | `darwin-arm64` | Required; a failed build blocks publication. |
-| `linux-arm64`, `darwin-x64`, `win32-x64` | Best effort; included in npm and GitHub artifacts only after that matrix leg succeeds. |
+| `win32-x64` | Required; a failed build blocks publication. |
+
+This checkout is prepared as `0.24.0-alpha.14`. It remains a release
+candidate until the nonpublishing candidate workflow and the separate tagged
+release workflow both pass. `npm install -g kuzushi` always installs the
+registry's current `latest`, which may differ from this checkout.
 
 ## Quick Start
 
