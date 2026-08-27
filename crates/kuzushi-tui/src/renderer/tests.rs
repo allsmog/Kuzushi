@@ -6137,6 +6137,56 @@ fn workbench_warmed_input_to_paint_p95_stays_within_budget() {
     );
 }
 
+#[test]
+fn workbench_prompt_burst_paints_exact_draft_with_cached_large_ledger() {
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_latency_app();
+    app.set_input_mode(crate::InputMode::Prompt);
+
+    let draft = "typing-latency-0123456789-abcdefghijklmn";
+    type_prompt_burst(&mut app, draft);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+
+    assert_eq!(app.input(), draft);
+    let painted = format!("{:?}", terminal.backend().buffer());
+    assert!(painted.contains(draft), "{painted}");
+}
+
+#[test]
+#[ignore = "wall-clock performance gate; run serially with pnpm test:performance"]
+fn workbench_warmed_prompt_input_to_paint_p95_stays_within_budget() {
+    const SAMPLE_COUNT: usize = 60;
+    const SINGLE_KEY_BUDGET: std::time::Duration = std::time::Duration::from_millis(25);
+    const BURST_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
+    const BURST: &str = "typing-latency-0123456789-abcdefghijklmn";
+
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_latency_app();
+    app.set_input_mode(crate::InputMode::Prompt);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    for _ in 0..8 {
+        workbench_prompt_input_to_paint_sample(&mut terminal, &mut app, "x");
+        workbench_prompt_input_to_paint_sample(&mut terminal, &mut app, BURST);
+    }
+
+    let single_key = prompt_input_p95(&mut terminal, &mut app, "x", SAMPLE_COUNT);
+    let burst = prompt_input_p95(&mut terminal, &mut app, BURST, SAMPLE_COUNT);
+    eprintln!(
+        "warmed Workbench prompt-to-paint p95: single={single_key:?} (budget={SINGLE_KEY_BUDGET:?}), burst={burst:?} (budget={BURST_BUDGET:?})"
+    );
+
+    assert!(
+        single_key <= SINGLE_KEY_BUDGET,
+        "warmed single-key prompt-to-paint p95 {single_key:?} exceeded {SINGLE_KEY_BUDGET:?}"
+    );
+    assert!(
+        burst <= BURST_BUDGET,
+        "warmed prompt burst-to-paint p95 {burst:?} exceeded {BURST_BUDGET:?}"
+    );
+}
+
 fn workbench_latency_app() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_viewport(TerminalViewport::new(120, 36));
@@ -6164,7 +6214,50 @@ fn workbench_latency_app() -> ShellApp {
             })
             .collect(),
     );
+    let ledger_counts = crate::ui_view_models::finding_ledger_counts(
+        app.findings(),
+        app.review_decisions(),
+        app.findings().len(),
+    );
+    app.domain_mut().set_finding_ledger_counts(ledger_counts);
     app
+}
+
+fn prompt_input_p95(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut ShellApp,
+    input: &str,
+    sample_count: usize,
+) -> std::time::Duration {
+    let mut samples = (0..sample_count)
+        .map(|_| workbench_prompt_input_to_paint_sample(terminal, app, input))
+        .collect::<Vec<_>>();
+    samples.sort_unstable();
+    samples[(sample_count * 95).div_ceil(100) - 1]
+}
+
+fn workbench_prompt_input_to_paint_sample(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut ShellApp,
+    input: &str,
+) -> std::time::Duration {
+    app.set_input("");
+    let started = std::time::Instant::now();
+    type_prompt_burst(app, input);
+    terminal.draw(|frame| render_app(frame, app)).unwrap();
+    assert_eq!(app.input(), input);
+    started.elapsed()
+}
+
+fn type_prompt_burst(app: &mut ShellApp, input: &str) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for ch in input.chars() {
+        assert!(press_key(
+            app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        ));
+    }
 }
 
 fn workbench_input_to_paint_sample(

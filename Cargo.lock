@@ -2275,6 +2275,7 @@ dependencies = [
  "ctor",
  "kuzushi-core",
  "kuzushi-openai",
+ "libc",
  "ratatui",
  "serde",
  "serde_json",

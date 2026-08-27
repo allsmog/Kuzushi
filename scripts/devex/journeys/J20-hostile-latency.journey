@@ -18,16 +18,16 @@ launch: --target @TMP_TARGET
 wait-for: 30 KUZUSHI
 # Let the watcher start reporting churn before the first probe.
 wait: 3
-expect-echo-within: 800 zzqqxx1
+expect-echo-within: 300 zzqqxx1-0123456789-abcdefghijklmnopqrstuv
 snap: echo-early-churn
-expect: zzqqxx1
+expect: zzqqxx1-0123456789-abcdefghijklmnopqrstuv
 keys: C-u
 # Ten more seconds of sustained churn, then probe again — latency must not
 # degrade as invalidation work accumulates.
 wait: 10
-expect-echo-within: 800 zzqqxx2
+expect-echo-within: 300 zzqqxx2-0123456789-abcdefghijklmnopqrstuv
 snap: echo-sustained-churn
-expect: zzqqxx2
+expect: zzqqxx2-0123456789-abcdefghijklmnopqrstuv
 keys: C-u
 ask: Hostile churn — while an external writer rewrites `.kuzushi/v3` 10×/s, does the prompt feel like a text editor (echo, cursor, backspace) with no visible stutter or repaint tearing?
 # The transcript must not be a storm: the same unchanged tree re-delivered
