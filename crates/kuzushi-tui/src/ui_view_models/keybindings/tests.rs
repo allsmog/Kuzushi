@@ -556,8 +556,10 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(dfd_bindings.contains(&bind("PgUp/PgDn", "detail")));
     assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(!dfd_bindings.contains(&bind("g/G", "ends")));
-    assert!(!dfd_bindings.contains(&bind("Tab", "next page")));
-    assert!(!dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
+    // Summary and DFD are permanent surfaces, so even an empty gallery has two
+    // Tab stops to advertise.
+    assert!(dfd_bindings.contains(&bind("Tab", "next page")));
+    assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
     assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
     assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));

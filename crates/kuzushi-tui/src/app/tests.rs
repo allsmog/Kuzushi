@@ -19520,14 +19520,24 @@ fn assert_plain_output_strict_80(output: &str) {
 
 #[test]
 fn scene_command_opens_gallery_without_a_flag() {
+    use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Scene);
     assert_eq!(app.shell_view(), ShellView::Scene);
-    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
+    // The remembered page defaults to the terrain, which has no findings
+    // behind it, so the empty-page redirect still lands on the DFD.
+    assert_eq!(app.router.scene().page(), VizPage::Dfd);
+    // Summary and DFD are permanent surfaces, so a fresh gallery already has
+    // two Tab stops and the receipt must say so.
+    assert_eq!(
+        app.available_viz_pages(),
+        vec![VizPage::Summary, VizPage::Dfd]
+    );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scene"
-            && line.body.contains("data-flow diagram · Esc/q returns")
-            && !line.body.contains("Tab cycles")
+            && line
+                .body
+                .contains("data-flow diagram · Tab cycles pages · Esc/q returns")
     }));
 }
 
@@ -19544,13 +19554,17 @@ fn gallery_cycle_skips_pages_without_backing_artifacts() {
         }),
     );
 
+    // The taint-flow snapshot earns the attack-path tab; Summary and DFD are
+    // permanent. The remaining six pages have no artifact and take no Tab stop.
     assert_eq!(
         app.available_viz_pages(),
-        vec![VizPage::AttackPath, VizPage::Dfd]
+        vec![VizPage::AttackPath, VizPage::Summary, VizPage::Dfd]
     );
     app.open_scene_to_page(VizPage::Dfd);
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     assert_eq!(app.router.scene().page(), VizPage::AttackPath);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::Summary);
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
 }
