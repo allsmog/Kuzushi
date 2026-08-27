@@ -11917,6 +11917,33 @@ fn phase_command_opens_requested_phase_picker() {
 }
 
 #[test]
+fn slash_map_and_scan_open_their_configuration_pickers() {
+    for (command, phase) in [("/map", WorkflowPhase::Map), ("/scan", WorkflowPhase::Scan)] {
+        let dir = tempfile::tempdir().expect("temp target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(dir.path().to_path_buf()));
+
+        run_command(&mut app, parse_command(command));
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker, "{command}");
+        assert_eq!(app.engagement.current_phase(), Some(phase), "{command}");
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == phase));
+        press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(
+            app.engagement.planning_picker().focus(),
+            PickerFocus::OptionsPane,
+            "{command}"
+        );
+        assert!(!app.has_running_work(), "{command}");
+    }
+}
+
+#[test]
 fn phase_command_replaces_an_idle_guided_flow_only_after_picker_opens() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
