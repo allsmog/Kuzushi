@@ -30,7 +30,7 @@ jobs:
       - name: Bind the release tag to current main
         id: identity
         env:
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DEFAULT_BRANCH: main
         run: |
           set -euo pipefail
           version="$(node -p 'require("./package.json").version')"
@@ -87,29 +87,24 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: release-candidate-packages
-          path: dist/npm
-      - name: Publish verified platform packages
+          name: release-candidate-artifacts
+          path: dist/release
+      - name: Rehash the complete candidate before publication
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
-        run: node scripts/publish-platform-packages.mjs
-      - name: Publish verified thin launcher last
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+          RELEASE_SHA: ${{ github.sha }}
           RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
-        run: |
-          set -euo pipefail
-          package="dist/npm/kuzushi-${RELEASE_VERSION}.tgz"
-          args=(publish "${package}" --access public --tag latest --ignore-scripts)
-          if [[ "${NPM_PROVENANCE:-}" == "true" ]]; then
-            args+=(--provenance)
-          fi
-          npm "${args[@]}"
+        run: node scripts/verify-release-artifacts.mjs dist/release "${RELEASE_SHA}" "${RELEASE_VERSION}"
+      - name: Publish verified npm packages with the thin launcher last
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          KUZUSHI_RELEASE_DIRECTORY: dist/release
+        run: node scripts/publish-platform-packages.mjs
 
   github-release:
-    needs: [preflight, candidate]
+    needs: [preflight, candidate, publish-npm]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -118,15 +113,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+          ref: ${{ github.sha }}
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: release-candidate-packages
-          path: dist/npm
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          pattern: release-candidate-native-*
-          path: dist/native-archives
-          merge-multiple: true
+          name: release-candidate-artifacts
+          path: dist/release
+      - name: Rehash the complete candidate before release creation
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: node scripts/verify-release-artifacts.mjs dist/release "${RELEASE_SHA}" "${RELEASE_VERSION}"
       - name: Generate changelog from the previous reachable tag
         env:
           QUALITY_BASE_REF: ${{ needs.preflight.outputs.quality_base_ref }}
@@ -142,8 +138,10 @@ jobs:
           body_path: ${{ env.CHANGELOG_PATH }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            dist/npm/*
-            dist/native-archives/*
+            dist/release/release-manifest.json
+            dist/release/packages/*
+            dist/release/native/*
+            dist/release/source/*
 
   published-release-smoke:
     needs: [preflight, publish-npm, github-release]

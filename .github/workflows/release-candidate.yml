@@ -90,6 +90,7 @@ jobs:
           fi
           node scripts/check-release-contract.mjs
           node scripts/check-secrets.mjs --base 0000000000000000000000000000000000000000 --head "${EXPECTED_SHA}"
+          node scripts/check-release-source.mjs "${EXPECTED_SHA}"
 
   ci:
     name: full-ci
@@ -205,13 +206,58 @@ jobs:
       - name: Pack and verify the npm candidate
         env:
           KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           pnpm pack:native-platforms
           pnpm verify:pack
-          npm pack --ignore-scripts --json --pack-destination dist/npm
+          node scripts/build-release-artifacts.mjs \
+            dist/release dist/npm . "${EXPECTED_SHA}" "${EXPECTED_VERSION}"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: release-candidate-packages
-          path: dist/npm/
+          name: release-candidate-artifacts
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  local-tarball-smoke:
+    name: local-tarball-${{ matrix.slug }}
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            slug: linux-x64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+          - os: macos-15-intel
+            slug: darwin-x64
+          - os: macos-14
+            slug: darwin-arm64
+          - os: windows-2025
+            slug: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate-artifacts
+          path: dist/release
+      - name: Install and execute the exact local tarballs
+        run: >-
+          node scripts/smoke-release-tarballs.mjs
+          dist/release "${{ inputs.expected_sha }}" "${{ inputs.expected_version }}" "${{ matrix.slug }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: local-tarball-smoke-${{ matrix.slug }}
+          path: local-tarball-smoke.json
           if-no-files-found: error
           retention-days: 7

@@ -154,9 +154,10 @@ const fullCiRequirements = [
 const releaseRequirements = [
   "uses: ./.github/workflows/release-candidate.yml",
   "release tag must point at current origin/${DEFAULT_BRANCH}",
-  "name: release-candidate-packages",
+  "name: release-candidate-artifacts",
+  "node scripts/verify-release-artifacts.mjs",
   "node scripts/publish-platform-packages.mjs",
-  "--tag latest",
+  "Publish verified npm packages with the thin launcher last",
   "uses: ./.github/workflows/published-release-smoke.yml",
 ];
 
@@ -170,6 +171,9 @@ const releaseCandidateRequirements = [
   "pnpm verify:pack",
   "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
   "pnpm pack:native-platforms",
+  "node scripts/build-release-artifacts.mjs",
+  "node scripts/check-release-source.mjs",
+  "node scripts/smoke-release-tarballs.mjs",
   "node scripts/build-native-runtime.mjs",
   "moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3",
 ];

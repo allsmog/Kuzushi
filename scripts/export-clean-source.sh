@@ -8,5 +8,5 @@ if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   exit 2
 fi
 
-git archive --format=tar.gz --output "${OUTPUT}" HEAD
-echo "Wrote ${OUTPUT}"
+COMMIT_SHA="${KUZUSHI_SOURCE_COMMIT:-$(git rev-parse HEAD)}"
+node scripts/export-clean-source.mjs "${COMMIT_SHA}" "${OUTPUT}"

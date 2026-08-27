@@ -8,6 +8,7 @@ import {
   actionlintImageFailures,
   callGraphActionPinFailures,
   candidateWorkflowFailures,
+  platformPublisherFailures,
   publisherWorkflowFailures,
 } from "./release-workflow-contract.mjs";
 
@@ -161,6 +162,7 @@ function checkReleaseWorkflows() {
   failures.push(
     ...candidateWorkflowFailures(candidate),
     ...publisherWorkflowFailures(publisher),
+    ...platformPublisherFailures(readText("scripts/publish-platform-packages.mjs")),
     ...callGraphActionPinFailures(workflows),
     ...actionlintImageFailures(fullCi),
     ...publishedSmokeFailures(publishedSmoke),
