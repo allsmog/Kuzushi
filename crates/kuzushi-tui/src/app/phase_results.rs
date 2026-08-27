@@ -6,6 +6,23 @@ use kuzushi_core::WorkflowPhase;
 
 use super::{RunFocusReceipt, RunSummaryEntriesState, ShellApp, ViewDataState};
 
+#[cfg(test)]
+thread_local! {
+    static PHASE_RESULT_PRESENTATION_CALLS: std::cell::Cell<usize> = const {
+        std::cell::Cell::new(0)
+    };
+}
+
+#[cfg(test)]
+pub(crate) fn take_phase_result_presentation_calls() -> usize {
+    PHASE_RESULT_PRESENTATION_CALLS.with(|calls| calls.replace(0))
+}
+
+#[cfg(test)]
+fn record_phase_result_presentation_call() {
+    PHASE_RESULT_PRESENTATION_CALLS.with(|calls| calls.set(calls.get() + 1));
+}
+
 #[path = "phase_results/typed_receipt.rs"]
 mod typed_receipt;
 use typed_receipt::TypedReceiptResolution;
@@ -221,11 +238,29 @@ pub(crate) fn phase_result_policy(
 
 pub(crate) fn phase_attempt_outcome_from_label(value: &str) -> PhaseAttemptOutcome {
     match value.trim().to_ascii_lowercase().as_str() {
-        "completed" | "complete" | "success" => PhaseAttemptOutcome::Completed,
-        "partial" => PhaseAttemptOutcome::Partial,
+        "completed" | "complete" | "success" | "skipped" => PhaseAttemptOutcome::Completed,
+        "partial" | "pending" | "running" => PhaseAttemptOutcome::Partial,
         "blocked" | "refused" => PhaseAttemptOutcome::Blocked,
         "canceled" | "cancelled" => PhaseAttemptOutcome::Canceled,
         _ => PhaseAttemptOutcome::Failed,
+    }
+}
+
+pub(crate) fn phase_attempt_outcome_from_run_status(
+    status: kuzushi_core::run_lifecycle::RunItemStatus,
+) -> PhaseAttemptOutcome {
+    phase_attempt_outcome_from_label(status.label())
+}
+
+fn receipt_outcome_state(
+    state: ViewDataState<Result<Option<PhaseAttemptOutcome>, String>>,
+    fallback: PhaseAttemptOutcome,
+) -> ViewDataState<PhaseAttemptOutcome> {
+    match state {
+        ViewDataState::Ready(Ok(Some(outcome))) => ViewDataState::Ready(outcome),
+        ViewDataState::Ready(Ok(None) | Err(_)) => ViewDataState::Ready(fallback),
+        ViewDataState::Loading => ViewDataState::Loading,
+        ViewDataState::NotRequested => ViewDataState::NotRequested,
     }
 }
 
@@ -252,6 +287,8 @@ impl ShellApp {
         &self,
         completed: &PhaseAttemptCompleted,
     ) -> PhaseResultPresentation {
+        #[cfg(test)]
+        record_phase_result_presentation_call();
         let typed_receipt = TypedReceiptResolution::resolve(completed);
         let policy = self.phase_result_policy_with_receipt(completed, &typed_receipt);
         let live = self.matching_live_result_receipt(&completed.attempt_id);
@@ -455,6 +492,24 @@ impl ShellApp {
             return PhaseAttemptOutcome::Partial;
         }
         completed.outcome
+    }
+
+    pub(crate) fn cached_authoritative_phase_attempt_outcome(
+        &self,
+        completed: &PhaseAttemptCompleted,
+    ) -> ViewDataState<PhaseAttemptOutcome> {
+        let fallback = self.effective_phase_attempt_outcome(completed);
+        let Some(target) = self.target() else {
+            return ViewDataState::Ready(fallback);
+        };
+        if target != std::path::Path::new(&completed.target_snapshot.target) {
+            return ViewDataState::Ready(fallback);
+        }
+        let state = self
+            .workbench_cache()
+            .borrow()
+            .cached_phase_receipt_outcome(target, &completed.attempt_id);
+        receipt_outcome_state(state, fallback)
     }
 
     pub(crate) fn effective_phase_attempt_blocker(

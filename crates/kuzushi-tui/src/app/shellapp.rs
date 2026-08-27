@@ -1006,9 +1006,12 @@ impl ShellApp {
         // hydration. Refilling here ran `git status` on the UI thread for
         // every watcher-reported source change, which stalls input for
         // seconds on large targets.
-        self.workbench_cache()
-            .borrow_mut()
-            .invalidate_workspace_files();
+        let mut cache = self.workbench_cache().borrow_mut();
+        if changes_are_source_file_only(changes) {
+            cache.invalidate_source_file_changes();
+        } else {
+            cache.invalidate_workspace_files();
+        }
     }
 
     pub(crate) fn apply_external_workspace_state_change(
@@ -1286,6 +1289,17 @@ impl ShellApp {
     pub(crate) fn set_session_thinking_level(&mut self, thinking_level: Option<String>) {
         self.session.set_thinking_level(thinking_level);
     }
+}
+
+fn changes_are_source_file_only(changes: &[WorkspaceChange]) -> bool {
+    changes.iter().all(|change| {
+        matches!(
+            change,
+            WorkspaceChange::FileChanged(_)
+                | WorkspaceChange::FileDeleted(_)
+                | WorkspaceChange::FileMoved { .. }
+        )
+    })
 }
 
 pub(crate) fn contextual_surface_view(view: ShellView) -> bool {

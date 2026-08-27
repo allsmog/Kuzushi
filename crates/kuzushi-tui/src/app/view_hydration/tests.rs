@@ -120,6 +120,9 @@ fn missing_value(key: &ViewHydrationKey) -> ViewHydrationValue {
         ViewHydrationKey::RunProjection { .. } => {
             ViewHydrationValue::RunProjection(Err("missing fixture projection".to_string()))
         }
+        ViewHydrationKey::PhaseReceiptOutcome { .. } => {
+            ViewHydrationValue::PhaseReceiptOutcome(Ok(None))
+        }
         ViewHydrationKey::ScanStageReceipt { .. } => {
             ViewHydrationValue::ScanStageReceipt(ScanStageReceiptState::Missing)
         }
@@ -258,6 +261,35 @@ fn workbench_hydrates_the_map_artifact_state() {
     app.set_shell_view(ShellView::Workbench);
 
     assert!(active_view_hydration_keys(&app).contains(&ViewHydrationKey::MapArtifacts));
+}
+
+#[test]
+fn hydration_key_enumeration_skips_phase_result_presentation() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let snapshot = kuzushi_core::workflow_attempts::PhaseTargetSnapshot::capture(temp.path());
+    let completed = kuzushi_core::workflow_attempts::PhaseAttemptCompleted::new(
+        WorkflowPhase::Map,
+        vec!["run-must-not-be-read".to_string()],
+        snapshot.clone(),
+        kuzushi_core::workflow_attempts::PhaseAttemptOutcome::Completed,
+    );
+    let attempt_id = completed.attempt_id.clone();
+    let ledger = kuzushi_core::workflow_attempts::PhaseAttemptLedger::from_events([
+        kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptCompleted(completed),
+    ])
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_shell_view(ShellView::Workbench);
+    app.engagement
+        .set_phase_attempt_projection(Some(snapshot), ledger);
+    crate::app::take_phase_result_presentation_calls();
+
+    let keys = active_view_hydration_keys(&app);
+
+    assert!(keys.contains(&ViewHydrationKey::ScanRecommendations));
+    assert!(keys.contains(&ViewHydrationKey::PhaseReceiptOutcome { attempt_id }));
+    assert_eq!(crate::app::take_phase_result_presentation_calls(), 0);
 }
 
 #[test]
