@@ -5,7 +5,7 @@ use self::{
 };
 pub(in crate::app) use super::*;
 use crate::commands::ShellCommand;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Instant;
 
 #[derive(Default)]

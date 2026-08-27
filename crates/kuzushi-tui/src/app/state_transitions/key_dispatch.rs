@@ -15,6 +15,9 @@ enum JourneyPhaseEntry {
 
 impl ShellApp {
     pub(crate) fn reduce_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if key.kind != KeyEventKind::Press {
+            return InputUpdate::ignored();
+        }
         let key = normalize_back_tab(key);
         let update = self.reduce_key_without_recording(key);
         if update.handled {
