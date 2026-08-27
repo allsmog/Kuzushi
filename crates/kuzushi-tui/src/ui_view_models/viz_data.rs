@@ -17,10 +17,10 @@ pub(crate) use components::{
     ComponentStack,
 };
 pub(crate) use dfd::{
-    dfd_model, dfd_overview, dfd_overview_component_at, dfd_overview_component_count,
-    dfd_security_items_for_selection, dfd_selectable_count, dfd_selected_item,
-    dfd_selection_for_key, display_target, DfdBoundaryModel, DfdContextCounts, DfdFlowModel,
-    DfdKind, DfdLinkState, DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent,
+    dfd_model, dfd_model_is_empty, dfd_overview, dfd_overview_component_at,
+    dfd_overview_component_count, dfd_security_items_for_selection, dfd_selectable_count,
+    dfd_selected_item, dfd_selection_for_key, display_target, DfdBoundaryModel, DfdContextCounts,
+    DfdFlowModel, DfdKind, DfdLinkState, DfdModel, DfdNodeModel, DfdOverview, DfdOverviewComponent,
     DfdOverviewFlow, DfdOverviewZone, DfdSecurityItem, DfdSecurityKind, DfdSelected, DfdZoneFlow,
 };
 pub(crate) use entry_points::{

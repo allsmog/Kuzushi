@@ -389,8 +389,10 @@ is expected to behave identically and should be filed as a parity bug.
 - **Durable Map/Scan/Review/Prove/Fix pages** project persisted artifacts and
   finding truth. Map never reads live Run Focus state. A ready Map embeds the
   shared real-data gallery as its primary body: Summary by default after an
-  accepted Map, then DFD, Entry points, and Components when their artifacts
-  exist. `Tab` changes the local projection; `z` opens the same projection in
+  accepted Map, then DFD — both permanent guidance surfaces that stay reachable
+  with an honest empty state and a `threat-model:build` affordance — then Entry
+  points and Components, which appear only when their artifacts exist.
+  `Tab` changes the local projection; `z` opens the same projection in
   a Map-scoped full-frame zoom. Project context is one compact receipt, and the
   action drawer appears only for missing, stale, or blocked Map evidence. Scan
   is a resting cockpit over accepted attempts, scope/engine plan, per-engine outcomes,

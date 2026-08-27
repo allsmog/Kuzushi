@@ -722,21 +722,25 @@ mod tests {
     }
 
     #[test]
-    fn empty_gallery_header_only_shows_the_permanent_dfd_page() {
+    fn empty_gallery_header_only_shows_the_permanent_summary_and_dfd_pages() {
         let app = ShellApp::new(V2Config::default(), None);
 
         let text = spans_text(nav_spans(&app, VizPage::Dfd));
 
-        assert!(text.contains("pages  [dfd]"), "{text}");
+        // Summary and DFD are guidance surfaces that stay reachable without an
+        // artifact, so an empty gallery has exactly those two Tab stops and
+        // advertises the cycle.
+        assert!(text.contains("pages  summary · [dfd]"), "{text}");
+        assert!(text.contains("Tab cycles"), "{text}");
+        // Every content-gated page stays out of the nav until its artifact lands.
         assert!(!text.contains("terrain"), "{text}");
         assert!(!text.contains("path"), "{text}");
-        assert!(!text.contains("summary"), "{text}");
         assert!(!text.contains("entry"), "{text}");
         assert!(!text.contains("components"), "{text}");
         assert!(!text.contains("heatmap"), "{text}");
         assert!(!text.contains("chain"), "{text}");
+        assert!(!text.contains("worklist"), "{text}");
         assert!(!text.contains('∅'), "{text}");
-        assert!(!text.contains("Tab cycles"), "{text}");
         assert!(!text.contains("Esc/q"), "{text}");
         assert!(!text.contains("j/k"), "{text}");
         assert!(!text.contains("PgUp"), "{text}");

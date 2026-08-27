@@ -550,25 +550,34 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.set_input_mode(crate::InputMode::Navigate);
 
     let dfd_bindings = footer_keybindings(&app);
-    // The DFD selects topology separately from its wrapped detail viewport.
-    assert!(dfd_bindings.contains(&bind("j/k/↑/↓", "select")));
+    // This app has no threat model, so nothing is selectable and nothing has a
+    // detail pane. Only the generate affordance is real.
     assert!(dfd_bindings.contains(&bind("Enter", "generate DFD")));
-    assert!(dfd_bindings.contains(&bind("PgUp/PgDn", "detail")));
+    assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "select")));
+    assert!(!dfd_bindings.contains(&bind("PgUp/PgDn", "detail")));
     assert!(!dfd_bindings.contains(&bind("j/k/↑/↓", "scroll")));
     assert!(!dfd_bindings.contains(&bind("g/G", "ends")));
-    assert!(!dfd_bindings.contains(&bind("Tab", "next page")));
-    assert!(!dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
+    // Summary and DFD are permanent surfaces, so even an empty gallery has two
+    // Tab stops to advertise.
+    assert!(dfd_bindings.contains(&bind("Tab", "next page")));
+    assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
     assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
     assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
+    // This app has no threat model, so Summary shows its empty state: there is
+    // nothing to select and nothing to scroll. Advertise only the generate
+    // affordance, matching the empty DFD above.
     app.router.scene_mut().set_page(VizPage::Summary);
     let summary_bindings = footer_keybindings(&app);
-    assert!(summary_bindings.contains(&bind("PgUp/PgDn", "scroll")));
-    assert!(summary_bindings.contains(&bind("j/k/↑/↓", "component")));
-    assert!(summary_bindings.contains(&bind("g/G", "ends")));
-    assert!(summary_bindings.contains(&bind("Enter", "DFD target")));
+    assert!(summary_bindings.contains(&bind("Enter", "generate DFD")));
+    assert!(!summary_bindings.contains(&bind("PgUp/PgDn", "scroll")));
+    assert!(!summary_bindings.contains(&bind("j/k/↑/↓", "component")));
+    assert!(!summary_bindings.contains(&bind("g/G", "ends")));
+    assert!(!summary_bindings.contains(&bind("Enter", "DFD target")));
+    assert!(summary_bindings.contains(&bind("Tab", "next page")));
+    assert!(summary_bindings.contains(&bind("Esc/q", "leave")));
     app.router.scene_mut().set_page(VizPage::Dfd);
 
     app.router.scene_mut().toggle_dfd_focus();
@@ -601,6 +610,89 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(entry_bindings.contains(&bind("PgUp/PgDn", "detail")));
     assert!(entry_bindings.contains(&bind("Enter", "DFD target")));
     assert!(!entry_bindings.contains(&bind("j/k/↑/↓", "scroll")));
+}
+
+/// A shell whose target carries a real two-node DFD, so the Summary and DFD
+/// footers project a populated model instead of their empty state.
+fn app_with_populated_dfd(target: &tempfile::TempDir, page: VizPage) -> ShellApp {
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    kuzushi_core::capabilities::save_persistent_threat_model(
+        workspace.root(),
+        &serde_json::json!({
+            "systemContext": "Operators review records.",
+            "dfd": {
+                "nodes": [
+                    {"id": "operator", "name": "Operator", "trustZone": "local"},
+                    {"id": "app", "name": "Desktop app", "trustZone": "desktop"}
+                ],
+                "flows": [{"id": "open", "sourceId": "operator", "targetId": "app"}],
+                "trustBoundaries": []
+            },
+            "attackSurface": {"entryPoints": []},
+            "assets": [],
+            "threats": []
+        }),
+        true,
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.hydrate_all_view_data_for_test();
+    app.router.scene_mut().set_page(page);
+    app.set_shell_view(ShellView::Scene);
+    app
+}
+
+/// The empty-Summary footer above must not be the only Summary contract: once a
+/// threat model exists the component tree is real, so the navigation keys come
+/// back and the generate affordance goes away.
+#[test]
+fn populated_summary_footer_restores_component_navigation() {
+    let target = tempfile::tempdir().unwrap();
+    let app = app_with_populated_dfd(&target, VizPage::Summary);
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(
+        bindings.contains(&bind("j/k/↑/↓", "component")),
+        "{bindings:?}"
+    );
+    assert!(bindings.contains(&bind("g/G", "ends")), "{bindings:?}");
+    assert!(
+        bindings.contains(&bind("PgUp/PgDn", "scroll")),
+        "{bindings:?}"
+    );
+    assert!(
+        bindings.contains(&bind("Enter", "DFD target")),
+        "{bindings:?}"
+    );
+    assert!(
+        !bindings.contains(&bind("Enter", "generate DFD")),
+        "{bindings:?}"
+    );
+}
+
+/// The same both-halves guarantee for the DFD: an empty page advertises only
+/// the build, a populated one restores topology selection and the detail pane.
+#[test]
+fn populated_dfd_footer_restores_topology_selection() {
+    let target = tempfile::tempdir().unwrap();
+    let app = app_with_populated_dfd(&target, VizPage::Dfd);
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(
+        bindings.contains(&bind("j/k/↑/↓", "select")),
+        "{bindings:?}"
+    );
+    assert!(
+        bindings.contains(&bind("PgUp/PgDn", "detail")),
+        "{bindings:?}"
+    );
+    assert!(
+        !bindings.contains(&bind("Enter", "generate DFD")),
+        "{bindings:?}"
+    );
+    assert!(bindings.contains(&bind("Esc/q", "leave")), "{bindings:?}");
 }
 
 #[test]

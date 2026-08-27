@@ -108,6 +108,15 @@ impl ViewModelFragmentCache {
             .map(|cache| cache.model.clone())
     }
 
+    /// Answer "does the DFD have any topology?" off the cached model without
+    /// cloning it — the footers ask this every frame and need nothing else.
+    pub(super) fn dfd_model_is_empty(&self, key: &DfdModelCacheKey) -> Option<bool> {
+        self.dfd_model
+            .as_ref()
+            .filter(|cache| &cache.key == key)
+            .map(|cache| cache.model.empty_hint.is_some())
+    }
+
     pub(super) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
         self.dfd_model = Some(CachedDfdModel { key, model });
     }

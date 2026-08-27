@@ -12803,6 +12803,43 @@ fn empty_dfd_enter_requests_the_normal_model_backed_build_without_pipeline_overr
 }
 
 #[test]
+fn empty_summary_enter_requests_the_same_build_as_the_empty_dfd() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(target.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.open_scene_to_page(crate::scene3d::VizPage::Summary);
+    assert_eq!(
+        app.router.scene().page(),
+        crate::scene3d::VizPage::Summary,
+        "Summary is a permanent surface and must not redirect"
+    );
+    assert_eq!(
+        app.input_mode(),
+        crate::InputMode::Prompt,
+        "the footer advertises Enter in the default mode, so it must work there"
+    );
+
+    let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let prepare = run_tool_prepare(&update.effects).expect("Summary Enter prepares a tool");
+
+    assert_eq!(prepare.tool_name, "threat-model:build");
+    assert!(prepare.input.is_none());
+    assert!(
+        !app.log_lines()
+            .iter()
+            .any(|line| line.body.contains("no resolved DFD node")),
+        "a missing model is not an unresolved component"
+    );
+
+    // Navigate mode reaches the same build, so the affordance never depends on
+    // which mode the operator happens to be in.
+    app.set_input_mode(crate::InputMode::Navigate);
+    let navigate = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    let prepare = run_tool_prepare(&navigate.effects).expect("Navigate Enter prepares a tool");
+    assert_eq!(prepare.tool_name, "threat-model:build");
+}
+
+#[test]
 fn linked_dfd_enter_toggles_local_graph_and_escape_collapses_before_leaving() {
     let target = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(target.path()).unwrap();
@@ -19520,14 +19557,24 @@ fn assert_plain_output_strict_80(output: &str) {
 
 #[test]
 fn scene_command_opens_gallery_without_a_flag() {
+    use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Scene);
     assert_eq!(app.shell_view(), ShellView::Scene);
-    assert_eq!(app.router.scene().page(), crate::scene3d::VizPage::Dfd);
+    // The remembered page defaults to the terrain, which has no findings
+    // behind it, so the empty-page redirect still lands on the DFD.
+    assert_eq!(app.router.scene().page(), VizPage::Dfd);
+    // Summary and DFD are permanent surfaces, so a fresh gallery already has
+    // two Tab stops and the receipt must say so.
+    assert_eq!(
+        app.available_viz_pages(),
+        vec![VizPage::Summary, VizPage::Dfd]
+    );
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scene"
-            && line.body.contains("data-flow diagram · Esc/q returns")
-            && !line.body.contains("Tab cycles")
+            && line
+                .body
+                .contains("data-flow diagram · Tab cycles pages · Esc/q returns")
     }));
 }
 
@@ -19544,13 +19591,17 @@ fn gallery_cycle_skips_pages_without_backing_artifacts() {
         }),
     );
 
+    // The taint-flow snapshot earns the attack-path tab; Summary and DFD are
+    // permanent. The remaining six pages have no artifact and take no Tab stop.
     assert_eq!(
         app.available_viz_pages(),
-        vec![VizPage::AttackPath, VizPage::Dfd]
+        vec![VizPage::AttackPath, VizPage::Summary, VizPage::Dfd]
     );
     app.open_scene_to_page(VizPage::Dfd);
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     assert_eq!(app.router.scene().page(), VizPage::AttackPath);
+    press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert_eq!(app.router.scene().page(), VizPage::Summary);
     press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
 }
