@@ -31,10 +31,18 @@ impl PhaseTargetSnapshot {
         }
     }
 
+    /// Whether both snapshots describe the same target at the same revision
+    /// and worktree state.
+    ///
+    /// Revision and dirty state are plain comparisons; target identity may
+    /// have to resolve the filesystem. Ledger queries scan every attempt
+    /// recorded for the target, and most of those were recorded at other
+    /// revisions, so the two comparisons that cannot touch the disk decide
+    /// first.
     pub(crate) fn equivalent_to(&self, other: &Self) -> bool {
-        target_identities_match(&self.target, &other.target)
-            && self.revision == other.revision
+        self.revision == other.revision
             && self.dirty == other.dirty
+            && target_identities_match(&self.target, &other.target)
     }
 }
 
@@ -47,8 +55,25 @@ pub(crate) fn canonical_target_identity(target: impl AsRef<Path>) -> String {
         .to_string()
 }
 
+/// Whether two recorded target identities name the same target.
+///
+/// Identities are recorded through [`canonical_target_identity`], so two
+/// records for one target normally hold the same string. Resolving the
+/// filesystem reconciles only the spellings that differ: an identity written
+/// before it was canonicalized, or one captured while the path could not be
+/// resolved. The interactive shell re-runs these ledger queries on every
+/// frame, so the equal-string answer must not cost a `canonicalize` walk per
+/// record.
 pub(crate) fn target_identities_match(left: &str, right: &str) -> bool {
-    canonical_target_identity(left) == canonical_target_identity(right)
+    identities_match_resolved_by(left, right, |identity| canonical_target_identity(identity))
+}
+
+fn identities_match_resolved_by(
+    left: &str,
+    right: &str,
+    resolve: impl Fn(&str) -> String,
+) -> bool {
+    left == right || resolve(left) == resolve(right)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,4 +374,80 @@ fn truncate_utf8(value: &mut String, max_bytes: usize) {
     }
     value.truncate(end);
     value.push('…');
+}
+
+#[cfg(test)]
+mod target_identity_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn identical_identities_match_without_resolving_either_side() {
+        let resolutions = Cell::new(0);
+
+        let matched = identities_match_resolved_by("/home/op/target", "/home/op/target", |_| {
+            resolutions.set(resolutions.get() + 1);
+            "/resolved".to_string()
+        });
+
+        assert!(matched);
+        assert_eq!(resolutions.get(), 0);
+    }
+
+    #[test]
+    fn differing_spellings_are_still_reconciled_by_resolution() {
+        let resolutions = Cell::new(0);
+
+        let matched = identities_match_resolved_by("/home/op/target/.", "/home/op/target", |id| {
+            resolutions.set(resolutions.get() + 1);
+            id.trim_end_matches("/.").to_string()
+        });
+
+        assert!(matched);
+        assert_eq!(resolutions.get(), 2);
+    }
+
+    #[test]
+    fn unrelated_identities_do_not_match_after_resolution() {
+        let matched =
+            identities_match_resolved_by("/home/op/one", "/home/op/two", |id| id.to_string());
+
+        assert!(!matched);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_target_matches_the_path_it_resolves_to() {
+        let temp = tempfile::tempdir().unwrap();
+        let real = temp.path().join("engagement");
+        std::fs::create_dir(&real).unwrap();
+        let link = temp.path().join("link-to-engagement");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        assert!(target_identities_match(
+            &link.display().to_string(),
+            &real.display().to_string()
+        ));
+    }
+
+    #[test]
+    fn a_snapshot_stays_equivalent_only_at_the_same_revision_and_worktree_state() {
+        let snapshot = PhaseTargetSnapshot {
+            target: "/home/op/target".to_string(),
+            revision: Some("abc123".to_string()),
+            dirty: false,
+        };
+        let other_revision = PhaseTargetSnapshot {
+            revision: Some("def456".to_string()),
+            ..snapshot.clone()
+        };
+        let dirty = PhaseTargetSnapshot {
+            dirty: true,
+            ..snapshot.clone()
+        };
+
+        assert!(snapshot.equivalent_to(&snapshot));
+        assert!(!snapshot.equivalent_to(&other_revision));
+        assert!(!snapshot.equivalent_to(&dirty));
+    }
 }
