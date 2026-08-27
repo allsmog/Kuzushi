@@ -4,7 +4,11 @@
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Please report security issues by emailing **security@kuzushi.dev**.
+Kuzushi does not currently publish a verified private reporting channel. Do
+not send vulnerability details through issues, discussions, or an unverified
+email address. Repository owners must configure and test a private reporting
+channel before making the repository public; this policy will name that
+channel once it exists.
 
 Include:
 - Description of the vulnerability
@@ -12,7 +16,7 @@ Include:
 - Impact assessment
 - Suggested fix (if any)
 
-You should receive a response within 48 hours. We will work with you to understand the issue and coordinate a fix before any public disclosure.
+No response-time commitment is currently offered.
 
 ## Scope
 
@@ -22,5 +26,5 @@ This policy covers the Kuzushi codebase and its official npm package. It does no
 
 | Version | Supported |
 | ------- | --------- |
-| 0.24.x (latest published 0.x) | Yes |
-| older 0.x | No — upgrade to the latest release |
+No supported public version is currently declared. `0.24.0-alpha.14` is a
+release candidate until its release and public-package verification finish.

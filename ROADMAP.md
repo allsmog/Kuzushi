@@ -1,7 +1,7 @@
 # Kuzushi Roadmap — Path to World-Class
 
 This roadmap started from the June 2026 deep audit and is maintained against
-the live Rust product. The status snapshot below was reconciled on 2026-07-12;
+the current Rust product. The status snapshot below was reconciled on 2026-08-27;
 code, tests, release workflows, and the npm registry remain the source of truth.
 
 ## North star
@@ -14,7 +14,7 @@ code, tests, release workflows, and the npm registry remain the source of truth.
 
 | Metric | Today | World-class |
 | --- | --- | --- |
-| `npm install -g kuzushi` installs the documented product | Native `0.24.0-alpha.6`; the repo is one alpha ahead | ✅ current release on all supported platforms |
+| `npm install -g kuzushi` installs the documented product | Registry `latest` is `0.24.0-alpha.12`; this tree is an unpublished `0.24.0-alpha.14` candidate | Current release on all supported platforms |
 | Findings with repo-verified evidence (span + content hash) | Producer-dependent, with unverified states surfaced honestly | 100% of persisted findings |
 | "Exploitable: confirmed" backed by runtime proof | Runtime-verified is reserved for proof level 4 | Preserve this invariant |
 | Published detection numbers (TP/FP/cost) | `baseline.json` is `{}` | Scoreboard on real corpora + CWE-Bench-Java head-to-head |
@@ -28,19 +28,22 @@ code, tests, release workflows, and the npm registry remain the source of truth.
 **Goal: a stranger can install and run what the README describes.**
 *~1–2 weeks. Nothing else matters while this is red.*
 
-- [ ] **P0.1 Keep the native npm release current.** Registry `latest` is the
-  native `0.24.0-alpha.6`; this tree is `0.24.0-alpha.8`. Publish the current
-  alpha only after its release gates are green.
+- [ ] **P0.1 Keep the native npm release current.** Registry `latest` is
+  `0.24.0-alpha.12`; this tree is the `0.24.0-alpha.14` candidate.
+  `0.24.0-alpha.13` was a failed attempt and was never published. Complete the
+  private candidate and historical-artifact cleanup gates before changing
+  repository visibility or creating the release tag.
   *Exit: `npm i -g kuzushi && kuzushi doctor` matches README on a clean machine.*
-- [ ] **P0.2 Finish cross-platform release hardening.** `release.yml` now
-  builds and stages Linux, macOS, and Windows binaries into the npm tarball;
-  several matrix legs remain best-effort. Promote them to required after a
-  green tagged release, then add the installer/Homebrew distribution path.
-  *Exit: install succeeds on linux-x64, darwin-arm64, darwin-x64, win32-x64.*
+- [ ] **P0.2 Prove cross-platform release hardening.** The candidate workflow
+  requires native builds and local-tarball installs on Linux x64, Linux arm64,
+  macOS x64, macOS arm64, and Windows x64. Record the first green Alpha14
+  candidate before treating that contract as proven, then add the
+  installer/Homebrew distribution path.
+  *Exit: one candidate receipt proves install on all five supported targets.*
 - [ ] **P0.3 Reduce the default bridge dependency footprint.** The former
   GitHub-only Randori dependency is gone. LangChain and bridge dependencies
   remain in the default install; make them an explicit runtime extra without
-  weakening the retained TypeScript module SDK.
+  weakening the brokered KWP worker protocol or LangGraph bridge.
   *Exit: zero `github:` specifiers in the dependency graph; install < 30s, no native compile.*
 - [x] **P0.4 CI gating semantics.** `kuzushi scan --fail-on <severity>` and
   `--sarif <path>` are implemented, documented, and covered by the reference
@@ -48,8 +51,9 @@ code, tests, release workflows, and the npm registry remain the source of truth.
   *Exit: a GitHub Actions job fails on a high-severity finding and uploads SARIF to Code Scanning.*
 - [ ] **P0.5 Finish the trust kit.** The README now states the local-first,
   zero-first-party-telemetry promise and release publishing supports npm
-  provenance. Make provenance the default and keep release/security examples
-  synchronized through executable documentation checks.
+  records that bind a package to its build. Make those records the default,
+  remove or replace the quarantined historical root artifacts, and keep
+  release/security examples synchronized through executable documentation checks.
   *Exit: a security engineer's 10-minute diligence pass finds no incoherence.*
 - [x] **P0.6 First-run wow, offline.** `kuzushi demo` scans a bundled fixture
   without a key, model, or external scanner, persists honest `signal_only`

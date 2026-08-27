@@ -1,12 +1,22 @@
 {
   "name": "@kuzushi/linux-arm64",
-  "version": "0.24.0-alpha.13",
+  "version": "0.24.0-alpha.14",
   "description": "Kuzushi native runtime for Linux arm64 (glibc)",
   "license": "MIT",
   "repository": "https://github.com/allsmog/Kuzushi.git",
-  "os": ["linux"],
-  "cpu": ["arm64"],
-  "libc": ["glibc"],
-  "files": ["bin"],
-  "publishConfig": { "access": "public" }
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "files": [
+    "bin"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }
