@@ -5,7 +5,6 @@ on:
     tags:
       - "v*"
 
-# Serialize concurrent release runs; don't cancel mid-publish.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -14,241 +13,142 @@ permissions:
   contents: read
 
 env:
-  # Run JS-based actions on Node 24 ahead of the June 2026 default flip
-  # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  # ── Gate: require the complete default product contract ──────────────────
-  ci:
-    uses: ./.github/workflows/ci-full.yml
+  preflight:
+    name: release-identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      quality_base_ref: ${{ steps.identity.outputs.quality_base_ref }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Bind the release tag to current main
+        id: identity
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          version="$(node -p 'require("./package.json").version')"
+          expected_tag="v${version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "release tag ${GITHUB_REF_NAME} must equal ${expected_tag}" >&2
+            exit 1
+          fi
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "${checked_out_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "tag checkout ${checked_out_sha} does not equal event SHA ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          remote_main_sha="$(git ls-remote origin "refs/heads/${DEFAULT_BRANCH}" | awk '{print $1}')"
+          if [[ -z "${remote_main_sha}" || "${remote_main_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "release tag must point at current origin/${DEFAULT_BRANCH}" >&2
+            exit 1
+          fi
+          quality_base_ref="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [[ -z "${quality_base_ref}" ]]; then
+            quality_base_ref="$(git rev-list --max-parents=0 HEAD | head -n 1)"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "quality_base_ref=${quality_base_ref}" >> "${GITHUB_OUTPUT}"
+
+  candidate:
+    name: verified-candidate
+    needs: preflight
+    uses: ./.github/workflows/release-candidate.yml
     with:
-      quality_base_ref: HEAD^
+      expected_version: ${{ needs.preflight.outputs.version }}
+      expected_sha: ${{ github.sha }}
+      quality_base_ref: ${{ needs.preflight.outputs.quality_base_ref }}
     permissions:
       contents: read
 
-  # ── Publish thin launcher + one optional package per native platform ────
   publish-npm:
-    needs: [ci, native-binaries]
-    runs-on: ubuntu-latest
+    needs: [preflight, candidate]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
-      # id-token is only required when NPM_PROVENANCE is opted in; safe to declare.
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
-      - name: Download cross-platform binaries
-        uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: release-native-*
-          merge-multiple: true
-      - name: Stage native binaries for every built platform
-        # Each matrix leg uploads kuzushi-<tag>-<slug>.{tar.gz,zip}; extract
-        # them into native/<slug>/ so the npm tarball works on every platform
-        # that produced a green build (previously: linux-x64 only).
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for archive in kuzushi-*.tar.gz; do
-            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
-            mkdir -p "native/${slug}"
-            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
-            chmod 755 "native/${slug}"/kuzushi*
-            rm -f "${archive}"
-          done
-          for archive in kuzushi-*.zip; do
-            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
-            mkdir -p "native/${slug}"
-            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
-            rm -f "${archive}"
-          done
-          ls -la native/*/
-      - name: Verify required multi-platform package assembly
-        env:
-          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
-        run: |
-          pnpm pack:native-platforms
-          pnpm verify:pack
-      # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
-      # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
-      - name: Publish platform packages to npm
+          name: release-candidate-packages
+          path: dist/npm
+      - name: Publish verified platform packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
         run: node scripts/publish-platform-packages.mjs
-      - name: Publish thin launcher to npm
+      - name: Publish verified thin launcher last
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_PROVENANCE: ${{ vars.NPM_PROVENANCE }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
         run: |
           set -euo pipefail
-          if [ "${NPM_PROVENANCE:-}" = "true" ]; then
-            echo "Publishing with --provenance"
-            npm publish --access public --provenance --ignore-scripts
-          else
-            npm publish --access public --ignore-scripts
+          package="dist/npm/kuzushi-${RELEASE_VERSION}.tgz"
+          args=(publish "${package}" --access public --tag latest --ignore-scripts)
+          if [[ "${NPM_PROVENANCE:-}" == "true" ]]; then
+            args+=(--provenance)
           fi
+          npm "${args[@]}"
 
-  # Prove the public package works from a clean npm prefix on every supported
-  # platform after both registries expose the immutable release.
-  published-release-smoke:
-    needs: [publish-npm, github-release]
-    uses: ./.github/workflows/published-release-smoke.yml
-    with:
-      version: ${{ github.ref_name }}
-    permissions:
-      contents: read
-
-  # ── Cross-platform native binaries for the GitHub Release ───────────────
-  # Each leg builds natively on its own runner arch (no cross toolchains).
-  # Every supported archive is required before npm or GitHub publication.
-  native-binaries:
-    needs: ci
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            slug: linux-x64
-          - os: ubuntu-24.04-arm
-            slug: linux-arm64
-          - os: macos-15-intel
-            slug: darwin-x64
-          - os: macos-14
-            slug: darwin-arm64
-          - os: windows-latest
-            slug: win32-x64
-    name: native-${{ matrix.slug }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7
-      - uses: moonrepo/setup-rust@v1
-        with:
-          inherit-toolchain: true
-          # Restoring a multi-platform release target cache can exhaust the
-          # hosted runner before compilation begins.
-          cache: false
-      - run: node scripts/build-native-runtime.mjs
-      - name: Execute staged native runtime on its release platform
-        run: node scripts/smoke-native-runtime.mjs
-      - name: Exercise platform-specific process and atomic-write contracts
-        run: |
-          cargo test -p kuzushi-core fs_atomic::tests
-          cargo test -p kuzushi-core scan::subprocess::scan_cancellation::tests
-          cargo test -p kuzushi-core capabilities::recon::adapters::process::tests
-          cargo test -p kuzushi-cli mcp::tests
-      - name: Package binaries
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME}"
-          staging="kuzushi-${version}-${{ matrix.slug }}"
-          mkdir -p "${staging}"
-          # `kz` is an argv0 alias of `kuzushi`; the other files are the
-          # sibling MCP servers used by the CLI and agent bridge.
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp native/${{ matrix.slug }}/*.exe "${staging}/"
-            7z a "${staging}.zip" "${staging}" > /dev/null
-          else
-            cp native/${{ matrix.slug }}/* "${staging}/"
-            tar -czf "${staging}.tar.gz" "${staging}"
-          fi
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-native-${{ matrix.slug }}
-          path: |
-            kuzushi-*.tar.gz
-            kuzushi-*.zip
-          if-no-files-found: error
-          retention-days: 7
-
-  # ── Create GitHub Release (reuses dist/native artifacts + changelog) ────
   github-release:
-    needs: [ci, native-binaries]
-    runs-on: ubuntu-latest
+    needs: [preflight, candidate]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Download cross-platform binaries
-        uses: actions/download-artifact@v8
+          name: release-candidate-packages
+          path: dist/npm
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: release-native-*
+          pattern: release-candidate-native-*
+          path: dist/native-archives
           merge-multiple: true
-
-      - name: Stage native binaries for every built platform
-        # Same staging as publish-npm so the .tgz attached to the GitHub
-        # Release is multi-platform too. The original archives are kept in
-        # the workspace — the release step attaches them below.
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-          for archive in kuzushi-*.tar.gz; do
-            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
-            mkdir -p "native/${slug}"
-            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
-            chmod 755 "native/${slug}"/kuzushi*
-          done
-          for archive in kuzushi-*.zip; do
-            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
-            mkdir -p "native/${slug}"
-            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
-          done
-          ls -la native/*/
-
-      - name: Verify required multi-platform release assembly
+      - name: Generate changelog from the previous reachable tag
         env:
-          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
-        run: |
-          pnpm pack:native-platforms
-          pnpm verify:pack
-
-      # The root package stays thin; native platform packages were packed by
-      # the assembly gate above from the already-tested release archives.
-      - run: npm pack --ignore-scripts --pack-destination dist/npm
-
-      - name: Generate changelog from commits since previous tag
+          QUALITY_BASE_REF: ${{ needs.preflight.outputs.quality_base_ref }}
         run: |
           set -euo pipefail
-          CHANGELOG="${RUNNER_TEMP}/changelog.txt"
-          # Canonical "previous tag reachable from the parent of the release commit";
-          # fall back to the initial commit for first-ever releases.
-          PREV_TAG=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
-          if [ -z "${PREV_TAG}" ]; then
-            INITIAL_COMMIT=$(git rev-list --max-parents=0 HEAD | head -n 1)
-            echo "No previous tag; using initial commit ${INITIAL_COMMIT}."
-            git log --pretty=format:"- %s (%h)" "${INITIAL_COMMIT}..HEAD" > "${CHANGELOG}"
-          else
-            echo "Previous tag: ${PREV_TAG}"
-            git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" > "${CHANGELOG}"
-          fi
-          echo "CHANGELOG_PATH=${CHANGELOG}" >> "${GITHUB_ENV}"
-
+          changelog="${RUNNER_TEMP}/changelog.txt"
+          git log --pretty=format:"- %s (%h)" "${QUALITY_BASE_REF}..HEAD" > "${changelog}"
+          echo "CHANGELOG_PATH=${changelog}" >> "${GITHUB_ENV}"
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           generate_release_notes: true
           body_path: ${{ env.CHANGELOG_PATH }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
-            dist/npm/*.tgz
-            kuzushi-*.tar.gz
-            kuzushi-*.zip
+            dist/npm/*
+            dist/native-archives/*
+
+  published-release-smoke:
+    needs: [preflight, publish-npm, github-release]
+    uses: ./.github/workflows/published-release-smoke.yml
+    with:
+      version: v${{ needs.preflight.outputs.version }}
+    permissions:
+      contents: read

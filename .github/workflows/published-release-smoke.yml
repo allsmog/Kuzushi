@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             slug: linux-x64
           - os: ubuntu-24.04-arm
             slug: linux-arm64
@@ -34,14 +34,14 @@ jobs:
             slug: darwin-x64
           - os: macos-14
             slug: darwin-arm64
-          - os: windows-latest
+          - os: windows-2025
             slug: win32-x64
     name: published-${{ matrix.slug }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -52,7 +52,7 @@ jobs:
         run: node scripts/smoke-published-release.mjs
       - name: Upload consumer receipt
         if: always() && hashFiles('published-release-smoke.json') != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: published-release-smoke-${{ matrix.slug }}
           path: published-release-smoke.json

@@ -145,28 +145,33 @@ const fullCiRequirements = [
   "verify-pack:",
   "pnpm verify:pack",
   "node scripts/build-native-runtime.mjs",
-  "moonrepo/setup-rust@v1",
+  "moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3",
   "native-linux-x64",
   "KUZUSHI_CRAP_RISK_BASE_REF",
   "fetch-depth: 0",
 ];
 
 const releaseRequirements = [
-  // Release jobs turn every green native/<slug>/ input into a separate
-  // platform npm package, then publish the thin launcher last.
-  "pattern: release-native-*",
+  "uses: ./.github/workflows/release-candidate.yml",
+  "release tag must point at current origin/${DEFAULT_BRANCH}",
+  "name: release-candidate-packages",
+  "node scripts/publish-platform-packages.mjs",
+  "--tag latest",
+  "uses: ./.github/workflows/published-release-smoke.yml",
+];
+
+const releaseCandidateRequirements = [
+  "workflow_dispatch:",
+  "workflow_call:",
+  "expected_sha must equal the caller commit",
+  "uses: ./.github/workflows/ci-full.yml",
+  "pattern: release-candidate-native-*",
   "merge-multiple: true",
-  "Stage native binaries for every built platform",
   "pnpm verify:pack",
   "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
   "pnpm pack:native-platforms",
-  "node scripts/publish-platform-packages.mjs",
-  "npm publish --access public --provenance --ignore-scripts",
-  "npm publish --access public --ignore-scripts",
-  "npm pack --ignore-scripts",
   "node scripts/build-native-runtime.mjs",
-  "moonrepo/setup-rust@v1",
-  "uses: ./.github/workflows/ci-full.yml",
+  "moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3",
 ];
 
 const heavyCiJobs = [
@@ -192,6 +197,7 @@ const failures = [
   ...checkNeedles(".github/workflows/ci.yml", quickCiRequirements),
   ...checkNeedles(".github/workflows/ci-full.yml", fullCiRequirements),
   ...checkNeedles(".github/workflows/release.yml", releaseRequirements),
+  ...checkNeedles(".github/workflows/release-candidate.yml", releaseCandidateRequirements),
   ...checkForbiddenNeedles(".github/workflows/ci.yml", [
     "**/*.md",
     "docs/**",
