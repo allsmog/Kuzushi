@@ -83,17 +83,31 @@ not promote bytes from an earlier manual candidate run.
 Do not make the repository public until every item below has an operator-owned
 receipt:
 
-1. Confirm the Alpha14 candidate is green and its downloaded bundle passes
-   `node scripts/verify-release-artifacts.mjs <directory> <sha> 0.24.0-alpha.14`.
-2. Obtain npm unpublish or registry-support cleanup for the exact
+1. Build the all-ref history rewrite in an offline mirror from the verified
+   backup bundle. Record the old-to-new map for every advertised head and tag,
+   and verify topology, author/committer identity and dates, metadata-only tree
+   equality, the path-scoped content allowlist, and zero private identifiers or
+   prohibited attribution across every rewritten ref.
+2. With separate operator authorization and while the repository is private,
+   force-update every advertised head and rewritten tag. Verify the remote ref
+   map exactly matches the reviewed mirror before continuing.
+3. Obtain GitHub Support confirmation that immutable pull-request refs and old
+   sensitive object IDs have been purged from repository storage and caches.
+   Verify the named old SHAs are no longer fetchable and that the contributor
+   graph cannot recover the prohibited attribution. Rewriting branch and tag
+   tips alone is not sufficient.
+4. Confirm the Alpha14 candidate runs at the rewritten `main` commit and its
+   downloaded bundle passes `node scripts/verify-release-artifacts.mjs
+   <directory> <sha> 0.24.0-alpha.14`.
+5. Obtain npm unpublish or registry-support cleanup for the exact
    `kuzushi@0.24.0-alpha.10` and `kuzushi@0.24.0-alpha.12` root packages. They
    contain private identifiers. Moving `latest` to Alpha14 does not make an
    exact historical version unavailable.
-3. Remove or replace the corresponding root npm tarball assets on the
+6. Remove or replace the corresponding root npm tarball assets on the
    `v0.24.0-alpha.10` and `v0.24.0-alpha.12` GitHub Releases. If an asset is
    replaced, record the approved clean file's SHA-256 and verify the downloaded
    bytes against it.
-4. Verify the two exact npm versions are no longer downloadable, or retain the
+7. Verify the two exact npm versions are no longer downloadable, or retain the
    registry support confirmation that provides the equivalent restriction.
    Verify each GitHub Release asset list and download before recording the gate
    complete.

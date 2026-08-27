@@ -14,10 +14,17 @@ import {
 test("approved OpenAI and Spark Java contexts remain public", () => {
   const fixtures = [
     ["model.md", "openai-codex:gpt-5.3-codex-spark"],
+    ["model.md", "OpenAI Codex Spark and OpenAI Spark are public model labels"],
+    ["model.md", "OpenAI OAuth GPT-5.3 Codex Spark is a public model label"],
+    ["engine.md", "Apache Spark processes the public example dataset"],
     ["routes.rs", 'framework.or(Some("Spark Java"));\nspark.get("/health")'],
     ["trend.rs", "render the sparkline without dummy data"],
+    ["authorization.rs", "let r" + "bac_policy = policy_for(target);"],
+    ["physics.md", "linear " + "polar" + "isation remains a public term"],
+    ["physics.md", "the signal is polar" + "ised before comparison"],
+    ["radio.md", "C" + "DMA remains a public cellular standard"],
     [
-      "model_selectors.rs",
+      "crates/kuzushi-tui/src/app/settings/normalize_thinking_level/model_selectors.rs",
       'const catalog = "openai-codex:gpt-5.3-codex-spark";\n| "spark" => MODEL_CHOICES.get(3)',
     ],
   ];
@@ -37,7 +44,22 @@ test("private names, attribution, unknown Spark context, and developer homes fai
     "Claude " + "My" + "thos 5",
     "Co-Authored-By: Claude " + "My" + "thos 5 <noreply@example.invalid>",
     "SPARK control plane",
+    "SPARK coordinator for codex transport",
+    'const model = "openai-codex:gpt-5"; // SPARK control plane',
+    'const model = "openai-codex:gpt-5.3-codex-spark"; // SPARK control plane',
+    "Apache Spark adapter for the SPARK control plane",
+    "OpenAI Codex Spark replaced the SPARK control plane",
+    "// Spark Java support\nconst SPARK_CONTROL_PLANE = true;",
     "/Users/" + "shaya" + "unnejad/vibe-code/project",
+    "/Users/" + "Shaya" + "un.Ne" + "jad/Desktop/project",
+    "c" + "dm_cluster",
+    "R" + "SCGateway",
+    "Rub" + "rikClient",
+    "R" + "SC" + "GATEWAY",
+    "C" + "DM" + "CLUSTER",
+    "RUB" + "RIKCLIENT",
+    "rub" + "rikclient",
+    "my" + "thosagent",
   ];
   for (const source of forbidden) {
     assert.notDeepEqual(textContextFailures("fixture.txt", source), []);
