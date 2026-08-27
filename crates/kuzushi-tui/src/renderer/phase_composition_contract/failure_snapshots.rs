@@ -112,6 +112,12 @@ impl FailureFixture {
         app.set_viewport(TerminalViewport::new(width, height));
         app.set_input_mode(InputMode::Navigate);
         app.refresh_phase_attempt_projection();
+        app.hydrate_view_keys_blocking(
+            workspace.root(),
+            vec![crate::ViewHydrationKey::PhaseReceiptOutcome {
+                attempt_id: attempt_id.clone(),
+            }],
+        );
         assert!(
             app.await_guided_phase_result_for_test(scenario.phase, attempt_id),
             "{}: persisted attempt did not bind to the result card",

@@ -1917,9 +1917,17 @@ mod tests {
         ));
     }
 
-    fn hydrated_app(workspace: &WorkspaceTarget, keys: Vec<ViewHydrationKey>) -> ShellApp {
+    fn hydrated_app(workspace: &WorkspaceTarget, mut keys: Vec<ViewHydrationKey>) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), Some(workspace));
         app.refresh_phase_attempt_projection();
+        let receipt_keys = WorkflowPhase::ORDER.iter().filter_map(|phase| {
+            app.engagement
+                .unresolved_phase_attempt(*phase)
+                .map(|record| ViewHydrationKey::PhaseReceiptOutcome {
+                    attempt_id: record.completed.attempt_id.clone(),
+                })
+        });
+        keys.extend(receipt_keys);
         app.hydrate_view_keys_blocking(workspace.root(), keys);
         app
     }
