@@ -6,6 +6,7 @@ import {
   actionlintImageFailures,
   callGraphActionPinFailures,
   candidateWorkflowFailures,
+  platformPublisherFailures,
   publisherWorkflowFailures,
 } from "./release-workflow-contract.mjs";
 
@@ -13,6 +14,10 @@ const candidate = workflow("release-candidate.yml");
 const publisher = workflow("release.yml");
 const fullCi = workflow("ci-full.yml");
 const publishedSmoke = workflow("published-release-smoke.yml");
+const platformPublisher = readFileSync(
+  new URL("./publish-platform-packages.mjs", import.meta.url),
+  "utf8",
+);
 
 test("release candidate is nonpublishing and identity-bound", () => {
   assert.deepEqual(candidateWorkflowFailures(candidate), []);
@@ -36,14 +41,17 @@ test("release matrix requires every exact native runner", () => {
 });
 
 test("release publisher remains latest-tagged and main-bound", () => {
-  const wrongTag = publisher.replace("--tag latest", "--tag alpha");
   const withoutMain = publisher.replace(
     "release tag must point at current origin/${DEFAULT_BRANCH}",
     "release tag accepted",
   );
 
-  assert.match(publisherWorkflowFailures(wrongTag).join("\n"), /--tag latest/);
   assert.match(publisherWorkflowFailures(withoutMain).join("\n"), /current origin/);
+  assert.deepEqual(platformPublisherFailures(platformPublisher), []);
+  assert.match(
+    platformPublisherFailures(platformPublisher.replace('"latest",', '"alpha",')).join("\n"),
+    /latest/,
+  );
 });
 
 test("the complete release call graph uses immutable action refs", () => {

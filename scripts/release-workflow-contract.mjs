@@ -23,10 +23,22 @@ export function publisherWorkflowFailures(source) {
     "uses: ./.github/workflows/release-candidate.yml",
     "release tag must point at current origin/${DEFAULT_BRANCH}",
     'expected_tag="v${version}"',
-    "name: release-candidate-packages",
+    "name: release-candidate-artifacts",
+    "node scripts/verify-release-artifacts.mjs",
     "node scripts/publish-platform-packages.mjs",
-    "--tag latest",
+    "Publish verified npm packages with the thin launcher last",
     "uses: ./.github/workflows/published-release-smoke.yml",
+  ]);
+}
+
+export function platformPublisherFailures(source) {
+  return missingTokens(source, "platform publisher", [
+    "verifyReleaseManifest",
+    '"--tag",',
+    '"latest",',
+    '"--ignore-scripts",',
+    "entry.npmIntegrity",
+    'kind }) => kind === "root-npm"',
   ]);
 }
 
@@ -47,12 +59,16 @@ function candidateRequirements() {
     "expected_sha must equal the caller commit",
     "quality_base_ref must precede the candidate",
     "node scripts/check-secrets.mjs --base 0000000000000000000000000000000000000000",
+    "node scripts/check-release-source.mjs",
     "needs: identity",
     "uses: ./.github/workflows/ci-full.yml",
     "quality_base_ref: ${{ inputs.quality_base_ref }}",
     "pnpm audit --prod --audit-level high",
     "KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY",
-    "name: release-candidate-packages",
+    "node scripts/build-release-artifacts.mjs",
+    "name: release-candidate-artifacts",
+    "node scripts/smoke-release-tarballs.mjs",
+    "local-tarball-smoke-${{ matrix.slug }}",
   ];
 }
 
@@ -62,11 +78,11 @@ function candidateForbiddenTokens() {
 
 function releaseMatrixFailures(source) {
   return releasePlatforms
-    .filter(
-      ({ runner, slug }) =>
-        !source.includes(`          - os: ${runner}\n            slug: ${slug}`),
-    )
-    .map(({ runner, slug }) => `release candidate must build ${slug} on ${runner}`);
+    .filter(({ runner, slug }) => {
+      const entry = `          - os: ${runner}\n            slug: ${slug}`;
+      return source.split(entry).length - 1 < 2;
+    })
+    .map(({ runner, slug }) => `release candidate must build and install ${slug} on ${runner}`);
 }
 
 function externalActionPinFailures(workflowName, source) {
