@@ -50,14 +50,24 @@ export function scanRepository(root = process.cwd()) {
   const files = trackedFiles(root);
   const failures = requiredPolicyFailures(root, files);
   for (const file of files) {
-    if (CONTEXT_FIXTURES.has(file)) continue;
-    const stateFailure = trackedWorkspaceStateFailure(file);
-    if (stateFailure) failures.push(stateFailure);
-    const bytes = readFileSync(path.join(root, file));
-    if (bytes.includes(0)) continue;
-    failures.push(...textContextFailures(file, bytes.toString("utf8")));
+    failures.push(...trackedFileFailures(root, file));
   }
   return failures;
+}
+
+function trackedFileFailures(root, file) {
+  if (CONTEXT_FIXTURES.has(file)) return [];
+  return [...workspaceStateFailures(file), ...trackedTextFailures(root, file)];
+}
+
+function workspaceStateFailures(file) {
+  const stateFailure = trackedWorkspaceStateFailure(file);
+  return stateFailure ? [stateFailure] : [];
+}
+
+function trackedTextFailures(root, file) {
+  const bytes = readFileSync(path.join(root, file));
+  return bytes.includes(0) ? [] : textContextFailures(file, bytes.toString("utf8"));
 }
 
 export function textContextFailures(file, source) {
