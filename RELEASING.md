@@ -68,8 +68,9 @@ gh workflow run release-candidate.yml --ref main \
 ```
 
 The candidate workflow requires `expected_sha` to equal the workflow commit,
-runs reusable full CI, builds all five native targets, installs the exact root
-and matching platform tarballs on all five target runners, and uploads one
+runs reusable full CI, builds all five native targets on four native runners,
+installs the exact root and matching platform tarballs on all five target
+runners, and uploads one
 `release-candidate-artifacts` bundle. Its `release-manifest.json` receipt binds
 the source commit and version to every npm package, native archive, and source
 archive with byte size, SHA-256, and npm integrity where applicable. The
@@ -155,6 +156,49 @@ five-platform public-package smoke.
 
 Do not publish from a local package build. `pnpm publish:npm:go` fails closed
 because `pnpm build:native` stages only the current host.
+
+### Native platform builds
+
+Four runners produce the five shipped platform payloads:
+
+| Slug           | Built on           | Installed and executed on |
+| -------------- | ------------------ | ------------------------- |
+| `linux-x64`    | `ubuntu-24.04`     | `ubuntu-24.04`            |
+| `linux-arm64`  | `ubuntu-24.04-arm` | `ubuntu-24.04-arm`        |
+| `darwin-arm64` | `macos-14`         | `macos-14`                |
+| `darwin-x64`   | `macos-14` (cross) | `macos-15-intel`          |
+| `win32-x64`    | `windows-2025`     | `windows-2025`            |
+
+`darwin-x64` is cross-compiled from the Apple silicon runner with
+`rustup target add x86_64-apple-darwin` followed by a second
+`node scripts/build-native-runtime.mjs` under
+`KUZUSHI_NATIVE_TARGET=x86_64-apple-darwin`, and uploaded as its own
+`release-candidate-native-darwin-x64` artifact. Kuzushi's native dependency set
+crosses cleanly — no openssl, git2, or portable-pty; the tree-sitter grammars
+and bundled `libsqlite3-sys` build through `cc`, wasmtime is cranelift-only, and
+reqwest uses rustls. The x64 payload is still *installed and executed* on a real
+Intel runner, so cross-compilation never replaces execution evidence.
+
+To cross-build one platform locally:
+
+```sh
+rustup target add x86_64-apple-darwin
+KUZUSHI_NATIVE_TARGET=x86_64-apple-darwin node scripts/build-native-runtime.mjs
+# equivalently: node scripts/build-native-runtime.mjs --target x86_64-apple-darwin
+```
+
+Cargo writes to `target/<triple>/release` (or `$CARGO_TARGET_DIR/<triple>/release`)
+and staging publishes it as `native/<slug>`. Only the five supported triples in
+`scripts/native-runtime-contract.mjs` are accepted; anything else is refused
+rather than mapped to a guessed slug.
+
+`node scripts/smoke-native-runtime.mjs [slug]` still refuses to execute a slug
+the host cannot run. A `darwin-x64` payload may be smoked on a `darwin-arm64`
+host only with an explicit `KUZUSHI_SMOKE_ALLOW_ROSETTA=1` opt-in *and* Rosetta 2
+actually installed; the receipt then records the host slug, the smoked slug, and
+`"translation": "rosetta"`. The same opt-in applies to
+`scripts/smoke-release-tarballs.mjs`. No other host/payload pairing is ever
+unlocked.
 
 ## Verify a tagged release
 

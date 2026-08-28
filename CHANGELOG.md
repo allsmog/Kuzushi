@@ -25,6 +25,29 @@ Notable changes to Kuzushi. Release procedure lives in
   passes. Dependabot batches into one grouped monthly pull request per
   ecosystem. Release candidates run the same complete gauntlet as before.
 
+- `darwin-x64` is now cross-compiled on the Apple silicon release runner instead
+  of on a separately billed Intel macOS build host. The release candidate builds
+  five platform payloads on four runners: `macos-14` builds `darwin-arm64`
+  natively and then `darwin-x64` through `--target x86_64-apple-darwin`,
+  uploading each slug as its own `release-candidate-native-<slug>` artifact, so
+  `assemble` still receives all five required slugs. The `darwin-x64` tarball and
+  the published package are still installed and executed on a real
+  `macos-15-intel` runner, so no execution evidence is traded away for the
+  cheaper build.
+- `scripts/build-native-runtime.mjs` accepts `--target <triple>` or
+  `KUZUSHI_NATIVE_TARGET=<triple>` for the five supported Rust targets and
+  forwards the selection to staging, which reads
+  `target/<triple>/release` and publishes `native/<slug-for-triple>`. An
+  unsupported triple is refused instead of mapped to a guessed slug, staging now
+  honors `CARGO_TARGET_DIR`, and the executable suffix follows the target
+  platform rather than the building host.
+- Native and local-tarball smokes still refuse to execute a foreign platform
+  payload. `KUZUSHI_SMOKE_ALLOW_ROSETTA=1` unlocks exactly one pairing —
+  `darwin-x64` on a `darwin-arm64` host — and only when Rosetta 2 is actually
+  installed; the run then executes through `/usr/bin/arch -x86_64` and records
+  the host slug, the smoked slug, and `"translation": "rosetta"` in its receipt.
+  No other pairing is ever unlocked, and nothing is smoked silently under the
+  wrong architecture.
 - The seven-item historical artifact cleanup gate is renamed the repository
   visibility gate and now blocks making the repository public only. Creating
   the Alpha14 tag requires the candidate gate and a release commit equal to
