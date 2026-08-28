@@ -150,6 +150,7 @@ create table if not exists finding_identity_fingerprints (
   identity_id text not null references finding_identities(identity_id) on delete cascade,
   fingerprint text not null,
   match_basis text not null,
+  identity_basis text,
   created_at text not null,
   primary key(identity_id, fingerprint)
 );
@@ -161,6 +162,7 @@ create table if not exists finding_current (
   run_id text not null,
   identity_id text not null,
   identity_match_tier text not null,
+  identity_basis text,
   fingerprint text not null,
   created_at text not null,
   updated_at text not null,
@@ -225,7 +227,9 @@ create table if not exists review_decisions (
   decision_event_seq integer,
   decision_event_hash text,
   decision_read_watermark integer,
-  review_session_id text
+  review_session_id text,
+  propagation_basis text,
+  source_finding_ids_json text
 );
 create index if not exists idx_review_decisions_finding
   on review_decisions(finding_id, created_at desc, id desc);
@@ -405,6 +409,8 @@ create table if not exists threat_model_versions (
   created_at text not null,
   source text not null,
   run_id text,
+  model_id text,
+  revision_id text,
   methodology text not null,
   threat_count integer not null,
   sha256 text not null,

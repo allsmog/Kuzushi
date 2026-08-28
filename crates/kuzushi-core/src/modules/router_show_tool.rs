@@ -326,13 +326,7 @@ fn auto_triage_full_mode_findings(
         crate::runtime::RuntimeCostReport::known(crate::runtime::RuntimeCost::ZERO),
         |cost, finding| {
             cost.checked_add(
-                auto_triage_candidate_cost(
-                    finding,
-                    routed,
-                    Some(&spend),
-                    &audit_cfg,
-                    &store,
-                )?,
+                auto_triage_candidate_cost(finding, routed, Some(&spend), &audit_cfg, &store)?,
                 "full-mode auto-triage fan-out cost",
             )
         },
@@ -375,6 +369,7 @@ fn auto_triage_config(
         temperature: DEFAULT_TEMPERATURE,
         passes: DEFAULT_PASSES,
         taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy::Available,
+        reviewed_refutation_context: None,
     }
 }
 

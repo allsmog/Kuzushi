@@ -377,13 +377,7 @@ fn findings_for_run_ids(store: &FindingStore, run_ids: &[String]) -> Result<Vec<
 }
 
 fn finding_dedupe_key(finding: &Finding) -> String {
-    finding
-        .identity_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&finding.fingerprint)
-        .to_string()
+    crate::findings::finding_projection_key(finding, crate::findings::IdentityFoldPolicy::Safe)
 }
 
 fn scan_run_export_contexts(

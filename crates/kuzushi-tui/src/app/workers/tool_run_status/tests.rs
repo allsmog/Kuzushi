@@ -1,6 +1,78 @@
 use super::*;
 
 #[test]
+fn auxiliary_ask_request_has_only_bridge_acknowledged_read_tools() {
+    let target = tempfile::tempdir().unwrap();
+    let authorization =
+        kuzushi_core::runtime::AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap();
+    let request = read_only_agent_request(
+        "openai:test".to_string(),
+        target.path().to_path_buf(),
+        read_only_agent_system_prompt(),
+        "inspect auth".to_string(),
+        authorization.policy,
+    );
+
+    assert_eq!(
+        request.tool_policy.tools,
+        kuzushi_core::runtime::READ_ONLY_ASK_TOOLS
+    );
+    assert!(!request.tool_policy.mcps);
+    assert!(request.tool_policy.mcps_attached.is_empty());
+    assert!(!request.system_prompt.contains("request_user_input"));
+}
+
+#[test]
+fn executing_receipt_is_durable_before_terminal_outcome() {
+    let target = tempfile::tempdir().unwrap();
+    let authorization =
+        kuzushi_core::runtime::AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap();
+    let receipt = kuzushi_core::runtime::AgentToolPolicyReceipt {
+        protocol_version: authorization.protocol_version,
+        policy_id: authorization.policy_id,
+        effective_tools: authorization.policy.tools,
+        read_roots: authorization.policy.mcp_read_roots,
+        write_shell_tools_mounted: false,
+        mcp_tools_mounted: false,
+    };
+    record_agent_run_started(
+        Some(target.path()),
+        "agent-sidecar",
+        &serde_json::json!({}),
+        "openai:test".to_string(),
+        None,
+        Vec::new(),
+    )
+    .unwrap();
+
+    persist_read_only_agent_receipt(target.path(), "agent-sidecar", &receipt).unwrap();
+
+    let path =
+        kuzushi_core::run_dir(target.path(), "agent-sidecar").join("tool-policy-receipt.json");
+    let persisted: kuzushi_core::runtime::AgentToolPolicyReceipt =
+        serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(persisted, receipt);
+    assert_eq!(
+        persisted.protocol_version,
+        kuzushi_core::runtime::READ_ONLY_ASK_POLICY_PROTOCOL_VERSION
+    );
+    assert_eq!(
+        persisted.policy_id,
+        kuzushi_core::runtime::READ_ONLY_ASK_POLICY_ID
+    );
+    assert_eq!(
+        persisted.effective_tools,
+        kuzushi_core::runtime::READ_ONLY_ASK_TOOLS
+    );
+    assert_eq!(
+        persisted.read_roots,
+        vec![target.path().canonicalize().unwrap()]
+    );
+    assert!(!persisted.write_shell_tools_mounted);
+    assert!(!persisted.mcp_tools_mounted);
+}
+
+#[test]
 fn terminal_status_samples_cancellation_at_settlement_time() {
     let canceled = ScanCancellation::default();
     assert_eq!(

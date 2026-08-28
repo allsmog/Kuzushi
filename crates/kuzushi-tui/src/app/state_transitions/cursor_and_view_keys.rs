@@ -222,6 +222,7 @@ impl ShellApp {
             KeyCode::Char('k') | KeyCode::Up if is_dfd => self.cycle_active_dfd_selection(-1),
             KeyCode::PageDown if is_dfd => self.scroll_dfd_detail(1),
             KeyCode::PageUp if is_dfd => self.scroll_dfd_detail(-1),
+            KeyCode::Char('g') if is_dfd => return self.regenerate_selected_dfd_scope(),
             KeyCode::Enter if is_dfd => return self.activate_dfd_selection(),
             _ => return InputUpdate::ignored(),
         }
@@ -348,6 +349,7 @@ impl ShellApp {
             KeyCode::Char('k') | KeyCode::Up => self.cycle_active_dfd_selection(-1),
             KeyCode::PageDown => self.scroll_dfd_detail(1),
             KeyCode::PageUp => self.scroll_dfd_detail(-1),
+            KeyCode::Char('g') => return self.regenerate_selected_dfd_scope(),
             KeyCode::Enter => return self.activate_dfd_selection(),
             KeyCode::Esc if self.router.scene_mut().collapse_dfd_focus() => {}
             _ => return InputUpdate::ignored(),
@@ -427,6 +429,75 @@ impl ShellApp {
             tool: Some("threat-model:build".to_string()),
             input: None,
         })
+    }
+
+    fn regenerate_selected_dfd_scope(&mut self) -> InputUpdate {
+        let (target, scope) = match self.selected_scope_regeneration_context() {
+            Ok(context) => context,
+            Err(error) => return self.refuse_scoped_regeneration(&error),
+        };
+        self.dispatch_scoped_regeneration(&target, &scope)
+    }
+
+    fn selected_scope_regeneration_context(
+        &self,
+    ) -> Result<(PathBuf, kuzushi_core::NestedProjectScope), String> {
+        let evidence = self.selected_dfd_evidence();
+        if evidence.is_empty() {
+            return Err("selected component has no repository evidence path".to_string());
+        }
+        let target = self
+            .target_owned()
+            .ok_or_else(|| "scoped regeneration requires a target".to_string())?;
+        let tree = kuzushi_core::load_nested_project_scopes(&target)
+            .map_err(|error| format!("could not read the scope tree: {error:#}"))?
+            .ok_or_else(|| "run Map decomposition first".to_string())?;
+        let scope = crate::app::owning_leaf_scope(&tree, &evidence)
+            .cloned()
+            .ok_or_else(|| "no eligible leaf scope owns the selected evidence".to_string())?;
+        Ok((target, scope))
+    }
+
+    fn selected_dfd_evidence(&self) -> Vec<String> {
+        let model = crate::ui_view_models::dfd_model(self);
+        let rows = crate::ui_view_models::dfd_security_items_for_selection(
+            &model,
+            self.router.scene().dfd_selection(),
+        );
+        if self.router.scene().dfd_focused() {
+            return rows
+                .get(self.router.scene().dfd_context_selection())
+                .map(|row| row.evidence_paths.clone())
+                .unwrap_or_default();
+        }
+        rows.into_iter()
+            .flat_map(|row| row.evidence_paths.clone())
+            .collect()
+    }
+
+    fn dispatch_scoped_regeneration(
+        &mut self,
+        target: &std::path::Path,
+        scope: &kuzushi_core::NestedProjectScope,
+    ) -> InputUpdate {
+        let methodology = self.configured_map_methodology();
+        let input = match crate::app::scoped_regeneration_input(target, scope, &methodology) {
+            Ok(input) => input,
+            Err(error) => {
+                return self.refuse_scoped_regeneration(&format!(
+                    "could not bind scoped regeneration: {error:#}"
+                ));
+            }
+        };
+        self.reduce_hotkey_command(ShellCommand::RunTool {
+            tool: Some("threat-model:build".to_string()),
+            input: Some(input.to_string()),
+        })
+    }
+
+    fn refuse_scoped_regeneration(&mut self, detail: &str) -> InputUpdate {
+        self.set_warn_notice("Map regeneration", detail);
+        InputUpdate::handled()
     }
 
     fn cycle_summary_component_selection(&mut self, direction: i32) {
@@ -641,3 +712,117 @@ const UNMODIFIED_CURSOR_KEY_ACTIONS: &[(KeyCode, fn(&mut ShellApp))] = &[
     (KeyCode::End, ShellApp::move_cursor_end),
     (KeyCode::Delete, ShellApp::delete_forward),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn dfd_g_prepares_regeneration_for_the_leaf_that_owns_structured_evidence() {
+        let target = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(target.path().join("services/api/src")).unwrap();
+        let tree = scope_tree();
+        kuzushi_core::save_nested_project_scopes(target.path(), &tree).unwrap();
+        let scope =
+            kuzushi_core::capabilities::current_scope_ref_for_path(target.path(), "services/api")
+                .unwrap()
+                .unwrap();
+        let committed = commit_scope_model(target.path(), scope);
+        let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.hydrate_all_view_data_for_test();
+        let model = crate::ui_view_models::dfd_model(&app);
+        assert_eq!(model.security_context.len(), 1, "{model:#?}");
+        assert_eq!(
+            model.security_context[0].evidence_paths,
+            ["services/api/src/routes.rs"]
+        );
+
+        let key = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty());
+        let update = app.handle_frame_scene_key(key, false, true, false);
+        let [ShellEffect::PrepareRunTool(preparation)] = update.effects.as_slice() else {
+            panic!("DFD g must prepare one scoped build");
+        };
+        let input: serde_json::Value =
+            serde_json::from_str(preparation.input.as_deref().unwrap()).unwrap();
+
+        assert!(update.handled);
+        assert_eq!(preparation.tool_name, "threat-model:build");
+        assert_eq!(input["scope"], json!("id:api"));
+        assert_eq!(input["modelId"], json!(committed.model_id.as_str()));
+        assert_eq!(input["mode"], json!("refine"));
+    }
+
+    fn scope_tree() -> kuzushi_core::NestedProjectScopeTree {
+        kuzushi_core::NestedProjectScopeTree {
+            schema_version: 2,
+            root: kuzushi_core::workspace::ROOT_SCOPE_ID.to_string(),
+            scopes: vec![
+                kuzushi_core::NestedProjectScope {
+                    id: kuzushi_core::workspace::ROOT_SCOPE_ID.to_string(),
+                    parent: None,
+                    kind: kuzushi_core::NestedProjectKind::Root,
+                    rel_path: ".".to_string(),
+                    inherited_sections: Vec::new(),
+                },
+                kuzushi_core::NestedProjectScope {
+                    id: "api".to_string(),
+                    parent: Some(kuzushi_core::workspace::ROOT_SCOPE_ID.to_string()),
+                    kind: kuzushi_core::NestedProjectKind::PackageRoot,
+                    rel_path: "services/api".to_string(),
+                    inherited_sections: Vec::new(),
+                },
+            ],
+        }
+    }
+
+    fn commit_scope_model(
+        root: &std::path::Path,
+        scope: kuzushi_core::ScopeRef,
+    ) -> kuzushi_core::ThreatModelRef {
+        let document = json!({
+            "version": "2.0",
+            "methodology": "stride",
+            "dfd": {
+                "nodes": [
+                    {"id": "api", "name": "API", "trustZone": "service"},
+                    {"id": "db", "name": "Database", "trustZone": "data"}
+                ],
+                "flows": [{
+                    "id": "api-to-db",
+                    "sourceId": "api",
+                    "targetId": "db",
+                    "description": "query"
+                }],
+                "trustBoundaries": []
+            },
+            "attackSurface": {"entryPoints": [{
+                "id": "EP-api",
+                "name": "API route",
+                "path": "services/api/src/routes.rs",
+                "targetElementIds": ["api"]
+            }]},
+            "threats": [],
+            "summary": {"text": "API scope"}
+        });
+        kuzushi_core::capabilities::commit_threat_model_revision(
+            root,
+            &document,
+            kuzushi_core::ThreatModelCommit {
+                model_id: None,
+                new_model: false,
+                label: "API STRIDE".to_string(),
+                scope,
+                methodology: "stride".to_string(),
+                source: kuzushi_core::ThreatModelRevisionSource::Build,
+                source_revision_id: None,
+                run_id: None,
+                activate: Some(true),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap()
+        .model_ref
+    }
+}

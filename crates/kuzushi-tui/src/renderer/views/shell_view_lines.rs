@@ -54,6 +54,7 @@ fn primary_shell_view_lines(
                 auth_method_picker_lines(app, area, app.router.auth_picker().provider())
             }
             Some(crate::app::SetupEditor::Plan) => planning_picker_lines(app, area),
+            Some(crate::app::SetupEditor::ThreatModel) => map_run_config_lines(app, area),
             _ => setup_lines(app, area),
         },
         ShellView::Report => report_lines(app, area),

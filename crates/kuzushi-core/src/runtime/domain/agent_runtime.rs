@@ -115,6 +115,16 @@ pub trait AgentRuntime: Send + Sync {
         Ok(())
     }
 
+    /// Ask the runtime bridge to prove the effective tools and roots it would
+    /// mount for a policy before concurrent execution is admitted. Runtimes
+    /// that do not implement the handshake fail closed.
+    fn authorize_tool_policy_blocking(
+        &self,
+        _authorization: &AgentToolPolicyAuthorization,
+    ) -> Result<AgentToolPolicyReceipt> {
+        anyhow::bail!("agent runtime does not acknowledge tool-policy authorization")
+    }
+
     fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         anyhow::bail!("agent runtime does not support generic LangGraph queries")
     }

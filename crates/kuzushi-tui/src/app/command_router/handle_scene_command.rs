@@ -109,7 +109,7 @@ impl ShellApp {
         }
     }
 
-    pub(super) fn hydrate_latest_threat_model_for_dfd(&mut self) {
+    pub(crate) fn hydrate_latest_threat_model_for_dfd(&mut self) {
         let Some(target) = self.target_owned() else {
             return;
         };

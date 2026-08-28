@@ -15,7 +15,7 @@ pub(crate) fn staged_synthesis_prompt(
     // that excludes the persisted model — embeds nothing from the previous
     // generation, full document and count summary alike.
     let previous_model = if input.embeds_prior_model() {
-        try_load_persistent_threat_model(&input.target)?
+        load_selected_build_threat_model(input)?.map(|selected| selected.document)
     } else {
         None
     };

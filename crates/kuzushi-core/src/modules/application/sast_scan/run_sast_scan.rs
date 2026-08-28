@@ -14,11 +14,14 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let (mut input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
     let workspace = sast_workspace(ctx)?;
+    let PreparedSastScan {
+        input,
+        primary_run_id,
+        whitebox_static,
+        _threat_model_lease,
+    } = prepare_sast_scan(registry, input, ctx, workspace)?;
     let store = sast_store(ctx)?;
-    let primary_run_id = canonical_sast_run_id(&input, ctx);
-    set_canonical_sast_run_id(&mut input, &primary_run_id);
     ensure_sast_run_started(registry, workspace, &primary_run_id, &input, ctx)?;
     let fallback_trace = fallback_sast_trace(ctx, workspace, &primary_run_id)?;
     let run_ctx = sast_run_context(ctx, fallback_trace.as_ref());
@@ -32,18 +35,147 @@ pub(in crate::modules) fn run_sast_scan_with_registry(
         primary_run_id.clone(),
         whitebox_static,
     );
-    match result {
-        Ok(output) => Ok(output),
-        Err(error) => {
-            let persistence = persist_sast_terminal_error(
-                workspace,
-                &primary_run_id,
-                &error,
-                sast_cancellation_disposition(ctx),
-                run_ctx.run_observation().as_ref(),
-            );
-            Err(error_with_persistence(error, persistence))
-        }
+    result
+        .map_err(|error| started_sast_scan_error(workspace, &primary_run_id, error, ctx, &run_ctx))
+}
+
+fn started_sast_scan_error(
+    workspace: &WorkspaceTarget,
+    run_id: &str,
+    error: anyhow::Error,
+    ctx: &ToolExecutionContext<'_>,
+    run_ctx: &ToolExecutionContext<'_>,
+) -> anyhow::Error {
+    let persistence = persist_sast_terminal_error(
+        workspace,
+        run_id,
+        &error,
+        sast_cancellation_disposition(ctx),
+        run_ctx.run_observation().as_ref(),
+    );
+    error_with_persistence(error, persistence)
+}
+
+struct PreparedSastScan {
+    input: Value,
+    primary_run_id: String,
+    whitebox_static: Option<WhiteboxStaticPolicy>,
+    _threat_model_lease: Option<crate::capabilities::threat_model::ThreatModelReadLease>,
+}
+
+fn prepare_sast_scan(
+    registry: &ModuleRegistry,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    workspace: &WorkspaceTarget,
+) -> Result<PreparedSastScan> {
+    let input = bind_dispatch_snapshot_input("sast:scan", input, ctx)?;
+    let primary_run_id = canonical_sast_run_id(&input, ctx);
+    let threat_model_lease = acquire_bound_threat_model_lease(workspace, &input)?;
+    crate::capabilities::campaign::verify_scan_batch_child_equivalence(
+        workspace.root(),
+        &primary_run_id,
+        &input,
+        ctx.config,
+        registry,
+    )?;
+    let (mut input, whitebox_static) = apply_whitebox_static_sast_policy(input)?;
+    set_canonical_sast_run_id(&mut input, &primary_run_id);
+    Ok(PreparedSastScan {
+        input,
+        primary_run_id,
+        whitebox_static,
+        _threat_model_lease: threat_model_lease,
+    })
+}
+
+fn acquire_bound_threat_model_lease(
+    workspace: &WorkspaceTarget,
+    input: &Value,
+) -> Result<Option<crate::capabilities::threat_model::ThreatModelReadLease>> {
+    let expected = parse_sast_threat_model_binding(input)?;
+    crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
+        workspace.root(),
+        expected.as_ref(),
+    )
+    .map(Some)
+}
+
+fn parse_sast_threat_model_binding(
+    input: &Value,
+) -> Result<Option<crate::capabilities::threat_model::ThreatModelRef>> {
+    let Some(value) = input
+        .get("threatModelRef")
+        .or_else(|| input.get("threat_model_ref"))
+    else {
+        anyhow::bail!("sast:scan input is missing its dispatch-bound threatModelRef");
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let model_ref = serde_json::from_value(value.clone())
+        .context("sast:scan threatModelRef is not a valid immutable model reference")?;
+    Ok(Some(model_ref))
+}
+
+#[cfg(test)]
+mod threat_model_binding_tests {
+    use super::*;
+
+    #[test]
+    fn explicitly_model_free_scan_holds_a_read_lease() {
+        let target = tempfile::tempdir().unwrap();
+        crate::capabilities::threat_model::open_writable_threat_model_store(target.path()).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let lease =
+            acquire_bound_threat_model_lease(&workspace, &json!({"threatModelRef": Value::Null}))
+                .unwrap();
+
+        assert!(lease.is_some());
+        assert!(lease.unwrap().model_ref().is_none());
+    }
+
+    #[test]
+    fn ordinary_scan_binds_explicit_model_free_state_before_start() {
+        let target = tempfile::tempdir().unwrap();
+        crate::capabilities::threat_model::open_writable_threat_model_store(target.path()).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let input = bind_dispatch_snapshot_input("sast:scan", json!({}), &ctx).unwrap();
+
+        assert!(input.get("threatModelRef").is_some_and(Value::is_null));
+        assert!(acquire_bound_threat_model_lease(&workspace, &input)
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn scan_refuses_a_bound_revision_after_the_active_pointer_changes() {
+        let target = tempfile::tempdir().unwrap();
+        crate::capabilities::threat_model::open_writable_threat_model_store(target.path()).unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        let stale_ref = crate::capabilities::threat_model::ThreatModelRef {
+            model_id: crate::capabilities::threat_model::ThreatModelId::new(),
+            revision_id: crate::capabilities::threat_model::ThreatModelRevisionId::new(),
+            sha256: format!("sha256:{}", "0".repeat(64)),
+        };
+
+        let error =
+            acquire_bound_threat_model_lease(&workspace, &json!({"threatModelRef": stale_ref}))
+                .err()
+                .expect("a stale immutable reference must be refused");
+
+        assert!(error.to_string().contains("active threat model changed"));
     }
 }
 

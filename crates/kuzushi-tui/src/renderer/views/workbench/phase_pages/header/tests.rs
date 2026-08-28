@@ -20,6 +20,7 @@ fn scan_header(
         target: "./target".to_string(),
         context: "context present".to_string(),
         model: "unconfigured".to_string(),
+        threat_model: None,
         module: "all modules".to_string(),
         cost_usd: 0.0,
         cost_complete: true,
@@ -83,6 +84,7 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
         target: "/a/very/long/target/that/must/not/evict/mode/truth".to_string(),
         context: "context present".to_string(),
         model: "configured".to_string(),
+        threat_model: None,
         module: "all modules".to_string(),
         cost_usd: 0.0,
         cost_complete: true,
@@ -107,6 +109,23 @@ fn compact_identity_keeps_selected_view_distinct_from_reality() {
 
     let wide = line_text(identity_line(&header, 120));
     assert!(wide.contains("next required Review"), "{wide}");
+}
+
+#[test]
+fn map_identity_names_the_active_threat_model_separately_from_runtime_model() {
+    let mut header = scan_header(None);
+    header.phase = kuzushi_core::WorkflowPhase::Map;
+    header.reality_phase = Some(kuzushi_core::WorkflowPhase::Map);
+    header.model = "configured openai:gpt-test".to_string();
+    header.threat_model = Some("model 2/3 · Payments · pasta · verified".to_string());
+
+    let text = line_text(identity_line(&header, 160));
+
+    assert!(text.contains("model configured openai:gpt-test"), "{text}");
+    assert!(
+        text.contains("model 2/3 · Payments · pasta · verified"),
+        "{text}"
+    );
 }
 
 #[test]

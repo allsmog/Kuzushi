@@ -113,6 +113,10 @@ pub struct RunSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threat_model_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub threat_model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threat_model_revision_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub threat_model_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threat_model_resolved_via: Option<String>,
@@ -292,6 +296,8 @@ impl RunSummary {
         self.house_rules = source.house_rules.clone();
         self.prompt_overrides = source.prompt_overrides.clone();
         self.threat_model_sha256 = source.threat_model_sha256.clone();
+        self.threat_model_id = source.threat_model_id.clone();
+        self.threat_model_revision_id = source.threat_model_revision_id.clone();
         self.threat_model_source = source.threat_model_source.clone();
         self.threat_model_resolved_via = source.threat_model_resolved_via.clone();
         self.env_fingerprint = source.env_fingerprint.clone();
@@ -347,6 +353,18 @@ impl RunSummary {
 
     pub fn with_threat_model_sha256(mut self, threat_model_sha256: Option<String>) -> Self {
         self.threat_model_sha256 = non_empty_metadata(threat_model_sha256);
+        self
+    }
+
+    pub fn with_threat_model_ref(
+        mut self,
+        model_id: Option<String>,
+        revision_id: Option<String>,
+        sha256: Option<String>,
+    ) -> Self {
+        self.threat_model_id = non_empty_metadata(model_id);
+        self.threat_model_revision_id = non_empty_metadata(revision_id);
+        self.threat_model_sha256 = non_empty_metadata(sha256);
         self
     }
 

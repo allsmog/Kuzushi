@@ -8,6 +8,11 @@ pub(crate) fn read_threat_model(
     let Some(output_dir) = read_string(&input, &["outputDir", "output_dir"]) else {
         return read_persistent_fallback(&input, ctx, flavor);
     };
+    anyhow::ensure!(
+        read_string(&input, &["scope"]).is_none(),
+        "{} cannot combine scope with outputDir; omit outputDir to resolve the immutable scoped model",
+        flavor.tool_name()
+    );
     let target = resolve_target(&input, ctx)?;
     let repo_name = repo_name(&target);
     let fallback = requested_or_default_methodology(&input, flavor);
@@ -29,7 +34,35 @@ pub(crate) fn read_threat_model(
         methodology,
         document,
         artifacts,
+        model_ref: None,
     }))
+}
+
+#[cfg(test)]
+mod input_contract_tests {
+    use super::*;
+
+    #[test]
+    fn scoped_read_never_silently_uses_an_output_directory_artifact() {
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+
+        let error = read_threat_model(
+            json!({"scope": "id:api", "outputDir": ".kuzushi/runs/old"}),
+            &ctx,
+            ReadFlavor::ThreatModel,
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("cannot combine scope with outputDir"));
+    }
 }
 
 fn missing_output_dir_response(flavor: ReadFlavor) -> Value {
@@ -53,7 +86,8 @@ fn read_persistent_fallback(
     flavor: ReadFlavor,
 ) -> Result<Value> {
     let target = resolve_target(input, ctx)?;
-    let Some(document) = try_load_persistent_threat_model(&target)? else {
+    let loaded = load_requested_threat_model(input, &target)?;
+    let Some((document, model_ref)) = loaded else {
         return Ok(missing_output_dir_response(flavor));
     };
     let methodology = resolve_document_methodology(input, &document, flavor);
@@ -67,6 +101,7 @@ fn read_persistent_fallback(
         methodology,
         document,
         artifacts: empty_randori_artifacts(),
+        model_ref,
     });
     result["data"]["resolvedFrom"] = json!("persistent");
     Ok(result)
@@ -157,6 +192,7 @@ struct ReadThreatModelResponse {
     methodology: String,
     document: Value,
     artifacts: RandoriArtifacts,
+    model_ref: Option<ThreatModelRef>,
 }
 
 fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
@@ -179,6 +215,7 @@ fn read_threat_model_response(response: ReadThreatModelResponse) -> Value {
         "methodology": response.methodology,
         "document": response.document,
         "artifacts": response.artifacts.to_json(),
+        "modelRef": response.model_ref,
     });
     crate::module_result::completed_output_result(output.clone(), output, data)
 }

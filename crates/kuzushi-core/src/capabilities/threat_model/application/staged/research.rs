@@ -32,7 +32,7 @@ pub(crate) fn run_research(
     let history_mined = mined.is_some();
     let vuln_commits = mined.unwrap_or_default();
     let advisories = fetch_osv_advisories(input)?;
-    let docs = read_project_docs(&input.target);
+    let docs = read_project_docs(input.analysis_root());
     let mut evidence_index = build_evidence_index(&grounding, &vuln_commits);
     evidence_index.extend(advisories.iter().map(|record| record.id.clone()));
     evidence_index.extend(input.vulns.iter().map(|row| row.id.clone()));
@@ -117,7 +117,7 @@ fn mine_history(
         max_commits: input.history_depth,
         ..Default::default()
     };
-    mine_vuln_history(&input.target, &keywords, &cfg)
+    mine_vuln_history(input.analysis_root(), &keywords, &cfg)
 }
 
 pub(crate) fn build_evidence_index(

@@ -199,7 +199,10 @@ fn folded_cell_states(
 /// Running; a mix of completed and pending is Partial — never full credit
 /// for partial coverage. Without any completion, best-of as before.
 fn aggregate_cell_state(states: &[CoverageCellState]) -> CoverageCellState {
-    if states.iter().all(|state| *state == CoverageCellState::Completed) {
+    if states
+        .iter()
+        .all(|state| *state == CoverageCellState::Completed)
+    {
         return CoverageCellState::Completed;
     }
     let best_incomplete = states
@@ -211,7 +214,10 @@ fn aggregate_cell_state(states: &[CoverageCellState]) -> CoverageCellState {
     if best_incomplete == CoverageCellState::Running {
         return CoverageCellState::Running;
     }
-    if states.iter().any(|state| *state == CoverageCellState::Completed) {
+    if states
+        .iter()
+        .any(|state| *state == CoverageCellState::Completed)
+    {
         return CoverageCellState::Partial;
     }
     best_incomplete
@@ -385,7 +391,9 @@ pub fn confirmed_finding_ids_from_decisions(
             crate::findings::ReviewDecisionVerdict::Confirmed
                 | crate::findings::ReviewDecisionVerdict::ToFix
         );
-        let entry = latest.entry(record.finding_id).or_insert((record.id, confirmed));
+        let entry = latest
+            .entry(record.finding_id)
+            .or_insert((record.id, confirmed));
         if record.id >= entry.0 {
             *entry = (record.id, confirmed);
         }

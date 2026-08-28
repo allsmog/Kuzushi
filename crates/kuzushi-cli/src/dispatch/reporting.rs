@@ -1,5 +1,8 @@
 use crate::application::export::export_command;
-use crate::application::findings::{finding_command, findings_command};
+use crate::application::findings::{
+    finding_command, findings_batch_command, findings_command,
+    findings_identity_audit_approve_command, findings_identity_audit_command,
+};
 use crate::application::permissions::permissions_command;
 use crate::application::pr_comment::pr_comment_command;
 use crate::application::proof_deferrals::proof_command;
@@ -7,6 +10,8 @@ use crate::application::review_decisions::decision_command;
 use crate::application::runs::runs_command;
 use crate::application::suppressions::{suppress_command, suppressions_command};
 use crate::command::Command;
+use crate::command::FindingsCommand;
+use crate::command::IdentityAuditCommand;
 use crate::doctor::doctor_command;
 use crate::support::require_cli_target;
 use anyhow::Result;
@@ -53,6 +58,7 @@ pub(super) fn dispatch_reporting_command(
 
 fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {
     let Command::Findings {
+        command,
         limit,
         severity,
         mut verdict,
@@ -69,6 +75,9 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
     else {
         unreachable!("non-findings command routed to findings dispatcher")
     };
+    if let Some(command) = command {
+        return dispatch_findings_subcommand(command, default_target);
+    }
     verdict.extend(decision);
     let filter = FindingListFilter::from_parts_full(
         severity,
@@ -83,6 +92,23 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
     )?
     .with_triage_states(state)?;
     findings_command(default_target, filter, json)
+}
+
+fn dispatch_findings_subcommand(
+    command: FindingsCommand,
+    default_target: Option<PathBuf>,
+) -> Result<()> {
+    match command {
+        FindingsCommand::Batch { batch_id, json } => {
+            findings_batch_command(default_target, batch_id, json)
+        }
+        FindingsCommand::IdentityAudit { action, json } => match action {
+            None => findings_identity_audit_command(default_target, json),
+            Some(IdentityAuditCommand::Approve { input, json }) => {
+                findings_identity_audit_approve_command(default_target, input, json)
+            }
+        },
+    }
 }
 
 fn dispatch_suppress_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {

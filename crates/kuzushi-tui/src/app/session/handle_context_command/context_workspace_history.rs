@@ -70,7 +70,7 @@ impl ShellApp {
 
     pub(crate) fn clear_conversation(&mut self) -> Vec<ShellEffect> {
         let live_agent_was_canceled = self.jobs_mut().cancel(JobKind::Agent);
-        if live_agent_was_canceled {
+        if live_agent_was_canceled && self.runtime_state.cleared_agent_run().is_none() {
             let run = crate::app::ClearedAgentRun {
                 run_id: self.agent_chat().and_then(|agent| agent.run_id.clone()),
                 started_secs: self
@@ -78,9 +78,12 @@ impl ShellApp {
                     .map(|agent| agent.started_secs)
                     .unwrap_or_default(),
                 artifact_target: self.agent_artifact_target_owned(),
+                auxiliary_read_only: self
+                    .agent_chat()
+                    .is_some_and(|agent| agent.auxiliary_read_only),
             };
             self.runtime_state.remember_cleared_agent_run(run);
-        } else {
+        } else if !live_agent_was_canceled {
             self.runtime_state.clear_cleared_agent_run();
             self.set_agent_cancel(None);
         }

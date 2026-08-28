@@ -19,8 +19,7 @@ pub(in crate::modules) struct TriageRuntimeOutcome {
     pub(in crate::modules) failed_vote_summaries: Vec<String>,
     /// Deep-auditor evidence citations for the representative finding. Empty
     /// for the standard single-shot path and for inherited duplicates.
-    pub(in crate::modules) evidence:
-        Vec<crate::capabilities::deep_auditor::EvidenceCitation>,
+    pub(in crate::modules) evidence: Vec<crate::capabilities::deep_auditor::EvidenceCitation>,
 }
 
 #[derive(Default)]
@@ -119,22 +118,41 @@ pub(in crate::modules) fn call_triage_runtime_uncached(
 /// trusting it), and stored-suppression reviewer feedback (data, not
 /// instructions — dismiss only if the recorded reason still applies).
 fn triage_prompt_with_grounding(input: &TriageRunInput, finding: &Finding) -> Option<String> {
-    let grounding = crate::findings::grounding_prompt_note(finding);
-    let feedback = suppression_feedback::feedback_note_for(&input.suppression_feedback, finding);
-    if grounding.is_none() && feedback.is_none() {
+    let notes = triage_prompt_notes(input, finding);
+    if notes.is_empty() {
         return input.prompt_template.clone();
     }
-    let mut prompt = input
+    let prompt = input
         .prompt_template
         .clone()
         .unwrap_or_else(|| crate::runtime::DEFAULT_TRIAGE_PROMPT.to_string());
-    if let Some(note) = grounding {
-        prompt.push_str(&format!("\n\nGrounding note: {note}"));
-    }
-    if let Some(note) = feedback {
+    Some(append_triage_prompt_notes(prompt, &notes))
+}
+
+fn triage_prompt_notes(input: &TriageRunInput, finding: &Finding) -> Vec<String> {
+    let grounding = crate::findings::grounding_prompt_note(finding)
+        .map(|note| format!("Grounding note: {note}"));
+    let feedback = suppression_feedback::feedback_note_for(&input.suppression_feedback, finding)
+        .map(str::to_string);
+    let prior = reviewed_refutation_prompt_note(input, finding);
+    [grounding, feedback, prior].into_iter().flatten().collect()
+}
+
+fn append_triage_prompt_notes(mut prompt: String, notes: &[String]) -> String {
+    for note in notes {
         prompt.push_str(&format!("\n\n{note}"));
     }
-    Some(prompt)
+    prompt
+}
+
+pub(in crate::modules) fn reviewed_refutation_prompt_note(
+    input: &TriageRunInput,
+    finding: &Finding,
+) -> Option<String> {
+    input
+        .reviewed_refutation_priors
+        .get(&finding.fingerprint)
+        .map(crate::findings::ReviewedRefutationPrior::prompt_note)
 }
 
 fn cached_triage_outcome(key: &TriageRuntimeCacheKey) -> Option<TriageOutcome> {
@@ -189,6 +207,7 @@ pub(in crate::modules) fn persist_triage_outcome(
     stats: &mut TriageRunStats,
     finding: Finding,
     runtime_outcome: TriageRuntimeOutcome,
+    reconcile: IdentityReconcilePolicy,
 ) -> Result<()> {
     let TriageRuntimeOutcome {
         outcome,
@@ -200,7 +219,7 @@ pub(in crate::modules) fn persist_triage_outcome(
         stats.record_unpersisted_outcome(finding, outcome)?;
         return Ok(());
     };
-    match store.record_auto_triage_for_fingerprint(&finding.fingerprint, &outcome) {
+    match record_triage_for_policy(store, &finding, &outcome, reconcile) {
         Ok(updated) if updated > 0 => {
             crate::capabilities::deep_auditor::record_evidence(store, finding_id, &evidence)?;
             if cached {
@@ -237,6 +256,7 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
     finding: Finding,
     representative_outcome: &TriageOutcome,
     representative_fingerprint: &str,
+    reconcile: IdentityReconcilePolicy,
 ) {
     let inherited = TriageOutcome {
         rationale: duplicate_rationale(
@@ -247,7 +267,7 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
         cost_usd_exact: true,
         ..representative_outcome.clone()
     };
-    match store.record_auto_triage_for_fingerprint(&finding.fingerprint, &inherited) {
+    match record_triage_for_policy(store, &finding, &inherited, reconcile) {
         Ok(updated) if updated > 0 => {
             stats.record_duplicate_outcome(finding, inherited, representative_fingerprint);
         }
@@ -256,6 +276,23 @@ pub(in crate::modules) fn propagate_duplicate_outcome(
             record_triage_persistence_diagnostic(&finding, &error);
             stats.record_duplicate_persistence_error(&finding, representative_fingerprint);
         }
+    }
+}
+
+fn record_triage_for_policy(
+    store: &FindingStore,
+    finding: &Finding,
+    outcome: &TriageOutcome,
+    reconcile: IdentityReconcilePolicy,
+) -> Result<usize> {
+    let finding_id = finding
+        .id
+        .context("persisted triage finding is missing its id")?;
+    match reconcile {
+        IdentityReconcilePolicy::Auto => store.record_auto_triage_for_identity(finding_id, outcome),
+        IdentityReconcilePolicy::Off => store
+            .record_auto_triage_locally(finding_id, outcome)
+            .map(usize::from),
     }
 }
 

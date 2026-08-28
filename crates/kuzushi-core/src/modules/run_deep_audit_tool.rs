@@ -51,7 +51,10 @@ struct DeepAuditOptions {
     taint_tools: crate::capabilities::deep_auditor::TaintToolPolicy,
 }
 
-fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>) -> Option<crate::run_lifecycle::RunItemId> {
+fn emit_deep_audit_start(
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepAuditRun<'_>,
+) -> Option<crate::run_lifecycle::RunItemId> {
     ctx.trace.map(|trace| {
         trace
             .step(
@@ -239,6 +242,7 @@ fn deep_audit_config(
         temperature: options.temperature,
         passes: options.passes,
         taint_tools: options.taint_tools,
+        reviewed_refutation_context: None,
     }
 }
 
@@ -323,4 +327,3 @@ mod deep_audit_option_tests {
         );
     }
 }
-

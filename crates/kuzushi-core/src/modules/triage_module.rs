@@ -118,6 +118,8 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_cost_cap_option(),
         triage_prefilter_option(),
         triage_retriage_option(),
+        identity_reconcile_option(),
+        model_dedupe_option(),
         triage_dedupe_flag_option(),
         triage_votes_option(),
         triage_stage2_tier_option(),
@@ -129,6 +131,27 @@ fn triage_run_options() -> Vec<OptionSpec> {
     ];
     options.extend(deep_triage_advanced_options());
     options
+}
+
+fn identity_reconcile_option() -> OptionSpec {
+    opt(
+        "identityReconcile",
+        OptionType::Enum,
+        "Deterministic review reconciliation: auto applies basis-safe durable identity propagation; off records only the selected finding.",
+    )
+    .aliases(&["identity_reconcile"])
+    .choices(&["auto", "off"])
+}
+
+fn model_dedupe_option() -> OptionSpec {
+    opt(
+        "modelDedupe",
+        OptionType::Enum,
+        "Model dedupe policy: off disables it, manual leaves the explicit triage:dedupe dry run to the operator, auto runs the model dedupe pre-pass.",
+    )
+    .aliases(&["model_dedupe"])
+    .choices(&["off", "manual", "auto"])
+    .default(json!("off"))
 }
 
 /// Dataflow tools offered to the deep auditor. Non-advanced: it changes what
@@ -219,8 +242,7 @@ fn triage_dedupe_flag_option() -> OptionSpec {
     opt(
         "dedupe",
         OptionType::Bool,
-        "Run the model-driven corpus dedupe (triage:dedupe) before triage so settled \
-duplicates never burn triage spend. Opt-in.",
+        "Legacy boolean opt-in for modelDedupe=auto. New callers should use modelDedupe.",
     )
     .default(json!(false))
 }

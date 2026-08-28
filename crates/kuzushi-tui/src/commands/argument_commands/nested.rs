@@ -6,9 +6,7 @@ pub(crate) fn parse_nested_shell_command(
     original: &str,
 ) -> Option<ShellCommand> {
     let command = match verb {
-        "options" => options_command(args, OptionsFilter::Standard),
-        "findings" | "f" => parse_findings_command(args),
-        "export" => parse_workspace_findings_export_args(args),
+        "options" | "findings" | "f" | "export" => parse_finding_surface_command(verb, args),
         "recon:import" | "recon-import" => parse_recon_import_command(args),
         "recon" => return parse_recon_nested_command(args),
         "auth" => parse_auth_command(args),
@@ -24,8 +22,9 @@ pub(crate) fn parse_nested_shell_command(
         "project" => parse_project_command(args),
         "runs" => parse_runs_command(args),
         "jobs" => parse_jobs_command(args),
-        "campaign" | "campaigns" => parse_campaign_command(args),
-        "coverage" => ShellCommand::ShowCoverage,
+        "campaign" | "campaigns" | "batch" | "coverage" => {
+            parse_campaign_surface_command(verb, args)
+        }
         "queue" => parse_queue_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
         "decision" | "review" => parse_review_decision_command(args),
@@ -39,6 +38,30 @@ pub(crate) fn parse_nested_shell_command(
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_finding_surface_command(verb: &str, args: &[&str]) -> ShellCommand {
+    match verb {
+        "options" => options_command(args, OptionsFilter::Standard),
+        "export" => parse_workspace_findings_export_args(args),
+        _ => parse_findings_command(args),
+    }
+}
+
+fn parse_campaign_surface_command(verb: &str, args: &[&str]) -> ShellCommand {
+    match verb {
+        "campaign" | "campaigns" => parse_campaign_command(args),
+        "batch" => parse_batch_command(args),
+        _ => ShellCommand::ShowCoverage,
+    }
+}
+
+fn parse_batch_command(args: &[&str]) -> ShellCommand {
+    match args {
+        ["clear"] => ShellCommand::ClearBatchScope,
+        [batch_id] => ShellCommand::BatchResults((*batch_id).to_string()),
+        _ => ShellCommand::Unknown("batch <id>|clear".to_string()),
+    }
 }
 
 fn parse_recon_nested_command(args: &[&str]) -> Option<ShellCommand> {

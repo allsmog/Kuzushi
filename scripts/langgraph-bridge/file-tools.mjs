@@ -1,7 +1,11 @@
-import { globSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { globSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import {
+  canonicalPathWithinRoots as confineToRoots,
+  readConfinedText,
+} from "./confined-file-read.mjs";
 import { GREP_MAX_PATTERN_CHARS, scanBoundedRegex } from "./grep-regex-runner.mjs";
 
 const READ_MAX_LINES = 2000;
@@ -20,15 +24,15 @@ const SKIPPED_DIRS = new Set([".git", "node_modules", "target", ".kuzushi"]);
  * Read/Glob/Grep/LS); MCP servers cover structured queries but the agent
  * still needs plain source access for languages and paths MCP cannot reach.
  * Every path is canonicalized and confined to `toolPolicy.mcpReadRoots`. */
-export function fileToolsForRequest(request) {
+export function fileToolsForRequest(request, fileReadHooks = {}) {
   const roots = readRootsFor(request);
   if (roots.length === 0) return [];
   const granted = grantedToolNames(request);
   const available = {
-    Read: readTool(roots),
-    LS: lsTool(roots),
+    Read: readTool(roots, fileReadHooks),
+    LS: lsTool(roots, fileReadHooks),
     Glob: globTool(roots),
-    Grep: grepTool(roots),
+    Grep: grepTool(roots, fileReadHooks),
   };
   return Object.entries(available)
     .filter(([name]) => granted.has(name))
@@ -53,18 +57,6 @@ function readRootsFor(request) {
     }
   }
   return [...new Set(roots)];
-}
-
-function confineToRoots(absolute, roots) {
-  let canonical;
-  try {
-    canonical = realpathSync(absolute);
-  } catch {
-    return null;
-  }
-  return roots.some((root) => canonical === root || canonical.startsWith(`${root}${sep}`))
-    ? canonical
-    : null;
 }
 
 // Confine a glob match by its canonical target while retaining the ORIGINAL
@@ -112,9 +104,13 @@ function authorizedPath(candidate, roots) {
   return canonical;
 }
 
-function readTool(roots) {
+function readTool(roots, hooks) {
   return tool(
-    ({ file_path, offset, limit }) => renderFileSlice(authorizedPath(file_path, roots), offset, limit),
+    ({ file_path, offset, limit }) => {
+      const path = authorizedPath(file_path, roots);
+      const text = readConfinedText(path, roots, null, () => hooks.afterFileValidation?.("Read", path));
+      return renderFileSlice(text, offset, limit);
+    },
     {
       name: "Read",
       description:
@@ -128,8 +124,8 @@ function readTool(roots) {
   );
 }
 
-function renderFileSlice(path, offset, limit) {
-  const lines = readFileSync(path, "utf8").split("\n");
+function renderFileSlice(text, offset, limit) {
+  const lines = text.split("\n");
   const first = Math.max(1, offset ?? 1);
   // Default small: every line returned here is re-sent to the provider on
   // each subsequent agent hop, so oversized reads compound into quota burn.
@@ -143,9 +139,13 @@ function renderFileSlice(path, offset, limit) {
   return numbered.join("\n") || "(empty file)";
 }
 
-function lsTool(roots) {
+function lsTool(roots, hooks) {
   return tool(
-    ({ path }) => renderDirectory(authorizedPath(path ?? roots[0], roots)),
+    ({ path }) => {
+      const authorized = authorizedPath(path ?? roots[0], roots);
+      hooks.afterDirectoryValidation?.("LS", authorized);
+      return renderDirectory(authorized, roots);
+    },
     {
       name: "LS",
       description: "List the entries of a workspace directory (directories get a trailing slash).",
@@ -156,13 +156,25 @@ function lsTool(roots) {
   );
 }
 
-function renderDirectory(path) {
-  const entries = readdirSync(path, { withFileTypes: true })
-    .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-    .sort();
+function renderDirectory(path, roots) {
+  const names = readdirSync(path);
+  if (confineToRoots(path, roots) === null) {
+    throw new Error("workspace directory changed during authorization");
+  }
+  const entries = names.flatMap((name) => confinedDirectoryLabel(path, name, roots)).sort();
   const shown = entries.slice(0, LS_MAX_ENTRIES);
   if (entries.length > shown.length) shown.push(`… ${entries.length - shown.length} more entries omitted`);
   return shown.join("\n") || "(empty directory)";
+}
+
+function confinedDirectoryLabel(base, name, roots) {
+  const canonical = confineToRoots(resolve(base, name), roots);
+  if (canonical === null) return [];
+  try {
+    return [statSync(canonical).isDirectory() ? `${name}/` : name];
+  } catch {
+    return [];
+  }
 }
 
 function globTool(roots) {
@@ -190,10 +202,10 @@ function renderGlob(pattern, base, roots) {
   return shown.join("\n") || `no files match ${pattern}`;
 }
 
-function grepTool(roots) {
+function grepTool(roots, hooks) {
   return tool(
     async ({ pattern, path, glob }) =>
-      renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob),
+      renderGrep(pattern, authorizedPath(path ?? roots[0], roots), roots, glob, hooks),
     {
       name: "Grep",
       description:
@@ -211,21 +223,21 @@ function grepTool(roots) {
   );
 }
 
-async function renderGrep(pattern, base, roots, glob) {
+async function renderGrep(pattern, base, roots, glob, hooks) {
   const { files, truncatedWalk } = grepCandidateFiles(base, roots, glob);
-  const { lines, scanned } = await collectGrepMatches(files, base, pattern);
+  const { lines, scanned } = await collectGrepMatches(files, base, pattern, roots, hooks);
   const truncated = truncatedWalk || scanned < files.length;
   const note = grepScanNote(lines.length, scanned, truncated);
   if (note) lines.push(note);
   return lines.join("\n") || `no matches for ${pattern}`;
 }
 
-async function collectGrepMatches(files, base, pattern) {
+async function collectGrepMatches(files, base, pattern, roots, hooks) {
   const { matches, scanned } = await scanBoundedRegex({
     pattern,
     files,
     maxMatches: GREP_MAX_MATCHES,
-    readText: grepCandidateText,
+    readText: (candidate) => grepCandidateText(candidate, roots, hooks),
   });
   const lines = matches.map(({ fileIndex, line, preview }) => {
     const relative = workspaceRelative(files[fileIndex].matchedPath, base);
@@ -234,8 +246,8 @@ async function collectGrepMatches(files, base, pattern) {
   return { lines, scanned };
 }
 
-function grepCandidateText(candidate) {
-  const text = readGrepText(candidate.canonicalPath);
+function grepCandidateText(candidate, roots, hooks) {
+  const text = readGrepText(candidate.canonicalPath, roots, hooks);
   if (text === null || text.includes("\u0000")) return null;
   return text;
 }
@@ -266,12 +278,11 @@ function confinedGrepCandidates(matches, base, roots) {
   return { files: kept, truncatedWalk: truncated };
 }
 
-function readGrepText(path) {
+function readGrepText(path, roots, hooks) {
   try {
-    const stats = statSync(path);
-    if (!stats.isFile()) return null;
-    if (stats.size > GREP_MAX_FILE_BYTES) return null;
-    return readFileSync(path, "utf8");
+    return readConfinedText(path, roots, GREP_MAX_FILE_BYTES, () =>
+      hooks.afterFileValidation?.("Grep", path),
+    );
   } catch {
     return null;
   }

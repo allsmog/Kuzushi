@@ -3,13 +3,15 @@ use std::path::PathBuf;
 
 mod investigate_args;
 mod pr_comment_args;
+mod scan_args;
 mod subcommands;
 pub(crate) use investigate_args::InvestigateArgs;
 pub(crate) use pr_comment_args::PrCommentArgs;
+pub(crate) use scan_args::ScanArgs;
 pub(crate) use subcommands::{
-    AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
-    ProofCommand, ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat,
-    SessionsCommand,
+    AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, FindingsCommand, IdentityAuditCommand,
+    KwpCommand, McpBackend, McpCommand, ProofCommand, ReviewYieldCommand, RunsCommand, ScanModeArg,
+    SessionExportFormat, SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -17,70 +19,13 @@ pub(crate) enum Command {
     /// Start the interactive shell.
     Shell {},
     /// Run configured scanners and persist findings.
-    Scan {
-        #[arg(help = crate::support::TARGET_HELP)]
-        target: Option<PathBuf>,
-        /// Scan mode: `standard` or `whitebox-static`.
-        #[arg(long, value_enum)]
-        mode: Option<ScanModeArg>,
-        /// Restrict the scan to these DAG tasks (comma- or repeat-separated).
-        #[arg(long, value_delimiter = ',')]
-        tasks: Vec<String>,
-        /// Run model-backed triage on recorded findings after the scan.
-        #[arg(long, action = clap::ArgAction::SetTrue)]
-        triage: Option<bool>,
-        /// Emit the scan result as a single machine-readable JSON object.
-        #[arg(long)]
-        json: bool,
-        /// Emit one line per pipeline event in a deterministic, grep-friendly format.
-        #[arg(long, conflicts_with = "json")]
-        ci: bool,
-        /// Per-operation USD budget caps, e.g. `triage=50,deep-audit=200,full-mode-multi=300`.
-        /// Caps are persisted to the spend ledger and enforced by spend-aware
-        /// model-backed operations before they reserve estimated LLM spend.
-        /// Scanner-only work and tools that do not report spend are unaffected.
-        #[arg(long)]
-        budget: Option<String>,
-        /// Scan only the named shard from the shard manifest — a reusable,
-        /// workspace-relative scope declared as `[shards.<name>] paths = [...]`
-        /// in `<target>/.kuzushi/shards.toml` (or `--shard-manifest <file>`).
-        /// Compiles into the canonical `sast:scan` `paths` option and records
-        /// the shard name in run provenance.
-        #[arg(long)]
-        shard: Option<String>,
-        /// Shard manifest file to resolve `--shard` against. Defaults to
-        /// `<target>/.kuzushi/shards.toml`.
-        #[arg(long, requires = "shard")]
-        shard_manifest: Option<PathBuf>,
-        /// Restrict the scan to these workspace-relative path roots (comma- or
-        /// repeat-separated) without a manifest. Mutually exclusive with `--shard`.
-        #[arg(long, value_delimiter = ',', conflicts_with = "shard")]
-        paths: Vec<String>,
-        /// Diff-scope the scan to files changed since `<ref>`, matching the
-        /// shell's `scan since <ref>`. Compiles into the canonical `sast:scan`
-        /// `paths` and `diffBase` options, so every engine is narrowed. With
-        /// `--paths`/`--shard` the effective scope is the intersection. A
-        /// reference that changed nothing refuses rather than scanning
-        /// everything. Pass `--include-worktree` to include uncommitted edits.
-        #[arg(long)]
-        since: Option<String>,
-        /// When `--since` is set, also include uncommitted (working-tree) changes.
-        #[arg(long, requires = "since")]
-        include_worktree: bool,
-        /// Exit with code 3 when any finding at or above this severity is
-        /// recorded by the scan. Lets CI block a PR on findings; without it
-        /// the scan exits 0 regardless of what it found.
-        #[arg(long, value_enum)]
-        fail_on: Option<FailOnArg>,
-        /// Write a SARIF 2.1.0 export of this workspace's findings to the
-        /// given path after the scan (for GitHub Code Scanning upload etc.).
-        #[arg(long)]
-        sarif: Option<PathBuf>,
-    },
+    Scan(ScanArgs),
     /// Run an opinionated evidence campaign through the canonical SAST pipeline.
     Investigate(InvestigateArgs),
     /// List persisted findings.
     Findings {
+        #[command(subcommand)]
+        command: Option<FindingsCommand>,
         /// Maximum number of findings to list.
         #[arg(long, default_value_t = 50)]
         limit: usize,

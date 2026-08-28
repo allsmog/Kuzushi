@@ -389,7 +389,8 @@ fn workbench_page_action_keybindings(page: WorkbenchPage, backlog: bool) -> Vec<
             "reverify applied",
             ViewHotkeyAction::WorkbenchReverifyPatch,
         )],
-        WorkbenchPage::Map | WorkbenchPage::Scan => Vec::new(),
+        WorkbenchPage::Map => threat_model_cycle_keybindings(),
+        WorkbenchPage::Scan => Vec::new(),
     }
 }
 
@@ -527,7 +528,7 @@ pub(super) fn threat_view_for_digit(key: char) -> Option<ThreatView> {
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
-    ('1'..='5')
+    let mut bindings = ('1'..='5')
         .filter_map(|key| {
             let view = threat_view_for_digit(key)?;
             Some(bind_char(
@@ -537,7 +538,21 @@ pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
                 ViewHotkeyAction::ThreatView(view),
             ))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    bindings.extend(threat_model_cycle_keybindings());
+    bindings
+}
+
+fn threat_model_cycle_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char('m', "m/M", "next model", ViewHotkeyAction::ThreatModelNext),
+        bind_char(
+            'M',
+            "m/M",
+            "previous model",
+            ViewHotkeyAction::ThreatModelPrevious,
+        ),
+    ]
 }
 
 pub(super) fn actor_detail_keybindings() -> Vec<ViewKeybinding> {

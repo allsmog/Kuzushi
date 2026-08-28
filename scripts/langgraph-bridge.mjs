@@ -29,6 +29,10 @@ import { messagesForNextStep } from "./langgraph-bridge/next-step-messages.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
+import {
+  acknowledgeToolPolicy,
+  authorizeExecutingQuery,
+} from "./langgraph-bridge/tool-policy-handshake.mjs";
 
 async function readStdin() {
   let data = "";
@@ -300,6 +304,18 @@ async function handlePing(request) {
 }
 
 async function dispatch(request) {
+  if (request.type === "tool-policy-handshake") return acknowledgeToolPolicy(request);
+  if (request.authorization) return dispatchAuthorizedModelRequest(request);
+  return dispatchModelRequest(request);
+}
+
+async function dispatchAuthorizedModelRequest(request) {
+  const acknowledgement = authorizeExecutingQuery(request);
+  const response = await dispatchModelRequest(request);
+  return { ...response, toolPolicyAcknowledgement: acknowledgement };
+}
+
+async function dispatchModelRequest(request) {
   if (request.type === "next-step") return handleNextStep(request);
   if (request.type === "next-step-preflight") {
     return { ok: true, step: "final", text: "ok", cost_usd: 0 };

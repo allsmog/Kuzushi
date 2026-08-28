@@ -13,7 +13,20 @@ pub(crate) struct ExclusiveFileLock {
     _file: File,
 }
 
+/// A shared advisory lock released automatically when the file is dropped.
+/// Multiple immutable readers may coexist; an exclusive writer waits until
+/// every reader has finished.
+pub(crate) struct SharedFileLock {
+    _file: File,
+}
+
 impl Drop for ExclusiveFileLock {
+    fn drop(&mut self) {
+        let _ = self._file.unlock();
+    }
+}
+
+impl Drop for SharedFileLock {
     fn drop(&mut self) {
         let _ = self._file.unlock();
     }
@@ -36,6 +49,15 @@ impl ExclusiveFileLock {
                 Err(error).with_context(|| format!("Could not lock {}", path.display()))
             }
         }
+    }
+}
+
+impl SharedFileLock {
+    pub(crate) fn acquire(path: &Path) -> Result<Self> {
+        let file = prepared_lock_file(path)?;
+        file.lock_shared()
+            .with_context(|| format!("Could not read-lock {}", path.display()))?;
+        Ok(Self { _file: file })
     }
 }
 
@@ -240,6 +262,27 @@ mod tests {
         assert!(started.elapsed() >= std::time::Duration::from_millis(75));
         drop(second);
         first.join().unwrap();
+    }
+
+    #[test]
+    fn an_exclusive_writer_waits_for_shared_readers() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = Arc::new(temp.path().join("state.lock"));
+        let barrier = Arc::new(Barrier::new(2));
+        let reader_path = Arc::clone(&path);
+        let reader_barrier = Arc::clone(&barrier);
+        let reader = std::thread::spawn(move || {
+            let guard = SharedFileLock::acquire(&reader_path).unwrap();
+            reader_barrier.wait();
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(guard);
+        });
+        barrier.wait();
+        let started = std::time::Instant::now();
+        let writer = ExclusiveFileLock::acquire(&path).unwrap();
+        assert!(started.elapsed() >= std::time::Duration::from_millis(75));
+        drop(writer);
+        reader.join().unwrap();
     }
 
     #[cfg(unix)]

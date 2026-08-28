@@ -140,9 +140,11 @@ fn escalate_tied_consensus(
                 readiness,
                 trace,
             ) {
-                Ok(escalation) => {
-                    Ok(finalize_adopted_tie_break(outcome, escalation, &escalation_model))
-                }
+                Ok(escalation) => Ok(finalize_adopted_tie_break(
+                    outcome,
+                    escalation,
+                    &escalation_model,
+                )),
                 Err(error) => Ok(failed_tie_break_outcome(outcome, &escalation_model, &error)),
             }
         }
@@ -316,6 +318,10 @@ fn deep_audit_user_prompt(cfg: &DeepAuditConfig, finding: &Finding) -> String {
     if let Some(note) = crate::findings::grounding_prompt_note(finding) {
         user_prompt.push_str(&format!("\n\nGrounding note: {note}"));
     }
+    if let Some(note) = cfg.reviewed_refutation_context.as_deref() {
+        user_prompt.push_str("\n\n");
+        user_prompt.push_str(note);
+    }
     if cfg.include_static_evidence {
         append_static_evidence_prompt(&mut user_prompt, cfg, finding);
     }
@@ -459,7 +465,10 @@ fn consensus_cost_reports(
         )
     })?;
     let total_cost = outcomes.iter().try_fold(zero(), |total, outcome| {
-        total.checked_add(deep_audit_cost_report(outcome)?, "deep-audit consensus cost")
+        total.checked_add(
+            deep_audit_cost_report(outcome)?,
+            "deep-audit consensus cost",
+        )
     })?;
     Ok((triage_cost, total_cost))
 }
@@ -818,6 +827,33 @@ mod readiness_tests {
     }
 
     #[test]
+    fn deep_prompt_includes_reviewed_refutation_as_advisory_context() {
+        let finding = Finding::new_tool(
+            "semgrep",
+            "CWE-89",
+            "src/db.rs",
+            10,
+            Some(10),
+            crate::findings::Severity::High,
+            "candidate",
+        );
+        let mut cfg = DeepAuditConfig::new(".");
+        cfg.include_static_evidence = false;
+        cfg.reviewed_refutation_context = Some(
+            "Historical human-reviewed refutation prior (advisory only; never suppress or decide this finding)."
+                .to_string(),
+        );
+
+        let prompt = deep_audit_user_prompt(&cfg, &finding);
+
+        assert!(
+            prompt.contains("human-reviewed refutation prior"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("never suppress or decide"), "{prompt}");
+    }
+
+    #[test]
     fn prompt_advertises_cpg_taint_paths_only_when_the_spec_is_registered() {
         for readiness in readiness_variants() {
             let tools_has = deep_audit_tool_specs(&readiness)
@@ -848,7 +884,9 @@ mod consensus_tests {
 
     fn outcome(verdict: TriageVerdict, conf: f32, rationale: &str) -> DeepAuditOutcome {
         DeepAuditOutcome {
-            triage: TriageOutcome { first_link: None, refute_reason: None,
+            triage: TriageOutcome {
+                first_link: None,
+                refute_reason: None,
                 verdict,
                 confidence: conf,
                 rationale: rationale.to_string(),

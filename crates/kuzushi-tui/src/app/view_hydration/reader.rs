@@ -116,6 +116,7 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         ViewHydrationKey::ProjectScopeTree => Some(ViewHydrationValue::ProjectScopeTree(
             project_scope_tree(target),
         )),
+        ViewHydrationKey::ThreatModelStore => Some(read_threat_model_store(target)),
         ViewHydrationKey::ProjectModelDocument { scope_id, revision } => Some(
             read_project_model_document(target, scope_id, revision.as_deref()),
         ),
@@ -127,6 +128,18 @@ fn read_project_value(target: &Path, key: &ViewHydrationKey) -> Option<ViewHydra
         )),
         _ => read_project_analysis_value(target, key),
     }
+}
+
+fn read_threat_model_store(target: &Path) -> ViewHydrationValue {
+    let state = match kuzushi_core::load_threat_model_manifest(target) {
+        Ok(None) => ThreatModelStoreState::Legacy,
+        Ok(Some(manifest)) => match kuzushi_core::load_active_threat_model(target) {
+            Ok(active) => ThreatModelStoreState::Ready { manifest, active },
+            Err(error) => ThreatModelStoreState::Invalid(error.to_string()),
+        },
+        Err(error) => ThreatModelStoreState::Invalid(error.to_string()),
+    };
+    ViewHydrationValue::ThreatModelStore(state)
 }
 
 fn read_project_analysis_value(

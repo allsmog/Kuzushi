@@ -58,16 +58,15 @@ fn load_refine_state(
     verb: &str,
     input: &BuildInput,
 ) -> Result<(GeneratedThreatModel, ThreatModelSourceBundle)> {
-    let Some(document) = try_load_persistent_threat_model(&input.target)? else {
+    let Some(selected) = load_selected_build_threat_model(input)? else {
         anyhow::bail!(
-            "threat-model:build mode=refine requires a persisted .kuzushi/threat-model.json for {}; run a full build first",
-            input.target.display()
+            "threat-model:build mode=refine requires a model for the selected scope and methodology; run a full build first"
         );
     };
     let source_bundle = load_threat_model_source_bundle(ctx, input)?;
     emit_source_bundle_loaded(ctx, verb, source_bundle.loaded_count());
     let generated = GeneratedThreatModel {
-        document,
+        document: normalize_document(selected.document, &input.methodology)?,
         bridge_findings: None,
         cost_usd: 0.0,
         cost_usd_exact: true,
@@ -166,7 +165,7 @@ fn delta_changed_files(input: &BuildInput, document: &Value) -> Result<Option<Ve
         return Ok(None);
     };
     changed_files_since(
-        &input.target,
+        input.workspace_root(),
         revision,
         MAX_REFINE_CHANGED_FILES,
         REFINE_GIT_TIMEOUT,
@@ -444,7 +443,7 @@ fn finalize_refined_document(
     )?;
     assign_stable_ids(document);
     apply_coverage(document, coverage, gap_method, parked);
-    stamp_provenance(document, &input.target, "staged");
+    stamp_provenance(document, input.workspace_root(), "staged");
     stamp_entry_point_catalog_receipt(document, &delta.entry_point_catalog);
     stamp_refine_delta_provenance(document, delta, attach, gap_method, closer, parked);
     Ok(())
@@ -682,7 +681,11 @@ mod tests {
         };
         let closer = QuestionCloserOutcome::skipped("none-needed", 0);
         let input = BuildInput {
-            target: target.path().to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: None,
+            },
             ..BuildInput::default()
         };
         let mut document = json!({

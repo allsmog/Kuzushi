@@ -1,7 +1,8 @@
 use crate::workspace::domain::{
     inherited_sections_for_child_scope, normalize_relative_path, project_model_scopes_path,
-    scope_id, scope_sort_key, validated_workspace_descendant, write_workspace_state_file,
-    NestedProjectKind, NestedProjectScope, NestedProjectScopeTree, ROOT_SCOPE_ID,
+    scope_id, scope_sort_key, valid_scope_id, validated_workspace_descendant,
+    write_workspace_state_file, NestedProjectKind, NestedProjectScope, NestedProjectScopeTree,
+    ROOT_SCOPE_ID, SCOPE_TREE_SCHEMA_VERSION,
 };
 use crate::workspace::inventory::{
     generated_vendor_path, ignored_dir, language_for_path, manifest_kind, vendor_dir_kind,
@@ -72,7 +73,7 @@ fn ordered_scope_tree(scopes: BTreeMap<String, NestedProjectScope>) -> NestedPro
             .then_with(|| left.rel_path.cmp(&right.rel_path))
     });
     NestedProjectScopeTree {
-        schema_version: 1,
+        schema_version: SCOPE_TREE_SCHEMA_VERSION,
         root: ROOT_SCOPE_ID.to_string(),
         scopes: ordered_scopes,
     }
@@ -112,9 +113,44 @@ pub fn discover_and_save_nested_project_scopes(
     root: impl AsRef<Path>,
 ) -> Result<NestedProjectScopeTree> {
     let root = root.as_ref();
-    let tree = discover_nested_project_scopes(root);
+    let mut tree = discover_nested_project_scopes(root);
+    if let Some(previous) = load_nested_project_scopes(root)? {
+        preserve_exact_scope_ids(&mut tree, &previous);
+    }
     save_nested_project_scopes(root, &tree)?;
     Ok(tree)
+}
+
+fn preserve_exact_scope_ids(
+    discovered: &mut NestedProjectScopeTree,
+    previous: &NestedProjectScopeTree,
+) {
+    let mut used = BTreeSet::from([ROOT_SCOPE_ID.to_string()]);
+    for scope in discovered.non_root_scopes().cloned().collect::<Vec<_>>() {
+        let Some(prior) = exact_prior_scope(previous, &scope) else {
+            continue;
+        };
+        if valid_scope_id(&prior.id) && used.insert(prior.id.clone()) {
+            if let Some(current) = discovered
+                .scopes
+                .iter_mut()
+                .find(|current| current.rel_path == scope.rel_path && current.kind == scope.kind)
+            {
+                current.id = prior.id.clone();
+            }
+        }
+    }
+}
+
+fn exact_prior_scope<'a>(
+    previous: &'a NestedProjectScopeTree,
+    scope: &NestedProjectScope,
+) -> Option<&'a NestedProjectScope> {
+    let mut matches = previous
+        .non_root_scopes()
+        .filter(|prior| prior.kind == scope.kind && prior.rel_path == scope.rel_path);
+    let selected = matches.next()?;
+    matches.next().is_none().then_some(selected)
 }
 
 fn insert_scope(

@@ -5,6 +5,8 @@ use std::path::{Component, Path, PathBuf};
 pub const PROJECT_MODEL_DIR: &str = "project-model";
 pub const PROJECT_MODEL_SCOPES_FILE: &str = "scopes.json";
 pub const ROOT_SCOPE_ID: &str = "root";
+pub(crate) const SCOPE_TREE_SCHEMA_VERSION: u32 = 2;
+const MAX_SCOPE_ID_BYTES: usize = 160;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -106,7 +108,21 @@ pub(crate) fn scope_id(kind: NestedProjectKind, rel_path: &str) -> String {
     if kind == NestedProjectKind::Root {
         return ROOT_SCOPE_ID.to_string();
     }
-    format!("{}-{}", kind.id_prefix(), slugify_scope_path(rel_path))
+    let slug = slugify_scope_path(rel_path);
+    let short_slug = &slug[..slug.len().min(64)];
+    let hash = crate::identity::hash_parts(
+        "kuzushi.project-scope.v2",
+        &[kind.label().as_bytes(), rel_path.as_bytes()],
+    );
+    format!("{}-{short_slug}-{}", kind.id_prefix(), &hash.as_str()[..12])
+}
+
+pub(crate) fn valid_scope_id(scope_id: &str) -> bool {
+    !scope_id.is_empty()
+        && scope_id.len() <= MAX_SCOPE_ID_BYTES
+        && scope_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 pub(crate) fn scope_sort_key(scope: &NestedProjectScope) -> (u8, NestedProjectKind) {

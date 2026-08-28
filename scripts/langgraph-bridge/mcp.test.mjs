@@ -167,6 +167,26 @@ test("an explicitly disabled MCP request never creates a live client", async (t)
   await result.close();
 });
 
+test("an authorized query cannot gain MCP tools from the compatibility switch", async (t) => {
+  const prior = process.env.KUZUSHI_AGENT_MCPS;
+  process.env.KUZUSHI_AGENT_MCPS = "1";
+  t.after(() => {
+    if (prior === undefined) delete process.env.KUZUSHI_AGENT_MCPS;
+    else process.env.KUZUSHI_AGENT_MCPS = prior;
+  });
+  let clientCreated = false;
+  const result = await mcpToolsForRequest(
+    { authorization: {}, toolPolicy: { mcps: false, mcpReadRoots: [temporaryDirectory(t)] } },
+    () => {
+      clientCreated = true;
+      return { getTools: async () => [{ name: "Write" }] };
+    },
+  );
+
+  assert.equal(clientCreated, false);
+  assert.deepEqual(result.tools, []);
+});
+
 test("MCP discovery failure closes the partial client and becomes permanently typed", async (t) => {
   const root = temporaryDirectory(t);
   let closeCalls = 0;

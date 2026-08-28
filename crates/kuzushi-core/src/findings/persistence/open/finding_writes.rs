@@ -39,7 +39,8 @@ enum ProjectionEvidence {
 struct ProjectionIdentityLink {
     identity_id: String,
     fingerprint: String,
-    match_basis: FindingIdentityMatchTier,
+    match_tier: FindingIdentityMatchTier,
+    basis: FindingIdentityBasis,
 }
 
 impl ProjectionIdentityLink {
@@ -47,7 +48,8 @@ impl ProjectionIdentityLink {
         Self {
             identity_id: assignment.identity_id.clone(),
             fingerprint: fingerprint.to_string(),
-            match_basis: assignment.match_tier,
+            match_tier: assignment.match_tier,
+            basis: assignment.basis,
         }
     }
 
@@ -56,7 +58,7 @@ impl ProjectionIdentityLink {
         fingerprint: &str,
         existing_had_identity: bool,
     ) -> Self {
-        let match_basis = if existing_had_identity {
+        let match_tier = if existing_had_identity {
             FindingIdentityMatchTier::DedupCollision
         } else {
             assignment.match_tier
@@ -64,7 +66,8 @@ impl ProjectionIdentityLink {
         Self {
             identity_id: assignment.identity_id.clone(),
             fingerprint: fingerprint.to_string(),
-            match_basis,
+            match_tier,
+            basis: assignment.basis,
         }
     }
 }
@@ -414,7 +417,8 @@ fn observation_write(
         identity_id: Some(identity_link.identity_id.clone()),
         identity_alias: Some(finding_identity_alias(&identity_link.identity_id)),
         identity_fingerprint: Some(identity_link.fingerprint.clone()),
-        identity_match_basis: Some(identity_link.match_basis.as_str().to_string()),
+        identity_match_tier: Some(identity_link.match_tier.as_str().to_string()),
+        identity_match_basis: Some(identity_link.basis.as_str().to_string()),
         observation_hash: observation_hash(scan_id, finding, &snapshot_hash, &raw_result_hash),
         stable_fp,
         snapshot_hash,
@@ -589,6 +593,7 @@ fn apply_projection_identity(
     projected.scan_id = Some(scan_id.to_string());
     projected.identity_id = Some(identity.identity_id.clone());
     projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
+    projected.identity_basis = Some(identity.basis);
 }
 
 pub(super) fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
@@ -767,6 +772,7 @@ fn collision_identity_assignment(finding: &Finding) -> Option<FindingIdentityAss
     Some(FindingIdentityAssignment {
         identity_id: finding.identity_id.clone()?,
         match_tier: identity_match_tier(finding.identity_match_tier.as_deref()),
+        basis: finding.effective_identity_basis(),
     })
 }
 
@@ -779,6 +785,9 @@ fn identity_match_tier(raw: Option<&str>) -> FindingIdentityMatchTier {
 }
 
 fn dedup_collision_can_merge(existing: &Finding, incoming: &Finding) -> bool {
+    if !existing.has_compatible_symbol_locator(incoming) {
+        return false;
+    }
     match (
         existing.source_signature.as_deref(),
         incoming.source_signature.as_deref(),
@@ -794,4 +803,37 @@ fn dedup_collision_can_merge(existing: &Finding, incoming: &Finding) -> bool {
 
 fn normalized_collision_text(value: &str) -> String {
     crate::identity::finding_identity::normalize_finding_text(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn collision_finding(symbol_locator: Option<&str>) -> Finding {
+        let finding = Finding::new_tool(
+            "semgrep",
+            "CWE-89",
+            "src/db.rs",
+            24,
+            None,
+            Severity::High,
+            "query reaches database sink",
+        )
+        .with_source_signature("source-signature");
+        match symbol_locator {
+            Some(locator) => finding.with_symbol_locator(locator),
+            None => finding,
+        }
+    }
+
+    #[test]
+    fn dedup_collision_never_merges_distinct_or_missing_symbol_locators() {
+        let execute = collision_finding(Some("crate::db::execute"));
+        let prepare = collision_finding(Some("crate::db::prepare"));
+        let missing = collision_finding(None);
+
+        assert!(dedup_collision_can_merge(&execute, &execute));
+        assert!(!dedup_collision_can_merge(&execute, &prepare));
+        assert!(!dedup_collision_can_merge(&execute, &missing));
+    }
 }

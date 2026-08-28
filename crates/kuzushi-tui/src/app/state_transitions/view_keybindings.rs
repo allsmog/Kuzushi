@@ -206,6 +206,26 @@ mod keymap_collision_tests {
         }
     }
 
+    #[test]
+    fn map_and_threat_views_bind_model_head_cycling() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router
+            .workbench_mut()
+            .set_page(Some(crate::app::WorkbenchPage::Map));
+
+        for view in [ShellView::Workbench, ShellView::Threat] {
+            let binds = app.view_keybindings_for_view(view);
+            assert!(binds.iter().any(|binding| {
+                binding.trigger == HotkeyTrigger::Char('m')
+                    && binding.action == ViewHotkeyAction::ThreatModelNext
+            }));
+            assert!(binds.iter().any(|binding| {
+                binding.trigger == HotkeyTrigger::Char('M')
+                    && binding.action == ViewHotkeyAction::ThreatModelPrevious
+            }));
+        }
+    }
+
     /// The backlog preset arms eight extra one-key decisions on the Review
     /// page — the densest keymap in the shell and the one where a collision
     /// would record a wrong review decision.

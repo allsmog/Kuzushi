@@ -136,5 +136,6 @@ fn disconnected_job_audit() -> AgentCallAudit {
     AgentCallAudit {
         cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
         call_attempted: true,
+        tool_policy_receipt: None,
     }
 }

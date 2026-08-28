@@ -1,7 +1,7 @@
 //! Campaign deck behaviors: disk-snapshot refresh, cursor interaction, and
 //! detached dispatcher launch/kill. The deck never executes jobs in-process —
-//! Launch spawns `kuzushi campaign run` in its own process group, so closing
-//! the shell never kills a campaign.
+//! Launch spawns the matching campaign dispatcher/controller in its own
+//! process group, so closing the shell never kills a campaign.
 
 use super::state_transitions::{InputUpdate, ViewHotkeyAction};
 use super::*;
@@ -37,6 +37,7 @@ impl ShellApp {
             }
             None => deck.notice = Some(format!("campaign {campaign_id:?} not found")),
         }
+        deck.sync_selected_batch_workers();
     }
 
     pub(crate) fn refresh_campaign_deck(&mut self) {
@@ -49,16 +50,7 @@ impl ShellApp {
             return;
         };
         let (campaigns, unreadable) = load_campaign_snapshots(&target);
-        let spend = kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
-            observed_usd: campaigns
-                .iter()
-                .map(|campaign| campaign.total_cost_usd)
-                .sum(),
-            provider_spend_unresolved: unreadable > 0
-                || campaigns
-                    .iter()
-                    .any(|campaign| campaign.provider_spend_unresolved),
-        };
+        let spend = campaign_snapshot_spend(&campaigns, unreadable);
         let trend = kuzushi_core::capabilities::campaign::trend::trend_metrics_with_spend(
             self.review_decisions(),
             spend,
@@ -72,8 +64,20 @@ impl ShellApp {
             .selected_campaign
             .min(deck.campaigns.len().saturating_sub(1));
         deck.selected_job = deck.selected_job.min(deck.detail_job_ceiling());
+        deck.sync_selected_batch_workers();
         deck.notice =
             (unreadable > 0).then(|| format!("{unreadable} campaign dir(s) had no readable plan"));
+        let active_batch_exists = deck.active_batch_id.as_deref().is_some_and(|active| {
+            deck.campaigns
+                .iter()
+                .any(|campaign| campaign.campaign_id == active && is_scan_batch_snapshot(campaign))
+        });
+        if deck.active_batch_id.is_some() && !active_batch_exists {
+            deck.clear_active_batch();
+        }
+        if active_batch_exists {
+            self.refresh_active_batch_report();
+        }
     }
 
     /// Recompute only the workspace trend (the Report route renders the same
@@ -93,27 +97,33 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_campaign_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
+        if self.router.campaign().batch_scan_config.is_some() {
+            return self.apply_batch_scan_hotkey(action);
+        }
+        self.apply_campaign_deck_hotkey(action)
+    }
+
+    fn apply_campaign_deck_hotkey(&mut self, action: ViewHotkeyAction) -> InputUpdate {
         match action {
             ViewHotkeyAction::CampaignCursorPrevious => self.campaign_deck_edit(|deck| {
                 deck.move_cursor(-1);
+                deck.sync_selected_batch_workers();
             }),
             ViewHotkeyAction::CampaignCursorNext => self.campaign_deck_edit(|deck| {
                 deck.move_cursor(1);
+                deck.sync_selected_batch_workers();
             }),
             ViewHotkeyAction::CampaignOpenDetail => self.campaign_deck_edit(|deck| {
                 deck.detail = deck.selected_campaign().is_some();
+                deck.sync_selected_batch_workers();
             }),
             ViewHotkeyAction::CampaignBackToList => self.campaign_deck_edit(|deck| {
                 deck.detail = false;
             }),
-            ViewHotkeyAction::CampaignToggleExclude => self.campaign_deck_edit(|deck| {
-                deck.toggle_selected_exclusion();
-            }),
-            ViewHotkeyAction::CampaignCycleWorkers => self.campaign_deck_edit(|deck| {
-                deck.cycle_workers();
-            }),
+            ViewHotkeyAction::CampaignToggleExclude => self.toggle_campaign_exclusion(),
+            ViewHotkeyAction::CampaignCycleWorkers => self.cycle_campaign_workers(),
             ViewHotkeyAction::CampaignLaunch => {
-                self.campaign_launch();
+                self.launch_selected_campaign();
                 InputUpdate::handled()
             }
             ViewHotkeyAction::CampaignKill => {
@@ -137,13 +147,49 @@ impl ShellApp {
         InputUpdate::handled()
     }
 
+    fn cycle_campaign_workers(&mut self) -> InputUpdate {
+        let deck = self.router.campaign_mut();
+        let frozen = deck
+            .selected_campaign()
+            .filter(|campaign| is_scan_batch_snapshot(campaign))
+            .map(|campaign| {
+                (
+                    campaign.effective_workers.unwrap_or(1),
+                    campaign
+                        .parallel_safety_reason
+                        .clone()
+                        .unwrap_or_else(|| "frozen by the scan-batch plan".to_string()),
+                )
+            });
+        if let Some((workers, reason)) = frozen {
+            deck.workers = workers;
+            deck.notice = Some(format!("batch workers stay at {workers} — {reason}"));
+        } else {
+            deck.cycle_workers();
+        }
+        InputUpdate::handled()
+    }
+
+    fn toggle_campaign_exclusion(&mut self) -> InputUpdate {
+        let deck = self.router.campaign_mut();
+        if deck.selected_campaign().is_some_and(is_scan_batch_snapshot) {
+            deck.excluded.clear();
+            deck.notice = Some(
+                "batch trials are immutable — create a new batch to change trial scope".to_string(),
+            );
+        } else {
+            deck.toggle_selected_exclusion();
+        }
+        InputUpdate::handled()
+    }
+
     /// Launch = spawn a detached dispatcher over the included job set. The
     /// deck records only the pid it spawned; dispatchers started elsewhere
     /// stay visible through queue state alone. One dispatcher per deck: a
     /// second Launch would overwrite the held child handle, orphaning the
     /// first dispatcher (unreapable, unkillable from `K`) and racing two
     /// dispatchers on the same queue.
-    fn campaign_launch(&mut self) {
+    pub(crate) fn launch_selected_campaign(&mut self) {
         if let Some(pid) = self.deck_dispatcher_blocking_relaunch() {
             self.router.campaign_mut().notice = Some(format!(
                 "dispatcher pid {pid} is still running — K kills it; one dispatcher per deck"
@@ -190,13 +236,20 @@ impl ShellApp {
         };
         let campaign_id = campaign.campaign_id.clone();
         let total_jobs = campaign.jobs.len();
-        let included = deck.included_job_ids();
+        let batch = is_scan_batch_snapshot(campaign);
+        let included = if batch {
+            campaign.jobs.iter().map(|job| job.job_id.clone()).collect()
+        } else {
+            deck.included_job_ids()
+        };
         if included.is_empty() {
             self.router.campaign_mut().notice =
                 Some("every job is excluded — nothing to launch".to_string());
             return None;
         }
-        let args = dispatcher_args(&campaign_id, &target, deck.workers, &included, total_jobs);
+        let workers = campaign.effective_workers.unwrap_or(deck.workers);
+        let args =
+            campaign_process_args(batch, &campaign_id, &target, workers, &included, total_jobs);
         Some((target, campaign_id, args))
     }
 
@@ -264,6 +317,20 @@ impl ShellApp {
     }
 }
 
+fn campaign_process_args(
+    batch: bool,
+    campaign_id: &str,
+    target: &Path,
+    workers: usize,
+    included: &[String],
+    total_jobs: usize,
+) -> Vec<String> {
+    if batch {
+        return batch_controller_args(campaign_id, target);
+    }
+    dispatcher_args(campaign_id, target, workers, included, total_jobs)
+}
+
 /// Record a deduped trend snapshot (best effort — a history write failure
 /// must not break the deck) and reload the bounded history window that
 /// backs the sparkline strip.
@@ -287,6 +354,22 @@ fn load_campaign_snapshots(target: &Path) -> (Vec<CampaignSnapshot>, usize) {
         }
     }
     (snapshots, unreadable)
+}
+
+fn campaign_snapshot_spend(
+    campaigns: &[CampaignSnapshot],
+    unreadable: usize,
+) -> kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
+    kuzushi_core::capabilities::campaign::trend::WorkspaceCampaignSpend {
+        observed_usd: campaigns
+            .iter()
+            .map(|campaign| campaign.total_cost_usd)
+            .sum(),
+        provider_spend_unresolved: unreadable > 0
+            || campaigns
+                .iter()
+                .any(|campaign| campaign.provider_spend_unresolved),
+    }
 }
 
 /// Spawn the detached dispatcher and return its handle. Callers must keep
@@ -423,6 +506,27 @@ mod tests {
         (temp, app)
     }
 
+    fn batch_deck_app() -> (tempfile::TempDir, ShellApp) {
+        let temp = tempfile::tempdir().unwrap();
+        let plan = serde_json::json!({
+            "kind": "scan-batch",
+            "campaignId": "batch1",
+            "tool": "sast:scan",
+            "requestedWorkers": 6,
+            "effectiveWorkers": 1,
+            "parallelSafety": {"clampReason": "workspace-exclusive resource codeql"},
+            "jobs": [
+                {"jobId": "trial-1", "tool": "sast:scan", "priority": 1, "input": {}}
+            ]
+        });
+        let path = kuzushi_core::capabilities::campaign::campaign_plan_path(temp.path(), "batch1");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_vec_pretty(&plan).unwrap()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(temp.path().to_path_buf()));
+        (temp, app)
+    }
+
     #[test]
     fn campaign_verb_opens_deck_with_folded_queue_state() {
         let (_temp, mut app) = deck_app();
@@ -460,6 +564,52 @@ mod tests {
 
         let deck = app.router.campaign();
         assert_eq!(deck.included_job_ids(), vec!["j2".to_string()]);
+    }
+
+    #[test]
+    fn batch_trials_cannot_be_excluded() {
+        let (_temp, mut app) = batch_deck_app();
+        app.open_campaign_view(Some("batch1".to_string()));
+
+        app.apply_campaign_hotkey(ViewHotkeyAction::CampaignToggleExclude);
+
+        assert!(app.router.campaign().excluded.is_empty());
+        assert!(app
+            .router
+            .campaign()
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("immutable")));
+    }
+
+    #[test]
+    fn batch_reopen_freezes_workers_and_relaunch_uses_the_controller() {
+        let (_temp, mut app) = batch_deck_app();
+        app.open_campaign_view(Some("batch1".to_string()));
+
+        assert_eq!(app.router.campaign().workers, 1);
+        app.apply_campaign_hotkey(ViewHotkeyAction::CampaignCycleWorkers);
+        assert_eq!(app.router.campaign().workers, 1);
+        assert!(app
+            .router
+            .campaign()
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("codeql")));
+
+        app.router.campaign_mut().workers = 8;
+        let (_, _, args) = app.campaign_launch_spec().unwrap();
+        assert_eq!(
+            args,
+            [
+                "--plain",
+                "--target",
+                _temp.path().to_str().unwrap(),
+                "campaign",
+                "batch",
+                "batch1"
+            ]
+        );
     }
 
     #[test]

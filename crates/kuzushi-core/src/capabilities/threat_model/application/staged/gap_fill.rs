@@ -44,13 +44,13 @@ fn query_gap_fill(
     let _scope = begin_gap_fill_scope(ctx, verb, gap_count);
     // The prompt embeds the full gap list, so an unchanged coverage state
     // replays the STRIDE pass for free.
-    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(input.workspace_root());
     crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
-            input.target.clone(),
+            input.analysis_root().to_path_buf(),
             threat_model_system_prompt(),
             prompt,
         )

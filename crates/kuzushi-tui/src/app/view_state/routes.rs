@@ -3,8 +3,8 @@ mod pickers;
 use super::ActivityRouteState;
 pub(crate) use pickers::PendingTargetIntent;
 pub use pickers::{
-    AuthPickerRouteState, ModelPickerRouteState, PlanningPickerRouteState, SetupEditor,
-    SetupRouteState, SetupRowId, TargetPickerRouteState,
+    AuthPickerRouteState, MapRunConfigRouteState, MapRunConfigRowId, ModelPickerRouteState,
+    PlanningPickerRouteState, SetupEditor, SetupRouteState, SetupRowId, TargetPickerRouteState,
 };
 use std::{path::PathBuf, time::Instant};
 

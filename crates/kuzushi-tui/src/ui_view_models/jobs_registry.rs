@@ -239,9 +239,12 @@ fn agent_worker_job_row(app: &ShellApp) -> Option<JobRow> {
     if !app.jobs().is_running(JobKind::Agent) {
         return None;
     }
-    let question = app
-        .activity()
-        .and_then(|session| session.operator_question.as_ref());
+    let question = (!app.active_agent_is_auxiliary_read_only())
+        .then(|| {
+            app.activity()
+                .and_then(|session| session.operator_question.as_ref())
+        })
+        .flatten();
     let status = if app.jobs().cancel_requested(JobKind::Agent)
         || app.agent_chat().is_some_and(|agent| agent.abort_requested)
     {
@@ -256,9 +259,7 @@ fn agent_worker_job_row(app: &ShellApp) -> Option<JobRow> {
             card.request().questions.len()
         )
     });
-    let run_id = app
-        .activity()
-        .map_or_else(|| "agent".to_string(), |session| session.run_id.clone());
+    let run_id = app.active_agent_run_id().unwrap_or("agent");
     Some(worker_job_row(&run_id, "agent", status, phase))
 }
 

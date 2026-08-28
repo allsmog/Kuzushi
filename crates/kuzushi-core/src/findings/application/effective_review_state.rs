@@ -7,9 +7,14 @@
 //! identity, and newest over oldest. Shell projections, headless review
 //! listings, and the proof-deferral gate all read that one answer here so a
 //! finding can never be actionable in one mode and unreviewed in another.
+//!
+//! Recency alone is not the tie-break. A human verdict outranks a machine one
+//! whatever their order, so a later automated triage pass cannot quietly
+//! overturn a decision an operator already made.
 
 use super::super::domain::{
-    Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, TriageVerdict,
+    Finding, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, TriageAuthor,
+    TriageVerdict,
 };
 use crate::workspace::WorkspaceFindingReviewContext;
 use std::collections::BTreeMap;
@@ -314,9 +319,25 @@ fn insert_latest_decision<K: Ord>(
     candidate: IndexedReviewDecision,
 ) {
     match decisions.get(&key) {
-        Some(existing) if existing.sort_key > candidate.sort_key => {}
+        Some(existing) if decision_remains_effective(existing, &candidate) => {}
         _ => {
             decisions.insert(key, candidate);
         }
+    }
+}
+
+/// A human decision holds against a machine one regardless of recency; between
+/// two decisions by the same kind of author, the newer one wins.
+fn decision_remains_effective(
+    existing: &IndexedReviewDecision,
+    candidate: &IndexedReviewDecision,
+) -> bool {
+    match (
+        existing.decision.author == TriageAuthor::Human,
+        candidate.decision.author == TriageAuthor::Human,
+    ) {
+        (true, false) => true,
+        (false, true) => false,
+        _ => existing.sort_key > candidate.sort_key,
     }
 }

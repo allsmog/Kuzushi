@@ -91,7 +91,7 @@ impl ShellApp {
     fn inline_picker_editor_owns_key(&self) -> bool {
         let editor = self.router.setup().editor();
         let planning_option = self.engagement.planning_picker().option_edit().is_some();
-        matches!(editor, Some(SetupEditor::Budget))
+        matches!(editor, Some(SetupEditor::Budget | SetupEditor::ThreatModel))
             || planning_option
             || (editor == Some(SetupEditor::Credentials)
                 && self.router.auth_picker().is_api_key_row())
@@ -251,6 +251,7 @@ impl ShellApp {
             Some(SetupEditor::Model) => return self.handle_model_picker_key(key.code),
             Some(SetupEditor::Credentials) => return self.handle_auth_picker_key(key),
             Some(SetupEditor::Plan) => return self.handle_planning_picker_key(key),
+            Some(SetupEditor::ThreatModel) => return self.handle_map_run_config_key(key),
             _ => {}
         }
         let code = key.code;
@@ -272,6 +273,68 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             _ => InputUpdate::ignored(),
+        }
+    }
+
+    fn handle_map_run_config_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if self.router.setup().map_run_config().edit().is_some() {
+            return self.handle_map_run_text_key(key);
+        }
+        match key.code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.router.setup_mut().map_run_config_mut().move_cursor(-1)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.router.setup_mut().map_run_config_mut().move_cursor(1)
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => return self.activate_map_run_config_row(),
+            KeyCode::Esc => self.router.setup_mut().finish_editor(),
+            _ => return InputUpdate::ignored(),
+        }
+        InputUpdate::handled()
+    }
+
+    fn handle_map_run_text_key(&mut self, key: KeyEvent) -> InputUpdate {
+        match key.code {
+            KeyCode::Enter => return self.commit_map_run_text_input(),
+            KeyCode::Esc => self.router.setup_mut().map_run_config_mut().finish_edit(),
+            KeyCode::Backspace => self.router.setup_mut().map_run_config_mut().pop_char(),
+            KeyCode::Char(ch) if key.modifiers.is_empty() => {
+                self.router.setup_mut().map_run_config_mut().push_char(ch)
+            }
+            _ => return InputUpdate::handled(),
+        }
+        InputUpdate::handled()
+    }
+
+    fn activate_map_run_config_row(&mut self) -> InputUpdate {
+        let row = self.router.setup().map_run_config().row();
+        let result = match row {
+            crate::app::MapRunConfigRowId::Methodology => self.cycle_map_methodology(),
+            crate::app::MapRunConfigRowId::Scope => self.cycle_map_scope(),
+            crate::app::MapRunConfigRowId::DesignDocs | crate::app::MapRunConfigRowId::Context => {
+                self.begin_map_text_edit(row);
+                return InputUpdate::handled();
+            }
+        };
+        self.set_map_run_config_result(result);
+        InputUpdate::handled()
+    }
+
+    fn commit_map_run_text_input(&mut self) -> InputUpdate {
+        let result = self.commit_map_text_edit();
+        self.set_map_run_config_result(result);
+        InputUpdate::handled()
+    }
+
+    fn set_map_run_config_result(&mut self, result: anyhow::Result<()>) {
+        match result {
+            Ok(()) => self.router.setup_mut().map_run_config_mut().clear_error(),
+            Err(error) => self
+                .router
+                .setup_mut()
+                .map_run_config_mut()
+                .set_error(format!("{error:#}")),
         }
     }
 
@@ -344,6 +407,16 @@ impl ShellApp {
                 InputUpdate::handled()
             }
             SetupRowId::Plan => self.open_setup_plan_editor(),
+            SetupRowId::ThreatModel => match self.open_map_run_config() {
+                Ok(()) => InputUpdate::handled(),
+                Err(error) => {
+                    self.set_warn_notice(
+                        "setup",
+                        format!("Map configuration unavailable: {error:#}"),
+                    );
+                    InputUpdate::handled()
+                }
+            },
             SetupRowId::Model => {
                 self.router.setup_mut().begin_editor(SetupEditor::Model);
                 self.open_model_picker();

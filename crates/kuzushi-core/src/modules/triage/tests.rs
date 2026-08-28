@@ -94,8 +94,8 @@ mod tests {
         let cwd = Path::new(".");
 
         let bulk = TriageRunInput::from_tool_input(&json!({}), cwd).unwrap();
-        let targeted = TriageRunInput::from_tool_input(&json!({"fingerprint": "fp-1"}), cwd)
-            .unwrap();
+        let targeted =
+            TriageRunInput::from_tool_input(&json!({"fingerprint": "fp-1"}), cwd).unwrap();
         let explicit_deep = TriageRunInput::from_tool_input(
             &json!({"fingerprint": "fp-1", "strategy": "deep"}),
             cwd,
@@ -105,6 +105,21 @@ mod tests {
         assert!(bulk.deep);
         assert!(!targeted.deep);
         assert!(explicit_deep.deep);
+    }
+
+    #[test]
+    fn triage_run_input_parses_reconciliation_policies() {
+        let defaults = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        assert_eq!(defaults.identity_reconcile, IdentityReconcilePolicy::Off);
+        assert_eq!(defaults.model_dedupe, ModelDedupePolicy::Off);
+
+        let explicit = TriageRunInput::from_tool_input(
+            &json!({"identityReconcile": "off", "modelDedupe": "manual"}),
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(explicit.identity_reconcile, IdentityReconcilePolicy::Off);
+        assert_eq!(explicit.model_dedupe, ModelDedupePolicy::Manual);
     }
 
     #[test]
@@ -644,6 +659,7 @@ mod tests {
             &mut stats,
             latest,
             runtime_outcome(true_positive_outcome()),
+            IdentityReconcilePolicy::Auto,
         )
         .unwrap();
 
@@ -654,6 +670,114 @@ mod tests {
                 Some(TriageVerdict::TruePositive)
             );
         }
+    }
+
+    #[test]
+    fn identity_reconcile_off_records_only_the_selected_finding() {
+        let finding = finding_with(Severity::High, "semgrep", "same fp local only");
+        let store = store_with_scan_findings(&[("scan-a", finding.clone()), ("scan-z", finding)]);
+        let first = store.list_findings_for_scan_id("scan-a").unwrap().remove(0);
+        let latest = store.list_findings_for_scan_id("scan-z").unwrap().remove(0);
+        let mut stats = TriageRunStats::default();
+
+        persist_triage_outcome(
+            &store,
+            &mut stats,
+            latest.clone(),
+            runtime_outcome(true_positive_outcome()),
+            IdentityReconcilePolicy::Off,
+        )
+        .unwrap();
+
+        assert!(store
+            .list_review_decisions(first.id.unwrap())
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            store
+                .list_review_decisions(latest.id.unwrap())
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn advisory_output_matches_headless_reports_and_keeps_both_denominators() {
+        let first = Finding::new_tool(
+            "semgrep",
+            "CWE-78",
+            "src/lib.rs",
+            10,
+            None,
+            Severity::High,
+            "command sink",
+        );
+        let second = Finding::new_tool(
+            "codeql",
+            "CWE-89",
+            "src/lib.rs",
+            10,
+            None,
+            Severity::High,
+            "query sink",
+        );
+        let store = store_with_scan_findings(&[("scan-a", first), ("scan-b", second)]);
+        let findings = store.list_all_findings().unwrap();
+        let rejected = TriageOutcome {
+            verdict: TriageVerdict::FalsePositive,
+            ..true_positive_outcome()
+        };
+        store
+            .record_triage_with_author(
+                findings[0].id.unwrap(),
+                &rejected,
+                crate::findings::TriageAuthor::Human,
+            )
+            .unwrap();
+        store
+            .record_triage_with_author(
+                findings[1].id.unwrap(),
+                &true_positive_outcome(),
+                crate::findings::TriageAuthor::Auto,
+            )
+            .unwrap();
+        let input = TriageRunInput::from_tool_input(
+            &json!({"identityReconcile": "off", "modelDedupe": "manual"}),
+            Path::new("."),
+        )
+        .unwrap();
+        let mut response = triage_response(
+            &input,
+            &triage_config("/repo"),
+            &stage1_for(2),
+            &TriageRunStats::default(),
+            Vec::new(),
+        );
+
+        attach_triage_advisory_reports(&mut response, &store, &input).unwrap();
+
+        assert_eq!(
+            response["data"]["policies"]["modelDedupe"]["mode"],
+            json!("manual")
+        );
+        assert_eq!(
+            response["data"]["policies"]["occurrenceEvidence"]["absence"],
+            json!("not_refutation")
+        );
+        assert_eq!(
+            response["data"]["crossToolClusters"]["candidateClusters"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        let output = response["output"].as_str().unwrap();
+        assert!(output.contains("1/1 reviewed; 1/2 emitted"), "{output}");
+        assert!(
+            output.contains("report only; no verdict inheritance"),
+            "{output}"
+        );
     }
 
     #[test]
@@ -797,6 +921,38 @@ mod tests {
         );
         assert_eq!(response["data"]["findings"], json!([]));
         assert_eq!(response["costUsd"], json!(0.0));
+    }
+
+    #[test]
+    fn empty_triage_result_still_attaches_advisory_reports_and_policy_receipts() {
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let store = FindingStore::open_in_memory().unwrap();
+        let mut response = empty_triage_response(&input, Vec::new());
+
+        attach_triage_advisory_reports(&mut response, &store, &input).unwrap();
+
+        assert_eq!(
+            response["data"]["crossToolClusters"]["reportOnly"],
+            json!(true)
+        );
+        assert!(response["data"]["reviewedRefutation"].is_object());
+        assert_eq!(
+            response["data"]["policies"]["occurrenceEvidence"]["absence"],
+            json!("not_refutation")
+        );
+        assert_eq!(
+            response["data"]["policies"]["modelDedupe"]["mode"],
+            json!("off")
+        );
+        let output = response["output"].as_str().unwrap();
+        assert!(
+            output.contains("Reviewed refutation (human): n/a (0/0 reviewed; 0/0 emitted)"),
+            "{output}"
+        );
+        assert!(
+            output.contains("Reviewed refutation (automatic): n/a (0/0 reviewed; 0/0 emitted)"),
+            "{output}"
+        );
     }
 
     fn store_with_scan_findings(scan_findings: &[(&str, Finding)]) -> FindingStore {
@@ -1260,6 +1416,60 @@ mod tests {
         );
         assert!(prompt.contains("Reviewer feedback"), "{prompt}");
         assert!(prompt.contains("test note"), "{prompt}");
+    }
+
+    #[test]
+    fn human_reviewed_prior_reaches_standard_prompt_without_dropping_the_finding() {
+        let finding = Finding::new_tool(
+            "semgrep",
+            "CWE-89",
+            "src/prior-context.rs",
+            41,
+            Some(41),
+            Severity::High,
+            "unique prior-context candidate",
+        );
+        let mut input = TriageRunInput::from_tool_input(
+            &json!({"retriage": true, "strategy": "standard"}),
+            Path::new("."),
+        )
+        .unwrap();
+        input.reviewed_refutation_priors.insert(
+            finding.fingerprint.clone(),
+            crate::findings::ReviewedRefutationPrior {
+                key: crate::findings::RefutationCohortKey {
+                    tool: "semgrep".to_string(),
+                    rule_id: "CWE-89".to_string(),
+                    rule_version: Some("1".to_string()),
+                    tool_version: Some("2".to_string()),
+                    rule_set_hash: Some("rules".to_string()),
+                    config_hash: Some("config".to_string()),
+                    language: Some("rust".to_string()),
+                },
+                emitted: 37,
+                reviewed: 11,
+                refuted: 9,
+                shrunken_refutation_rate: 10.0 / 13.0,
+                credible_interval_90: [0.52, 0.93],
+            },
+        );
+        let runtime = PromptCapturingRuntime {
+            prompts: std::sync::Mutex::new(Vec::new()),
+        };
+        let config = TriageExecutionConfig::new(PathBuf::from("."), "provider:model".to_string());
+
+        call_triage_runtime(&runtime, &config, &input, &finding).unwrap();
+
+        let prompts = runtime.prompts.lock().unwrap();
+        assert_eq!(prompts.len(), 1, "the finding still reaches classification");
+        let prompt = prompts[0].as_deref().unwrap();
+        assert!(
+            prompt.contains("human-reviewed refutation prior"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("9/11 reviewed refuted"), "{prompt}");
+        assert!(prompt.contains("11/37 emitted reviewed"), "{prompt}");
+        assert!(prompt.contains("never suppress or decide"), "{prompt}");
     }
 
     /// A finding with no stored feedback keeps its prompt untouched — no

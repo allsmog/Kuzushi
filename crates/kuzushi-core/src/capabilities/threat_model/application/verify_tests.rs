@@ -556,3 +556,92 @@ fn absent_and_stale_context_snapshots_ground_verification_the_same_way() {
     assert_eq!(stale.verdict, "stale", "degraded grounding is never a pass");
     assert!(stale.grounding_degraded.is_some());
 }
+
+fn scoped_fixture() -> (tempfile::TempDir, ThreatModelBuildRoots) {
+    let workspace = tempfile::tempdir().unwrap();
+    let api = workspace.path().join("services/api");
+    let web = workspace.path().join("services/web");
+    std::fs::create_dir_all(api.join("src")).unwrap();
+    std::fs::create_dir_all(web.join("src")).unwrap();
+    std::fs::write(api.join("src/app.py"), "def api(request):\n    return request\n").unwrap();
+    std::fs::write(web.join("src/app.py"), "def web(request):\n    return request\n").unwrap();
+    let roots = ThreatModelBuildRoots {
+        workspace_root: workspace.path().canonicalize().unwrap(),
+        analysis_root: api.canonicalize().unwrap(),
+        scope: Some(ScopeRef {
+            scope_id: "scope_api".to_string(),
+            rel_path: PathBuf::from("services/api"),
+            project_model_sha256: format!("sha256:{}", "a".repeat(64)),
+            target_revision: "fixture".to_string(),
+        }),
+    };
+    (workspace, roots)
+}
+
+fn cover_scoped_grounding(mut doc: Value, roots: &ThreatModelBuildRoots) -> Value {
+    let surfaces = scoped_verification_grounding(roots).unwrap().surfaces;
+    doc["deprioritized"] = json!(surfaces
+        .into_iter()
+        .map(|surface| json!({
+            "entryPointId": surface.id,
+            "entryPoint": surface.title,
+            "reason": "scope verification fixture accepts this surface",
+        }))
+        .collect::<Vec<_>>());
+    doc["provenance"] = json!({
+        "treeHash": crate::incremental_index::current_workspace_tree_hash(
+            &roots.workspace_root
+        ).unwrap(),
+        "entryPointCatalog": {
+            "status": "scoped-derived",
+            "sha256": null,
+            "records": 0,
+            "recordsSelected": 0,
+            "groundingLimit": 40,
+            "groundingRecordsSelected": 0,
+            "snapshotTimestamp": null,
+            "contextSha256": null,
+            "treeHash": crate::incremental_index::current_workspace_tree_hash(
+                &roots.workspace_root
+            ).unwrap(),
+            "revision": null,
+            "revisionDirty": null,
+            "selectionPolicy": DETERMINISTIC_ENTRY_POINT_SELECTION_POLICY,
+        }
+    });
+    doc
+}
+
+#[test]
+fn scoped_verification_resolves_workspace_paths_and_uses_only_scope_surfaces() {
+    let (_workspace, roots) = scoped_fixture();
+    let doc = cover_scoped_grounding(
+        document(&["services/api/src/app.py"]),
+        &roots,
+    );
+    let scoped_surfaces = scoped_verification_grounding(&roots).unwrap().surfaces;
+
+    let verification = verify_threat_model_document_with_roots(&doc, &roots).unwrap();
+
+    assert_eq!(verification.missing_count, 0);
+    assert_eq!(verification.coverage_considered, scoped_surfaces.len());
+    assert_eq!(verification.coverage_gaps, 0);
+    assert_eq!(verification.verdict, "verified");
+}
+
+#[test]
+fn scoped_verification_refuses_a_workspace_sibling_citation() {
+    let (_workspace, roots) = scoped_fixture();
+    let doc = cover_scoped_grounding(
+        document(&["services/web/src/app.py"]),
+        &roots,
+    );
+
+    let verification = verify_threat_model_document_with_roots(&doc, &roots).unwrap();
+
+    assert_eq!(verification.verdict, "failed");
+    assert!(verification
+        .missing
+        .iter()
+        .any(|problem| problem.contains("outside the selected scope")));
+}

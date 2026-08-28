@@ -2,6 +2,7 @@ use super::super::threat_dfd_diagram::{
     parse_flows, parse_nodes, zones_in_order, DfdFlow, DfdNode,
 };
 use crate::{DfdModelCacheKey, ShellApp};
+use std::collections::BTreeSet;
 
 mod overview;
 pub(crate) use overview::{
@@ -65,6 +66,7 @@ pub(crate) struct DfdSecurityItem {
     pub label: String,
     pub detail: String,
     pub evidence: String,
+    pub evidence_paths: Vec<String>,
     pub target_element_ids: Vec<String>,
 }
 
@@ -114,7 +116,7 @@ pub(crate) fn dfd_model_is_empty(app: &ShellApp) -> bool {
     dfd_model(app).empty_hint.is_some()
 }
 
-fn dfd_model_from_doc(
+pub(crate) fn dfd_model_from_doc(
     doc: Option<&serde_json::Value>,
     target: Option<&std::path::Path>,
 ) -> DfdModel {
@@ -256,14 +258,112 @@ fn security_item_from_value(
     value: &serde_json::Value,
     kind: DfdSecurityKind,
 ) -> Option<DfdSecurityItem> {
+    let evidence_paths = security_evidence_paths(value);
     Some(DfdSecurityItem {
         key: string_field(value, "id")?,
         kind,
         label: security_label(value, kind),
         detail: security_detail(value, kind),
-        evidence: string_field(value, "evidence").unwrap_or_default(),
+        evidence: string_field(value, "evidence")
+            .or_else(|| evidence_paths.first().cloned())
+            .unwrap_or_default(),
+        evidence_paths,
         target_element_ids: string_array(value, "targetElementIds"),
     })
+}
+
+fn security_evidence_paths(value: &serde_json::Value) -> Vec<String> {
+    let mut paths = BTreeSet::new();
+    collect_direct_locator_fields(value, &mut paths);
+    collect_affected_files(value, &mut paths);
+    collect_evidence_refs(value, &mut paths);
+    paths.into_iter().collect()
+}
+
+fn collect_direct_locator_fields(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    for field in ["path", "filePath", "sourcePath"] {
+        insert_nonempty_path(string_field(value, field), paths);
+    }
+    for pointer in ["/sourceLocation/path", "/location/path", "/locator/path"] {
+        insert_nonempty_path(
+            value
+                .pointer(pointer)
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string),
+            paths,
+        );
+    }
+}
+
+fn insert_nonempty_path(path: Option<String>, paths: &mut BTreeSet<String>) {
+    if let Some(path) = path.filter(|path| !path.trim().is_empty()) {
+        paths.insert(path);
+    }
+}
+
+fn collect_affected_files(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    for row in value
+        .get("affectedFiles")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(path) = row.as_str() {
+            insert_path_like(path, paths);
+        } else {
+            collect_direct_locator_fields(row, paths);
+        }
+    }
+}
+
+fn collect_evidence_refs(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    for field in ["evidenceRefs", "evidence"] {
+        if let Some(evidence) = value.get(field) {
+            collect_evidence_value(evidence, paths);
+        }
+    }
+}
+
+fn collect_evidence_value(value: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    match value {
+        serde_json::Value::String(candidate) => insert_path_like(candidate, paths),
+        serde_json::Value::Array(rows) => {
+            for row in rows {
+                collect_evidence_row(row, paths);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_evidence_row(row: &serde_json::Value, paths: &mut BTreeSet<String>) {
+    if let Some(candidate) = row.as_str() {
+        insert_path_like(candidate, paths);
+        return;
+    }
+    collect_direct_locator_fields(row, paths);
+    for key in ["ref", "source"] {
+        if let Some(candidate) = string_field(row, key) {
+            insert_path_like(&candidate, paths);
+        }
+    }
+}
+
+fn insert_path_like(candidate: &str, paths: &mut BTreeSet<String>) {
+    let trimmed = candidate.trim().trim_matches('`');
+    let without_line = trimmed.split_once(":").map_or(trimmed, |(head, tail)| {
+        tail.split('-')
+            .all(|part| part.parse::<u32>().is_ok())
+            .then_some(head)
+            .unwrap_or(trimmed)
+    });
+    let path = std::path::Path::new(without_line);
+    let looks_like_path = without_line.contains('/')
+        || path.extension().is_some()
+        || matches!(without_line, "Dockerfile" | "Makefile" | "Rakefile");
+    if looks_like_path && !without_line.chars().any(char::is_whitespace) {
+        paths.insert(trimmed.to_string());
+    }
 }
 
 fn security_label(value: &serde_json::Value, kind: DfdSecurityKind) -> String {
@@ -531,6 +631,44 @@ mod tests {
                 .map(|item| item.key.as_str())
                 .collect::<Vec<_>>(),
             ["T-callback"]
+        );
+    }
+
+    #[test]
+    fn structured_security_evidence_exposes_all_repository_paths() {
+        let mut doc = linked_document();
+        doc["attackSurface"]["entryPoints"][0]["path"] =
+            serde_json::json!("services/api/src/oauth.rs");
+        doc["threats"][0]["affectedFiles"] = serde_json::json!([
+            "services/api/src/callback.rs",
+            {"path": "services/api/src/session.rs"}
+        ]);
+        doc["threats"][0]["evidenceRefs"] = serde_json::json!([
+            {"source": "services/api/src/router.rs:42"},
+            {"filePath": "services/api/src/token.rs"}
+        ]);
+
+        let model = dfd_model_from_doc(Some(&doc), None);
+        let entry = model
+            .security_context
+            .iter()
+            .find(|item| item.key == "AS-oauth")
+            .unwrap();
+        let threat = model
+            .security_context
+            .iter()
+            .find(|item| item.key == "T-callback")
+            .unwrap();
+
+        assert_eq!(entry.evidence_paths, ["services/api/src/oauth.rs"]);
+        assert_eq!(
+            threat.evidence_paths,
+            [
+                "services/api/src/callback.rs",
+                "services/api/src/router.rs:42",
+                "services/api/src/session.rs",
+                "services/api/src/token.rs",
+            ]
         );
     }
 

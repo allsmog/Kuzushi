@@ -195,6 +195,9 @@ mod error_label_tests {
         let error = anyhow::Error::new(crate::runtime::RuntimeFailure::new(metadata))
             .context("structured output failed");
 
-        assert_eq!(safe_error_label("query", &error), "query failed (authentication)");
+        assert_eq!(
+            safe_error_label("query", &error),
+            "query failed (authentication)"
+        );
     }
 }

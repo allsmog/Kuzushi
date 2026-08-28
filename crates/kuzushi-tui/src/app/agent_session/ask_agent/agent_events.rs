@@ -18,30 +18,55 @@ impl ShellApp {
         audit: AgentCallAudit,
         state: AgentEventState,
     ) -> Vec<ShellEffect> {
+        self.settle_agent_answer_state(&text, state.abort_requested);
+        self.record_agent_cost(&audit, state.run_id.as_deref());
+        if state.abort_requested {
+            return self.apply_aborted_agent_answer(audit, state);
+        }
+        self.apply_completed_agent_answer(text, audit, state)
+    }
+
+    fn settle_agent_answer_state(&mut self, text: &str, abort_requested: bool) {
         if let Some(agent) = self.agent_chat_mut() {
             agent.running = false;
             agent.abort_requested = false;
-            if state.abort_requested {
+            if abort_requested {
                 agent.answer = None;
                 agent.error = Some("response arrived after abort request; ignored".to_string());
             } else {
-                agent.answer = Some(text.clone());
+                agent.answer = Some(text.to_string());
                 agent.error = None;
             }
         }
-        self.record_agent_cost(&audit, state.run_id.as_deref());
-        if state.abort_requested {
-            self.log(
-                "agent",
-                "LangGraph response arrived after abort request; ignored",
-            );
-            self.set_refused_activity("agent", "response ignored after abort request");
-            return self.agent_canceled_record(
-                "response arrived after abort request".to_string(),
-                audit,
-                state,
-            );
-        }
+    }
+
+    fn apply_aborted_agent_answer(
+        &mut self,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        self.log(
+            "agent",
+            "LangGraph response arrived after abort request; ignored",
+        );
+        self.set_agent_terminal_activity(
+            state.auxiliary_read_only,
+            LiveActivityPhase::Refused,
+            "response ignored after abort request",
+        );
+        self.agent_canceled_record(
+            "response arrived after abort request".to_string(),
+            audit,
+            state,
+        )
+    }
+
+    fn apply_completed_agent_answer(
+        &mut self,
+        text: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
         self.record_session_event(
             kuzushi_core::session_transcript::SessionEvent::AgentAssistantTurn {
                 text: text.clone(),
@@ -50,7 +75,11 @@ impl ShellApp {
         self.log("answer", text.clone());
         // Ask is a fallthrough: the operator kept their view, and the full
         // answer text lands in the transcript.
-        self.set_completed_activity("agent", "answer received. Next: logs");
+        self.set_agent_terminal_activity(
+            state.auxiliary_read_only,
+            LiveActivityPhase::Completed,
+            "answer received. Next: logs",
+        );
         self.agent_success_record(&text, audit, state)
     }
 
@@ -74,7 +103,11 @@ impl ShellApp {
                 "agent",
                 format!("LangGraph ended after abort request: {safe_error}"),
             );
-            self.set_refused_activity("agent", "worker ended after abort request");
+            self.set_agent_terminal_activity(
+                state.auxiliary_read_only,
+                LiveActivityPhase::Refused,
+                "worker ended after abort request",
+            );
             return self.agent_canceled_record(
                 format!("worker ended after abort request: {error}"),
                 audit,
@@ -82,8 +115,28 @@ impl ShellApp {
             );
         }
         self.set_error_notice("ask", safe_error.clone());
-        self.set_refused_activity("agent", "model request failed");
+        self.set_agent_terminal_activity(
+            state.auxiliary_read_only,
+            LiveActivityPhase::Refused,
+            "model request failed",
+        );
         self.agent_failure_record(safe_error, audit, state)
+    }
+
+    fn set_agent_terminal_activity(
+        &mut self,
+        auxiliary_read_only: bool,
+        phase: LiveActivityPhase,
+        detail: &str,
+    ) {
+        if auxiliary_read_only {
+            return;
+        }
+        match phase {
+            LiveActivityPhase::Completed => self.set_completed_activity("agent", detail),
+            LiveActivityPhase::Refused => self.set_refused_activity("agent", detail),
+            _ => {}
+        }
     }
 
     fn record_agent_cost(&mut self, audit: &AgentCallAudit, run_id: Option<&str>) {
@@ -113,6 +166,7 @@ impl ShellApp {
             outcome: AgentRunOutcome::Complete {
                 answer_chars: text.chars().count(),
             },
+            auxiliary_read_only: state.auxiliary_read_only,
         })]
     }
 
@@ -131,6 +185,7 @@ impl ShellApp {
             latency_ms: state.latency_ms,
             audit,
             outcome: AgentRunOutcome::Failed { error },
+            auxiliary_read_only: state.auxiliary_read_only,
         })]
     }
 
@@ -149,6 +204,7 @@ impl ShellApp {
             latency_ms: state.latency_ms,
             audit,
             outcome: AgentRunOutcome::Canceled { reason },
+            auxiliary_read_only: state.auxiliary_read_only,
         })]
     }
 
@@ -182,6 +238,9 @@ impl ShellApp {
         );
         self.log("error", message.clone());
         self.set_error_notice("artifacts", message);
+        if record.auxiliary_read_only {
+            return;
+        }
         if usable_result {
             self.set_partial_activity("agent", "answer retained; replay artifacts are incomplete");
         } else {
@@ -235,6 +294,7 @@ struct AgentEventState {
     run_id: Option<String>,
     latency_ms: Option<u64>,
     artifact_target: Option<std::path::PathBuf>,
+    auxiliary_read_only: bool,
 }
 
 impl AgentEventState {
@@ -258,6 +318,10 @@ impl AgentEventState {
             artifact_target: app
                 .agent_artifact_target_owned()
                 .or_else(|| cleared.and_then(|run| run.artifact_target.clone())),
+            auxiliary_read_only: agent
+                .map(|agent| agent.auxiliary_read_only)
+                .or_else(|| cleared.map(|run| run.auxiliary_read_only))
+                .unwrap_or(false),
         }
     }
 }

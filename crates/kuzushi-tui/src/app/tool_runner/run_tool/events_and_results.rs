@@ -1120,6 +1120,14 @@ mod tests {
     }
 
     #[test]
+    fn triage_advisory_report_reaches_the_tui_transcript_unchanged() {
+        let output = "triage complete\nCross-tool candidates: 1 cluster(s), report only; no verdict inheritance.\nReviewed refutation (human): 82% (9/11 reviewed; 11/37 emitted).";
+        let result = serde_json::json!({"output": output});
+
+        assert_eq!(rendered_tool_result(&result), output);
+    }
+
+    #[test]
     fn a_long_structured_artifact_is_clipped_with_a_pointer_to_the_full_record() {
         // A pretty-printed artifact used to expand into hundreds of transcript
         // rows and evict the run it belonged to.

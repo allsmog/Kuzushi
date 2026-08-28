@@ -287,7 +287,7 @@ mod tests {
             .insert(PlanningTaskId::BuildThreatModel);
         let model = setup_readiness_model(&app);
         assert!(!model.can_start);
-        assert_eq!(model.first_blocker, Some(2));
+        assert_eq!(model.first_blocker, Some(3));
     }
 
     #[test]
@@ -303,7 +303,7 @@ mod tests {
         let model = setup_readiness_model(&app);
 
         assert!(!model.can_start);
-        assert_eq!(model.rows[2].status, "INCOMPATIBLE");
+        assert_eq!(model.rows[3].status, "INCOMPATIBLE");
     }
 
     #[test]
@@ -444,6 +444,6 @@ mod tests {
         app.session_mut().set_session_budget_usd(Some(0.0));
         let model = setup_readiness_model(&app);
         assert!(!model.can_start);
-        assert!(model.rows[5].detail.contains("positive"));
+        assert!(model.rows[6].detail.contains("positive"));
     }
 }

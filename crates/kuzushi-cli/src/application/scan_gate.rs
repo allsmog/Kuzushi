@@ -1,9 +1,14 @@
 use anyhow::{Context, Result};
-use kuzushi_core::{
-    export_scan_findings_sarif_with_run_summary, suppressions::run_suppression_sweep, FindingStore,
-    Severity, WorkspaceTarget,
+use kuzushi_core::capabilities::campaign::{
+    persist_batch_gate_outcome, persist_batch_sarif_document, ScanBatchGateBinding,
+    ScanBatchGateCounts, ScanBatchGateOutcome, ScanBatchGatePolicy,
 };
-use std::collections::BTreeSet;
+use kuzushi_core::findings::{derive_batch_gate_binding, BatchOccurrenceReport};
+use kuzushi_core::{
+    export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
+    suppressions::run_suppression_sweep, FindingStore, Severity, WorkspaceTarget,
+};
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// Post-scan CI policy: SARIF export and severity gating. Applied after scan
@@ -19,6 +24,34 @@ pub(crate) struct ScanGatePolicy {
 /// CI can tell "the scanner broke" from "the scan worked and found blocking
 /// issues". Documented in README and the reference workflow.
 pub(crate) const FAIL_ON_EXIT_CODE: i32 = 3;
+
+pub(crate) struct AppliedBatchGate {
+    outcome: ScanBatchGateOutcome,
+}
+
+impl AppliedBatchGate {
+    pub(crate) fn outcome(&self) -> &ScanBatchGateOutcome {
+        &self.outcome
+    }
+
+    pub(crate) fn operationally_incomplete(&self) -> bool {
+        self.outcome.operational_status
+            == kuzushi_core::capabilities::campaign::BatchOperationalStatus::Incomplete
+    }
+
+    pub(crate) fn failed(&self) -> bool {
+        self.outcome.security_status
+            == kuzushi_core::capabilities::campaign::BatchSecurityGateStatus::Failed
+    }
+
+    pub(crate) fn enforce(self) {
+        exit_on_blocking_findings(
+            self.outcome.threshold,
+            self.outcome.blocking_safe_fold_count,
+            &self.outcome.completed_run_ids,
+        );
+    }
+}
 
 pub(crate) fn apply_scan_gate_policy(
     workspace: &WorkspaceTarget,
@@ -45,6 +78,213 @@ pub(crate) fn apply_scan_gate_policy(
         enforce_fail_on(store, run_ids, threshold)?;
     }
     Ok(())
+}
+
+pub(crate) fn apply_batch_scan_gate_policy(
+    workspace: &WorkspaceTarget,
+    store: &FindingStore,
+    report: &BatchOccurrenceReport,
+    policy: &ScanGatePolicy,
+) -> Result<AppliedBatchGate> {
+    let frozen_policy = batch_gate_policy(policy);
+    let run_ids = report.completed_run_ids();
+    let sarif_path = export_batch_sarif(workspace, report, policy, &run_ids)?;
+    if policy.fail_on.is_some() {
+        reconcile_suppressions_before_gate(workspace, store)?;
+    }
+    let (binding, blocking) =
+        derive_batch_gate_binding(store, report, policy.fail_on, sarif_path.as_deref())?;
+    let outcome = batch_gate_outcome(
+        report,
+        &frozen_policy,
+        run_ids,
+        blocking,
+        sarif_path.is_some(),
+        binding,
+    );
+    let path = persist_batch_gate_outcome(workspace.root(), &outcome)?;
+    eprintln!(
+        "batch gate: {} ({})",
+        outcome.status.as_str(),
+        path.display()
+    );
+    Ok(AppliedBatchGate { outcome })
+}
+
+fn export_batch_sarif(
+    workspace: &WorkspaceTarget,
+    report: &BatchOccurrenceReport,
+    policy: &ScanGatePolicy,
+    run_ids: &[String],
+) -> Result<Option<PathBuf>> {
+    let Some(path) = &policy.sarif else {
+        return Ok(None);
+    };
+    let export = export_scan_findings_sarif(workspace, path, run_ids)?;
+    let folded_count = annotate_batch_sarif(&export.output_path, report)?;
+    eprintln!(
+        "sarif: wrote {} identity-folded batch finding(s) to {}",
+        folded_count,
+        export.output_path.display()
+    );
+    Ok(Some(export.output_path))
+}
+
+fn batch_gate_outcome(
+    report: &BatchOccurrenceReport,
+    gate_policy: &ScanBatchGatePolicy,
+    completed_run_ids: Vec<String>,
+    blocking_safe_fold_count: usize,
+    sarif_written: bool,
+    binding: ScanBatchGateBinding,
+) -> ScanBatchGateOutcome {
+    ScanBatchGateOutcome::new(
+        &report.batch_id,
+        &report.equivalence_key,
+        gate_policy,
+        ScanBatchGateCounts {
+            planned_trials: report.planned,
+            completed_trials: report.completed,
+            failed_trials: report.failed,
+            pending_trials: report.pending,
+            completed_run_ids,
+            blocking_safe_fold_count,
+            sarif_written,
+        },
+        binding,
+    )
+}
+
+fn batch_gate_policy(policy: &ScanGatePolicy) -> ScanBatchGatePolicy {
+    ScanBatchGatePolicy {
+        fail_on: policy.fail_on,
+        sarif: policy.sarif.clone(),
+    }
+}
+
+fn exit_on_blocking_findings(threshold: Option<Severity>, blocking: usize, run_ids: &[String]) {
+    let Some(threshold) = threshold.filter(|_| blocking > 0) else {
+        return;
+    };
+    eprintln!(
+        "fail-on: {blocking} finding(s) at or above {} for scan runs {} (exit {FAIL_ON_EXIT_CODE})",
+        severity_gate_label(threshold),
+        run_ids.join(","),
+    );
+    super::config_diagnostics::exit_after_runtime_diagnostics(FAIL_ON_EXIT_CODE);
+}
+
+fn annotate_batch_sarif(path: &std::path::Path, report: &BatchOccurrenceReport) -> Result<usize> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("could not read batch SARIF {}", path.display()))?;
+    let mut document: serde_json::Value = serde_json::from_slice(&bytes)
+        .with_context(|| format!("{} is malformed SARIF", path.display()))?;
+    document["properties"]["kuzushiBatch"] = batch_sarif_metadata(report);
+    let folded_count = annotate_sarif_results(&mut document, report)?;
+    persist_batch_sarif_document(path, &document)?;
+    Ok(folded_count)
+}
+
+fn batch_sarif_metadata(report: &BatchOccurrenceReport) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": report.schema_version,
+        "batchId": report.batch_id,
+        "equivalenceKey": report.equivalence_key,
+        "identityFold": report.identity_fold,
+        "trialsPlanned": report.planned,
+        "trialsCompleted": report.completed,
+        "trialsFailed": report.failed,
+        "rawAttemptRunIds": report.all_attempt_run_ids(),
+    })
+}
+
+fn annotate_sarif_results(
+    document: &mut serde_json::Value,
+    report: &BatchOccurrenceReport,
+) -> Result<usize> {
+    let runs = document
+        .get_mut("runs")
+        .and_then(serde_json::Value::as_array_mut)
+        .context("batch SARIF has no runs array")?;
+    anyhow::ensure!(!runs.is_empty(), "batch SARIF has no run");
+    let folded = fold_sarif_results(take_sarif_results(runs), report)?;
+    let count = folded.len();
+    runs[0]["results"] = serde_json::Value::Array(folded);
+    Ok(count)
+}
+
+fn take_sarif_results(runs: &mut [serde_json::Value]) -> Vec<serde_json::Value> {
+    let mut results = Vec::new();
+    for run in runs {
+        let Some(run_results) = run
+            .get_mut("results")
+            .and_then(serde_json::Value::as_array_mut)
+        else {
+            continue;
+        };
+        results.append(run_results);
+    }
+    results
+}
+
+fn fold_sarif_results(
+    results: Vec<serde_json::Value>,
+    report: &BatchOccurrenceReport,
+) -> Result<Vec<serde_json::Value>> {
+    let mut selected = BTreeMap::<usize, (bool, serde_json::Value)>::new();
+    for mut result in results {
+        let fingerprint = sarif_result_fingerprint(&result)?.to_string();
+        let (index, row) = occurrence_row_for_fingerprint(report, &fingerprint)?;
+        annotate_sarif_result(&mut result, row);
+        let representative = fingerprint == row.representative_fingerprint;
+        match selected.entry(index) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert((representative, result));
+            }
+            std::collections::btree_map::Entry::Occupied(mut entry)
+                if representative && !entry.get().0 =>
+            {
+                entry.insert((true, result));
+            }
+            _ => {}
+        }
+    }
+    Ok(selected.into_values().map(|(_, result)| result).collect())
+}
+
+fn sarif_result_fingerprint(result: &serde_json::Value) -> Result<&str> {
+    result
+        .pointer("/fingerprints/kuzushi~1v1")
+        .and_then(serde_json::Value::as_str)
+        .context("batch SARIF result has no Kuzushi fingerprint")
+}
+
+fn occurrence_row_for_fingerprint<'a>(
+    report: &'a BatchOccurrenceReport,
+    fingerprint: &str,
+) -> Result<(usize, &'a kuzushi_core::findings::BatchOccurrenceRow)> {
+    report
+        .rows
+        .iter()
+        .enumerate()
+        .find(|(_, row)| row.fingerprints.iter().any(|value| value == fingerprint))
+        .with_context(|| format!("SARIF finding {fingerprint} has no batch occurrence group"))
+}
+
+fn annotate_sarif_result(
+    result: &mut serde_json::Value,
+    row: &kuzushi_core::findings::BatchOccurrenceRow,
+) {
+    result["properties"]["kuzushiBatchOccurrence"] = serde_json::json!({
+        "seen": row.seen,
+        "completed": row.completed,
+        "planned": row.planned,
+        "failed": row.failed,
+        "runIds": row.run_ids,
+        "severityVariants": row.severities,
+        "locationVariants": row.locations,
+        "titleVariants": row.titles,
+    });
 }
 
 /// Re-run the suppression sweep immediately before `--fail-on` decides
@@ -108,13 +348,10 @@ pub(crate) fn count_blocking_findings_for_run_ids(
 }
 
 fn finding_dedupe_key(finding: &kuzushi_core::Finding) -> String {
-    finding
-        .identity_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&finding.fingerprint)
-        .to_string()
+    kuzushi_core::findings::finding_projection_key(
+        finding,
+        kuzushi_core::findings::IdentityFoldPolicy::Safe,
+    )
 }
 
 /// Severity rank for gating. `Unknown` is deliberately excluded (`None`): the
@@ -145,6 +382,9 @@ fn severity_gate_label(severity: Severity) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::findings::{
+        BatchOccurrenceRow, BatchTrialReport, FindingIdentityBasis, IdentityFoldPolicy,
+    };
     use kuzushi_core::suppressions::{
         save_suppression_rules, FindingRef, SuppressionOrigin, SuppressionPredicate,
         SuppressionReason, SuppressionRule,
@@ -232,9 +472,12 @@ mod tests {
     #[test]
     fn union_gate_counts_each_durable_identity_once_across_child_runs() {
         let store = FindingStore::open_in_memory().unwrap();
-        record_running_scans(&store, &["child-a", "child-b"]);
-        let (first, second) = cross_engine_duplicate_findings();
+        record_running_scans(&store, &["seed", "child-a", "child-b"]);
+        let (mut first, mut second) = cross_engine_duplicate_findings();
+        first.dedup_key = Some("shared-source-locus".to_string());
+        second.dedup_key = first.dedup_key.clone();
         assert_ne!(first.fingerprint, second.fingerprint);
+        store.insert_finding("seed", &first).unwrap();
         store.insert_finding("child-a", &first).unwrap();
         store.insert_finding("child-b", &second).unwrap();
         let first_identity = stored_identity(&store, "child-a");
@@ -249,6 +492,233 @@ mod tests {
         assert_eq!(count, 1, "cross-engine identity must gate once");
     }
 
+    #[test]
+    fn batch_sarif_safe_fold_keeps_distinct_fallback_signatures() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        record_running_scans(&store, &["trial-a", "trial-b"]);
+        let mut first = fallback_finding("first", "sig:first", 10);
+        let mut second = fallback_finding("second", "sig:second", 80);
+        first.identity_id = Some("fi_shared_fallback".to_string());
+        second.identity_id = Some("fi_shared_fallback".to_string());
+        store.insert_finding("trial-a", &first).unwrap();
+        store.insert_finding("trial-b", &second).unwrap();
+        let output = temp.path().join("batch.sarif");
+
+        let exported = export_scan_findings_sarif(
+            &workspace,
+            &output,
+            &["trial-a".to_string(), "trial-b".to_string()],
+        )
+        .unwrap();
+
+        assert_eq!(exported.count, 2);
+    }
+
+    #[test]
+    fn batch_sarif_emits_one_annotated_result_per_safe_occurrence_group() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        record_running_scans(&store, &["trial-a", "trial-b"]);
+        let (first, second) = cross_engine_duplicate_findings();
+        store.insert_finding("trial-a", &first).unwrap();
+        store.insert_finding("trial-b", &second).unwrap();
+        let stored_first = store.list_findings_for_scan_id("trial-a").unwrap()[0].clone();
+        let stored_second = store.list_findings_for_scan_id("trial-b").unwrap()[0].clone();
+        let report = occurrence_report_for_duplicate(&stored_first, &stored_second);
+        let output = temp.path().join("batch.sarif");
+
+        apply_batch_scan_gate_policy(
+            &workspace,
+            &store,
+            &report,
+            &ScanGatePolicy {
+                fail_on: None,
+                sarif: Some(output.clone()),
+            },
+        )
+        .unwrap();
+
+        let sarif: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(output).unwrap()).unwrap();
+        let results = sarif
+            .pointer("/runs/0/results")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(
+            results[0].pointer("/properties/kuzushiBatchOccurrence/seen"),
+            Some(&serde_json::json!(2))
+        );
+        assert_eq!(
+            sarif.pointer("/properties/kuzushiBatch/trialsCompleted"),
+            Some(&serde_json::json!(2))
+        );
+        let gate_path =
+            kuzushi_core::capabilities::campaign::campaign_dir(workspace.root(), "batch-test")
+                .join("gate.json");
+        let gate: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(gate_path).unwrap()).unwrap();
+        assert_eq!(gate["status"], "disabled");
+        assert_eq!(gate["completedTrials"], 2);
+        assert_eq!(gate["blockingSafeFoldCount"], 0);
+        assert_eq!(gate["sarifWritten"], true);
+        assert!(gate["binding"]["logicalTerminalStateSha256"].is_string());
+        assert!(gate["binding"]["blockingFindingsSha256"].is_string());
+        assert!(gate["binding"]["sarifSha256"].is_string());
+    }
+
+    #[test]
+    fn batch_controller_recomputes_gate_after_trial_finding_and_sarif_drift() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        record_running_scans(&store, &["trial-a", "trial-b"]);
+        let (mut finding, second) = cross_engine_duplicate_findings();
+        finding.identity_basis = Some(FindingIdentityBasis::ExactProducerFingerprint);
+        store.insert_finding("trial-a", &finding).unwrap();
+        let mut report = occurrence_report_for_duplicate(&finding, &second);
+        mark_second_trial_failed(&mut report, &finding);
+        let output = temp.path().join("batch.sarif");
+        std::fs::write(&output, b"stale sarif").unwrap();
+        let policy = ScanGatePolicy {
+            fail_on: Some(Severity::High),
+            sarif: Some(output.clone()),
+        };
+        report.gate = Some(stale_gate_receipt(&report, &policy));
+
+        let applied = apply_batch_scan_gate_policy(&workspace, &store, &report, &policy).unwrap();
+
+        let outcome = applied.outcome();
+        assert_eq!((outcome.completed_trials, outcome.failed_trials), (1, 1));
+        assert_eq!(outcome.completed_run_ids, vec!["trial-a"]);
+        assert_eq!(outcome.blocking_safe_fold_count, 1);
+        assert!(outcome.sarif_written);
+        assert_ne!(std::fs::read(&output).unwrap(), b"stale sarif");
+        let sarif_digest =
+            kuzushi_core::run_lifecycle::sha256_content_digest(&std::fs::read(&output).unwrap());
+        assert_eq!(
+            outcome.binding.sarif_sha256.as_deref(),
+            Some(sarif_digest.as_str())
+        );
+        let gate_path =
+            kuzushi_core::capabilities::campaign::campaign_dir(workspace.root(), "batch-test")
+                .join("gate.json");
+        let persisted: ScanBatchGateOutcome =
+            serde_json::from_slice(&std::fs::read(gate_path).unwrap()).unwrap();
+        assert_eq!(&persisted, outcome);
+    }
+
+    fn mark_second_trial_failed(report: &mut BatchOccurrenceReport, finding: &Finding) {
+        report.completed = 1;
+        report.failed = 1;
+        report.trials[1].state = "failed".to_string();
+        report.trials[1].finding_run_ids.clear();
+        let row = &mut report.rows[0];
+        row.seen = 1;
+        row.completed = 1;
+        row.failed = 1;
+        row.run_ids = vec!["trial-a".to_string()];
+        row.fingerprints = vec![finding.fingerprint.clone()];
+        row.severities = vec![finding.severity.as_str().to_string()];
+        row.locations = vec![finding_location(finding)];
+        row.titles = vec![finding.title.clone()];
+    }
+
+    fn stale_gate_receipt(
+        report: &BatchOccurrenceReport,
+        policy: &ScanGatePolicy,
+    ) -> ScanBatchGateOutcome {
+        ScanBatchGateOutcome::new(
+            &report.batch_id,
+            &report.equivalence_key,
+            &batch_gate_policy(policy),
+            ScanBatchGateCounts {
+                planned_trials: 2,
+                completed_trials: 2,
+                failed_trials: 0,
+                pending_trials: 0,
+                completed_run_ids: vec!["trial-a".to_string(), "trial-b".to_string()],
+                blocking_safe_fold_count: 0,
+                sarif_written: true,
+            },
+            ScanBatchGateBinding {
+                logical_terminal_state_sha256: "sha256:stale-state".to_string(),
+                blocking_findings_sha256: "sha256:stale-findings".to_string(),
+                sarif_path: Some(policy.sarif.clone().unwrap()),
+                sarif_sha256: Some("sha256:stale-sarif".to_string()),
+            },
+        )
+    }
+
+    fn occurrence_report_for_duplicate(first: &Finding, second: &Finding) -> BatchOccurrenceReport {
+        BatchOccurrenceReport {
+            schema_version: 1,
+            batch_id: "batch-test".to_string(),
+            equivalence_key: "sha256:equivalent".to_string(),
+            identity_fold: IdentityFoldPolicy::Safe,
+            planned: 2,
+            completed: 2,
+            failed: 0,
+            pending: 0,
+            gate: None,
+            trials: vec![completed_trial(1, "trial-a"), completed_trial(2, "trial-b")],
+            rows: vec![BatchOccurrenceRow {
+                fold_key: finding_dedupe_key(first),
+                identity_id: first.identity_id.clone(),
+                identity_basis: first.identity_basis,
+                seen: 2,
+                completed: 2,
+                planned: 2,
+                failed: 0,
+                severities: vec!["high".to_string(), "critical".to_string()],
+                locations: vec![finding_location(first), finding_location(second)],
+                titles: vec![first.title.clone(), second.title.clone()],
+                fingerprints: vec![first.fingerprint.clone(), second.fingerprint.clone()],
+                run_ids: vec!["trial-a".to_string(), "trial-b".to_string()],
+                representative_fingerprint: second.fingerprint.clone(),
+                representative_title: second.title.clone(),
+                representative_severity: "critical".to_string(),
+                representative_location: finding_location(second),
+            }],
+        }
+    }
+
+    fn finding_location(finding: &Finding) -> String {
+        format!("{}:{}", finding.file_path, finding.start_line)
+    }
+
+    fn completed_trial(trial: usize, run_id: &str) -> BatchTrialReport {
+        BatchTrialReport {
+            trial,
+            job_id: format!("trial-{trial:03}"),
+            state: "completed".to_string(),
+            attempts: 1,
+            run_id: Some(run_id.to_string()),
+            attempt_run_ids: vec![run_id.to_string()],
+            finding_run_ids: vec![run_id.to_string()],
+            failure_reason: None,
+        }
+    }
+
+    fn fallback_finding(title: &str, signature: &str, line: u32) -> Finding {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "rule/cwe-78",
+            "src/shell.rs",
+            line,
+            Some(line),
+            Severity::High,
+            title,
+        );
+        finding.identity_basis = Some(FindingIdentityBasis::FileFallback);
+        finding.source_signature = Some(signature.to_string());
+        finding
+    }
+
     fn record_running_scans(store: &FindingStore, run_ids: &[&str]) {
         for run_id in run_ids {
             store
@@ -259,7 +729,7 @@ mod tests {
 
     fn cross_engine_duplicate_findings() -> (Finding, Finding) {
         let evidence = shared_locus_evidence();
-        let first = Finding::new_tool(
+        let mut first = Finding::new_tool(
             "semgrep",
             "java.injection.tainted-system-call",
             "src/foo.c",
@@ -269,7 +739,7 @@ mod tests {
             "user-controlled exec, CWE-78",
         )
         .with_evidence(vec![evidence.clone()]);
-        let second = Finding::new_tool(
+        let mut second = Finding::new_tool(
             "systems-hunt",
             "systems/cwe-78",
             "src/foo.c",
@@ -279,6 +749,10 @@ mod tests {
             "exec reaches shell with attacker input, CWE-78",
         )
         .with_evidence(vec![evidence]);
+        first.identity_basis = Some(FindingIdentityBasis::SourceLocator);
+        second.identity_basis = Some(FindingIdentityBasis::SourceLocator);
+        first.source_signature = Some("src/foo.c:exec:user".to_string());
+        second.source_signature = first.source_signature.clone();
         (first, second)
     }
 
@@ -323,6 +797,8 @@ mod tests {
         );
         first.identity_id = Some("fi_shared".to_string());
         second.identity_id = Some("fi_shared".to_string());
+        first.identity_basis = Some(FindingIdentityBasis::SourceLocator);
+        second.identity_basis = Some(FindingIdentityBasis::SourceLocator);
         assert_ne!(first.fingerprint, second.fingerprint);
         assert_eq!(finding_dedupe_key(&first), finding_dedupe_key(&second));
     }

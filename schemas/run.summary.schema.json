@@ -110,6 +110,14 @@
     "threatModelSha256": {
       "type": "string"
     },
+    "threatModelId": {
+      "type": "string",
+      "pattern": "^tm_[0-9a-f]{32}$"
+    },
+    "threatModelRevisionId": {
+      "type": "string",
+      "pattern": "^tmr_[0-9a-f]{32}$"
+    },
     "threatModelSource": {
       "type": "string"
     },

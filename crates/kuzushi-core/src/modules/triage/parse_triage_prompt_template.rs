@@ -16,9 +16,9 @@ pub(in crate::modules) fn parse_triage_prompt_template(
 pub(in crate::modules) fn apply_threat_model_triage_context(
     input: &mut TriageRunInput,
     root: &Path,
-) {
-    let Some(digest) = crate::capabilities::agentic_sast::threat_model_scan_context(root) else {
-        return;
+) -> Result<()> {
+    let Some(digest) = crate::capabilities::agentic_sast::threat_model_scan_context(root)? else {
+        return Ok(());
     };
     let base = input
         .prompt_template
@@ -29,6 +29,7 @@ pub(in crate::modules) fn apply_threat_model_triage_context(
 judging impact; the digest is derived context, not ground truth.\n{}",
         crate::runbooks::untrusted::render_untrusted_derived_block("threat-model-digest", &digest),
     ));
+    Ok(())
 }
 
 pub(in crate::modules) fn parse_triage_scan_id(input: &Value) -> Result<Option<String>> {

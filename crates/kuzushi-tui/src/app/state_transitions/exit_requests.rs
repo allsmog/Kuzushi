@@ -234,12 +234,11 @@ impl ShellApp {
     }
 
     pub(super) fn reduce_quit_chord(&mut self) -> InputUpdate {
-        if !self.has_running_work() {
-            if crate::ui_view_models::has_volatile_session_state(self) {
-                self.set_shell_view(ShellView::QuitConfirm);
-                return InputUpdate::handled();
-            }
-            return InputUpdate::handled_with_effects(vec![ShellEffect::RequestShellQuit]);
+        if let Some(update) = self.idle_quit_update() {
+            return update;
+        }
+        if let Some(effect) = self.concurrent_run_ask_cancel_effect() {
+            return InputUpdate::handled_with_effects(vec![effect]);
         }
         if self.abort_request_pending() {
             self.log(
@@ -249,6 +248,45 @@ impl ShellApp {
             return InputUpdate::handled();
         }
         InputUpdate::handled_with_effects(vec![ShellEffect::CancelActiveJobs])
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reduce_quit_chord_for_test(&mut self) -> InputUpdate {
+        self.reduce_quit_chord()
+    }
+
+    fn idle_quit_update(&mut self) -> Option<InputUpdate> {
+        if self.has_running_work() {
+            return None;
+        }
+        if crate::ui_view_models::has_volatile_session_state(self) {
+            self.set_shell_view(ShellView::QuitConfirm);
+            return Some(InputUpdate::handled());
+        }
+        Some(InputUpdate::handled_with_effects(vec![
+            ShellEffect::RequestShellQuit,
+        ]))
+    }
+
+    fn concurrent_run_ask_cancel_effect(&self) -> Option<ShellEffect> {
+        if !self.jobs().is_running(JobKind::Run) || !self.active_agent_is_auxiliary_read_only() {
+            return None;
+        }
+        if !self.run_abort_request_pending() {
+            return Some(ShellEffect::CancelJob(JobKind::Run));
+        }
+        (!self.agent_abort_request_pending()).then_some(ShellEffect::CancelJob(JobKind::Agent))
+    }
+
+    fn run_abort_request_pending(&self) -> bool {
+        self.jobs().cancel_requested(JobKind::Run)
+            || self.scan().is_some_and(|scan| scan.abort_requested)
+            || self.tool_abort_requested()
+    }
+
+    fn agent_abort_request_pending(&self) -> bool {
+        self.jobs().cancel_requested(JobKind::Agent)
+            || self.agent_chat().is_some_and(|agent| agent.abort_requested)
     }
 
     fn abort_request_pending(&self) -> bool {

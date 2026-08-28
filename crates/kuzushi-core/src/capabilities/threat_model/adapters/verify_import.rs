@@ -15,25 +15,72 @@ pub(crate) fn verify_threat_model_adapter(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let workspace = ctx
+    let workspace_root = verification_root(ctx)?;
+    let roots = read_build_roots(&input, workspace_root)?;
+    let selected_scope = roots
+        .scope
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(|| root_scope_ref(workspace_root))?;
+    let (mut document, selected_ref) = load_verification_document(&input, workspace_root)?;
+    let verification = verify_threat_model_document_with_roots(&document, &roots)?;
+    stamp_verification(&mut document, &verification);
+    let write = input.get("write").and_then(Value::as_bool).unwrap_or(true);
+    let written_ref = write_verified_revision(
+        workspace_root,
+        &document,
+        selected_ref.as_ref(),
+        &selected_scope,
+        write,
+    )?;
+    Ok(verification_result(
+        verification,
+        write,
+        selected_ref,
+        written_ref,
+    ))
+}
+
+fn verification_root<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a Path> {
+    Ok(ctx
         .workspace
         .context(crate::workspace::active_workspace_required_message(
             "threat-model:verify",
-        ))?;
-    let root = workspace.root();
-    let mut document = try_load_persistent_threat_model(root)?.context(
+        ))?
+        .root())
+}
+
+fn load_verification_document(
+    input: &Value,
+    root: &Path,
+) -> Result<(Value, Option<ThreatModelRef>)> {
+    load_requested_threat_model(input, root)?.context(
         "threat-model:verify requires a persisted threat model \
          (.kuzushi/threat-model.json); run threat-model:build or \
          threat-model:import first",
-    )?;
-    let verification = verify_threat_model_document(&document, root)?;
-    stamp_verification(&mut document, &verification);
-    let write = input.get("write").and_then(Value::as_bool).unwrap_or(true);
-    if write {
-        // force: the only change is the verification block; user edits in
-        // the document body are carried through untouched.
-        save_persistent_threat_model(root, &document, true)?;
-    }
+    )
+}
+
+fn write_verified_revision(
+    root: &Path,
+    document: &Value,
+    selected_ref: Option<&ThreatModelRef>,
+    selected_scope: &ScopeRef,
+    write: bool,
+) -> Result<Option<ThreatModelRef>> {
+    let written = write
+        .then(|| persist_verified_revision(root, document, selected_ref, selected_scope))
+        .transpose()?
+        .map(|committed| committed.model_ref);
+    Ok(written)
+}
+
+fn verification_result(
+    verification: ThreatModelVerification,
+    write: bool,
+    selected_ref: Option<ThreatModelRef>,
+    written_ref: Option<ThreatModelRef>,
+) -> Value {
     let output = format!(
         "threat-model:verify — {} ({} cited paths, {} missing; {} link errors; coverage {}/{}){}",
         verification.verdict,
@@ -44,14 +91,88 @@ pub(crate) fn verify_threat_model_adapter(
         verification.coverage_considered,
         degraded_grounding_note(verification.grounding_degraded.as_deref()),
     );
-    Ok(crate::module_result::completed_output_result(
+    crate::module_result::completed_output_result(
         output.clone(),
         output,
         json!({
             "verification": verification,
             "written": write,
+            "sourceModelRef": selected_ref,
+            "modelRef": written_ref,
         }),
-    ))
+    )
+}
+
+fn persist_verified_revision(
+    root: &Path,
+    document: &Value,
+    selected_ref: Option<&ThreatModelRef>,
+    selected_scope: &ScopeRef,
+) -> Result<ThreatModelCommitResult> {
+    let manifest = open_writable_threat_model_store(root)?;
+    let model_ref = selected_ref
+        .cloned()
+        .or(manifest.active.clone())
+        .context("threat-model store has no selected lineage")?;
+    let model = manifest
+        .models
+        .iter()
+        .find(|model| model.model_id == model_ref.model_id)
+        .context("selected threat-model lineage is absent from manifest")?;
+    let document = verification_revision_document(document, model, &model_ref)?;
+    commit_threat_model_revision(
+        root,
+        &document,
+        ThreatModelCommit {
+            model_id: Some(model.model_id.clone()),
+            new_model: false,
+            label: model.label.clone(),
+            scope: selected_scope.clone(),
+            methodology: model.methodology.clone(),
+            source: ThreatModelRevisionSource::Verify,
+            source_revision_id: Some(model_ref.revision_id),
+            run_id: None,
+            activate: None,
+            actor: "tool:threat-model:verify".to_string(),
+        },
+    )
+}
+
+fn verification_revision_document(
+    document: &Value,
+    model: &ThreatModelMetadata,
+    model_ref: &ThreatModelRef,
+) -> Result<Value> {
+    let is_legacy = model
+        .revisions
+        .iter()
+        .find(|revision| revision.revision_id == model_ref.revision_id)
+        .is_some_and(|revision| revision.source == ThreatModelRevisionSource::LegacyImport);
+    if !is_legacy {
+        return Ok(document.clone());
+    }
+    legacy_persistence_envelope(document, &model.methodology)
+}
+
+fn legacy_persistence_envelope(document: &Value, methodology: &str) -> Result<Value> {
+    let mut document = document.clone();
+    let object = document
+        .as_object_mut()
+        .context("legacy ThreatModelDocument must be a JSON object")?;
+    object.entry("version").or_insert_with(|| json!("2.0"));
+    object
+        .entry("methodology")
+        .or_insert_with(|| json!(methodology));
+    object.entry("threats").or_insert_with(|| json!([]));
+    object.entry("summary").or_insert_with(|| json!({}));
+    let dfd = object.entry("dfd").or_insert_with(|| json!({}));
+    let dfd = dfd
+        .as_object_mut()
+        .context("legacy ThreatModelDocument.dfd must be an object")?;
+    for field in ["nodes", "flows", "trustBoundaries"] {
+        dfd.entry(field).or_insert_with(|| json!([]));
+    }
+    Ok(document)
 }
 
 /// A verdict measured without the entry-point catalog says so on the same
@@ -81,7 +202,7 @@ pub(crate) fn import_threat_model_adapter(
     bind_import_to_current_tree(&mut document, root)?;
     let verification = verify_threat_model_document(&document, root)?;
     stamp_verification(&mut document, &verification);
-    persist_imported_document(root, &document, &input)?;
+    let model_ref = persist_imported_document(root, &document, &methodology, &input)?;
     let output = format!(
         "threat-model:import saved ({}; {} threats, verification {})",
         methodology,
@@ -97,6 +218,7 @@ pub(crate) fn import_threat_model_adapter(
         json!({
             "methodology": methodology,
             "verification": verification,
+            "modelRef": model_ref,
         }),
     ))
 }
@@ -116,16 +238,77 @@ fn bind_import_to_current_tree(document: &mut Value, root: &Path) -> Result<()> 
     Ok(())
 }
 
-fn persist_imported_document(root: &Path, document: &Value, input: &Value) -> Result<()> {
+fn persist_imported_document(
+    root: &Path,
+    document: &Value,
+    methodology: &str,
+    input: &Value,
+) -> Result<ThreatModelRef> {
     let force = input.get("force").and_then(Value::as_bool).unwrap_or(false);
-    if !save_persistent_threat_model(root, document, force)? {
-        anyhow::bail!(
-            "threat-model:import refused to overwrite the user-edited live \
-             threat model; pass force=true to replace it"
-        );
+    prepare_import_store(root, force)?;
+    let model_id = input
+        .get("modelId")
+        .and_then(Value::as_str)
+        .map(ThreatModelId::parse)
+        .transpose()?;
+    let request = ThreatModelCommit {
+        new_model: model_id.is_none(),
+        model_id,
+        label: import_label(input, methodology),
+        scope: root_scope_ref(root)?,
+        methodology: methodology.to_string(),
+        source: ThreatModelRevisionSource::Import,
+        source_revision_id: None,
+        run_id: None,
+        activate: Some(input.get("activate").and_then(Value::as_bool).unwrap_or(true)),
+        actor: "tool:threat-model:import".to_string(),
+    };
+    let committed = commit_threat_model_revision(root, document, request)?;
+    record_threat_model_version_with_ref(
+        root,
+        document,
+        "import",
+        None,
+        &committed.model_ref,
+    )?;
+    Ok(committed.model_ref)
+}
+
+fn prepare_import_store(root: &Path, force: bool) -> Result<ThreatModelManifest> {
+    match open_writable_threat_model_store(root) {
+        Ok(manifest) => Ok(manifest),
+        Err(error) if force && error.downcast_ref::<ThreatModelStoreError>().is_some() => {
+            discard_divergent_import_mirror(root)?;
+            load_threat_model_manifest(root)?.context("threat-model manifest is missing")
+        }
+        Err(error) if error.downcast_ref::<ThreatModelStoreError>().is_some() => Err(error).context(
+            "threat-model:import refused a divergent compatibility mirror; adopt edits or pass force=true",
+        ),
+        Err(error) => Err(error),
     }
-    record_threat_model_version(root, document, "import", None)?;
+}
+
+fn discard_divergent_import_mirror(root: &Path) -> Result<()> {
+    let manifest = load_threat_model_manifest(root)?.context("threat-model manifest is missing")?;
+    let active = manifest.active.context("threat-model manifest has no active revision")?;
+    activate_threat_model(
+        root,
+        &active.model_id,
+        Some(&active.revision_id),
+        "tool:threat-model:import",
+        MirrorAction::Discard,
+    )?;
     Ok(())
+}
+
+fn import_label(input: &Value, methodology: &str) -> String {
+    input
+        .get("label")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("Imported {} threat model", methodology.to_ascii_uppercase()))
 }
 
 fn import_document_value(input: &Value) -> Result<Value> {
@@ -169,6 +352,33 @@ mod verify_import_tests {
         std::fs::write(temp.path().join("src/app.py"), "a\nb\n").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         (temp, workspace)
+    }
+
+    fn run_git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.invalid")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.invalid")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+
+    fn commit_all(root: &Path, message: &str) {
+        run_git(root, &["add", "-A"]);
+        run_git(root, &["commit", "-qm", message]);
+    }
+
+    fn active_model(manifest: &ThreatModelManifest) -> &ThreatModelMetadata {
+        let active = manifest.active.as_ref().unwrap();
+        manifest
+            .models
+            .iter()
+            .find(|model| model.model_id == active.model_id)
+            .unwrap()
     }
 
     fn ctx<'a>(config: &'a V2Config, workspace: &'a WorkspaceTarget) -> ToolExecutionContext<'a> {
@@ -234,7 +444,9 @@ mod verify_import_tests {
             "{result:#}"
         );
 
-        let live = load_persistent_threat_model(workspace.root()).unwrap();
+        let live = load_persistent_threat_model(workspace.root())
+            .unwrap()
+            .unwrap();
         assert_eq!(
             live.pointer("/verification/verdict"),
             Some(&json!("verified"))
@@ -246,25 +458,58 @@ mod verify_import_tests {
     }
 
     #[test]
-    fn import_refuses_user_edited_live_doc_without_force() {
+    fn import_preserves_a_legacy_hand_edit_before_creating_a_new_model() {
         let (_temp, workspace) = fixture();
         let config = V2Config::default();
         let ctx = ctx(&config, &workspace);
         let mut edited = hand_written_document(workspace.root());
         edited["userEdited"] = json!(true);
         save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
+
+        import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap();
+
+        let manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        assert_eq!(manifest.models.len(), 2);
+        let legacy = &manifest.models[0];
+        assert_eq!(legacy.revisions[0].source, ThreatModelRevisionSource::LegacyImport);
+        let preserved = load_threat_model_revision(
+            workspace.root(),
+            &legacy.model_id,
+            Some(&legacy.revisions[0].revision_id),
+        )
+        .unwrap();
+        assert_eq!(preserved.document, edited);
+    }
+
+    #[test]
+    fn import_refuses_a_divergent_managed_mirror_without_force() {
+        let (_temp, workspace) = fixture();
+        let config = V2Config::default();
+        let ctx = ctx(&config, &workspace);
+        import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap();
+        let mut edited = load_persistent_threat_model(workspace.root())
+            .unwrap()
+            .unwrap();
+        edited["operatorNote"] = json!("keep me");
+        save_persistent_threat_model(workspace.root(), &edited, true).unwrap();
+
         let refused = import_threat_model_adapter(
             json!({"document": hand_written_document(workspace.root())}),
             &ctx,
         )
         .unwrap_err();
-        assert!(refused.to_string().contains("force=true"), "{refused:#}");
 
-        import_threat_model_adapter(
-            json!({"document": hand_written_document(workspace.root()), "force": true}),
-            &ctx,
-        )
-        .unwrap();
+        assert!(refused.to_string().contains("force=true"), "{refused:#}");
+        let mirror = fs::read_to_string(persistent_threat_model_path(workspace.root())).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&mirror).unwrap(), edited);
     }
 
     #[test]
@@ -282,7 +527,9 @@ mod verify_import_tests {
 
         assert!(error.to_string().contains("unknown DFD id `missing`"));
         assert_eq!(
-            load_persistent_threat_model(workspace.root()).unwrap(),
+            load_persistent_threat_model(workspace.root())
+                .unwrap()
+                .unwrap(),
             live
         );
     }
@@ -299,7 +546,9 @@ mod verify_import_tests {
 
         verify_threat_model_adapter(json!({}), &ctx).unwrap();
 
-        let live = load_persistent_threat_model(workspace.root()).unwrap();
+        let live = load_persistent_threat_model(workspace.root())
+            .unwrap()
+            .unwrap();
         assert_eq!(live.get("userEdited"), Some(&json!(true)));
         assert!(live.get("verification").is_some());
         assert!(
@@ -308,5 +557,92 @@ mod verify_import_tests {
                 .is_empty(),
             "verify never writes a versions-ledger row"
         );
+    }
+
+    #[test]
+    fn verify_revision_records_the_current_target_revision() {
+        let (_temp, workspace) = fixture();
+        run_git(workspace.root(), &["init", "-q"]);
+        commit_all(workspace.root(), "initial");
+        let config = V2Config::default();
+        let ctx = ctx(&config, &workspace);
+        import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap();
+        let initial_manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        let before = active_model(&initial_manifest).scope.target_revision.clone();
+
+        std::fs::write(workspace.root().join("src/app.py"), "a\nb\nc\n").unwrap();
+        commit_all(workspace.root(), "next");
+        let current = crate::workspace::target_git_metadata(workspace.root())
+            .unwrap()
+            .sha;
+        verify_threat_model_adapter(json!({}), &ctx).unwrap();
+
+        let manifest = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+        let model = active_model(&manifest);
+        assert_ne!(before, current);
+        assert_eq!(model.scope.target_revision, current);
+        assert_eq!(
+            model.revisions.last().unwrap().scope.as_ref().unwrap().target_revision,
+            current
+        );
+    }
+
+    #[test]
+    fn scoped_read_and_verify_never_fall_back_to_the_active_root_model() {
+        let (_temp, workspace) = fixture();
+        std::fs::create_dir_all(workspace.root().join("apps/api")).unwrap();
+        save_api_scope_tree(workspace.root());
+        let config = V2Config::default();
+        let ctx = ctx(&config, &workspace);
+        import_threat_model_adapter(
+            json!({"document": hand_written_document(workspace.root())}),
+            &ctx,
+        )
+        .unwrap();
+        let before = load_threat_model_manifest(workspace.root()).unwrap().unwrap();
+
+        let read = read_threat_model(
+            json!({"scope": "id:api"}),
+            &ctx,
+            ReadFlavor::ThreatModel,
+        )
+        .unwrap();
+        let verify_error = verify_threat_model_adapter(json!({"scope": "id:api"}), &ctx)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(read["status"], json!("failed"));
+        assert_eq!(read["data"]["reason"], json!("missing-output-dir"));
+        assert!(verify_error.contains("requires a persisted threat model"));
+        assert_eq!(
+            load_threat_model_manifest(workspace.root()).unwrap().unwrap(),
+            before,
+            "failed scoped verification must not append to the active root lineage"
+        );
+    }
+
+    fn save_api_scope_tree(root: &Path) {
+        crate::workspace::save_nested_project_scopes(
+            root,
+            &crate::workspace::NestedProjectScopeTree {
+                schema_version: 2,
+                root: crate::workspace::ROOT_SCOPE_ID.to_string(),
+                scopes: vec![
+                    crate::capabilities::threat_model::root_scope(),
+                    crate::workspace::NestedProjectScope {
+                        id: "api".to_string(),
+                        parent: Some(crate::workspace::ROOT_SCOPE_ID.to_string()),
+                        kind: crate::workspace::NestedProjectKind::PackageRoot,
+                        rel_path: "apps/api".to_string(),
+                        inherited_sections: Vec::new(),
+                    },
+                ],
+            },
+        )
+        .unwrap();
     }
 }

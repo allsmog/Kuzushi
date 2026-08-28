@@ -57,8 +57,60 @@ pub(crate) fn agent_worker(
     sink.send(ShellEvent::Agent(event));
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn read_only_agent_worker(
+    config: V2Config,
+    model: String,
+    thinking_level: Option<String>,
+    cwd: PathBuf,
+    question: String,
+    run_id: String,
+    authorization: kuzushi_core::runtime::AgentToolPolicyAuthorization,
+    sink: JobEventSink,
+    cancel: ScanCancellation,
+) {
+    let system_prompt = read_only_agent_system_prompt();
+    let audit = AgentCallAudit::for_prompt(&model, &system_prompt, &question);
+    let result = run_read_only_agent_query(
+        config,
+        model,
+        thinking_level,
+        cwd,
+        system_prompt,
+        question,
+        run_id,
+        authorization,
+        cancel,
+    );
+    let event = agent_event_from_read_only_result(result, audit);
+    sink.send(ShellEvent::Agent(event));
+}
+
+fn agent_event_from_read_only_result(
+    result: CostedWorkerResult<ReadOnlyAgentWorkerAnswer>,
+    audit: AgentCallAudit,
+) -> AgentEvent {
+    match result {
+        Ok((answer, cost)) => AgentEvent::Answered {
+            text: answer.text,
+            audit: audit
+                .with_cost(cost)
+                .with_tool_policy_receipt(answer.tool_policy_receipt),
+        },
+        Err(error) => AgentEvent::Failed {
+            error: error.error.to_string(),
+            audit: audit.with_outcome(error.cost, error.call_attempted),
+        },
+    }
+}
+
 pub(crate) struct AgentWorkerAnswer {
     pub(crate) text: String,
+}
+
+struct ReadOnlyAgentWorkerAnswer {
+    text: String,
+    tool_policy_receipt: kuzushi_core::runtime::AgentToolPolicyReceipt,
 }
 
 pub(crate) fn run_agent_worker(
@@ -87,6 +139,170 @@ fn agent_system_prompt() -> String {
     format!(
         "{ASK_SYSTEM_PROMPT}\n\nYou may call request_user_input when 1-3 concise operator choices materially affect the answer. Do not ask for credentials; direct credential work to Setup/Auth. Ask at most three times."
     )
+}
+
+fn read_only_agent_system_prompt() -> String {
+    format!(
+        "{ASK_SYSTEM_PROMPT}\n\nThis Ask is running alongside an active scan. Use only the mounted Read, LS, Glob, and Grep tools. Never request operator input and never attempt write, shell, or MCP operations."
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_read_only_agent_query(
+    config: V2Config,
+    model: String,
+    thinking_level: Option<String>,
+    cwd: PathBuf,
+    system_prompt: String,
+    prompt: String,
+    run_id: String,
+    authorization: kuzushi_core::runtime::AgentToolPolicyAuthorization,
+    cancel: ScanCancellation,
+) -> CostedWorkerResult<ReadOnlyAgentWorkerAnswer> {
+    let observation = kuzushi_core::run_lifecycle::RunObservationHandle::jsonl(&cwd, &run_id)
+        .and_then(|observation| {
+            observation.start_root_task("Answer with read-only workspace evidence")
+        })
+        .map_err(CostedWorkerError::before_call)?;
+    let runtime = LangGraphRuntime::from_config(&config, &cwd)
+        .map_err(CostedWorkerError::before_call)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel.clone());
+    let artifact_target = cwd.clone();
+    let request = read_only_agent_request(
+        model,
+        cwd,
+        system_prompt,
+        prompt,
+        authorization.policy.clone(),
+    );
+    runtime
+        .preflight_model_blocking(&request.model)
+        .map_err(CostedWorkerError::before_call)?;
+    mark_root_task_running(&observation).map_err(CostedWorkerError::before_call)?;
+    execute_read_only_agent_query(
+        runtime,
+        request,
+        authorization,
+        artifact_target,
+        observation,
+        run_id,
+        cancel,
+    )
+}
+
+fn read_only_agent_request(
+    model: String,
+    cwd: PathBuf,
+    system_prompt: String,
+    prompt: String,
+    tool_policy: kuzushi_core::runtime::AgentToolPolicy,
+) -> AgentQueryRequest {
+    AgentQueryRequest::new(model, cwd, system_prompt, prompt).with_tool_policy(tool_policy)
+}
+
+fn execute_read_only_agent_query(
+    runtime: LangGraphRuntime,
+    request: AgentQueryRequest,
+    authorization: kuzushi_core::runtime::AgentToolPolicyAuthorization,
+    artifact_target: PathBuf,
+    observation: kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: String,
+    cancel: ScanCancellation,
+) -> CostedWorkerResult<ReadOnlyAgentWorkerAnswer> {
+    let (response, receipt) = runtime
+        .query_authorized_observed_blocking(request, &authorization)
+        .map_err(|error| {
+            let settled = settle_auxiliary_query_failure(&observation, &run_id, &cancel);
+            CostedWorkerError::unresolved(error_with_lifecycle(error, settled))
+        })?;
+    persist_read_only_agent_receipt(&artifact_target, &run_id, &receipt).map_err(|error| {
+        let settled = settle_auxiliary_query_failure(&observation, &run_id, &cancel);
+        CostedWorkerError::unresolved(error_with_lifecycle(error, settled))
+    })?;
+    let cost = response
+        .value
+        .checked_cost_report()
+        .map_err(CostedWorkerError::unresolved)?;
+    let status = read_only_query_status(&response.value, &cancel);
+    let summary = read_only_query_summary(status);
+    settle_root_model_run_if_owned(&observation, &run_id, true, status, cost, summary)
+        .map_err(|error| CostedWorkerError::observed(error, cost))?;
+    checked_read_only_agent_answer(response.value, receipt, cost)
+}
+
+fn persist_read_only_agent_receipt(
+    target: &std::path::Path,
+    run_id: &str,
+    receipt: &kuzushi_core::runtime::AgentToolPolicyReceipt,
+) -> anyhow::Result<()> {
+    let value = serde_json::to_value(receipt)?;
+    kuzushi_core::run_artifacts::write_run_artifact_json(
+        target,
+        run_id,
+        "tool-policy-receipt.json",
+        "read-only Ask tool-policy receipt",
+        &value,
+    )
+    .map(|_| ())
+}
+
+fn settle_auxiliary_query_failure(
+    observation: &kuzushi_core::run_lifecycle::RunObservationHandle,
+    run_id: &str,
+    cancel: &ScanCancellation,
+) -> anyhow::Result<()> {
+    settle_root_model_run_if_owned(
+        observation,
+        run_id,
+        true,
+        terminal_status_after_cancellation(
+            cancel,
+            kuzushi_core::run_lifecycle::RunItemStatus::Failed,
+        ),
+        kuzushi_core::runtime::RuntimeCostReport::INCOMPLETE_ZERO,
+        "read-only Ask failed",
+    )
+}
+
+fn read_only_query_status(
+    response: &kuzushi_core::runtime::AgentQueryResponse,
+    cancel: &ScanCancellation,
+) -> kuzushi_core::run_lifecycle::RunItemStatus {
+    let usable = if response.truncated || response.text.trim().is_empty() {
+        kuzushi_core::run_lifecycle::RunItemStatus::Partial
+    } else {
+        kuzushi_core::run_lifecycle::RunItemStatus::Completed
+    };
+    terminal_status_after_cancellation(cancel, usable)
+}
+
+fn read_only_query_summary(status: kuzushi_core::run_lifecycle::RunItemStatus) -> &'static str {
+    if status == kuzushi_core::run_lifecycle::RunItemStatus::Completed {
+        "read-only Ask completed"
+    } else {
+        "read-only Ask did not produce a complete answer"
+    }
+}
+
+fn checked_read_only_agent_answer(
+    response: kuzushi_core::runtime::AgentQueryResponse,
+    tool_policy_receipt: kuzushi_core::runtime::AgentToolPolicyReceipt,
+    cost: kuzushi_core::runtime::RuntimeCostReport,
+) -> CostedWorkerResult<ReadOnlyAgentWorkerAnswer> {
+    if response.truncated || response.text.trim().is_empty() {
+        return Err(CostedWorkerError::observed(
+            anyhow::anyhow!("read-only Ask returned no complete answer"),
+            cost,
+        ));
+    }
+    Ok((
+        ReadOnlyAgentWorkerAnswer {
+            text: response.text,
+            tool_policy_receipt,
+        },
+        cost,
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]

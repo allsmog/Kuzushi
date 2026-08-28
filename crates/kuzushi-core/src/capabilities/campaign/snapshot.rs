@@ -13,6 +13,13 @@ use std::path::Path;
 #[derive(Debug, Clone, PartialEq)]
 pub struct CampaignSnapshot {
     pub campaign_id: String,
+    /// Plan-kind discriminator. Dedicated scan batches use `scan-batch`;
+    /// legacy campaign plans may omit the field.
+    pub kind: Option<String>,
+    /// Dedicated batch plans freeze dispatcher width at compile time.
+    pub requested_workers: Option<usize>,
+    pub effective_workers: Option<usize>,
+    pub parallel_safety_reason: Option<String>,
     pub tool: Option<String>,
     pub created_at_ms: Option<u64>,
     pub paused_until_ms: Option<u64>,
@@ -102,6 +109,12 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
     let provider_spend_unresolved = jobs.iter().any(|job| job.provider_spend_unresolved);
     Ok(CampaignSnapshot {
         campaign_id: campaign_id.to_string(),
+        kind: plan.get("kind").and_then(Value::as_str).map(str::to_string),
+        requested_workers: usize_field(&plan, "requestedWorkers"),
+        effective_workers: usize_field(&plan, "effectiveWorkers"),
+        parallel_safety_reason: plan
+            .get("parallelSafety")
+            .and_then(|value| string_field(value, "clampReason")),
         tool: plan.get("tool").and_then(Value::as_str).map(str::to_string),
         created_at_ms: plan.get("createdAtMs").and_then(Value::as_u64),
         paused_until_ms: queue_doc.get("pausedUntilMs").and_then(Value::as_u64),
@@ -116,6 +129,10 @@ pub fn load_campaign_snapshot(root: &Path, campaign_id: &str) -> Result<Campaign
         provider_spend_unresolved,
         jobs,
     })
+}
+
+fn usize_field(value: &Value, key: &str) -> Option<usize> {
+    usize::try_from(value.get(key)?.as_u64()?).ok()
 }
 
 fn plan_job_rows(plan: &Value) -> impl Iterator<Item = &Value> {

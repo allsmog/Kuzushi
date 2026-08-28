@@ -20,13 +20,18 @@ impl ResultCardFixture {
     /// matching Workbench page, in Navigate mode — the state the card's
     /// single-key hints are printed in.
     fn open(phase: WorkflowPhase, tool: &str) -> Self {
+        Self::open_with_input(phase, tool, serde_json::json!({}))
+    }
+
+    fn open_with_input(phase: WorkflowPhase, tool: &str, input: Value) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        crate::test_support::record_indexed_run(
+        crate::test_support::record_indexed_run_with_input(
             temp.path(),
             "run-result-card",
             tool,
+            input,
             serde_json::json!({
                 "ok": true,
                 "status": "completed",
@@ -229,4 +234,97 @@ fn an_unadvertised_default_key_leaves_the_card_alone() {
         None,
         "an unadvertised key must not claim a receipt either"
     );
+}
+
+#[test]
+fn threat_model_refine_review_discloses_and_dispatches_canonical_override() {
+    assert_threat_model_action_review(
+        'f',
+        serde_json::json!({"mode": "build", "seedMode": "seeded"}),
+        &[("mode", "refine")],
+    );
+}
+
+#[test]
+fn threat_model_regenerate_review_discloses_and_dispatches_canonical_overrides() {
+    assert_threat_model_action_review(
+        'g',
+        serde_json::json!({"mode": "refine", "seedMode": "seeded"}),
+        &[("mode", "build"), ("seedMode", "fresh")],
+    );
+}
+
+#[test]
+fn threat_model_rerun_refuses_input_that_changed_after_review() {
+    let mut fixture = ResultCardFixture::open_with_input(
+        WorkflowPhase::Map,
+        "threat-model:build",
+        serde_json::json!({"mode": "build", "seedMode": "seeded"}),
+    );
+    assert!(fixture.press('f').handled);
+    let prompt_dir = fixture._temp.path().join(".kuzushi/prompts/threat-model");
+    std::fs::create_dir_all(&prompt_dir).unwrap();
+    std::fs::write(prompt_dir.join("build.md"), "new operator guidance").unwrap();
+
+    let update = fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+    assert!(update.effects.is_empty(), "changed input must not dispatch");
+    let notice = fixture
+        .notice_message()
+        .expect("changed preparation must be refused on screen");
+    assert!(notice.contains("input changed after review"), "{notice}");
+}
+
+fn assert_threat_model_action_review(key: char, saved_input: Value, expected: &[(&str, &str)]) {
+    let mut fixture =
+        ResultCardFixture::open_with_input(WorkflowPhase::Map, "threat-model:build", saved_input);
+
+    assert!(fixture.press(key).handled);
+    let reviewed_input = match fixture.app.engagement.pending_phase_rerun() {
+        Some(review) => review.prepared_input.clone(),
+        None => panic!(
+            "action did not open a rerun review: {:?}",
+            fixture.notice_message()
+        ),
+    };
+    let card =
+        crate::ui_view_models::phase_cockpit_model_for_phase(&fixture.app, WorkflowPhase::Map)
+            .header
+            .result_card
+            .expect("rerun review card");
+    let plain = crate::renderer::render_plain_app(&fixture.app, 120);
+    for (name, value) in expected {
+        assert_eq!(reviewed_input[*name], serde_json::json!(value));
+        let disclosed = format!("{name} = {value}");
+        assert!(card.detail.contains(&disclosed), "{}", card.detail);
+        assert!(plain.contains(&disclosed), "{plain}");
+    }
+
+    let update = fixture
+        .app
+        .reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    let [ShellEffect::DispatchRunTool(launch)] = update.effects.as_slice() else {
+        panic!("expected reviewed threat-model rerun dispatch");
+    };
+    assert_eq!(launch.input.value(), &reviewed_input);
+}
+
+#[test]
+fn phase_rerun_action_overrides_are_narrowly_scoped() {
+    use kuzushi_core::workflow_attempts::PhaseAttemptDerivation::{Original, Refine, Regenerate};
+
+    assert_eq!(
+        phase_rerun_action_overrides(Some(Refine), "threat-model:build"),
+        &[("mode", "refine")]
+    );
+    assert_eq!(
+        phase_rerun_action_overrides(Some(Regenerate), "threat-model:build"),
+        &[("mode", "build"), ("seedMode", "fresh")]
+    );
+    assert!(phase_rerun_action_overrides(None, "threat-model:build").is_empty());
+    assert!(phase_rerun_action_overrides(Some(Original), "threat-model:build").is_empty());
+    assert!(phase_rerun_action_overrides(Some(Refine), "context:build").is_empty());
+    assert!(phase_rerun_action_overrides(Some(Regenerate), "context:build").is_empty());
 }

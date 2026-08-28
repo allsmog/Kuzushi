@@ -270,7 +270,7 @@ fn review_queue_row_line_with_selection(
 ) -> Line<'static> {
     let signals = review_queue_signal_text(row, width);
     let signals_width = review_queue_signal_width(width);
-    let chip = review_queue_confidence_chip(row, width);
+    let chip = review_queue_metadata_chip(row, width);
     let title_budget = review_queue_title_budget(width, signals_width, chip.chars().count());
     if selected {
         return selected_review_queue_row(row, width, &signals, signals_width, &chip, title_budget);
@@ -302,6 +302,22 @@ fn review_queue_row_line_with_selection(
             review_queue_row_style(theme::primary(), selected),
         ),
     ])
+}
+
+fn review_queue_metadata_chip(row: &ReviewQueueRow, width: usize) -> String {
+    let confidence = review_queue_confidence_chip(row, width);
+    let Some(occurrence) = row.occurrence else {
+        return confidence;
+    };
+    let occurrence = if width < REVIEW_FULL_METADATA_MIN_WIDTH {
+        format!("occ {}/{}", occurrence.seen, occurrence.completed)
+    } else {
+        format!(
+            "occ {}/{} p{} f{}",
+            occurrence.seen, occurrence.completed, occurrence.planned, occurrence.failed
+        )
+    };
+    format!("{confidence} {occurrence}")
 }
 
 fn selected_review_queue_row(
@@ -491,6 +507,7 @@ mod tests {
             proof_confidence: ProofConfidence::Confirmed,
             proof_confidence_label: "RUNTIME VERIFIED".to_string(),
             confidence_label: "91%".to_string(),
+            occurrence: None,
             priority_label: "review-order:1".to_string(),
             lifecycle_status: "statically_supported".to_string(),
             decision: "needs_review".to_string(),
@@ -583,6 +600,23 @@ mod tests {
         // At metadata widths the full band word sits right after the severity glyph.
         assert!(wide.contains("RUNTIME VERIFIED"), "{wide}");
         assert!(wide.contains("H [●●○] s2 @? RUNTIME VERIFIED"), "{wide}");
+    }
+
+    #[test]
+    fn batch_row_has_a_visible_occurrence_column() {
+        let mut row = review_row();
+        row.occurrence = Some(crate::ui_view_models::ReviewOccurrence {
+            seen: 2,
+            completed: 3,
+            planned: 4,
+            failed: 1,
+        });
+
+        let narrow = line_text(review_queue_row_line(&row, 80));
+        let wide = line_text(review_queue_row_line(&row, 220));
+
+        assert!(narrow.contains("occ 2/3"), "{narrow}");
+        assert!(wide.contains("occ 2/3 p4 f1"), "{wide}");
     }
 
     #[test]

@@ -55,6 +55,33 @@ pub(crate) fn prepare_scan_command(
     prepare_scan_command_from_bootstrap(bootstrap, budget, since, include_worktree, json, ci, true)
 }
 
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_scan_batch_command(
+    target: &PathBuf,
+    mode: Option<ScanModeArg>,
+    tasks: &[String],
+    budget: Option<&str>,
+    scope: &super::scan::ScanScopeArgs,
+    since: Option<&str>,
+    include_worktree: bool,
+    json: bool,
+    ci: bool,
+) -> Result<PreparedScanCommand> {
+    let mut bootstrap = ScanCommandBootstrap::new(target, mode, tasks, Some(false), scope)?;
+    force_batch_discovery_only(&mut bootstrap.requested_input)?;
+    prepare_scan_command_from_bootstrap(bootstrap, budget, since, include_worktree, json, ci, true)
+}
+
+fn force_batch_discovery_only(input: &mut serde_json::Value) -> Result<()> {
+    let object = input
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("prepared scan-batch input must be an object"))?;
+    for key in ["triage", "verify", "autoPatch"] {
+        object.insert(key.to_string(), serde_json::Value::Bool(false));
+    }
+    Ok(())
+}
+
 pub(crate) fn prepare_scan_command_with_requested_input(
     target: &PathBuf,
     requested_input: serde_json::Value,
@@ -358,6 +385,22 @@ mod tests {
 
         assert_eq!(input["runId"], serde_json::json!("scan-123"));
         assert_eq!(input["triage"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn batch_policy_forces_every_post_scan_stage_off() {
+        let mut input = serde_json::json!({
+            "triage": true, "verify": true, "autoPatch": true
+        });
+
+        force_batch_discovery_only(&mut input).unwrap();
+
+        assert_eq!(
+            input,
+            serde_json::json!({
+                "triage": false, "verify": false, "autoPatch": false
+            })
+        );
     }
 
     #[test]

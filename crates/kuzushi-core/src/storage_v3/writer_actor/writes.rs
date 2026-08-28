@@ -31,6 +31,10 @@ pub struct DecisionWrite {
     /// recorded. `None` for headless decisions and for every decision taken
     /// without shadow recording active.
     pub review_session_id: Option<String>,
+    /// Present only for an automatic decision propagated across durable
+    /// observations. Values are audit provenance, not a second identity key.
+    pub propagation_basis: Option<String>,
+    pub source_finding_ids: Option<Vec<i64>>,
 }
 
 impl DecisionWrite {
@@ -58,6 +62,8 @@ impl DecisionWrite {
             "dismissReason": self.dismiss_reason,
             "dismissedBy": self.dismissed_by,
             "reviewSessionId": self.review_session_id,
+            "propagationBasis": self.propagation_basis,
+            "sourceFindingIds": self.source_finding_ids,
         })
     }
 }

@@ -11,6 +11,7 @@ mod workspace_target;
 
 pub(crate) use nested_scope::{
     inherited_sections_for_child_scope, normalize_relative_path, scope_id, scope_sort_key,
+    valid_scope_id, SCOPE_TREE_SCHEMA_VERSION,
 };
 pub use nested_scope::{
     project_model_dir, project_model_scopes_path, NestedProjectKind, NestedProjectScope,

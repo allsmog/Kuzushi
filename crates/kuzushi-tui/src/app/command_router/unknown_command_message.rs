@@ -117,7 +117,7 @@ fn missing_option_message(verb: &str) -> Option<String> {
     }
     let message = match verb {
         "task" => "task needs a sub-verb. Next: `tasks` to list, then `task block <id>` / `task allow <id>` / `task toggle [id]` / `task mode auto|manual|toggle` / `task reset`".to_string(),
-        "threats" => "threats needs a sub-verb or number. Next: `threats summary|dfd|stride|stories|scope|versions` (or 1..5), `threats use <id>`, `threats edit`, `threats regen`, `threats apply`, `threats reject`, `threats ask <question>`".to_string(),
+        "threats" => "threats needs a sub-verb or number. Next: `threats summary|stride|stories|scope|models|versions` (or 1..5), `threats diff`, `threats activate <model-id>[@<revision-id>]`, `threats revisions <model-id>`, `threats restore <revision-id>`, `threats edit`, `threats regen`, `threats apply`, `threats reject`, `threats ask <question>`".to_string(),
         "prompt" => "prompt needs a sub-verb. Next: `prompts` to open the editor, or `prompt edit <verb>` / `prompt show <verb>` / `prompt diff <verb>` / `prompt reset <verb>`".to_string(),
         _ => return None,
     };

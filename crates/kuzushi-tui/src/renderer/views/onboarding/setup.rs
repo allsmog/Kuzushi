@@ -210,7 +210,7 @@ mod tests {
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.open_setup();
-        app.router.setup_mut().set_cursor(2);
+        app.router.setup_mut().set_cursor(3);
 
         let text = setup_lines(&app, Rect::new(0, 0, 40, 12))
             .into_iter()
@@ -242,6 +242,7 @@ mod tests {
         assert!(text.contains(target_name.as_ref()), "{text}");
         for label in [
             "Map plan",
+            "Threat model",
             "Model",
             "Credentials",
             "Prompt",
@@ -258,7 +259,7 @@ mod tests {
         let workspace = WorkspaceTarget::new(target.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
         app.open_setup();
-        app.router.setup_mut().set_cursor(6);
+        app.router.setup_mut().set_cursor(7);
 
         let text = setup_lines(&app, Rect::new(0, 0, 60, 20))
             .into_iter()

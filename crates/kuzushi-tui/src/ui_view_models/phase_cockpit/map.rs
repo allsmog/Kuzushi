@@ -19,6 +19,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
     let worklist = worklist_model(app);
     let next_scans = next_scans_state(app);
     let dfd = dfd_model(app);
+    let threat_model_freshness = crate::ui_view_models::threat_model_freshness(app);
     let empty_hint = map_empty_hint(app, &context, attack_surface.is_some(), &dfd);
     MapPhaseModel {
         context,
@@ -28,6 +29,7 @@ pub(super) fn map_phase_model(app: &ShellApp) -> MapPhaseModel {
         worklist,
         next_scans,
         dfd,
+        threat_model_freshness,
         empty_hint,
         decompose_first: decompose_first_hint(app),
     }
@@ -41,6 +43,7 @@ pub(super) fn map_requires_action(model: &MapPhaseModel) -> bool {
     model.empty_hint.is_some()
         || model.dfd.empty_hint.is_some()
         || model.decompose_first.is_some()
+        || model.threat_model_freshness.requires_attention
         || model.context.state.eq_ignore_ascii_case("stale")
         || model
             .context

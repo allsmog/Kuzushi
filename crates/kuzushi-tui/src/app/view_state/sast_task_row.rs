@@ -242,6 +242,7 @@ pub enum ThreatView {
     Stories,
     Scope,
     Summary,
+    Models,
     Versions,
 }
 

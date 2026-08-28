@@ -11,13 +11,32 @@ pub(crate) mod test_support;
 mod tests;
 
 pub use application::{
-    compare_scan_runs, decision_is_review_actionable, finding_is_review_actionable,
-    review_decision_history_for, review_verdict_is_actionable, EffectiveReviewDecision,
-    EffectiveReviewStateIndex, finding_confidence_label, finding_cwe_label, finding_evidence_preview,
-    finding_location, finding_remediation_hint, finding_source_label, finding_verdict_label,
-    project_finding, severity_badge, severity_icon, ComparedFinding, FindingProjection,
-    ReviewDecisionConflict, ScanComparisonClass, ScanFindingSignature, ScanRunComparison,
-    ScanUncertainMatch,
+    audit_finding_identities, compare_scan_runs, decision_is_review_actionable,
+    derive_batch_gate_binding,
+    derive_batch_occurrence_report, derive_batch_occurrence_report_for_controller,
+    derive_cross_tool_cluster_report, derive_reviewed_refutation_report, finding_confidence_label,
+    finding_cwe_label, finding_evidence_preview, finding_is_review_actionable, finding_location,
+    finding_projection_key,
+    finding_remediation_hint, finding_source_label, finding_verdict_label, project_finding,
+    review_decision_history_for, review_verdict_is_actionable,
+    severity_badge, severity_icon, BatchOccurrenceReport, BatchOccurrenceRow, BatchTrialReport,
+    ComparedFinding, CrossToolCandidateCluster, CrossToolClusterBasis, CrossToolClusterMember,
+    CrossToolClusterReport, EffectiveReviewDecision, EffectiveReviewStateIndex,
+    FindingIdentityAuditGroup, FindingIdentityAuditIssueKind,
+    FindingIdentityAuditReport, FindingIdentityAuditApprovalReceipt,
+    FindingIdentityAuditApprovalRequest, FindingIdentityAuditDisposition,
+    FindingIdentityAuditEvidence, FindingIdentityAuditGroupDisposition, FindingProjection,
+    IdentityFoldPolicy, IdentityPolicyApprovalStatus, IdentityPolicyDefaults,
+    IDENTITY_AUDIT_APPROVAL_DIR, IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
+    IDENTITY_AUDIT_EVIDENCE_SCHEMA_VERSION, RefutationCohortFact,
+    RefutationCohortKey, RefutationPopulation, RefutationPopulationStats, ReviewDecisionConflict,
+    ReviewedRefutationCohort, ReviewedRefutationPrior, ReviewedRefutationReport,
+    ScanComparisonClass, ScanFindingSignature, ScanRunComparison, ScanUncertainMatch,
+};
+pub use application::{
+    approve_finding_identity_audit, build_finding_identity_audit_evidence,
+    current_finding_identity_audit_evidence, identity_audit_approval_receipt_path,
+    resolve_identity_policy_defaults,
 };
 pub(crate) use application::{
     normalize_agent_json_findings, persist_tool_findings, render_generic_findings_output,
@@ -25,24 +44,24 @@ pub(crate) use application::{
 };
 #[cfg(test)]
 pub(crate) use domain::test_verified_receipt;
-pub use domain::{
-    compute_dedup_key, compute_root_cause_key, compute_source_signature, derive_triage_state,
-    extract_cwe, ground_finding_location, grounding_prompt_note, is_attack_chain_finding,
-    normalize_cwe, ConfidenceBand, DismissReason, Finding, FindingEvidence, FindingSource,
-    FindingTriageState, GroundingStatus, PatchAttempt, PatchAttemptSummary,
-    PatchDetectorReplayOutcome, PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord,
-    PatchLifecycleState, PatchProvenance, PatchResult, PatchReverificationCaseKind,
-    PatchReverificationFileHash, PatchReverificationReceipt, PatchReverificationStep,
-    PatchReverificationTarget, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofConfidence, RefuteReason, ReviewDecision,
-    ReviewDecisionProvenance, ReviewDecisionRecord, ReviewDecisionVerdict, Severity,
-    StableLifecycleStatus, StaticProofState,
-    StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VerificationProvenance,
-    VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
-};
 pub(crate) use domain::{
     all_components_deterministic, is_deterministic_scanner, is_runtime_proof_state, now_isoish,
     safe_target_path, tool_components,
+};
+pub use domain::{
+    auto_triage_propagation_basis, compute_dedup_key, compute_root_cause_key,
+    compute_source_signature, derive_triage_state, extract_cwe, ground_finding_location,
+    grounding_prompt_note, is_attack_chain_finding, normalize_cwe, ConfidenceBand, DismissReason,
+    Finding, FindingEvidence, FindingIdentityBasis, FindingSource, FindingTriageState,
+    GroundingStatus, PatchAttempt, PatchAttemptSummary, PatchDetectorReplayOutcome,
+    PatchEmpiricalOutcome, PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState,
+    PatchProvenance, PatchResult, PatchReverificationCaseKind, PatchReverificationFileHash,
+    PatchReverificationReceipt, PatchReverificationStep, PatchReverificationTarget, PatchStatus,
+    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofConfidence,
+    RefuteReason, ReviewDecision, ReviewDecisionPropagation, ReviewDecisionProvenance,
+    ReviewDecisionRecord, ReviewDecisionVerdict, Severity, StableLifecycleStatus, StaticProofState,
+    StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VerificationProvenance,
+    VulnSource, PATCH_REVERIFICATION_RECEIPT_SCHEMA_VERSION,
 };
 pub use persistence::{
     threat_model_document_sha256, FindingAuditEvent, FindingStore, ModelRekeyRequest,

@@ -19,14 +19,17 @@ pub use application::{
     run_tool_loop, run_tool_loop_observed, spawn_subagent_blocking_checked,
     triage_finding_blocking_checked, PendingLoopCheckpoint,
 };
+pub use domain::runtime_failure_metadata;
 pub use domain::{
     append_structured_output_contract, triage_cost_report, AgentLoopOutcome, AgentLoopStep,
     AgentQueryControl, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
-    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    McpAttachment, ModelTier, ModelTokenUsage, Observed, RuntimeCost, RuntimeCostReport,
-    RuntimeFailure, RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall,
-    ToolCallHandler, ToolResult, TriageRequest,
-    DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE, REQUEST_USER_INPUT_TOOL_NAME,
+    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy,
+    AgentToolPolicyAuthorization, AgentToolPolicyReceipt, LoopHistoryEntry, McpAttachment,
+    ModelTier, ModelTokenUsage, Observed, RuntimeCost, RuntimeCostReport, RuntimeFailure,
+    RuntimeFailureClass, RuntimeFailureMetadata, SubagentRole, ToolBox, ToolCall, ToolCallHandler,
+    ToolResult, TriageRequest, DEFAULT_TRIAGE_PROMPT, INTERACTION_REQUIRED_CODE,
+    READ_ONLY_ASK_POLICY_ID, READ_ONLY_ASK_POLICY_PROTOCOL_VERSION, READ_ONLY_ASK_TOOLS,
+    REQUEST_USER_INPUT_TOOL_NAME,
 };
 pub use mcp_probe::{
     mcp_attachment_plan_for_target, plan_contains, try_mcp_attachment_plan_for_target,
@@ -42,7 +45,6 @@ pub use traced_runtime::{
     model_error_class_from_message, model_provider, prompt_pair_hash, safe_model_failure_message,
     TracedRuntime,
 };
-pub use domain::runtime_failure_metadata;
 
 pub fn missing_agent_runtime_message(tool_name: &str) -> String {
     format!(

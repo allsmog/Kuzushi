@@ -214,9 +214,7 @@ pub fn pending_agent_loop_checkpoints(target: &Path) -> Vec<PendingLoopCheckpoin
     };
     let mut pending: Vec<PendingLoopCheckpoint> = entries
         .flatten()
-        .filter_map(|entry| {
-            pending_checkpoint(&entry.path(), &workspace_root, &source_identity)
-        })
+        .filter_map(|entry| pending_checkpoint(&entry.path(), &workspace_root, &source_identity))
         .collect();
     pending.sort_by_key(|entry| std::cmp::Reverse(entry.modified_at_unix));
     pending
@@ -452,10 +450,7 @@ mod tests {
 
         store.save(&transcript());
 
-        assert_eq!(
-            fs::read_to_string(fixed).unwrap(),
-            "unrelated staging file"
-        );
+        assert_eq!(fs::read_to_string(fixed).unwrap(), "unrelated staging file");
         assert!(store.load().is_some());
     }
 

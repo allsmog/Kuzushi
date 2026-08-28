@@ -9,11 +9,66 @@ pub(super) fn readiness_rows(
     vec![
         target_row(app),
         plan_row(app, selected_rows, selected_model_tasks),
+        threat_model_row(app, selected_rows),
         model_row(app, selected_model_tasks),
         credential_row(app, selected_model_tasks, credential_readiness),
         prompt_row(app, selected_rows),
         budget_row(app),
     ]
+}
+
+fn threat_model_row(
+    app: &ShellApp,
+    selected_rows: &[&crate::app::PlanningTaskRow],
+) -> SetupReadinessRow {
+    let selected = selected_rows
+        .iter()
+        .any(|row| row.id == crate::app::PlanningTaskId::BuildThreatModel);
+    if !selected {
+        return optional_row(
+            SetupRowId::ThreatModel,
+            "Threat model",
+            "NOT SELECTED",
+            "add Build threat model to the Map plan to configure it",
+        );
+    }
+    let summary = app.map_run_config_summary();
+    if let Some(error) = summary.scope_error {
+        return blocked_row(SetupRowId::ThreatModel, "Threat model", "SCOPE", error);
+    }
+    if summary.review_required {
+        return threat_model_review_row(summary.selected_scopes);
+    }
+    ready_row(
+        SetupRowId::ThreatModel,
+        "Threat model",
+        "READY",
+        threat_model_ready_detail(&summary),
+    )
+}
+
+fn threat_model_review_row(selected_scopes: usize) -> SetupReadinessRow {
+    blocked_row(
+        SetupRowId::ThreatModel,
+        "Threat model",
+        "REVIEW",
+        format!(
+            "{selected_scopes} scopes selected · Enter and confirm above the {}-scope review threshold",
+            crate::app::ALL_SCOPES_REVIEW_THRESHOLD
+        ),
+    )
+}
+
+fn threat_model_ready_detail(summary: &crate::app::MapRunConfigSummary) -> String {
+    format!(
+        "{} · {} · {} build(s) · {} · {} design doc(s) · {} context row(s)",
+        summary.methodology,
+        summary.scope,
+        summary.selected_scopes,
+        summary.cost,
+        summary.design_docs,
+        summary.context_rows
+    )
 }
 
 fn target_row(app: &ShellApp) -> SetupReadinessRow {

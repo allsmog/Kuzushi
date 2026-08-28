@@ -1,5 +1,6 @@
 use super::bridge_payloads::{
-    BridgeRequest, BridgeResponse, NextStepBridgeRequest, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+    BridgeRequest, BridgeResponse, NextStepBridgeRequest, ToolPolicyHandshakeBridgeRequest,
+    LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
 };
 use super::bridge_process::{
     bridge_failure_metadata, bridge_near_executable, bridge_runtime_failure,
@@ -9,7 +10,10 @@ use super::bridge_process::{
     wait_with_output_deadline_limits, write_bridge_diagnostics,
 };
 use super::runtime_impl::estimated_bridge_cost;
-use kuzushi_core::AgentToolPolicy;
+use kuzushi_core::{
+    AgentToolPolicy, AgentToolPolicyAuthorization, READ_ONLY_ASK_POLICY_ID,
+    READ_ONLY_ASK_POLICY_PROTOCOL_VERSION,
+};
 use serde_json::json;
 use std::fs;
 use std::io::Cursor;
@@ -410,6 +414,7 @@ fn bridge_requests_serialize_protocol_version() {
         thinking_level: None,
         max_output_tokens: None,
         tool_policy: AgentToolPolicy::default(),
+        authorization: None,
         runtime_options: None,
         temperature: None,
     };
@@ -429,6 +434,41 @@ fn next_step_requests_serialize_protocol_version() {
     assert_eq!(
         value.pointer("/protocolVersion"),
         Some(&json!(LANGGRAPH_BRIDGE_PROTOCOL_VERSION))
+    );
+}
+
+#[test]
+fn tool_policy_handshake_serializes_protocols_and_policy() {
+    let target = tempfile::tempdir().unwrap();
+    let request = ToolPolicyHandshakeBridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+        envelope_type: "tool-policy-handshake",
+        authorization: AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap(),
+    };
+
+    let value = serde_json::to_value(request).unwrap();
+
+    assert_eq!(value["type"], json!("tool-policy-handshake"));
+    assert_eq!(
+        value["protocolVersion"],
+        json!(LANGGRAPH_BRIDGE_PROTOCOL_VERSION)
+    );
+    assert_eq!(
+        value["authorization"]["policyId"],
+        json!(READ_ONLY_ASK_POLICY_ID)
+    );
+    assert_eq!(
+        value["authorization"]["protocolVersion"],
+        json!(READ_ONLY_ASK_POLICY_PROTOCOL_VERSION)
+    );
+    assert_eq!(
+        value["authorization"]["policy"]["tools"],
+        json!(["Read", "LS", "Glob", "Grep"])
+    );
+    assert_eq!(value["authorization"]["policy"]["mcps"], json!(false));
+    assert_eq!(
+        value["authorization"]["policy"]["mcpReadRoots"],
+        json!([target.path().canonicalize().unwrap()])
     );
 }
 
