@@ -1,5 +1,6 @@
 const fullCommitRef = /^[0-9a-f]{40}$/;
 
+/** Every slug is still installed and executed on its own release runner. */
 export const releasePlatforms = Object.freeze([
   { runner: "ubuntu-24.04", slug: "linux-x64" },
   { runner: "ubuntu-24.04-arm", slug: "linux-arm64" },
@@ -7,6 +8,26 @@ export const releasePlatforms = Object.freeze([
   { runner: "macos-14", slug: "darwin-arm64" },
   { runner: "windows-2025", slug: "win32-x64" },
 ]);
+
+/**
+ * darwin-x64 is cross-compiled from the Apple silicon runner instead of paying
+ * for a 10x-billed Intel macOS build host, so it has no native-build row of its
+ * own. Every other slug is still built on a runner of its own architecture.
+ */
+export const releaseCrossBuilds = Object.freeze([
+  {
+    runner: "macos-14",
+    hostSlug: "darwin-arm64",
+    slug: "darwin-x64",
+    target: "x86_64-apple-darwin",
+  },
+]);
+
+const crossBuiltSlugs = new Set(releaseCrossBuilds.map(({ slug }) => slug));
+
+export const releaseNativeBuildPlatforms = Object.freeze(
+  releasePlatforms.filter(({ slug }) => !crossBuiltSlugs.has(slug)),
+);
 
 export function candidateWorkflowFailures(source) {
   return [
@@ -77,12 +98,49 @@ function candidateForbiddenTokens() {
 }
 
 function releaseMatrixFailures(source) {
-  return releasePlatforms
-    .filter(({ runner, slug }) => {
-      const entry = `          - os: ${runner}\n            slug: ${slug}`;
-      return source.split(entry).length - 1 < 2;
-    })
-    .map(({ runner, slug }) => `release candidate must build and install ${slug} on ${runner}`);
+  return [
+    ...missingMatrixRows(source, "native-binaries", releaseNativeBuildPlatforms, "build"),
+    ...missingMatrixRows(source, "local-tarball-smoke", releasePlatforms, "install"),
+    ...crossBuildFailures(source),
+  ];
+}
+
+/** Each matrix is checked inside its own job so one job cannot cover another. */
+function missingMatrixRows(source, jobName, platforms, action) {
+  const section = jobSection(source, jobName);
+  return platforms
+    .filter(({ runner, slug }) => !section.includes(matrixRow(runner, slug)))
+    .map(({ runner, slug }) => `release candidate must ${action} ${slug} on ${runner}`);
+}
+
+function jobSection(source, jobName) {
+  const start = source.indexOf(`\n  ${jobName}:\n`);
+  if (start === -1) return "";
+  const next = source.slice(start + 1).search(/\n {2}[a-z][a-z0-9-]*:\n/);
+  return next === -1 ? source.slice(start) : source.slice(start, start + 1 + next);
+}
+
+/**
+ * A cross-built slug must be produced by an explicit target on its host runner
+ * and uploaded under its own artifact name, never inherited from the host build.
+ */
+function crossBuildFailures(source) {
+  const section = jobSection(source, "native-binaries");
+  return releaseCrossBuilds.flatMap(({ runner, hostSlug, slug, target }) =>
+    [
+      `${matrixRow(runner, hostSlug)}\n            cross_slug: ${slug}`,
+      `            cross_target: ${target}`,
+      `rustup target add \${{ matrix.cross_target }}`,
+      "KUZUSHI_NATIVE_TARGET: ${{ matrix.cross_target }}",
+      "name: release-candidate-native-${{ matrix.cross_slug }}",
+    ]
+      .filter((token) => !section.includes(token))
+      .map((token) => `release candidate must cross-build ${slug} on ${runner} via ${token}`),
+  );
+}
+
+function matrixRow(runner, slug) {
+  return `          - os: ${runner}\n            slug: ${slug}`;
 }
 
 function externalActionPinFailures(workflowName, source) {
