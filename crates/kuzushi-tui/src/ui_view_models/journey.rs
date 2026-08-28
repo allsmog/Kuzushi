@@ -414,16 +414,42 @@ fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckp
         .domain()
         .finding_ledger_counts()
         .is_some_and(|counts| counts.durable_scan_evidence);
-    let scan = !app
-        .engagement
-        .has_phase_attempt_for_target(WorkflowPhase::Scan)
+    let scan = legacy_inference_applies(app, WorkflowPhase::Scan)
         && (legacy_completed_scan(app) || durable_finding_scan);
-    let map = !app
-        .engagement
-        .has_phase_attempt_for_target(WorkflowPhase::Map)
+    let map = legacy_inference_applies(app, WorkflowPhase::Map)
         && !app.engagement.phase_is_skipped(WorkflowPhase::Map)
         && (map_artifacts_built || scan);
     LegacyCheckpoints { map, scan }
+}
+
+/// Pre-ledger inference is only meaningful for a phase this engagement has
+/// never attempted as a first-class attempt — and only while no such attempt
+/// is running.
+fn legacy_inference_applies(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    !app.engagement.has_phase_attempt_for_target(phase) && !phase_attempt_in_flight(app, phase)
+}
+
+/// Returns whether a first-class attempt for `phase` is still in flight.
+///
+/// Attempt records are appended at completion, while Map tools such as
+/// `context:build` and `entry-points:extract` write their `.kuzushi/`
+/// artifacts as they go. Without this guard the legacy inference reads those
+/// half-written artifacts as a finished Map and advances the phase chip to
+/// Scan mid-run, only to fall back once the attempt record lands.
+///
+/// Liveness is the live Run Focus session's launch phase plus its terminal
+/// stamp, corroborated by the shared single-slot `JobHub`. Every path that
+/// finishes a slot (`ShellApp::apply_job_event`) stamps `completed_at` through
+/// `mark_run_focus_terminal_pending` before the hub slot is cleared, so a
+/// finished, canceled, or interrupted run stops suppressing immediately. A
+/// backgrounded run keeps both signals, which is correct: it is still in
+/// flight. Requiring the hub as well means a session that was seeded but never
+/// dispatched cannot suppress inference forever.
+fn phase_attempt_in_flight(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    app.jobs().has_running_job()
+        && app.activity().is_some_and(|session| {
+            session.origin_phase == Some(phase) && session.completed_at.is_none()
+        })
 }
 
 /// Returns whether an accepted checkpoint was a partial result explicitly
@@ -1915,6 +1941,114 @@ mod tests {
             &recorded_clean,
             Some(&current_dirty)
         ));
+    }
+
+    /// Fixture for issue #172: a first-ever Map run on a target whose Map
+    /// tools have already written `.kuzushi/` artifacts, with no ledger
+    /// attempt yet (the attempt record is appended at completion).
+    fn app_with_map_run_in_flight(workspace: &WorkspaceTarget) -> ShellApp {
+        let mut app = hydrated_app(workspace, vec![ViewHydrationKey::MapArtifacts]);
+        let _ticket = app.jobs_mut().start(crate::app::JobKind::Run, "map");
+        app.set_activity(Some(crate::app::ActivitySession::for_phase(
+            "map-run-1",
+            WorkflowPhase::Map,
+        )));
+        app
+    }
+
+    #[test]
+    fn in_flight_first_map_run_does_not_infer_a_legacy_map_checkpoint() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let app = app_with_map_run_in_flight(&workspace);
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(journey.progress.map_artifacts_built);
+        assert!(
+            !journey.progress.map_checkpoint,
+            "a running Map attempt has completed nothing"
+        );
+        assert!(!journey.progress.legacy_inferred);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(
+            journey_footer_segment(&app).as_deref(),
+            Some("Map 1/5"),
+            "the phase chip must not flip to Scan mid-run"
+        );
+    }
+
+    #[test]
+    fn backgrounded_map_run_still_suppresses_legacy_inference() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let mut app = app_with_map_run_in_flight(&workspace);
+        app.activity_mut().unwrap().run_focus_backgrounded = true;
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(!journey.progress.map_checkpoint);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+    }
+
+    #[test]
+    fn finished_and_cleared_map_session_does_not_suppress_legacy_inference() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let mut app = app_with_map_run_in_flight(&workspace);
+        // Terminal receipt: `mark_run_focus_terminal_pending` stamps
+        // `completed_at`, then the hub slot is finished.
+        app.activity_mut().unwrap().mark_terminal();
+        app.jobs_mut().finish(crate::app::JobKind::Run);
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(journey.progress.map_checkpoint);
+        assert!(journey.progress.legacy_inferred);
+    }
+
+    #[test]
+    fn completed_map_attempt_stays_on_map_until_the_operator_accepts_it() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "map-run-1",
+            "context:build",
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "context snapshot built",
+                "data": {"filesIndexed": 1}
+            }),
+        );
+        let completed = crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Map,
+            "map-run-1",
+            PhaseAttemptOutcome::Completed,
+        );
+
+        let unresolved = hydrated_app(&workspace, vec![ViewHydrationKey::MapArtifacts]);
+        assert_eq!(
+            journey_model(&unresolved).expect("journey").current,
+            WorkflowPhase::Map,
+            "an unresolved attempt keeps reality on Map"
+        );
+
+        crate::test_support::select_typed_attempt(target.path(), &completed);
+        let accepted = hydrated_app(&workspace, vec![ViewHydrationKey::MapArtifacts]);
+
+        assert_eq!(
+            journey_model(&accepted).expect("journey").current,
+            WorkflowPhase::Scan
+        );
     }
 
     fn hydrated_app(workspace: &WorkspaceTarget, mut keys: Vec<ViewHydrationKey>) -> ShellApp {

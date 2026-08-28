@@ -5,6 +5,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Fixed:**
+
+- The JOURNEY phase chip no longer flips to `Scan 2/5` partway through the
+  first Map run on a target. Pre-ledger inference reads `.kuzushi/` artifacts,
+  which Map tools write while the run is still going; it is now suppressed
+  while a first-class Map or Scan attempt is in flight, so the chip stays on
+  `Map 1/5` until an attempt actually completes and is accepted.
+
 **Release process:**
 
 - The seven-item historical artifact cleanup gate is renamed the repository

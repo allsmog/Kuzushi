@@ -17,6 +17,10 @@ keys: C-c
 wait-for: 2 cancel
 snap: cancel-requested
 expect: cancel
+# Issue #172: nothing has completed or been accepted on this fresh target, so
+# the JOURNEY chip must still read Map — mid-run `.kuzushi/` artifacts must not
+# advance it to Scan.
+expect-not: Scan 2/5
 ask: Cancel request — does live work show CANCELING while cleanup is active, or CANCELED only when cleanup has already completed?
 wait-for: 30 canceled
 snap: canceled-terminal

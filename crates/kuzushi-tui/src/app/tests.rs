@@ -787,6 +787,52 @@ fn terminal_tool_events_keep_the_activity_on_its_launch_phase() {
 }
 
 #[test]
+fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
+    // Regression (#172): the Map tools write `.kuzushi/` artifacts while the
+    // run is still going. The pre-ledger inference used to read those mid-run
+    // and advance the JOURNEY chip to `Scan 2/5`, which then fell back to
+    // `Map 1/5` once the attempt record landed at completion.
+    let dir = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let _ticket = app.jobs_mut().start(JobKind::Run, "context:build");
+    app.set_activity(Some(ActivitySession::for_phase(
+        "map-run-1",
+        WorkflowPhase::Map,
+    )));
+    app.set_active_tool_run_id_for_test("map-run-1");
+    app.set_running_tool_for_test("context:build");
+    app.set_shell_view(ShellView::Activity);
+
+    let mut chips = vec![crate::ui_view_models::journey_footer_segment(&app)];
+
+    // Mid-run: `context:build` commits its snapshot before the run finishes.
+    let snapshot = dir.path().join(".kuzushi/context-snapshot.json");
+    std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    std::fs::write(snapshot, r#"{"filesIndexed":42}"#).unwrap();
+    app.invalidate_view_hydration();
+    app.hydrate_view_keys_blocking(dir.path(), vec![crate::app::ViewHydrationKey::MapArtifacts]);
+    chips.push(crate::ui_view_models::journey_footer_segment(&app));
+
+    assert!(
+        chips.iter().all(|chip| chip.as_deref() == Some("Map 1/5")),
+        "the chip must stay on Map while the Map attempt is in flight: {chips:?}"
+    );
+
+    let effects = app.apply_job_event(ShellEvent::Tool(ToolEvent::Finished {
+        tool_name: "context:build".to_string(),
+        result: serde_json::json!({ "ok": true, "status": "completed" }),
+    }));
+    EffectRuntime::execute(&mut app, effects);
+
+    assert!(
+        app.activity()
+            .is_some_and(|session| session.completed_at.is_some()),
+        "the terminal event must stamp the session so liveness stops suppressing"
+    );
+}
+
+#[test]
 fn background_tool_waits_for_pending_prompt_mutation_decision() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
