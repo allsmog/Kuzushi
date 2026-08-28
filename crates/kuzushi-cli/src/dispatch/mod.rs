@@ -391,6 +391,7 @@ async fn dispatch_non_scan_command(
         | Command::Decision { .. }
         | Command::Runs { .. }
         | Command::Export { .. }
+        | Command::Proof { .. }
         | Command::Suppress { .. }
         | Command::Suppressions { .. }
         | Command::Permissions { .. }

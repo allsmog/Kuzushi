@@ -216,6 +216,21 @@ impl PhaseAttemptLedger {
         })
     }
 
+    /// The newest durable deferral for an exact discovery generation,
+    /// projected for display. Presentation surfaces read this instead of the
+    /// raw event so the Prove page, plain output, and `kuzushi finding` all
+    /// disclose the same decision.
+    pub fn proof_deferral_view_for(
+        &self,
+        snapshot: &PhaseTargetSnapshot,
+        fingerprint: &str,
+        identity_id: Option<&str>,
+        scan_id: &str,
+    ) -> Option<super::ProofDeferralView> {
+        self.proof_deferral_for(snapshot, fingerprint, identity_id, scan_id)
+            .map(super::ProofDeferralView::from_record)
+    }
+
     /// The newest durable proof deferral for the current target snapshot.
     pub fn latest_proof_deferral_for(
         &self,

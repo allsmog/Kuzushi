@@ -2,9 +2,10 @@ use super::*;
 use crate::{ActivitySession, PendingPatch};
 use kuzushi_core::workflow_attempts::{
     append_phase_attempt_completed, append_phase_attempt_disposition,
-    append_phase_checkpoint_skipped, PhaseAttemptCompleted, PhaseAttemptDerivation,
-    PhaseAttemptDisposition, PhaseAttemptDispositionRecorded, PhaseAttemptOutcome,
-    PhaseAttemptReceipt, PhaseCheckpointSkipped, PhaseResultAction, PhaseTargetSnapshot,
+    append_phase_checkpoint_skipped, append_proof_deferral, PhaseAttemptCompleted,
+    PhaseAttemptDerivation, PhaseAttemptDisposition, PhaseAttemptDispositionRecorded,
+    PhaseAttemptOutcome, PhaseAttemptReceipt, PhaseCheckpointSkipped, PhaseResultAction,
+    PhaseTargetSnapshot, ProofDeferralRecorded,
 };
 use kuzushi_core::{
     Finding, PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState, PersistedProofVerdict,
@@ -801,4 +802,86 @@ fn persist_imported_scan_attempt(target: &std::path::Path) {
         PhaseAttemptOutcome::Completed,
     );
     crate::test_support::select_typed_attempt(target, &completed);
+}
+
+fn prove_body(app: &ShellApp) -> ProvePhaseModel {
+    let PhaseCockpitBody::Prove(prove) =
+        phase_cockpit_model_for_phase(app, WorkflowPhase::Prove).body
+    else {
+        panic!("expected Prove body");
+    };
+    prove
+}
+
+/// A deferral is an operator decision, not evidence. The selected finding has
+/// to disclose it, and nothing about the proof projection may move.
+#[test]
+fn selected_deferred_finding_discloses_the_decision_without_moving_the_proof_ladder() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = WorkspaceTarget::new(tmp.path()).expect("workspace");
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let mut selected = finding();
+    selected.scan_id = Some("scan-1".to_string());
+    *app.findings_mut() = vec![selected.clone()];
+    *app.selected_finding_mut() = Some(selected.clone());
+    let before = prove_body(&app);
+    assert!(before.deferral.is_none());
+
+    append_proof_deferral(
+        tmp.path(),
+        ProofDeferralRecorded::human(
+            selected.fingerprint.clone(),
+            selected.identity_id.clone(),
+            "scan-1",
+            PhaseTargetSnapshot::capture(tmp.path()),
+            "no runtime harness for this language yet",
+        ),
+    )
+    .expect("recorded deferral");
+    app.refresh_phase_attempt_projection();
+    let after = prove_body(&app);
+
+    let deferral = after.deferral.clone().expect("disclosed proof deferral");
+    assert_eq!(deferral.scan_id, "scan-1");
+    assert_eq!(deferral.actor, "operator");
+    assert_eq!(deferral.reason, "no runtime harness for this language yet");
+    assert!(
+        after.empty_hint.is_none(),
+        "a selected finding is never the empty state"
+    );
+    assert_eq!(
+        after.finding, before.finding,
+        "the deferral must not move the proof ladder, meter, confidence, or status"
+    );
+    assert_eq!(after.proof, before.proof);
+    assert_eq!(after.attack_path, before.attack_path);
+}
+
+/// The decision is bound to one discovery generation, so a re-scanned
+/// observation of the same finding must not inherit it.
+#[test]
+fn a_later_observation_of_a_deferred_finding_shows_no_deferral() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let workspace = WorkspaceTarget::new(tmp.path()).expect("workspace");
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let mut selected = finding();
+    selected.scan_id = Some("scan-1".to_string());
+    append_proof_deferral(
+        tmp.path(),
+        ProofDeferralRecorded::human(
+            selected.fingerprint.clone(),
+            selected.identity_id.clone(),
+            "scan-1",
+            PhaseTargetSnapshot::capture(tmp.path()),
+            "deferred to phase 2",
+        ),
+    )
+    .expect("recorded deferral");
+
+    selected.scan_id = Some("scan-2".to_string());
+    *app.findings_mut() = vec![selected.clone()];
+    *app.selected_finding_mut() = Some(selected);
+    app.refresh_phase_attempt_projection();
+
+    assert!(prove_body(&app).deferral.is_none());
 }

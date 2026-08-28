@@ -7,6 +7,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Additive:**
 
+- A recorded proof deferral is now visible wherever the finding is. The new
+  headless `kuzushi proof defer <finding> --target <repo> --reason <text>`
+  records the same operator decision as the shell's `proof defer` through one
+  shared core service, the Prove page discloses it on the STATUS/NEXT strip of
+  a selected finding (and in plain output), and `kuzushi finding` reports it
+  beside the proof state. The deferral stays a decision, not evidence: it never
+  moves proof confidence, the proof ladder, or a verification verdict, and it
+  remains bound to the exact discovery generation it was recorded against.
 - Successful phase attempts now keep the durable phase workspace primary with
   a compact action receipt, and operators can browse every phase page
   without changing reality-derived workflow progress.

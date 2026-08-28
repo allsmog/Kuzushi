@@ -387,3 +387,20 @@ pub(crate) enum AuthCommand {
         model: Option<String>,
     },
 }
+
+/// Operator decisions about empirical proof. A deferral records that proof was
+/// postponed for one exact discovery generation; it never records evidence.
+#[derive(Debug, Subcommand)]
+pub(crate) enum ProofCommand {
+    /// Record that proof is deferred for a reviewed finding.
+    Defer {
+        /// Finding alias (F-0001), full fingerprint, or fingerprint prefix.
+        reference: String,
+        /// Why proof is being postponed (recorded in the workflow ledger).
+        #[arg(long)]
+        reason: String,
+        /// Emit the result as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}

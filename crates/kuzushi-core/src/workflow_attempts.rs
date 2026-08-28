@@ -8,12 +8,16 @@
 mod domain;
 mod ledger;
 mod map_evidence;
+mod proof_deferral_service;
+mod proof_deferral_view;
 mod storage;
 mod v2;
 
 pub use domain::*;
 pub use ledger::*;
 pub use map_evidence::*;
+pub use proof_deferral_service::*;
+pub use proof_deferral_view::*;
 pub use storage::*;
 pub use v2::*;
 

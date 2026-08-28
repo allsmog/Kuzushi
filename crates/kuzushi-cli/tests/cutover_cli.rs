@@ -633,6 +633,119 @@ fn suppress_command_records_expiring_evidence_backed_suppression() {
     assert_eq!(decision.triage_verdict, None);
 }
 
+/// Headless parity for the shell's `proof defer`: the CLI records the same
+/// operator decision through the shared core service, and `kuzushi finding`
+/// discloses it without claiming any proof.
+#[test]
+fn proof_defer_records_a_decision_that_finding_detail_discloses() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/server.js"),
+        "res.send(req.query.name);\n",
+    )
+    .unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+    store
+        .record_run_started("scan-test", tmp.path(), "complete")
+        .unwrap();
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "javascript.express.xss",
+        "src/server.js",
+        1,
+        Some(1),
+        Severity::High,
+        "CWE-79 reflected XSS reaches response",
+    );
+    finding.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 1.0,
+        rationale: "reviewed the source and sink".to_string(),
+        ..TriageOutcome::default()
+    });
+    store.insert_finding("scan-test", &finding).unwrap();
+    drop(store);
+
+    let recorded: Value = serde_json::from_str(&stdout(
+        kuzushi()
+            .arg("proof")
+            .arg("defer")
+            .arg(&finding.fingerprint)
+            .args(["--target"])
+            .arg(tmp.path())
+            .args([
+                "--reason",
+                "no runtime harness for this language yet",
+                "--json",
+            ])
+            .output()
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(recorded["scanId"], "scan-test");
+    assert_eq!(recorded["actor"], "operator");
+
+    let detail = stdout(
+        kuzushi()
+            .arg("finding")
+            .arg(&finding.fingerprint)
+            .args(["--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    assert!(
+        detail.contains(
+            "Proof deferral: proof deferred by operator at generation scan-test · no runtime harness for this language yet"
+        ),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("Runtime validation: not attempted"),
+        "a deferral never promotes runtime validation: {detail}"
+    );
+}
+
+#[test]
+fn proof_defer_refuses_a_finding_that_review_has_not_confirmed() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+    store
+        .record_run_started("scan-test", tmp.path(), "complete")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "javascript.express.xss",
+        "src/server.js",
+        1,
+        Some(1),
+        Severity::High,
+        "CWE-79 reflected XSS reaches response",
+    );
+    store.insert_finding("scan-test", &finding).unwrap();
+    drop(store);
+
+    let output = kuzushi()
+        .arg("proof")
+        .arg("defer")
+        .arg(&finding.fingerprint)
+        .args(["--target"])
+        .arg(tmp.path())
+        .args(["--reason", "later"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not review-actionable"), "{stderr}");
+    assert!(!tmp
+        .path()
+        .join(".kuzushi/v3/workflow/phase-attempts.jsonl")
+        .exists());
+}
+
 #[test]
 fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();

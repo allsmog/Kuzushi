@@ -380,3 +380,73 @@ pub(in crate::findings) fn source_label(finding: &Finding) -> &'static str {
         .unwrap_or_else(|| VulnSource::from_tool(&finding.tool))
         .as_str()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow_attempts::{
+        PhaseTargetSnapshot, ProofDeferralRecorded, ProofDeferralView,
+    };
+
+    fn scanned_candidate() -> Finding {
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "js/xss",
+            "src/render.js",
+            42,
+            None,
+            Severity::High,
+            "Request query data is rendered into HTML without escaping",
+        );
+        finding.scan_id = Some("scan-7".to_string());
+        finding
+    }
+
+    fn deferral_for(finding: &Finding) -> ProofDeferralView {
+        ProofDeferralView::from_record(&ProofDeferralRecorded::human(
+            finding.fingerprint.clone(),
+            finding.identity_id.clone(),
+            "scan-7",
+            PhaseTargetSnapshot {
+                target: "/target".to_string(),
+                revision: Some("abc".to_string()),
+                dirty: false,
+            },
+            "no runtime harness for this language yet",
+        ))
+    }
+
+    /// A deferred finding is made visible by disclosing the decision, never by
+    /// inventing a status word for it. `finding_lifecycle_status` reports the
+    /// evidence that exists, so it must keep saying `seen` while the report
+    /// carries the operator's decision beside it.
+    #[test]
+    fn a_recorded_proof_deferral_never_moves_the_evidence_derived_lifecycle_status() {
+        let finding = scanned_candidate();
+        assert_eq!(finding_lifecycle_status(&finding), "seen");
+
+        let deferred = FindingDetailReport::new(None, finding, Vec::new())
+            .with_proof_deferral(Some(deferral_for(&scanned_candidate())));
+
+        assert_eq!(finding_lifecycle_status(&deferred.finding), "seen");
+        assert!(
+            deferred.output().contains("Proof deferral:"),
+            "the decision is disclosed beside the status, not folded into it"
+        );
+    }
+
+    /// The same invariant one rung up the evidence ladder: recorded static
+    /// evidence still governs the label, and the deferral changes nothing.
+    #[test]
+    fn statically_supported_status_survives_a_proof_deferral() {
+        let finding = scanned_candidate().with_static_proof_state(StaticProofState::SourceSinkLinked);
+        assert_eq!(finding_lifecycle_status(&finding), "statically_supported");
+
+        let deferred = FindingDetailReport::new(None, finding.clone(), Vec::new())
+            .with_proof_deferral(Some(deferral_for(&finding)));
+
+        assert_eq!(finding_lifecycle_status(&deferred.finding), "statically_supported");
+        assert_eq!(deferred.proof_state, proof_state_label(finding.static_proof_state));
+        assert_eq!(deferred.runtime_validation, "not attempted");
+    }
+}
