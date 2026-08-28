@@ -33,6 +33,13 @@ Notable changes to Kuzushi. Release procedure lives in
   put a tool run one Enter away from a typo. Ordinary abbreviations (`cb`,
   `ctx`, `con`) are unchanged, and history and finding search keep the
   permissive match.
+- Runtime-validation labels no longer read as a rejection of the scanner's
+  claim when nothing ran. A harness that failed to build, blocked
+  infrastructure, an unsupported language, and a finding with too little
+  detail now read `not executed - …` instead of `execution_rejected - …` in
+  the finding detail report and in JSON/JSONL exports. The durable
+  `execution_rejected` proof-state token in `.kuzushi` artifacts is
+  unchanged, so stored findings and their vocabulary still load as before.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
