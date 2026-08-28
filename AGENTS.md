@@ -550,9 +550,10 @@ is expected to behave identically and should be filed as a parity bug.
   process loss, and abnormal shutdown persist as `interrupted`. A requested
   cancellation stays visibly `canceling` until cleanup reaches a terminal row.
   `jobs -k <id>` dequeues a pending steer item, or emits a **scoped**
-  `CancelJob(JobKind)` that aborts only the addressed slot (not every live job
-  the way `CancelActiveJobs` does) through the existing per-slot abort helpers —
-  it never invents a second cancellation mechanism. The steer queue is the
+  `CancelJob(JobKind)` that aborts the addressed slot; `CancelActiveJobs`
+  (Ctrl+C) additionally drains the steer queue and pauses the planning queue.
+  Both go through the existing per-slot abort helpers — neither invents a second
+  cancellation mechanism. The steer queue is the
   third and lowest-precedence "next tool" mechanism after the prereq chain and
   the planning queue — deterministic order is **chain → plan → steer**.
   `advance_steer_queue` drains centrally from `apply_job_event` on **every**

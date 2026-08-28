@@ -8,7 +8,8 @@ pub(crate) use investigate_args::InvestigateArgs;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
     AuthCommand, CampaignCommand, ConfigCommand, FailOnArg, KwpCommand, McpBackend, McpCommand,
-    ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat, SessionsCommand,
+    ProofCommand, ReviewYieldCommand, RunsCommand, ScanModeArg, SessionExportFormat,
+    SessionsCommand,
 };
 
 #[derive(Debug, Subcommand)]
@@ -55,9 +56,12 @@ pub(crate) enum Command {
         /// repeat-separated) without a manifest. Mutually exclusive with `--shard`.
         #[arg(long, value_delimiter = ',', conflicts_with = "shard")]
         paths: Vec<String>,
-        /// Diff-scope the scan to files changed since `<ref>`. Engines that
-        /// support it (full-mode-multi today) narrow their walk; others are
-        /// unaffected. Pass `--include-worktree` to include uncommitted edits.
+        /// Diff-scope the scan to files changed since `<ref>`, matching the
+        /// shell's `scan since <ref>`. Compiles into the canonical `sast:scan`
+        /// `paths` and `diffBase` options, so every engine is narrowed. With
+        /// `--paths`/`--shard` the effective scope is the intersection. A
+        /// reference that changed nothing refuses rather than scanning
+        /// everything. Pass `--include-worktree` to include uncommitted edits.
         #[arg(long)]
         since: Option<String>,
         /// When `--since` is set, also include uncommitted (working-tree) changes.
@@ -192,6 +196,11 @@ pub(crate) enum Command {
         /// Output file or bundle directory. Relative paths resolve under the target root.
         #[arg(long = "out")]
         output: PathBuf,
+    },
+    /// Record operator decisions about empirical proof.
+    Proof {
+        #[command(subcommand)]
+        command: ProofCommand,
     },
     /// Add an expiring, evidence-backed suppression for a finding.
     Suppress {

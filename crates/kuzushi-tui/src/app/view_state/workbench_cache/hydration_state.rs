@@ -52,6 +52,9 @@ impl WorkbenchCache {
             ViewHydrationKey::RunProjection { run_id } => self
                 .cached_run_projection(target, run_id)
                 .is_not_requested(),
+            ViewHydrationKey::PhaseReceiptOutcome { attempt_id } => self
+                .cached_phase_receipt_outcome(target, attempt_id)
+                .is_not_requested(),
             ViewHydrationKey::ScanStageReceipt { run_id } => self
                 .cached_scan_stage_receipt(target, run_id)
                 .is_not_requested(),
@@ -195,6 +198,10 @@ impl WorkbenchCache {
                 ViewHydrationValue::RunProjection(state),
             ) => self.store_run_projection(target, run_id, state),
             (
+                ViewHydrationKey::PhaseReceiptOutcome { attempt_id },
+                ViewHydrationValue::PhaseReceiptOutcome(state),
+            ) => self.store_phase_receipt_outcome(target, attempt_id, state),
+            (
                 ViewHydrationKey::ScanStageReceipt { run_id },
                 ViewHydrationValue::ScanStageReceipt(state),
             ) => self.store_scan_stage_receipt(target, run_id, state),
@@ -253,6 +260,20 @@ impl WorkbenchCache {
             MAX_LARGE_RUN_CACHE_ENTRIES,
         );
         self.trim_large_run_caches(&LargeRunCacheKey::Projection(key));
+    }
+
+    fn store_phase_receipt_outcome(
+        &mut self,
+        target: PathBuf,
+        attempt_id: String,
+        state: Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
+    ) {
+        insert_bounded(
+            &mut self.phase_receipt_outcomes,
+            (target, attempt_id),
+            state,
+            MAX_RUN_CACHE_ENTRIES,
+        );
     }
 
     fn store_scan_stage_receipt(
@@ -523,6 +544,7 @@ fn hydration_group(key: &ViewHydrationKey) -> HydrationGroup {
         | ViewHydrationKey::RunSummaryEntries
         | ViewHydrationKey::RunArtifactText { .. }
         | ViewHydrationKey::RunProjection { .. }
+        | ViewHydrationKey::PhaseReceiptOutcome { .. }
         | ViewHydrationKey::ScanStageReceipt { .. } => HydrationGroup::Run,
         ViewHydrationKey::GitMetadata
         | ViewHydrationKey::RevisionRelationship { .. }

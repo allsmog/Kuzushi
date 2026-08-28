@@ -1534,7 +1534,6 @@ mod tests {
 
     #[test]
     fn offline_demo_fixture_effect_returns_target_activation_without_starting_worker() {
-        let _fixture_lock = demo_fixture_test_lock();
         let mut app = ShellApp::new(V2Config::default(), None);
 
         let effects = app.start_offline_demo_fixture_scan_effect();

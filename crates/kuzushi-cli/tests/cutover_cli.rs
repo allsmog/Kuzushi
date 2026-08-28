@@ -306,6 +306,191 @@ fn auth_ping_rejects_legacy_codex_provider_selector() {
     assert!(stderr.contains("Supported: openai, anthropic"), "{stderr}");
 }
 
+/// Sentinels stand in for real provider credentials. If either ever reaches
+/// the wrong provider's request — or any operator-visible output — the
+/// credential cross-bind P0 has returned.
+const OPENAI_SENTINEL: &str = "kuzushi-sentinel-openai-DO-NOT-FORWARD";
+const ANTHROPIC_SENTINEL: &str = "kuzushi-sentinel-anthropic-DO-NOT-FORWARD";
+const PING_SUCCESS_JSON: &str = r#"{"ok":true,"auth_mode":"api-key","latency_ms":4,"input_tokens":1,"output_tokens":1,"cost_usd":0.0}"#;
+
+/// Operator config from the audit's failure scenario: an `openai:*` model with
+/// the default OpenAI credential env, plus a bridge that records the exact
+/// envelope it was handed.
+#[cfg(unix)]
+struct AuthPingFixture {
+    _tmp: tempfile::TempDir,
+    home: PathBuf,
+    recorded_envelope: PathBuf,
+}
+
+#[cfg(unix)]
+fn auth_ping_fixture(bridge_exit_code: i32) -> AuthPingFixture {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+    let recorded_envelope = tmp.path().join("payload.json");
+    let bridge = tmp.path().join("bridge.sh");
+    fs::write(
+        &bridge,
+        format!(
+            "#!/bin/sh\ncat > {recorded}\nprintf '%s' '{PING_SUCCESS_JSON}'\nexit {bridge_exit_code}\n",
+            recorded = recorded_envelope.display(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&bridge, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        home.join(".kuzushi/v3/config.toml"),
+        format!(
+            "model = \"openai:gpt-5.5\"\n\n[runtime]\napi_key_env = \"OPENAI_API_KEY\"\nlanggraph_bridge_command = [\"{bridge}\"]\n",
+            bridge = bridge.display(),
+        ),
+    )
+    .unwrap();
+    AuthPingFixture {
+        _tmp: tmp,
+        home,
+        recorded_envelope,
+    }
+}
+
+#[cfg(unix)]
+fn auth_ping_command(fixture: &AuthPingFixture) -> Command {
+    let mut command = kuzushi();
+    command
+        .env("HOME", &fixture.home)
+        .env("OPENAI_API_KEY", OPENAI_SENTINEL)
+        .env("ANTHROPIC_API_KEY", ANTHROPIC_SENTINEL)
+        .env_remove("KUZUSHI_MODEL")
+        .env_remove("KUZUSHI_V2_MODEL")
+        .arg("auth")
+        .arg("ping");
+    command
+}
+
+#[cfg(unix)]
+fn assert_no_sentinel_in_output(output: &std::process::Output) {
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!text.contains(OPENAI_SENTINEL), "OpenAI credential leaked");
+    assert!(
+        !text.contains(ANTHROPIC_SENTINEL),
+        "Anthropic credential leaked"
+    );
+}
+
+/// The audit's P0: an Anthropic ping on a config whose credential env names
+/// OpenAI must fail before the bridge exists, so no key is forwarded.
+#[cfg(unix)]
+#[test]
+fn auth_ping_never_forwards_a_credential_across_providers() {
+    let fixture = auth_ping_fixture(0);
+
+    let output = auth_ping_command(&fixture)
+        .arg("anthropic")
+        .args(["--model", "anthropic:claude-haiku-4-5"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "cross-provider ping must fail");
+    assert!(
+        !fixture.recorded_envelope.exists(),
+        "the bridge must never be spawned for a cross-provider ping"
+    );
+    assert_no_sentinel_in_output(&output);
+}
+
+/// Only the model's own provider credential reaches the envelope.
+#[cfg(unix)]
+#[test]
+fn auth_ping_forwards_only_the_model_bound_credential() {
+    let fixture = auth_ping_fixture(0);
+
+    let output = auth_ping_command(&fixture)
+        .arg("openai")
+        .args(["--model", "openai:gpt-5.5"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let envelope: Value =
+        serde_json::from_slice(&fs::read(&fixture.recorded_envelope).unwrap()).unwrap();
+    assert_eq!(envelope["type"], Value::from("ping"));
+    assert_eq!(envelope["model"], Value::from("openai:gpt-5.5"));
+    assert_eq!(envelope["apiKeyEnv"], Value::from("OPENAI_API_KEY"));
+    assert_eq!(envelope["apiKey"], Value::from(OPENAI_SENTINEL));
+    assert!(
+        !envelope.to_string().contains(ANTHROPIC_SENTINEL),
+        "the Anthropic credential must never appear in an OpenAI envelope"
+    );
+    assert_no_sentinel_in_output(&output);
+}
+
+/// A bridge that prints a success document and then dies is not a healthy
+/// round trip.
+#[cfg(unix)]
+#[test]
+fn auth_ping_fails_when_bridge_exits_nonzero_after_success_json() {
+    let fixture = auth_ping_fixture(7);
+
+    let output = auth_ping_command(&fixture)
+        .arg("openai")
+        .args(["--model", "openai:gpt-5.5"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "nonzero bridge exit must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("auth ping bridge exited with"), "{stderr}");
+    assert_no_sentinel_in_output(&output);
+}
+
+#[cfg(unix)]
+#[test]
+fn auth_ping_succeeds_on_zero_exit_success_json() {
+    let fixture = auth_ping_fixture(0);
+
+    let output = auth_ping_command(&fixture)
+        .arg("openai")
+        .args(["--model", "openai:gpt-5.5"])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("round-trip ok via api-key"), "{stderr}");
+    assert!(stderr.contains("auth ping: OK"), "{stderr}");
+}
+
+/// A bare `auth ping` defaults its provider to `anthropic` while the model
+/// comes from config. When those disagree the run must fail, not send.
+#[cfg(unix)]
+#[test]
+fn auth_ping_default_provider_and_configured_model_agree_or_fail() {
+    let fixture = auth_ping_fixture(0);
+
+    let output = auth_ping_command(&fixture).output().unwrap();
+
+    assert!(
+        !output.status.success(),
+        "a bare ping on an openai model must not pass as anthropic"
+    );
+    assert!(
+        !fixture.recorded_envelope.exists(),
+        "a disagreeing default provider must not spawn the bridge"
+    );
+    assert_no_sentinel_in_output(&output);
+}
+
 #[test]
 fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
     let tmp = tempfile::tempdir().unwrap();
@@ -631,6 +816,119 @@ fn suppress_command_records_expiring_evidence_backed_suppression() {
         .expect("suppressed review decision");
     assert_eq!(decision.decision.verdict, ReviewDecisionVerdict::Suppressed);
     assert_eq!(decision.triage_verdict, None);
+}
+
+/// Headless parity for the shell's `proof defer`: the CLI records the same
+/// operator decision through the shared core service, and `kuzushi finding`
+/// discloses it without claiming any proof.
+#[test]
+fn proof_defer_records_a_decision_that_finding_detail_discloses() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(
+        tmp.path().join("src/server.js"),
+        "res.send(req.query.name);\n",
+    )
+    .unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+    store
+        .record_run_started("scan-test", tmp.path(), "complete")
+        .unwrap();
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "javascript.express.xss",
+        "src/server.js",
+        1,
+        Some(1),
+        Severity::High,
+        "CWE-79 reflected XSS reaches response",
+    );
+    finding.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 1.0,
+        rationale: "reviewed the source and sink".to_string(),
+        ..TriageOutcome::default()
+    });
+    store.insert_finding("scan-test", &finding).unwrap();
+    drop(store);
+
+    let recorded: Value = serde_json::from_str(&stdout(
+        kuzushi()
+            .arg("proof")
+            .arg("defer")
+            .arg(&finding.fingerprint)
+            .args(["--target"])
+            .arg(tmp.path())
+            .args([
+                "--reason",
+                "no runtime harness for this language yet",
+                "--json",
+            ])
+            .output()
+            .unwrap(),
+    ))
+    .unwrap();
+    assert_eq!(recorded["scanId"], "scan-test");
+    assert_eq!(recorded["actor"], "operator");
+
+    let detail = stdout(
+        kuzushi()
+            .arg("finding")
+            .arg(&finding.fingerprint)
+            .args(["--target"])
+            .arg(tmp.path())
+            .output()
+            .unwrap(),
+    );
+    assert!(
+        detail.contains(
+            "Proof deferral: proof deferred by operator at generation scan-test · no runtime harness for this language yet"
+        ),
+        "{detail}"
+    );
+    assert!(
+        detail.contains("Runtime validation: not attempted"),
+        "a deferral never promotes runtime validation: {detail}"
+    );
+}
+
+#[test]
+fn proof_defer_refuses_a_finding_that_review_has_not_confirmed() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+    store
+        .record_run_started("scan-test", tmp.path(), "complete")
+        .unwrap();
+    let finding = Finding::new_tool(
+        "semgrep",
+        "javascript.express.xss",
+        "src/server.js",
+        1,
+        Some(1),
+        Severity::High,
+        "CWE-79 reflected XSS reaches response",
+    );
+    store.insert_finding("scan-test", &finding).unwrap();
+    drop(store);
+
+    let output = kuzushi()
+        .arg("proof")
+        .arg("defer")
+        .arg(&finding.fingerprint)
+        .args(["--target"])
+        .arg(tmp.path())
+        .args(["--reason", "later"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("not review-actionable"), "{stderr}");
+    assert!(!tmp
+        .path()
+        .join(".kuzushi/v3/workflow/phase-attempts.jsonl")
+        .exists());
 }
 
 #[test]
@@ -1325,9 +1623,12 @@ fn doctor_json_reports_named_preflight_checks() {
 }
 
 #[test]
-fn failed_run_writes_failure_handoff_context() {
+fn blocked_run_writes_failure_handoff_context() {
     let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
     let output = kuzushi()
+        .env("HOME", &home)
         .args(["--target"])
         .arg(tmp.path())
         .args(["run", "context:build", "--input", r#"{"enrichment":true}"#])
@@ -1340,7 +1641,9 @@ fn failed_run_writes_failure_handoff_context() {
     );
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(body["ok"], false);
-    assert_eq!(body["status"], "failed");
+    // The enrichment request is refused before anything executes, so the run
+    // is `blocked`; the failure-handoff context is written either way.
+    assert_eq!(body["status"], "blocked");
     assert_eq!(body["fallback_context"]["failedStage"], "context:build");
     assert!(body["fallback_context"]["fallbackPrompt"]
         .as_str()
@@ -1372,7 +1675,7 @@ fn failed_run_writes_failure_handoff_context() {
             .terminal
             .as_ref()
             .map(|terminal| terminal.status),
-        Some(kuzushi_core::run_lifecycle::RunItemStatus::Failed)
+        Some(kuzushi_core::run_lifecycle::RunItemStatus::Blocked)
     );
 }
 
@@ -1421,7 +1724,10 @@ fn malformed_run_input_writes_blocked_artifact_bundle() {
     let report = fs::read_to_string(latest_run_artifact(tmp.path(), "report.md")).unwrap();
 
     assert!(input.contains("rawInput"));
-    assert_eq!(failure_json["failures"][0]["error"], "--input must be JSON");
+    assert_eq!(
+        failure_json["failures"][0]["error"],
+        "--input must contain structured JSON; use --option key=value for ordinary options"
+    );
     assert!(report.contains("Status: blocked"));
 }
 
@@ -1474,7 +1780,7 @@ fn unknown_run_tool_writes_blocked_artifact_bundle() {
 }
 
 #[test]
-fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
+fn runtime_backed_run_missing_model_writes_blocked_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
@@ -1495,9 +1801,11 @@ fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
         "runtime-backed run without model should fail"
     );
     let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let (_, failure_json) = assert_failed_run_bundle(&repo, "run", "triage:run");
+    // Nothing executed: the missing model is refused before dispatch, so the
+    // honest artifact status is `blocked`, not `failed`.
+    let (_, failure_json) = assert_blocked_run_bundle(&repo, "run", "triage:run");
 
-    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["status"], "blocked");
     assert_eq!(stdout["fallback_context"]["failedStage"], "triage:run");
     assert!(failure_json["failures"][0]["error"]
         .as_str()

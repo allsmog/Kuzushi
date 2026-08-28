@@ -560,3 +560,76 @@ fn live_scan_composes_the_operational_dashboard_and_degrades_to_center() {
     );
     assert!(matches!(resting.composition, Composition::Columns(_)));
 }
+
+/// #172: a Map whose only surface is an unbuilt readiness card is a form
+/// asking for one action, not a workspace. The generic column solver handed
+/// it the entire body, so on a wide terminal a ~124-column pane carried rows
+/// that stopped near column 90. It is now capped at the centered-form width,
+/// while terminals narrower than that cap keep the full-width card.
+#[test]
+fn actionable_map_status_card_is_a_width_capped_centered_form() {
+    for state in [
+        SemanticFixture::Empty,
+        SemanticFixture::Blocked,
+        SemanticFixture::Stale,
+    ] {
+        let body = fixture_body(WorkflowPhase::Map, state);
+        for (width, height) in CANONICAL_SIZES {
+            assert_map_status_card_width(&body, state, Rect::new(7, 5, width, height));
+        }
+    }
+}
+
+fn assert_map_status_card_width(body: &PhaseCockpitBody, state: SemanticFixture, area: Rect) {
+    let plan = phase_presentation_plan(body, area, None, None, AttentionMode::Normal);
+    let Composition::CenteredForm(id) = plan.composition else {
+        return;
+    };
+    let cell = cell_label(WorkflowPhase::Map, state, area.width, area.height);
+    let card = plan
+        .surface(id)
+        .unwrap_or_else(|| panic!("{cell}: centered form has no rect"));
+    assert_eq!(
+        card.rect.width,
+        area.width
+            .min(super::composition::CENTERED_FORM_MAX_COLUMNS),
+        "{cell}: centered action-card width"
+    );
+    assert!(
+        card.rect.width <= super::composition::CENTERED_FORM_MAX_COLUMNS,
+        "{cell}: action card must not span the whole body"
+    );
+}
+
+/// The 160x48 and 80x24 corners the defect report named, pinned explicitly so
+/// the cap and the full-width fallback cannot both drift at once.
+#[test]
+fn unbuilt_map_status_card_is_capped_wide_and_full_width_at_eighty_columns() {
+    let body = fixture_body(WorkflowPhase::Map, SemanticFixture::Empty);
+
+    let wide = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 160, 48),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    assert_eq!(wide.surfaces.len(), 1, "unbuilt Map shows one card");
+    assert!(
+        wide.surfaces[0].rect.width <= 100,
+        "160x48 card width was {}",
+        wide.surfaces[0].rect.width
+    );
+
+    let narrow = phase_presentation_plan(
+        &body,
+        Rect::new(0, 0, 80, 24),
+        None,
+        None,
+        AttentionMode::Normal,
+    );
+    assert_eq!(
+        narrow.surfaces[0].rect.width, 80,
+        "80x24 keeps the full-width card"
+    );
+}

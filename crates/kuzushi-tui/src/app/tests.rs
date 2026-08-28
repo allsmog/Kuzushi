@@ -787,6 +787,52 @@ fn terminal_tool_events_keep_the_activity_on_its_launch_phase() {
 }
 
 #[test]
+fn first_map_run_chip_never_reads_scan_before_its_terminal_event() {
+    // Regression (#172): the Map tools write `.kuzushi/` artifacts while the
+    // run is still going. The pre-ledger inference used to read those mid-run
+    // and advance the JOURNEY chip to `Scan 2/5`, which then fell back to
+    // `Map 1/5` once the attempt record landed at completion.
+    let dir = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let _ticket = app.jobs_mut().start(JobKind::Run, "context:build");
+    app.set_activity(Some(ActivitySession::for_phase(
+        "map-run-1",
+        WorkflowPhase::Map,
+    )));
+    app.set_active_tool_run_id_for_test("map-run-1");
+    app.set_running_tool_for_test("context:build");
+    app.set_shell_view(ShellView::Activity);
+
+    let mut chips = vec![crate::ui_view_models::journey_footer_segment(&app)];
+
+    // Mid-run: `context:build` commits its snapshot before the run finishes.
+    let snapshot = dir.path().join(".kuzushi/context-snapshot.json");
+    std::fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    std::fs::write(snapshot, r#"{"filesIndexed":42}"#).unwrap();
+    app.invalidate_view_hydration();
+    app.hydrate_view_keys_blocking(dir.path(), vec![crate::app::ViewHydrationKey::MapArtifacts]);
+    chips.push(crate::ui_view_models::journey_footer_segment(&app));
+
+    assert!(
+        chips.iter().all(|chip| chip.as_deref() == Some("Map 1/5")),
+        "the chip must stay on Map while the Map attempt is in flight: {chips:?}"
+    );
+
+    let effects = app.apply_job_event(ShellEvent::Tool(ToolEvent::Finished {
+        tool_name: "context:build".to_string(),
+        result: serde_json::json!({ "ok": true, "status": "completed" }),
+    }));
+    EffectRuntime::execute(&mut app, effects);
+
+    assert!(
+        app.activity()
+            .is_some_and(|session| session.completed_at.is_some()),
+        "the terminal event must stamp the session so liveness stops suppressing"
+    );
+}
+
+#[test]
 fn background_tool_waits_for_pending_prompt_mutation_decision() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -7904,7 +7950,6 @@ fn auth_picker_swallows_shifted_typed_characters() {
 
 #[test]
 fn auth_picker_api_key_editor_owns_shortcut_letters_from_first_character() {
-    let _fixture_lock = demo_fixture_test_lock();
     for ch in ['j', 'k', 'd', 'q'] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.open_credential_entry("openai".to_string());
@@ -11917,6 +11962,33 @@ fn phase_command_opens_requested_phase_picker() {
 }
 
 #[test]
+fn slash_map_and_scan_open_their_configuration_pickers() {
+    for (command, phase) in [("/map", WorkflowPhase::Map), ("/scan", WorkflowPhase::Scan)] {
+        let dir = tempfile::tempdir().expect("temp target");
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_target(Some(dir.path().to_path_buf()));
+
+        run_command(&mut app, parse_command(command));
+
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker, "{command}");
+        assert_eq!(app.engagement.current_phase(), Some(phase), "{command}");
+        assert!(app
+            .engagement
+            .planning_picker()
+            .tasks()
+            .iter()
+            .all(|row| row.id.phase() == phase));
+        press_key(&mut app, KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+        assert_eq!(
+            app.engagement.planning_picker().focus(),
+            PickerFocus::OptionsPane,
+            "{command}"
+        );
+        assert!(!app.has_running_work(), "{command}");
+    }
+}
+
+#[test]
 fn phase_command_replaces_an_idle_guided_flow_only_after_picker_opens() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -12376,7 +12448,6 @@ fn target_picker_cannot_activate_candidate_while_planner_is_live() {
 
 #[test]
 fn target_picker_command_line_demo_starts_the_offline_fixture() {
-    let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::TargetPicker);
 
@@ -12559,7 +12630,6 @@ fn auth_picker_selected_kind_tracks_the_row_model() {
 
 #[test]
 fn auth_picker_enter_on_offline_demo_row_runs_the_fixture() {
-    let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("anthropic".to_string());
     let demo_row = app.router.auth_picker().row_count() - 1;
@@ -13515,7 +13585,6 @@ fn target_activation_clears_target_derived_state_before_hydration() {
 
 #[test]
 fn offline_demo_uses_target_activation_before_preparing_its_scan() {
-    let _fixture_lock = demo_fixture_test_lock();
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
@@ -16919,8 +16988,11 @@ fn ctrl_c_cancels_registered_worker_before_view_state_hydrates() {
     assert!(cancel.is_cancelled());
     assert!(app.jobs().cancel_requested(JobKind::Run));
     assert!(!app.should_quit());
+    // No domain has projected the worker yet, but the hub already knows its
+    // label, so the stop request names it instead of falling back to the
+    // anonymous "abort requested for active worker" line.
     assert!(app.log_lines().iter().any(|line| {
-        line.prefix == "system" && line.body.contains("abort requested for active worker")
+        line.prefix == "system" && line.body == "stop requested for starting worker"
     }));
 
     press_key(
@@ -23072,6 +23144,57 @@ fn cancel_job_effect_for_a_non_run_kind_does_not_blank_a_live_run_jobs_rows() {
         .and_then(|session| session.tasks.get("triage:run"))
         .expect("triage row seeded");
     assert_ne!(row.state, DagTaskState::Canceled);
+}
+
+#[test]
+fn a_stop_request_names_the_backgrounded_job_it_stops() {
+    // The one live job may have been backgrounded from a view the operator
+    // has since left, so a stop request must say which job it addressed
+    // instead of "abort requested for active worker".
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Run, "taint-iris:hunt");
+    app.set_activity(Some(ActivitySession::new("run-9")));
+
+    assert!(app.request_active_abort());
+
+    let lines = app.log_lines();
+    assert!(
+        lines.iter().any(|line| {
+            line.prefix == "system"
+                && line.body.contains("stop requested for taint-iris:hunt")
+                && line.body.contains("run-9")
+        }),
+        "stop request did not name the job: {lines:?}"
+    );
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.body.contains("abort requested for active worker")),
+        "generic line survived alongside the named one: {lines:?}"
+    );
+}
+
+#[test]
+fn a_stop_request_names_the_job_alongside_the_per_domain_cleanup_line() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let _ticket = app.jobs_mut().start(JobKind::Plan, "planner");
+    app.set_planner_running(true);
+
+    assert!(app.request_active_abort());
+
+    let lines = app.log_lines();
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.prefix == "system" && line.body == "stop requested for planner"),
+        "stop request did not name the job: {lines:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.prefix == "plan" && line.body.contains("abort requested; waiting")),
+        "per-domain cleanup line was lost: {lines:?}"
+    );
 }
 
 #[test]

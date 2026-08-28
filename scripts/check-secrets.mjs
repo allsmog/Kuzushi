@@ -73,6 +73,39 @@ const RULES = [
 ];
 
 const APPROVED_FIXTURE_HASHES = new Map([
+  [".env.example", "6866628bba6a4fe45f8b3b7e81a03f503402a7bb3a19507e641e005d8c58fc2c"],
+  [
+    "crates/kuzushi-cli/tests/dep_hygiene_cli.rs",
+    "b1c874905608db802746b13f06f0cf515062faac87c361e303d84da66c48f564",
+  ],
+  [
+    "crates/kuzushi-core/src/demo.rs",
+    "1b8f52e6529c42b477c5cbba1150fa370b3a5c6b3f2427cfd5da0c5528a6bc8f",
+  ],
+  [
+    "crates/kuzushi-core/src/modules/application/sast_scan/run_sast_scan.rs",
+    "e08280ff00273e9d933a6b84a0a81e225fcf68de23cc320c409098bacf4c05f1",
+  ],
+  [
+    "crates/kuzushi-core/src/run_lifecycle/tests.rs",
+    "b43939b1146432fa7d9cea6d2668bb962d63db30091ccfccf968f6eddb2c861b",
+  ],
+  [
+    "crates/kuzushi-core/src/scan/engines/secret_scan/applies_size_binary_and_severity_filters.rs",
+    "a1eab9b5fd96c66e46ce859878072877d34c1ea068aa21401382de2bf4502c63",
+  ],
+  [
+    "crates/kuzushi-core/src/scan/engines/secret_scan/cancellation_stops_native_scan.rs",
+    "dd358c5b342e170ebf162e2689da0cb0da3a91e6d845c221287c5801ba1440a6",
+  ],
+  [
+    "crates/kuzushi-core/src/scan/engines/secret_scan/classify_token.rs",
+    "a22d6b899ce1f0eb4ef68659d480842f3781835228d1bde69ae4dd658900717d",
+  ],
+  [
+    "crates/kuzushi-core/src/scan/engines/secret_scan/tests.rs",
+    "fb98c947dcc299125fbe9321729df8fda1998da91f3c3f38dc030626e6dfa0ac",
+  ],
   [
     "tests/fixtures/secret-scan/leaks/aws-keys.env",
     "263c194120335221f1647a7bb6f0d762dce39947771c5a46e0c8c7a4d4c59b63",

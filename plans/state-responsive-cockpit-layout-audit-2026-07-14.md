@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-14
 
-**Repository:** `/Users/operator/vibe-code/Kuzushi`
+**Repository:** `/workspace/Kuzushi`
 
 **Audited binary:** `kuzushi 0.24.0-alpha.8 (76974ccf5+dirty · debug)`
 

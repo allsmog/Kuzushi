@@ -261,8 +261,8 @@ mod scorecard_tests {
 
     fn status(reachable: bool, sha: Option<&str>) -> FleetTargetStatus {
         FleetTargetStatus {
-            target_id: "monorepo".to_string(),
-            path: "/data/monorepo".to_string(),
+            target_id: "target-a".to_string(),
+            path: "/data/target-a".to_string(),
             reachable,
             baseline_count: 3,
             last_scan_sha: sha.map(str::to_string),
@@ -289,7 +289,7 @@ mod scorecard_tests {
 
         assert!(card.contains("2 target(s) · 41 corpus row(s) · 3 quality flag(s)"));
         assert!(card.contains("rev a1b2c3d4 (main) · 3 baseline(s) · 2C 5H open · 1 flag(s)"));
-        assert!(card.contains("UNREACHABLE · /data/monorepo"));
+        assert!(card.contains("UNREACHABLE · /data/target-a"));
     }
 
     #[test]

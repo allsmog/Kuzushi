@@ -431,13 +431,13 @@ fn models_dir_documents_compound_across_subsystem_files() {
     let models = temp.path().join("models");
     std::fs::create_dir_all(&models).unwrap();
     std::fs::write(
-        models.join("monorepo-a.json"),
+        models.join("subsystem-a.json"),
         json!({"threats": [{"id": "A1", "title": "a", "severity": "high", "cwe": "CWE-787"}]})
             .to_string(),
     )
     .unwrap();
     std::fs::write(
-        models.join("monorepo-b.json"),
+        models.join("subsystem-b.json"),
         json!({"threats": [{"id": "B1", "title": "b", "severity": "medium"}]}).to_string(),
     )
     .unwrap();
@@ -451,8 +451,8 @@ fn models_dir_documents_compound_across_subsystem_files() {
     let jobs = result["data"]["plan"]["jobs"].as_array().unwrap().clone();
     assert_eq!(jobs.len(), 2); // one pseudo-shard × two subsystem threats
     assert_eq!(jobs[0]["threatId"], "A1");
-    assert_eq!(jobs[0]["threatSource"], "monorepo-a");
-    assert_eq!(jobs[1]["threatSource"], "monorepo-b");
+    assert_eq!(jobs[0]["threatSource"], "subsystem-a");
+    assert_eq!(jobs[1]["threatSource"], "subsystem-b");
 }
 
 #[test]

@@ -1,7 +1,8 @@
 # J52 — Keyless demo via the picker ':demo' route, then interrupt honesty
-# Recovers J8/J9/J12's blocked states: the picker footer says ':demo offline
-# fixture'; verify that route works, then attempt a mid-run Ctrl+C and audit
-# the terminal states in jobs.
+# Recovers J8/J9/J12's blocked states. The picker footer now advertises the
+# escape hatch as a typed 'demo offline fixture', but ':' still opens the
+# picker prompt; verify that route works, then attempt a mid-run Ctrl+C and
+# audit the terminal states in jobs.
 name: Picker colon-demo entry and interrupt honesty
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY

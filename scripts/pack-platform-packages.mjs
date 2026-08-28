@@ -5,6 +5,7 @@ import {
   chmodSync,
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -18,6 +19,7 @@ import {
   nativePlatformPackages,
   nativeRuntimeBinaries,
 } from "./native-runtime-contract.mjs";
+import { packedInventoryFailures } from "./npm-pack-inventory-contract.mjs";
 
 const root = process.cwd();
 const destination = path.resolve(root, process.env.KUZUSHI_NPM_PACK_DESTINATION ?? "dist/npm");
@@ -59,6 +61,7 @@ function stageAndPack(platformPackage, nativeDir) {
   assertNativeDirectory(platformPackage.slug, nativeDir, executableNames);
   stageNativeExecutables(platformPackage, packageDir, nativeDir, executableNames);
   const packed = runNpmPack(packageDir);
+  assertPackedInventory(packageManifest.name, packed, executableNames);
   assertPackageBudgets(packageManifest.name, packed);
   return packageReceipt(platformPackage, packageManifest, packed);
 }
@@ -70,6 +73,20 @@ function assertNativeDirectory(slug, nativeDir, executableNames) {
     throw new Error(
       `native/${slug} must contain exactly ${expectedNames.join(", ")}; found ${actualNames.join(", ")}`,
     );
+  }
+  for (const executableName of expectedNames) {
+    const stat = lstatSync(path.join(nativeDir, executableName));
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new Error(`native/${slug}/${executableName} must be a regular file`);
+    }
+  }
+}
+
+function assertPackedInventory(packageName, packed, executableNames) {
+  const expected = ["package.json", ...executableNames.map((name) => `bin/${name}`)].sort();
+  const failures = packedInventoryFailures(packed, expected);
+  if (failures.length > 0) {
+    throw new Error(`${packageName} packed inventory is unsafe:\n- ${failures.join("\n- ")}`);
   }
 }
 

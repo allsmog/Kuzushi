@@ -31,7 +31,7 @@ Do not include local/generated/heavy artifacts or secrets:
 
 ## Command Used
 
-Run this from `/Users/operator/vibe-code`:
+Run this from `/workspace`:
 
 ```sh
 zip -r Kuzushi-deep-research.zip Kuzushi \

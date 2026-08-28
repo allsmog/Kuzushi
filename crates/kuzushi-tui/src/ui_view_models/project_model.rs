@@ -5,7 +5,12 @@ use super::{
 use crate::app::ProjectScopeTreeState;
 use crate::{ShellApp, ViewDataState};
 
+mod context_columns;
 mod document_rows;
+pub(crate) use context_columns::{
+    project_context_columns, ProjectContextCell, ProjectContextRow, ProjectContextTable,
+    CONTEXT_COLUMN_RULE,
+};
 use document_rows::project_model_document_rows;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

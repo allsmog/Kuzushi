@@ -15,7 +15,7 @@ The IRIS idea is to use LLMs to infer taint specifications, run static analysis 
 
 Kuzushi's adaptation keeps that source/sink and taint-spec workflow as inspiration, but drives the hunt from Kuzushi's context and threat-model modules. The intended flow is context/threat-model driven hunt planning, tree-sitter/ast-grep/Semgrep-style structural extraction, scoped agents, and the in-process cpg-rs dataflow backend (with optional CodeQL) for deeper evidence.
 
-The engine design also follows the concepts reviewed from `/Users/operator/Desktop/iris.pdf`: candidate API extraction, LLM taint-spec labeling, CodeQL-backed path detection, and contextual false-positive filtering.
+The engine design also follows concepts from the reviewed IRIS paper: candidate API extraction, LLM taint-spec labeling, CodeQL-backed path detection, and contextual false-positive filtering.
 
 ## Engine V1
 

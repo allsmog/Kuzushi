@@ -2,8 +2,9 @@
 
 use super::phase_cockpit::phase_cockpit_model_for_phase_with_journey;
 use super::{
-    journey_model, journey_phase_segment, threat_model_doc, FindingDetailModel, JourneyModel,
-    JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId, ReviewQueueMode,
+    journey_model, journey_phase_segment, journey_reality_projection, threat_model_doc,
+    FindingDetailModel, JourneyModel, JourneyPhaseStatus, PhaseCockpitModel, PhaseSurfaceId,
+    ReviewQueueMode,
 };
 use crate::app::{WorkbenchPage, WorkflowPhase};
 use crate::ShellApp;
@@ -228,20 +229,41 @@ fn review_queue_mode_for_completeness(
 }
 
 pub(crate) fn active_workbench_page(app: &ShellApp) -> WorkbenchPage {
-    let journey = journey_model(app);
-    active_workbench_page_with_journey(app, journey.as_ref())
+    active_workbench_page_with_phase_builder(app, |app| {
+        journey_reality_projection(app).map(|reality| reality.current)
+    })
 }
 
-fn active_workbench_page_with_journey(
+fn active_workbench_page_with_phase_builder<F>(app: &ShellApp, build_phase: F) -> WorkbenchPage
+where
+    F: FnOnce(&ShellApp) -> Option<WorkflowPhase>,
+{
+    immediate_workbench_page(app)
+        .or_else(|| build_phase(app).map(WorkbenchPage::from_phase))
+        .unwrap_or(WorkbenchPage::Review)
+}
+
+pub(crate) fn active_workbench_page_with_journey(
     app: &ShellApp,
     journey: Option<&JourneyModel>,
 ) -> WorkbenchPage {
+    active_workbench_page_with_reality_phase(app, journey.map(|journey| journey.current))
+}
+
+pub(crate) fn active_workbench_page_with_reality_phase(
+    app: &ShellApp,
+    reality_phase: Option<WorkflowPhase>,
+) -> WorkbenchPage {
+    immediate_workbench_page(app)
+        .or_else(|| reality_phase.map(WorkbenchPage::from_phase))
+        .unwrap_or(WorkbenchPage::Review)
+}
+
+fn immediate_workbench_page(app: &ShellApp) -> Option<WorkbenchPage> {
     app.router
         .workbench()
         .page()
         .or_else(|| unresolved_result_page(app))
-        .or_else(|| journey.map(|journey| WorkbenchPage::from_phase(journey.current)))
-        .unwrap_or(WorkbenchPage::Review)
 }
 
 /// While a phase attempt is unresolved (RESULT READY), the workbench stays
@@ -686,7 +708,15 @@ mod tests {
         app.router
             .workbench_mut()
             .set_page(Some(WorkbenchPage::Map));
-        assert_eq!(active_workbench_page(&app), WorkbenchPage::Map);
+        let journey_builds = Cell::new(0);
+
+        let page = active_workbench_page_with_phase_builder(&app, |_| {
+            journey_builds.set(journey_builds.get() + 1);
+            None
+        });
+
+        assert_eq!(page, WorkbenchPage::Map);
+        assert_eq!(journey_builds.get(), 0);
     }
 
     #[test]

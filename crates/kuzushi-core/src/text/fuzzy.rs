@@ -10,8 +10,8 @@ pub fn subsequence_score(haystack: &str, needle: &str) -> Option<i32> {
     if needle.is_empty() {
         return Some(0);
     }
-    let hay: Vec<char> = haystack.chars().flat_map(char::to_lowercase).collect();
-    let pat: Vec<char> = needle.chars().flat_map(char::to_lowercase).collect();
+    let hay = lowered_chars(haystack);
+    let pat = lowered_chars(needle);
     let mut score = 0;
     let mut hay_idx = 0;
     let mut prev_match: Option<usize> = None;
@@ -20,6 +20,56 @@ pub fn subsequence_score(haystack: &str, needle: &str) -> Option<i32> {
         let at = hay_idx + found;
         score += match_bonus(at, prev_match, haystack);
         prev_match = Some(at);
+        hay_idx = at + 1;
+    }
+    Some(score)
+}
+
+/// Score `needle` against `haystack` like [`subsequence_score`], but only from
+/// an anchored start: the first needle character must open `haystack` or one of
+/// its words.
+///
+/// Unanchored subsequence matching is fine for ranking a list the operator is
+/// already reading. It is not safe for completing a command the next keystroke
+/// can dispatch: `xu` is a subsequence of `conte`x`t b`u`ild`, so the
+/// permissive form leaves a two-key typo one Enter away from running a tool
+/// nobody named.
+pub fn anchored_subsequence_score(haystack: &str, needle: &str) -> Option<i32> {
+    let pat = lowered_chars(needle);
+    let Some(&first) = pat.first() else {
+        return Some(0);
+    };
+    let hay = lowered_chars(haystack);
+    anchor_indexes(&hay, first)
+        .filter_map(|start| score_from_anchor(haystack, &hay, &pat, start))
+        .max()
+}
+
+fn lowered_chars(value: &str) -> Vec<char> {
+    value.chars().flat_map(char::to_lowercase).collect()
+}
+
+/// Every index where `first` opens `hay` or one of its words.
+fn anchor_indexes(hay: &[char], first: char) -> impl Iterator<Item = usize> + '_ {
+    (0..hay.len()).filter(move |&at| hay[at] == first && opens_a_word(hay, at))
+}
+
+fn opens_a_word(hay: &[char], at: usize) -> bool {
+    at == 0
+        || hay
+            .get(at - 1)
+            .is_some_and(|ch| matches!(ch, ' ' | ':' | '-' | '.' | '_' | '/'))
+}
+
+fn score_from_anchor(haystack: &str, hay: &[char], pat: &[char], start: usize) -> Option<i32> {
+    let mut score = match_bonus(start, None, haystack);
+    let mut prev = start;
+    let mut hay_idx = start + 1;
+    for want in &pat[1..] {
+        let found = hay[hay_idx..].iter().position(|c| c == want)?;
+        let at = hay_idx + found;
+        score += match_bonus(at, Some(prev), haystack);
+        prev = at;
         hay_idx = at + 1;
     }
     Some(score)
@@ -94,6 +144,64 @@ mod tests {
         let segment = subsequence_score("run:scan", "scan").unwrap();
         let buried = subsequence_score("rescans", "scan").unwrap();
         assert!(segment > buried, "{segment} should beat {buried}");
+    }
+
+    #[test]
+    fn anchored_empty_needle_matches_everything() {
+        assert_eq!(anchored_subsequence_score("anything", ""), Some(0));
+    }
+
+    #[test]
+    fn anchored_keeps_the_abbreviations_operators_actually_type() {
+        for needle in ["c", "cb", "ctx", "con", "context b", "bu", "build"] {
+            assert!(
+                anchored_subsequence_score("context build", needle).is_some(),
+                "{needle:?} should still reach `context build`"
+            );
+        }
+    }
+
+    #[test]
+    fn anchored_rejects_a_needle_that_starts_mid_word() {
+        for needle in ["xu", "on", "ild", "ext"] {
+            assert_eq!(
+                anchored_subsequence_score("context build", needle),
+                None,
+                "{needle:?} starts inside a word and must not match"
+            );
+        }
+    }
+
+    #[test]
+    fn anchored_uses_a_later_word_start_when_the_first_hit_is_buried() {
+        // The first `e` in `workspace` is buried; the anchored match is the
+        // one that opens `export`.
+        assert!(anchored_subsequence_score("workspace export", "ex").is_some());
+        assert!(anchored_subsequence_score("taint-iris:hunt", "hunt").is_some());
+        assert!(anchored_subsequence_score("taint-iris:hunt", "iris").is_some());
+    }
+
+    #[test]
+    fn anchored_agrees_with_the_permissive_score_on_a_prefix_match() {
+        assert_eq!(
+            anchored_subsequence_score("scan", "sc"),
+            subsequence_score("scan", "sc")
+        );
+    }
+
+    #[test]
+    fn anchored_prefers_the_highest_scoring_anchor() {
+        // `s` opens both `scan` and `status`. Scoring only the first anchor
+        // charges a gap penalty across the whole first word; the best anchor
+        // keeps the consecutive run inside `status`.
+        let hay = lowered_chars("scan status");
+        let pat = lowered_chars("sta");
+        let first_anchor = score_from_anchor("scan status", &hay, &pat, 0).unwrap();
+        let best = anchored_subsequence_score("scan status", "sta").unwrap();
+        assert!(
+            best > first_anchor,
+            "best anchor {best} should beat the first anchor {first_anchor}"
+        );
     }
 
     #[test]

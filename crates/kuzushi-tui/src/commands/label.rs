@@ -113,7 +113,8 @@ pub enum ShellCommand {
     /// and reopen the Map planner for this revision.
     NextFresh,
     /// Open a specific engagement phase picker without changing workspace-
-    /// derived `next` semantics.
+    /// derived `next` semantics. Emitted by the direct phase verbs and
+    /// `phase <name>`.
     Phase(WorkflowPhase),
     /// Read (`None`) or set the operator autonomy posture — the always-visible
     /// authorization ceiling the dispatch gate enforces.

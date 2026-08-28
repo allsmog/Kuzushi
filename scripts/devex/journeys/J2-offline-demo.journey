@@ -1,6 +1,6 @@
 # J2 — Offline demo path
 # Persona: evaluator who won't paste a key yet. Two routes to the same value:
-# the `kuzushi demo` subcommand and the in-gate `d` offline route.
+# the `kuzushi demo` subcommand and the `demo` verb typed at the target gate.
 name: Offline demo path
 cwd: @TMP_TARGET
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
@@ -12,13 +12,13 @@ ask: `kuzushi demo` — does the output make a real scanner signal, redacted loc
 wait-for: 120 demo: ready for your code?
 wait: 3
 snap: demo-subcommand-settled
-# Route 2: the in-gate `d` escape hatch (bare launch → gates → d).
+# Route 2: the `demo` verb at the target gate (bare launch → gate → demo).
 env-unset: ANTHROPIC_API_KEY OPENAI_API_KEY
 env: HOME=@TMP_HOME KUZUSHI_REDUCED_MOTION=1
 launch:
 wait-for: 25 CHOOSE A TARGET
-keys: d
+submit: demo
 wait-for: 90 run completed
 snap: in-gate-demo
 expect: findings
-ask: In-gate `d` — same value as the subcommand route? Zero key, zero network, and the same honest scanner-signal proof state?
+ask: The in-gate `demo` verb — same value as the subcommand route? Zero key, zero network, and the same honest scanner-signal proof state?

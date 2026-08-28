@@ -1,5 +1,5 @@
 use super::*;
-use kuzushi_core::run_lifecycle::{PhaseReceiptProjection, RunItemStatus, WorkflowContinuation};
+use kuzushi_core::run_lifecycle::{PhaseReceiptProjection, WorkflowContinuation};
 
 #[derive(Debug, Clone)]
 pub(super) enum TypedReceiptResolution {
@@ -34,7 +34,7 @@ impl TypedReceiptResolution {
 
     pub(super) fn outcome(&self) -> PhaseAttemptOutcome {
         match self {
-            Self::Ready(receipt) => phase_outcome(receipt.status),
+            Self::Ready(receipt) => phase_attempt_outcome_from_run_status(receipt.status),
             Self::Invalid {
                 fallback_outcome, ..
             } => *fallback_outcome,
@@ -127,17 +127,6 @@ fn phase_action(continuation: &WorkflowContinuation) -> PhaseResultAction {
         }
         WorkflowContinuation::Retry { .. } => PhaseResultAction::RunAgain,
         WorkflowContinuation::NoFurtherAction { .. } => PhaseResultAction::Select,
-    }
-}
-
-fn phase_outcome(status: RunItemStatus) -> PhaseAttemptOutcome {
-    match status {
-        RunItemStatus::Completed | RunItemStatus::Skipped => PhaseAttemptOutcome::Completed,
-        RunItemStatus::Partial => PhaseAttemptOutcome::Partial,
-        RunItemStatus::Blocked => PhaseAttemptOutcome::Blocked,
-        RunItemStatus::Canceled => PhaseAttemptOutcome::Canceled,
-        RunItemStatus::Failed | RunItemStatus::Interrupted => PhaseAttemptOutcome::Failed,
-        RunItemStatus::Pending | RunItemStatus::Running => PhaseAttemptOutcome::Partial,
     }
 }
 

@@ -157,6 +157,9 @@ pub(crate) enum ViewHydrationKey {
     RunProjection {
         run_id: String,
     },
+    PhaseReceiptOutcome {
+        attempt_id: String,
+    },
     ScanStageReceipt {
         run_id: String,
     },
@@ -220,6 +223,9 @@ pub(crate) enum ViewHydrationValue {
     RunSummaryEntries(RunSummaryEntriesHydration),
     RunArtifactText(RunArtifactTextRead),
     RunProjection(Result<kuzushi_core::run_lifecycle::RunProjectionRead, String>),
+    PhaseReceiptOutcome(
+        Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
+    ),
     ScanStageReceipt(ScanStageReceiptState),
     FindingPatchTruth(FindingPatchTruthState),
     FindingAuditDataflow(FindingAuditDataflowState),

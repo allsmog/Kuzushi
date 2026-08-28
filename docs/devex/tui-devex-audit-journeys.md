@@ -28,7 +28,7 @@ even when nothing crashes.
 
 ```bash
 tmux new-session -d -s <name> -x <cols> -y <rows> \
-  'cd /Users/operator/vibe-code/Kuzushi && <env> ./target/debug/kuzushi <args>'
+  'cd /workspace/Kuzushi && <env> ./target/debug/kuzushi <args>'
 tmux capture-pane -t <name> -p      # plain text  → content / honesty audit
 tmux capture-pane -t <name> -e -p   # with ANSI    → color / style audit
 tmux send-keys   -t <name> <keys>   # real keystrokes: Tab Enter Escape C-c j k, literal text

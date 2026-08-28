@@ -4,6 +4,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { nativePlatformPackages, nativeRuntimePackages } from "./native-runtime-contract.mjs";
+import {
+  actionlintImageFailures,
+  callGraphActionPinFailures,
+  candidateWorkflowFailures,
+  platformPublisherFailures,
+  publisherWorkflowFailures,
+} from "./release-workflow-contract.mjs";
 
 const root = process.cwd();
 const manifest = readJson("package.json");
@@ -26,18 +33,18 @@ if (!rustToolchainSatisfiesMsrv(cargoRustVersion, toolchainChannel)) {
   );
 }
 
-for (const workflow of [".github/workflows/ci.yml", ".github/workflows/release.yml"]) {
+for (const workflow of [
+  ".github/workflows/ci.yml",
+  ".github/workflows/ci-full.yml",
+  ".github/workflows/release-candidate.yml",
+]) {
   checkWorkflowUsesToolchainFile(workflow);
 }
 checkNativeRuntimeContract();
 checkDynamicHostVersion();
 checkPlatformPackageVersions();
 checkWorkspaceLockVersions();
-checkNativeReleaseSmoke();
-checkReleaseAssemblyGate();
-checkReleaseCiGate();
-checkReleaseMetadata();
-checkPublishedReleaseSmoke();
+checkReleaseWorkflows();
 checkReleaseInstructions();
 
 if (process.env.GITHUB_REF_TYPE === "tag") {
@@ -67,7 +74,10 @@ function checkWorkflowUsesToolchainFile(relativePath) {
   if (/\btoolchain:\s*["']?\d+\.\d+/.test(source)) {
     failures.push(`${relativePath} must not pin a numeric Rust toolchain inline`);
   }
-  if (!source.includes("moonrepo/setup-rust@v1") || !source.includes("inherit-toolchain: true")) {
+  const installsWorkspaceToolchain =
+    /moonrepo\/setup-rust@(?:v1|[0-9a-f]{40})/.test(source) &&
+    source.includes("inherit-toolchain: true");
+  if (!installsWorkspaceToolchain) {
     failures.push(`${relativePath} must install Rust from rust-toolchain.toml`);
   }
 }
@@ -140,119 +150,29 @@ function checkReleaseInstructions() {
   }
 }
 
-function checkNativeReleaseSmoke() {
-  const workflow = readText(".github/workflows/release.yml");
-  for (const token of [
-    "node scripts/smoke-native-runtime.mjs",
-    "cargo test -p kuzushi-core fs_atomic::tests",
-    "cargo test -p kuzushi-core scan::subprocess::scan_cancellation::tests",
-    "cargo test -p kuzushi-cli mcp::tests",
-  ]) {
-    if (!workflow.includes(token)) failures.push(`release workflow must run ${token}`);
-  }
-}
-
-function checkReleaseAssemblyGate() {
-  const workflow = readText(".github/workflows/release.yml");
+function checkReleaseWorkflows() {
+  const workflowPaths = [
+    ".github/workflows/release-candidate.yml",
+    ".github/workflows/release.yml",
+    ".github/workflows/ci-full.yml",
+    ".github/workflows/published-release-smoke.yml",
+  ];
+  const workflows = workflowPaths.map((name) => ({ name, source: readText(name) }));
+  const [candidate, publisher, fullCi, publishedSmoke] = workflows.map(({ source }) => source);
   failures.push(
-    ...releaseAssemblyActivationFailures(workflow),
-    ...nativeReleaseMatrixFailures(workflow),
-    ...platformPackageAssemblyFailures(workflow),
+    ...candidateWorkflowFailures(candidate),
+    ...publisherWorkflowFailures(publisher),
+    ...platformPublisherFailures(readText("scripts/publish-platform-packages.mjs")),
+    ...callGraphActionPinFailures(workflows),
+    ...actionlintImageFailures(fullCi),
+    ...publishedSmokeFailures(publishedSmoke),
   );
 }
 
-function checkReleaseCiGate() {
-  const workflow = readText(".github/workflows/release.yml");
-  failures.push(
-    ...missingTokenFailures(workflow, "release workflow", [
-      "uses: ./.github/workflows/ci-full.yml",
-    ]),
-  );
-}
-
-function checkReleaseMetadata() {
-  const workflow = readText(".github/workflows/release.yml");
-  failures.push(
-    ...missingTokenFailures(workflow, "release workflow", [
-      "prerelease: ${{ contains(github.ref_name, '-') }}",
-    ]),
-  );
-}
-
-function checkPublishedReleaseSmoke() {
-  const releaseWorkflow = readText(".github/workflows/release.yml");
-  const smokeWorkflow = readText(".github/workflows/published-release-smoke.yml");
-  failures.push(
-    ...missingTokenFailures(releaseWorkflow, "release workflow", [
-      "needs: [publish-npm, github-release]",
-      "uses: ./.github/workflows/published-release-smoke.yml",
-      "version: ${{ github.ref_name }}",
-    ]),
-    ...missingTokenFailures(smokeWorkflow, "published smoke", [
-      "node scripts/smoke-published-release.mjs",
-      "ubuntu-latest",
-      "ubuntu-24.04-arm",
-      "macos-15-intel",
-      "macos-14",
-      "windows-latest",
-    ]),
-  );
-}
-
-function missingTokenFailures(source, subject, tokens) {
-  return tokens
-    .filter((token) => !source.includes(token))
-    .map((token) => `${subject} must contain ${token}`);
-}
-
-function releaseAssemblyActivationFailures(workflow) {
-  const activationFailures = [];
-  if (!workflow.includes("KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY")) {
-    activationFailures.push("release workflow must enable the pack release assembly gate");
-  }
-  const gatedVerifySteps = workflow.match(/KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY/g)?.length ?? 0;
-  if (gatedVerifySteps < 2) {
-    activationFailures.push(
-      "npm and GitHub release assembly must both enable the pack release gate",
-    );
-  }
-  return activationFailures;
-}
-
-function platformPackageAssemblyFailures(workflow) {
-  const missingTokens = ["pnpm pack:native-platforms", "node scripts/publish-platform-packages.mjs"]
-    .filter((token) => !workflow.includes(token))
-    .map((token) => `release assembly gate must mention ${token}`);
-  const optionalPlatforms = nativePlatformPackages
-    .filter(({ required }) => !required)
-    .map(({ slug }) => `release platform package ${slug} must block publication`);
-  return [...missingTokens, ...optionalPlatforms];
-}
-
-function nativeReleaseMatrixFailures(workflow) {
-  const matrixFailures = [];
-  if (!workflow.includes("timeout-minutes: 90")) {
-    matrixFailures.push("native release jobs must allow the 90-minute cross-platform build budget");
-  }
-  if (workflow.includes("continue-on-error")) {
-    matrixFailures.push("release jobs must not allow supported platform failures");
-  }
-  return [...matrixFailures, ...requiredNativeReleaseMatrixEntryFailures(workflow)];
-}
-
-function requiredNativeReleaseMatrixEntryFailures(workflow) {
-  return [
-    { runner: "ubuntu-latest", slug: "linux-x64" },
-    { runner: "ubuntu-24.04-arm", slug: "linux-arm64" },
-    { runner: "macos-15-intel", slug: "darwin-x64" },
-    { runner: "macos-14", slug: "darwin-arm64" },
-    { runner: "windows-latest", slug: "win32-x64" },
-  ]
-    .filter(
-      ({ runner, slug }) =>
-        !workflow.includes(`          - os: ${runner}\n            slug: ${slug}`),
-    )
-    .map(({ runner, slug }) => `release matrix must include ${slug} on ${runner}`);
+function publishedSmokeFailures(source) {
+  return ["ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-14", "windows-2025"]
+    .filter((runner) => !source.includes(runner))
+    .map((runner) => `published smoke must run on ${runner}`);
 }
 
 function nativePackageFailures() {

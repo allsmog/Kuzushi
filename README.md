@@ -154,8 +154,15 @@ Release platform policy is explicit:
 | Platform payload | Release status |
 | --- | --- |
 | `linux-x64` | Required; a failed build blocks publication. |
+| `linux-arm64` | Required; a failed build blocks publication. |
+| `darwin-x64` | Required; a failed build blocks publication. |
 | `darwin-arm64` | Required; a failed build blocks publication. |
-| `linux-arm64`, `darwin-x64`, `win32-x64` | Best effort; included in npm and GitHub artifacts only after that matrix leg succeeds. |
+| `win32-x64` | Required; a failed build blocks publication. |
+
+This checkout is prepared as `0.24.0-alpha.14`. It remains a release
+candidate until the nonpublishing candidate workflow and the separate tagged
+release workflow both pass. `npm install -g kuzushi` always installs the
+registry's current `latest`, which may differ from this checkout.
 
 ## Quick Start
 
@@ -253,6 +260,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi decision <F-0001\|fingerprint-prefix> --target <repo> --verdict confirmed\|rejected_false_positive\|suppressed\|deferred\|accepted_risk\|needs_review --reason <text> [--json]` | Append a human review decision for a persisted finding. This carries forward by durable identity and does not mutate scanner triage. |
 | `kuzushi runs list [--status completed,failed]\|show <runId>\|replay <runId> [--json]\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, replay, compare, or prune runs under `.kuzushi/v3/runs/<runId>/`. `replay` reduces the authoritative typed `items.jsonl` lifecycle and reports projection health; `--json` emits the machine-readable projection. `trace` prints non-authoritative diagnostics. |
 | `kuzushi export --target <repo> --out <path> [--format json\|jsonl\|sarif\|csv\|markdown-bundle] [--completeness all\|open\|complete] [--preview] [--allow-empty]` | Export or preview the canonical persisted findings projection with review state and provenance. |
+| `kuzushi proof defer <F-0001\|fingerprint-prefix> --target <repo> --reason <text> [--json]` | Record that empirical proof is deferred for one reviewed finding at its exact discovery generation. This is an operator decision, not evidence: it never changes proof confidence, the proof ladder, or a verification verdict, and a later observation of the same finding never inherits it. |
 | `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
 | `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
 | `kuzushi permissions [--target <repo>]` | Show the current model fallback, approval, headless-run, and sandbox policy summary. |

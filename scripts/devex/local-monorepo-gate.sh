@@ -276,7 +276,7 @@ kuzushi-core --lib capabilities::scan_recommender"}
     # (observed: p95 246ms saturated box / 174ms in-suite / ~34ms isolated,
     # against a 50ms budget). Run the suite without them, then enforce each
     # budget on a fair single-test run — identical coverage, honest signal.
-    PERF_ISOLATED_TESTS="workbench_warmed_input_to_paint_p95"
+    PERF_ISOLATED_TESTS="workbench_warmed_input_to_paint_p95 workbench_warmed_prompt_input_to_paint_p95"
     for crate in kuzushi-core kuzushi-tui kuzushi-cli; do
       skip_args=""
       if [ "$crate" = kuzushi-tui ]; then
@@ -299,7 +299,7 @@ kuzushi-core --lib capabilities::scan_recommender"}
     for t in $PERF_ISOLATED_TESTS; do
       perf_ok=""
       for attempt in 1 2 3; do
-        if cargo test -p kuzushi-tui --lib "$t" >>"$LOG" 2>&1; then
+        if cargo test -p kuzushi-tui --lib "$t" --locked -- --ignored --test-threads=1 >>"$LOG" 2>&1; then
           say "PASS perf-isolated $t (attempt $attempt/3)"
           perf_ok=1
           break

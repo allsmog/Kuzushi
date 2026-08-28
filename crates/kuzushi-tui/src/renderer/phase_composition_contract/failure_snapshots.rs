@@ -108,21 +108,7 @@ impl FailureFixture {
         let target = tempfile::tempdir().expect("failure card target");
         let attempt_id = persist_scenario_attempt(scenario, target.path());
         let workspace = WorkspaceTarget::new(target.path()).expect("failure card workspace");
-        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        app.set_viewport(TerminalViewport::new(width, height));
-        app.set_input_mode(InputMode::Navigate);
-        app.refresh_phase_attempt_projection();
-        assert!(
-            app.await_guided_phase_result_for_test(scenario.phase, attempt_id),
-            "{}: persisted attempt did not bind to the result card",
-            scenario.slug
-        );
-        if scenario.corrupt_ledger {
-            assert!(
-                app.engagement.phase_attempt_projection_is_degraded(),
-                "degraded_ledger scenario failed to degrade the projection"
-            );
-        }
+        let app = app_bound_to_scenario_attempt(scenario, &workspace, attempt_id, width, height);
         let target_root = target.path().to_path_buf();
         let canonical_target_root = target_root
             .canonicalize()
@@ -153,6 +139,39 @@ impl FailureFixture {
             )
             .replace(&self.target_name, "failure-target")
     }
+}
+
+/// Builds the shell over the workspace and binds the persisted attempt to the
+/// phase result card, so the fixture renders the same receipt an operator sees.
+fn app_bound_to_scenario_attempt(
+    scenario: &FailureScenario,
+    workspace: &WorkspaceTarget,
+    attempt_id: String,
+    width: u16,
+    height: u16,
+) -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), Some(workspace));
+    app.set_viewport(TerminalViewport::new(width, height));
+    app.set_input_mode(InputMode::Navigate);
+    app.refresh_phase_attempt_projection();
+    app.hydrate_view_keys_blocking(
+        workspace.root(),
+        vec![crate::ViewHydrationKey::PhaseReceiptOutcome {
+            attempt_id: attempt_id.clone(),
+        }],
+    );
+    assert!(
+        app.await_guided_phase_result_for_test(scenario.phase, attempt_id),
+        "{}: persisted attempt did not bind to the result card",
+        scenario.slug
+    );
+    if scenario.corrupt_ledger {
+        assert!(
+            app.engagement.phase_attempt_projection_is_degraded(),
+            "degraded_ledger scenario failed to degrade the projection"
+        );
+    }
+    app
 }
 
 fn persist_scenario_attempt(scenario: &FailureScenario, target: &Path) -> String {

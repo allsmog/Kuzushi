@@ -212,17 +212,14 @@ fn carried_rejected_decision_does_not_conflict_with_rejected_scanner_signal() {
 #[test]
 fn non_triage_review_decision_has_no_legacy_triage_verdict() {
     let finding = finding("demo.suppressed", 22, "reviewed under policy");
-    let decision = EffectiveReviewDecision {
-        decision: ReviewDecision {
-            verdict: ReviewDecisionVerdict::Suppressed,
-            author: TriageAuthor::Human,
-            confidence: 1.0,
-            rationale: "suppressed by approved review policy".to_string(),
-            dismiss_reason: None,
-            actor: None,
-        },
-        source: EffectiveReviewDecisionSource::DurableIdentity,
-    };
+    let decision = EffectiveReviewDecision::carried_from_identity(ReviewDecision {
+        verdict: ReviewDecisionVerdict::Suppressed,
+        author: TriageAuthor::Human,
+        confidence: 1.0,
+        rationale: "suppressed by approved review policy".to_string(),
+        dismiss_reason: None,
+        actor: None,
+    });
 
     assert_eq!(decision.decision_label(), "suppressed");
     assert!(decision.complete());

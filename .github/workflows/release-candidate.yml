@@ -1,0 +1,263 @@
+name: Release Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact package version expected at the selected workflow ref
+        required: true
+        type: string
+      expected_sha:
+        description: Full 40-character commit SHA expected at the selected workflow ref
+        required: true
+        type: string
+      quality_base_ref:
+        description: Prior release tag or full commit SHA for changed-code quality gates
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      expected_version:
+        description: Exact package version expected at the caller commit
+        required: true
+        type: string
+      expected_sha:
+        description: Full 40-character caller commit SHA
+        required: true
+        type: string
+      quality_base_ref:
+        description: Prior release tag or full commit SHA for changed-code quality gates
+        required: true
+        type: string
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  identity:
+    name: candidate-identity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_sha }}
+      - name: Bind candidate inputs to the caller commit
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          QUALITY_BASE_REF: ${{ inputs.quality_base_ref }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${EXPECTED_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_sha must be a lowercase 40-character commit SHA" >&2
+            exit 1
+          fi
+          if [[ "${EXPECTED_SHA}" != "${GITHUB_SHA}" ]]; then
+            echo "expected_sha must equal the caller commit ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ "${checked_out_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "checkout resolved ${checked_out_sha}, expected ${EXPECTED_SHA}" >&2
+            exit 1
+          fi
+          package_version="$(node -p 'require("./package.json").version')"
+          if [[ "${package_version}" != "${EXPECTED_VERSION}" ]]; then
+            echo "package version ${package_version} does not equal ${EXPECTED_VERSION}" >&2
+            exit 1
+          fi
+          if [[ ! "${QUALITY_BASE_REF}" =~ ^([0-9a-f]{40}|v[0-9A-Za-z][0-9A-Za-z._-]*)$ ]]; then
+            echo "quality_base_ref must be a full commit SHA or a v-prefixed release tag" >&2
+            exit 1
+          fi
+          quality_base_sha="$(git rev-parse --verify "${QUALITY_BASE_REF}^{commit}")"
+          if [[ "${quality_base_sha}" == "${EXPECTED_SHA}" ]]; then
+            echo "quality_base_ref must precede the candidate" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "${quality_base_sha}" "${EXPECTED_SHA}"; then
+            echo "quality_base_ref ${QUALITY_BASE_REF} is not an ancestor of the candidate" >&2
+            exit 1
+          fi
+          node scripts/check-release-contract.mjs
+          node scripts/check-secrets.mjs --base 0000000000000000000000000000000000000000 --head "${EXPECTED_SHA}"
+          node scripts/check-release-source.mjs "${EXPECTED_SHA}"
+
+  ci:
+    name: full-ci
+    needs: identity
+    uses: ./.github/workflows/ci-full.yml
+    with:
+      quality_base_ref: ${{ inputs.quality_base_ref }}
+    permissions:
+      contents: read
+
+  native-binaries:
+    needs: [identity, ci]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            slug: linux-x64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+          - os: macos-15-intel
+            slug: darwin-x64
+          - os: macos-14
+            slug: darwin-arm64
+          - os: windows-2025
+            slug: win32-x64
+    name: native-${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_sha }}
+      - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
+        with:
+          inherit-toolchain: true
+          cache: false
+      - run: node scripts/build-native-runtime.mjs
+      - name: Execute staged native runtime on its release platform
+        run: node scripts/smoke-native-runtime.mjs
+      - name: Exercise platform-specific process and atomic-write contracts
+        run: |
+          cargo test -p kuzushi-core fs_atomic::tests
+          cargo test -p kuzushi-core scan::subprocess::scan_cancellation::tests
+          cargo test -p kuzushi-core capabilities::recon::adapters::process::tests
+          cargo test -p kuzushi-cli mcp::tests
+      - name: Package native archive
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          PLATFORM_SLUG: ${{ matrix.slug }}
+        run: |
+          set -euo pipefail
+          staging="kuzushi-v${EXPECTED_VERSION}-${PLATFORM_SLUG}"
+          mkdir -p "${staging}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            cp "native/${PLATFORM_SLUG}"/*.exe "${staging}/"
+            7z a "${staging}.zip" "${staging}" > /dev/null
+          else
+            cp "native/${PLATFORM_SLUG}"/* "${staging}/"
+            tar -czf "${staging}.tar.gz" "${staging}"
+          fi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-candidate-native-${{ matrix.slug }}
+          path: |
+            kuzushi-*.tar.gz
+            kuzushi-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: assemble-candidate
+    needs: native-binaries
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.expected_sha }}
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: release-candidate-native-*
+          merge-multiple: true
+      - name: Stage every native platform
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in kuzushi-*.tar.gz; do
+            slug="${archive#"kuzushi-v${EXPECTED_VERSION}-"}"
+            slug="${slug%.tar.gz}"
+            mkdir -p "native/${slug}"
+            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
+            chmod 755 "native/${slug}"/kuzushi*
+          done
+          for archive in kuzushi-*.zip; do
+            slug="${archive#"kuzushi-v${EXPECTED_VERSION}-"}"
+            slug="${slug%.zip}"
+            mkdir -p "native/${slug}"
+            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
+          done
+      - name: Pack and verify the npm candidate
+        env:
+          KUZUSHI_VERIFY_PACK_RELEASE_ASSEMBLY: "1"
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          pnpm pack:native-platforms
+          pnpm verify:pack
+          node scripts/build-release-artifacts.mjs \
+            dist/release dist/npm . "${EXPECTED_SHA}" "${EXPECTED_VERSION}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-candidate-artifacts
+          path: dist/release/
+          if-no-files-found: error
+          retention-days: 7
+
+  local-tarball-smoke:
+    name: local-tarball-${{ matrix.slug }}
+    needs: assemble
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            slug: linux-x64
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+          - os: macos-15-intel
+            slug: darwin-x64
+          - os: macos-14
+            slug: darwin-arm64
+          - os: windows-2025
+            slug: win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.expected_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-candidate-artifacts
+          path: dist/release
+      - name: Install and execute the exact local tarballs
+        run: >-
+          node scripts/smoke-release-tarballs.mjs
+          dist/release "${{ inputs.expected_sha }}" "${{ inputs.expected_version }}" "${{ matrix.slug }}"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: local-tarball-smoke-${{ matrix.slug }}
+          path: local-tarball-smoke.json
+          if-no-files-found: error
+          retention-days: 7

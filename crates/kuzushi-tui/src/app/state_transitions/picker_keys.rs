@@ -557,7 +557,7 @@ impl ShellApp {
     fn defer_model_picker(&mut self) {
         self.log(
             "onboarding",
-            "model selection deferred — set one with /model <id>, or run `demo` for the offline fixture",
+            "model selection deferred — set one with `model <id>`, or run `demo` for the offline fixture",
         );
         if self.router.setup().editor() == Some(SetupEditor::Model) {
             self.return_to_setup_from_editor();

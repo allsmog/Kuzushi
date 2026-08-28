@@ -15,7 +15,15 @@ impl FindingDetailReport {
             next_action,
             patch_results,
             security_case: None,
+            proof_deferral: None,
         }
+    }
+
+    /// Attach the operator's recorded proof deferral for this exact discovery
+    /// generation. It is disclosed beside the proof state and never alters it.
+    pub fn with_proof_deferral(mut self, deferral: Option<ProofDeferralView>) -> Self {
+        self.proof_deferral = deferral;
+        self
     }
 
     /// Attach the append-only review history and project one canonical case
@@ -87,6 +95,9 @@ impl FindingDetailReport {
             self.proof_ladder.stage, self.proof_ladder.reason
         ));
         lines.push(format!("Next proof step: {}", self.proof_ladder.next_step));
+        if let Some(deferral) = &self.proof_deferral {
+            lines.push(format!("Proof deferral: {}", deferral.disclosure_line()));
+        }
     }
 
     fn append_triage_lines(&self, lines: &mut Vec<String>) {

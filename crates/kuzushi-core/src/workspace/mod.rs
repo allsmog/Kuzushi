@@ -16,7 +16,7 @@ pub mod tool_shelf;
 mod tests;
 
 pub use application::{
-    active_workspace_required_message, build_project_model_document,
+    active_workspace_required_message, build_project_model_document, changed_scan_input,
     discover_and_save_nested_project_scopes, discover_nested_project_scopes,
     export_scan_findings_sarif, export_scan_findings_sarif_with_run_summary,
     export_workspace_findings, export_workspace_findings_with_options,
@@ -30,7 +30,7 @@ pub use application::{
     write_program_scope_scaffold, ProjectModelDocument, ProjectModelSection,
     ProjectModelSectionOrigin, WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
     WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
-    WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
+    ChangedScanScope, WorkspaceFindingProvenanceSummary, WorkspaceFindingReviewContext,
     WorkspaceFindingsExportPreview, WorkspaceRemediationExportSummary, WorkspaceRunExportContext, WorkspaceStatus,
     WorkspaceVerificationExportSummary, PROJECT_MODEL_SCHEMA_VERSION,
 };

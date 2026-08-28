@@ -87,6 +87,10 @@ pub(crate) struct WorkbenchCache {
     path_states: BTreeMap<PathBuf, PathStateCache>,
     directory_listings: BTreeMap<PathBuf, DirectoryListingCache>,
     run_projections: BTreeMap<(PathBuf, String), RunProjectionCache>,
+    phase_receipt_outcomes: BTreeMap<
+        (PathBuf, String),
+        Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>,
+    >,
     run_artifact_texts: BTreeMap<(PathBuf, String, String), RunArtifactTextCache>,
     scan_stage_receipts: BTreeMap<(PathBuf, String), ScanStageReceiptState>,
     map_artifacts: MapArtifactsCache,
@@ -197,6 +201,24 @@ impl WorkbenchCache {
             target,
             &ViewHydrationKey::RunProjection {
                 run_id: run_id.to_string(),
+            },
+        )
+    }
+
+    pub(crate) fn cached_phase_receipt_outcome(
+        &self,
+        target: &Path,
+        attempt_id: &str,
+    ) -> ViewDataState<Result<Option<kuzushi_core::workflow_attempts::PhaseAttemptOutcome>, String>>
+    {
+        let map_key = (target.to_path_buf(), attempt_id.to_string());
+        if let Some(state) = self.phase_receipt_outcomes.get(&map_key) {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(
+            target,
+            &ViewHydrationKey::PhaseReceiptOutcome {
+                attempt_id: attempt_id.to_string(),
             },
         )
     }
@@ -421,6 +443,7 @@ impl WorkbenchCache {
         self.file_completion_values = None;
         self.bump_completion_generation();
         self.run_projections.clear();
+        self.phase_receipt_outcomes.clear();
         self.run_artifact_texts.clear();
         drop_unsettled_scan_stage_receipts(&mut self.scan_stage_receipts);
         self.finding_patch_truth.invalidate(None);
@@ -431,6 +454,21 @@ impl WorkbenchCache {
         self.scan_recommendations = None;
         self.prompt_overrides.invalidate();
         self.health_checks.clear();
+        self.clear_view_hydration_loading();
+    }
+
+    /// Refresh data derived from live target source without evicting durable
+    /// `.kuzushi` artifacts. Editor saves can arrive several times per second;
+    /// dropping Map, run, JSON, or revision caches here makes accepted phase
+    /// evidence oscillate through Loading even though those files did not
+    /// change.
+    pub(crate) fn invalidate_source_file_changes(&mut self) {
+        self.source_file = None;
+        self.mark_git_metadata_stale();
+        self.file_completion_values = None;
+        self.bump_completion_generation();
+        self.finding_patch_truth.invalidate(None);
+        self.scan_recommendations = None;
         self.clear_view_hydration_loading();
     }
 
@@ -528,6 +566,10 @@ impl WorkbenchCache {
     ) -> (bool, bool) {
         let path = roots.target.join(relative);
         let broad = path == roots.state;
+        if phase_receipt_source_changed(roots, &path, broad) {
+            self.phase_receipt_outcomes
+                .retain(|(target, _), _| target != roots.target);
+        }
         self.invalidate_named_artifact(relative);
         self.invalidate_path_caches(&path, &roots.state, broad);
         self.invalidate_run_caches(roots, &path, broad);
@@ -878,6 +920,10 @@ fn state_change_flags(roots: &StateArtifactRoots<'_>, path: &Path, broad: bool) 
         broad || is_findings_store_path(path),
         broad || path == roots.latest || run_metadata_path_changed(path, &roots.runs),
     )
+}
+
+fn phase_receipt_source_changed(roots: &StateArtifactRoots<'_>, path: &Path, broad: bool) -> bool {
+    broad || path.starts_with(&roots.runs) || path.starts_with(roots.state.join("workflow"))
 }
 
 fn is_project_scope_tree_path(path: &Path) -> bool {

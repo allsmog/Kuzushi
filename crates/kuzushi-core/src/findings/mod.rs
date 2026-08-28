@@ -11,7 +11,9 @@ pub(crate) mod test_support;
 mod tests;
 
 pub use application::{
-    compare_scan_runs, finding_confidence_label, finding_cwe_label, finding_evidence_preview,
+    compare_scan_runs, decision_is_review_actionable, finding_is_review_actionable,
+    review_decision_history_for, review_verdict_is_actionable, EffectiveReviewDecision,
+    EffectiveReviewStateIndex, finding_confidence_label, finding_cwe_label, finding_evidence_preview,
     finding_location, finding_remediation_hint, finding_source_label, finding_verdict_label,
     project_finding, severity_badge, severity_icon, ComparedFinding, FindingProjection,
     ReviewDecisionConflict, ScanComparisonClass, ScanFindingSignature, ScanRunComparison,

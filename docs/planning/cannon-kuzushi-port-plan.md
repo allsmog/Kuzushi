@@ -13,7 +13,7 @@
 > `strategy/` + `engagement/` modules and the findings-store fields. This plan re-sequences
 > around what is now real.
 >
-> **Source located:** cannon is at `/Users/operator/vibe-code/vuln-scan-cannon-harness`
+> **Source located:** cannon is at `/workspace/vuln-scan-cannon-harness`
 > (crate `cannon` v0.2.0, single binary, ~10k LOC). Fully readable; every cannon claim
 > below carries a `cannon:src/...` anchor. Kuzushi claims carry a `crates/...` anchor.
 
@@ -91,7 +91,7 @@ reframe. The hard invariants are unchanged: **no silent model fallback**, **mode
 
 ---
 
-## 2. Source map — cannon (`/Users/operator/vibe-code/vuln-scan-cannon-harness`)
+## 2. Source map — cannon (`/workspace/vuln-scan-cannon-harness`)
 
 Single crate, `cannon` v0.2.0. The CLI *is* the phase flow:
 `aim → map → permute/queue → fire → triage → manage → prove → chain → fix → measure/tune`

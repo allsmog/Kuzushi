@@ -1,14 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::adapters::auth_bridge::{
-        auth_ping_envelope, bridge_ping_error, bridge_ping_summary, parse_bridge_stdout,
-        run_auth_ping_bridge,
-    };
+    use crate::adapters::auth_bridge::{bridge_ping_error, bridge_ping_summary};
     use crate::adapters::auth_oauth::{
         anthropic_missing_credential_message, anthropic_oauth_readiness_message, auth_ping_model,
         openai_missing_credential_message,
     };
-    use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
+    use crate::adapters::auth_ping::auth_ping_provider_kind;
     use crate::application::config::{config_command, ensure_config_init_allowed};
     use crate::application::findings::findings_command;
     use crate::application::review_decisions::decision_command;
@@ -2585,7 +2582,7 @@ mod tests {
 
     #[test]
     fn bridge_ping_error_and_summary_parse_bridge_json() {
-        let parsed = parse_bridge_stdout(
+        let parsed: kuzushi_openai::PingBridgeResponse = serde_json::from_slice(
             br#"{"ok":true,"auth_mode":"oauth","latency_ms":7,"input_tokens":2,"output_tokens":3,"cost_usd":0.0042}"#,
         )
         .unwrap();
@@ -2596,40 +2593,59 @@ mod tests {
             "round-trip ok via oauth (7ms, 2/3 tokens, ~$0.00420)"
         );
 
-        let failed = serde_json::json!({"ok": false, "error": "bad credentials"});
+        let failed: kuzushi_openai::PingBridgeResponse =
+            serde_json::from_value(serde_json::json!({"ok": false, "error": "bad credentials"}))
+                .unwrap();
         assert_eq!(
             bridge_ping_error(&failed),
             Some("bad credentials".to_string())
         );
     }
 
+    /// The ping envelope carries the credential env of the *model's* provider,
+    /// so a config whose `runtime.api_key_env` names another provider cannot
+    /// smuggle that provider's secret into the request.
     #[test]
-    fn auth_ping_envelope_uses_the_runtime_oauth_contract() {
-        let temp = tempfile::tempdir().unwrap();
-        let credentials_path = temp.path().join("oauth.json");
-        let mut config = kuzushi_core::V2Config::default();
-        config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
-            credentials_path: Some(credentials_path.clone()),
-            allow_env_token: false,
-        });
+    fn auth_ping_binds_the_envelope_to_the_model_provider() {
+        let anthropic = kuzushi_core::runtime::require_model_auth_binding(
+            auth_ping_provider_kind("anthropic").unwrap(),
+            "anthropic:claude-haiku-4-5",
+            "ANTHROPIC_API_KEY",
+        )
+        .unwrap();
+        assert_eq!(anthropic.api_key_env, "ANTHROPIC_API_KEY");
 
-        let envelope = auth_ping_envelope(&config, "openai-codex:gpt-5.5".to_string()).unwrap();
+        // The shipped default config: an OpenAI credential env plus the
+        // default `anthropic` positional provider.
+        let config = kuzushi_core::V2Config::default();
+        let error = kuzushi_core::runtime::require_model_auth_binding(
+            auth_ping_provider_kind("anthropic").unwrap(),
+            "anthropic:claude-haiku-4-5",
+            &config.runtime.api_key_env,
+        )
+        .expect_err("OPENAI_API_KEY must not authenticate an Anthropic ping")
+        .to_string();
+        assert!(error.contains("ANTHROPIC_API_KEY"), "{error}");
 
-        assert_eq!(
-            envelope["protocolVersion"],
-            kuzushi_openai::LANGGRAPH_BRIDGE_PROTOCOL_VERSION
+        let crossed = kuzushi_core::runtime::require_model_auth_binding(
+            auth_ping_provider_kind("anthropic").unwrap(),
+            "openai:gpt-5.5",
+            &config.runtime.api_key_env,
+        )
+        .expect_err("an OpenAI model must not answer an Anthropic ping")
+        .to_string();
+        assert!(
+            crossed.contains("will not forward a credential across providers"),
+            "{crossed}"
         );
-        assert_eq!(
-            envelope["oauthCredentialsPath"],
-            credentials_path.display().to_string()
-        );
-        assert_eq!(envelope["oauthAllowEnvToken"], false);
     }
 
+    /// The ping runs through the strict bridge runner, so a bridge that exits
+    /// nonzero is a failure even when it printed a success document.
     #[test]
     fn run_auth_ping_bridge_round_trips_json_over_stdio() {
-        let mut log = AuthPingLog::default();
-        let envelope = serde_json::json!({
+        let temp = tempfile::tempdir().unwrap();
+        let success = serde_json::json!({
             "ok": true,
             "auth_mode": "echo",
             "latency_ms": 1,
@@ -2638,9 +2654,65 @@ mod tests {
             "cost_usd": 0.0
         });
 
-        let parsed = run_auth_ping_bridge(&["cat".to_string()], &envelope, &mut log).unwrap();
+        let ok_bridge = fake_ping_bridge(temp.path(), "ok.sh", &success.to_string(), 0);
+        let parsed = ping_runtime(&ok_bridge)
+            .auth_ping_blocking("openai-codex:gpt-5.5")
+            .unwrap();
+        assert!(parsed.ok);
+        assert_eq!(bridge_ping_error(&parsed), None);
+        assert_eq!(parsed.auth_mode.as_deref(), Some("echo"));
 
-        assert_eq!(parsed, envelope);
+        let lying_bridge = fake_ping_bridge(temp.path(), "lying.sh", &success.to_string(), 3);
+        let error = ping_runtime(&lying_bridge)
+            .auth_ping_blocking("openai-codex:gpt-5.5")
+            .expect_err("a nonzero bridge exit must not report a healthy round trip")
+            .to_string();
+        assert!(error.contains("auth ping bridge exited with"), "{error}");
+    }
+
+    #[cfg(unix)]
+    fn fake_ping_bridge(
+        dir: &std::path::Path,
+        name: &str,
+        stdout: &str,
+        exit_code: i32,
+    ) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = dir.join(name);
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ncat > /dev/null\nprintf '%s' '{stdout}'\nexit {exit_code}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    /// A runtime whose OAuth bag is already usable, so the ping reaches the
+    /// bridge instead of stopping at credential validation.
+    #[cfg(unix)]
+    fn ping_runtime(bridge: &std::path::Path) -> kuzushi_openai::LangGraphRuntime {
+        let oauth = bridge.parent().unwrap().join("oauth-credentials.json");
+        std::fs::write(
+            &oauth,
+            serde_json::json!({
+                "openai-codex": {
+                    "access": "test-access-token",
+                    "refresh": "test-refresh-token",
+                    "expires": 4_102_444_800_000_u64
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut config = kuzushi_core::V2Config::default();
+        config.runtime.langgraph_bridge_command = Some(vec![bridge.to_string_lossy().into_owned()]);
+        config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
+            credentials_path: Some(oauth),
+            allow_env_token: false,
+        });
+        kuzushi_openai::LangGraphRuntime::from_config(&config, bridge.parent().unwrap()).unwrap()
     }
 
     #[test]

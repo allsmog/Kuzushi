@@ -15,18 +15,26 @@ part of every release commit.
   host-owned; module authors should use `actorFingerprint` for a producer-side
   observation id.
 
+## Current release status
+
+`0.24.0-alpha.14` is the next candidate. `0.24.0-alpha.13` was a failed
+release attempt and was never published; do not create or reuse its tag.
+Preparing a candidate does not publish npm packages, create a GitHub Release,
+or change repository visibility.
+
 ## Prerequisites
 
-- Node.js 22 or newer (`node --version`); this must match `engines.node` in the
-  published package
-- npm login: `npm whoami` should show your username
-- Push access to `github.com/allsmog/Kuzushi`
-- `NPM_TOKEN` secret set in GitHub repo settings (for automated CI releases)
+- Node.js 22 or newer (`node --version`), matching `engines.node`
+- GitHub CLI authentication and push access to `github.com/allsmog/Kuzushi`
+- For the later tagged release only, an npm token available to the release
+  workflow as `NPM_TOKEN`
 
-## Prepare a release (from your machine)
+## Prepare and verify a nonpublishing candidate
+
+Run the local gates, bump every machine-owned version source, and commit the
+candidate without tagging it:
 
 ```sh
-# 1. Make sure release gates pass locally
 pnpm check:docs
 pnpm quality:architecture
 pnpm quality:model-safety
@@ -37,72 +45,126 @@ cargo test --workspace
 pnpm build:native
 pnpm verify:pack
 
-# 2. Consistently bump the launcher and platform package manifests, Cargo
-#    workspace/lock entries, and the dynamic-module host protocol version.
-node scripts/bump-release-version.mjs 0.24.0-alpha.13
+node scripts/bump-release-version.mjs 0.24.0-alpha.14
 pnpm check:release
 
-# 3. Commit every source updated by the bump, plus the changelog, and tag
 git add package.json pnpm-lock.yaml npm/platform-packages Cargo.toml Cargo.lock scripts/kuzushi-dynamic-module-host.mjs CHANGELOG.md RELEASING.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
-git tag "v$(node -p 'require("./package.json").version')"
-
-# 4. Push commit + tag (triggers GitHub Release workflow and npm publish)
-git push origin main --tags
 ```
 
-Do not publish from the local package build. `pnpm publish:npm:go` fails
-closed by design because `pnpm build:native` stages only the current host.
-The tag-triggered workflow is the sole publishing path and requires
-`linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`, and `win32-x64`
-payloads before npm publication can run. It
-publishes one exact-version optional package per successful platform, then the
-thin `kuzushi` launcher.
-
-## Automated Release (via CI)
-
-Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
-
-1. Runs the full reusable CI suite, including the hard-blocking e2e npm-wrapper smoke.
-2. Builds native binaries for linux-x64, linux-arm64, darwin-x64,
-   darwin-arm64, and win32-x64. Every platform blocks publication if its build,
-   platform contract, packaging, or artifact upload fails.
-3. Stages the CLI and every advertised MCP server from each green build into
-   `native/<platform>-<arch>/`, then packs each directory as
-   `@kuzushi/<platform>-<arch>`.
-4. Executes each platform's staged CLI plus every advertised MCP health check
-   with an empty inherited `PATH`, runs the platform-specific process/atomic
-   tests, then runs `pnpm verify:pack` against the thin launcher and platform
-   packages.
-5. Publishes the available platform packages first and the thin `kuzushi`
-   launcher last (requires `NPM_TOKEN` and access to the `@kuzushi` scope).
-6. Creates a GitHub Release with changelog, the thin launcher tarball,
-    platform npm packages, and CLI-plus-MCP native archives. The native archives
-    intentionally omit Node dependencies; model-backed and dynamic-Node tools
-    use npm or source.
-7. Installs the public npm version into a clean prefix on all five supported
-   platform/architecture pairs, then runs both command wrappers, `doctor`, and
-   the offline demo. Each leg uploads a JSON consumer receipt.
+Push the reviewed commit to `main`, then dispatch `release-candidate.yml` at
+that exact commit. Supply a previous reachable release tag, or a full ancestor
+commit for the first release, as the quality baseline:
 
 ```sh
-# If you've already published manually, just push the tag:
-git push origin main --tags
+candidate_sha="$(git rev-parse HEAD)"
+candidate_version="$(node -p 'require("./package.json").version')"
+quality_base_ref="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)"
+
+gh workflow run release-candidate.yml --ref main \
+  -f expected_sha="${candidate_sha}" \
+  -f expected_version="${candidate_version}" \
+  -f quality_base_ref="${quality_base_ref}"
 ```
 
-## Setting up NPM_TOKEN for CI
+The candidate workflow requires `expected_sha` to equal the workflow commit,
+runs reusable full CI, builds all five native targets, installs the exact root
+and matching platform tarballs on all five target runners, and uploads one
+`release-candidate-artifacts` bundle. Its `release-manifest.json` receipt binds
+the source commit and version to every npm package, native archive, and source
+archive with byte size, SHA-256, and npm integrity where applicable. The
+workflow has read-only repository permission and no npm credential.
 
-1. Go to https://www.npmjs.com → Access Tokens → Generate New Token (Classic, Automation type)
-2. Go to GitHub repo → Settings → Secrets and variables → Actions
-3. Add `NPM_TOKEN` with the token value
+A later tag run rebuilds these files and repeats every candidate check. It does
+not promote bytes from an earlier manual candidate run.
 
-## Verifying a release
+## Repository visibility gate
+
+This gate governs repository visibility only. Do not make the repository public
+until every item below has an operator-owned receipt. It does not gate creating
+a release tag or publishing to npm; see the recorded decision below.
+
+1. Build the all-ref history rewrite in an offline mirror from the verified
+   backup bundle. Record the old-to-new map for every advertised head and tag,
+   and verify topology, author/committer identity and dates, metadata-only tree
+   equality, the path-scoped content allowlist, and zero private identifiers or
+   prohibited attribution across every rewritten ref.
+2. With separate operator authorization and while the repository is private,
+   force-update every advertised head and rewritten tag. Verify the remote ref
+   map exactly matches the reviewed mirror before continuing.
+3. Obtain GitHub Support confirmation that immutable pull-request refs and old
+   sensitive object IDs have been purged from repository storage and caches.
+   Verify the named old SHAs are no longer fetchable and that the contributor
+   graph cannot recover the prohibited attribution. Rewriting branch and tag
+   tips alone is not sufficient.
+4. Confirm the Alpha14 candidate runs at the rewritten `main` commit and its
+   downloaded bundle passes `node scripts/verify-release-artifacts.mjs
+   <directory> <sha> 0.24.0-alpha.14`.
+5. Obtain npm unpublish or registry-support cleanup for the exact
+   `kuzushi@0.24.0-alpha.10` and `kuzushi@0.24.0-alpha.12` root packages. They
+   contain private identifiers. Moving `latest` to Alpha14 does not make an
+   exact historical version unavailable.
+6. Remove or replace the corresponding root npm tarball assets on the
+   `v0.24.0-alpha.10` and `v0.24.0-alpha.12` GitHub Releases. If an asset is
+   replaced, record the approved clean file's SHA-256 and verify the downloaded
+   bytes against it.
+7. Verify the two exact npm versions are no longer downloadable, or retain the
+   registry support confirmation that provides the equivalent restriction.
+   Verify each GitHub Release asset list and download before recording the gate
+   complete.
+
+This work requires separate operator authorization. The release workflow does
+not delete or rewrite historical registry content.
+
+### Recorded decision, 2026-08-28: the visibility gate does not block Alpha14
+
+Decided by the repository owner on 2026-08-28. The seven items above were
+previously written to block the Alpha14 tag as well as public visibility. They
+now block public visibility only.
+
+Rationale: `0.24.0-alpha.10` and `0.24.0-alpha.12` are already published and
+already carry private identifiers. Publishing a scrubbed `0.24.0-alpha.14` at
+the `latest` dist-tag strictly reduces exposure, because every new install
+resolves to the scrubbed package instead of a contaminated one, and it is the
+prerequisite for deprecating alpha.10 and alpha.12. Withholding the tag leaves
+`latest` pointing at contaminated bytes and improves nothing. The repository
+stays private until this gate is complete, so the history rewrite and support
+confirmations remain required work rather than cancelled work.
+
+## Publish the tagged release
+
+The tag-triggered workflow is the sole publishing path. Create the tag only
+after the candidate gate is complete and the release commit is the current
+`origin/main`. The repository visibility gate above is not a tag prerequisite:
 
 ```sh
-npm view kuzushi version          # check published version
-npm install -g kuzushi && kuzushi --version   # install and verify
+git fetch origin main --tags
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+version="$(node -p 'require("./package.json").version')"
+git tag "v${version}" "$(git rev-parse HEAD)"
+git push origin "v${version}"
+```
 
-# Rerun the five-platform public-package smoke for an existing release.
-gh workflow run published-release-smoke.yml -f version=0.24.0-alpha.13
+`.github/workflows/release.yml` refuses a tag that does not match the package
+version or current `origin/main`. It then calls the candidate workflow, rehashes
+the complete receipt, publishes all five exact-version platform packages, and
+publishes the thin `kuzushi` launcher last. Every npm publish uses the `latest`
+dist-tag. A matching already-published file is reused; a byte mismatch fails.
+Only after npm succeeds does the workflow create the GitHub Release and run the
+five-platform public-package smoke.
+
+Do not publish from a local package build. `pnpm publish:npm:go` fails closed
+because `pnpm build:native` stages only the current host.
+
+## Verify a tagged release
+
+```sh
+npm view kuzushi version
+npm view kuzushi@0.24.0-alpha.14 dist.integrity
+npm install -g kuzushi@0.24.0-alpha.14
+kuzushi --version
+
+gh workflow run published-release-smoke.yml -f version=0.24.0-alpha.14
 ```
 
 ## Surface Compatibility Migrations
@@ -292,20 +354,14 @@ symlinks, and oversized source files now fail as infrastructure input errors.
 
 ## If a version is already published
 
-npm doesn't allow republishing the same version. Bump and try again:
+npm does not allow republishing the same version. Choose a new version, update
+the machine-owned version surfaces with the canonical bump script, and rerun the
+candidate workflow. Publish only through a new immutable release tag.
 
-```sh
-npm version patch --no-git-tag-version
-npm publish --access public
-```
+## If a release tag is wrong
 
-## If you need to force-update a tag
-
-```sh
-git tag -d v0.2.0
-git tag v0.2.0
-git push origin v0.2.0 --force
-```
+Do not move or force-update a release tag. Correct the problem in a new version,
+pass the candidate gates again, and create a new tag for that version.
 
 ## Suppression primitive migration (unreleased)
 

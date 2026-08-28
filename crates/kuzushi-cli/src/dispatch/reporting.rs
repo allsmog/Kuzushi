@@ -2,6 +2,7 @@ use crate::application::export::export_command;
 use crate::application::findings::{finding_command, findings_command};
 use crate::application::permissions::permissions_command;
 use crate::application::pr_comment::pr_comment_command;
+use crate::application::proof_deferrals::proof_command;
 use crate::application::review_decisions::decision_command;
 use crate::application::runs::runs_command;
 use crate::application::suppressions::{suppress_command, suppressions_command};
@@ -37,6 +38,7 @@ pub(super) fn dispatch_reporting_command(
             export_command(target, output, format, completeness, preview, allow_empty)
         }
         suppress @ Command::Suppress { .. } => dispatch_suppress_command(suppress, default_target),
+        Command::Proof { command } => proof_command(command, default_target),
         Command::Suppressions { json } => suppressions_command(default_target, json),
         Command::Permissions { json } => permissions_command(default_target, json),
         Command::Doctor { json } => {

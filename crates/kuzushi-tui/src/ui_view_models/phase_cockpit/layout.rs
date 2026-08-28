@@ -212,6 +212,9 @@ fn screen_composition(
     if let Some(composition) = ready_map_composition(body, density) {
         return composition;
     }
+    if let Some(composition) = sparse_map_status_composition(body, density, visible) {
+        return composition;
+    }
     if !matches!(density, LayoutDensity::Dense | LayoutDensity::MasterDetail) {
         return columns();
     }
@@ -232,6 +235,28 @@ fn ready_map_composition(body: &PhaseCockpitBody, density: LayoutDensity) -> Opt
         canvas: PhaseSurfaceId::MapDfd,
         drawer: None,
     })
+}
+
+/// An unbuilt Map has only its readiness card, so the generic column solver
+/// handed one status card the entire body: on a 160-column terminal every row
+/// stopped near column 90 inside a 124-column pane. A card that exists to ask
+/// for an action is a form, not a workspace, so it gets the centered-form
+/// width cap instead. Scoped to Map — the other phases keep their matrix.
+fn sparse_map_status_composition(
+    body: &PhaseCockpitBody,
+    density: LayoutDensity,
+    visible: &[&PhaseSurfaceSpec],
+) -> Option<Composition> {
+    let spec = visible.first()?;
+    let sparse_map = density == LayoutDensity::Sparse && matches!(body, PhaseCockpitBody::Map(_));
+    (sparse_map && awaits_operator_action(spec.state)).then_some(Composition::CenteredForm(spec.id))
+}
+
+fn awaits_operator_action(state: SurfaceState) -> bool {
+    matches!(
+        state,
+        SurfaceState::Missing | SurfaceState::Blocked | SurfaceState::Stale
+    )
 }
 
 fn rich_phase_composition(body: &PhaseCockpitBody, visible_count: usize) -> Option<Composition> {

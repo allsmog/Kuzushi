@@ -34,6 +34,10 @@ expect: target ./
 # partial-result cards own the expanded PROJECT CONTEXT label.
 expect-wide: 80 context:
 expect-wide: 80 rev:
+# F5 (#172): above the collapse threshold each readiness receipt row spends
+# the card's width on the state and next-action cells the project model
+# already carries, instead of stopping mid-pane.
+expect-wide: 120 ▸ context
 ask: Map — with no accepted root scan baseline, is the single dominant NEXT action a root-level whole-repository scan, or does the page surface child-scope / non-root work without that gate?
 ask: Map — are the repository facts on screen (target name, revision, scope names, counts) derived from the real checkout rather than hard-coded or fabricated?
 keys: 2

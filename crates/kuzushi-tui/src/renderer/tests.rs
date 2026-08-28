@@ -6137,6 +6137,56 @@ fn workbench_warmed_input_to_paint_p95_stays_within_budget() {
     );
 }
 
+#[test]
+fn workbench_prompt_burst_paints_exact_draft_with_cached_large_ledger() {
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_latency_app();
+    app.set_input_mode(crate::InputMode::Prompt);
+
+    let draft = "typing-latency-0123456789-abcdefghijklmn";
+    type_prompt_burst(&mut app, draft);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+
+    assert_eq!(app.input(), draft);
+    let painted = format!("{:?}", terminal.backend().buffer());
+    assert!(painted.contains(draft), "{painted}");
+}
+
+#[test]
+#[ignore = "wall-clock performance gate; run serially with pnpm test:performance"]
+fn workbench_warmed_prompt_input_to_paint_p95_stays_within_budget() {
+    const SAMPLE_COUNT: usize = 60;
+    const SINGLE_KEY_BUDGET: std::time::Duration = std::time::Duration::from_millis(25);
+    const BURST_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
+    const BURST: &str = "typing-latency-0123456789-abcdefghijklmn";
+
+    let backend = TestBackend::new(120, 36);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = workbench_latency_app();
+    app.set_input_mode(crate::InputMode::Prompt);
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    for _ in 0..8 {
+        workbench_prompt_input_to_paint_sample(&mut terminal, &mut app, "x");
+        workbench_prompt_input_to_paint_sample(&mut terminal, &mut app, BURST);
+    }
+
+    let single_key = prompt_input_p95(&mut terminal, &mut app, "x", SAMPLE_COUNT);
+    let burst = prompt_input_p95(&mut terminal, &mut app, BURST, SAMPLE_COUNT);
+    eprintln!(
+        "warmed Workbench prompt-to-paint p95: single={single_key:?} (budget={SINGLE_KEY_BUDGET:?}), burst={burst:?} (budget={BURST_BUDGET:?})"
+    );
+
+    assert!(
+        single_key <= SINGLE_KEY_BUDGET,
+        "warmed single-key prompt-to-paint p95 {single_key:?} exceeded {SINGLE_KEY_BUDGET:?}"
+    );
+    assert!(
+        burst <= BURST_BUDGET,
+        "warmed prompt burst-to-paint p95 {burst:?} exceeded {BURST_BUDGET:?}"
+    );
+}
+
 fn workbench_latency_app() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_viewport(TerminalViewport::new(120, 36));
@@ -6164,7 +6214,50 @@ fn workbench_latency_app() -> ShellApp {
             })
             .collect(),
     );
+    let ledger_counts = crate::ui_view_models::finding_ledger_counts(
+        app.findings(),
+        app.review_decisions(),
+        app.findings().len(),
+    );
+    app.domain_mut().set_finding_ledger_counts(ledger_counts);
     app
+}
+
+fn prompt_input_p95(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut ShellApp,
+    input: &str,
+    sample_count: usize,
+) -> std::time::Duration {
+    let mut samples = (0..sample_count)
+        .map(|_| workbench_prompt_input_to_paint_sample(terminal, app, input))
+        .collect::<Vec<_>>();
+    samples.sort_unstable();
+    samples[(sample_count * 95).div_ceil(100) - 1]
+}
+
+fn workbench_prompt_input_to_paint_sample(
+    terminal: &mut Terminal<TestBackend>,
+    app: &mut ShellApp,
+    input: &str,
+) -> std::time::Duration {
+    app.set_input("");
+    let started = std::time::Instant::now();
+    type_prompt_burst(app, input);
+    terminal.draw(|frame| render_app(frame, app)).unwrap();
+    assert_eq!(app.input(), input);
+    started.elapsed()
+}
+
+fn type_prompt_burst(app: &mut ShellApp, input: &str) {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    for ch in input.chars() {
+        assert!(press_key(
+            app,
+            KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()),
+        ));
+    }
 }
 
 fn workbench_input_to_paint_sample(
@@ -7301,4 +7394,104 @@ fn phase_five_committed_module_views_render_descriptor_details() {
             );
         }
     }
+}
+
+/// #172: an unbuilt Map carries only its readiness card, and the generic
+/// column solver stretched that card across the whole 124-column body while
+/// its rows stopped near column 90. The card is now a width-capped centered
+/// form, and its rows spend that width on the state and next action the
+/// project model already carries.
+#[test]
+fn unbuilt_map_context_card_is_centered_and_carries_state_and_action() {
+    let target = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::Workbench);
+    app.set_target(Some(target.path().to_path_buf()));
+
+    let wide = render_phase_app(&app, 160, 48);
+    let (left, right) = cockpit_pane_span(&wide, "PROJECT CONTEXT")
+        .unwrap_or_else(|| panic!("no PROJECT CONTEXT card at 160x48:\n{wide}"));
+
+    assert!(
+        left >= 12,
+        "the readiness card must be a centered form, not the whole body: \
+         left rail at column {left}\n{wide}"
+    );
+    assert!(
+        right - left < 100,
+        "the readiness card must stay inside the centered-form cap: \
+         columns {left}..={right}\n{wide}"
+    );
+    assert!(
+        right >= 96,
+        "the card's rows must fill the card instead of stopping near column 90: \
+         rightmost painted column {right}\n{wide}"
+    );
+    assert!(wide.contains("root only"), "state cell missing:\n{wide}");
+    assert!(wide.contains("▸ next"), "action cell missing:\n{wide}");
+    assert!(
+        wide.contains("▸ context build"),
+        "action cell missing:\n{wide}"
+    );
+
+    let narrow = render_phase_app(&app, 80, 24);
+    let (narrow_left, _) = cockpit_pane_span(&narrow, "PROJECT CONTEXT")
+        .unwrap_or_else(|| panic!("no PROJECT CONTEXT card at 80x24:\n{narrow}"));
+
+    assert_eq!(
+        narrow_left, 0,
+        "an 80-column terminal keeps the full-width card:\n{narrow}"
+    );
+    assert!(
+        !narrow.contains("▸ context build"),
+        "80 columns cannot afford the action column; the row must collapse:\n{narrow}"
+    );
+}
+
+/// `(left rail column, rightmost painted column)` of a cockpit pane. Panes
+/// carry a left border only, so the right edge is measured from the rows that
+/// share the pane's rail, clipped to the pane so the context rail beside it
+/// cannot inflate the reading.
+fn cockpit_pane_span(rendered: &str, title: &str) -> Option<(usize, usize)> {
+    const PANE_COLUMN_LIMIT: usize = 100;
+    let rows: Vec<Vec<char>> = rendered.lines().map(|row| row.chars().collect()).collect();
+    let banner = rows
+        .iter()
+        .position(|row| row.iter().collect::<String>().contains(title))?;
+    let left = rows[banner].iter().position(|cell| *cell == '│')?;
+    let right = rows[banner..]
+        .iter()
+        .take_while(|row| row.get(left) == Some(&'│'))
+        .filter_map(|row| {
+            row.iter()
+                .take(left + PANE_COLUMN_LIMIT)
+                .rposition(|cell| !cell.is_whitespace())
+        })
+        .max()?;
+    Some((left, right))
+}
+
+/// Plain output projects the same receipt columns the Map card draws. The
+/// shared plain sanitizer folds the rule and the action marker to ASCII, so a
+/// scripted operator reads the state and next action without needing
+/// box-drawing glyph support.
+#[test]
+fn plain_project_model_rows_carry_the_same_state_and_action_cells() {
+    let target = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_shell_view(ShellView::ProjectModel);
+    app.set_target(Some(target.path().to_path_buf()));
+
+    let rendered = render_plain_app(&app, 120);
+
+    assert!(rendered.contains("root only"), "state cell: {rendered}");
+    assert!(rendered.contains("| > next"), "action cell: {rendered}");
+    assert!(
+        rendered.contains("| > context build"),
+        "action cell: {rendered}"
+    );
+    assert!(
+        !rendered.contains('│'),
+        "plain output must not depend on box drawing: {rendered}"
+    );
 }

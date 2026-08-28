@@ -139,6 +139,7 @@ fn review_fixture(state: SemanticFixture) -> ReviewPhaseModel {
 fn prove_fixture(state: SemanticFixture) -> ProvePhaseModel {
     let richness = state.richness();
     ProvePhaseModel {
+        deferral: None,
         finding: (richness >= 1).then(fixture_finding),
         attack_path: fixture_attack_path(richness >= 1),
         proof: (richness >= 2).then(|| fixture_proof(state == SemanticFixture::Stale)),

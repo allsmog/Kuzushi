@@ -5,6 +5,7 @@ import path from "node:path";
 import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 import { nativePlatformPackages } from "./native-runtime-contract.mjs";
+import { packedInventoryFailures } from "./npm-pack-inventory-contract.mjs";
 
 const repo = process.cwd();
 const manifest = readPackageManifest();
@@ -49,7 +50,17 @@ const allowedPackageEntries = [
   "bin",
   "scripts/native-runtime-contract.mjs",
   "scripts/langgraph-bridge.mjs",
-  "scripts/langgraph-bridge",
+  "scripts/langgraph-bridge/diagnostics.mjs",
+  "scripts/langgraph-bridge/errors.mjs",
+  "scripts/langgraph-bridge/file-tools.mjs",
+  "scripts/langgraph-bridge/grep-regex-runner.mjs",
+  "scripts/langgraph-bridge/grep-regex-worker.mjs",
+  "scripts/langgraph-bridge/mcp.mjs",
+  "scripts/langgraph-bridge/model.mjs",
+  "scripts/langgraph-bridge/oauth-login.mjs",
+  "scripts/langgraph-bridge/oauth-models.mjs",
+  "scripts/langgraph-bridge/process-exit.mjs",
+  "scripts/langgraph-bridge/schema.mjs",
   "scripts/kuzushi-dynamic-module-host.mjs",
   "schemas",
   "examples/kwp/agentic-fuzz",
@@ -221,6 +232,8 @@ for (const entry of includes) {
 
 const sorted = [...files].sort();
 const offenders = sorted.filter((file) => denied.some((pattern) => pattern.test(file)));
+const actualPack = readActualPackMetadata();
+const actualInventoryFailures = packedInventoryFailures(actualPack, sorted);
 const deniedFixtureFailures = deniedPathFixtureFailures();
 const packagePathShapeFailures = packagePayloadPathShapeFailures(includes);
 const packageEntryFailures = packageFilesEntryFailures(entries);
@@ -256,6 +269,7 @@ const bridgeDependencyFailures = packagedBridgeDependencyFailures(packageDepende
 
 if (
   offenders.length > 0 ||
+  actualInventoryFailures.length > 0 ||
   deniedFixtureFailures.length > 0 ||
   packagePathShapeFailures.length > 0 ||
   packageFileShapeFailures.length > 0 ||
@@ -291,6 +305,7 @@ if (
     process.stderr.write(`- ${offender}\n`);
   }
   for (const failure of [
+    ...actualInventoryFailures,
     ...nativeFailures,
     ...deniedFixtureFailures,
     ...packagePathShapeFailures,
@@ -326,6 +341,7 @@ if (
   process.exit(1);
 }
 
+runPrivateContextCheck();
 runArchitectureContractChecks();
 
 process.stdout.write(
@@ -352,6 +368,13 @@ function runArchitectureContractChecks() {
   });
 }
 
+function runPrivateContextCheck() {
+  execFileSync(process.execPath, ["scripts/check-private-context.mjs"], {
+    cwd: repo,
+    stdio: "inherit",
+  });
+}
+
 function readPackageManifest() {
   try {
     return JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
@@ -359,6 +382,22 @@ function readPackageManifest() {
     process.stderr.write("package artifact contract failed:\n");
     process.stderr.write(`- package.json must be valid JSON: ${error.message}\n`);
     process.exit(1);
+  }
+}
+
+function readActualPackMetadata() {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  try {
+    const output = execFileSync(npm, ["pack", "--dry-run", "--ignore-scripts", "--json"], {
+      cwd: repo,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const [packed] = JSON.parse(output);
+    if (packed && typeof packed === "object") return packed;
+    throw new Error("npm pack returned no package record");
+  } catch (error) {
+    return { files: [], inventoryError: error.message };
   }
 }
 
@@ -373,7 +412,7 @@ function readPackageContractText(file) {
 function packagedBridgeImports() {
   const files = [
     "scripts/langgraph-bridge.mjs",
-    ...walk("scripts/langgraph-bridge").filter((file) => file.endsWith(".mjs")),
+    ...sorted.filter((file) => file.startsWith("scripts/langgraph-bridge/")),
     "scripts/kuzushi-dynamic-module-host.mjs",
   ];
   return new Set(files.flatMap(externalImportsFrom));

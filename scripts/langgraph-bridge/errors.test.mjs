@@ -4,9 +4,7 @@ import { BridgePublicError, bridgeErrorResponse } from "./errors.mjs";
 import { modelOptions } from "./model.mjs";
 
 test("adaptive-thinking temperature validation has an actionable safe class", () => {
-  const error = new Error(
-    "temperature is not compatible with adaptive thinking for claude-orchid-5",
-  );
+  const error = new Error("temperature is not compatible with adaptive thinking");
   error.name = "InvocationParamCompatibilityError";
 
   const response = bridgeErrorResponse(error);
@@ -20,10 +18,15 @@ test("adaptive-thinking temperature validation has an actionable safe class", ()
 });
 
 test("adaptive-thinking models omit a caller-pinned temperature", () => {
-  const adaptive = modelOptions({ model: "anthropic:claude-orchid-5", temperature: 0 });
+  const adaptive = modelOptions({ model: "anthropic:claude-opus-4-7", temperature: 0 });
+  const datedAdaptive = modelOptions({
+    model: "vertex-anthropic:claude-opus-4-7-20260801",
+    temperature: 0,
+  });
   const ordinary = modelOptions({ model: "anthropic:claude-sonnet-4-5", temperature: 0 });
 
   assert.equal(adaptive.temperature, undefined);
+  assert.equal(datedAdaptive.temperature, undefined);
   assert.equal(ordinary.temperature, 0);
 });
 

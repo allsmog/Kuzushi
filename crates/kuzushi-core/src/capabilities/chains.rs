@@ -740,8 +740,8 @@ mod tests {
     #[test]
     fn surface_key_folds_leading_directories() {
         assert_eq!(
-            surface_key("src/cpp/code/appliance/agentserver/netapp/client.cpp"),
-            "src/cpp/code/appliance"
+            surface_key("src/cpp/code/svc/agentserver/netapp/client.cpp"),
+            "src/cpp/code/svc"
         );
         assert_eq!(surface_key("main.cpp"), "");
     }

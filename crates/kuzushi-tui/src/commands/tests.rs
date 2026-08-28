@@ -668,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn canonical_phase_verbs_open_only_the_requested_phase() {
+    fn canonical_phase_verbs_open_the_requested_phase_picker() {
         for (verb, phase) in [
             ("map", WorkflowPhase::Map),
             ("scan", WorkflowPhase::Scan),

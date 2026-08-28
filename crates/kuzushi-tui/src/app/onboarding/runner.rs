@@ -1424,7 +1424,7 @@ mod tests {
         };
 
         assert!(app.step_configures_write_path(&step(json!({"workspaceRoot": "/tmp/ws"}))));
-        assert!(!app.step_configures_write_path(&step(json!({"afeTarget": "appliance_regf"}))));
+        assert!(!app.step_configures_write_path(&step(json!({"afeTarget": "svc_regf"}))));
         assert_eq!(
             planning_step_authorization(PlanningTaskId::ScanFuzz, true),
             ExecutionAuthorization::interactive_request()

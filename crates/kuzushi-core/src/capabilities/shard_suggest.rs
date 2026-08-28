@@ -539,7 +539,9 @@ mod tests {
 
         let draft_path = PathBuf::from(first["data"]["draftPath"].as_str().unwrap());
         let body = std::fs::read_to_string(&draft_path).unwrap();
-        let manifest: toml::Value = body.parse().unwrap();
+        // `toml` 1.x parses `Value::from_str` as a bare value expression, so a
+        // whole manifest document has to go through `toml::from_str`.
+        let manifest = toml::from_str::<toml::Value>(&body).unwrap();
         let shard_table = manifest.get("shards").and_then(toml::Value::as_table).unwrap();
         assert_eq!(shard_table.len(), 5);
         assert!(body.contains("# signals: parse(6) recv(3)"), "{body}");

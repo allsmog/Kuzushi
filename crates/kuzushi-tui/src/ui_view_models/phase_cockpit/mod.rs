@@ -254,6 +254,10 @@ pub(crate) struct ProvePhaseModel {
     /// recorded path beside the operator-requested expansion from the
     /// durable static-evidence store.
     pub(crate) trace: Option<TraceEvidenceModel>,
+    /// The operator's durable decision to postpone proof for exactly this
+    /// finding generation. A decision, never evidence: it is disclosed beside
+    /// the status and never moves proof confidence or the ladder.
+    pub(crate) deferral: Option<kuzushi_core::workflow_attempts::ProofDeferralView>,
 }
 
 /// The data-flow evidence graph for one finding. The original path is what

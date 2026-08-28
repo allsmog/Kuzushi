@@ -104,6 +104,44 @@ pub(crate) struct BridgeRequest {
     pub(crate) temperature: Option<f32>,
 }
 
+/// `type: "ping"` envelope consumed by the bridge's `handlePing`. The wire
+/// keys are unchanged from the previously hand-built JSON object, so the Node
+/// bridge needs no migration.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PingBridgeRequest {
+    pub(crate) protocol_version: u32,
+    #[serde(rename = "type")]
+    pub(crate) envelope_type: &'static str,
+    pub(crate) model: String,
+    pub(crate) api_key_env: String,
+    pub(crate) api_key: Option<String>,
+    pub(crate) oauth_credentials_path: String,
+    pub(crate) oauth_allow_env_token: bool,
+    pub(crate) base_url: Option<String>,
+}
+
+/// `handlePing` result. The bridge emits snake_case usage keys here, unlike
+/// the camelCase request envelope.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct PingBridgeResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub auth_mode: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub latency_ms: Option<u64>,
+    #[serde(default)]
+    pub input_tokens: Option<u64>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BridgeResponse {

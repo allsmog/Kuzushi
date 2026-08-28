@@ -1,31 +1,51 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { verifyReleaseManifest } from "./release-artifact-contract.mjs";
 
 const root = process.cwd();
-const destination = path.resolve(root, process.env.KUZUSHI_NPM_PACK_DESTINATION ?? "dist/npm");
-const packages = JSON.parse(readFileSync(path.join(destination, "platform-packages.json"), "utf8"));
+const destination = path.resolve(root, process.env.KUZUSHI_RELEASE_DIRECTORY ?? "dist/release");
+const releaseSha = requiredEnvironment("RELEASE_SHA");
+const releaseVersion = requiredEnvironment("RELEASE_VERSION");
+const manifest = verifyReleaseManifest(destination, releaseSha, releaseVersion);
+const platformPackages = manifest.files.filter(({ kind }) => kind === "platform-npm");
+const rootPackage = manifest.files.find(({ kind }) => kind === "root-npm");
+if (!rootPackage) throw new Error("release manifest is missing the root npm package");
+const packages = [...platformPackages, rootPackage];
 
 run("npm", ["whoami"]);
 run("npm", ["access", "list", "packages", "@kuzushi", "--json"]);
 
 const states = packages.map((entry) => ({ entry, published: publishedIntegrity(entry) }));
 for (const { entry, published } of states) {
-  if (published === entry.integrity) {
+  if (published === entry.npmIntegrity) {
     process.stdout.write(`reusing ${entry.name}@${entry.version} with matching integrity\n`);
     continue;
   }
   if (published) {
     throw new Error(
-      `${entry.name}@${entry.version} already exists with integrity ${published}, expected ${entry.integrity}`,
+      `${entry.name}@${entry.version} already exists with integrity ${published}, expected ${entry.npmIntegrity}`,
     );
   }
-  const args = ["publish", path.join(destination, entry.filename), "--access", "public"];
+  const args = [
+    "publish",
+    path.join(destination, entry.file),
+    "--access",
+    "public",
+    "--tag",
+    "latest",
+    "--ignore-scripts",
+  ];
   if (process.env.NPM_PROVENANCE === "true") args.push("--provenance");
   run("npm", args, { inherit: true });
+}
+
+function requiredEnvironment(name) {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required`);
+  return value;
 }
 
 function publishedIntegrity(entry) {

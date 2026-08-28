@@ -2985,6 +2985,55 @@ mod tests {
         assert_eq!(json["nextAction"], "patch");
     }
 
+    /// `kuzushi finding` must disclose a recorded proof deferral beside the
+    /// proof state, and the deferral must not move any proof field.
+    #[test]
+    fn finding_detail_discloses_a_proof_deferral_without_changing_proof_state() {
+        let finding = Finding::new_tool(
+            "semgrep",
+            "js/xss",
+            "src/render.js",
+            42,
+            None,
+            Severity::High,
+            "Request query data is rendered into HTML without escaping",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+        let plain = FindingDetailReport::new(None, finding.clone(), Vec::new());
+        let deferral = kuzushi_core_proof_deferral_view();
+
+        let deferred = FindingDetailReport::new(None, finding, Vec::new())
+            .with_proof_deferral(Some(deferral.clone()));
+
+        assert!(deferred
+            .output()
+            .contains("Proof deferral: proof deferred by operator at generation scan-7"));
+        assert_eq!(deferred.proof_state, plain.proof_state);
+        assert_eq!(deferred.runtime_validation, plain.runtime_validation);
+        assert_eq!(deferred.proof_ladder, plain.proof_ladder);
+        assert_eq!(deferred.next_action, plain.next_action);
+        assert!(!plain.output().contains("Proof deferral:"));
+        let json = serde_json::to_value(&deferred).unwrap();
+        assert_eq!(json["proofDeferral"]["scanId"], "scan-7");
+        assert_eq!(json["proofDeferral"]["actor"], "operator");
+    }
+
+    fn kuzushi_core_proof_deferral_view() -> crate::workflow_attempts::ProofDeferralView {
+        crate::workflow_attempts::ProofDeferralView::from_record(
+            &crate::workflow_attempts::ProofDeferralRecorded::human(
+                "semgrep:js/xss:9867ad7c",
+                None,
+                "scan-7",
+                crate::workflow_attempts::PhaseTargetSnapshot {
+                    target: "/target".to_string(),
+                    revision: Some("abc".to_string()),
+                    dirty: false,
+                },
+                "no runtime harness for this language yet",
+            ),
+        )
+    }
+
     #[test]
     fn compact_static_proof_summary_keeps_ui_vocabulary_short() {
         let signal = static_proof_summary(Some(StaticProofState::SignalOnly));
@@ -3068,6 +3117,35 @@ mod tests {
         finding.static_proof_state = Some(StaticProofState::SourceSinkLinked);
         assert_eq!(finding_lifecycle_status(&finding), "statically_supported");
         assert_eq!(ProofConfidence::classify(&finding), ProofConfidence::Likely);
+    }
+
+    #[test]
+    fn runtime_validation_label_says_not_executed_for_non_disproof_verdicts() {
+        // These four verdicts mean runtime verification could not run. They
+        // are not a verdict on the scanner's claim, so the operator-facing
+        // label must not read as a rejection of it.
+        for verdict in [
+            PersistedProofVerdict::HarnessFailedToBuild,
+            PersistedProofVerdict::InfrastructureError,
+            PersistedProofVerdict::LanguageUnsupportedYet,
+            PersistedProofVerdict::InsufficientFindingDetail,
+        ] {
+            let mut verification = crate::findings::test_support::empirically_verified(0);
+            verification.proof_verdict = verdict;
+            let label = runtime_validation_label(Some(&verification));
+
+            assert!(
+                !label.contains("execution_rejected"),
+                "{verdict:?} still labeled as a rejection: {label}"
+            );
+            assert!(
+                label.starts_with("not executed - "),
+                "{verdict:?} label lost its honest prefix: {label}"
+            );
+        }
+
+        // The durable artifact vocabulary is unchanged: only the label moved.
+        assert!(crate::findings::is_runtime_proof_state("execution_rejected"));
     }
 
     #[test]

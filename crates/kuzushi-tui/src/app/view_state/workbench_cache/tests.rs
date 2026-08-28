@@ -166,6 +166,143 @@ fn stale_git_metadata_serves_until_rehydrated() {
     ));
 }
 
+#[test]
+fn source_change_invalidation_keeps_durable_phase_state_ready() {
+    let target = PathBuf::from("/tmp/source-change-cache-target");
+    let source = target.join("src/app.rs");
+    let mut cache = WorkbenchCache::default();
+    seed_source_and_durable_state(&mut cache, &target, &source);
+
+    cache.invalidate_source_file_changes();
+
+    assert_source_change_cache_contract(&cache, &target, &source);
+
+    cache.invalidate_workspace_files();
+    assert!(cache
+        .cached_map_artifacts_built(Some(&target))
+        .is_not_requested());
+    assert!(cache
+        .cached_revision_relationship(Some(&target), "accepted", "current")
+        .is_not_requested());
+    assert!(cache
+        .cached_run_projection(&target, "run-ready")
+        .is_not_requested());
+    assert!(cache
+        .cached_json_file(&target, &target.join(".kuzushi/attack-surface.json"))
+        .is_not_requested());
+}
+
+#[test]
+fn shell_source_change_uses_narrow_cache_invalidation() {
+    let target = tempfile::tempdir().unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(target.path()).unwrap();
+    let source = target.path().join("src/app.rs");
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), Some(&workspace));
+    seed_source_and_durable_state(
+        &mut app.workbench_cache().borrow_mut(),
+        target.path(),
+        &source,
+    );
+
+    app.apply_workspace_changes(&[
+        kuzushi_core::incremental_index::WorkspaceChange::FileChanged(PathBuf::from("src/app.rs")),
+    ]);
+
+    assert_source_change_cache_contract(&app.workbench_cache().borrow(), target.path(), &source);
+}
+
+fn seed_source_and_durable_state(cache: &mut WorkbenchCache, target: &Path, source: &Path) {
+    for (key, value) in [
+        (
+            ViewHydrationKey::GitMetadata,
+            ViewHydrationValue::GitMetadata(Some(kuzushi_core::RunTargetGitMetadata {
+                sha: "e817c5ee00112233445566778899aabbccddeeff".to_string(),
+                branch: Some("main".to_string()),
+                dirty: false,
+            })),
+        ),
+        (
+            ViewHydrationKey::RevisionRelationship {
+                accepted_revision: "accepted".to_string(),
+                current_revision: "current".to_string(),
+            },
+            ViewHydrationValue::RevisionRelationship(
+                kuzushi_core::workspace::RevisionRelationship::Same,
+            ),
+        ),
+        (
+            ViewHydrationKey::MapArtifacts,
+            ViewHydrationValue::MapArtifacts(true),
+        ),
+        (
+            ViewHydrationKey::SourceFile {
+                path: source.to_path_buf(),
+            },
+            ViewHydrationValue::SourceFile(Ok("fn main() {}".to_string())),
+        ),
+        (
+            ViewHydrationKey::FileCompletionValues,
+            ViewHydrationValue::FileCompletionValues(FileCompletionIndex::complete(vec![
+                "src/app.rs".to_string(),
+            ])),
+        ),
+        (
+            ViewHydrationKey::JsonFile {
+                path: target.join(".kuzushi/attack-surface.json"),
+            },
+            ViewHydrationValue::JsonFile(JsonFileHydration {
+                state: JsonFileState::Present(serde_json::json!({"ready": true})),
+                content_sha256: Some("durable-json".to_string()),
+                entry_point_catalog_authentication: None,
+                entry_point_catalog_context_authentication: None,
+            }),
+        ),
+    ] {
+        cache.apply_view_hydration(ViewHydrationResult {
+            target: target.to_path_buf(),
+            key,
+            value,
+        });
+    }
+    cache.store_run_projection(
+        target.to_path_buf(),
+        "run-ready".to_string(),
+        Err("cached durable projection".to_string()),
+    );
+}
+
+fn assert_source_change_cache_contract(cache: &WorkbenchCache, target: &Path, source: &Path) {
+    assert!(matches!(
+        cache.cached_map_artifacts_built(Some(target)),
+        ViewDataState::Ready(true)
+    ));
+    assert!(matches!(
+        cache.cached_revision_relationship(Some(target), "accepted", "current"),
+        ViewDataState::Ready(kuzushi_core::workspace::RevisionRelationship::Same)
+    ));
+    assert!(matches!(
+        cache.cached_run_projection(target, "run-ready"),
+        ViewDataState::Ready(Err(_))
+    ));
+    assert!(matches!(
+        cache.cached_json_file(target, &target.join(".kuzushi/attack-surface.json")),
+        ViewDataState::Ready(JsonFileState::Present(value)) if value["ready"] == true
+    ));
+    assert!(matches!(
+        cache.cached_git_metadata(Some(target)),
+        ViewDataState::Ready(Some(git)) if git.sha.starts_with("e817c5ee")
+    ));
+    assert!(cache.git_metadata_needs_refresh(target));
+    assert!(cache.cached_source_file(target, source).is_not_requested());
+    assert!(cache.view_hydration_needed(
+        target,
+        &ViewHydrationKey::SourceFile {
+            path: source.to_path_buf(),
+        }
+    ));
+    assert!(cache.view_hydration_needed(target, &ViewHydrationKey::FileCompletionValues));
+}
+
 fn ready_receipt_state() -> ScanStageReceiptState {
     ScanStageReceiptState::Ready(kuzushi_core::run_artifacts::PhaseStageReceipt {
         phase: kuzushi_core::WorkflowPhase::Scan,

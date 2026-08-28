@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -103,6 +104,25 @@ test("only exact approved fixture bytes bypass their intentional patterns", () =
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("whole repository scan accepts only hash-approved synthetic secret fixtures", () => {
+  const revision = spawnSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" });
+  assert.equal(revision.status, 0, revision.stderr);
+  const head = revision.stdout.trim();
+  const scan = spawnSync(
+    process.execPath,
+    [
+      "scripts/check-secrets.mjs",
+      "--base",
+      "0000000000000000000000000000000000000000",
+      "--head",
+      head,
+    ],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
+
+  assert.equal(scan.status, 0, `${scan.stdout}\n${scan.stderr}`);
 });
 
 test("defaults to the repository quality base and permits explicit overrides", () => {

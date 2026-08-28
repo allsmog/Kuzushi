@@ -44,4 +44,9 @@ pub struct FindingDetailReport {
     /// append-only review history in addition to the current finding row.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub security_case: Option<SecurityCaseProjection>,
+    /// The operator's durable decision to postpone proof for exactly this
+    /// discovery generation. A decision, not evidence: it never moves
+    /// `proof_state`, `runtime_validation`, or `proof_ladder`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub proof_deferral: Option<ProofDeferralView>,
 }

@@ -13,6 +13,7 @@ pub(crate) mod permissions;
 pub(crate) mod pr_comment;
 #[cfg(test)]
 mod pr_comment_tests;
+pub(crate) mod proof_deferrals;
 pub(crate) mod review_decisions;
 pub(crate) mod review_yield;
 pub(crate) mod run_exit;

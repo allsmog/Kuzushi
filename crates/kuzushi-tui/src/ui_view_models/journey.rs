@@ -5,9 +5,9 @@
 //! persisted findings/review decisions/verifications, and compatible legacy
 //! run artifacts.
 
-use crate::app::{PlanningTaskId, ViewDataState, WorkflowPhase};
+use crate::app::{FindingLedgerCounts, PlanningTaskId, ViewDataState, WorkflowPhase};
 use crate::ui_view_models::review_state::{
-    indexed_review_decision_complete, EffectiveReviewStateIndex,
+    decision_is_review_actionable, indexed_review_decision_complete, EffectiveReviewStateIndex,
 };
 use crate::{RunSummaryEntriesState, ShellApp};
 use kuzushi_core::findings::ReviewDecisionVerdict;
@@ -41,6 +41,18 @@ pub struct CheckpointDrift {
     pub current_revision: Option<String>,
     pub dirty_changed: bool,
     pub relationship: Option<kuzushi_core::workspace::RevisionRelationship>,
+}
+
+/// Cached and in-memory journey truth needed by routing and hydration.
+///
+/// Keep this projection and [`journey_model`] free of filesystem reads. Full
+/// phase-result cards own durable run replay outside the journey projection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct JourneyRealityProjection {
+    pub(crate) current: WorkflowPhase,
+    pub(crate) destination: JourneyDestination,
+    pub(crate) progress: JourneyProgress,
+    pub(crate) checkpoint_drift: Option<CheckpointDrift>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -222,15 +234,13 @@ impl JourneyProgress {
 }
 
 pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
-    let target = app.target()?;
-    let map_artifacts_built = cached_map_artifacts_built(app, target);
-    let progress = journey_progress(app, map_artifacts_built);
-    let unresolved_phase = earliest_unresolved_phase(app);
-    let destination = journey_destination(progress, unresolved_phase);
-    let current = match destination {
-        JourneyDestination::Phase(phase) => phase,
-        JourneyDestination::Report(_) => progress.current_phase(),
-    };
+    let reality = journey_reality_projection(app)?;
+    let JourneyRealityProjection {
+        current,
+        destination,
+        progress,
+        checkpoint_drift,
+    } = reality;
     let failed = failed_phase_set(app);
     let explicitly_skipped = app.engagement.projected_skipped_phases();
     let next_action = projected_next_action(app, destination, progress);
@@ -242,6 +252,24 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         next_summary: destination_next_summary(destination, progress, &next_action),
         next_action,
         next_tools: projected_next_tools(app, destination),
+        checkpoint_drift,
+    })
+}
+
+pub(crate) fn journey_reality_projection(app: &ShellApp) -> Option<JourneyRealityProjection> {
+    let target = app.target()?;
+    let map_artifacts_built = cached_map_artifacts_built(app, target);
+    let progress = journey_progress(app, map_artifacts_built);
+    let unresolved_phase = earliest_unresolved_phase(app);
+    let destination = journey_destination(progress, unresolved_phase);
+    let current = match destination {
+        JourneyDestination::Phase(phase) => phase,
+        JourneyDestination::Report(_) => progress.current_phase(),
+    };
+    Some(JourneyRealityProjection {
+        current,
+        destination,
+        progress,
         checkpoint_drift: checkpoint_drift(app, current),
     })
 }
@@ -312,21 +340,17 @@ fn cached_map_artifacts_built(app: &ShellApp, target: &std::path::Path) -> bool 
 }
 
 fn journey_progress(app: &ShellApp, map_artifacts_built: bool) -> JourneyProgress {
-    let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        app.findings(),
-        app.review_decisions(),
+    let mut progress = journey_finding_progress(
+        map_artifacts_built,
+        app.domain().finding_ledger_counts(),
+        || {
+            let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(
+                app.findings(),
+                app.review_decisions(),
+            );
+            journey_progress_from_parts(map_artifacts_built, app.findings(), &review_index)
+        },
     );
-    let mut progress =
-        journey_progress_from_parts(map_artifacts_built, app.findings(), &review_index);
-    if let Some(counts) = app.domain().finding_ledger_counts() {
-        progress.finding_total = counts.total;
-        progress.reviewed_findings = counts.reviewed;
-        progress.confirmed_findings = counts.confirmed;
-        progress.proven_findings = counts.proven.saturating_add(counts.proof_deferred);
-        progress.proof_backed_findings = counts.proof_backed;
-        progress.remediated_findings = counts.remediated;
-        progress.remediation_projection_complete = counts.remediation_projection_complete;
-    }
     let selected_map = selected_attempt_counts(app, WorkflowPhase::Map);
     let selected_scan = selected_attempt_counts(app, WorkflowPhase::Scan);
     let legacy = legacy_checkpoints(app, map_artifacts_built);
@@ -340,6 +364,40 @@ fn journey_progress(app: &ShellApp, map_artifacts_built: bool) -> JourneyProgres
     progress.scan_partial_acknowledged = selected_scan == Some(true);
     progress.legacy_inferred = legacy.map || legacy.scan;
     progress
+}
+
+fn journey_finding_progress<F>(
+    map_artifacts_built: bool,
+    counts: Option<FindingLedgerCounts>,
+    findings_fallback: F,
+) -> JourneyProgress
+where
+    F: FnOnce() -> JourneyProgress,
+{
+    match counts {
+        Some(counts) => journey_progress_from_counts(map_artifacts_built, counts),
+        None => findings_fallback(),
+    }
+}
+
+fn journey_progress_from_counts(
+    map_artifacts_built: bool,
+    counts: FindingLedgerCounts,
+) -> JourneyProgress {
+    JourneyProgress {
+        map_artifacts_built,
+        map_checkpoint: false,
+        scan_checkpoint: false,
+        scan_partial_acknowledged: false,
+        finding_total: counts.total,
+        reviewed_findings: counts.reviewed,
+        confirmed_findings: counts.confirmed,
+        proven_findings: counts.proven.saturating_add(counts.proof_deferred),
+        proof_backed_findings: counts.proof_backed,
+        remediated_findings: counts.remediated,
+        remediation_projection_complete: counts.remediation_projection_complete,
+        legacy_inferred: false,
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -356,16 +414,42 @@ fn legacy_checkpoints(app: &ShellApp, map_artifacts_built: bool) -> LegacyCheckp
         .domain()
         .finding_ledger_counts()
         .is_some_and(|counts| counts.durable_scan_evidence);
-    let scan = !app
-        .engagement
-        .has_phase_attempt_for_target(WorkflowPhase::Scan)
+    let scan = legacy_inference_applies(app, WorkflowPhase::Scan)
         && (legacy_completed_scan(app) || durable_finding_scan);
-    let map = !app
-        .engagement
-        .has_phase_attempt_for_target(WorkflowPhase::Map)
+    let map = legacy_inference_applies(app, WorkflowPhase::Map)
         && !app.engagement.phase_is_skipped(WorkflowPhase::Map)
         && (map_artifacts_built || scan);
     LegacyCheckpoints { map, scan }
+}
+
+/// Pre-ledger inference is only meaningful for a phase this engagement has
+/// never attempted as a first-class attempt — and only while no such attempt
+/// is running.
+fn legacy_inference_applies(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    !app.engagement.has_phase_attempt_for_target(phase) && !phase_attempt_in_flight(app, phase)
+}
+
+/// Returns whether a first-class attempt for `phase` is still in flight.
+///
+/// Attempt records are appended at completion, while Map tools such as
+/// `context:build` and `entry-points:extract` write their `.kuzushi/`
+/// artifacts as they go. Without this guard the legacy inference reads those
+/// half-written artifacts as a finished Map and advances the phase chip to
+/// Scan mid-run, only to fall back once the attempt record lands.
+///
+/// Liveness is the live Run Focus session's launch phase plus its terminal
+/// stamp, corroborated by the shared single-slot `JobHub`. Every path that
+/// finishes a slot (`ShellApp::apply_job_event`) stamps `completed_at` through
+/// `mark_run_focus_terminal_pending` before the hub slot is cleared, so a
+/// finished, canceled, or interrupted run stops suppressing immediately. A
+/// backgrounded run keeps both signals, which is correct: it is still in
+/// flight. Requiring the hub as well means a session that was seeded but never
+/// dispatched cannot suppress inference forever.
+fn phase_attempt_in_flight(app: &ShellApp, phase: WorkflowPhase) -> bool {
+    app.jobs().has_running_job()
+        && app.activity().is_some_and(|session| {
+            session.origin_phase == Some(phase) && session.completed_at.is_none()
+        })
 }
 
 /// Returns whether an accepted checkpoint was a partial result explicitly
@@ -562,27 +646,7 @@ fn finding_has_current_terminal_verification(finding: &Finding) -> bool {
 }
 
 fn indexed_actionable_finding(index: &EffectiveReviewStateIndex, finding: &Finding) -> bool {
-    if let Some(decision) = index.effective_decision_for(finding) {
-        return matches!(
-            decision.verdict(),
-            ReviewDecisionVerdict::Confirmed | ReviewDecisionVerdict::ToFix
-        );
-    }
-    finding
-        .triage
-        .as_ref()
-        .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
-}
-
-pub(crate) fn finding_is_review_actionable(
-    finding: &Finding,
-    decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
-) -> bool {
-    let index = EffectiveReviewStateIndex::from_findings_and_decisions(
-        std::slice::from_ref(finding),
-        decisions,
-    );
-    indexed_actionable_finding(&index, finding)
+    decision_is_review_actionable(finding, index.effective_decision_for(finding).as_ref())
 }
 
 fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
@@ -812,10 +876,15 @@ pub(super) fn unresolved_attempt_action(
     if let Some(reason) = app.effective_phase_attempt_blocker(completed) {
         return reason;
     }
-    let outcome = app
-        .phase_result_presentation_for(completed)
-        .compact_summary
-        .outcome;
+    let outcome = match app.cached_authoritative_phase_attempt_outcome(completed) {
+        ViewDataState::Ready(outcome) => outcome,
+        ViewDataState::NotRequested | ViewDataState::Loading => {
+            return format!(
+                "inspect the {} result while its receipt loads",
+                completed.phase.title()
+            );
+        }
+    };
     match outcome {
         PhaseAttemptOutcome::Completed => format!(
             "accept, continue with, or discard the completed {} result",
@@ -925,13 +994,14 @@ mod tests {
         append_phase_attempt_completed, append_phase_attempt_disposition,
         append_phase_checkpoint_skipped, PhaseAttemptCompleted, PhaseAttemptDisposition,
         PhaseAttemptDispositionRecorded, PhaseAttemptLedger, PhaseAttemptOutcome,
-        PhaseCheckpointSkipped, PhaseTargetSnapshot,
+        PhaseAttemptRecord, PhaseCheckpointSkipped, PhaseTargetSnapshot,
     };
     use kuzushi_core::{
         write_run_summary, PatchLifecycleRecord, PersistedProofVerdict, PersistedSandboxBackend,
         PersistedVerification, RunTargetGitMetadata, Severity, TriageOutcome, V2Config,
         WorkspaceTarget,
     };
+    use std::cell::Cell;
     use std::path::Path;
 
     fn progress(
@@ -986,6 +1056,157 @@ mod tests {
             progress(true, true, 2, 2, 1, 1, 1, 1).destination(),
             JourneyDestination::Report(ReportReason::RemediationComplete)
         );
+    }
+
+    #[test]
+    fn authoritative_ledger_counts_skip_the_findings_fallback() {
+        let fallback_calls = Cell::new(0);
+        let counts = FindingLedgerCounts {
+            total: 401,
+            reviewed: 307,
+            confirmed: 29,
+            proven: 11,
+            proof_deferred: 3,
+            proof_backed: 7,
+            remediated: 5,
+            remediation_projection_complete: true,
+            durable_scan_evidence: true,
+        };
+
+        let progress = journey_finding_progress(true, Some(counts), || {
+            fallback_calls.set(fallback_calls.get() + 1);
+            progress(false, false, 1, 1, 1, 1, 1, 1)
+        });
+
+        assert_eq!(fallback_calls.get(), 0);
+        assert_eq!(progress.finding_total, 401);
+        assert_eq!(progress.reviewed_findings, 307);
+        assert_eq!(progress.confirmed_findings, 29);
+        assert_eq!(progress.proven_findings, 14);
+        assert_eq!(progress.proof_backed_findings, 7);
+        assert_eq!(progress.remediated_findings, 5);
+        assert!(progress.map_artifacts_built);
+        assert!(progress.remediation_projection_complete);
+    }
+
+    #[test]
+    fn missing_ledger_counts_preserve_the_findings_fallback() {
+        let fallback = progress(false, false, 2, 1, 1, 0, 0, 0);
+
+        assert_eq!(journey_finding_progress(false, None, || fallback), fallback);
+    }
+
+    #[test]
+    fn unresolved_action_uses_durable_fallback_without_building_presentation() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let snapshot = PhaseTargetSnapshot {
+            target: "/target".to_string(),
+            revision: None,
+            dirty: false,
+        };
+        let cases = [
+            (
+                PhaseAttemptOutcome::Completed,
+                "accept, continue with, or discard the completed Map result",
+            ),
+            (PhaseAttemptOutcome::Partial, "acknowledge the partial Map"),
+            (
+                PhaseAttemptOutcome::Blocked,
+                "inspect, rerun, or discard the blocked Map result",
+            ),
+            (
+                PhaseAttemptOutcome::Failed,
+                "inspect, rerun, or discard the failed Map result",
+            ),
+            (
+                PhaseAttemptOutcome::Canceled,
+                "inspect, rerun, or discard the canceled Map result",
+            ),
+        ];
+        crate::app::take_phase_result_presentation_calls();
+
+        for (outcome, expected) in cases {
+            let record = PhaseAttemptRecord {
+                completed: PhaseAttemptCompleted::new(
+                    WorkflowPhase::Map,
+                    vec!["run-must-not-be-read".to_string()],
+                    snapshot.clone(),
+                    outcome,
+                ),
+                disposition: None,
+            };
+            assert_eq!(unresolved_attempt_action(&app, &record), expected);
+        }
+
+        assert_eq!(crate::app::take_phase_result_presentation_calls(), 0);
+
+        let counter_probe = PhaseAttemptCompleted::new(
+            WorkflowPhase::Map,
+            vec!["missing-counter-probe".to_string()],
+            snapshot,
+            PhaseAttemptOutcome::Completed,
+        );
+        app.phase_result_presentation_for(&counter_probe);
+        assert_eq!(crate::app::take_phase_result_presentation_calls(), 1);
+    }
+
+    #[test]
+    fn unresolved_action_prefers_hydrated_typed_receipt_when_outcomes_disagree() {
+        crate::app::take_phase_result_presentation_calls();
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "receipt-authority",
+            "sast:scan",
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "scan completed",
+                "data": {"count": 0}
+            }),
+        );
+        let mut completed = crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Scan,
+            "receipt-authority",
+            PhaseAttemptOutcome::Failed,
+        );
+        completed.outcome = PhaseAttemptOutcome::Completed;
+        let attempt_id = completed.attempt_id.clone();
+        let snapshot = completed.target_snapshot.clone();
+        let ledger = PhaseAttemptLedger::from_events([
+            kuzushi_core::workflow_attempts::PhaseAttemptEvent::PhaseAttemptCompleted(completed),
+        ])
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.engagement
+            .set_phase_attempt_projection(Some(snapshot), ledger);
+        app.hydrate_view_keys_blocking(
+            workspace.root(),
+            vec![ViewHydrationKey::PhaseReceiptOutcome {
+                attempt_id: attempt_id.clone(),
+            }],
+        );
+        let receipt_state = app
+            .workbench_cache()
+            .borrow()
+            .cached_phase_receipt_outcome(workspace.root(), &attempt_id);
+        assert!(
+            matches!(receipt_state, ViewDataState::Ready(Ok(Some(_)))),
+            "{receipt_state:?}"
+        );
+        let record = app
+            .engagement
+            .unresolved_phase_attempt(WorkflowPhase::Scan)
+            .expect("contradictory unresolved attempt");
+
+        assert_eq!(record.completed.outcome, PhaseAttemptOutcome::Completed);
+        assert_eq!(
+            unresolved_attempt_action(&app, record),
+            "inspect, rerun, or discard the failed Scan result"
+        );
+        assert_eq!(crate::app::take_phase_result_presentation_calls(), 0);
     }
 
     #[test]
@@ -1070,6 +1291,23 @@ mod tests {
             &app.engagement,
         );
         assert_eq!(counts.proof_deferred, 1);
+        // A deferral is a decision, never proof: the proven and proof-backed
+        // folds must stay at zero for the very generation it was recorded on.
+        assert_eq!(counts.proven, 0);
+        assert_eq!(counts.proof_backed, 0);
+        // The same decision projects for display, so a selected finding can
+        // disclose it instead of reading as merely unproven.
+        let view = app
+            .engagement
+            .proof_deferral_for(&finding)
+            .map(kuzushi_core::workflow_attempts::ProofDeferralView::from_record)
+            .expect("projected proof deferral");
+        assert_eq!(view.scan_id, "scan-1");
+        assert_eq!(view.actor, "operator");
+        assert_eq!(
+            view.reason,
+            "runtime environment is intentionally unavailable"
+        );
 
         let stale = actionable_finding("scan-2");
         let mut stale_counts = finding_ledger_counts(std::slice::from_ref(&stale), &[], 1);
@@ -1080,6 +1318,7 @@ mod tests {
             &app.engagement,
         );
         assert_eq!(stale_counts.proof_deferred, 0);
+        assert!(app.engagement.proof_deferral_for(&stale).is_none());
     }
 
     #[test]
@@ -1702,9 +1941,125 @@ mod tests {
         ));
     }
 
-    fn hydrated_app(workspace: &WorkspaceTarget, keys: Vec<ViewHydrationKey>) -> ShellApp {
+    /// Fixture for issue #172: a first-ever Map run on a target whose Map
+    /// tools have already written `.kuzushi/` artifacts, with no ledger
+    /// attempt yet (the attempt record is appended at completion).
+    fn app_with_map_run_in_flight(workspace: &WorkspaceTarget) -> ShellApp {
+        let mut app = hydrated_app(workspace, vec![ViewHydrationKey::MapArtifacts]);
+        let _ticket = app.jobs_mut().start(crate::app::JobKind::Run, "map");
+        app.set_activity(Some(crate::app::ActivitySession::for_phase(
+            "map-run-1",
+            WorkflowPhase::Map,
+        )));
+        app
+    }
+
+    #[test]
+    fn in_flight_first_map_run_does_not_infer_a_legacy_map_checkpoint() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let app = app_with_map_run_in_flight(&workspace);
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(journey.progress.map_artifacts_built);
+        assert!(
+            !journey.progress.map_checkpoint,
+            "a running Map attempt has completed nothing"
+        );
+        assert!(!journey.progress.legacy_inferred);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+        assert_eq!(
+            journey_footer_segment(&app).as_deref(),
+            Some("Map 1/5"),
+            "the phase chip must not flip to Scan mid-run"
+        );
+    }
+
+    #[test]
+    fn backgrounded_map_run_still_suppresses_legacy_inference() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let mut app = app_with_map_run_in_flight(&workspace);
+        app.activity_mut().unwrap().run_focus_backgrounded = true;
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(!journey.progress.map_checkpoint);
+        assert_eq!(journey.current, WorkflowPhase::Map);
+    }
+
+    #[test]
+    fn finished_and_cleared_map_session_does_not_suppress_legacy_inference() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+
+        let mut app = app_with_map_run_in_flight(&workspace);
+        // Terminal receipt: `mark_run_focus_terminal_pending` stamps
+        // `completed_at`, then the hub slot is finished.
+        app.activity_mut().unwrap().mark_terminal();
+        app.jobs_mut().finish(crate::app::JobKind::Run);
+
+        let journey = journey_model(&app).expect("journey");
+
+        assert!(journey.progress.map_checkpoint);
+        assert!(journey.progress.legacy_inferred);
+    }
+
+    #[test]
+    fn completed_map_attempt_stays_on_map_until_the_operator_accepts_it() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target.path()).unwrap();
+        write_map_artifact(target.path());
+        crate::test_support::record_indexed_run(
+            target.path(),
+            "map-run-1",
+            "context:build",
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "summary": "context snapshot built",
+                "data": {"filesIndexed": 1}
+            }),
+        );
+        let completed = crate::test_support::append_typed_attempt(
+            target.path(),
+            WorkflowPhase::Map,
+            "map-run-1",
+            PhaseAttemptOutcome::Completed,
+        );
+
+        let unresolved = hydrated_app(&workspace, vec![ViewHydrationKey::MapArtifacts]);
+        assert_eq!(
+            journey_model(&unresolved).expect("journey").current,
+            WorkflowPhase::Map,
+            "an unresolved attempt keeps reality on Map"
+        );
+
+        crate::test_support::select_typed_attempt(target.path(), &completed);
+        let accepted = hydrated_app(&workspace, vec![ViewHydrationKey::MapArtifacts]);
+
+        assert_eq!(
+            journey_model(&accepted).expect("journey").current,
+            WorkflowPhase::Scan
+        );
+    }
+
+    fn hydrated_app(workspace: &WorkspaceTarget, mut keys: Vec<ViewHydrationKey>) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), Some(workspace));
         app.refresh_phase_attempt_projection();
+        let receipt_keys = WorkflowPhase::ORDER.iter().filter_map(|phase| {
+            app.engagement
+                .unresolved_phase_attempt(*phase)
+                .map(|record| ViewHydrationKey::PhaseReceiptOutcome {
+                    attempt_id: record.completed.attempt_id.clone(),
+                })
+        });
+        keys.extend(receipt_keys);
         app.hydrate_view_keys_blocking(workspace.root(), keys);
         app
     }
