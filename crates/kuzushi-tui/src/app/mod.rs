@@ -115,16 +115,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-#[cfg(test)]
-static DEMO_FIXTURE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-#[cfg(test)]
-fn demo_fixture_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    DEMO_FIXTURE_TEST_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-}
-
 mod onboarding;
 mod prompts;
 mod review_session;
