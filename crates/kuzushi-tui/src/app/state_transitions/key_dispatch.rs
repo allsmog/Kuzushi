@@ -15,7 +15,7 @@ enum JourneyPhaseEntry {
 
 impl ShellApp {
     pub(crate) fn reduce_key(&mut self, key: KeyEvent) -> InputUpdate {
-        let key = normalize_back_tab(key);
+        let key = normalize_terminal_key_encoding(key);
         let update = self.reduce_key_without_recording(key);
         if update.handled {
             self.record_operator_interaction();
@@ -1783,6 +1783,12 @@ fn review_search_anchor(finding: &kuzushi_core::Finding) -> String {
         .clone()
 }
 
+/// Fold terminal-specific keystroke encodings into the canonical form every
+/// binding in this crate matches, before any owner sees the key.
+fn normalize_terminal_key_encoding(key: KeyEvent) -> KeyEvent {
+    normalize_line_feed_enter(normalize_back_tab(key))
+}
+
 /// Terminals speaking an enhanced keyboard protocol (kitty CSI-u,
 /// modifyOtherKeys, tmux extended-keys) report Shift+Tab as `Tab` with the
 /// SHIFT modifier instead of the legacy `ESC [ Z` BackTab that every binding
@@ -1791,6 +1797,19 @@ fn review_search_anchor(finding: &kuzushi_core::Finding) -> String {
 fn normalize_back_tab(mut key: KeyEvent) -> KeyEvent {
     if key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT) {
         key.code = KeyCode::BackTab;
+    }
+    key
+}
+
+/// A line feed on stdin means Enter. Crossterm cannot tell `0x0A` apart from
+/// Ctrl+J in raw mode and reports the chord, so an Enter that reached the tty
+/// while the line discipline was still translating CR to LF — the startup
+/// window before raw mode engages, and every external-process suspension —
+/// arrives here as Ctrl+J. Canonicalise it so that Enter always submits
+/// instead of typing a stray `j` into the composer.
+fn normalize_line_feed_enter(key: KeyEvent) -> KeyEvent {
+    if key.code == KeyCode::Char('j') && key.modifiers == KeyModifiers::CONTROL {
+        return KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
     }
     key
 }
@@ -2323,6 +2342,38 @@ mod tests {
 
         app.reduce_key(plain_key(KeyCode::Esc));
         assert_eq!(app.shell_view(), ShellView::Workbench);
+    }
+
+    #[test]
+    fn line_feed_submits_the_composer_instead_of_typing_a_j() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        for ch in "demo".chars() {
+            app.reduce_key(plain_key(KeyCode::Char(ch)));
+        }
+        assert_eq!(app.input(), "demo");
+
+        // A CR that reached the tty before raw mode engaged arrives as LF,
+        // which crossterm reports as Ctrl+J.
+        let update = app.reduce_key(ctrl_key(KeyCode::Char('j')));
+
+        assert!(update.handled);
+        assert!(
+            app.input().is_empty(),
+            "Ctrl+J must submit the line, not type into it: {:?}",
+            app.input()
+        );
+    }
+
+    #[test]
+    fn unbound_ctrl_chords_do_not_type_their_letter_into_the_composer() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        for ch in "demo".chars() {
+            app.reduce_key(plain_key(KeyCode::Char(ch)));
+        }
+
+        app.reduce_key(ctrl_key(KeyCode::Char('y')));
+
+        assert_eq!(app.input(), "demo");
     }
 
     #[test]

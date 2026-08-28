@@ -27,6 +27,14 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Fixed:**
 
+- Enter no longer types a stray `j` into the shell composer. A carriage return
+  that reaches the terminal while the line discipline is still translating CR
+  to LF — the startup window before raw mode engages, and every
+  external-process suspension — arrives from crossterm as Ctrl+J, and the
+  composer inserted the bare letter instead of submitting, so `demo` became
+  `demoj` and the command was never run. Line feeds are now folded into Enter
+  at the key-dispatch boundary, and unbound Ctrl/Alt chords are refused by the
+  line editor rather than typed as text.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
