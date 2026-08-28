@@ -634,6 +634,9 @@ fn phase_rerun_editor_rows(
                 }),
         );
     }
+    // The editor is where the operator remedies a refused dispatch, so the
+    // reason has to stay on screen while they do it.
+    push_phase_rerun_dispatch_refusal(&mut rows, review);
     if let Some(error) = review.option_error.as_deref() {
         rows.push(phase_rerun_detail_row(format!("REFUSED · INPUT · {error}")));
     }
@@ -695,12 +698,19 @@ fn phase_rerun_review_rows(
             ))
         }));
     }
+    push_phase_rerun_dispatch_refusal(&mut rows, review);
+    rows
+}
+
+fn push_phase_rerun_dispatch_refusal(
+    rows: &mut Vec<crate::app::PhaseResultDetailRow>,
+    review: &crate::app::PhaseRerunReview,
+) {
     if let Some(error) = review.dispatch_error.as_deref() {
         rows.push(phase_rerun_detail_row(format!(
             "REFUSED · DISPATCH · {error}"
         )));
     }
-    rows
 }
 
 fn phase_rerun_detail_row(text: String) -> crate::app::PhaseResultDetailRow {
