@@ -5,7 +5,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
-No changes recorded after the Alpha14 candidate.
+**Release process:**
+
+- The seven-item historical artifact cleanup gate is renamed the repository
+  visibility gate and now blocks making the repository public only. Creating
+  the Alpha14 tag requires the candidate gate and a release commit equal to
+  current `origin/main`. Recorded by the repository owner on 2026-08-28, on the
+  reasoning that moving the `latest` dist-tag to a scrubbed Alpha14 reduces
+  exposure for new installs and is the prerequisite for deprecating
+  `0.24.0-alpha.10` and `0.24.0-alpha.12`. No gate item is cancelled and the
+  repository stays private until every item has its receipt.
 
 ## v0.24.0-alpha.14 · candidate integrity and release preparation
 

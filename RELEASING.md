@@ -78,10 +78,11 @@ workflow has read-only repository permission and no npm credential.
 A later tag run rebuilds these files and repeats every candidate check. It does
 not promote bytes from an earlier manual candidate run.
 
-## Historical artifact cleanup gate
+## Repository visibility gate
 
-Do not make the repository public until every item below has an operator-owned
-receipt:
+This gate governs repository visibility only. Do not make the repository public
+until every item below has an operator-owned receipt. It does not gate creating
+a release tag or publishing to npm; see the recorded decision below.
 
 1. Build the all-ref history rewrite in an offline mirror from the verified
    backup bundle. Record the old-to-new map for every advertised head and tag,
@@ -115,11 +116,26 @@ receipt:
 This work requires separate operator authorization. The release workflow does
 not delete or rewrite historical registry content.
 
+### Recorded decision, 2026-08-28: the visibility gate does not block Alpha14
+
+Decided by the repository owner on 2026-08-28. The seven items above were
+previously written to block the Alpha14 tag as well as public visibility. They
+now block public visibility only.
+
+Rationale: `0.24.0-alpha.10` and `0.24.0-alpha.12` are already published and
+already carry private identifiers. Publishing a scrubbed `0.24.0-alpha.14` at
+the `latest` dist-tag strictly reduces exposure, because every new install
+resolves to the scrubbed package instead of a contaminated one, and it is the
+prerequisite for deprecating alpha.10 and alpha.12. Withholding the tag leaves
+`latest` pointing at contaminated bytes and improves nothing. The repository
+stays private until this gate is complete, so the history rewrite and support
+confirmations remain required work rather than cancelled work.
+
 ## Publish the tagged release
 
 The tag-triggered workflow is the sole publishing path. Create the tag only
-after the candidate and historical cleanup gates are complete and the release
-commit is the current `origin/main`:
+after the candidate gate is complete and the release commit is the current
+`origin/main`. The repository visibility gate above is not a tag prerequisite:
 
 ```sh
 git fetch origin main --tags
