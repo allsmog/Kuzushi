@@ -54,17 +54,29 @@ fn a_refused_rerun_dispatch_is_disclosed_on_the_review_card() {
         draft_modified: false,
         derivation: None,
     };
+    let app = ShellApp::new(V2Config::default(), None);
     assert!(!rendered_rerun_review(&review).contains("REFUSED"));
 
     review.dispatch_error = Some("rerun requires an active target".to_string());
 
-    assert!(rendered_rerun_review(&review)
-        .contains("REFUSED · DISPATCH · rerun requires an active target"));
+    let disclosed = "REFUSED · DISPATCH · rerun requires an active target";
+    assert!(rendered_rerun_review(&review).contains(disclosed));
+    // `e` is how the operator remedies the refusal, so the reason has to
+    // survive the switch to the option editor.
+    review.option_editor_open = true;
+    assert!(rendered_rerun_editor(&app, &review).contains(disclosed));
 }
 
 fn rendered_rerun_review(review: &crate::app::PhaseRerunReview) -> String {
-    phase_rerun_review_rows(review)
-        .into_iter()
+    join_rows(phase_rerun_review_rows(review))
+}
+
+fn rendered_rerun_editor(app: &ShellApp, review: &crate::app::PhaseRerunReview) -> String {
+    join_rows(phase_rerun_editor_rows(app, review))
+}
+
+fn join_rows(rows: Vec<crate::app::PhaseResultDetailRow>) -> String {
+    rows.into_iter()
         .map(|row| row.text)
         .collect::<Vec<_>>()
         .join("\n")
