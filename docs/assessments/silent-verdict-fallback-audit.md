@@ -1,5 +1,24 @@
 # Silent verdict-fallback audit
 
+> **Stale as of 2026-08-28 — re-verified against the live tree.**
+> **Fixed:** F1 (a self-declared static proof state outside whitebox-static mode
+> is now clamped to `NeedsRuntimeEvidence` —
+> `capabilities/agentic_sast/application/normalize_findings.rs::unvalidated_agentic_static_state`);
+> F2 (`JsonExtractionStrategy` is threaded to the caller and
+> `strategy.is_balanced()` marks brace-walked extractions low-trust);
+> F5 (an object without a `findings` key now `bail!`s instead of coercing to an
+> empty array); F6 (unknown severity labels resolve to `Severity::Unknown`, incl.
+> `uaf_hunt`).
+> **Mostly fixed:** F7 — the `unwrap_or(json!(…))` cluster and the
+> `verify_consensus.rs` reads are gone; one residual `unwrap_or(false)` remains on
+> the already-normalized escalation pass (`verify_finding_tool.rs:145`).
+> **Half-fixed:** F3 and F4 — the degradation is now *recorded* (the classifier
+> gate emits a runtime diagnostic; the deep auditor attaches the raw text to a
+> synthesized rationale), but the fallback *value* is unchanged: a neutral `0.5`
+> score and a `triggerable: false @ 0.25` vote, neither typed as a degradation on
+> the finding. Tracked as ROADMAP **P1.4**.
+> The body below is preserved as the original 2026-07-07 audit.
+
 Read-only correctness audit. **No files were modified.** Scope: the paths that
 turn LLM/tool text into a structured verdict, severity, boolean, or confidence,
 looking for places where a parse failure, missing field, or unexpected type
