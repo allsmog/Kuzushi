@@ -453,6 +453,31 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   fail "nav-mode — Navigate footer never rendered"
 }
 
+# Dispose of a completed phase-result card by its own advertised key.
+# Those keys (app/phase_results.rs) are Navigate-mode only, and a single blind
+# press races a lagging event loop: the shell can be back in Prompt by the time
+# the key lands, where it is simply typed into the composer. Converge on
+# Navigate, press, and re-check the status footer's "result ready" chip — the
+# same poll-press-recheck shape d_submit and d_nav_mode already use.
+d_phase_result() { # <card key, e.g. n>
+  ensure_session
+  local key=$1 tries=0 tail3
+  while (( tries++ <= 24 )); do
+    if ! devex_pane_contains "$SESSION" "result ready"; then
+      report step "phase-result: $key (card resolved)"
+      return 0
+    fi
+    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    if devex_footer_is_navigate "$tail3"; then
+      tmux send-keys -t "$SESSION" "$key"
+    else
+      tmux send-keys -t "$SESSION" Escape
+    fi
+    sleep 0.5
+  done
+  fail "phase-result: $key — the result card never resolved"
+}
+
 d_wait() { sleep "$1"; }
 
 # After an interactive `launch:`, a needle only counts once the TUI owns the
@@ -790,6 +815,7 @@ dispatch() { # <directive> <value>
     type)            d_type "$2";;
     submit)          d_submit "$2";;
     nav-mode)        d_nav_mode;;
+    phase-result)    d_phase_result "$2";;
     wait)            d_wait "$2";;
     wait-for)        d_wait_for "$2";;
     wait-snap)       d_wait_snap "$2";;

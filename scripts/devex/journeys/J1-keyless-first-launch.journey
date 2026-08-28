@@ -10,7 +10,10 @@ launch:
 wait-for: 25 CHOOSE A TARGET
 snap: target-gate
 expect: Nothing defaults to cwd silently
-expect: :demo
+# The picker advertises the escape hatch as a typed verb, not the `:demo`
+# prefix form. `:` still opens the picker prompt (J52 exercises it), so assert
+# the affordance rather than the older syntax.
+expect: demo offline fixture
 ask: Target gate — is the operator told WHY they are stopped here, and is the next action obvious without docs?
 keys: Enter
 wait-for: 5 SETUP · READY THE MAP RUN
@@ -23,12 +26,9 @@ submit: demo
 wait-for: 120 run completed
 # The completed run parks a RESULT READY card whose advertised keys are
 # Navigate-mode only (app/phase_results.rs: `n` Use & Review, `u` Use scan,
-# `o` Open, `r` Run again). Converge on Navigate first — sent from Prompt the
-# key is just typed into the composer. Accepting routes to the derived next
-# phase, so the top bar leaves "Viewing Scan".
-nav-mode
-keys: n
-wait-for: 20 Viewing Map
+# `o` Open, `r` Run again). Sent from Prompt the key is merely typed, so
+# phase-result: converges on Navigate and re-checks the card before moving on.
+phase-result: n
 submit: findings
 wait-for: 20 REVIEW VIEW
 snap: offline-demo-result
