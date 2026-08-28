@@ -84,7 +84,7 @@ const APPROVED_FIXTURE_HASHES = new Map([
   ],
   [
     "crates/kuzushi-core/src/modules/application/sast_scan/run_sast_scan.rs",
-    "e08280ff00273e9d933a6b84a0a81e225fcf68de23cc320c409098bacf4c05f1",
+    "2ba247dc30d613e20e2672102baf57027faabac7e022bbc8836dc7bfff6fd240",
   ],
   [
     "crates/kuzushi-core/src/run_lifecycle/tests.rs",

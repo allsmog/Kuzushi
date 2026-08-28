@@ -632,25 +632,7 @@ impl ShellApp {
         let record = self.current_phase_result_record()?;
         let (tool, input) = self.rerun_specification_for(&record)?;
         let overrides = phase_rerun_action_overrides(derivation, &tool);
-        let workspace = match self.phase_rerun_workspace() {
-            Ok(workspace) => workspace,
-            Err(reason) => {
-                self.refuse_phase_result_action(format!("rerun draft not opened — {reason}"));
-                return None;
-            }
-        };
-        let prepared_input = match self.prepare_phase_rerun_review_input(
-            &tool,
-            input.clone(),
-            overrides,
-            &workspace,
-        ) {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                self.refuse_phase_result_action(format!("rerun input is invalid: {error}"));
-                return None;
-            }
-        };
+        let prepared_input = self.phase_rerun_draft_input(&tool, input.clone(), overrides)?;
         let descriptor = self.registry().resolve_tool(&tool)?;
         Some(PhaseRerunDraft {
             review: PhaseRerunReview {
@@ -671,6 +653,31 @@ impl ShellApp {
             },
             derivation,
         })
+    }
+
+    /// Resolves the input the review will show, announcing why a draft could
+    /// not be opened instead of leaving the operator with an unexplained
+    /// no-op on the result card.
+    fn phase_rerun_draft_input(
+        &mut self,
+        tool: &str,
+        input: Value,
+        overrides: &[(&str, &str)],
+    ) -> Option<Value> {
+        let workspace = match self.phase_rerun_workspace() {
+            Ok(workspace) => workspace,
+            Err(reason) => {
+                self.refuse_phase_result_action(format!("rerun draft not opened — {reason}"));
+                return None;
+            }
+        };
+        match self.prepare_phase_rerun_review_input(tool, input, overrides, &workspace) {
+            Ok(prepared) => Some(prepared),
+            Err(error) => {
+                self.refuse_phase_result_action(format!("rerun input is invalid: {error}"));
+                None
+            }
+        }
     }
 
     fn prepare_phase_rerun_review_input(

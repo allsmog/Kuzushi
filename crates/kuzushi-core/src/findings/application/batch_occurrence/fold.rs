@@ -156,21 +156,23 @@ impl OccurrenceFoldContext {
     }
 
     fn projection_key(&self, finding: &Finding, policy: IdentityFoldPolicy) -> String {
-        if policy == IdentityFoldPolicy::Safe && self.matches_strong_fingerprint(finding) {
-            return format!(
-                "identity:{}",
-                finding.identity_id.as_deref().unwrap_or_default()
-            );
+        if policy == IdentityFoldPolicy::Safe {
+            if let Some(identity_id) = self.strong_fingerprint_identity(finding) {
+                return format!("identity:{identity_id}");
+            }
         }
         finding_projection_key(finding, policy)
     }
 
-    fn matches_strong_fingerprint(&self, finding: &Finding) -> bool {
-        let Some(identity_id) = finding.identity_id.as_ref() else {
-            return false;
-        };
+    /// Returns the identity the fold key is built from, so a finding without
+    /// one can never reach the `identity:` branch. Answering `bool` here and
+    /// re-reading `identity_id` at the call site allowed an absent identity to
+    /// fold every such finding into one empty `identity:` bucket.
+    fn strong_fingerprint_identity<'a>(&self, finding: &'a Finding) -> Option<&'a str> {
+        let identity_id = finding.identity_id.as_ref()?;
         self.strong_fingerprints
             .contains(&(identity_id.clone(), finding.fingerprint.clone()))
+            .then_some(identity_id.as_str())
     }
 }
 

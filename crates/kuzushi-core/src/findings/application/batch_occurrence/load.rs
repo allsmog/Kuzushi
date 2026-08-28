@@ -22,17 +22,16 @@ fn trial_report(index: usize, row: &Value, queue: Option<&Value>) -> BatchTrialR
     let job_id = row
         .get("jobId")
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string();
-    let state = queue.and_then(|doc| doc.pointer(&format!("/jobs/{job_id}")));
+        .filter(|job_id| !job_id.is_empty());
+    let state = job_id.and_then(|job_id| queue.and_then(|doc| doc.pointer(&format!("/jobs/{job_id}"))));
     let run_id = state_field(state, "runId");
     BatchTrialReport {
         trial: row
             .get("trial")
             .and_then(Value::as_u64)
             .unwrap_or((index + 1) as u64) as usize,
-        job_id,
-        state: state_field(state, "state").unwrap_or_else(|| "planned".to_string()),
+        job_id: job_id.unwrap_or_default().to_string(),
+        state: trial_state(job_id, state_field(state, "state")),
         attempts: state
             .and_then(|value| value.get("attempts"))
             .and_then(Value::as_u64)
@@ -57,6 +56,17 @@ fn attempt_run_ids(state: Option<&Value>, current: Option<&str>) -> Vec<String> 
         run_ids.insert(current.to_string());
     }
     run_ids.into_iter().collect()
+}
+
+/// A plan row carrying no job id cannot be bound to queue state at all, so its
+/// outcome is `unknown`, not "has not started yet". Reporting it as `planned`
+/// would let a trial nobody can read count toward a clean batch; `unknown`
+/// falls into `pending`, contributes no findings, and stays visible.
+fn trial_state(job_id: Option<&str>, queue_state: Option<String>) -> String {
+    let Some(_) = job_id else {
+        return "unknown".to_string();
+    };
+    queue_state.unwrap_or_else(|| "planned".to_string())
 }
 
 fn state_field(value: Option<&Value>, key: &str) -> Option<String> {
