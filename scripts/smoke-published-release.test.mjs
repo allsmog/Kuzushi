@@ -8,8 +8,47 @@ import {
   installedCommandPath,
   normalizePublishedVersion,
   parseJsonOutput,
+  resolveSmokePlan,
   successfulCommandOutput,
 } from "./smoke-published-release.mjs";
+
+const appleSilicon = {
+  platform: "darwin",
+  nodeArch: "arm64",
+  translated: false,
+  allowRosetta: true,
+  rosettaInstalled: () => true,
+};
+
+test("an unpinned slug leaves the published smoke exactly as it was", () => {
+  assert.equal(resolveSmokePlan(undefined, appleSilicon), null);
+  assert.equal(resolveSmokePlan("  ", appleSilicon), null);
+});
+
+test("a pinned darwin-x64 slug refuses an arm64 Node and records the translation", () => {
+  assert.throws(() => resolveSmokePlan("darwin-x64", appleSilicon), /must run under an x64 Node/);
+  assert.deepEqual(
+    resolveSmokePlan("darwin-x64", { ...appleSilicon, nodeArch: "x64", translated: true }),
+    {
+      hostSlug: "darwin-arm64",
+      smokedSlug: "darwin-x64",
+      translation: "rosetta",
+    },
+  );
+  assert.deepEqual(resolveSmokePlan("darwin-arm64", appleSilicon), {
+    hostSlug: "darwin-arm64",
+    smokedSlug: "darwin-arm64",
+    translation: "none",
+  });
+});
+
+test("a pinned slug still refuses a host Rosetta cannot reach", () => {
+  assert.throws(() => resolveSmokePlan("linux-x64", appleSilicon), /cannot run on darwin-arm64/);
+  assert.throws(
+    () => resolveSmokePlan("darwin-x64", { ...appleSilicon, allowRosetta: false }),
+    /requires an explicit KUZUSHI_SMOKE_ALLOW_ROSETTA=1 opt-in/,
+  );
+});
 
 test("published version accepts a tag or npm version", () => {
   assert.equal(normalizePublishedVersion("v0.24.0-alpha.12"), "0.24.0-alpha.12");

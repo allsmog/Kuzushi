@@ -15,6 +15,11 @@ on:
         description: Prior release tag or full commit SHA for changed-code quality gates
         required: true
         type: string
+      hosted:
+        description: Build and smoke the darwin legs on GitHub-hosted macOS runners
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       expected_version:
@@ -29,6 +34,11 @@ on:
         description: Prior release tag or full commit SHA for changed-code quality gates
         required: true
         type: string
+      hosted:
+        description: Build and smoke the darwin legs on GitHub-hosted macOS runners
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: release-candidate-${{ github.ref }}
@@ -123,10 +133,16 @@ jobs:
             slug: darwin-arm64
             cross_slug: darwin-x64
             cross_target: x86_64-apple-darwin
+            self_hosted: true
           - os: windows-2025
             slug: win32-x64
     name: native-${{ matrix.slug }}
-    runs-on: ${{ matrix.os }}
+    # Both darwin payloads are produced by the one Apple silicon row, so that
+    # row is the whole macOS bill. It runs on the owner's self-hosted Apple
+    # silicon runner by default and costs nothing; `hosted: true` sends it back
+    # to the 10x-billed `macos-14` image. Every other row stays GitHub-hosted,
+    # and no job that holds a credential or write permission is ever eligible.
+    runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || format('["{0}"]', matrix.os)) }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -266,11 +282,14 @@ jobs:
             slug: linux-arm64
           - os: macos-15-intel
             slug: darwin-x64
+            self_hosted: true
+            rosetta: "1"
           - os: macos-14
             slug: darwin-arm64
+            self_hosted: true
           - os: windows-2025
             slug: win32-x64
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || format('["{0}"]', matrix.os)) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -280,11 +299,35 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # npm gates `@kuzushi/darwin-x64` on `process.arch === "x64"`, so the
+      # translated leg needs an x64 Node ahead of the host's arm64 one. Putting
+      # its prefix first on PATH is enough: macOS runs the x64 binaries under
+      # Rosetta, and npm's `#!/usr/bin/env node` shebang then resolves to it.
+      - name: Lead with the x64 Node toolchain for the translated darwin-x64 leg
+        if: ${{ matrix.rosetta && !inputs.hosted }}
+        shell: bash
+        env:
+          X64_NODE_PREFIX: ${{ vars.KUZUSHI_X64_NODE_PREFIX || '/usr/local' }}
+        run: |
+          set -euo pipefail
+          node_path="${X64_NODE_PREFIX}/bin/node"
+          if [[ ! -x "${node_path}" ]]; then
+            echo "no x64 Node at ${node_path}; see docs/quality/release-legs-self-hosted.md" >&2
+            exit 1
+          fi
+          reported="$("${node_path}" -p 'process.arch')"
+          if [[ "${reported}" != "x64" ]]; then
+            echo "${node_path} reports ${reported}, but the darwin-x64 leg needs x64" >&2
+            exit 1
+          fi
+          echo "${X64_NODE_PREFIX}/bin" >> "${GITHUB_PATH}"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: release-candidate-artifacts
           path: dist/release
       - name: Install and execute the exact local tarballs
+        env:
+          KUZUSHI_SMOKE_ALLOW_ROSETTA: ${{ matrix.rosetta }}
         run: >-
           node scripts/smoke-release-tarballs.mjs
           dist/release "${{ inputs.expected_sha }}" "${{ inputs.expected_version }}" "${{ matrix.slug }}"

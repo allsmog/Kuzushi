@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   localConsumerManifest,
+  machineArchitecture,
+  nodeArchitectureFailure,
+  processIsTranslated,
   rosettaOverrideEnvVar,
   rosettaOverrideRequested,
   rosettaTranslationInstalled,
@@ -129,6 +132,30 @@ test("the override is opt-in by exact value and the probe is the only host quest
     rosettaTranslationInstalled({ markerExists: () => false, probe: () => false }),
     false,
   );
+});
+
+test("a translated process reports the machine it runs on, not the arch it reports", () => {
+  assert.equal(machineArchitecture("x64", true), "arm64");
+  assert.equal(machineArchitecture("x64", false), "x64");
+  assert.equal(machineArchitecture("arm64", false), "arm64");
+  assert.equal(processIsTranslated({ platform: "linux", probe: () => true }), false);
+  assert.equal(processIsTranslated({ platform: "darwin", probe: () => true }), true);
+  assert.equal(processIsTranslated({ platform: "darwin", probe: () => false }), false);
+});
+
+test("a translated leg refuses to smoke darwin-x64 through an arm64 Node", () => {
+  const translated = smokeExecutionPlan({
+    slug: "darwin-x64",
+    platform: "darwin",
+    arch: "arm64",
+    allowRosetta: true,
+    rosettaInstalled: true,
+  });
+  assert.match(nodeArchitectureFailure(translated, "arm64"), /must run under an x64 Node/);
+  assert.equal(nodeArchitectureFailure(translated, "x64"), null);
+
+  const native = smokeExecutionPlan({ slug: "darwin-arm64", platform: "darwin", arch: "arm64" });
+  assert.equal(nodeArchitectureFailure(native, "arm64"), null);
 });
 
 test("a selected tarball carries the execution plan into the receipt", () => {

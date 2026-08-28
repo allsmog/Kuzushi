@@ -64,6 +64,10 @@ jobs:
       expected_version: ${{ needs.preflight.outputs.version }}
       expected_sha: ${{ github.sha }}
       quality_base_ref: ${{ needs.preflight.outputs.quality_base_ref }}
+      # A tag push carries no inputs, so the darwin escape hatch is a repository
+      # variable: set `KUZUSHI_RELEASE_HOSTED=true` to run one release on
+      # GitHub-hosted macOS without editing this workflow, and unset it after.
+      hosted: ${{ vars.KUZUSHI_RELEASE_HOSTED == 'true' }}
     permissions:
       contents: read
 
@@ -148,5 +152,6 @@ jobs:
     uses: ./.github/workflows/published-release-smoke.yml
     with:
       version: v${{ needs.preflight.outputs.version }}
+      hosted: ${{ vars.KUZUSHI_RELEASE_HOSTED == 'true' }}
     permissions:
       contents: read

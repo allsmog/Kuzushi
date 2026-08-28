@@ -7,6 +7,9 @@ import path from "node:path";
 import process from "node:process";
 import {
   localConsumerManifest,
+  machineArchitecture,
+  nodeArchitectureFailure,
+  processIsTranslated,
   rosettaOverrideRequested,
   rosettaTranslationInstalled,
   selectLocalTarballs,
@@ -23,10 +26,15 @@ if (!directoryArg || !commitSha || !version || !slug) {
 const directory = path.resolve(directoryArg);
 const manifest = verifyReleaseManifest(directory, commitSha, version);
 const allowRosetta = rosettaOverrideRequested(process.env);
-const selected = selectLocalTarballs(manifest, directory, slug, process.platform, process.arch, {
+// The receipt must name the machine, not the process: an x64 Node executing on
+// Apple silicon reports x64 for itself while the host is still arm64.
+const machineArch = machineArchitecture(process.arch, processIsTranslated());
+const selected = selectLocalTarballs(manifest, directory, slug, process.platform, machineArch, {
   allowRosetta,
   rosettaInstalled: allowRosetta && rosettaTranslationInstalled(),
 });
+const archFailure = nodeArchitectureFailure(selected.plan, process.arch);
+if (archFailure) throw new Error(archFailure);
 const consumer = mkdtempSync(path.join(tmpdir(), `kuzushi-${slug}-consumer-`));
 
 try {
@@ -56,7 +64,7 @@ try {
   );
   writeFileSync(
     path.join(process.cwd(), "local-tarball-smoke.json"),
-    `${JSON.stringify({ commitSha, version, slug, hostSlug: selected.plan.hostSlug, smokedSlug: selected.plan.smokedSlug, translation: selected.plan.translation, root: selected.root.file, platform: selected.native.file }, null, 2)}\n`,
+    `${JSON.stringify({ commitSha, version, slug, hostSlug: selected.plan.hostSlug, smokedSlug: selected.plan.smokedSlug, translation: selected.plan.translation, nodeArch: process.arch, root: selected.root.file, platform: selected.native.file }, null, 2)}\n`,
   );
   process.stdout.write(
     `local tarball install and runtime smoke passed for ${slug} on ${selected.plan.hostSlug} ` +
