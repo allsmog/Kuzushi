@@ -641,6 +641,17 @@ fn authorize_prepared_execution(
     enforce_descriptor_finding_store(descriptor, ctx)
 }
 
+/// Reject unusable model credentials before the executor starts.
+///
+/// This preflight only reports what the runtime says about a *resolved* model.
+/// A missing runtime and a missing model are decided elsewhere on purpose:
+/// `enforce_runtime_requirement` already refused the call above, and each
+/// executor's `resolve_tool_model` raises the no-silent-fallback error that
+/// names the exact operator remedy. Several tools additionally defer that
+/// judgement to their executor so they can report a deterministic outcome
+/// (`Run triage:run first`, `pipeline=deterministic`, …) instead of a generic
+/// runtime complaint. Restating either condition here would replace those
+/// specific messages with a vaguer one.
 fn preflight_execution_model(
     registry: &ModuleRegistry,
     name: &str,
@@ -651,9 +662,10 @@ fn preflight_execution_model(
     if !registry.tool_wants_runtime(name, input, ctx.config) {
         return Ok(());
     }
-    let runtime = runtime.context("model-backed execution requires an agent runtime")?;
-    let model = crate::modules::tool_execution_model(name, input, ctx.config)
-        .with_context(|| format!("{name} requires an explicit model before execution"))?;
+    let model = crate::modules::tool_execution_model(name, input, ctx.config);
+    let (Some(runtime), Some(model)) = (runtime, model) else {
+        return Ok(());
+    };
     runtime.preflight_model_blocking(&model)
 }
 
@@ -719,6 +731,66 @@ mod model_preflight_tests {
             RuntimeFailureClass::Authentication
         );
         assert!(!target.path().join(".kuzushi/v3/runs").exists());
+    }
+
+    #[test]
+    fn unresolved_model_leaves_the_no_silent_fallback_remedy_intact() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(target.path()).unwrap();
+        let config = crate::V2Config::default();
+        let store = crate::findings::FindingStore::open(workspace.findings_db_path()).unwrap();
+        let runtime = AuthenticationMissingRuntime {
+            preflight_calls: AtomicUsize::new(0),
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_dispatch_input("agentic-sast:scan", json!({}), &ctx, None)
+            .unwrap()
+            .authorize_explicit_headless();
+
+        let error = registry
+            .dispatch_prepared_input_with_runtime(prepared, &ctx, Some(&runtime))
+            .unwrap_err()
+            .to_string();
+
+        // The preflight must stay silent so the executor can name the remedy.
+        assert_eq!(runtime.preflight_calls.load(Ordering::SeqCst), 0);
+        assert!(error.contains("requires an explicit model"), "{error}");
+        assert!(error.contains("will not choose a fallback model"), "{error}");
+    }
+
+    #[test]
+    fn executor_owned_runtime_requirement_keeps_its_deterministic_error() {
+        let target = tempfile::tempdir().unwrap();
+        let workspace = crate::WorkspaceTarget::new(target.path()).unwrap();
+        let config = crate::V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        let registry = ModuleRegistry::with_v2_builtins();
+
+        let error = registry
+            .execute_tool("threat-model:build", json!({}), &ctx)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            error.contains("model-backed and requires a configured model"),
+            "{error}"
+        );
     }
 }
 
