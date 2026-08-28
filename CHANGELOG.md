@@ -33,6 +33,15 @@ packages, create a tag, or create a GitHub Release._
 
 **Security:**
 
+- `kuzushi auth ping` no longer builds its own request envelope. The
+  credential is now bound to the provider of the model being pinged, so a
+  provider argument that disagrees with the model — including the default
+  `anthropic` argument on a config whose model is `openai:*` — fails before any
+  environment variable is read or any bridge process starts, instead of
+  forwarding one provider's API key to another provider. The ping also runs
+  through the shared runtime credential preflight used by scan and run, and a
+  bridge that exits nonzero is now reported as a failure even when it printed a
+  success document.
 - Durable finding identity now rejects canonical fingerprint, deduplication,
   and source-signature overrides from KWP workers, keeps actor fingerprints as
   provenance only, and refuses exact-fingerprint reuse across different

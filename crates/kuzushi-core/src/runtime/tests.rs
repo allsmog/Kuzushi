@@ -693,3 +693,78 @@ mod tests {
         assert_eq!(SubagentRole::FfiBoundaryReasoner.name(), "ffi-boundary");
     }
 }
+
+// Cross-provider containment for the shared model/credential binding.
+//
+// These sit at the file's top level rather than inside the `tests` module
+// above so `cargo test -p kuzushi-core runtime::tests::model_auth_binding`
+// selects exactly this pair.
+use crate::runtime::policy::{
+    bind_model_auth, public_auth_provider, require_model_auth_binding, PublicAuthProvider,
+};
+
+/// Every (requested provider, foreign model) pair must refuse, under either
+/// configured credential env name. Refusal is the only safe outcome: the
+/// alternative hands one provider's secret to another provider.
+#[test]
+fn model_auth_binding_rejects_every_cross_provider_pair() {
+    let foreign_pairs = [
+        (PublicAuthProvider::Anthropic, "openai:gpt-5.5"),
+        (PublicAuthProvider::Anthropic, "openai-codex:gpt-5.5"),
+        (PublicAuthProvider::OpenAi, "anthropic:claude-haiku-4-5"),
+        (PublicAuthProvider::OpenAi, "vertex-anthropic:claude-haiku-4-5"),
+    ];
+
+    for (requested, model) in foreign_pairs {
+        for api_key_env in ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"] {
+            let error = require_model_auth_binding(requested, model, api_key_env)
+                .expect_err("cross-provider binding must refuse")
+                .to_string();
+            assert!(
+                error.contains(model),
+                "{} + {api_key_env} refusal must name the model: {error}",
+                requested.label()
+            );
+        }
+    }
+}
+
+/// Namespaces that share one public provider must bind to it, so Vertex-hosted
+/// Claude and the OAuth-backed Codex transport are not mistaken for a
+/// different trust boundary.
+#[test]
+fn model_auth_binding_accepts_provider_namespace_aliases() {
+    let anthropic = require_model_auth_binding(
+        PublicAuthProvider::Anthropic,
+        "anthropic:claude-haiku-4-5",
+        "ANTHROPIC_API_KEY",
+    )
+    .unwrap();
+    assert_eq!(anthropic.api_key_env, "ANTHROPIC_API_KEY");
+    assert_eq!(anthropic.model_provider, "anthropic");
+
+    let vertex = require_model_auth_binding(
+        PublicAuthProvider::Anthropic,
+        "vertex-anthropic:claude-haiku-4-5",
+        "ANTHROPIC_VERTEX_PROJECT_ID",
+    )
+    .unwrap();
+    assert_eq!(vertex.api_key_env, "ANTHROPIC_VERTEX_PROJECT_ID");
+    assert_eq!(vertex.public_provider, PublicAuthProvider::Anthropic);
+
+    let codex = require_model_auth_binding(
+        PublicAuthProvider::OpenAi,
+        " openai-codex : gpt-5.5 ",
+        "OPENAI_API_KEY",
+    )
+    .unwrap();
+    assert_eq!(codex.model, "openai-codex:gpt-5.5");
+    assert_eq!(codex.public_provider, PublicAuthProvider::OpenAi);
+
+    assert_eq!(
+        public_auth_provider("openai").unwrap(),
+        PublicAuthProvider::OpenAi
+    );
+    assert!(public_auth_provider("mistral").is_err());
+    assert!(bind_model_auth("gpt-5.5", "OPENAI_API_KEY").is_err());
+}

@@ -202,6 +202,33 @@ fn legacy_error_class_non_rate_limited(lower: &str) -> &'static str {
         .unwrap_or("bridge_internal")
 }
 
+/// Spawn the bridge, hand it the request, and collect its process output.
+/// The only side-effecting step; both runners below interpret the result.
+fn bridge_output<T: Serialize>(
+    command: &[String],
+    request: &T,
+    label: &str,
+    extra_env: &[(String, String)],
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<Output> {
+    let (mut cmd, process_group) = configured_bridge_command(command)?;
+    for (env, value) in extra_env {
+        cmd.env(env, value);
+    }
+    let mut child = cmd
+        .spawn()
+        .with_context(|| format!("could not start {label} {}", command[0]))?;
+
+    write_bridge_request(&mut child, request, label)?;
+    wait_with_output_deadline(
+        child,
+        process_group,
+        label,
+        Some(bridge_timeout()?),
+        cancellation,
+    )
+}
+
 fn run_json_bridge<T, R>(
     command: &[String],
     request: &T,
@@ -213,23 +240,31 @@ where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let (mut cmd, process_group) = configured_bridge_command(command)?;
-    for (env, value) in extra_env {
-        cmd.env(env, value);
-    }
-    let mut child = cmd
-        .spawn()
-        .with_context(|| format!("could not start {label} {}", command[0]))?;
-
-    write_bridge_request(&mut child, request, label)?;
-    let output = wait_with_output_deadline(
-        child,
-        process_group,
-        label,
-        Some(bridge_timeout()?),
-        cancellation,
-    )?;
+    let output = bridge_output(command, request, label, extra_env, cancellation)?;
     parse_bridge_output(output, label)
+}
+
+/// Strict variant: a nonzero exit is a failure even when the bridge also
+/// printed a well-formed response document. Diagnostic callers such as
+/// `auth ping` must not report success for a process that died.
+pub(crate) fn run_strict_json_bridge<T, R>(
+    command: &[String],
+    request: &T,
+    label: &str,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<R>
+where
+    T: Serialize,
+    R: DeserializeOwned,
+{
+    let output = bridge_output(command, request, label, &[], cancellation)?;
+    forward_bridge_diagnostics(&output.stderr);
+    anyhow::ensure!(
+        output.status.success(),
+        "{label} exited with {}",
+        output.status
+    );
+    parse_successful_bridge_output(&output.stdout, label)
 }
 
 const MAX_BRIDGE_STDOUT_BYTES: usize = 64 * 1024 * 1024;

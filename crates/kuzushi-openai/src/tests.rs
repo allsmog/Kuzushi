@@ -1126,4 +1126,116 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             serde_json::json!("bridge.log")
         );
     }
+
+    /// The ping envelope carries the credential of the *model's* provider. A
+    /// model from another provider is refused before the bridge is spawned,
+    /// so no credential can cross a provider trust boundary.
+    #[cfg(unix)]
+    #[test]
+    fn auth_ping_bridge_binds_the_credential_to_the_model_provider() {
+        let tmp = tempfile::tempdir().unwrap();
+        let recorded = tmp.path().join("payload.json");
+        let bridge = write_ping_bridge_script(tmp.path(), "bridge.sh", &recorded, 0);
+        let runtime = ping_runtime(tmp.path(), &bridge);
+
+        let error = runtime
+            .auth_ping_blocking("anthropic:claude-haiku-4-5")
+            .expect_err("an Anthropic model must not ping through an OpenAI credential")
+            .to_string();
+        assert!(error.contains("ANTHROPIC_API_KEY"), "{error}");
+        assert!(
+            !recorded.exists(),
+            "a cross-provider ping must not spawn the bridge at all"
+        );
+
+        let response = runtime.auth_ping_blocking(" openai-codex : gpt-5.5 ").unwrap();
+        assert!(response.ok);
+        assert_eq!(response.auth_mode.as_deref(), Some("oauth"));
+
+        let sent: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&recorded).unwrap()).unwrap();
+        assert_eq!(sent["type"], serde_json::json!("ping"));
+        assert_eq!(sent["model"], serde_json::json!("openai-codex:gpt-5.5"));
+        assert_eq!(sent["apiKeyEnv"], serde_json::json!("OPENAI_API_KEY"));
+        assert_eq!(
+            sent["protocolVersion"],
+            serde_json::json!(LANGGRAPH_BRIDGE_PROTOCOL_VERSION)
+        );
+    }
+
+    /// The strict runner refuses to report a healthy round trip for a bridge
+    /// that exited nonzero, even when it printed a success document.
+    #[cfg(unix)]
+    #[test]
+    fn auth_ping_bridge_rejects_a_nonzero_exit_after_success_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let recorded = tmp.path().join("payload.json");
+        let bridge = write_ping_bridge_script(tmp.path(), "lying.sh", &recorded, 7);
+
+        let error = ping_runtime(tmp.path(), &bridge)
+            .auth_ping_blocking("openai-codex:gpt-5.5")
+            .expect_err("a nonzero exit must fail the ping")
+            .to_string();
+
+        assert!(error.contains("auth ping bridge exited with"), "{error}");
+    }
+
+    #[cfg(unix)]
+    fn write_ping_bridge_script(
+        dir: &std::path::Path,
+        name: &str,
+        recorded: &std::path::Path,
+        exit_code: i32,
+    ) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = dir.join(name);
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\ncat > {recorded}\nprintf '%s' '{response}'\nexit {exit_code}\n",
+                recorded = recorded.display(),
+                response = r#"{"ok":true,"auth_mode":"oauth","latency_ms":4,"input_tokens":1,"output_tokens":1,"cost_usd":0.0}"#,
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        script
+    }
+
+    /// Runtime with a usable stored OpenAI OAuth bag, so the ping proceeds to
+    /// the bridge rather than stopping at credential validation.
+    #[cfg(unix)]
+    fn ping_runtime(dir: &std::path::Path, bridge: &std::path::Path) -> LangGraphRuntime {
+        let oauth_path = dir.join("oauth-credentials.json");
+        std::fs::write(
+            &oauth_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "access": "test-access-token",
+                    "refresh": "test-refresh-token",
+                    "expires": 4_102_444_800_000_u64
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            bridge_retry_attempts: None,
+            bridge_retry_backoff_ms: None,
+            anthropic_oauth: Some(kuzushi_core::AnthropicOauthConfig {
+                credentials_path: Some(oauth_path),
+                allow_env_token: false,
+            }),
+        };
+        LangGraphRuntime::from_runtime_config(&runtime, dir).unwrap()
+    }
 }

@@ -10,7 +10,7 @@ mod triage;
 
 pub use runtime_config::LangGraphRuntime;
 
-pub use bridge_payloads::LANGGRAPH_BRIDGE_PROTOCOL_VERSION;
+pub use bridge_payloads::{PingBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
 pub use bridge_process::default_langgraph_bridge_command;
 pub(crate) use bridge_process::{run_bridge, run_next_step_bridge};
 pub(crate) use next_step_bridge::next_step_blocking;
