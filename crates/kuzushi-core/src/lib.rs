@@ -48,7 +48,7 @@ pub(crate) mod yaml;
 mod code_index;
 mod public_exports;
 pub use demo::{
-    demo_fixture_path, offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture,
+    is_demo_fixture_path, offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture,
 };
 pub use public_exports::*;
 pub use runtime_diagnostics::{take_runtime_diagnostics, RuntimeDiagnostic};

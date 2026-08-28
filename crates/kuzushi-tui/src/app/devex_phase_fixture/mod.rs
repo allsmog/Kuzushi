@@ -91,15 +91,9 @@ impl ShellApp {
 }
 
 fn is_offline_demo_target(target: &Path) -> bool {
-    let expected = kuzushi_core::demo_fixture_path();
-    let safe_directory = std::fs::symlink_metadata(&expected)
+    let safe_directory = std::fs::symlink_metadata(target)
         .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
-    safe_directory
-        && target
-            .canonicalize()
-            .ok()
-            .zip(expected.canonicalize().ok())
-            .is_some_and(|(target, expected)| target == expected)
+    safe_directory && kuzushi_core::is_demo_fixture_path(target)
 }
 
 #[cfg(test)]

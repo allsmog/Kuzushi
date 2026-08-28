@@ -7904,7 +7904,6 @@ fn auth_picker_swallows_shifted_typed_characters() {
 
 #[test]
 fn auth_picker_api_key_editor_owns_shortcut_letters_from_first_character() {
-    let _fixture_lock = demo_fixture_test_lock();
     for ch in ['j', 'k', 'd', 'q'] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.open_credential_entry("openai".to_string());
@@ -12403,7 +12402,6 @@ fn target_picker_cannot_activate_candidate_while_planner_is_live() {
 
 #[test]
 fn target_picker_command_line_demo_starts_the_offline_fixture() {
-    let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_shell_view(ShellView::TargetPicker);
 
@@ -12586,7 +12584,6 @@ fn auth_picker_selected_kind_tracks_the_row_model() {
 
 #[test]
 fn auth_picker_enter_on_offline_demo_row_runs_the_fixture() {
-    let _fixture_lock = demo_fixture_test_lock();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.open_auth_method_picker("anthropic".to_string());
     let demo_row = app.router.auth_picker().row_count() - 1;
@@ -13542,7 +13539,6 @@ fn target_activation_clears_target_derived_state_before_hydration() {
 
 #[test]
 fn offline_demo_uses_target_activation_before_preparing_its_scan() {
-    let _fixture_lock = demo_fixture_test_lock();
     let _env_lock = env_test_lock();
     let home = tempfile::tempdir().unwrap();
     let _home = EnvVarGuard::set("HOME", home.path().to_string_lossy().as_ref());
