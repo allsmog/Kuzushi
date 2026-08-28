@@ -3,6 +3,11 @@ use super::*;
 impl ShellApp {
     pub(super) fn handle_text_key(&mut self, key: KeyEvent) -> InputUpdate {
         match key.code {
+            // Every chord this shell binds has already had its turn by now, so
+            // a Ctrl/Alt-modified character here is an *unbound* chord — never
+            // text the operator asked to type. Refuse it rather than letting
+            // the bare letter land in the composer.
+            KeyCode::Char(_) if chord_modified(key) => return InputUpdate::ignored(),
             KeyCode::Char(ch) => self.insert_printable_key(ch),
             KeyCode::Backspace => self.backspace(),
             KeyCode::Tab if !self.ui().keymap_overrides_action("composer", "complete") => {
@@ -412,6 +417,14 @@ fn activity_body_contains_row(row: u16, height: u16, header_rows: u16, footer_ro
 
 fn normalise_paste_text(text: &str) -> String {
     text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// True when the keystroke is a Ctrl/Alt chord rather than typed text. Mirrors
+/// `picker_command_char`, so the composer and the picker prompt agree on what
+/// counts as a character the operator meant to type.
+fn chord_modified(key: KeyEvent) -> bool {
+    key.modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
 }
 
 #[cfg(test)]

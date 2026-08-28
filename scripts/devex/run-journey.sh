@@ -74,6 +74,9 @@ J_COLS=0 J_ROWS=0 J_CWD="" SESSION_STARTED=0
 ENV_PREFIX=""    # accumulated `env -u K K=V` prefix, consumed by next launch
 TMP_HOME="" FIXTURE_TARGET=""
 ACTIVE_PROFILE="default" ACTIVE_LAUNCH_ARGS="" ACTIVE_TARGET_CONTEXT="not launched"
+# 1 once an interactive `launch:` has started the TUI, which owns the terminal
+# in raw mode. `launch-raw:` journeys may be headless and keep this at 0.
+ACTIVE_LAUNCH_OWNS_TERMINAL=0
 TARGET_PROOF_REQUIRED=0 TARGET_PROOF_ACTIVE=0 TARGET_REAL="" TARGET_TOPLEVEL=""
 TARGET_HEAD_BEFORE="" TARGET_STATUS_BEFORE="" TARGET_TREE_BEFORE=""
 
@@ -330,6 +333,7 @@ d_launch() { # args appended to the kuzushi binary ('' = bare launch)
   local args cmd; args=$(expand_tokens "$1")
   ACTIVE_PROFILE=$(profile_for_launch_env "$ENV_PREFIX")
   ACTIVE_LAUNCH_ARGS=$args
+  ACTIVE_LAUNCH_OWNS_TERMINAL=1
   case " $args " in
     *' --target '*) ACTIVE_TARGET_CONTEXT=$args;;
     *) ACTIVE_TARGET_CONTEXT="interactive target selection from $J_CWD";;
@@ -346,6 +350,7 @@ d_launch_raw() { # full shell command line (pipes, --plain, non-TTY checks)
   local raw cmd; raw=$(expand_tokens "$1")
   ACTIVE_PROFILE=$(profile_for_launch_env "$ENV_PREFIX")
   ACTIVE_LAUNCH_ARGS=$raw
+  ACTIVE_LAUNCH_OWNS_TERMINAL=0
   ACTIVE_TARGET_CONTEXT="command-defined or headless"
   cmd=$(launch_cmd "$raw")
   ENV_PREFIX=""
@@ -448,7 +453,43 @@ d_nav_mode() { # converge the shell to Navigate mode (page keys / view hotkeys)
   fail "nav-mode — Navigate footer never rendered"
 }
 
+# Dispose of a completed phase-result card by its own advertised key.
+# Those keys (app/phase_results.rs) are Navigate-mode only, and a single blind
+# press races a lagging event loop: the shell can be back in Prompt by the time
+# the key lands, where it is simply typed into the composer. Converge on
+# Navigate, press, and re-check the status footer's "result ready" chip — the
+# same poll-press-recheck shape d_submit and d_nav_mode already use.
+d_phase_result() { # <card key, e.g. n>
+  ensure_session
+  local key=$1 tries=0 tail3
+  while (( tries++ <= 24 )); do
+    if ! devex_pane_contains "$SESSION" "result ready"; then
+      report step "phase-result: $key (card resolved)"
+      return 0
+    fi
+    tail3=$(tmux capture-pane -t "$SESSION" -p 2>/dev/null | tail -3)
+    if devex_footer_is_navigate "$tail3"; then
+      tmux send-keys -t "$SESSION" "$key"
+    else
+      tmux send-keys -t "$SESSION" Escape
+    fi
+    sleep 0.5
+  done
+  fail "phase-result: $key — the result card never resolved"
+}
+
 d_wait() { sleep "$1"; }
+
+# After an interactive `launch:`, a needle only counts once the TUI owns the
+# terminal. Matching the pre-TUI boot banner in the scrollback would release
+# the following `keys:` into a still-cooked tty — see devex_live_pane_contains.
+wait_for_needle_visible() { # <session> <needle>
+  if [ "$ACTIVE_LAUNCH_OWNS_TERMINAL" = 1 ]; then
+    devex_live_pane_contains "$1" "$2"
+  else
+    devex_pane_contains "$1" "$2"
+  fi
+}
 
 d_wait_for() { # [timeout-secs] <substring>  — poll the pane, bounded, honest
   ensure_session
@@ -460,7 +501,7 @@ d_wait_for() { # [timeout-secs] <substring>  — poll the pane, bounded, honest
   # Include the exact timeout boundary: a two-second SLO gets checks at
   # 0.0, 0.5, 1.0, 1.5, and 2.0 seconds rather than failing at 1.5.
   while [ "$waited" -le "$((timeout * 2))" ]; do
-    if devex_pane_contains "$SESSION" "$needle"; then
+    if wait_for_needle_visible "$SESSION" "$needle"; then
       pass "wait-for \"$needle\" (within ${timeout}s)"
       return 0
     fi
@@ -774,6 +815,7 @@ dispatch() { # <directive> <value>
     type)            d_type "$2";;
     submit)          d_submit "$2";;
     nav-mode)        d_nav_mode;;
+    phase-result)    d_phase_result "$2";;
     wait)            d_wait "$2";;
     wait-for)        d_wait_for "$2";;
     wait-snap)       d_wait_snap "$2";;
@@ -809,6 +851,7 @@ run_journey() { # <journey-file> <run-dir>
   J_COLS=${RUN_SIZE%x*} J_ROWS=${RUN_SIZE#*x} J_CWD=$REPO_ROOT
   TMP_HOME="" FIXTURE_TARGET=""
   ACTIVE_PROFILE="default" ACTIVE_LAUNCH_ARGS="" ACTIVE_TARGET_CONTEXT="not launched"
+  ACTIVE_LAUNCH_OWNS_TERMINAL=0
   TARGET_PROOF_REQUIRED=0 TARGET_PROOF_ACTIVE=0 TARGET_REAL="" TARGET_TOPLEVEL=""
   TARGET_HEAD_BEFORE="" TARGET_STATUS_BEFORE="" TARGET_TREE_BEFORE=""
   TARGET_HEAD_AFTER="" TARGET_STATUS_AFTER="" TARGET_TREE_AFTER=""

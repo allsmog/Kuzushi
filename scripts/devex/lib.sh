@@ -368,6 +368,9 @@ devex_capture() {
 }
 
 # devex_pane_contains <session> <fixed-substring>  (case-insensitive)
+# Mixed TUI/headless path: matches the live screen, and the saved scrollback
+# when no alternate screen is active. A journey that then sends keys must use
+# devex_live_pane_contains instead — see below.
 devex_pane_contains() {
   if [ "$(tmux display-message -p -t "$1" '#{alternate_on}' 2>/dev/null)" = 1 ]; then
     tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
@@ -375,6 +378,21 @@ devex_pane_contains() {
     tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2" \
       || tmux capture-pane -t "$1" -a -q -p 2>/dev/null | grep -Fiq -- "$2"
   fi
+}
+
+# devex_live_pane_contains <session> <fixed-substring>  (case-insensitive)
+# Matches ONLY a screen the TUI already owns. Kuzushi enables raw mode
+# immediately before entering the alternate screen, so an alternate pane is
+# proof that the shell is reading keys raw.
+#
+# Waiting on the mixed path instead lets a needle match Kuzushi's pre-TUI boot
+# banner in the scrollback — "kuzushi: choose a target in the picker; run
+# `demo` for the offline fixture" matches a case-insensitive "CHOOSE A TARGET"
+# — and the journey then types into a still-cooked tty, where the line
+# discipline rewrites the Enter's CR to LF and the shell receives Ctrl+J.
+devex_live_pane_contains() {
+  devex_alternate_active "$1" || return 1
+  tmux capture-pane -t "$1" -p 2>/dev/null | grep -Fiq -- "$2"
 }
 
 # devex_ansi_has_profile <capture.ansi> <indexed|truecolor>

@@ -10,7 +10,10 @@ launch:
 wait-for: 25 CHOOSE A TARGET
 snap: target-gate
 expect: Nothing defaults to cwd silently
-expect: :demo
+# The picker advertises the escape hatch as a typed verb, not the `:demo`
+# prefix form. `:` still opens the picker prompt (J52 exercises it), so assert
+# the affordance rather than the older syntax.
+expect: demo offline fixture
 ask: Target gate — is the operator told WHY they are stopped here, and is the next action obvious without docs?
 keys: Enter
 wait-for: 5 SETUP · READY THE MAP RUN
@@ -21,12 +24,17 @@ expect: Start Map      READY
 ask: Aggregate Setup — can a keyless user tell why this deterministic plan needs neither a model nor credentials, and is the single Start Map commit obvious?
 submit: demo
 wait-for: 120 run completed
-keys: d
-wait: 2
+# The completed run parks a RESULT READY card whose advertised keys are
+# Navigate-mode only (app/phase_results.rs: `n` Use & Review, `u` Use scan,
+# `o` Open, `r` Run again). Sent from Prompt the key is merely typed, so
+# phase-result: converges on Navigate and re-checks the card before moving on.
+phase-result: n
 submit: findings
-wait: 3
+wait-for: 20 REVIEW VIEW
 snap: offline-demo-result
 expect: findings
 expect: signal
-expect: config.env:2
+# Location facets carry a per-fixture tally, so assert the redacted file, not
+# its count.
+expect: config.env
 ask: Offline escape hatch — did `demo` make a real scanner signal, redacted location, and signal_only proof state legible, not just dump logs?
