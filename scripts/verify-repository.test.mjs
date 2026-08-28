@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  foldRunSnapshots,
   parseArguments,
   planDigest,
   rustcIdentity,
@@ -194,6 +195,38 @@ test("process receipt preserves terminating signal", { skip: process.platform ==
   });
 });
 
+test("snapshot folding reports the close-time state and any drift between the ends", () => {
+  const clean = { commit: "aaa", tree: "ttt", dirty: false };
+
+  assert.deepEqual(foldRunSnapshots(clean, clean), {
+    commit: "aaa",
+    tree: "ttt",
+    dirty: false,
+    driftedDuringRun: false,
+  });
+  assert.deepEqual(foldRunSnapshots(clean, { ...clean, dirty: true }), {
+    commit: "aaa",
+    tree: "ttt",
+    dirty: true,
+    driftedDuringRun: true,
+  });
+  assert.deepEqual(foldRunSnapshots({ ...clean, dirty: true }, clean), {
+    commit: "aaa",
+    tree: "ttt",
+    dirty: true,
+    driftedDuringRun: true,
+  });
+
+  const moved = foldRunSnapshots(clean, { commit: "bbb", tree: "uuu", dirty: false });
+  assert.equal(moved.commit, "bbb", "the receipt reports the close-time commit");
+  assert.equal(moved.tree, "uuu");
+  assert.equal(moved.driftedDuringRun, true, "a commit that moved mid-run is drift");
+
+  const unknown = foldRunSnapshots(clean, { ...clean, dirty: null });
+  assert.equal(unknown.dirty, null, "an unreadable git status must not read as clean");
+  assert.equal(unknown.driftedDuringRun, true, "unknown cleanliness fails closed");
+});
+
 test("receipt binds the run to a commit, tree, toolchain, and plan digest", {
   skip: process.platform === "win32",
 }, () => {
@@ -206,6 +239,8 @@ test("receipt binds the run to a commit, tree, toolchain, and plan digest", {
     assert.equal(receipt.commit, gitOutput(["rev-parse", "HEAD"]));
     assert.equal(receipt.tree, gitOutput(["rev-parse", "HEAD^{tree}"]));
     assert.equal(receipt.dirty, gitOutput(["status", "--porcelain"]).length > 0);
+    assert.equal(receipt.driftedDuringRun, receipt.dirty);
+    assert.ok(!("opened" in receipt), "the opening snapshot is internal, not receipt content");
     assert.equal(receipt.toolchain.node, process.version);
     assert.equal(receipt.host, `${process.platform}-${process.arch}`);
     assert.deepEqual(receipt.plan, {
@@ -229,9 +264,45 @@ test("receipt records a dirty working tree honestly", {
       const dirty = JSON.parse(runVerifierIn(repository, environment, receiptPath).stdout);
 
       assert.equal(clean.dirty, false);
+      assert.equal(clean.driftedDuringRun, false);
       assert.equal(dirty.dirty, true);
+      assert.equal(dirty.driftedDuringRun, true);
       assert.equal(dirty.commit, clean.commit, "an uncommitted edit does not move HEAD");
       assert.equal(dirty.ok, true, "the receipt still passes; it just says the tree was dirty");
+    });
+  });
+});
+
+test("a tree edited between plan start and receipt close is recorded as drift", {
+  skip: process.platform === "win32",
+}, () => {
+  withFakeTools("edit-midrun", { keepPath: true }, (environment) => {
+    withTemporaryGitRepository((repository) => {
+      const receipt = JSON.parse(
+        runVerifierIn(repository, environment, temporaryReceiptPath()).stdout,
+      );
+
+      assert.equal(receipt.ok, true, "every step still passed");
+      assert.equal(receipt.dirty, true, "the tree was clean at start but dirty at close");
+      assert.equal(receipt.driftedDuringRun, true);
+    });
+  });
+});
+
+test("a commit made between plan start and receipt close is recorded as drift", {
+  skip: process.platform === "win32",
+}, () => {
+  withFakeTools("commit-midrun", { keepPath: true }, (environment) => {
+    withTemporaryGitRepository((repository) => {
+      const opening = gitOutputIn(repository, ["rev-parse", "HEAD"]);
+      const receipt = JSON.parse(
+        runVerifierIn(repository, environment, temporaryReceiptPath()).stdout,
+      );
+
+      assert.equal(receipt.ok, true);
+      assert.equal(receipt.dirty, false, "the tree itself stayed clean");
+      assert.notEqual(receipt.commit, opening, "the receipt reports the close-time commit");
+      assert.equal(receipt.driftedDuringRun, true, "HEAD moved mid-run");
     });
   });
 });
@@ -315,6 +386,10 @@ function gitOutput(args) {
   return spawnSync("git", args, { encoding: "utf8" }).stdout.trim();
 }
 
+function gitOutputIn(cwd, args) {
+  return spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
+}
+
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -322,5 +397,11 @@ function escapeRegExp(value) {
 function toolExit(mode) {
   if (mode === "failure") return '[ "$1" = "test" ] && exit 7\nexit 0';
   if (mode === "signal") return '[ "$1" = "test" ] && kill -TERM $$\nexit 0';
+  // Mutate the working tree from inside a plan step, so the opening and closing
+  // snapshots genuinely disagree.
+  if (mode === "edit-midrun") return '[ "$1" = "test" ] && : > mid-run-edit.txt\nexit 0';
+  if (mode === "commit-midrun") {
+    return '[ "$1" = "test" ] && git commit --quiet --allow-empty -m mid-run\nexit 0';
+  }
   return "exit 0";
 }

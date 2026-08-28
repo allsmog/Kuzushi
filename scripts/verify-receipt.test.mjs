@@ -52,6 +52,8 @@ test("every dishonest receipt is refused with a named reason", () => {
     [{ ok: false }, /reports ok=false/],
     [{ dirty: true }, /dirty=true/],
     [{ dirty: null }, /dirty=null/],
+    [{ driftedDuringRun: true }, /driftedDuringRun=true/],
+    [{ driftedDuringRun: undefined }, /driftedDuringRun=undefined/],
     [{ steps: [{ name: "tests", status: 1, signal: null }] }, /step tests did not pass/],
     [{ steps: [{ name: "tests", status: 0, signal: "SIGTERM" }] }, /step tests did not pass/],
     [{ steps: [] }, /records no verification steps/],
@@ -112,6 +114,7 @@ test("verify refuses tampered steps, a dirty tree, and a stale receipt", skipWit
   const cases = [
     [{ steps: [{ name: "tests", status: 1, signal: null }] }, /step tests did not pass/],
     [{ dirty: true }, /dirty=true/],
+    [{ driftedDuringRun: true }, /the tree moved or was dirty during the run/],
     [{ finishedAt: "2026-01-01T00:00:00.000Z" }, /past the 24h limit/],
     [{ plan: { mode: "quick", digest: "0".repeat(64) } }, /plan digest 0000.*does not match/],
   ];
@@ -200,6 +203,7 @@ function soundReceipt() {
     commit: COMMIT,
     tree: "3333333333333333333333333333333333333333",
     dirty: false,
+    driftedDuringRun: false,
     toolchain: {
       rustc: "rustc 1.90.0 (host aarch64-apple-darwin)",
       node: "v26.3.0",
