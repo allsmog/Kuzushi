@@ -3,23 +3,31 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } f
 import { join } from "node:path";
 import process from "node:process";
 import {
+  cargoReleaseDir,
   nativeExecutableName,
+  nativePlatformForSlug,
   nativePlatformSlug,
   nativeRuntimeBinaries,
+  nativeSlugForTarget,
+  resolveNativeTarget,
 } from "./native-runtime-contract.mjs";
 
 const root = process.cwd();
+const target = resolveNativeTarget(process.argv.slice(2), process.env);
+const slug = target ? nativeSlugForTarget(target) : nativePlatformSlug();
+const targetPlatform = nativePlatformForSlug(slug);
 // `kz` remains an argv0 alias of `kuzushi`; every executable dependency used
 // by the CLI and agent bridge is otherwise shipped as a sibling.
-const exes = nativeRuntimeBinaries.map((binary) => nativeExecutableName(binary));
+const exes = nativeRuntimeBinaries.map((binary) => nativeExecutableName(binary, targetPlatform));
 const retiredExes =
-  process.platform === "win32"
+  targetPlatform === "win32"
     ? ["codex.exe", "kuzushi-ts.exe", "kz.exe"]
     : ["codex", "kuzushi-ts", "kz"];
-const outDir = join(root, "native", nativePlatformSlug());
+const releaseDir = cargoReleaseDir(root, process.env, target);
+const outDir = join(root, "native", slug);
 
 for (const exe of exes) {
-  const source = join(root, "target", "release", exe);
+  const source = join(releaseDir, exe);
   if (!existsSync(source)) {
     process.stderr.write(
       `Missing ${source}. Run \`node scripts/build-native-runtime.mjs\` before staging the native package.\n`,
@@ -46,11 +54,10 @@ for (const exe of retiredExes) {
 }
 
 for (const exe of exes) {
-  const source = join(root, "target", "release", exe);
   const destination = join(outDir, exe);
-  copyFileSync(source, destination);
+  copyFileSync(join(releaseDir, exe), destination);
 
-  if (process.platform !== "win32") {
+  if (targetPlatform !== "win32" && process.platform !== "win32") {
     chmodSync(destination, 0o755);
   }
 
