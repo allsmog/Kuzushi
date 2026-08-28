@@ -222,7 +222,9 @@ mod tests {
         // `xu` is a subsequence of `conte`x`t b`u`ild` but opens no word in it.
         let candidates = command_completion_candidates("xu", false);
         assert!(
-            !candidates.iter().any(|candidate| candidate == "context build"),
+            !candidates
+                .iter()
+                .any(|candidate| candidate == "context build"),
             "`xu` completed into a tool run: {candidates:?}"
         );
     }

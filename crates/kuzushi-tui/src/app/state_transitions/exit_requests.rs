@@ -64,10 +64,12 @@ impl ShellApp {
 
     fn stop_request_subject(&self) -> Option<String> {
         let label = self.jobs().live_job_label()?;
-        Some(match self.activity().map(|session| session.run_id.as_str()) {
-            Some(run_id) => format!("{label} · {run_id}"),
-            None => label.to_string(),
-        })
+        Some(
+            match self.activity().map(|session| session.run_id.as_str()) {
+                Some(run_id) => format!("{label} · {run_id}"),
+                None => label.to_string(),
+            },
+        )
     }
 
     fn pause_planning_after_abort(&mut self) {
