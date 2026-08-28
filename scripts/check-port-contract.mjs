@@ -190,6 +190,19 @@ const heavyCiJobs = [
   "e2e",
 ];
 
+// Quick CI may skip a prose-only pull request, because GitHub skips a run only
+// when EVERY changed file matches `paths-ignore`. It must never skip one that
+// touches executable, packaging, or workflow content, and it must never adopt
+// the `paths:` allow-list form, which inverts the default from run to skip.
+const quickCiUnskippablePaths = [
+  ".github/**",
+  "scripts/**",
+  "crates/**",
+  "Cargo.lock",
+  "pnpm-lock.yaml",
+  "package.json",
+];
+
 const retiredStandaloneCiWorkflows = [
   ".github/workflows/actionlint.yml",
   ".github/workflows/secret-scan.yml",
@@ -203,11 +216,10 @@ const failures = [
   ...checkNeedles(".github/workflows/release.yml", releaseRequirements),
   ...checkNeedles(".github/workflows/release-candidate.yml", releaseCandidateRequirements),
   ...checkForbiddenNeedles(".github/workflows/ci.yml", [
-    "**/*.md",
-    "docs/**",
     "schedule:",
     ...heavyCiJobs.map((job) => `  ${job}:\n`),
   ]),
+  ...checkQuickCiPathFilter(),
   ...checkForbiddenNeedles(".github/workflows/ci-full.yml", ["pull_request:", "push:"]),
   ...heavyCiJobs.flatMap((job) =>
     checkWorkflowJobNeedles(".github/workflows/ci-full.yml", job, []),
@@ -253,6 +265,29 @@ function checkWorkflowJobNeedles(file, job, needles) {
   return needles
     .filter((needle) => !jobSource.includes(needle))
     .map((needle) => `${file} job ${job} does not mention ${needle}`);
+}
+
+function checkQuickCiPathFilter() {
+  const file = ".github/workflows/ci.yml";
+  const source = readFileSync(path.join(repo, file), "utf8");
+  if (/^\s*paths:\s*$/m.test(source)) {
+    return [`${file} must not use a paths allow-list; it would skip CI by default`];
+  }
+  const ignored = pathsIgnoreEntries(source);
+  return quickCiUnskippablePaths
+    .filter((needle) => ignored.includes(needle))
+    .map((needle) => `${file} must not add ${needle} to paths-ignore; CI would skip real changes`);
+}
+
+function pathsIgnoreEntries(source) {
+  const start = source.search(/^\s*paths-ignore:\s*$/m);
+  if (start < 0) return [];
+  const lines = source.slice(start).split("\n").slice(1);
+  const listEnd = lines.findIndex((line) => !/^\s+-\s+/.test(line));
+  return (listEnd < 0 ? lines : lines.slice(0, listEnd))
+    .map((line) => line.match(/^\s+-\s+"?([^"\s]+)"?\s*$/))
+    .filter((entry) => entry !== null)
+    .map((entry) => entry[1]);
 }
 
 function checkFileAbsent(file) {

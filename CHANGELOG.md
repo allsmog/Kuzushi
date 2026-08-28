@@ -15,6 +15,16 @@ Notable changes to Kuzushi. Release procedure lives in
 
 **Release process:**
 
+- Routine CI now bills far fewer runner minutes without weakening a gate.
+  Quick CI dropped its redundant post-merge `push: branches: [main]` run and
+  skips prose-only pull requests, both CI workflows cache the Rust target
+  directory, Full CI installs cargo-llvm-cov and cargo-mutants from
+  checksum-verified release binaries instead of building them, its cron
+  dropped from weekly to monthly, and the 90-minute mutation sweep now runs
+  only behind an explicit `deep` input that release-candidate.yml always
+  passes. Dependabot batches into one grouped monthly pull request per
+  ecosystem. Release candidates run the same complete gauntlet as before.
+
 - The seven-item historical artifact cleanup gate is renamed the repository
   visibility gate and now blocks making the repository public only. Creating
   the Alpha14 tag requires the candidate gate and a release commit equal to
