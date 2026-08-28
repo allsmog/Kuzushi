@@ -7,8 +7,11 @@ use kuzushi_core::{
     RuntimeFailureMetadata, ScanCancellation, TriageOutcome, TriageRequest,
 };
 
-use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
-use super::bridge_process::{bridge_runtime_failure, run_bridge};
+use super::bridge_payloads::{
+    BridgeRequest, BridgeResponse, PingBridgeRequest, PingBridgeResponse,
+    LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
+use super::bridge_process::{bridge_runtime_failure, run_bridge, run_strict_json_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::next_step_observed_blocking as run_next_step_observed_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -308,6 +311,37 @@ impl LangGraphRuntime {
             return Ok(credential);
         }
         Err(missing_model_credential(model, provider))
+    }
+
+    /// One-token credential round-trip for `auth ping`.
+    ///
+    /// The credential comes from the model's own provider, so a mismatched
+    /// request fails here — before a bridge process exists — instead of
+    /// forwarding one provider's secret to another. A nonzero bridge exit is
+    /// a failure even if the bridge printed a success document.
+    pub fn auth_ping_blocking(&self, model: &str) -> Result<PingBridgeResponse> {
+        let model = kuzushi_core::runtime::canonical_model_spec(model)?;
+        let credential = self.validated_model_credential(&model)?;
+        let request = self.ping_request(model, credential);
+        run_strict_json_bridge(
+            &self.command,
+            &request,
+            "auth ping bridge",
+            self.cancellation.as_ref(),
+        )
+    }
+
+    fn ping_request(&self, model: String, credential: ModelCredential) -> PingBridgeRequest {
+        PingBridgeRequest {
+            protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+            envelope_type: "ping",
+            model,
+            api_key_env: credential.env,
+            api_key: credential.value,
+            oauth_credentials_path: self.oauth_credentials_path.display().to_string(),
+            oauth_allow_env_token: self.oauth_allow_env_token,
+            base_url: self.base_url.clone(),
+        }
     }
 }
 
