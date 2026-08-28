@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
+import { HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { debugDumpBridgeCall } from "./langgraph-bridge/diagnostics.mjs";
 import { bridgeErrorResponse } from "./langgraph-bridge/errors.mjs";
@@ -25,6 +25,7 @@ import {
   toolMessageForOutput,
   usageFromMessage,
 } from "./langgraph-bridge/model.mjs";
+import { messagesForNextStep } from "./langgraph-bridge/next-step-messages.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { writeBridgeResponseAndExit } from "./langgraph-bridge/process-exit.mjs";
 import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
@@ -241,23 +242,6 @@ function queryStopReason(messages, request) {
   return decision === "continue" ? undefined : decision;
 }
 
-function messagesForNextStep(request) {
-  return (request.messages ?? []).flatMap(nextStepMessage);
-}
-
-function nextStepMessage(raw) {
-  const role = raw.role ?? raw.type;
-  if (role === "user") return [new HumanMessage(raw.content ?? "")];
-  if (role === "assistant") return [new AIMessage(raw.content ?? "")];
-  if (role !== "tool") return [];
-  return [
-    new ToolMessage({
-      tool_call_id: raw.tool_call_id ?? raw.toolUseId ?? raw.id ?? "tool",
-      content: raw.content ?? "",
-    }),
-  ];
-}
-
 async function handleNextStep(request) {
   const tools = bridgeToolsForNextStep(request);
   const baseModel = modelForRequest(request);
@@ -265,7 +249,7 @@ async function handleNextStep(request) {
   const system = request.systemPrompt ?? request.system_prompt ?? "";
   const response = await model.invoke([
     systemMessageForRequest(request, system),
-    ...messagesForNextStep(request),
+    ...messagesForNextStep(request.messages),
   ]);
   debugDumpBridgeCall("next-step", request, tools, system, response);
   return nextStepResultFromResponse(response);
