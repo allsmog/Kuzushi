@@ -19,6 +19,11 @@ on:
         required: false
         type: boolean
         default: false
+      hosted:
+        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       quality_base_ref:
@@ -28,6 +33,11 @@ on:
         default: ""
       deep:
         description: Also run the long mutation sweep
+        required: false
+        type: boolean
+        default: false
+      hosted:
+        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
         required: false
         type: boolean
         default: false
@@ -49,11 +59,23 @@ env:
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
 
+# Every job below except `windows-compile` runs by default on the owner's
+# ephemeral self-hosted Apple-Silicon runner (labels `self-hosted, macOS,
+# ARM64, kuzushi-mac`), so a full sweep costs no hosted minutes. Passing
+# `hosted: true` flips exactly those jobs back to `ubuntu-latest` for a caller
+# that must not depend on that machine being online -- release-candidate.yml
+# can request it when the Mac is off. Both branches of the expression are JSON
+# arrays so `runs-on` has one type either way.
+#
+# macOS and `ubuntu-latest` produce different `cargo` target directories, so
+# the two runners never share a build cache; each keeps its own. Nothing in
+# these jobs is Linux-specific except the patch-validation sandbox action,
+# which is a documented no-op off Linux (see the rust-cli disclosure step).
 jobs:
   # Fail fast before starting the expensive cross-platform fan-out.
   quality-gauntlet:
     name: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -69,8 +91,18 @@ jobs:
           inherit-toolchain: true
           cache: true
       - run: pnpm install --frozen-lockfile
-      - name: Lint GitHub Actions workflows
+      # The Docker path only exists for `hosted: true`, because the
+      # GitHub-hosted ubuntu image is the only runner here with a daemon
+      # running. The self-hosted Mac has none, so it lints with the native
+      # binary at the same pinned version.
+      - name: Lint GitHub Actions workflows (hosted, Docker)
+        if: ${{ inputs.hosted }}
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+      - name: Lint GitHub Actions workflows (native binary)
+        if: ${{ !inputs.hosted }}
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: bash scripts/runner/lint-workflows.sh
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
@@ -81,7 +113,7 @@ jobs:
   rust-core:
     name: rust-core
     needs: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -108,7 +140,7 @@ jobs:
   cargo-deny:
     name: cargo-deny
     needs: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -119,8 +151,13 @@ jobs:
   rust-cli:
     name: rust-cli
     needs: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 60
+    # The native payload is host-specific, so the artifact carries the host
+    # slug rather than a hardcoded `linux-x64`. Consumers read this output
+    # instead of guessing, which keeps the download honest on either runner.
+    outputs:
+      native-artifact: ${{ steps.native-artifact.outputs.name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
@@ -134,15 +171,28 @@ jobs:
           inherit-toolchain: true
           cache: true
       - uses: ./.github/actions/install-patch-validation-sandbox
+      # The sandbox action installs nothing off Linux, so say so in the job
+      # summary. `SandboxBackend::detect_backend` then resolves to `Plain`
+      # (crates/kuzushi-sandbox/src/backend/mod.rs) and the sandbox tests stay
+      # green -- the argv builders are pure string assembly, and the one
+      # execution test branches on `which("bwrap")`. Green here therefore does
+      # not mean bubblewrap or AppArmor were exercised.
+      - name: Disclose sandbox coverage
+        run: bash scripts/runner/report-sandbox-coverage.sh
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
       - run: pnpm test:performance
       - run: cargo build --workspace --locked
       - run: node scripts/build-native-runtime.mjs
+      - name: Resolve native artifact name
+        id: native-artifact
+        run: |
+          slug="$(node --input-type=module -e 'import { nativePlatformSlug } from "./scripts/native-runtime-contract.mjs"; process.stdout.write(nativePlatformSlug());')"
+          echo "name=native-${slug}" >>"$GITHUB_OUTPUT"
       - name: Upload native artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: native-linux-x64
+          name: ${{ steps.native-artifact.outputs.name }}
           path: native/
           if-no-files-found: error
           retention-days: 1
@@ -150,7 +200,7 @@ jobs:
   coverage:
     name: coverage
     needs: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -195,7 +245,7 @@ jobs:
     name: mutation
     if: ${{ inputs.deep == true }}
     needs: quality-gauntlet
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -234,7 +284,7 @@ jobs:
   node22-compat:
     name: node22-compat
     needs: rust-cli
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -246,7 +296,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-linux-x64
+          name: ${{ needs.rust-cli.outputs.native-artifact }}
           path: native/
       - run: chmod -R +x native/
       - run: pnpm test
@@ -255,7 +305,7 @@ jobs:
   verify-pack:
     name: verify-pack
     needs: rust-cli
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -267,7 +317,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-linux-x64
+          name: ${{ needs.rust-cli.outputs.native-artifact }}
           path: native/
       - run: chmod -R +x native/
       - run: pnpm verify:pack
@@ -275,7 +325,7 @@ jobs:
   e2e:
     name: e2e
     needs: rust-cli
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -294,7 +344,7 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: native-linux-x64
+          name: ${{ needs.rust-cli.outputs.native-artifact }}
           path: native/
       - name: Run smoke tests against native CLI
         env:

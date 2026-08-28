@@ -61,6 +61,20 @@ Notable changes to Kuzushi. Release procedure lives in
   No other pairing is ever unlocked, and nothing is smoked silently under the
   wrong architecture.
 - The seven-item historical artifact cleanup gate is renamed the repository
+- Routine CI now runs on one ephemeral self-hosted Apple-Silicon runner
+  (`self-hosted, macOS, ARM64, kuzushi-mac`) on the owner's Mac, so a pull
+  request costs no hosted minutes. `windows-compile` stays on
+  `windows-latest`, and a new `hosted` workflow input puts every other job
+  back on `ubuntu-latest` when the Mac is offline. The actionlint step no
+  longer needs a Docker daemon: it runs the pinned 1.7.12 binary and refuses
+  any other version. The patch-validation sandbox action is an explicit no-op
+  off Linux, and `rust-cli` records in its job summary that bubblewrap and
+  AppArmor were not exercised, because a green run there proves less than the
+  same run on Linux. Setup, threat model, and teardown are in
+  `scripts/runner/README.md`; de-registering the runner is now item 8 of the
+  repository visibility gate.
+
+- The historical artifact cleanup gate is renamed the repository
   visibility gate and now blocks making the repository public only. Creating
   the Alpha14 tag requires the candidate gate and a release commit equal to
   current `origin/main`. Recorded by the repository owner on 2026-08-28, on the

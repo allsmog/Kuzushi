@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: ""
+      hosted:
+        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
+        required: false
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       quality_base_ref:
@@ -41,6 +46,11 @@ on:
         required: false
         type: string
         default: ""
+      hosted:
+        description: Run on GitHub-hosted ubuntu-latest instead of the self-hosted Mac
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-quick-${{ github.event.pull_request.number || github.ref }}
@@ -59,10 +69,22 @@ env:
 jobs:
   # Draft PRs do not allocate a runner. Marking one ready is its first CI
   # request; synchronize then keeps later ready-PR heads covered exactly.
+  #
+  # `runs-on` defaults to the owner's ephemeral self-hosted Apple-Silicon
+  # runner (labels `self-hosted, macOS, ARM64, kuzushi-mac`) so a routine pull
+  # request costs no hosted minutes. `hosted: true` flips the job back to
+  # `ubuntu-latest` for callers that must not depend on that machine being
+  # online. Both branches of the expression are JSON arrays so the value has
+  # one type either way.
+  #
+  # Nothing this job runs is Linux-specific: `pnpm verify:quick:summary` is
+  # exactly what the owner already runs locally. macOS and `ubuntu-latest` do
+  # produce different `cargo` target directories, so the two runners never
+  # share a build cache; each keeps its own.
   quality-gauntlet:
     name: quality-gauntlet
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ fromJSON(inputs.hosted && '["ubuntu-latest"]' || '["self-hosted","macOS","ARM64","kuzushi-mac"]') }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -78,12 +100,18 @@ jobs:
           inherit-toolchain: true
           cache: true
       - run: pnpm install --frozen-lockfile
-      # Kept on Docker for now because the GitHub-hosted ubuntu image ships a
-      # running daemon. A self-hosted runner will not, so relabelling this job
-      # means first replacing this step with the native actionlint binary at
-      # the same pinned 1.7.12 and keeping ci-full.yml's digest pin in step.
-      - name: Lint GitHub Actions workflows
+      # The Docker path only exists for `hosted: true`, because the
+      # GitHub-hosted ubuntu image is the only runner here with a daemon
+      # running. The self-hosted Mac has none, so it lints with the native
+      # binary at the same pinned version.
+      - name: Lint GitHub Actions workflows (hosted, Docker)
+        if: ${{ inputs.hosted }}
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
+      - name: Lint GitHub Actions workflows (native binary)
+        if: ${{ !inputs.hosted }}
+        env:
+          ACTIONLINT_VERSION: "1.7.12"
+        run: bash scripts/runner/lint-workflows.sh
       - name: Run quick repository contract
         env:
           KUZUSHI_CRAP_RISK_BASE_REF: ${{ inputs.quality_base_ref || github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}

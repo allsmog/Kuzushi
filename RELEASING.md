@@ -113,15 +113,24 @@ a release tag or publishing to npm; see the recorded decision below.
    registry support confirmation that provides the equivalent restriction.
    Verify each GitHub Release asset list and download before recording the gate
    complete.
+8. De-register and delete every self-hosted runner and restore hosted CI
+   **before** the repository becomes public. `gh api
+   /repos/allsmog/Kuzushi/actions/runners --jq '.total_count'` must return `0`,
+   and `.github/workflows/ci.yml` and `.github/workflows/ci-full.yml` must be
+   back on `runs-on: ubuntu-latest` (flip the `hosted` input default to `true`,
+   or replace the expressions outright). A self-hosted runner on a public
+   repository executes code from any fork pull request on the owner's machine.
+   Teardown steps are in `scripts/runner/README.md`.
 
 This work requires separate operator authorization. The release workflow does
 not delete or rewrite historical registry content.
 
 ### Recorded decision, 2026-08-28: the visibility gate does not block Alpha14
 
-Decided by the repository owner on 2026-08-28. The seven items above were
+Decided by the repository owner on 2026-08-28. Items 1 through 7 above were
 previously written to block the Alpha14 tag as well as public visibility. They
-now block public visibility only.
+now block public visibility only. Item 8 was added later, with the self-hosted
+runner, and has always been visibility-only.
 
 Rationale: `0.24.0-alpha.10` and `0.24.0-alpha.12` are already published and
 already carry private identifiers. Publishing a scrubbed `0.24.0-alpha.14` at
