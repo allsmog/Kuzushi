@@ -4,14 +4,36 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import {
+  rosettaOverrideRequested,
+  rosettaTranslationInstalled,
+  smokeExecutionPlan,
+  translatedCommand,
+} from "./local-tarball-smoke-contract.mjs";
+import {
   nativeExecutableName,
+  nativePlatformForSlug,
   nativePlatformSlug,
   nativeRuntimePackages,
 } from "./native-runtime-contract.mjs";
 
 const root = process.cwd();
-const runtimeDir = path.join(root, "native", nativePlatformSlug());
-const cli = path.join(runtimeDir, nativeExecutableName("kuzushi"));
+// Without an explicit slug this smokes the host payload. A foreign slug is
+// refused unless the operator opted into Rosetta translation and the host
+// actually has it, so a cross-built payload is never silently unexercised.
+const requestedSlug = resolveRequestedSlug(process.argv.slice(2));
+const allowRosetta = rosettaOverrideRequested(process.env);
+const plan = smokeExecutionPlan({
+  slug: requestedSlug,
+  platform: process.platform,
+  arch: process.arch,
+  allowRosetta,
+  rosettaInstalled: allowRosetta && rosettaTranslationInstalled(),
+});
+const runtimeDir = path.join(root, "native", plan.smokedSlug);
+const cli = path.join(
+  runtimeDir,
+  nativeExecutableName("kuzushi", nativePlatformForSlug(plan.smokedSlug)),
+);
 const isolatedEnvironment = { ...process.env, PATH: "" };
 const mcpBackends = new Map([
   ["kuzushi-mcp-gtags", "gtags"],
@@ -48,11 +70,19 @@ for (const { binaryName } of nativeRuntimePackages) {
 }
 
 process.stdout.write(
-  `native ${nativePlatformSlug()} CLI and every MCP sibling passed with an empty inherited PATH\n`,
+  `native ${plan.smokedSlug} CLI and every MCP sibling passed with an empty inherited PATH ` +
+    `on ${plan.hostSlug} (translation: ${plan.translation})\n`,
 );
+process.stdout.write(`${JSON.stringify({ ...plan, executable: cli })}\n`);
+
+function resolveRequestedSlug(argv) {
+  const positional = argv.find((argument) => !argument.startsWith("-"));
+  return positional ?? nativePlatformSlug();
+}
 
 function run(command, args) {
-  const result = spawnSync(command, args, {
+  const launched = translatedCommand(plan, command, args);
+  const result = spawnSync(launched.command, launched.args, {
     cwd: root,
     env: isolatedEnvironment,
     encoding: "utf8",
