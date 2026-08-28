@@ -113,6 +113,13 @@ packages, create a tag, or create a GitHub Release._
   state and next action the project model already knew — the Ratatui card and
   plain output project the same columns, collapsing to the compact
   section/summary row when the terminal cannot afford them.
+- A refused phase rerun no longer discards the draft the operator just
+  reviewed. Enter on the rerun review card consumes the pending review only
+  once a launch exists, so a missing target, a stale phase prerequisite, or a
+  saved input that no longer prepares leaves the reviewed draft — including
+  every edited option — open where it was. The reason is disclosed on the card
+  as a `REFUSED · DISPATCH` row and painted as a Workbench notice instead of
+  only reaching the transcript.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII

@@ -307,10 +307,6 @@ impl EngagementState {
         self.pending_phase_rerun = Some(review);
     }
 
-    pub(crate) fn take_pending_phase_rerun(&mut self) -> Option<crate::app::PhaseRerunReview> {
-        self.pending_phase_rerun.take()
-    }
-
     pub(crate) fn clear_pending_phase_rerun(&mut self) {
         self.pending_phase_rerun = None;
     }

@@ -84,6 +84,10 @@ pub(crate) struct PhaseRerunReview {
     pub(crate) option_cursor: usize,
     pub(crate) option_edit: Option<PhaseRerunOptionEdit>,
     pub(crate) option_error: Option<String>,
+    /// Why the last Enter refused to launch this draft. The review stays open
+    /// on a refusal, so the reason has to survive on the card the operator is
+    /// still looking at, not only in the transcript.
+    pub(crate) dispatch_error: Option<String>,
     pub(crate) draft_modified: bool,
     pub(crate) derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
 }
