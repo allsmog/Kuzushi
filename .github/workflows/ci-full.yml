@@ -55,7 +55,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - run: pnpm install --frozen-lockfile
       - name: Lint GitHub Actions workflows
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
@@ -76,7 +76,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - run: bash scripts/check-public-rust-core.sh
 
   windows-compile:
@@ -89,7 +89,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - run: cargo check --workspace --all-targets --locked
       - run: "cargo test -p kuzushi-core worker_protocol::jsonl:: --locked"
 
@@ -120,7 +120,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - uses: ./.github/actions/install-patch-validation-sandbox
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - run: cargo test --workspace --locked
@@ -153,7 +153,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - name: Install coverage tool
         run: cargo install cargo-llvm-cov --version 0.8.7 --locked
       - uses: ./.github/actions/install-patch-validation-sandbox
@@ -187,7 +187,7 @@ jobs:
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
-          cache: false
+          cache: true
       - uses: ./.github/actions/install-patch-validation-sandbox
       - name: Install mutation tool
         run: cargo install cargo-mutants --version 27.1.0 --locked

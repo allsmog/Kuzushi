@@ -124,6 +124,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.expected_sha }}
+      # Quick and full CI cache their Rust target directories; this matrix
+      # deliberately does not. Five platform targets would push multi-gigabyte
+      # caches into the repository's shared cache budget and evict the Linux
+      # caches that the frequently run workflows depend on, and a candidate
+      # that builds roughly once a month would find its own entry already
+      # evicted anyway. A shipped binary is also worth building from a clean
+      # tree rather than from restored intermediate artifacts.
       - uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1
         with:
           inherit-toolchain: true
