@@ -78,7 +78,7 @@ const COMPACT_DRAWER_ROWS: u16 = 6;
 const EXPANDED_DRAWER_MAX_ROWS: u16 = 14;
 const LOG_STRIP_ROWS: u16 = 4;
 const ACTION_MENU_MAX_ROWS: u16 = 12;
-const CENTERED_FORM_MAX_COLUMNS: u16 = 100;
+pub(super) const CENTERED_FORM_MAX_COLUMNS: u16 = 100;
 
 /// How a composition region should present itself: a canvas dominates the
 /// workspace, a drawer is a contextual action card, a standard region keeps
