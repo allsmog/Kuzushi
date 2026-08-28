@@ -21,12 +21,20 @@ expect: Start Map      READY
 ask: Aggregate Setup — can a keyless user tell why this deterministic plan needs neither a model nor credentials, and is the single Start Map commit obvious?
 submit: demo
 wait-for: 120 run completed
-keys: d
-wait: 2
+# The completed run parks a RESULT READY card whose advertised keys are
+# Navigate-mode only (app/phase_results.rs: `n` Use & Review, `u` Use scan,
+# `o` Open, `r` Run again). Converge on Navigate first — sent from Prompt the
+# key is just typed into the composer. Accepting routes to the derived next
+# phase, so the top bar leaves "Viewing Scan".
+nav-mode
+keys: n
+wait-for: 20 Viewing Map
 submit: findings
-wait: 3
+wait-for: 20 REVIEW VIEW
 snap: offline-demo-result
 expect: findings
 expect: signal
-expect: config.env:2
+# Location facets carry a per-fixture tally, so assert the redacted file, not
+# its count.
+expect: config.env
 ask: Offline escape hatch — did `demo` make a real scanner signal, redacted location, and signal_only proof state legible, not just dump logs?
