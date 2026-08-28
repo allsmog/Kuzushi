@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # One ephemeral GitHub Actions runner registration per job, forever.
 #
-# This is the LaunchAgent's target (see setup-mac-runner.sh). Each pass:
+# This is the LaunchDaemon's target (see setup-mac-runner.sh). Each pass:
 #   1. mints a short-lived registration token from the GitHub API, using a
-#      fine-grained PAT read out of this user's login Keychain
+#      fine-grained PAT read out of a 0600 file owned by this user
 #   2. configures a fresh `--ephemeral` runner
 #   3. runs it until it has executed exactly one job, then exits
 #   4. wipes the work directory and repeats
 #
 # `--ephemeral` is the security property that matters: a job cannot leave
 # state behind for the next one, because the registration is consumed and the
-# work tree is deleted. The token never reaches the log, the process table, or
-# disk -- it is passed to the runner on stdin and held only in shell locals.
+# work tree is deleted. The PAT never reaches the log or the process table: it
+# is read from a 0600 file into a shell local and handed to curl on stdin.
+#
+# This runs as a LaunchDaemon under `UserName=_ghrunner`, so there is no GUI
+# session and no unlocked login Keychain to read from. The secret file is that
+# trade, made explicitly -- see README.md.
 set -euo pipefail
 
 REPO="${KUZUSHI_RUNNER_REPO:-allsmog/Kuzushi}"
@@ -19,7 +23,7 @@ RUNNER_NAME="${KUZUSHI_RUNNER_NAME:-kuzushi-mac-1}"
 RUNNER_LABELS="${KUZUSHI_RUNNER_LABELS:-kuzushi-mac}"
 RUNNER_DIR="${KUZUSHI_RUNNER_DIR:-${HOME}/actions-runner}"
 WORK_DIR="_work"
-KEYCHAIN_SERVICE="kuzushi-runner-pat"
+SECRET_FILE="${KUZUSHI_RUNNER_PAT_FILE:-${HOME}/.config/kuzushi-runner/pat}"
 # Long enough that a GitHub outage does not become a request flood, short
 # enough that the runner is back within a coffee break.
 RETRY_SECONDS="${KUZUSHI_RUNNER_RETRY_SECONDS:-30}"
@@ -30,9 +34,14 @@ log() {
   printf '%s %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
 
-# Reads the PAT from the login Keychain. Never echo the result.
+# Reads the PAT from its 0600 file. Never echo the result. Reading it on every
+# pass rather than once at startup is what makes rotation work: overwrite the
+# file and the next loop pass uses the new token, no daemon restart needed.
 read_pat() {
-  security find-generic-password -s "${KEYCHAIN_SERVICE}" -w 2>/dev/null
+  local pat
+  [ -r "${SECRET_FILE}" ] || return 1
+  IFS= read -r pat <"${SECRET_FILE}" || return 1
+  printf '%s' "${pat}"
 }
 
 # Mints a registration token. Prints ONLY the token on stdout; every
@@ -42,11 +51,11 @@ read_pat() {
 mint_registration_token() {
   local pat response token
   pat="$(read_pat)" || {
-    log "no PAT in the ${KEYCHAIN_SERVICE} Keychain item; see scripts/runner/README.md" >&2
+    log "cannot read ${SECRET_FILE}; run setup-mac-runner.sh --set-pat" >&2
     return 1
   }
   if [ -z "${pat}" ]; then
-    log "the ${KEYCHAIN_SERVICE} Keychain item is empty" >&2
+    log "${SECRET_FILE} is empty; run setup-mac-runner.sh --set-pat" >&2
     return 1
   fi
 

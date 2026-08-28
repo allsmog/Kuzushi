@@ -117,7 +117,9 @@ repository owner's Mac**, labelled `self-hosted, macOS, ARM64, kuzushi-mac`.
 Two consequences matter when you read a CI result:
 
 - **A queued job may mean the runner is offline, not that CI is slow.** There
-  is exactly one runner, and it registers ephemerally per job.
+  is exactly one runner. It runs as a system LaunchDaemon, so it survives
+  logout and reboot, but it registers ephemerally per job and is briefly absent
+  between jobs.
 - **A green run does not prove the Linux-only patch-validation sandbox.**
   Bubblewrap and AppArmor do not exist on macOS, so `rust-cli` records in its
   job summary that it did not exercise them. `windows-compile` still runs on

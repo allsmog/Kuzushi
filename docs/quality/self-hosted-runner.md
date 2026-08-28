@@ -73,6 +73,29 @@ hint (`brew install actionlint`) otherwise, so the lint surface cannot drift
 because a machine carries a different build. The SHA-pinned
 `rhysd/actionlint:1.7.12` image remains as the `hosted: true` branch.
 
+## Headless by construction
+
+The runner is a system **LaunchDaemon** (`com.kuzushi.runner`) with
+`UserName=_ghrunner`, not a LaunchAgent. An agent runs only while its user
+holds a launchd GUI session, so on a laptop CI would stop the moment nobody was
+logged in as the runner user -- silently, with jobs queueing rather than
+failing. The daemon starts at boot and needs no login.
+
+That choice propagates to the credential. Reading a login Keychain item needs
+that user's Keychain unlocked, which is the same GUI-session dependency, so the
+fine-grained PAT lives in a `0600` file owned by `_ghrunner`. **The token is at
+rest on disk**, readable only by that service account and by root. Its scope is
+one repository and one permission (`administration: write`), so compromise of
+`_ghrunner` buys the ability to register runners for this repository and
+nothing else -- no code read, no contents write, no secrets, no other
+repository.
+
+Because the daemon has no inherited environment, the plist states `HOME` and
+`PATH` explicitly, and the runner user needs its own toolchains: `rustup` with
+the `rust-toolchain.toml` channel under `~_ghrunner/.cargo`, plus Homebrew
+`node`, `pnpm`, and `actionlint`. `setup-mac-runner.sh` provisions the Rust
+toolchain and warns about any missing Homebrew tool.
+
 ## The runner must be removed before the repository goes public
 
 GitHub does not run fork workflows for a private repository, which is the only
