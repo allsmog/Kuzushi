@@ -93,10 +93,7 @@ fn constant_mcp_attachments() -> Vec<McpAttachment> {
         .collect()
 }
 
-fn mcp_artifact_attachment(
-    target: &Path,
-    spec: &McpArtifactSpec,
-) -> Result<Option<McpAttachment>> {
+fn mcp_artifact_attachment(target: &Path, spec: &McpArtifactSpec) -> Result<Option<McpAttachment>> {
     match spec.name {
         "codeql" => managed_codeql_attachment(target),
         // Ready when at least one current-shape-version graph exists —

@@ -1,10 +1,21 @@
 use super::*;
 
 #[derive(
-    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema,
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    schemars::JsonSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    #[default]
     Unknown,
     Info,
     Low,

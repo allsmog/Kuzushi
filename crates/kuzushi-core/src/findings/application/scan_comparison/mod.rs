@@ -137,10 +137,7 @@ pub fn compare_scan_runs(
     })
 }
 
-fn findings_by_stable_key(
-    store: &FindingStore,
-    run_id: &str,
-) -> Result<BTreeMap<String, Finding>> {
+fn findings_by_stable_key(store: &FindingStore, run_id: &str) -> Result<BTreeMap<String, Finding>> {
     let findings = store.v3_findings_for_scan_id(run_id)?;
     Ok(findings
         .into_iter()

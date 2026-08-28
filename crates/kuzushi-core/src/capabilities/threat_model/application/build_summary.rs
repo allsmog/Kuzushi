@@ -139,7 +139,7 @@ fn threat_model_build_header_lines(
             "threat-model:build {} for {} ({})",
             evidence_status(has_concrete_content),
             input.repo_name,
-            input.target.display()
+            input.workspace_root().display()
         ),
         format!("  Method:   {}", methodology_label(&input.methodology)),
         format!("  Slice:    {}", input.slice),
@@ -150,7 +150,11 @@ fn threat_model_build_header_lines(
         format!("  Artifact: {}", input.output_dir),
         format!(
             "  Saved:    {}",
-            saved_threat_model_status(persisted, has_concrete_content, &input.target)
+            saved_threat_model_status(
+                persisted,
+                has_concrete_content,
+                input.workspace_root(),
+            )
         ),
     ]);
     lines
@@ -161,7 +165,7 @@ fn randori_pasta_header_lines(input: &BuildInput, has_concrete_content: bool) ->
         "randori:pasta {} for {} ({})",
         evidence_status(has_concrete_content),
         input.repo_name,
-        input.target.display()
+        input.workspace_root().display()
     )];
     append_pasta_stages(&mut lines, input);
     lines.push(format!("  Artifact: {}", input.output_dir));

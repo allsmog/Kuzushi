@@ -1,4 +1,5 @@
 use super::*;
+use kuzushi_core::try_load_persistent_threat_model;
 
 impl ShellApp {
     pub(crate) fn reduce_threat_regen(&mut self) -> Vec<ShellEffect> {
@@ -11,6 +12,9 @@ impl ShellApp {
         if self.reject_runtime_launch_while_budget_halted(true, "threat model") {
             return;
         }
+        let Some(existing) = self.active_threat_model_for_worker(&start.cwd) else {
+            return;
+        };
         let Some(ticket) = self.try_start_exclusive_job(JobKind::Threat, "threat model") else {
             return;
         };
@@ -24,7 +28,7 @@ impl ShellApp {
             run_id: run_id.clone(),
             tool_name: "threat-model:proposal".to_string(),
         });
-        let runtime = self.start_threat_worker_runtime(&start, watchdog_cancel.clone());
+        let runtime = self.start_threat_worker_runtime(&start, watchdog_cancel.clone(), existing);
         let loaded_modules = self.registry().loaded_module_specifiers();
         let metadata = ProposalRunMetadata {
             run_id,
@@ -39,10 +43,17 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn reduce_threat_ask(&mut self, question: &str) -> Vec<ShellEffect> {
-        self.prepare_threat_ask_start(question)
-            .map(|start| vec![ShellEffect::StartThreat(start)])
-            .unwrap_or_default()
+    fn active_threat_model_for_worker(&mut self, cwd: &PathBuf) -> Option<serde_json::Value> {
+        match persistent_threat_model_or_null(cwd) {
+            Ok(existing) => Some(existing),
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("cannot read the active threat model: {error:#}"),
+                );
+                None
+            }
+        }
     }
 
     fn prepare_threat_regen(&mut self) -> Option<String> {
@@ -65,25 +76,6 @@ impl ShellApp {
         Some(())
     }
 
-    fn prepare_threat_question(&mut self, question: &str) -> Option<String> {
-        self.reject_threat_ask_blockers()?;
-        non_empty_threat_question(question).or_else(|| {
-            self.log(
-                "error",
-                "/threats ask requires a question. Next: /threats ask what attack surface is in admin?",
-            );
-            None
-        })
-    }
-
-    fn reject_threat_ask_blockers(&mut self) -> Option<()> {
-        if self.threat_worker_running() {
-            self.log("threats", "regen already running; wait first");
-            return None;
-        }
-        Some(())
-    }
-
     fn require_valid_threat_model(&mut self, command: &str) -> Option<String> {
         let Some(model) = self.config().model.clone() else {
             self.log(
@@ -98,27 +90,13 @@ impl ShellApp {
     fn prepare_threat_regen_start(&mut self) -> Option<ThreatWorkerStart> {
         let cwd = self.require_threat_target("/threats regen")?;
         let model = self.prepare_threat_regen()?;
-        Some(self.threat_worker_start(
-            model,
-            "regenerating threat-model patch",
-            ThreatWorkerTask::Regenerate,
-            cwd,
-        ))
-    }
-
-    fn prepare_threat_ask_start(&mut self, question: &str) -> Option<ThreatWorkerStart> {
-        let cwd = self.require_threat_target("/threats ask")?;
-        let question = self.prepare_threat_question(question)?;
-        let model = self.require_valid_threat_model("/threats ask")?;
-        let message = format!("asking: {question}");
-        Some(self.threat_worker_start(model, message, ThreatWorkerTask::Ask { question }, cwd))
+        Some(self.threat_worker_start(model, "regenerating threat-model patch", cwd))
     }
 
     fn threat_worker_start(
         &self,
         model: String,
         message: impl Into<String>,
-        task: ThreatWorkerTask,
         cwd: PathBuf,
     ) -> ThreatWorkerStart {
         ThreatWorkerStart {
@@ -127,7 +105,6 @@ impl ShellApp {
             thinking_level: self.session_thinking_level_owned(),
             cwd,
             message: message.into(),
-            task,
             origin_phase: self.engagement.current_phase(),
         }
     }
@@ -167,20 +144,15 @@ impl ShellApp {
         &mut self,
         start: &ThreatWorkerStart,
         cancel: ScanCancellation,
+        existing: serde_json::Value,
     ) -> ThreatWorkerRuntime {
-        let existing = persistent_threat_model_or_null(&start.cwd);
         self.begin_threat_worker_state(start.message.clone(), cancel);
         ThreatWorkerRuntime { existing }
     }
 }
 
-fn non_empty_threat_question(question: &str) -> Option<String> {
-    let question = question.trim();
-    (!question.is_empty()).then(|| question.to_string())
-}
-
-fn persistent_threat_model_or_null(cwd: &PathBuf) -> serde_json::Value {
-    load_persistent_threat_model(cwd).unwrap_or(serde_json::Value::Null)
+fn persistent_threat_model_or_null(cwd: &PathBuf) -> anyhow::Result<serde_json::Value> {
+    Ok(try_load_persistent_threat_model(cwd)?.unwrap_or(serde_json::Value::Null))
 }
 
 pub(crate) struct ThreatWorkerStart {
@@ -189,7 +161,6 @@ pub(crate) struct ThreatWorkerStart {
     thinking_level: Option<String>,
     cwd: PathBuf,
     message: String,
-    task: ThreatWorkerTask,
     origin_phase: Option<WorkflowPhase>,
 }
 
@@ -205,7 +176,6 @@ mod tests {
         let manual = app.threat_worker_start(
             "openai:gpt-test".to_string(),
             "inspect threats",
-            ThreatWorkerTask::Regenerate,
             target.clone(),
         );
         assert_eq!(manual.origin_phase, None);
@@ -214,7 +184,6 @@ mod tests {
         let guided = app.threat_worker_start(
             "openai:gpt-test".to_string(),
             "build the threat model",
-            ThreatWorkerTask::Regenerate,
             target,
         );
         assert_eq!(guided.origin_phase, Some(WorkflowPhase::Map));
@@ -236,12 +205,6 @@ mod tests {
             .iter()
             .any(|line| line.body.contains("requires an explicit target")));
     }
-}
-
-#[derive(Clone)]
-enum ThreatWorkerTask {
-    Regenerate,
-    Ask { question: String },
 }
 
 struct ThreatWorkerRuntime {
@@ -273,28 +236,15 @@ struct ThreatWorkerInvocation {
 impl ThreatWorkerInvocation {
     fn run(self, sink: JobEventSink, cancel: ScanCancellation) {
         let start = self.start;
-        match start.task {
-            ThreatWorkerTask::Regenerate => threat_regen_worker(
-                start.config,
-                start.model,
-                start.thinking_level,
-                start.cwd,
-                self.existing,
-                self.metadata,
-                sink,
-                cancel,
-            ),
-            ThreatWorkerTask::Ask { question } => threat_ask_worker(
-                start.config,
-                start.model,
-                start.thinking_level,
-                start.cwd,
-                self.existing,
-                question,
-                self.metadata,
-                sink,
-                cancel,
-            ),
-        }
+        threat_regen_worker(
+            start.config,
+            start.model,
+            start.thinking_level,
+            start.cwd,
+            self.existing,
+            self.metadata,
+            sink,
+            cancel,
+        )
     }
 }

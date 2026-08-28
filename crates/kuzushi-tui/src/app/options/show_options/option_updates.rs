@@ -54,7 +54,7 @@ impl ShellApp {
                 format_option_value(&value)
             ),
         );
-        persist_option_effects(scope)
+        tool_option_effects(scope, &option.canonical_name)
     }
 
     pub(crate) fn reduce_unset_option(&mut self, global: bool, name: &str) -> Vec<ShellEffect> {
@@ -99,7 +99,7 @@ impl ShellApp {
             prefix,
             removed_tool_option_message(&option, removed || legacy_removed),
         );
-        persist_option_effects(scope)
+        tool_option_effects(scope, &option.canonical_name)
     }
 
     fn resolve_tool_option(&mut self, name: &str) -> Option<ResolvedToolOption> {
@@ -357,6 +357,17 @@ fn persist_option_effects(scope: OptionScope) -> Vec<ShellEffect> {
     }
 }
 
+fn tool_option_effects(scope: OptionScope, option_name: &str) -> Vec<ShellEffect> {
+    let mut effects = persist_option_effects(scope);
+    if option_name == "identityFold" {
+        effects.push(ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: None,
+        }));
+    }
+    effects
+}
+
 fn invalid_tool_option_message(option: &ResolvedToolOption, error: String) -> String {
     format!(
         "invalid value for {}.{}: {error}. Next: show options {}",
@@ -372,4 +383,27 @@ fn removed_tool_option_message(option: &ResolvedToolOption, removed: bool) -> St
         "{}.{} was not set. Next: show options {}",
         option.tool_name, option.canonical_name, option.tool_name
     )
+}
+
+#[cfg(test)]
+mod identity_fold_effect_tests {
+    use super::*;
+
+    #[test]
+    fn identity_fold_option_change_requests_a_filter_preserving_refresh() {
+        let effects = tool_option_effects(OptionScope::Session, "identityFold");
+
+        assert!(matches!(
+            effects.as_slice(),
+            [ShellEffect::RefreshFindings(FindingsRefresh {
+                announce: false,
+                filter: None,
+            })]
+        ));
+    }
+
+    #[test]
+    fn unrelated_session_option_does_not_reload_findings() {
+        assert!(tool_option_effects(OptionScope::Session, "model").is_empty());
+    }
 }

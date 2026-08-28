@@ -9,6 +9,8 @@ mod commands;
 mod dispatch;
 mod lifecycle;
 mod staleness;
+#[cfg(test)]
+mod test_hooks;
 mod writes;
 
 pub use commands::{
@@ -323,6 +325,8 @@ impl StorageWriter {
     }
 
     fn apply_appended_event(&mut self, event: &EventEnvelope) -> Result<WriteReceipt> {
+        #[cfg(test)]
+        test_hooks::after_event_append(event);
         self.lifecycle.append_committed_event(event.seq)?;
         let projection = self.projection.apply_event(event)?;
         self.lifecycle.projection_advanced(event.seq)?;
@@ -446,3 +450,5 @@ fn workspace_state_ancestor(path: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod process_stress_tests;

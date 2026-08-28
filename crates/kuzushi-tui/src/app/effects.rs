@@ -367,6 +367,7 @@ pub(crate) struct AgentRunRecord {
     pub(crate) latency_ms: Option<u64>,
     pub(crate) audit: AgentCallAudit,
     pub(crate) outcome: AgentRunOutcome,
+    pub(crate) auxiliary_read_only: bool,
 }
 
 pub(crate) enum AgentRunOutcome {
@@ -802,30 +803,29 @@ impl ShellApp {
         let target = apply.target;
         self.engagement.clear_pending_threat_patch();
         self.set_completed_activity("threat model", "pending patch applied");
-        let mut document = kuzushi_core::load_persistent_threat_model(&target)
-            .unwrap_or_else(|| serde_json::json!({}));
-        merge_json(&mut document, &apply.patch.patch);
-        match kuzushi_core::save_persistent_threat_model(&target, &document, true) {
-            Ok(_) => {
+        match kuzushi_core::capabilities::apply_threat_model_patch_revision(
+            &target,
+            &apply.patch.patch,
+            "tui:threats-apply",
+        ) {
+            Ok(committed) => {
                 self.log_applied_threat_patch(apply.patch.unsupported);
-                self.record_threat_model_version_row(&target, &document);
+                self.log(
+                    "threats",
+                    format!(
+                        "activated immutable revision {}",
+                        committed.model_ref.revision_id
+                    ),
+                );
+                if let Some(warning) = committed.ledger_warning {
+                    self.log("threats", warning);
+                }
+                self.hydrate_latest_threat_model_for_dfd();
             }
-            Err(error) => self.log("error", format!("failed to write threat model: {error}")),
-        }
-    }
-
-    fn record_threat_model_version_row(
-        &mut self,
-        target: &std::path::Path,
-        document: &serde_json::Value,
-    ) {
-        if let Err(error) =
-            kuzushi_core::record_threat_model_version(target, document, "operator-edit", None)
-        {
-            self.log(
-                "threats",
-                format!("version ledger append failed: {error:#}"),
-            );
+            Err(error) => self.log(
+                "error",
+                format!("threat-model patch was not committed: {error:#}"),
+            ),
         }
     }
 

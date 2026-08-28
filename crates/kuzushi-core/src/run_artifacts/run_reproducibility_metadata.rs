@@ -50,25 +50,33 @@ fn summary_with_prompt_overrides(target: &Path, summary: RunSummary) -> RunSumma
 }
 
 fn summary_with_threat_model_digest(target: &Path, summary: RunSummary) -> RunSummary {
-    let summary = summary_with_threat_model_provenance(target, summary);
-    if let Some(hash) = threat_model_sha256(target) {
-        return summary.with_threat_model_sha256(Some(hash));
+    match crate::capabilities::threat_model::try_resolve_threat_model(target, ".") {
+        Ok(Some(resolved)) => summary_with_resolved_threat_model(target, summary, resolved),
+        Ok(None) => summary,
+        Err(_) => summary.with_threat_model_sha256(Some("invalid:model-store".to_string())),
     }
-    summary
 }
 
-/// Record which document governs this target and via which resolution step
-/// (scope file, ancestor file, or the persistent model), so review can
-/// answer "which model seeded this run".
-fn summary_with_threat_model_provenance(target: &Path, summary: RunSummary) -> RunSummary {
-    let Some(resolved) = crate::capabilities::threat_model::resolve_threat_model(target, ".")
-    else {
-        return summary;
-    };
-    summary.with_threat_model_provenance(
+fn summary_with_resolved_threat_model(
+    target: &Path,
+    summary: RunSummary,
+    resolved: crate::capabilities::threat_model::ResolvedThreatModel,
+) -> RunSummary {
+    let summary = summary.with_threat_model_provenance(
         Some(resolved.source_path.to_string_lossy().into_owned()),
         Some(resolved.resolved_via.as_str().to_string()),
-    )
+    );
+    match resolved.model_ref {
+        Some(model_ref) => summary.with_threat_model_ref(
+            Some(model_ref.model_id.to_string()),
+            Some(model_ref.revision_id.to_string()),
+            Some(model_ref.sha256),
+        ),
+        None => summary.with_threat_model_sha256(threat_model_source_sha256(
+            target,
+            &resolved.source_path,
+        )),
+    }
 }
 
 fn summary_with_env_fingerprint(summary: RunSummary) -> RunSummary {
@@ -198,9 +206,12 @@ fn sensitive_env_key(key: &str) -> bool {
         .any(|part| key.contains(part))
 }
 
-fn threat_model_sha256(target: &Path) -> Option<String> {
-    let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
-    bounded_file_sha256(target, &path, MAX_THREAT_MODEL_DIGEST_BYTES)
+fn threat_model_source_sha256(target: &Path, source_path: &Path) -> Option<String> {
+    bounded_file_sha256(
+        target,
+        &target.join(source_path),
+        MAX_THREAT_MODEL_DIGEST_BYTES,
+    )
 }
 
 fn load_prompt_override_fingerprints(target: &Path) -> Vec<RunPromptOverrideFingerprint> {

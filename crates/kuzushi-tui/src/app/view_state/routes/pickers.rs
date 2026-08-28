@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub enum SetupRowId {
     Target,
     Plan,
+    ThreatModel,
     Model,
     Credentials,
     Prompt,
@@ -16,9 +17,10 @@ pub enum SetupRowId {
 }
 
 impl SetupRowId {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Target,
         Self::Plan,
+        Self::ThreatModel,
         Self::Model,
         Self::Credentials,
         Self::Prompt,
@@ -31,10 +33,111 @@ impl SetupRowId {
 pub enum SetupEditor {
     Target,
     Plan,
+    ThreatModel,
     Model,
     Credentials,
     Prompt,
     Budget,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapRunConfigRowId {
+    Methodology,
+    Scope,
+    DesignDocs,
+    Context,
+}
+
+impl MapRunConfigRowId {
+    pub const ALL: [Self; 4] = [
+        Self::Methodology,
+        Self::Scope,
+        Self::DesignDocs,
+        Self::Context,
+    ];
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MapRunConfigRouteState {
+    cursor: usize,
+    edit: Option<MapRunConfigRowId>,
+    draft: String,
+    error: Option<String>,
+    reviewed_all_scope_key: Option<String>,
+}
+
+impl MapRunConfigRouteState {
+    pub(crate) fn open(&mut self) {
+        self.edit = None;
+        self.draft.clear();
+        self.error = None;
+        self.cursor = self
+            .cursor
+            .min(MapRunConfigRowId::ALL.len().saturating_sub(1));
+    }
+
+    pub(crate) fn cursor(&self) -> usize {
+        self.cursor
+    }
+
+    pub(crate) fn row(&self) -> MapRunConfigRowId {
+        MapRunConfigRowId::ALL[self.cursor.min(MapRunConfigRowId::ALL.len() - 1)]
+    }
+
+    pub(crate) fn move_cursor(&mut self, delta: isize) {
+        self.cursor = wrapped_cursor(self.cursor, delta, MapRunConfigRowId::ALL.len());
+        self.error = None;
+    }
+
+    pub(crate) fn begin_edit(&mut self, row: MapRunConfigRowId, draft: String) {
+        self.edit = Some(row);
+        self.draft = draft;
+        self.error = None;
+    }
+
+    pub(crate) fn finish_edit(&mut self) {
+        self.edit = None;
+        self.draft.clear();
+        self.error = None;
+    }
+
+    pub(crate) fn edit(&self) -> Option<MapRunConfigRowId> {
+        self.edit
+    }
+
+    pub(crate) fn draft(&self) -> &str {
+        &self.draft
+    }
+
+    pub(crate) fn push_char(&mut self, ch: char) {
+        self.draft.push(ch);
+        self.error = None;
+    }
+
+    pub(crate) fn pop_char(&mut self) {
+        self.draft.pop();
+        self.error = None;
+    }
+
+    pub(crate) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub(crate) fn set_error(&mut self, error: impl Into<String>) {
+        self.error = Some(error.into());
+    }
+
+    pub(crate) fn clear_error(&mut self) {
+        self.error = None;
+    }
+
+    pub(crate) fn all_scopes_reviewed(&self, key: &str) -> bool {
+        self.reviewed_all_scope_key.as_deref() == Some(key)
+    }
+
+    pub(crate) fn set_all_scopes_reviewed(&mut self, key: Option<String>) {
+        self.reviewed_all_scope_key = key;
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -44,6 +147,7 @@ pub struct SetupRouteState {
     editor: Option<SetupEditor>,
     budget_draft: String,
     budget_error: Option<String>,
+    map_run_config: MapRunConfigRouteState,
 }
 
 impl SetupRouteState {
@@ -102,6 +206,14 @@ impl SetupRouteState {
 
     pub(crate) fn budget_draft(&self) -> &str {
         &self.budget_draft
+    }
+
+    pub(crate) fn map_run_config(&self) -> &MapRunConfigRouteState {
+        &self.map_run_config
+    }
+
+    pub(crate) fn map_run_config_mut(&mut self) -> &mut MapRunConfigRouteState {
+        &mut self.map_run_config
     }
 
     pub(crate) fn push_budget_char(&mut self, ch: char) {

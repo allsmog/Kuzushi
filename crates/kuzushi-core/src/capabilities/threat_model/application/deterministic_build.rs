@@ -18,22 +18,21 @@ pub(crate) fn build_deterministic_threat_model(
 ) -> Result<Value> {
     let use_entry_point_catalog = deterministic_catalog_enabled(&input);
     let input = parse_deterministic_build_input(&input, ctx, flavor)?;
-    let surface_map = build_attack_surface_map(&input.target)?;
-    let document =
-        prepare_deterministic_document(&input, &surface_map.surfaces, use_entry_point_catalog)?;
+    preflight_deterministic_build_lineage(&input)?;
+    let surfaces = scoped_attack_surfaces(&input)?;
+    let document = prepare_deterministic_document(&input, &surfaces, use_entry_point_catalog)?;
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&document);
     let (normalized_artifact, markdown_artifact) =
         write_deterministic_artifacts(&input, &document)?;
-    let persisted =
-        persist_deterministic_document(flavor, &input, &document, has_concrete_content)?;
-    if let Some(warning) =
-        record_persisted_version(ctx, &input.target, &document, "deterministic", persisted)
-    {
-        if let Some(trace) = ctx.trace {
-            let _ = trace.step("tool-progress", "build", warning).emit();
-        }
-    }
+    let model_ref = persist_and_record_deterministic_document(
+        ctx,
+        flavor,
+        &input,
+        &document,
+        has_concrete_content,
+    )?;
+    let persisted = model_ref.is_some();
     Ok(deterministic_response(
         input,
         flavor,
@@ -41,8 +40,80 @@ pub(crate) fn build_deterministic_threat_model(
         normalized_artifact,
         markdown_artifact,
         persisted,
+        model_ref,
         has_concrete_content,
     ))
+}
+
+fn preflight_deterministic_build_lineage(input: &DeterministicBuildInput) -> Result<()> {
+    let scope = input
+        .roots
+        .scope
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(|| root_scope_ref(input.workspace_root()))?;
+    resolve_build_lineage_selection(
+        input.workspace_root(),
+        &scope,
+        &input.methodology,
+        input.model_id.as_ref(),
+        input.new_model,
+        false,
+        true,
+    )?;
+    Ok(())
+}
+
+fn persist_and_record_deterministic_document(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    input: &DeterministicBuildInput,
+    document: &Value,
+    has_concrete_content: bool,
+) -> Result<Option<ThreatModelRef>> {
+    let model_ref = persist_deterministic_document(
+        flavor,
+        input,
+        document,
+        has_concrete_content,
+        ctx.run_id().as_deref(),
+    )?;
+    let warning = record_persisted_version(
+        ctx,
+        input.workspace_root(),
+        document,
+        "deterministic",
+        model_ref.is_some(),
+        model_ref.as_ref(),
+    );
+    emit_deterministic_version_warning(ctx, warning);
+    Ok(model_ref)
+}
+
+fn emit_deterministic_version_warning(ctx: &ToolExecutionContext<'_>, warning: Option<String>) {
+    let (Some(trace), Some(warning)) = (ctx.trace, warning) else {
+        return;
+    };
+    let _ = trace.step("tool-progress", "build", warning).emit();
+}
+
+fn scoped_attack_surfaces(input: &DeterministicBuildInput) -> Result<Vec<AttackSurface>> {
+    let mut surfaces = build_attack_surface_map(input.analysis_root())?.surfaces;
+    let Some(scope) = input.roots.scope.as_ref() else {
+        return Ok(surfaces);
+    };
+    if scope.rel_path == Path::new(".") {
+        return Ok(surfaces);
+    }
+    for surface in &mut surfaces {
+        surface.path = scope
+            .rel_path
+            .join(&surface.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        surface.id = crate::workspace::attack_surface::attack_surface_id(surface);
+    }
+    Ok(surfaces)
 }
 
 fn prepare_deterministic_document(
@@ -52,7 +123,7 @@ fn prepare_deterministic_document(
 ) -> Result<Value> {
     let selected = deterministic_threat_surfaces(surfaces, input.max_threats);
     let catalog = deterministic_entry_point_grounding(
-        &input.target,
+        input,
         &selected,
         input.max_threats,
         use_entry_point_catalog,
@@ -60,7 +131,7 @@ fn prepare_deterministic_document(
     let mut document = deterministic_document(input, surfaces, &selected)?;
     // Match the model-backed provenance contract while keeping this
     // runtime-free fold explicit and revision-bound.
-    stamp_provenance(&mut document, &input.target, "deterministic");
+    stamp_provenance(&mut document, input.workspace_root(), "deterministic");
     finalize_deterministic_entry_points(&mut document, &selected, &catalog)?;
     require_complete_security_context_links(&document)?;
     Ok(document)
@@ -76,18 +147,33 @@ fn deterministic_catalog_enabled(input: &Value) -> bool {
 }
 
 fn deterministic_entry_point_grounding(
-    target: &Path,
+    input: &DeterministicBuildInput,
     selected: &[AttackSurface],
     grounding_limit: usize,
     enabled: bool,
 ) -> Result<crate::capabilities::entry_points::EntryPointCatalogGrounding> {
+    if input
+        .roots
+        .scope
+        .as_ref()
+        .is_some_and(|scope| scope.rel_path != Path::new("."))
+    {
+        let mut grounding =
+            crate::capabilities::entry_points::EntryPointCatalogGrounding::unavailable(
+                "scoped-derived",
+            );
+        stamp_deterministic_selection(&mut grounding, grounding_limit, selected.len());
+        return Ok(grounding);
+    }
     if !enabled {
         let mut grounding =
             crate::capabilities::entry_points::EntryPointCatalogGrounding::unavailable("disabled");
         stamp_deterministic_selection(&mut grounding, grounding_limit, selected.len());
         return Ok(grounding);
     }
-    let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(target)?;
+    let resolution = crate::capabilities::entry_points::ensure_current_entry_point_catalog(
+        input.workspace_root(),
+    )?;
     Ok(deterministic_catalog_grounding(
         &resolution,
         selected,
@@ -187,14 +273,15 @@ fn write_deterministic_artifacts(
     input: &DeterministicBuildInput,
     document: &Value,
 ) -> Result<(PathBuf, PathBuf)> {
-    let normalized = write_normalized_artifact(&input.target, &input.output_dir, document)?;
+    let normalized =
+        write_normalized_artifact(input.workspace_root(), &input.output_dir, document)?;
     let markdown = render_schema_markdown(
         document,
         &input.repo_name,
-        &input.target.display().to_string(),
+        &input.workspace_root().display().to_string(),
     );
     let rendered = write_markdown_artifact(
-        &input.target,
+        input.workspace_root(),
         &input.output_dir,
         "THREAT_MODEL.md",
         &markdown,
@@ -504,11 +591,52 @@ fn persist_deterministic_document(
     input: &DeterministicBuildInput,
     document: &Value,
     has_concrete_content: bool,
-) -> Result<bool> {
+    run_id: Option<&str>,
+) -> Result<Option<ThreatModelRef>> {
     if !flavor.persists_document() || !has_concrete_content {
-        return Ok(false);
+        return Ok(None);
     }
-    save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
+    let scope = input
+        .roots
+        .scope
+        .clone()
+        .map(Ok)
+        .unwrap_or_else(|| root_scope_ref(input.workspace_root()))?;
+    let selection = BuildRevisionSelection {
+        workspace_root: input.workspace_root().to_path_buf(),
+        label: deterministic_model_label(input, &scope),
+        scope,
+        methodology: input.methodology.clone(),
+        model_id: input.model_id.clone(),
+        new_model: input.new_model,
+        fresh: true,
+        activate: input.activate,
+        source: ThreatModelRevisionSource::Build,
+        run_id: run_id.map(str::to_string),
+        actor: "tool:threat-model:build".to_string(),
+    };
+    if should_preserve_selected_user_edited_model(&selection, input.preserve_user_edits)? {
+        return Ok(None);
+    }
+    Ok(Some(commit_generated_threat_model_revision(
+        document, selection,
+    )?))
+}
+
+fn deterministic_model_label(input: &DeterministicBuildInput, scope: &ScopeRef) -> String {
+    if scope.scope_id == crate::workspace::ROOT_SCOPE_ID {
+        format!(
+            "{} {}",
+            input.repo_name,
+            input.methodology.to_ascii_uppercase()
+        )
+    } else {
+        format!(
+            "{} · {}",
+            scope.rel_path.display(),
+            input.methodology.to_ascii_uppercase()
+        )
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -519,11 +647,12 @@ fn deterministic_response(
     normalized_artifact: PathBuf,
     markdown_artifact: PathBuf,
     persisted: bool,
+    model_ref: Option<ThreatModelRef>,
     has_concrete_content: bool,
 ) -> Value {
     let threat_count = array_len(document.pointer("/threats"));
-    let target = input.target.clone();
-    let persistent_artifact = persistent_threat_model_path(&input.target);
+    let target = input.workspace_root().to_path_buf();
+    let persistent_artifact = persistent_threat_model_path(input.workspace_root());
     let artifacts = threat_model_artifacts(
         &normalized_artifact,
         &markdown_artifact,
@@ -539,6 +668,7 @@ fn deterministic_response(
         markdown_artifact,
         persistent_artifact,
         persisted,
+        model_ref,
     );
     let warning = deterministic_warning(&target, has_concrete_content);
     let mut result =
@@ -577,9 +707,10 @@ fn deterministic_response_data(
     markdown_artifact: PathBuf,
     persistent_artifact: PathBuf,
     persisted: bool,
+    model_ref: Option<ThreatModelRef>,
 ) -> Value {
     json!({
-        "target": input.target.display().to_string(),
+        "target": input.workspace_root().display().to_string(),
         "repoName": input.repo_name,
         "artifactDir": input.output_dir,
         "normalizedArtifact": normalized_artifact.display().to_string(),
@@ -592,6 +723,7 @@ fn deterministic_response_data(
         "document": document,
         "findings": [],
         "persisted": persisted,
+        "modelRef": model_ref,
         "degradation": deterministic_degradation(),
     })
 }
@@ -602,14 +734,21 @@ mod tests {
 
     fn build_input(target: &Path) -> DeterministicBuildInput {
         DeterministicBuildInput {
-            target: target.to_path_buf(),
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.to_path_buf(),
+                analysis_root: target.to_path_buf(),
+                scope: None,
+            },
             repo_name: "fixture".to_string(),
             methodology: "stride".to_string(),
             slice: "all".to_string(),
             stages: vec!["dfd".to_string()],
             output_dir: ".kuzushi/test-artifacts".to_string(),
             max_threats: 5,
-            preserve_user_edits: false,
+            preserve_user_edits: true,
+            model_id: None,
+            new_model: false,
+            activate: None,
         }
     }
 
@@ -650,7 +789,8 @@ mod tests {
         let target = tempfile::tempdir().unwrap();
         let (mut document, selected) = deterministic_test_document(target.path());
         let grounding =
-            deterministic_entry_point_grounding(target.path(), &selected, 5, true).unwrap();
+            deterministic_entry_point_grounding(&build_input(target.path()), &selected, 5, true)
+                .unwrap();
 
         finalize_deterministic_entry_points(&mut document, &selected, &grounding).unwrap();
 
@@ -680,7 +820,8 @@ mod tests {
     fn current_typed_catalog_stamps_digest_and_exact_link_counts() {
         let target = tempfile::tempdir().unwrap();
         let surface = route_surface();
-        let tree_hash = crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap();
+        let tree_hash =
+            crate::incremental_index::current_workspace_tree_hash(target.path()).unwrap();
         let snapshot = json!({
             "target": target.path().display().to_string(),
             "timestamp": 123,
@@ -693,7 +834,8 @@ mod tests {
         let (mut document, selected) = deterministic_test_document(target.path());
 
         let grounding =
-            deterministic_entry_point_grounding(target.path(), &selected, 5, true).unwrap();
+            deterministic_entry_point_grounding(&build_input(target.path()), &selected, 5, true)
+                .unwrap();
         finalize_deterministic_entry_points(&mut document, &selected, &grounding).unwrap();
 
         let receipt = &document["provenance"]["entryPointCatalog"];
@@ -710,6 +852,83 @@ mod tests {
         assert_eq!(document["coverage"]["catalogEntryPointsTotal"], json!(1));
         assert_eq!(document["coverage"]["catalogEntryPointsSelected"], json!(1));
         assert_eq!(document["coverage"]["catalogEntryPointsLinked"], json!(1));
+    }
+
+    #[test]
+    fn scoped_deterministic_grounding_never_claims_the_workspace_catalog() {
+        let target = tempfile::tempdir().unwrap();
+        let analysis_root = target.path().join("services/api");
+        fs::create_dir_all(&analysis_root).unwrap();
+        let mut input = build_input(target.path());
+        input.roots.analysis_root = analysis_root;
+        input.roots.scope = Some(ScopeRef {
+            scope_id: "scope_api".to_string(),
+            rel_path: PathBuf::from("services/api"),
+            project_model_sha256: format!("sha256:{}", "a".repeat(64)),
+            target_revision: "fixture".to_string(),
+        });
+        let selected = vec![route_surface()];
+
+        let grounding = deterministic_entry_point_grounding(&input, &selected, 5, true).unwrap();
+
+        assert_eq!(grounding.receipt.status, "scoped-derived");
+        assert_eq!(grounding.receipt.records, 0);
+        assert!(grounding.catalog_ids.is_empty());
+        assert!(grounding.catalog_surfaces.is_empty());
+    }
+
+    #[test]
+    fn deterministic_preflight_accepts_stale_scope_without_explicit_lineage() {
+        let target = tempfile::tempdir().unwrap();
+        let stored_scope = deterministic_scope("tree-a");
+        let stored = commit_deterministic_lineage(target.path(), stored_scope.clone());
+        let mut input = build_input(target.path());
+        let mut current_scope = stored_scope;
+        current_scope.project_model_sha256 = "tree-b".to_string();
+        input.roots.scope = Some(current_scope);
+
+        preflight_deterministic_build_lineage(&input).unwrap();
+        input.model_id = Some(stored.model_id);
+        let error = preflight_deterministic_build_lineage(&input).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not match the requested scope and methodology"));
+    }
+
+    fn deterministic_scope(binding: &str) -> ScopeRef {
+        ScopeRef {
+            scope_id: "scope_api".to_string(),
+            rel_path: PathBuf::from("services/api"),
+            project_model_sha256: binding.to_string(),
+            target_revision: "fixture".to_string(),
+        }
+    }
+
+    fn commit_deterministic_lineage(root: &Path, scope: ScopeRef) -> ThreatModelRef {
+        commit_threat_model_revision(
+            root,
+            &json!({
+                "version": "2.0",
+                "methodology": "stride",
+                "dfd": {"nodes": [{"id": "app"}], "flows": [], "trustBoundaries": []},
+                "threats": [],
+                "summary": {}
+            }),
+            ThreatModelCommit {
+                model_id: None,
+                new_model: false,
+                label: "fixture".to_string(),
+                scope,
+                methodology: "stride".to_string(),
+                source: ThreatModelRevisionSource::Build,
+                source_revision_id: None,
+                run_id: None,
+                activate: Some(false),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap()
+        .model_ref
     }
 
     #[test]

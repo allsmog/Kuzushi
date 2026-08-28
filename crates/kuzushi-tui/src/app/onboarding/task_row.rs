@@ -67,17 +67,24 @@ impl PlanningTaskRow {
         let cli_blocked = required_cli.is_some_and(|cli| !cli_is_on_path(cli));
         let blocker = task_workspace_blocker(task, target);
         let cli_available = !cli_blocked && blocker.is_none();
-        let (artifact_path, artifact_state, artifact_modified) = match task.artifact_path(target) {
-            Some(path) => {
-                let state = cpg_aware_artifact_state(task, target, &path);
-                let modified = artifact_modified(target, &path, state);
-                (path, state, modified)
+        let (artifact_path, mut artifact_state, artifact_modified) =
+            match task.artifact_path(target) {
+                Some(path) => {
+                    let state = cpg_aware_artifact_state(task, target, &path);
+                    let modified = artifact_modified(target, &path, state);
+                    (path, state, modified)
+                }
+                // Action tasks have no cached artifact; the path is a harmless
+                // placeholder under the workspace state dir.
+                None => (target.join(".kuzushi"), ArtifactState::Action, None),
+            };
+        let cached_detail = match cached_row_detail(task, target, artifact_state) {
+            Ok(detail) => detail,
+            Err(error) => {
+                artifact_state = ArtifactState::Invalid;
+                Some(format!("integrity error: {error:#}"))
             }
-            // Action tasks have no cached artifact; the path is a harmless
-            // placeholder under the workspace state dir.
-            None => (target.join(".kuzushi"), ArtifactState::Action, None),
         };
-        let cached_detail = cached_row_detail(task, target, artifact_state);
         Self {
             id: task,
             label: task.label(),
@@ -300,23 +307,29 @@ fn failed_attempt(
 
 /// The live threat model's real methodology + ledger version, so the picker
 /// says "cached · stride v4" instead of guessing from the row that built it.
-fn cached_row_detail(task: PlanningTaskId, target: &Path, state: ArtifactState) -> Option<String> {
+fn cached_row_detail(
+    task: PlanningTaskId,
+    target: &Path,
+    state: ArtifactState,
+) -> anyhow::Result<Option<String>> {
     if task != PlanningTaskId::BuildThreatModel || state != ArtifactState::Cached {
-        return None;
+        return Ok(None);
     }
-    let document = kuzushi_core::load_persistent_threat_model(target)?;
+    let Some(document) = kuzushi_core::try_load_persistent_threat_model(target)? else {
+        return Ok(None);
+    };
     let methodology = document
         .get("methodology")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-    let version = kuzushi_core::list_threat_model_versions(target, 1)
-        .ok()
-        .and_then(|versions| versions.first().map(|record| record.id));
-    Some(match version {
+    let version = kuzushi_core::list_threat_model_versions(target, 1)?
+        .first()
+        .map(|record| record.id);
+    Ok(Some(match version {
         Some(version) => format!("{methodology} v{version}"),
         None => methodology,
-    })
+    }))
 }
 
 fn task_workspace_blocker(task: PlanningTaskId, target: &Path) -> Option<String> {
@@ -512,6 +525,33 @@ mod tests {
         let row = PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, tmp.path());
         assert!(row.artifact_path.ends_with(".kuzushi/threat-model.json"));
         assert_eq!(row.artifact_state, ArtifactState::Missing);
+    }
+
+    #[test]
+    fn merged_threat_model_row_surfaces_active_object_corruption() {
+        let target = tempfile::tempdir().unwrap();
+        kuzushi_core::save_persistent_threat_model(
+            target.path(),
+            &serde_json::json!({"methodology": "stride"}),
+            true,
+        )
+        .unwrap();
+        kuzushi_core::open_writable_threat_model_store(target.path()).unwrap();
+        let active = kuzushi_core::load_active_threat_model(target.path())
+            .unwrap()
+            .unwrap();
+        let object =
+            kuzushi_core::threat_model_object_path(target.path(), &active.model_ref.sha256)
+                .unwrap();
+        std::fs::write(object, b"{}").unwrap();
+
+        let row = PlanningTaskRow::for_task(PlanningTaskId::BuildThreatModel, target.path());
+
+        assert_eq!(row.artifact_state, ArtifactState::Invalid);
+        assert!(row
+            .cached_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("integrity error")));
     }
 
     fn write_cpg_dir(target: &Path) -> PathBuf {

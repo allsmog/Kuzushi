@@ -16,7 +16,10 @@ use crate::{
     ScannedSnippetWindow, ShellApp, ViewDataState, VisibleFindingProjection,
     VisibleFindingsCacheKey,
 };
-use kuzushi_core::findings::{DataflowEvidenceRow, FindingSource, ReviewDecision, VulnSource};
+use kuzushi_core::findings::{
+    finding_projection_key, DataflowEvidenceRow, FindingSource, IdentityFoldPolicy, ReviewDecision,
+    VulnSource,
+};
 use kuzushi_core::review_yield::application::ShadowQueueScore;
 use kuzushi_core::review_yield::domain::severity_rank as review_yield_severity_rank;
 use kuzushi_core::{
@@ -717,10 +720,11 @@ pub(crate) fn finding_identity_label(finding: &Finding) -> String {
 }
 
 pub(crate) fn visible_finding_position_for(app: &ShellApp, selected: &Finding) -> Option<usize> {
-    let selected_key = engagement_projection_key(selected);
+    let policy = active_identity_fold_policy(app);
+    let selected_key = engagement_projection_key(selected, policy);
     projected_visible_findings(app)
         .iter()
-        .position(|projected| engagement_projection_key(&projected.finding) == selected_key)
+        .position(|projected| engagement_projection_key(&projected.finding, policy) == selected_key)
 }
 
 fn selected_outside_loaded_findings(
@@ -731,19 +735,21 @@ fn selected_outside_loaded_findings(
         return None;
     }
     let selected = app.selected_finding().as_ref()?;
-    let selected_key = engagement_projection_key(selected);
+    let policy = active_identity_fold_policy(app);
+    let selected_key = engagement_projection_key(selected, policy);
     let selected_is_loaded = visible
         .iter()
-        .any(|projected| engagement_projection_key(&projected.finding) == selected_key);
+        .any(|projected| engagement_projection_key(&projected.finding, policy) == selected_key);
     (!selected_is_loaded).then_some(selected.clone())
 }
 
 pub(crate) fn selected_finding_out_of_window_notice(app: &ShellApp) -> Option<String> {
     let selected = app.selected_finding().as_ref()?;
-    let selected_key = engagement_projection_key(selected);
+    let policy = active_identity_fold_policy(app);
+    let selected_key = engagement_projection_key(selected, policy);
     if projected_visible_findings(app)
         .iter()
-        .any(|projected| engagement_projection_key(&projected.finding) == selected_key)
+        .any(|projected| engagement_projection_key(&projected.finding, policy) == selected_key)
     {
         return None;
     }
@@ -758,10 +764,11 @@ fn finding_rows(
     visible: &[ProjectedFinding],
     review_index: &EffectiveReviewStateIndex,
 ) -> Vec<FindingListRow> {
+    let policy = active_identity_fold_policy(app);
     let selected_key = app
         .selected_finding()
         .as_ref()
-        .map(engagement_projection_key);
+        .map(|finding| engagement_projection_key(finding, policy));
     let base = target_base(app);
     let runs = run_summary_index(app);
     visible
@@ -779,12 +786,22 @@ fn finding_rows(
                 base.as_deref(),
                 provenance,
                 decision.as_ref(),
+                policy,
             )
         })
         .collect()
 }
 
 pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
+    if app.finding_aliases().len() == app.findings().len() && !app.finding_aliases().is_empty() {
+        return app
+            .finding_aliases()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, alias)| (alias, index))
+            .collect();
+    }
     app.workbench_cache()
         .borrow_mut()
         .sorted_finding_alias_indices(app.findings(), app.findings_revision())
@@ -837,8 +854,35 @@ fn visible_finding_alias_indices_before_search(
         )
     };
     let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
-    let filtered = active_filter_finding_alias_indices(app, component_filtered);
+    let batch_filtered = batch_scoped_finding_alias_indices(app, component_filtered);
+    let filtered = active_filter_finding_alias_indices(app, batch_filtered);
     backlog_open_only_finding_alias_indices(app, filtered)
+}
+
+fn batch_scoped_finding_alias_indices(
+    app: &ShellApp,
+    candidates: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
+    let deck = app.router.campaign();
+    let Some(report) = deck.active_batch_report() else {
+        if deck.active_batch_id.is_some() {
+            return Vec::new();
+        }
+        return candidates;
+    };
+    let fingerprints = report
+        .rows
+        .iter()
+        .flat_map(|row| row.fingerprints.iter())
+        .collect::<std::collections::HashSet<_>>();
+    candidates
+        .into_iter()
+        .filter(|(_, index)| {
+            app.findings()
+                .get(*index)
+                .is_some_and(|finding| fingerprints.contains(&finding.fingerprint))
+        })
+        .collect()
 }
 
 /// Reorder rows inside a complete, fully scored proof-and-severity band.
@@ -1192,6 +1236,8 @@ fn review_search_cache_value(app: &ShellApp) -> Option<String> {
 }
 
 fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
+    let fold = identity_fold_policy_label(active_identity_fold_policy(app));
+    let batch = active_batch_cache_value(app);
     let filter = app
         .active_findings_filter()
         .as_deref()
@@ -1206,13 +1252,32 @@ fn active_findings_filter_cache_value(app: &ShellApp) -> Option<String> {
         // serve stale rows.
         let review = app.router.workbench().review();
         return Some(format!(
-            "[backlog sev:{} tool:{}]{}",
+            "[identityFold:{fold}{batch} backlog sev:{} tool:{}]{}",
             review.backlog_severity.unwrap_or("*"),
             review.backlog_tool.as_deref().unwrap_or("*"),
             filter.unwrap_or_default()
         ));
     }
-    filter
+    Some(format!(
+        "[identityFold:{fold}{batch}]{}",
+        filter.unwrap_or_default()
+    ))
+}
+
+fn active_batch_cache_value(app: &ShellApp) -> String {
+    let Some(report) = app.router.campaign().active_batch_report() else {
+        return String::new();
+    };
+    let fingerprints = report
+        .rows
+        .iter()
+        .map(|row| row.representative_fingerprint.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        " batch:{}:{}/{}/{}:{fingerprints}",
+        report.batch_id, report.completed, report.planned, report.failed
+    )
 }
 
 #[cfg(test)]
@@ -1227,13 +1292,14 @@ fn engagement_projected_findings(
     app: &ShellApp,
     visible: Vec<(String, usize)>,
 ) -> Vec<ProjectedFinding> {
+    let policy = active_identity_fold_policy(app);
     let mut groups = Vec::<ProjectedFinding>::new();
     let mut group_index = BTreeMap::<String, usize>::new();
     for (alias, index) in visible {
         let Some(finding) = app.findings().get(index).cloned() else {
             continue;
         };
-        let key = engagement_projection_key(&finding);
+        let key = engagement_projection_key(&finding, policy);
         if let Some(position) = group_index.get(&key).copied() {
             merge_projected_finding(&mut groups[position], alias, finding);
         } else {
@@ -1245,11 +1311,20 @@ fn engagement_projected_findings(
     groups
 }
 
-fn engagement_projection_key(finding: &Finding) -> String {
-    finding
-        .dedup_key
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone())
+fn active_identity_fold_policy(app: &ShellApp) -> IdentityFoldPolicy {
+    app.identity_fold_policy()
+}
+
+fn identity_fold_policy_label(policy: IdentityFoldPolicy) -> &'static str {
+    match policy {
+        IdentityFoldPolicy::Legacy => "legacy",
+        IdentityFoldPolicy::Safe => "safe",
+        IdentityFoldPolicy::Aggressive => "aggressive",
+    }
+}
+
+fn engagement_projection_key(finding: &Finding, policy: IdentityFoldPolicy) -> String {
+    finding_projection_key(finding, policy)
 }
 
 fn merge_projected_finding(projected: &mut ProjectedFinding, alias: String, finding: Finding) {
@@ -1505,6 +1580,7 @@ impl FindingListRow {
         base: Option<&str>,
         provenance: FindingRunProvenance,
         decision: Option<&EffectiveReviewDecision>,
+        identity_fold_policy: IdentityFoldPolicy,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
         let proof = finding_proof_badge(finding);
@@ -1532,7 +1608,8 @@ impl FindingListRow {
             cwe: projection.cwe_label,
             source: finding_source_summary_label(finding),
             evidence: projection.evidence_preview,
-            selected: selected_key.is_some_and(|key| key == engagement_projection_key(finding)),
+            selected: selected_key
+                .is_some_and(|key| key == engagement_projection_key(finding, identity_fold_policy)),
             cursor: cursor == index,
         }
     }

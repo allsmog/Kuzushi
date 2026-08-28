@@ -73,7 +73,7 @@ fn agent_finding_from_item(item: Value, target: &Path, tool_slug: &str) -> Optio
         read_object_string(&object, &["message", "title", "summary"]).unwrap_or(rule_id.clone());
     let severity = agent_finding_severity(&object, &mut message);
     append_agent_finding_context(&object, &mut message);
-    Some(Finding::new_tool(
+    let finding = Finding::new_tool(
         tool_slug.to_string(),
         rule_id,
         file_path,
@@ -81,7 +81,15 @@ fn agent_finding_from_item(item: Value, target: &Path, tool_slug: &str) -> Optio
         end_line,
         severity,
         message,
-    ))
+    );
+    Some(with_agent_finding_metadata(finding, &object))
+}
+
+fn with_agent_finding_metadata(mut finding: Finding, object: &Map<String, Value>) -> Finding {
+    finding.symbol_locator =
+        read_object_string(object, &["symbolLocator", "symbol_locator", "symbol"]);
+    finding.rule_version = read_object_string(object, &["ruleVersion", "rule_version"]);
+    finding
 }
 
 fn agent_finding_file_path(object: &Map<String, Value>, target: &Path) -> String {
@@ -177,4 +185,36 @@ fn read_object_u64(object: &Map<String, Value>, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .find_map(|key| object.get(*key))
         .and_then(Value::as_u64)
+}
+
+#[cfg(test)]
+mod metadata_tests {
+    use super::*;
+
+    #[test]
+    fn generic_agent_findings_keep_optional_symbol_and_rule_version() {
+        let findings = normalize_agent_json_findings(
+            serde_json::json!({
+                "findings": [{
+                    "ruleId": "CWE-89",
+                    "ruleVersion": "2026.08",
+                    "symbolLocator": "crate::db::execute",
+                    "filePath": "src/db.rs",
+                    "startLine": 12,
+                    "severity": "high",
+                    "message": "candidate"
+                }]
+            }),
+            Path::new("/repo"),
+            "agentic-sast",
+            10,
+        )
+        .unwrap();
+
+        assert_eq!(findings[0].rule_version.as_deref(), Some("2026.08"));
+        assert_eq!(
+            findings[0].symbol_locator.as_deref(),
+            Some("crate::db::execute")
+        );
+    }
 }

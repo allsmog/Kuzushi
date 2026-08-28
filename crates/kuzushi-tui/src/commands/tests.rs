@@ -181,6 +181,39 @@ mod tests {
             ShellCommand::Threat(ThreatView::Summary)
         );
         assert_eq!(parse_command("/threats regen"), ShellCommand::ThreatRegen);
+        assert_eq!(parse_command("/threats models"), ShellCommand::ThreatModels);
+        assert_eq!(
+            parse_command("/threats inspect diff"),
+            ShellCommand::ThreatModelInspectDiff
+        );
+        assert_eq!(
+            parse_command("/threats activate tm_1234567890abcdef1234567890abcdef"),
+            ShellCommand::ThreatModelActivate {
+                model_id: "tm_1234567890abcdef1234567890abcdef".to_string(),
+                revision_id: None,
+            }
+        );
+        assert_eq!(
+            parse_command(
+                "/threats activate tm_1234567890abcdef1234567890abcdef@tmr_1234567890abcdef1234567890abcdef"
+            ),
+            ShellCommand::ThreatModelActivate {
+                model_id: "tm_1234567890abcdef1234567890abcdef".to_string(),
+                revision_id: Some("tmr_1234567890abcdef1234567890abcdef".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_command("/threats revisions tm_1234567890abcdef1234567890abcdef"),
+            ShellCommand::ThreatModelRevisions("tm_1234567890abcdef1234567890abcdef".to_string())
+        );
+        assert_eq!(
+            parse_command("/threats restore tmr_1234567890abcdef1234567890abcdef"),
+            ShellCommand::ThreatModelRestore("tmr_1234567890abcdef1234567890abcdef".to_string())
+        );
+        assert_eq!(
+            parse_command("/threats activate"),
+            ShellCommand::Unknown("/threats activate <model-id>[@<revision-id>]".to_string())
+        );
         assert_eq!(
             parse_command("/threats versions"),
             ShellCommand::ThreatVersions
@@ -196,6 +229,10 @@ mod tests {
         assert_eq!(
             parse_command("/threats ask what changed?"),
             ShellCommand::ThreatAsk("what changed?".to_string())
+        );
+        assert_eq!(
+            parse_command("/threats ask --whole-model what changed?"),
+            ShellCommand::ThreatAskWholeModel("what changed?".to_string())
         );
         assert_eq!(parse_command("/threats apply"), ShellCommand::ThreatApply);
         assert_eq!(parse_command("/threats reject"), ShellCommand::ThreatReject);
@@ -629,6 +666,15 @@ mod tests {
             parse_command("?what changed?"),
             ShellCommand::Ask("what changed?".to_string())
         );
+        assert_eq!(
+            parse_command("/ask --whole-model what boundary does auth cross?"),
+            ShellCommand::AskWholeModel("what boundary does auth cross?".to_string())
+        );
+        assert_eq!(
+            parse_command("ask what boundary? --whole-model"),
+            ShellCommand::AskWholeModel("what boundary?".to_string())
+        );
+        assert_eq!(parse_command("ask cancel"), ShellCommand::CancelAsk);
         assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(
             parse_command("phase confirm"),
@@ -732,6 +778,25 @@ mod tests {
             parse_command("findings since main"),
             ShellCommand::Since("main".to_string())
         );
+    }
+
+    #[test]
+    fn scan_batch_and_batch_results_have_distinct_routes() {
+        assert_eq!(
+            parse_command("scan batch"),
+            ShellCommand::ScanBatch { prior_run_id: None }
+        );
+        assert_eq!(
+            parse_command("scan batch --prior-run run-123"),
+            ShellCommand::ScanBatch {
+                prior_run_id: Some("run-123".to_string())
+            }
+        );
+        assert_eq!(
+            parse_command("batch batch-123"),
+            ShellCommand::BatchResults("batch-123".to_string())
+        );
+        assert_eq!(parse_command("batch clear"), ShellCommand::ClearBatchScope);
     }
 
     #[test]
@@ -936,6 +1001,8 @@ mod tests {
             "back",
             "backend",
             "background",
+            "batch-clear",
+            "batch-results",
             "boot-splash",
             "cancel",
             "cancel-job",
@@ -995,6 +1062,7 @@ mod tests {
             "run-tool",
             "full",
             "scene",
+            "scan-batch",
             "session-info",
             "set-option",
             "show-aliases",
@@ -1011,6 +1079,10 @@ mod tests {
             "threat-ask",
             "threat-apply",
             "threat-editor",
+            "threat-model-activate",
+            "threat-model-restore",
+            "threat-model-revisions",
+            "threat-models",
             "threat-regen",
             "threat-reject",
             "threat-versions",
@@ -1140,6 +1212,7 @@ mod tests {
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
             ShellCommand::ScanSince { .. } => "scan-since",
+            ShellCommand::ScanBatch { .. } => "scan-batch",
             ShellCommand::Full(_) => "full",
             ShellCommand::LaunchStartView => "launch-start-view",
             ShellCommand::LaunchTargetPicker => "launch-target-picker",
@@ -1166,8 +1239,14 @@ mod tests {
             ShellCommand::ThreatEditor => "threat-editor",
             ShellCommand::ThreatRegen => "threat-regen",
             ShellCommand::ThreatAsk(_) => "threat-ask",
+            ShellCommand::ThreatAskWholeModel(_) => "threat-ask-whole-model",
             ShellCommand::ThreatApply => "threat-apply",
             ShellCommand::ThreatReject => "threat-reject",
+            ShellCommand::ThreatModels => "threat-models",
+            ShellCommand::ThreatModelInspectDiff => "threat-model-inspect-diff",
+            ShellCommand::ThreatModelActivate { .. } => "threat-model-activate",
+            ShellCommand::ThreatModelRevisions(_) => "threat-model-revisions",
+            ShellCommand::ThreatModelRestore(_) => "threat-model-restore",
             ShellCommand::ThreatVersions => "threat-versions",
             ShellCommand::ThreatVersionUse(_) => "threat-version-use",
             ShellCommand::Prompts => "prompts",
@@ -1177,6 +1256,8 @@ mod tests {
             ShellCommand::ShowJobs => "show-jobs",
             ShellCommand::CancelJob(_) => "cancel-job",
             ShellCommand::ShowCampaigns(_) => "campaigns",
+            ShellCommand::BatchResults(_) => "batch-results",
+            ShellCommand::ClearBatchScope => "batch-clear",
             ShellCommand::ShowCoverage => "coverage",
             ShellCommand::QueueCommand(_) => "queue-command",
             ShellCommand::Background => "background",
@@ -1201,6 +1282,8 @@ mod tests {
             ShellCommand::Target(_) => "target",
             ShellCommand::TargetRevision(_) => "target-revision",
             ShellCommand::Ask(_) => "ask",
+            ShellCommand::AskWholeModel(_) => "ask-whole-model",
+            ShellCommand::CancelAsk => "cancel-ask",
             ShellCommand::Options { .. } => "options",
             ShellCommand::SetOption { .. } => "set-option",
             ShellCommand::UnsetOption { .. } => "unset-option",
@@ -1258,6 +1341,12 @@ mod tests {
                 "<specifier>" => "builtin:sast".to_string(),
                 "<verb>" => "show run".to_string(),
                 "<n>" => "1".to_string(),
+                "<model-id>" => "tm_11111111111111111111111111111111".to_string(),
+                "<model-id>[@<revision-id>]" => {
+                    "tm_11111111111111111111111111111111@tmr_11111111111111111111111111111111"
+                        .to_string()
+                }
+                "<revision-id>" => "tmr_11111111111111111111111111111111".to_string(),
                 "[json]" => String::new(),
                 "[key=value" | "...]" => String::new(),
                 "[format]" => String::new(),

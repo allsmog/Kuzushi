@@ -74,12 +74,15 @@ impl ShellApp {
     pub(crate) fn apply_job_event(&mut self, event: ShellEvent) -> Vec<ShellEffect> {
         let kind = event.kind();
         let finishes_slot = self.job_event_finishes_slot(&event);
+        let owns_run_focus = self.job_owns_run_focus(kind);
         let terminal_fallback = finishes_slot.then(|| run_focus_event_outcome(&event));
         let mut effects = self.apply_current_job_event(event);
         if finishes_slot {
-            self.mark_run_focus_terminal_pending(
-                terminal_fallback.as_deref().unwrap_or("completed"),
-            );
+            if owns_run_focus {
+                self.mark_run_focus_terminal_pending(
+                    terminal_fallback.as_deref().unwrap_or("completed"),
+                );
+            }
             self.clear_finished_job(kind);
             let after_persistence = matches!(
                 effects.first(),
@@ -95,11 +98,34 @@ impl ShellApp {
     }
 
     pub(crate) fn finalize_job_effect(&mut self, kind: JobKind) {
+        if self.is_auxiliary_agent_job(kind) {
+            self.jobs_mut().finish(kind);
+            self.runtime_state.clear_cleared_agent_run();
+            return;
+        }
         self.drain_terminal_lifecycle_events();
         self.catch_up_focused_run_from_disk();
         self.jobs_mut().finish(kind);
+        if kind == JobKind::Agent {
+            self.runtime_state.clear_cleared_agent_run();
+        }
         let effects = self.advance_steer_queue();
         EffectRuntime::execute(self, effects);
+    }
+
+    fn job_owns_run_focus(&self, kind: JobKind) -> bool {
+        !self.is_auxiliary_agent_job(kind)
+    }
+
+    fn is_auxiliary_agent_job(&self, kind: JobKind) -> bool {
+        kind == JobKind::Agent
+            && (self
+                .agent_chat()
+                .is_some_and(|agent| agent.auxiliary_read_only)
+                || self
+                    .runtime_state
+                    .cleared_agent_run()
+                    .is_some_and(|run| run.auxiliary_read_only))
     }
 
     fn drain_terminal_lifecycle_events(&mut self) {
@@ -779,7 +805,6 @@ impl ShellApp {
         if self.agent_chat().is_some_and(|agent| agent.running) {
             return;
         }
-        self.runtime_state.clear_cleared_agent_run();
         self.set_agent_cancel(None);
     }
 

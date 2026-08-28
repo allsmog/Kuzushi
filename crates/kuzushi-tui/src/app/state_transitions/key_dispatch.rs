@@ -631,6 +631,26 @@ impl ShellApp {
     ) -> Option<PhaseRerunDraft> {
         let record = self.current_phase_result_record()?;
         let (tool, input) = self.rerun_specification_for(&record)?;
+        let overrides = phase_rerun_action_overrides(derivation, &tool);
+        let workspace = match self.phase_rerun_workspace() {
+            Ok(workspace) => workspace,
+            Err(reason) => {
+                self.refuse_phase_result_action(format!("rerun draft not opened — {reason}"));
+                return None;
+            }
+        };
+        let prepared_input = match self.prepare_phase_rerun_review_input(
+            &tool,
+            input.clone(),
+            overrides,
+            &workspace,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.refuse_phase_result_action(format!("rerun input is invalid: {error}"));
+                return None;
+            }
+        };
         let descriptor = self.registry().resolve_tool(&tool)?;
         Some(PhaseRerunDraft {
             review: PhaseRerunReview {
@@ -638,19 +658,52 @@ impl ShellApp {
                 parent_attempt_id: record.completed.attempt_id,
                 tool: tool.clone(),
                 tool_description: descriptor.description.clone(),
-                changed_options: rerun_option_review(descriptor, &input),
+                changed_options: rerun_option_review(descriptor, &prepared_input, overrides),
                 original_input: input.clone(),
-                prepared_input: input,
+                draft_modified: prepared_input != input,
+                prepared_input,
                 option_editor_open: false,
                 option_cursor: 0,
                 option_edit: None,
                 option_error: None,
                 dispatch_error: None,
-                draft_modified: false,
                 derivation,
             },
             derivation,
         })
+    }
+
+    fn prepare_phase_rerun_review_input(
+        &self,
+        tool: &str,
+        input: Value,
+        overrides: &[(&str, &str)],
+        workspace: &WorkspaceTarget,
+    ) -> anyhow::Result<Value> {
+        let candidate = input_with_phase_rerun_overrides(input, overrides)?;
+        self.prepare_phase_rerun_input(tool, candidate, workspace)
+    }
+
+    fn prepare_phase_rerun_input(
+        &self,
+        tool: &str,
+        input: Value,
+        workspace: &WorkspaceTarget,
+    ) -> anyhow::Result<Value> {
+        let ctx = kuzushi_core::modules::ToolExecutionContext {
+            config: self.config(),
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+            cancellation: None,
+            authorization: Default::default(),
+        };
+        self.registry().prepare_tool_input_for_dispatch(
+            tool,
+            input,
+            &ctx,
+            Some(self.option_store()),
+        )
     }
 
     fn apply_phase_rerun_draft(&mut self, draft: PhaseRerunDraft) {
@@ -1006,18 +1059,24 @@ impl ShellApp {
             .pending_phase_rerun()
             .context("rerun draft is unavailable")?;
         let tool = review.tool.clone();
+        let derivation = review.derivation;
         let original = review.original_input.clone();
         let mut candidate = review.prepared_input.clone();
         candidate
             .as_object_mut()
             .context("saved rerun input is not an object")?
             .insert(spec.name.clone(), value);
-        let prepared = self.registry().prepare_tool_input(&tool, candidate, None)?;
+        let target = self
+            .target_owned()
+            .context("rerun requires an active target")?;
+        let workspace = WorkspaceTarget::new(target)?;
+        let prepared = self.prepare_phase_rerun_input(&tool, candidate, &workspace)?;
         let descriptor = self
             .registry()
             .resolve_tool(&tool)
             .context("rerun tool descriptor disappeared")?;
-        let changed_options = rerun_option_diff(descriptor, &original, &prepared);
+        let overrides = phase_rerun_action_overrides(derivation, &tool);
+        let changed_options = rerun_option_diff(descriptor, &original, &prepared, overrides);
         if let Some(review) = self.engagement.pending_phase_rerun_mut() {
             review.prepared_input = prepared;
             review.changed_options = changed_options;
@@ -1075,6 +1134,7 @@ impl ShellApp {
         let prepared = self
             .prepare_background_tool_input(&review.tool, review.prepared_input.clone(), &workspace)
             .map_err(|error| format!("exact rerun is no longer valid: {error}"))?;
+        phase_rerun_preparation_matches_review(&review.prepared_input, prepared.value())?;
         self.apply_phase_rerun_lineage(&review);
         let thinking_level = thinking_level_from_input(prepared.value())
             .or_else(|| self.session_thinking_level_owned());
@@ -1845,6 +1905,39 @@ struct PhaseRerunDraft {
     derivation: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
 }
 
+fn phase_rerun_action_overrides(
+    action: Option<kuzushi_core::workflow_attempts::PhaseAttemptDerivation>,
+    tool: &str,
+) -> &'static [(&'static str, &'static str)] {
+    use kuzushi_core::workflow_attempts::PhaseAttemptDerivation::{Refine, Regenerate};
+    const REFINE: &[(&str, &str)] = &[("mode", "refine")];
+    const REGENERATE: &[(&str, &str)] = &[("mode", "build"), ("seedMode", "fresh")];
+
+    match (tool, action) {
+        ("threat-model:build", Some(Refine)) => REFINE,
+        ("threat-model:build", Some(Regenerate)) => REGENERATE,
+        _ => &[],
+    }
+}
+
+fn input_with_phase_rerun_overrides(
+    mut input: Value,
+    overrides: &[(&str, &str)],
+) -> anyhow::Result<Value> {
+    if overrides.is_empty() {
+        return Ok(input);
+    }
+    let object = input
+        .as_object_mut()
+        .context("saved rerun input is not an object")?;
+    object.extend(
+        overrides
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), Value::String((*value).to_string()))),
+    );
+    Ok(input)
+}
+
 fn rerun_specification(
     registry: &kuzushi_core::ModuleRegistry,
     target: &std::path::Path,
@@ -1892,6 +1985,7 @@ fn next_phase_rerun_enum_value(
 fn rerun_option_review(
     descriptor: &kuzushi_core::modules::ToolDescriptor,
     input: &serde_json::Value,
+    disclosed_overrides: &[(&str, &str)],
 ) -> Vec<PhaseRerunOptionReview> {
     let Some(input) = input.as_object() else {
         return Vec::new();
@@ -1901,7 +1995,10 @@ fn rerun_option_review(
         .iter()
         .filter_map(|option| {
             let value = input.get(&option.name)?;
-            if option.default.as_ref() == Some(value) {
+            let action_override = disclosed_overrides
+                .iter()
+                .any(|(name, _)| *name == option.name);
+            if option.default.as_ref() == Some(value) && !action_override {
                 return None;
             }
             Some(PhaseRerunOptionReview {
@@ -1917,6 +2014,7 @@ fn rerun_option_diff(
     descriptor: &kuzushi_core::modules::ToolDescriptor,
     original: &serde_json::Value,
     draft: &serde_json::Value,
+    disclosed_overrides: &[(&str, &str)],
 ) -> Vec<PhaseRerunOptionReview> {
     descriptor
         .options
@@ -1927,17 +2025,33 @@ fn rerun_option_diff(
                 .get(&option.name)
                 .unwrap_or(&serde_json::Value::Null);
             let after = draft.get(&option.name).unwrap_or(&serde_json::Value::Null);
-            (before != after).then(|| PhaseRerunOptionReview {
+            let changed = before != after;
+            let action_override = disclosed_overrides
+                .iter()
+                .any(|(name, _)| *name == option.name);
+            (changed || action_override).then(|| PhaseRerunOptionReview {
                 label: option.name.clone(),
-                value: format!(
-                    "{} -> {}",
-                    review_option_value(&option.name, before),
-                    review_option_value(&option.name, after)
-                ),
+                value: rerun_option_change_value(&option.name, before, after, changed),
                 description: option.description.clone(),
             })
         })
         .collect()
+}
+
+fn rerun_option_change_value(
+    name: &str,
+    before: &serde_json::Value,
+    after: &serde_json::Value,
+    changed: bool,
+) -> String {
+    if !changed {
+        return review_option_value(name, after);
+    }
+    format!(
+        "{} -> {}",
+        review_option_value(name, before),
+        review_option_value(name, after)
+    )
 }
 
 fn review_option_value(name: &str, value: &serde_json::Value) -> String {
@@ -1958,6 +2072,20 @@ fn sensitive_option_name(name: &str) -> bool {
     ["apikey", "token", "secret", "password", "credential"]
         .iter()
         .any(|needle| name.contains(needle))
+}
+
+/// An "exact rerun" is only exact when the input that will run is the input
+/// the operator reviewed. Preparation can legitimately re-resolve under a
+/// changed descriptor or workspace, so refuse instead of silently dispatching
+/// input the review never showed.
+fn phase_rerun_preparation_matches_review(
+    reviewed_input: &serde_json::Value,
+    prepared_input: &serde_json::Value,
+) -> Result<(), String> {
+    if prepared_input == reviewed_input {
+        return Ok(());
+    }
+    Err("rerun input changed after review — reopen the rerun review before dispatching".to_string())
 }
 
 fn phase_rerun_action(

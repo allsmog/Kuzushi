@@ -41,12 +41,12 @@ pub use app::{
     OptionsScreenStatus, OptionsView, PaneFocus, QuitConfirmFooter, QuitConfirmSection,
     QuitConfirmSnapshot, QuitConfirmStatus, ReconSnapshot, SastTasksFooter, SastTasksSnapshot,
     SastTasksStatus, ScanPanelState, ShellApp, ShellLaunchContext, ShellTargetSource, ShellView,
-    ThemePaletteRow, ThemePickerFooter, ThemePickerSnapshot, ThemePickerStatus, ThreatView,
-    UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus,
+    ThemePaletteRow, ThemePickerFooter, ThemePickerSnapshot, ThemePickerStatus, ThreadContextKey,
+    ThreatView, UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus,
 };
 pub use build_provenance::{
     build_provenance, build_summary, build_version, build_version_static, BuildProvenance,
 };
-pub use commands::{parse_command, ShellCommand};
+pub use commands::{parse_command, AskAttachment, AskRequest, ShellCommand};
 pub use kuzushi_core::ScanProgress;
 pub use renderer::{render_app, render_plain_app};

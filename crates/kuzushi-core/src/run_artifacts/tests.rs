@@ -1117,6 +1117,65 @@ mod tests {
     }
 
     #[test]
+    fn run_summary_records_the_exact_immutable_threat_model_revision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let scope = crate::capabilities::threat_model::current_scope_ref_for_path(tmp.path(), ".")
+            .unwrap()
+            .unwrap();
+        let committed = crate::capabilities::threat_model::commit_threat_model_revision(
+            tmp.path(),
+            &serde_json::json!({
+                "methodology": "stride",
+                "version": "2.0",
+                "dfd": {
+                    "nodes": [{"id": "app"}],
+                    "flows": [],
+                    "trustBoundaries": []
+                },
+                "threats": [],
+                "summary": {}
+            }),
+            crate::capabilities::threat_model::ThreatModelCommit {
+                model_id: None,
+                new_model: false,
+                label: "Primary".to_string(),
+                scope,
+                methodology: "stride".to_string(),
+                source: crate::capabilities::threat_model::ThreatModelRevisionSource::Build,
+                source_revision_id: None,
+                run_id: Some("map-run".to_string()),
+                activate: Some(true),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("scan-run", "sast:scan", None, "target").complete(),
+        )
+        .unwrap();
+        let loaded = load_run_summary(tmp.path(), "scan-run").unwrap();
+
+        assert_eq!(
+            loaded.threat_model_id.as_deref(),
+            Some(committed.model_ref.model_id.as_str())
+        );
+        assert_eq!(
+            loaded.threat_model_revision_id.as_deref(),
+            Some(committed.model_ref.revision_id.as_str())
+        );
+        assert_eq!(
+            loaded.threat_model_sha256.as_deref(),
+            Some(committed.model_ref.sha256.as_str())
+        );
+        assert_eq!(
+            loaded.threat_model_resolved_via.as_deref(),
+            Some("scope-model")
+        );
+    }
+
+    #[test]
     fn run_summary_records_invalid_threat_model_digest_state() {
         let tmp = tempfile::tempdir().unwrap();
         fs::create_dir_all(crate::capabilities::persistent_threat_model_path(

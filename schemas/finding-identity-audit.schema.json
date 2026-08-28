@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/finding-identity-audit.schema.json",
+  "title": "Kuzushi Finding Identity Audit Evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "canonicalTargetKey", "corpusWatermark", "reportSha256", "report"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "canonicalTargetKey": { "type": "string", "minLength": 1 },
+    "corpusWatermark": { "$ref": "#/definitions/sha256" },
+    "reportSha256": { "$ref": "#/definitions/sha256" },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["findingsScanned", "identityGroupsScanned", "suspiciousGroups"],
+      "properties": {
+        "findingsScanned": { "type": "integer", "minimum": 0 },
+        "identityGroupsScanned": { "type": "integer", "minimum": 0 },
+        "suspiciousGroups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/suspiciousGroup" }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "sha256": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "suspiciousGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identityId", "findingIds", "fingerprints", "issues"],
+      "properties": {
+        "identityId": { "type": "string", "minLength": 1 },
+        "findingIds": { "type": "array", "items": { "type": "integer" }, "uniqueItems": true },
+        "fingerprints": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+        "issues": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "multiple_source_signatures",
+              "multiple_symbols",
+              "non_overlapping_spans",
+              "multiple_rule_families",
+              "attack_chain_mixing",
+              "conflicting_human_decisions"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}

@@ -33,6 +33,8 @@ fn parse_generation_build_input(input: &Value) -> Result<BuildInput> {
             .get("advisoryFixtures")
             .or_else(|| input.get("advisory_fixtures"))
             .cloned(),
+        new_model: read_bool(input, &["newModel", "new_model"], false),
+        activate: input.get("activate").and_then(Value::as_bool),
         ..Default::default()
     })
 }
@@ -54,7 +56,10 @@ fn apply_target_build_input(
     build.methodology = read_methodology(input, flavor.default_methodology());
     build.sources = read_source_artifacts(input, flavor, &context_mode)?;
     build.seeds = read_string_list(input, &["seed"]);
-    build.design_doc = read_string(input, &["designDoc", "design_doc", "design"]);
+    build.design_docs = read_string_list(
+        input,
+        &["designDocs", "designDoc", "design_docs", "design_doc", "design"],
+    );
     build.stages = read_stages(input, flavor.tool_name(), &build.methodology)?;
     build.prompt_override = Some(
         prompt_override(input, &target)?
@@ -63,8 +68,127 @@ fn apply_target_build_input(
     build.model = build_model(input, ctx, flavor)?;
     build.vulns = read_operator_vulns(input, &target)?;
     build.context_mode = context_mode;
-    build.target = target;
+    build.model_id = read_string(input, &["modelId", "model_id"])
+        .map(ThreatModelId::parse)
+        .transpose()?;
+    build.roots = read_build_roots(input, &target)?;
     Ok(())
+}
+
+pub(crate) fn read_build_roots(input: &Value, workspace_root: &Path) -> Result<ThreatModelBuildRoots> {
+    let Some(scope_input) = read_string(input, &["scope"]) else {
+        return Ok(ThreatModelBuildRoots {
+            workspace_root: workspace_root.to_path_buf(),
+            analysis_root: workspace_root.to_path_buf(),
+            scope: None,
+        });
+    };
+    resolve_scoped_build_roots(workspace_root, &scope_input)
+}
+
+pub(crate) fn root_scope_ref(workspace_root: &Path) -> Result<ScopeRef> {
+    resolve_scoped_build_roots(workspace_root, "path:.")?
+        .scope
+        .context("root scope resolution returned no scope")
+}
+
+pub(crate) fn load_requested_threat_model(
+    input: &Value,
+    workspace_root: &Path,
+) -> Result<Option<(Value, Option<ThreatModelRef>)>> {
+    let roots = read_build_roots(input, workspace_root)?;
+    let scoped = roots.scope.is_some();
+    let selected = match roots.scope.as_ref() {
+        Some(scope) => load_scope_threat_model(workspace_root, scope)?,
+        None => load_active_threat_model(workspace_root)?,
+    };
+    if let Some(selected) = selected {
+        return Ok(Some((selected.document, Some(selected.model_ref))));
+    }
+    if scoped {
+        return Ok(None);
+    }
+    Ok(try_load_persistent_threat_model(workspace_root)?.map(|document| (document, None)))
+}
+
+fn resolve_scoped_build_roots(workspace_root: &Path, scope_input: &str) -> Result<ThreatModelBuildRoots> {
+    let tree = crate::workspace::load_nested_project_scopes(workspace_root)?;
+    let scope = resolve_scope_selection(tree.as_ref(), scope_input)?;
+    let analysis_root = canonical_analysis_root(workspace_root, Path::new(&scope.rel_path))?;
+    let scope_ref = bind_scope_ref(workspace_root, tree.as_ref(), &scope)?;
+    Ok(ThreatModelBuildRoots {
+        workspace_root: workspace_root.to_path_buf(),
+        analysis_root,
+        scope: Some(scope_ref),
+    })
+}
+
+fn resolve_scope_selection(
+    tree: Option<&crate::workspace::NestedProjectScopeTree>,
+    input: &str,
+) -> Result<crate::workspace::NestedProjectScope> {
+    let (kind, value) = input
+        .trim()
+        .split_once(':')
+        .context("scope must use id:<scope-id> or path:<relative-path>")?;
+    match kind {
+        "id" => scope_by_id(tree, value),
+        "path" => scope_by_path(tree, value),
+        _ => anyhow::bail!("scope must use id:<scope-id> or path:<relative-path>"),
+    }
+}
+
+fn scope_by_id(
+    tree: Option<&crate::workspace::NestedProjectScopeTree>,
+    scope_id: &str,
+) -> Result<crate::workspace::NestedProjectScope> {
+    if scope_id == crate::workspace::ROOT_SCOPE_ID && tree.is_none() {
+        return Ok(root_scope());
+    }
+    tree.and_then(|tree| tree.scopes.iter().find(|scope| scope.id == scope_id))
+        .cloned()
+        .with_context(|| format!("scope id {scope_id:?} is absent from the persisted scope tree"))
+}
+
+fn scope_by_path(
+    tree: Option<&crate::workspace::NestedProjectScopeTree>,
+    rel_path: &str,
+) -> Result<crate::workspace::NestedProjectScope> {
+    let rel_path = normalized_scope_path(rel_path)?;
+    if rel_path == "." && tree.is_none() {
+        return Ok(root_scope());
+    }
+    tree.and_then(|tree| tree.scopes.iter().find(|scope| scope.rel_path == rel_path))
+        .cloned()
+        .with_context(|| format!("scope path {rel_path:?} is absent from the persisted scope tree"))
+}
+
+fn root_scope() -> crate::workspace::NestedProjectScope {
+    crate::capabilities::threat_model::root_scope()
+}
+
+fn normalized_scope_path(value: &str) -> Result<String> {
+    let normalized = value.trim().replace('\\', "/");
+    if normalized == "." {
+        return Ok(normalized);
+    }
+    let path = Path::new(&normalized);
+    anyhow::ensure!(
+        !normalized.is_empty()
+            && path.components().all(|component| matches!(component, std::path::Component::Normal(_))),
+        "scope path must be a non-escaping workspace-relative path"
+    );
+    Ok(path.to_string_lossy().replace('\\', "/"))
+}
+
+fn canonical_analysis_root(workspace_root: &Path, rel_path: &Path) -> Result<PathBuf> {
+    let workspace = std::fs::canonicalize(workspace_root)
+        .with_context(|| format!("could not resolve workspace root {}", workspace_root.display()))?;
+    let analysis = std::fs::canonicalize(workspace_root.join(rel_path))
+        .with_context(|| format!("scope directory {} is missing", rel_path.display()))?;
+    anyhow::ensure!(analysis.is_dir(), "scope path {} is not a directory", rel_path.display());
+    anyhow::ensure!(analysis.starts_with(&workspace), "scope path {} escapes the workspace", rel_path.display());
+    Ok(analysis)
 }
 
 const MAX_VULNS_FILE_BYTES: usize = 512 * 1024;
@@ -449,6 +573,17 @@ mod seed_source_resolution_tests {
         assert!(reject_refine_with_fresh_seed("build", "fresh").is_ok());
         assert!(reject_refine_with_fresh_seed("refine", "seeded").is_ok());
     }
+
+    #[test]
+    fn attachments_are_an_explicit_parent_source() {
+        assert_eq!(
+            normalize_source_artifacts(vec!["ATTACHMENTS".to_string()]).unwrap(),
+            vec!["attachments"]
+        );
+        assert!(!default_source_artifacts(BuildFlavor::ThreatModel)
+            .iter()
+            .any(|source| source == "attachments"));
+    }
 }
 
 #[cfg(test)]
@@ -492,5 +627,73 @@ mod vulns_file_tests {
     #[test]
     fn json_object_row_without_id_is_rejected() {
         assert!(parse_vulns_text(r#"[{"summary": "no id"}]"#).is_err());
+    }
+}
+
+#[cfg(test)]
+mod scope_resolution_tests {
+    use super::*;
+
+    fn save_scope_tree(root: &Path) {
+        let tree = crate::workspace::NestedProjectScopeTree {
+            schema_version: 1,
+            root: "root".to_string(),
+            scopes: vec![
+                root_scope(),
+                crate::workspace::NestedProjectScope {
+                    id: "package-api-a1b2c3d4".to_string(),
+                    parent: Some("root".to_string()),
+                    kind: crate::workspace::NestedProjectKind::PackageRoot,
+                    rel_path: "apps/api".to_string(),
+                    inherited_sections: Vec::new(),
+                },
+            ],
+        };
+        crate::workspace::save_nested_project_scopes(root, &tree).unwrap();
+    }
+
+    #[test]
+    fn scope_id_and_path_resolve_to_the_same_bound_scope() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(root.path().join("apps/api")).unwrap();
+        save_scope_tree(root.path());
+
+        let by_id = read_build_roots(
+            &json!({"scope":"id:package-api-a1b2c3d4"}),
+            root.path(),
+        )
+        .unwrap();
+        let by_path = read_build_roots(&json!({"scope":"path:apps/api"}), root.path()).unwrap();
+
+        assert_eq!(by_id.scope, by_path.scope);
+        assert_eq!(by_id.analysis_root, root.path().join("apps/api").canonicalize().unwrap());
+        assert!(by_id.scope.unwrap().project_model_sha256.starts_with("sha256:"));
+    }
+
+    #[test]
+    fn missing_or_ambiguous_scope_syntax_fails_closed() {
+        let root = tempfile::tempdir().unwrap();
+
+        let syntax = read_build_roots(&json!({"scope":"apps/api"}), root.path())
+            .unwrap_err()
+            .to_string();
+        let missing = read_build_roots(&json!({"scope":"id:missing"}), root.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(syntax.contains("id:<scope-id> or path:<relative-path>"));
+        assert!(missing.contains("absent from the persisted scope tree"));
+    }
+
+    #[test]
+    fn selected_scope_must_still_exist_as_a_directory() {
+        let root = tempfile::tempdir().unwrap();
+        save_scope_tree(root.path());
+
+        let error = read_build_roots(&json!({"scope":"path:apps/api"}), root.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("scope directory apps/api is missing"), "{error}");
     }
 }

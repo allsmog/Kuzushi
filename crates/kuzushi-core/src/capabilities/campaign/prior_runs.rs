@@ -82,8 +82,9 @@ struct RunScope {
 }
 
 fn run_scope(run_dir: &Path) -> Option<RunScope> {
-    let body = crate::bounded_file::read_utf8_text(&run_dir.join("input.json"), MAX_INPUT_JSON_BYTES)
-        .ok()?;
+    let body =
+        crate::bounded_file::read_utf8_text(&run_dir.join("input.json"), MAX_INPUT_JSON_BYTES)
+            .ok()?;
     let input: Value = serde_json::from_str(&body).ok()?;
     let paths = input
         .get("paths")
@@ -115,10 +116,11 @@ fn scope_matches_shard(scope: &RunScope, shard: &str, shard_paths: &[String]) ->
             return true;
         }
     }
-    scope
-        .paths
-        .iter()
-        .any(|run_path| shard_paths.iter().any(|shard_path| paths_overlap(run_path, shard_path)))
+    scope.paths.iter().any(|run_path| {
+        shard_paths
+            .iter()
+            .any(|shard_path| paths_overlap(run_path, shard_path))
+    })
 }
 
 fn scope_file_names_shard(scope_file: &str, shard: &str) -> bool {
@@ -165,14 +167,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn write_run(
-        root: &Path,
-        run_id: &str,
-        kind: &str,
-        status: &str,
-        tool: &str,
-        input: Value,
-    ) {
+    fn write_run(root: &Path, run_id: &str, kind: &str, status: &str, tool: &str, input: Value) {
         let dir = root.join(".kuzushi/v3/runs").join(run_id);
         std::fs::create_dir_all(&dir).unwrap();
         let run = json!({
@@ -210,9 +205,30 @@ mod tests {
     fn campaign_runs_failed_runs_and_other_tools_never_overlap() {
         let temp = tempfile::tempdir().unwrap();
         let scope = json!({"scopeFile": "x/scope/py-tb-sed.txt"});
-        write_run(temp.path(), "job-001-a1", "run", "completed", "agentic-sast:scan", scope.clone());
-        write_run(temp.path(), "tool-2", "tool", "failed", "agentic-sast:scan", scope.clone());
-        write_run(temp.path(), "tool-3", "tool", "completed", "taint-iris:hunt", scope);
+        write_run(
+            temp.path(),
+            "job-001-a1",
+            "run",
+            "completed",
+            "agentic-sast:scan",
+            scope.clone(),
+        );
+        write_run(
+            temp.path(),
+            "tool-2",
+            "tool",
+            "failed",
+            "agentic-sast:scan",
+            scope.clone(),
+        );
+        write_run(
+            temp.path(),
+            "tool-3",
+            "tool",
+            "completed",
+            "taint-iris:hunt",
+            scope,
+        );
 
         let shards = vec![("py-tb-sed".to_string(), Vec::new())];
         assert!(prior_scan_overlaps(temp.path(), "agentic-sast:scan", &shards).is_empty());
@@ -231,11 +247,20 @@ mod tests {
         );
 
         let broader = vec![("broad".to_string(), vec!["src/py".to_string()])];
-        let narrower = vec![("narrow".to_string(), vec!["src/py/security/devices/sed.py".to_string()])];
+        let narrower = vec![(
+            "narrow".to_string(),
+            vec!["src/py/security/devices/sed.py".to_string()],
+        )];
         let disjoint = vec![("other".to_string(), vec!["src/go".to_string()])];
 
-        assert_eq!(prior_scan_overlaps(temp.path(), "agentic-sast:scan", &broader).len(), 1);
-        assert_eq!(prior_scan_overlaps(temp.path(), "agentic-sast:scan", &narrower).len(), 1);
+        assert_eq!(
+            prior_scan_overlaps(temp.path(), "agentic-sast:scan", &broader).len(),
+            1
+        );
+        assert_eq!(
+            prior_scan_overlaps(temp.path(), "agentic-sast:scan", &narrower).len(),
+            1
+        );
         assert!(prior_scan_overlaps(temp.path(), "agentic-sast:scan", &disjoint).is_empty());
     }
 }

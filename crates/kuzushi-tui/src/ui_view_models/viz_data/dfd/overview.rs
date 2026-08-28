@@ -259,6 +259,7 @@ mod tests {
                 label: "POST /api".into(),
                 detail: String::new(),
                 evidence: String::new(),
+                evidence_paths: Vec::new(),
                 target_element_ids: vec!["api".into()],
             }],
             ..Default::default()

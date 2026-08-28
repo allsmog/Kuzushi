@@ -1,3 +1,5 @@
+use super::batch_occurrence_lines::append_batch_occurrence;
+use super::batch_scan_config_lines::append_batch_scan_config;
 use super::*;
 use crate::app::CampaignRouteState;
 use kuzushi_core::capabilities::campaign::snapshot::{CampaignJobSnapshot, CampaignSnapshot};
@@ -13,6 +15,10 @@ pub(crate) fn campaign_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let deck = app.router.campaign();
     let mut lines = context_strip(app, area);
     lines.push(blank());
+    if let Some(config) = deck.batch_scan_config.as_ref() {
+        append_batch_scan_config(&mut lines, config, area);
+        return lines;
+    }
     match deck.selected_campaign().filter(|_| deck.detail) {
         Some(campaign) => append_campaign_detail(&mut lines, deck, campaign, area),
         None => append_campaign_list(&mut lines, deck, area),
@@ -75,7 +81,7 @@ fn campaign_row_line(
         Span::styled(
             format!(
                 "{}  ",
-                pad(&fit(&campaign.campaign_id, widths[1]), widths[1])
+                pad(&fit(&campaign_display_id(campaign), widths[1]), widths[1])
             ),
             theme::accent(),
         ),
@@ -100,6 +106,13 @@ fn campaign_row_line(
     ])
 }
 
+fn campaign_display_id(campaign: &CampaignSnapshot) -> String {
+    if crate::app::is_scan_batch_snapshot(campaign) {
+        return format!("[BATCH] {}", campaign.campaign_id);
+    }
+    campaign.campaign_id.clone()
+}
+
 fn states_label(campaign: &CampaignSnapshot) -> String {
     let counts = campaign.state_counts();
     if counts.is_empty() {
@@ -118,10 +131,7 @@ fn append_campaign_detail(
     campaign: &CampaignSnapshot,
     area: Rect,
 ) {
-    lines.push(divider(
-        &format!("CAMPAIGN {}", campaign.campaign_id),
-        area.width,
-    ));
+    lines.push(divider(&campaign_detail_title(campaign), area.width));
     lines.push(detail_summary_line(deck, campaign));
     append_campaign_operational_detail(lines, campaign);
     lines.push(blank());
@@ -143,9 +153,25 @@ fn append_campaign_detail(
     for (index, job) in campaign.jobs.iter().enumerate() {
         lines.push(job_row_line(deck, job, index == deck.selected_job, &widths));
     }
+    if let Some(report) = deck
+        .active_batch_report()
+        .filter(|report| report.batch_id == campaign.campaign_id)
+    {
+        append_batch_occurrence(lines, report, area);
+    }
+}
+
+fn campaign_detail_title(campaign: &CampaignSnapshot) -> String {
+    let kind = if crate::app::is_scan_batch_snapshot(campaign) {
+        "BATCH"
+    } else {
+        "CAMPAIGN"
+    };
+    format!("{kind} {}", campaign.campaign_id)
 }
 
 fn append_campaign_operational_detail(lines: &mut Vec<Line<'static>>, campaign: &CampaignSnapshot) {
+    append_optional_campaign_detail(lines, batch_worker_policy_label(campaign), theme::subtle());
     append_optional_campaign_detail(
         lines,
         burn_bar_label(campaign.total_cost_usd, campaign.budget_usd),
@@ -193,15 +219,34 @@ fn detail_summary_line(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -
         .unwrap_or_else(|| "no deck-launched dispatcher".to_string());
     Line::styled(
         format!(
-            "  {} job(s) · {} · workers {} · {} · {}",
+            "  {} job(s) · {} · {} · {} · {}",
             campaign.jobs.len(),
             states_label(campaign),
-            deck.workers,
+            campaign_worker_label(deck, campaign),
             campaign_spend_label(campaign),
             dispatcher,
         ),
         theme::subtle(),
     )
+}
+
+fn campaign_worker_label(deck: &CampaignRouteState, campaign: &CampaignSnapshot) -> String {
+    match (campaign.requested_workers, campaign.effective_workers) {
+        (Some(requested), Some(effective)) => {
+            format!("workers {effective} frozen (requested {requested})")
+        }
+        _ => format!("workers {}", deck.workers),
+    }
+}
+
+fn batch_worker_policy_label(campaign: &CampaignSnapshot) -> Option<String> {
+    if !crate::app::is_scan_batch_snapshot(campaign) {
+        return None;
+    }
+    Some(match campaign.parallel_safety_reason.as_deref() {
+        Some(reason) => format!("parallel safety — {reason}"),
+        None => "parallel safety — frozen by the immutable batch plan".to_string(),
+    })
 }
 
 fn job_list_widths(area: Rect) -> [usize; 9] {
@@ -381,7 +426,20 @@ fn append_deck_footer(lines: &mut Vec<Line<'static>>, deck: &CampaignRouteState,
         lines.push(Line::styled(format!("  {notice}"), theme::warn()));
     }
     lines.push(blank());
-    let commands: &[&str] = if deck.detail {
+    let batch_detail = deck
+        .selected_campaign()
+        .is_some_and(crate::app::is_scan_batch_snapshot);
+    let commands: &[&str] = if deck.detail && batch_detail {
+        &[
+            "j/k",
+            "trials frozen",
+            "workers frozen",
+            "L launch",
+            "K kill",
+            "r refresh",
+            "q list",
+        ]
+    } else if deck.detail {
         &[
             "j/k",
             "x include/exclude",
@@ -415,6 +473,11 @@ fn append_empty_deck(lines: &mut Vec<Line<'static>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::capabilities::campaign::{
+        BatchGateStatus, BatchOperationalStatus, BatchSecurityGateStatus, ScanBatchGateOutcome,
+        ScanBatchGatePolicy,
+    };
+    use kuzushi_core::findings::{BatchOccurrenceReport, BatchOccurrenceRow, IdentityFoldPolicy};
     use kuzushi_core::V2Config;
 
     fn line_width(line: &Line<'_>) -> usize {
@@ -430,6 +493,10 @@ mod tests {
         let job = sample_job("job-日本語-long", "retry-wait");
         let campaign = CampaignSnapshot {
             campaign_id: "campaign-日本語-long".to_string(),
+            kind: Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND.to_string()),
+            requested_workers: Some(4),
+            effective_workers: Some(1),
+            parallel_safety_reason: Some("workspace exclusive".to_string()),
             tool: Some("sast:scan".to_string()),
             created_at_ms: None,
             paused_until_ms: None,
@@ -483,6 +550,43 @@ mod tests {
         assert!(text.contains('—'), "{text}");
     }
 
+    #[test]
+    fn batch_config_withholds_cost_until_a_named_prior_exists() {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router.campaign_mut().batch_scan_config =
+            Some(crate::app::BatchScanConfig::load(target.path(), None));
+
+        let text = rendered_text(&app);
+
+        assert!(text.contains("SCAN BATCH"), "{text}");
+        assert!(text.contains("cost not estimated"), "{text}");
+        assert!(text.contains("requested 1 → effective 1"), "{text}");
+    }
+
+    #[test]
+    fn batch_detail_renders_badge_occurrence_and_runs() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let deck = app.router.campaign_mut();
+        deck.campaigns = vec![sample_campaign()];
+        deck.detail = true;
+        deck.active_batch_id = Some("batch-1".to_string());
+        deck.active_batch_report = Some(sample_batch_report());
+
+        let text = rendered_text(&app);
+
+        assert!(text.contains("BATCH batch-1"), "{text}");
+        assert!(text.contains("BATCH OCCURRENCE"), "{text}");
+        assert!(text.contains("seen 2 / completed 3"), "{text}");
+        assert!(text.contains("runs run-1,run-2"), "{text}");
+        assert!(
+            text.contains("gate failed · operational complete · security failed · blocking 1"),
+            "{text}"
+        );
+        assert!(text.contains("trials frozen"), "{text}");
+        assert!(!text.contains("x include/exclude"), "{text}");
+    }
+
     fn sample_job(job_id: &str, state: &str) -> CampaignJobSnapshot {
         CampaignJobSnapshot {
             job_id: job_id.to_string(),
@@ -502,6 +606,89 @@ mod tests {
             run_id: None,
             reason: None,
             findings: None,
+        }
+    }
+
+    fn sample_campaign() -> CampaignSnapshot {
+        CampaignSnapshot {
+            campaign_id: "batch-1".to_string(),
+            kind: Some(kuzushi_core::capabilities::campaign::SCAN_BATCH_KIND.to_string()),
+            requested_workers: Some(4),
+            effective_workers: Some(2),
+            parallel_safety_reason: Some("shared read".to_string()),
+            tool: Some("sast:scan".to_string()),
+            created_at_ms: None,
+            paused_until_ms: None,
+            budget_usd: None,
+            job_budget_usd: None,
+            fill_gaps: false,
+            skipped_covered_cells: None,
+            total_cost_usd: 0.0,
+            provider_spend_unresolved: false,
+            jobs: vec![sample_job("trial-1", "completed")],
+        }
+    }
+
+    fn sample_batch_report() -> BatchOccurrenceReport {
+        BatchOccurrenceReport {
+            schema_version: 1,
+            batch_id: "batch-1".to_string(),
+            equivalence_key: "eq-1".to_string(),
+            identity_fold: IdentityFoldPolicy::Safe,
+            planned: 4,
+            completed: 3,
+            failed: 1,
+            pending: 0,
+            gate: Some(sample_batch_gate()),
+            trials: Vec::new(),
+            rows: vec![BatchOccurrenceRow {
+                fold_key: "finding-1".to_string(),
+                identity_id: None,
+                identity_basis: None,
+                seen: 2,
+                completed: 3,
+                planned: 4,
+                failed: 1,
+                severities: vec!["high".to_string()],
+                locations: vec!["src/auth.rs:12".to_string()],
+                titles: vec!["unsafe auth flow".to_string()],
+                fingerprints: vec!["finding-1".to_string()],
+                run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+                representative_fingerprint: "finding-1".to_string(),
+                representative_title: "unsafe auth flow".to_string(),
+                representative_severity: "high".to_string(),
+                representative_location: "src/auth.rs:12".to_string(),
+            }],
+        }
+    }
+
+    fn sample_batch_gate() -> ScanBatchGateOutcome {
+        ScanBatchGateOutcome {
+            schema_version: 1,
+            batch_id: "batch-1".to_string(),
+            equivalence_key: "eq-1".to_string(),
+            policy: ScanBatchGatePolicy {
+                fail_on: Some(kuzushi_core::findings::Severity::High),
+                sarif: None,
+            },
+            status: BatchGateStatus::Failed,
+            operational_status: BatchOperationalStatus::Complete,
+            security_status: BatchSecurityGateStatus::Failed,
+            threshold: Some(kuzushi_core::findings::Severity::High),
+            planned_trials: 4,
+            completed_trials: 4,
+            failed_trials: 0,
+            pending_trials: 0,
+            completed_run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+            blocking_safe_fold_count: 1,
+            sarif_written: false,
+            binding: kuzushi_core::capabilities::campaign::ScanBatchGateBinding {
+                logical_terminal_state_sha256: "terminal-sha".to_string(),
+                blocking_findings_sha256: "findings-sha".to_string(),
+                sarif_path: None,
+                sarif_sha256: None,
+            },
+            recorded_at_ms: 1,
         }
     }
 

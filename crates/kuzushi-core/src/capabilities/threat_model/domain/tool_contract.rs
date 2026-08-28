@@ -9,7 +9,7 @@ pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 pub(crate) const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];
 
 pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] =
-    &["context", "threat-model", "x-ray", "entry-points", "none"];
+    &["context", "threat-model", "x-ray", "entry-points", "attachments", "none"];
 
 pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
 
@@ -120,12 +120,12 @@ pub(crate) struct OperatorVulnRow {
 
 #[derive(Debug, Default)]
 pub(crate) struct BuildInput {
-    pub(crate) target: PathBuf,
+    pub(crate) roots: ThreatModelBuildRoots,
     pub(crate) repo_name: String,
     pub(crate) methodology: String,
     pub(crate) sources: Vec<String>,
     pub(crate) seeds: Vec<String>,
-    pub(crate) design_doc: Option<String>,
+    pub(crate) design_docs: Vec<String>,
     pub(crate) slice: String,
     pub(crate) stages: Vec<String>,
     pub(crate) output_dir: String,
@@ -149,9 +149,27 @@ pub(crate) struct BuildInput {
     pub(crate) offline: bool,
     pub(crate) advisory_fixtures: Option<Value>,
     pub(crate) vulns: Vec<OperatorVulnRow>,
+    pub(crate) model_id: Option<ThreatModelId>,
+    pub(crate) new_model: bool,
+    pub(crate) activate: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ThreatModelBuildRoots {
+    pub workspace_root: PathBuf,
+    pub analysis_root: PathBuf,
+    pub scope: Option<ScopeRef>,
 }
 
 impl BuildInput {
+    pub(crate) fn workspace_root(&self) -> &Path {
+        &self.roots.workspace_root
+    }
+
+    pub(crate) fn analysis_root(&self) -> &Path {
+        &self.roots.analysis_root
+    }
+
     pub(crate) fn is_staged(&self) -> bool {
         self.pipeline == "staged"
     }
@@ -160,8 +178,8 @@ impl BuildInput {
         self.mode == "refine"
     }
 
-    /// Fresh builds deliberately ignore the persisted model as seed context;
-    /// document identity carry-forward is unaffected.
+    /// Fresh builds deliberately ignore the persisted model as seed context
+    /// and do not carry forward its display identifiers.
     pub(crate) fn is_fresh(&self) -> bool {
         self.seed_mode == "fresh"
     }

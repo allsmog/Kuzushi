@@ -1,5 +1,47 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AskAttachment {
+    Screen,
+    ThreatModel { whole_model: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskRequest {
+    pub question: String,
+    pub attachment: AskAttachment,
+}
+
+impl AskRequest {
+    pub fn screen(question: impl Into<String>) -> Self {
+        Self {
+            question: question.into(),
+            attachment: AskAttachment::Screen,
+        }
+    }
+
+    pub fn threat_model(question: impl Into<String>, whole_model: bool) -> Self {
+        Self {
+            question: question.into(),
+            attachment: AskAttachment::ThreatModel { whole_model },
+        }
+    }
+}
+
+impl AskAttachment {
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::Screen => "screen",
+            Self::ThreatModel { whole_model: false } => "threat-model-scene",
+            Self::ThreatModel { whole_model: true } => "threat-model-whole",
+        }
+    }
+
+    pub(crate) fn whole_model(self) -> bool {
+        matches!(self, Self::ThreatModel { whole_model: true })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellCommand {
     Home,
@@ -29,6 +71,11 @@ pub enum ShellCommand {
     ScanSince {
         reference: String,
         include_worktree: bool,
+    },
+    /// Open the dedicated nondeterministic scan-batch configurator. A named
+    /// prior run may supply historical cost evidence; it is never inferred.
+    ScanBatch {
+        prior_run_id: Option<String>,
     },
     /// Open the guided Map → Scan workflow, optionally selecting a target
     /// first. Emitted by the public `full` and `pipeline` shell verbs.
@@ -61,9 +108,22 @@ pub enum ShellCommand {
     Threat(ThreatView),
     ThreatEditor,
     ThreatRegen,
+    /// Ask about the current threat-model scene. Kept as a string payload for
+    /// compatibility with callers that construct shell commands directly.
     ThreatAsk(String),
+    ThreatAskWholeModel(String),
     ThreatApply,
     ThreatReject,
+    /// Open the immutable-lineage picker backed by threat-model manifest
+    /// heads. This is distinct from the legacy version ledger.
+    ThreatModels,
+    ThreatModelInspectDiff,
+    ThreatModelActivate {
+        model_id: String,
+        revision_id: Option<String>,
+    },
+    ThreatModelRevisions(String),
+    ThreatModelRestore(String),
     ThreatVersions,
     ThreatVersionUse(i64),
     Prompts,
@@ -79,6 +139,10 @@ pub enum ShellCommand {
     /// Open the Campaign deck (all campaigns, or jump straight to one).
     /// `campaign [id]`.
     ShowCampaigns(Option<String>),
+    /// Open one batch report and retain it as the Review scope.
+    BatchResults(String),
+    /// Leave batch-scoped Review and return to the workspace finding set.
+    ClearBatchScope,
     ShowCoverage,
     /// Queue a command to dispatch after the current run finishes. `queue
     /// <tool|verb>`.
@@ -122,7 +186,12 @@ pub enum ShellCommand {
     Logs,
     Target(Option<String>),
     TargetRevision(String),
+    /// Ask about the current screen. Kept as a string payload for compatibility
+    /// with callers that construct shell commands directly.
     Ask(String),
+    AskWholeModel(String),
+    /// Cancel only the active Ask, preserving a concurrently running scan.
+    CancelAsk,
     Options {
         tool: Option<String>,
         filter: OptionsFilter,

@@ -7,11 +7,52 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(test)]
+use std::cell::RefCell;
+
 /// Monotonic per-process counter so two concurrent `write_atomic` calls to the
 /// *same* target never collide on their temp sibling. Process id alone is not
 /// enough: a single process writing the same state file from two threads/tasks
 /// would otherwise reuse one temp name and corrupt each other's write.
 static TEMP_WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AtomicWriteFaultPoint {
+    AfterTempSync,
+    AfterRename,
+}
+
+#[cfg(test)]
+thread_local! {
+    static ATOMIC_WRITE_FAULT: RefCell<Option<(PathBuf, AtomicWriteFaultPoint)>> =
+        const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+pub(crate) struct AtomicWriteFaultGuard;
+
+#[cfg(test)]
+impl Drop for AtomicWriteFaultGuard {
+    fn drop(&mut self) {
+        ATOMIC_WRITE_FAULT.with(|fault| fault.borrow_mut().take());
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn inject_atomic_write_fault(
+    path: PathBuf,
+    point: AtomicWriteFaultPoint,
+) -> AtomicWriteFaultGuard {
+    ATOMIC_WRITE_FAULT.with(|fault| {
+        assert!(
+            fault.borrow().is_none(),
+            "atomic-write fault already installed"
+        );
+        *fault.borrow_mut() = Some((path, point));
+    });
+    AtomicWriteFaultGuard
+}
 
 /// Write `contents` to `path` atomically and durably.
 ///
@@ -47,11 +88,48 @@ pub(crate) fn write_atomic_bytes(path: &Path, contents: &[u8]) -> Result<()> {
     let temp = temp_sibling(path);
     write_and_sync_temp(&temp, contents)
         .with_context(|| format!("Could not write {}", temp.display()))?;
+    #[cfg(test)]
+    trigger_atomic_write_fault(path, AtomicWriteFaultPoint::AfterTempSync)?;
     if let Err(error) = replace_file(&temp, path) {
         let _ = fs::remove_file(&temp);
         return Err(error).with_context(|| format!("Could not move {} into place", path.display()));
     }
+    #[cfg(test)]
+    trigger_atomic_write_fault(path, AtomicWriteFaultPoint::AfterRename)?;
     sync_parent_dir(path).with_context(|| format!("Could not sync parent of {}", path.display()))
+}
+
+#[cfg(test)]
+fn trigger_atomic_write_fault(path: &Path, point: AtomicWriteFaultPoint) -> Result<()> {
+    let triggered = ATOMIC_WRITE_FAULT.with(|fault| {
+        let matches = fault
+            .borrow()
+            .as_ref()
+            .is_some_and(|(target, selected)| paths_match(target, path) && *selected == point);
+        matches.then(|| fault.borrow_mut().take()).is_some()
+    });
+    anyhow::ensure!(
+        !triggered,
+        "injected crash after {point:?} for {}",
+        path.display()
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+fn paths_match(left: &Path, right: &Path) -> bool {
+    left == right || normalized_test_path(left) == normalized_test_path(right)
+}
+
+#[cfg(test)]
+fn normalized_test_path(path: &Path) -> PathBuf {
+    let Some(parent) = path.parent() else {
+        return path.to_path_buf();
+    };
+    let normalized_parent = fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
+    path.file_name()
+        .map(|name| normalized_parent.join(name))
+        .unwrap_or(normalized_parent)
 }
 
 #[cfg(not(windows))]

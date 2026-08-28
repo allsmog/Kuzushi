@@ -12647,7 +12647,9 @@ mod tests {
             .unwrap(),
         )
         .unwrap();
-        let persistent = load_persistent_threat_model(temp.path()).unwrap();
+        let persistent = load_persistent_threat_model(temp.path())
+            .unwrap()
+            .unwrap();
 
         for value in [&built, &read, &artifact_read] {
             assert_eq!(

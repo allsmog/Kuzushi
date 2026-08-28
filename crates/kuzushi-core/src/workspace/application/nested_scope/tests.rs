@@ -28,12 +28,55 @@ fn discovers_root_and_gitmodule_submodule_scope() {
         .find(|scope| scope.rel_path == "libs/parser")
         .expect("submodule scope");
     assert_eq!(submodule.kind, NestedProjectKind::Submodule);
-    assert_eq!(submodule.id, "submodule-libs-parser");
+    assert!(submodule.id.starts_with("submodule-libs-parser-"));
     assert_eq!(submodule.parent.as_deref(), Some(ROOT_SCOPE_ID));
     assert_eq!(
         submodule.inherited_sections,
         vec!["context-feed".to_string(), "threat-model".to_string()]
     );
+}
+
+#[test]
+fn scope_ids_do_not_collapse_paths_with_the_same_slug() {
+    let underscore = scope_id(NestedProjectKind::PackageRoot, "apps/auth_service");
+    let dash = scope_id(NestedProjectKind::PackageRoot, "apps/auth-service");
+
+    assert_ne!(underscore, dash);
+    assert!(underscore.starts_with("package-apps-auth-service-"));
+    assert!(dash.starts_with("package-apps-auth-service-"));
+}
+
+#[test]
+fn rediscovery_preserves_an_exact_legacy_scope_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    touch_dir(temp.path(), "api/src");
+    fs::write(temp.path().join("api/Cargo.toml"), "[package]\nname='api'\nversion='0.1.0'\n").unwrap();
+    fs::write(temp.path().join("api/src/lib.rs"), "pub fn api() {}\n").unwrap();
+    let previous = NestedProjectScopeTree {
+        schema_version: 1,
+        root: ROOT_SCOPE_ID.to_string(),
+        scopes: vec![
+            root_scope_map().remove(ROOT_SCOPE_ID).unwrap(),
+            NestedProjectScope {
+                id: "package-api".to_string(),
+                parent: Some(ROOT_SCOPE_ID.to_string()),
+                kind: NestedProjectKind::PackageRoot,
+                rel_path: "api".to_string(),
+                inherited_sections: inherited_sections_for_child_scope(),
+            },
+        ],
+    };
+    save_nested_project_scopes(temp.path(), &previous).unwrap();
+
+    let refreshed = discover_and_save_nested_project_scopes(temp.path()).unwrap();
+
+    let api = refreshed
+        .scopes
+        .iter()
+        .find(|scope| scope.rel_path == "api")
+        .unwrap();
+    assert_eq!(api.id, "package-api");
+    assert_eq!(refreshed.schema_version, SCOPE_TREE_SCHEMA_VERSION);
 }
 
 #[test]
@@ -110,7 +153,7 @@ fn discovers_manifest_backed_package_roots_with_source() {
         .iter()
         .find(|scope| scope.rel_path == "api")
         .expect("api package scope");
-    assert_eq!(api.id, "package-api");
+    assert!(api.id.starts_with("package-api-"));
     assert_eq!(api.kind.label(), "package");
     assert_eq!(api.parent.as_deref(), Some(ROOT_SCOPE_ID));
 }

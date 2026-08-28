@@ -249,6 +249,56 @@ columns: `remediation_application_id`, `remediation_patch_run_id`,
 records with no applied lifecycle retain their prior shape/empty CSV values.
 No existing finding or export record is rewritten.
 
+Nested project-scope trees now write schema version 2. Newly discovered
+non-root scope ids keep their readable prefix and add a path-derived suffix so
+two paths that normalize to the same slug cannot collide. Refresh preserves a
+valid legacy id when kind and relative path still match exactly; removed or
+changed scopes remain visibly stale instead of being reassigned. Consumers
+must continue treating scope ids as opaque strings.
+
+Threat models now use an additive immutable lineage/revision store under
+`.kuzushi/threat-models/`. On the first writable open, a valid legacy
+`.kuzushi/threat-model.json` is imported as one lineage and remains the derived
+compatibility mirror of the active revision. Read-only opens never migrate.
+After migration, `manifest.json` plus its content-addressed object is
+authoritative; a missing/corrupt active object is an integrity error, and a
+hand-edited divergent mirror requires explicit adopt or forced-discard action.
+Every new run summary may add `threatModelId` and `threatModelRevisionId`
+alongside the existing content SHA. Older readers may ignore those additive
+fields but must not treat the mirror as an independently writable authority.
+
+`kuzushi scan --trials N` creates a dedicated immutable `scan-batch` campaign
+plan and invokes the same prepared `sast:scan` input for each logical trial.
+The deprecated `--attempts` and `--samples` spellings remain input aliases for
+`--trials`; dispatcher retries remain separately controlled. Batch artifacts
+add equivalence, logical-trial, occurrence, and one-controller-gate metadata.
+Consumers must count at most one completed observation per logical trial and
+must keep failed/parked trials outside the completed denominator.
+
+`--workers W` is additive for scan batches. Every immutable plan records the
+requested/effective worker counts and the shared resource-claim decision.
+Automatic or unresolved task selection stays single-worker; CodeQL database
+and cpg-rs graph users name their workspace-exclusive resource and stay
+single-worker. Explicit read-safe tasks may use up to eight detached campaign
+children (and never more workers than trials). The controller publishes one
+atomic `gate.json` after reporting/SARIF, before applying the final exit code.
+Each child publishes `batch-equivalence.json` after recomputing the frozen
+worktree/config/model/scope/engine key at scan consumption. The gate binds the
+logical terminal state, safe-fold blocking set, and final SARIF digest, so a
+later report refuses stale controller output.
+Operationally incomplete dispatch remains code 1 even when completed trials
+also contain a blocking finding; code 3 is reserved for an otherwise complete
+batch gate failure.
+
+Finding identity adds a conservative `basis` and descriptor-backed
+`identityFold=legacy|safe|aggressive`, `identityReconcile=auto|off`, and
+`modelDedupe=off|manual|auto` controls. The shipped default fold is `safe`;
+file-fallback identities still require matching source signature or dedup key,
+and attack-chain findings remain fingerprint-keyed. Existing findings remain
+readable and derive a conservative basis when the persisted field is absent.
+Run `kuzushi findings identity-audit --target <root>` before changing any
+workspace policy to aggressive reconciliation or automatic model dedupe.
+
 Optional PromptArmor, Shinsa, Trail of Bits, and Vuln Scout packages are no
 longer bundled or auto-discovered from `node_modules`. Configure an adapter
 explicitly or load it as an approved KWP integration. This prevents development

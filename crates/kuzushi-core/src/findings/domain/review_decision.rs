@@ -1,4 +1,4 @@
-use super::{TriageAuthor, TriageOutcome, TriageVerdict};
+use super::{FindingIdentityBasis, TriageAuthor, TriageOutcome, TriageVerdict};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -186,6 +186,16 @@ pub struct ReviewDecisionProvenance {
     pub event_hash: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_watermark: Option<u64>,
+}
+
+/// Why an automated review decision was copied across durable observations.
+/// Human/imported decisions and finding-local automated decisions leave this
+/// absent; propagation always names the source finding rows.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewDecisionPropagation {
+    pub basis: FindingIdentityBasis,
+    pub source_finding_ids: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

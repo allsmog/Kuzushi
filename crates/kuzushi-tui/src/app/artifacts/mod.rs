@@ -97,6 +97,7 @@ pub fn record_agent_run_completed(
             "answerChars": answer_chars,
             "latencyMs": latency_ms,
             "callAttempted": audit.call_attempted,
+            "toolPolicyReceipt": audit.tool_policy_receipt,
         },
     });
     kuzushi_core::run_artifacts::try_record_tool_run_complete(
@@ -237,5 +238,54 @@ mod run_summary_pid_tests {
 
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.process_id, None);
+    }
+}
+
+#[cfg(test)]
+mod agent_tool_policy_receipt_tests {
+    use super::*;
+
+    #[test]
+    fn completed_auxiliary_ask_persists_the_executing_bridge_receipt() {
+        let target = tempfile::tempdir().unwrap();
+        let authorization =
+            kuzushi_core::AgentToolPolicyAuthorization::read_only_ask(target.path()).unwrap();
+        let receipt = kuzushi_core::AgentToolPolicyReceipt {
+            protocol_version: authorization.protocol_version,
+            policy_id: authorization.policy_id,
+            effective_tools: authorization.policy.tools,
+            read_roots: authorization.policy.mcp_read_roots,
+            write_shell_tools_mounted: false,
+            mcp_tools_mounted: false,
+        };
+        record_agent_run_started(
+            Some(target.path()),
+            "agent-receipt",
+            &serde_json::json!({"executionMode": "auxiliary-read-only"}),
+            "openai:gpt-test".to_string(),
+            None,
+            Vec::new(),
+        )
+        .unwrap();
+        let audit = AgentCallAudit::test().with_tool_policy_receipt(receipt.clone());
+
+        record_agent_run_completed(Some(target.path()), "agent-receipt", 12, Some(3), &audit)
+            .unwrap();
+
+        let result: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                kuzushi_core::run_dir(target.path(), "agent-receipt").join("result.json"),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            result["data"]["toolPolicyReceipt"]["policyId"],
+            receipt.policy_id
+        );
+        assert_eq!(
+            result["data"]["toolPolicyReceipt"]["writeShellToolsMounted"],
+            false
+        );
     }
 }

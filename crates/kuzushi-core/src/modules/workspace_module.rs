@@ -7,10 +7,8 @@ pub(crate) fn workspace_module() -> BuiltinModule {
         ModuleKind::Intel,
         "Report target and state paths.",
         vec![
-            workspace_status_tool().with_policy(read_policy(
-                ToolPhase::Map,
-                WorkspaceRequirement::Optional,
-            )),
+            workspace_status_tool()
+                .with_policy(read_policy(ToolPhase::Map, WorkspaceRequirement::Optional)),
             workspace_export_findings_tool().with_policy(target_write_policy(
                 ToolPhase::Map,
                 RuntimeRequirement::Never,
@@ -48,10 +46,7 @@ fn workspace_import_findings_tool() -> ToolDescriptor {
 }
 
 fn workspace_status_tool() -> ToolDescriptor {
-    tool(
-        "workspace:status",
-        "Show current target and state paths.",
-    )
+    tool("workspace:status", "Show current target and state paths.")
 }
 
 fn workspace_export_findings_tool() -> ToolDescriptor {
@@ -66,8 +61,14 @@ fn workspace_export_findings_tool() -> ToolDescriptor {
 fn workspace_export_findings_options() -> Vec<OptionSpec> {
     vec![
         workspace_export_output_option(),
-        opt("format", OptionType::Enum, "Export format.")
-            .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle", "vuln-findings"]),
+        opt("format", OptionType::Enum, "Export format.").choices(&[
+            "json",
+            "jsonl",
+            "sarif",
+            "csv",
+            "markdown-bundle",
+            "vuln-findings",
+        ]),
         opt(
             "completeness",
             OptionType::Enum,
@@ -168,6 +169,7 @@ fn sast_selection_options() -> Vec<OptionSpec> {
     ];
     options.extend(sast_manual_task_options());
     options.extend(sast_run_filter_options());
+    options.extend(sast_batch_provenance_options());
     options.push(max_findings_option(40).advanced());
     options
 }
@@ -217,6 +219,67 @@ fn sast_run_filter_options() -> Vec<OptionSpec> {
         )
         .advanced(),
     ]
+}
+
+fn sast_batch_provenance_options() -> Vec<OptionSpec> {
+    vec![
+        batch_id_option(),
+        batch_trial_option(),
+        batch_equivalence_key_option(),
+        bound_threat_model_option(),
+        identity_fold_option(),
+    ]
+}
+
+fn batch_id_option() -> OptionSpec {
+    opt(
+        "batchId",
+        OptionType::String,
+        "Internal scan-batch lineage id recorded in trial provenance.",
+    )
+    .aliases(&["batch_id"])
+    .advanced()
+}
+
+fn batch_trial_option() -> OptionSpec {
+    opt(
+        "trial",
+        OptionType::Int,
+        "Internal one-based logical trial number; dispatcher retries do not change it.",
+    )
+    .integer_range(1, 100)
+    .advanced()
+}
+
+fn batch_equivalence_key_option() -> OptionSpec {
+    opt(
+        "batchEquivalenceKey",
+        OptionType::String,
+        "Immutable comparability key bound by the scan-batch compiler.",
+    )
+    .aliases(&["batch_equivalence_key"])
+    .advanced()
+}
+
+fn bound_threat_model_option() -> OptionSpec {
+    opt(
+        "threatModelRef",
+        OptionType::Json,
+        "Exact immutable threat-model revision bound by scan-batch dispatch; null records an explicitly model-free batch.",
+    )
+    .aliases(&["threat_model_ref"])
+    .advanced()
+}
+
+fn identity_fold_option() -> OptionSpec {
+    opt(
+        "identityFold",
+        OptionType::Enum,
+        "Finding fold policy for repeated-trial occurrence reports.",
+    )
+    .aliases(&["identity_fold"])
+    .choices(&["legacy", "safe", "aggressive"])
+    .advanced()
 }
 
 fn sast_whitebox_options() -> Vec<OptionSpec> {
@@ -649,9 +712,13 @@ fn agentic_sast_chunk_execution_options() -> Vec<OptionSpec> {
             "Plan chunked strategy cost without model calls.",
         )
         .advanced(),
-        opt("scopeFile", OptionType::Path, "Chunked strategy scope file.")
-            .workspace_read()
-            .advanced(),
+        opt(
+            "scopeFile",
+            OptionType::Path,
+            "Chunked strategy scope file.",
+        )
+        .workspace_read()
+        .advanced(),
         opt(
             "failedChunkIds",
             OptionType::String,

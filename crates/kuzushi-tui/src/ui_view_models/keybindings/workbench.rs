@@ -70,6 +70,7 @@ fn apply_map_gallery_controls(bindings: &mut Vec<FooterKeybinding>, app: &ShellA
         }
         crate::scene3d::VizPage::Dfd => {
             bindings.push(bind("j/k/↑/↓", "select"));
+            bindings.push(bind("g", "regenerate scope"));
             bindings.push(bind("Enter", "context"));
         }
         crate::scene3d::VizPage::EntryPoints => {

@@ -71,11 +71,23 @@ pub fn verify_threat_model_document(
     document: &Value,
     target: &Path,
 ) -> Result<ThreatModelVerification> {
+    let roots = ThreatModelBuildRoots {
+        workspace_root: target.to_path_buf(),
+        analysis_root: target.to_path_buf(),
+        scope: None,
+    };
+    verify_threat_model_document_with_roots(document, &roots)
+}
+
+pub(crate) fn verify_threat_model_document_with_roots(
+    document: &Value,
+    roots: &ThreatModelBuildRoots,
+) -> Result<ThreatModelVerification> {
     let refs = cited_path_refs(document);
-    let missing = missing_citations(target, &refs);
+    let missing = missing_citations(roots, &refs);
     let links = security_context_link_report(document);
-    let revision = revision_check(document, target);
-    let grounding = verification_grounding_surfaces(document, target)?;
+    let revision = revision_check(document, &roots.workspace_root);
+    let grounding = verification_grounding_surfaces(document, roots)?;
     let coverage = check_coverage(document, &grounding.surfaces);
     let verdict = verdict_for(&missing, &links, &coverage, &revision, &grounding);
     Ok(ThreatModelVerification {
@@ -260,16 +272,19 @@ fn looks_like_path(candidate: &str) -> bool {
         && (candidate.contains('/') || Path::new(candidate).extension().is_some())
 }
 
-fn missing_citations(target: &Path, refs: &[PathRef]) -> Vec<String> {
+fn missing_citations(roots: &ThreatModelBuildRoots, refs: &[PathRef]) -> Vec<String> {
     refs.iter()
-        .filter_map(|path_ref| citation_problem(target, path_ref))
+        .filter_map(|path_ref| citation_problem(roots, path_ref))
         .collect()
 }
 
-fn citation_problem(target: &Path, path_ref: &PathRef) -> Option<String> {
-    let Some(resolved) = crate::findings::safe_target_path(target, &path_ref.path) else {
+fn citation_problem(roots: &ThreatModelBuildRoots, path_ref: &PathRef) -> Option<String> {
+    let Some(resolved) = crate::findings::safe_target_path(&roots.workspace_root, &path_ref.path) else {
         return Some(format!("{} (escapes the target root)", path_ref.path));
     };
+    if roots.scope.is_some() && !resolved.starts_with(&roots.analysis_root) {
+        return Some(format!("{} (outside the selected scope)", path_ref.path));
+    }
     // Directory citations are legitimate surface anchors (vendor trees,
     // workflow directories); only a wholly absent path is a failure.
     if !resolved.exists() {
@@ -280,8 +295,12 @@ fn citation_problem(target: &Path, path_ref: &PathRef) -> Option<String> {
     }
     let line = path_ref.line?;
     let source =
-        crate::bounded_file::read_utf8_text_within(target, &resolved, VERIFY_MAX_FILE_BYTES)
-            .ok()?;
+        crate::bounded_file::read_utf8_text_within(
+            &roots.workspace_root,
+            &resolved,
+            VERIFY_MAX_FILE_BYTES,
+        )
+        .ok()?;
     let count = source.lines().count() as u32;
     (line > count).then(|| format!("{}:{line} (file has {count} lines)", path_ref.path))
 }
@@ -350,28 +369,54 @@ struct CatalogCoverageReceipt {
 
 impl CatalogCoverageReceipt {
     fn is_unavailable(&self) -> bool {
-        matches!(self.status.as_str(), "disabled" | "missing")
+        matches!(self.status.as_str(), "disabled" | "missing" | "scoped-derived")
     }
 }
 
 fn verification_grounding_surfaces(
     document: &Value,
-    target: &Path,
+    roots: &ThreatModelBuildRoots,
 ) -> Result<VerificationGrounding> {
     let receipt = catalog_coverage_receipt(document)?;
+    if roots.scope.is_some() {
+        anyhow::ensure!(
+            receipt.as_ref().is_none_or(CatalogCoverageReceipt::is_unavailable),
+            "scoped threat-model verification cannot consume a whole-workspace catalog receipt"
+        );
+        validate_unbacked_source(document, &roots.workspace_root, receipt.as_ref())?;
+        return scoped_verification_grounding(roots);
+    }
     let grounding =
-        crate::capabilities::entry_points::resolve_entry_point_catalog_for_verification(target)?;
+        crate::capabilities::entry_points::resolve_entry_point_catalog_for_verification(
+            &roots.workspace_root,
+        )?;
     match grounding {
         VerificationCatalogGrounding::Catalog(catalog) => {
-            authenticated_catalog_grounding(target, &catalog, receipt.as_ref())
+            authenticated_catalog_grounding(&roots.workspace_root, &catalog, receipt.as_ref())
         }
         VerificationCatalogGrounding::StaleContext(disclosure) => {
-            degraded_grounding(target, &disclosure)
+            degraded_grounding(&roots.workspace_root, &disclosure)
         }
         VerificationCatalogGrounding::Absent => {
-            unbacked_grounding(document, target, receipt.as_ref())
+            unbacked_grounding(document, &roots.workspace_root, receipt.as_ref())
         }
     }
+}
+
+fn scoped_verification_grounding(
+    roots: &ThreatModelBuildRoots,
+) -> Result<VerificationGrounding> {
+    let mut surfaces = noncatalog_verification_surfaces(&roots.analysis_root)?;
+    let scope = roots.scope.as_ref().context("scoped verification has no scope binding")?;
+    for surface in &mut surfaces {
+        surface.path = scope
+            .rel_path
+            .join(&surface.path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        surface.id = crate::workspace::attack_surface::attack_surface_id(surface);
+    }
+    Ok(VerificationGrounding::noncatalog(surfaces))
 }
 
 fn authenticated_catalog_grounding(
@@ -420,7 +465,7 @@ fn catalog_coverage_receipt(document: &Value) -> Result<Option<CatalogCoverageRe
         return Ok(None);
     };
     let status = required_receipt_text(receipt, "status")?;
-    let unavailable = matches!(status, "disabled" | "missing");
+    let unavailable = matches!(status, "disabled" | "missing" | "scoped-derived");
     if unavailable {
         validate_unavailable_receipt(receipt)?;
     }

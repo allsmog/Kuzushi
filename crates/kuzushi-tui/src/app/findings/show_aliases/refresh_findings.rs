@@ -1,28 +1,21 @@
 use super::*;
+use anyhow::Context;
+use kuzushi_core::findings::IdentityFoldPolicy;
+use kuzushi_core::FindingListReport;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
-fn finding_scope_key(finding: &Finding) -> &str {
-    finding
-        .identity_id
-        .as_deref()
-        .unwrap_or(finding.fingerprint.as_str())
-}
-
-fn finding_keys_for_runs(
-    store: &FindingStore,
-    run_refs: &[String],
-) -> anyhow::Result<BTreeSet<String>> {
-    let mut keys = BTreeSet::new();
-    for run_id in run_refs {
-        keys.extend(
-            store
-                .list_findings_for_scan_id(run_id)?
-                .iter()
-                .map(finding_scope_key)
-                .map(str::to_string),
-        );
+fn finding_observed_in_runs(finding: &Finding, run_refs: &BTreeSet<String>) -> bool {
+    if finding
+        .scan_id
+        .as_ref()
+        .is_some_and(|run_id| run_refs.contains(run_id))
+    {
+        return true;
     }
-    Ok(keys)
+    finding.sources.iter().any(|source| {
+        run_refs.contains(&source.first_scan_id) || run_refs.contains(&source.last_scan_id)
+    })
 }
 
 impl ShellApp {
@@ -51,77 +44,102 @@ impl ShellApp {
     }
 
     pub(crate) fn refresh_findings(&mut self, announce: bool) {
-        let store = match self.open_store() {
-            Ok(store) => store,
+        let operator_state = match self.identity_policy_operator_state_dir() {
+            Ok(path) => path,
             Err(error) => {
                 self.log_refresh_findings_error(error, announce);
                 return;
             }
         };
+        self.refresh_findings_with_operator_state(announce, &operator_state);
+    }
 
+    fn refresh_findings_with_operator_state(&mut self, announce: bool, operator_state: &Path) {
+        let (store, policy) = match self.open_store_and_identity_policy(operator_state) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.log_refresh_findings_error(error, announce);
+                return;
+            }
+        };
         let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
         let read_watermark = self.current_findings_projection_watermark(&store);
-        match store.list_findings_filtered(&filter) {
-            Ok(report) => self.replace_findings_from_store(
-                &store,
-                report.findings,
-                report.count,
-                announce,
-                read_watermark,
-            ),
+        match store.list_findings_filtered_with_identity_policy(&filter, policy) {
+            Ok(report) => {
+                self.replace_findings_from_store(&store, report, policy, announce, read_watermark)
+            }
             Err(error) => self.log_refresh_findings_error(error.into(), announce),
         }
     }
 
     pub(crate) fn refresh_findings_filtered(&mut self, expression: &str) {
+        let operator_state = match self.identity_policy_operator_state_dir() {
+            Ok(path) => path,
+            Err(error) => {
+                self.log_refresh_findings_error(error, true);
+                return;
+            }
+        };
+        self.refresh_findings_filtered_with_operator_state(expression, &operator_state);
+    }
+
+    fn refresh_findings_filtered_with_operator_state(
+        &mut self,
+        expression: &str,
+        operator_state: &Path,
+    ) {
+        let Some((filter, requested_limit)) = self.parsed_refresh_filter(expression) else {
+            return;
+        };
+        let (store, policy) = match self.open_store_and_identity_policy(operator_state) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.log_refresh_findings_error(error, true);
+                return;
+            }
+        };
+        let read_watermark = self.current_findings_projection_watermark(&store);
+        match store.list_findings_filtered_with_identity_policy(&filter, policy) {
+            Ok(report) => match self.filter_findings_by_provenance(report, &filter) {
+                Ok(report) => {
+                    let report = truncate_findings_report(report, requested_limit);
+                    self.refresh_journey_ledger_counts_with_policy(&store, policy);
+                    self.replace_filtered_findings(
+                        &store,
+                        report,
+                        policy,
+                        expression,
+                        read_watermark,
+                    );
+                }
+                Err(error) => self.log("error", format!("invalid findings filter: {error}")),
+            },
+            Err(error) => self.log_refresh_findings_error(error.into(), true),
+        }
+    }
+
+    fn parsed_refresh_filter(&mut self, expression: &str) -> Option<(FindingListFilter, usize)> {
         let mut filter = match FindingListFilter::from_filter_expression(expression) {
             Ok(filter) => filter,
             Err(error) => {
                 self.log("error", format!("invalid findings filter: {error}"));
-                return;
+                return None;
             }
         };
         let requested_limit = filter.limit;
         if filter.has_provenance_filter() {
             filter.limit = FindingListFilter::MAX_LIMIT;
         }
-        let store = match self.open_store() {
-            Ok(store) => store,
-            Err(error) => {
-                self.log_refresh_findings_error(error, true);
-                return;
-            }
-        };
-        self.refresh_journey_ledger_counts(&store);
-        let read_watermark = self.current_findings_projection_watermark(&store);
-        match store.list_findings_filtered(&filter) {
-            Ok(report) => {
-                match self.filter_findings_by_provenance(report.findings, report.count, &filter) {
-                    Ok((findings, count)) => {
-                        let findings = findings.into_iter().take(requested_limit).collect();
-                        self.replace_filtered_findings(
-                            &store,
-                            findings,
-                            expression,
-                            count,
-                            read_watermark,
-                        );
-                    }
-                    Err(error) => self.log("error", format!("invalid findings filter: {error}")),
-                }
-            }
-            Err(error) => self.log_refresh_findings_error(error.into(), true),
-        }
+        Some((filter, requested_limit))
     }
 
     fn filter_findings_by_provenance(
         &self,
-        findings: Vec<Finding>,
-        count: usize,
+        report: FindingListReport,
         filter: &FindingListFilter,
-    ) -> anyhow::Result<(Vec<Finding>, usize)> {
+    ) -> anyhow::Result<FindingListReport> {
         if !filter.has_provenance_filter() {
-            return Ok((findings, count));
+            return Ok(report);
         }
         let Some(target) = self.target_path_buf() else {
             anyhow::bail!("revision filters require an active target");
@@ -130,53 +148,79 @@ impl ShellApp {
             .into_iter()
             .map(|summary| (summary.run_id.clone(), summary))
             .collect::<BTreeMap<_, _>>();
-        let findings = findings
+        let (findings, aliases): (Vec<_>, Vec<_>) = report
+            .findings
             .into_iter()
-            .filter(|finding| filter.matches_run_provenance(finding, &runs))
-            .collect::<Vec<_>>();
+            .zip(report.aliases)
+            .filter(|(finding, _)| filter.matches_run_provenance(finding, &runs))
+            .unzip();
         let count = findings.len();
-        Ok((findings, count))
+        Ok(FindingListReport {
+            count,
+            findings,
+            aliases,
+        })
     }
 
     fn replace_findings_from_store(
         &mut self,
         store: &FindingStore,
-        findings: Vec<Finding>,
-        total_count: usize,
+        report: FindingListReport,
+        policy: IdentityFoldPolicy,
         announce: bool,
         read_watermark: Option<u64>,
     ) {
+        let FindingListReport {
+            count,
+            findings,
+            aliases,
+        } = report;
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        let counts = self.journey_ledger_counts(store, &findings, &decisions, total_count);
+        let counts = self.journey_ledger_counts(store, policy, &findings, &decisions, count);
         self.domain_mut().set_finding_ledger_counts(counts);
-        self.replace_findings(findings, decisions, announce, total_count, read_watermark);
+        self.replace_findings(
+            findings,
+            aliases,
+            policy,
+            decisions,
+            announce,
+            count,
+            read_watermark,
+        );
     }
 
     pub(crate) fn refresh_journey_ledger_projection(&mut self) {
         let Ok(store) = self.open_store() else {
             return;
         };
-        self.refresh_journey_ledger_counts(&store);
+        let policy = self.identity_fold_policy();
+        self.refresh_journey_ledger_counts_with_policy(&store, policy);
     }
 
-    fn refresh_journey_ledger_counts(&mut self, store: &FindingStore) {
+    fn refresh_journey_ledger_counts_with_policy(
+        &mut self,
+        store: &FindingStore,
+        policy: IdentityFoldPolicy,
+    ) {
         let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
-        let Ok(report) = store.list_findings_filtered(&filter) else {
+        let Ok(report) = store.list_findings_filtered_with_identity_policy(&filter, policy) else {
             return;
         };
         let decisions = self.load_review_decisions_for_findings(store, &report.findings);
-        let counts = self.journey_ledger_counts(store, &report.findings, &decisions, report.count);
+        let counts =
+            self.journey_ledger_counts(store, policy, &report.findings, &decisions, report.count);
         self.domain_mut().set_finding_ledger_counts(counts);
     }
 
     fn journey_ledger_counts(
         &mut self,
         store: &FindingStore,
+        policy: IdentityFoldPolicy,
         fallback_findings: &[Finding],
         fallback_decisions: &[kuzushi_core::findings::ReviewDecisionRecord],
         fallback_total: usize,
     ) -> FindingLedgerCounts {
-        match self.relevant_journey_findings(store) {
+        match self.relevant_journey_findings(store, policy) {
             Ok(findings) => self.count_journey_findings(store, &findings, findings.len()),
             Err(error) => {
                 self.log(
@@ -193,13 +237,17 @@ impl ShellApp {
         }
     }
 
-    fn relevant_journey_findings(&self, store: &FindingStore) -> anyhow::Result<Vec<Finding>> {
-        let mut findings = store.list_relevant_findings()?;
+    fn relevant_journey_findings(
+        &self,
+        store: &FindingStore,
+        policy: IdentityFoldPolicy,
+    ) -> anyhow::Result<Vec<Finding>> {
+        let mut findings = store.list_relevant_findings_with_identity_policy(policy)?;
         let Some(run_refs) = self.selected_current_scan_run_refs() else {
             return Ok(findings);
         };
-        let keys = finding_keys_for_runs(store, &run_refs)?;
-        findings.retain(|finding| keys.contains(finding_scope_key(finding)));
+        let run_refs = run_refs.into_iter().collect::<BTreeSet<_>>();
+        findings.retain(|finding| finding_observed_in_runs(finding, &run_refs));
         Ok(findings)
     }
 
@@ -269,6 +317,8 @@ impl ShellApp {
     fn replace_findings(
         &mut self,
         findings: Vec<Finding>,
+        aliases: Vec<String>,
+        policy: IdentityFoldPolicy,
         review_decisions: Vec<kuzushi_core::findings::ReviewDecisionRecord>,
         announce: bool,
         total_count: usize,
@@ -276,7 +326,7 @@ impl ShellApp {
     ) {
         let cursored_identity = crate::ui_view_models::visible_finding_at_cursor(self)
             .map(|(_, finding)| finding_generation_key(&finding));
-        self.set_findings(findings);
+        self.set_findings_projection(findings, aliases, policy);
         self.set_findings_total_count(total_count);
         self.set_findings_read_watermark(read_watermark);
         self.set_review_decisions(review_decisions);
@@ -320,13 +370,26 @@ impl ShellApp {
     fn replace_filtered_findings(
         &mut self,
         store: &FindingStore,
-        findings: Vec<Finding>,
+        report: FindingListReport,
+        policy: IdentityFoldPolicy,
         expression: &str,
-        count: usize,
         read_watermark: Option<u64>,
     ) {
+        let FindingListReport {
+            count,
+            findings,
+            aliases,
+        } = report;
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(findings, decisions, false, count, read_watermark);
+        self.replace_findings(
+            findings,
+            aliases,
+            policy,
+            decisions,
+            false,
+            count,
+            read_watermark,
+        );
         self.set_active_findings_filter(Some(expression.to_string()));
         self.log(
             "findings",
@@ -335,6 +398,30 @@ impl ShellApp {
                 self.findings().len()
             ),
         );
+    }
+
+    fn identity_policy_operator_state_dir(&self) -> anyhow::Result<std::path::PathBuf> {
+        Ok(kuzushi_core::ConfigPaths::from_target(self.target())?.global_state_dir())
+    }
+
+    fn open_store_and_identity_policy(
+        &mut self,
+        operator_state: &Path,
+    ) -> anyhow::Result<(FindingStore, IdentityFoldPolicy)> {
+        let store = self.open_store()?;
+        let target = self
+            .target()
+            .context("finding identity policy requires an active target")?;
+        let values = self.option_store().effective_stored_values("sast:scan");
+        let requested = values.get("identityFold").and_then(|value| value.as_str());
+        let defaults = kuzushi_core::findings::resolve_identity_policy_defaults(
+            operator_state,
+            target,
+            requested,
+            None,
+        )?;
+        let policy = IdentityFoldPolicy::parse(Some(&defaults.identity_fold))?;
+        Ok((store, policy))
     }
 
     fn current_findings_projection_watermark(&mut self, store: &FindingStore) -> Option<u64> {
@@ -402,9 +489,18 @@ impl ShellApp {
 
 fn finding_generation_key(finding: &Finding) -> String {
     finding
-        .identity_id
-        .clone()
-        .unwrap_or_else(|| finding.fingerprint.clone())
+        .id
+        .map(|id| format!("generation:{id}"))
+        .unwrap_or_else(|| format!("fingerprint:{}", finding.fingerprint))
+}
+
+fn truncate_findings_report(
+    mut report: FindingListReport,
+    requested_limit: usize,
+) -> FindingListReport {
+    report.findings.truncate(requested_limit);
+    report.aliases.truncate(requested_limit);
+    report
 }
 
 fn findings_loaded_message(loaded: usize, total: usize) -> String {
@@ -426,18 +522,272 @@ fn review_decisions_for_findings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::{Severity, V2Config};
+    use kuzushi_core::findings::{
+        FindingIdentityAuditApprovalRequest, FindingIdentityAuditDisposition,
+        FindingIdentityAuditGroupDisposition, IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
+    };
+    use kuzushi_core::{OptionScope, OptionTarget, Severity, V2Config};
 
     #[test]
-    fn finding_scope_key_prefers_identity_and_falls_back_to_fingerprint() {
+    fn finding_generation_key_never_collapses_distinct_identity_generations() {
         let mut finding = Finding {
             fingerprint: "legacy-fingerprint".to_string(),
             ..Finding::default()
         };
-        assert_eq!(finding_scope_key(&finding), "legacy-fingerprint");
+        assert_eq!(
+            finding_generation_key(&finding),
+            "fingerprint:legacy-fingerprint"
+        );
 
         finding.identity_id = Some("durable-identity".to_string());
-        assert_eq!(finding_scope_key(&finding), "durable-identity");
+        finding.id = Some(42);
+        assert_eq!(finding_generation_key(&finding), "generation:42");
+    }
+
+    fn insert_policy_generation(
+        store: &FindingStore,
+        target: &Path,
+        run_id: &str,
+        fingerprint: &str,
+        dedup_key: &str,
+        tool: &str,
+    ) {
+        store.record_run_started(run_id, target, "running").unwrap();
+        let mut finding = Finding::new_tool(
+            tool,
+            "CWE-78",
+            "src/app.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "command execution",
+        );
+        finding.fingerprint = fingerprint.to_string();
+        finding.dedup_key = Some(dedup_key.to_string());
+        finding.symbol_locator = Some("app::execute".to_string());
+        store.insert_finding(run_id, &finding).unwrap();
+    }
+
+    fn policy_workspace() -> (tempfile::TempDir, WorkspaceTarget) {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        std::fs::create_dir_all(workspace.root().join("src")).unwrap();
+        std::fs::write(workspace.root().join("src/app.rs"), "execute(input);\n").unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        insert_policy_generation(
+            &store,
+            workspace.root(),
+            "strong-a",
+            "producer-a",
+            "dedup-a",
+            "semgrep",
+        );
+        insert_policy_generation(
+            &store,
+            workspace.root(),
+            "strong-b",
+            "producer-b",
+            "dedup-b",
+            "codeql",
+        );
+        (temp, workspace)
+    }
+
+    fn approve_current_corpus(operator_state: &Path, target: &Path) {
+        let evidence =
+            kuzushi_core::findings::current_finding_identity_audit_evidence(target).unwrap();
+        let dispositions = evidence
+            .report
+            .suspicious_groups
+            .iter()
+            .map(|group| FindingIdentityAuditGroupDisposition {
+                identity_id: group.identity_id.clone(),
+                disposition: FindingIdentityAuditDisposition::Accepted,
+                rationale: "reviewed for the TUI policy projection test".to_string(),
+            })
+            .collect();
+        kuzushi_core::findings::approve_finding_identity_audit(
+            operator_state,
+            target,
+            FindingIdentityAuditApprovalRequest {
+                schema_version: IDENTITY_AUDIT_APPROVAL_SCHEMA_VERSION,
+                canonical_target_key: evidence.canonical_target_key,
+                corpus_watermark: evidence.corpus_watermark,
+                report_sha256: evidence.report_sha256,
+                actor: "test-operator".to_string(),
+                dispositions,
+            },
+        )
+        .unwrap();
+    }
+
+    fn set_identity_fold_option(app: &mut ShellApp, policy: &str) {
+        app.option_store_mut().set_value(
+            OptionScope::Session,
+            OptionTarget::Tool("sast:scan".to_string()),
+            "identityFold",
+            serde_json::Value::String(policy.to_string()),
+        );
+    }
+
+    #[test]
+    fn approval_controls_the_default_tui_identity_projection_and_staleness_reverts_it() {
+        let (_target_temp, workspace) = policy_workspace();
+        let operator = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        app.refresh_findings_with_operator_state(false, operator.path());
+        assert_eq!(app.identity_fold_policy(), IdentityFoldPolicy::Legacy);
+        assert_eq!((app.findings().len(), app.findings_total_count()), (2, 2));
+        assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 2);
+
+        approve_current_corpus(operator.path(), workspace.root());
+        app.refresh_findings_with_operator_state(false, operator.path());
+        assert_eq!(app.identity_fold_policy(), IdentityFoldPolicy::Safe);
+        assert_eq!((app.findings().len(), app.findings_total_count()), (1, 1));
+        assert_eq!(app.finding_aliases(), &["F-0001"]);
+        assert_eq!(app.domain().finding_ledger_counts().unwrap().total, 1);
+
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        insert_policy_generation(
+            &store,
+            workspace.root(),
+            "strong-c",
+            "producer-c",
+            "dedup-c",
+            "systems-hunt",
+        );
+        app.refresh_findings_with_operator_state(false, operator.path());
+        assert_eq!(app.identity_fold_policy(), IdentityFoldPolicy::Legacy);
+        assert_eq!(app.findings().len(), 3);
+    }
+
+    #[test]
+    fn explicit_safe_option_reprojects_the_refreshed_tui_corpus() {
+        let (_target_temp, workspace) = policy_workspace();
+        let operator = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.refresh_findings_with_operator_state(false, operator.path());
+        assert_eq!(app.findings().len(), 2);
+
+        set_identity_fold_option(&mut app, "safe");
+        app.refresh_findings_with_operator_state(false, operator.path());
+
+        assert_eq!(app.identity_fold_policy(), IdentityFoldPolicy::Safe);
+        assert_eq!(app.findings().len(), 1);
+        assert_eq!(crate::ui_view_models::visible_findings_len(&app), 1);
+    }
+
+    #[test]
+    fn safe_tui_projection_separates_fallback_signatures_and_attack_chains() {
+        let target_temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(target_temp.path()).unwrap();
+        let operator = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        for (run_id, fingerprint, line, signature) in [
+            ("fallback-a", "fallback-a", 10, "src/db.rs:10:CWE-89"),
+            (
+                "fallback-match",
+                "fallback-match",
+                10,
+                "src/db.rs:10:CWE-89",
+            ),
+            ("fallback-b", "fallback-b", 90, "src/db.rs:90:CWE-89"),
+        ] {
+            store
+                .record_run_started(run_id, workspace.root(), "running")
+                .unwrap();
+            let mut finding = Finding::new_tool(
+                "semgrep",
+                "CWE-89",
+                "src/db.rs",
+                line,
+                Some(line),
+                Severity::High,
+                "SQL injection",
+            );
+            finding.fingerprint = fingerprint.to_string();
+            finding.source_signature = Some(signature.to_string());
+            store.insert_finding(run_id, &finding).unwrap();
+        }
+        insert_policy_generation(
+            &store,
+            workspace.root(),
+            "chain-a",
+            "chain-a",
+            "chain-dedup-a",
+            "chains",
+        );
+        insert_policy_generation(
+            &store,
+            workspace.root(),
+            "chain-b",
+            "chain-b",
+            "chain-dedup-b",
+            "chains",
+        );
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        set_identity_fold_option(&mut app, "safe");
+
+        app.refresh_findings_with_operator_state(false, operator.path());
+
+        let chains = app
+            .findings()
+            .iter()
+            .filter(|finding| finding.tool == "chains")
+            .count();
+        let fallback_groups = app
+            .findings()
+            .iter()
+            .filter(|finding| finding.tool != "chains")
+            .collect::<Vec<_>>();
+        assert_eq!(chains, 2);
+        assert_eq!(fallback_groups.len(), 2);
+        assert_eq!(app.findings().len(), 4);
+        let matching_group = fallback_groups
+            .into_iter()
+            .find(|finding| finding.sources.len() == 2)
+            .expect("matching fallback observations fold together");
+        for run_id in ["fallback-a", "fallback-match"] {
+            assert!(finding_observed_in_runs(
+                matching_group,
+                &BTreeSet::from([run_id.to_string()]),
+            ));
+        }
+    }
+
+    #[test]
+    fn policy_filtered_refresh_keeps_total_alias_and_selection_on_one_projection() {
+        let (_target_temp, workspace) = policy_workspace();
+        let operator = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("low", workspace.root(), "running")
+            .unwrap();
+        store
+            .insert_finding(
+                "low",
+                &Finding::new_tool(
+                    "semgrep",
+                    "low-rule",
+                    "src/low.rs",
+                    1,
+                    None,
+                    Severity::Low,
+                    "low row",
+                ),
+            )
+            .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        set_identity_fold_option(&mut app, "safe");
+
+        app.refresh_findings_filtered_with_operator_state("rank:low", operator.path());
+
+        assert_eq!((app.findings().len(), app.findings_total_count()), (1, 1));
+        assert_eq!(app.finding_aliases(), &["F-0002"]);
+        let (alias, selected) = crate::ui_view_models::visible_finding_at_cursor(&app).unwrap();
+        assert_eq!(alias, "F-0002");
+        assert_eq!(selected.severity, Severity::Low);
     }
 
     fn filtered_workspace() -> (tempfile::TempDir, WorkspaceTarget) {

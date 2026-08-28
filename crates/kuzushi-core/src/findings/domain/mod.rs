@@ -9,6 +9,7 @@ mod finding_identity;
 mod finding_record;
 mod from_semgrep;
 mod grounding;
+mod identity_propagation;
 mod now_isoish;
 mod patch_lifecycle;
 mod patch_reverification;
@@ -29,7 +30,8 @@ pub use extract_cwe::extract_cwe;
 pub(crate) use finding_identity::finding_identity_key_for_finding;
 pub(crate) use finding_identity::finding_identity_key_for_finding_at_target;
 pub use finding_identity::{
-    compute_finding_identity_id, finding_identity_alias, FindingIdentityMatchTier,
+    compute_finding_identity_id, finding_identity_alias, FindingIdentityBasis,
+    FindingIdentityMatchTier,
 };
 pub use finding_record::{
     compute_class_dedup_key, compute_dedup_key, compute_root_cause_key, compute_source_signature,
@@ -38,6 +40,7 @@ pub use finding_record::{
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use grounding::safe_target_path;
 pub use grounding::{ground_finding_location, grounding_prompt_note, GroundingStatus};
+pub use identity_propagation::auto_triage_propagation_basis;
 pub(crate) use now_isoish::now_isoish;
 pub use patch_lifecycle::{PatchLifecycleFile, PatchLifecycleRecord, PatchLifecycleState};
 #[cfg(test)]
@@ -55,8 +58,8 @@ pub use persisted_results::{
 };
 pub use proof_confidence::ProofConfidence;
 pub use review_decision::{
-    DismissReason, ReviewDecision, ReviewDecisionProvenance, ReviewDecisionRecord,
-    ReviewDecisionVerdict,
+    DismissReason, ReviewDecision, ReviewDecisionPropagation, ReviewDecisionProvenance,
+    ReviewDecisionRecord, ReviewDecisionVerdict,
 };
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::{StaticProofState, StaticProofStateEvent};

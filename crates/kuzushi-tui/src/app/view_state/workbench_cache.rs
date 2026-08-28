@@ -78,6 +78,7 @@ pub(crate) struct WorkbenchCache {
     revision_relationships:
         BTreeMap<(PathBuf, String, String), kuzushi_core::workspace::RevisionRelationship>,
     scope_tree: Option<ScopeTreeCache>,
+    threat_model_store: Option<(PathBuf, ThreatModelStoreState)>,
     project_model_document: Option<ProjectModelDocumentCache>,
     strategy_queue: Option<StrategyQueueCache>,
     prompt_mutations: Option<PromptMutationsCache>,
@@ -433,6 +434,7 @@ impl WorkbenchCache {
         self.mark_git_metadata_stale();
         self.revision_relationships.clear();
         self.scope_tree = None;
+        self.threat_model_store = None;
         self.project_model_document = None;
         self.strategy_queue = None;
         self.prompt_mutations = None;
@@ -580,6 +582,9 @@ impl WorkbenchCache {
         if is_project_scope_tree_path(relative) {
             self.scope_tree = None;
         }
+        if is_threat_model_store_path(relative) {
+            self.threat_model_store = None;
+        }
         if is_map_artifact_path(relative) {
             self.map_artifacts.invalidate();
             self.cpg_artifacts.invalidate();
@@ -660,6 +665,7 @@ impl WorkbenchCache {
             .retain(|cached, _| !cached.starts_with(state_root));
         self.directory_listings
             .retain(|cached, _| !cached.starts_with(state_root));
+        self.threat_model_store = None;
         self.map_artifacts.invalidate();
         self.cpg_artifacts.invalidate();
         self.finding_patch_truth.invalidate(None);
@@ -942,6 +948,10 @@ fn is_map_artifact_path(path: &Path) -> bool {
                     | ".kuzushi/threat-intel/candidates.json"
             )
         )
+}
+
+fn is_threat_model_store_path(path: &Path) -> bool {
+    path == Path::new(".kuzushi/threat-model.json") || path.starts_with(".kuzushi/threat-models")
 }
 
 fn run_metadata_path_changed(path: &Path, runs_root: &Path) -> bool {

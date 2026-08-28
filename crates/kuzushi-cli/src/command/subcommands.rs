@@ -110,6 +110,18 @@ pub(crate) enum KwpCommand {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum CampaignCommand {
+    /// Run an authenticated scan-batch plan through its controller, including
+    /// final occurrence reporting, aggregate SARIF, and one durable gate.
+    Batch {
+        /// Batch id under `.kuzushi/v3/campaigns/`.
+        batch_id: String,
+        /// Emit the final occurrence report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+        /// Emit deterministic scan-batch progress suitable for logs.
+        #[arg(long, conflicts_with = "json")]
+        ci: bool,
+    },
     /// Execute a campaign plan's job matrix with a bounded worker pool.
     Run {
         /// Campaign id under `.kuzushi/v3/campaigns/` (from `campaign:plan`).
@@ -157,6 +169,39 @@ pub(crate) enum CampaignCommand {
         /// Print the dispatch order and exit without spawning anything.
         #[arg(long)]
         dry_run: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum FindingsCommand {
+    /// Report occurrence and variance across one scan batch's logical trials.
+    Batch {
+        /// Batch id written by `kuzushi scan --trials`.
+        batch_id: String,
+        /// Emit the occurrence report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Audit durable identity groups for unsafe collapse signals without changing findings.
+    IdentityAudit {
+        #[command(subcommand)]
+        action: Option<IdentityAuditCommand>,
+        /// Emit the migration-evidence report as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum IdentityAuditCommand {
+    /// Approve the current canonical audit using an operator-authored dispositions file.
+    Approve {
+        /// JSON approval request with actor plus accepted/fixed disposition and rationale per suspicious group.
+        #[arg(long = "from")]
+        input: PathBuf,
+        /// Emit the operator-owned approval receipt as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 

@@ -359,6 +359,10 @@ impl ConfigPaths {
         crate::workspace::workspace_config_path(&self.home_dir)
     }
 
+    pub fn global_state_dir(&self) -> PathBuf {
+        crate::workspace::workspace_state_dir(&self.home_dir)
+    }
+
     pub fn global_options_path(&self) -> PathBuf {
         crate::workspace::workspace_options_path(&self.home_dir)
     }

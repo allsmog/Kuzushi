@@ -9,7 +9,8 @@ use crate::ui_view_models::{
 use crate::{InputMode, PendingPatch, WorkflowPhase};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use kuzushi_core::findings::{
-    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, TriageAuthor,
+    BatchOccurrenceReport, BatchOccurrenceRow, IdentityFoldPolicy, ReviewDecision,
+    ReviewDecisionRecord, ReviewDecisionVerdict, TriageAuthor,
 };
 use kuzushi_core::{
     Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
@@ -127,6 +128,119 @@ fn review_queue_model_keeps_projected_duplicate_semantics() {
     assert_eq!(model.total_count, 1);
     assert_eq!(model.rows.len(), 1);
     assert_eq!(model.rows[0].severity_label, "HIGH");
+}
+
+#[test]
+fn active_batch_scopes_review_and_exposes_occurrence_and_run_facets() {
+    let mut in_batch = finding("path-traversal", Severity::High, 20);
+    in_batch.fingerprint = "batch-finding".to_string();
+    in_batch.dedup_key = Some("batch-key".to_string());
+    let mut outside = finding("sql-injection", Severity::Critical, 40);
+    outside.fingerprint = "outside-finding".to_string();
+    outside.dedup_key = Some("outside-key".to_string());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![outside, in_batch];
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some("batch-1".to_string());
+    deck.active_batch_report = Some(batch_report_for("batch-finding"));
+
+    let model = review_queue_model(&app, ReviewQueueMode::All);
+
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].rule, "path-traversal");
+    assert_eq!(
+        model.rows[0].occurrence,
+        Some(ReviewOccurrence {
+            seen: 2,
+            completed: 3,
+            planned: 4,
+            failed: 1,
+        })
+    );
+    assert!(model
+        .active_filter_chips
+        .contains(&"batch:batch-1".to_string()));
+    let runs = model
+        .facet_groups
+        .iter()
+        .find(|group| group.label == "runs")
+        .unwrap();
+    assert_eq!(runs.values[0].value, "run-1");
+    assert_eq!(runs.values[0].count, 1);
+}
+
+#[test]
+fn occurrence_ratio_is_metadata_only_for_a_tied_review_result() {
+    let mut tied = finding("tied-result", Severity::High, 20);
+    tied.fingerprint = "batch-finding".to_string();
+    tied.dedup_key = Some("batch-key".to_string());
+    tied.triage = Some(TriageOutcome {
+        first_link: None,
+        refute_reason: None,
+        verdict: TriageVerdict::NeedsReview,
+        confidence: 0.67,
+        rationale: "equal votes remain tied".to_string(),
+        cost_usd: 0.0,
+        cost_usd_exact: true,
+    });
+    let sparse = review_row_with_occurrence(tied.clone(), 1);
+    let repeated = review_row_with_occurrence(tied, 3);
+
+    assert_eq!(sparse.decision, "needs_review");
+    assert!(!sparse.decision_complete);
+    assert_eq!(sparse.confidence_label, repeated.confidence_label);
+    assert_eq!(sparse.workflow_group, ReviewWorkflowGroup::NeedsReview);
+    let mut sparse_without_occurrence = sparse;
+    let mut repeated_without_occurrence = repeated;
+    sparse_without_occurrence.occurrence = None;
+    repeated_without_occurrence.occurrence = None;
+    assert_eq!(sparse_without_occurrence, repeated_without_occurrence);
+}
+
+fn review_row_with_occurrence(finding: Finding, seen: usize) -> ReviewQueueRow {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    *app.findings_mut() = vec![finding];
+    let deck = app.router.campaign_mut();
+    deck.active_batch_id = Some("batch-1".to_string());
+    deck.active_batch_report = Some(batch_report_with_occurrence("batch-finding", seen));
+    review_queue_model(&app, ReviewQueueMode::All).rows[0].clone()
+}
+
+fn batch_report_for(fingerprint: &str) -> BatchOccurrenceReport {
+    batch_report_with_occurrence(fingerprint, 2)
+}
+
+fn batch_report_with_occurrence(fingerprint: &str, seen: usize) -> BatchOccurrenceReport {
+    BatchOccurrenceReport {
+        schema_version: 1,
+        batch_id: "batch-1".to_string(),
+        equivalence_key: "eq-1".to_string(),
+        identity_fold: IdentityFoldPolicy::Safe,
+        planned: 4,
+        completed: 3,
+        failed: 1,
+        pending: 0,
+        gate: None,
+        trials: Vec::new(),
+        rows: vec![BatchOccurrenceRow {
+            fold_key: fingerprint.to_string(),
+            identity_id: None,
+            identity_basis: None,
+            seen,
+            completed: 3,
+            planned: 4,
+            failed: 1,
+            severities: vec!["high".to_string()],
+            locations: vec!["src/lib.rs:20".to_string()],
+            titles: vec!["path traversal".to_string()],
+            fingerprints: vec![fingerprint.to_string()],
+            run_ids: vec!["run-1".to_string(), "run-2".to_string()],
+            representative_fingerprint: fingerprint.to_string(),
+            representative_title: "path traversal".to_string(),
+            representative_severity: "high".to_string(),
+            representative_location: "src/lib.rs:20".to_string(),
+        }],
+    }
 }
 
 #[test]

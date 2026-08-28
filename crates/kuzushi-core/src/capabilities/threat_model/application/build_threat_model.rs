@@ -38,9 +38,10 @@ fn build_agentic_threat_model(
     flavor: BuildFlavor,
 ) -> Result<Value> {
     let input = parse_build_input(&input, ctx, flavor)?;
+    preflight_agentic_build_lineage(&input)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
-    let snapshot = register_result_snapshot(ctx, verb, &input.target);
+    let snapshot = register_result_snapshot(ctx, verb, input.workspace_root());
     let result = if input.is_refine() {
         refine_threat_model(runtime, ctx, flavor, verb, input)?
     } else if input.is_staged() {
@@ -49,6 +50,20 @@ fn build_agentic_threat_model(
         build_single_threat_model(runtime, ctx, flavor, verb, input)?
     };
     Ok(attach_result_snapshot(result, snapshot))
+}
+
+fn preflight_agentic_build_lineage(input: &BuildInput) -> Result<()> {
+    let scope = effective_build_scope(input)?;
+    resolve_build_lineage_selection(
+        input.workspace_root(),
+        &scope,
+        &input.methodology,
+        input.model_id.as_ref(),
+        input.new_model,
+        input.is_refine(),
+        input.is_fresh(),
+    )?;
+    Ok(())
 }
 
 fn build_single_threat_model(
@@ -63,7 +78,7 @@ fn build_single_threat_model(
     let grounding = load_prompt_grounding(&input, ctx)?;
     source_bundle.authenticate_entry_point_sources(&grounding.entry_point_catalog.receipt)?;
     emit_grounding_loaded(ctx, verb, &grounding);
-    emit_seed_disclosure(ctx, verb, &input);
+    emit_seed_disclosure(ctx, verb, &input)?;
     let generated = generate_threat_model_document(
         runtime,
         ctx,
@@ -144,7 +159,7 @@ fn finish_agentic_threat_model(
     grounding: PromptGrounding,
 ) -> Result<Value> {
     let (coverage, parked) =
-        finalize_single_document(&mut generated.document, &input.target, &grounding)?;
+        finalize_single_document(&mut generated.document, input.workspace_root(), &grounding)?;
     emit_coverage_checked(ctx, verb, &coverage);
     let reconciliation = BuildReconciliation::from_report(
         &coverage,
@@ -202,16 +217,14 @@ pub(crate) fn complete_threat_model_build(
     let has_concrete_content =
         crate::workflow_attempts::threat_model_has_concrete_content(&generated.document);
     let cost = generated_threat_model_cost(&generated)?;
-    let artifacts =
-        write_threat_model_outputs(flavor, &input, &generated.document, has_concrete_content)?;
-    emit_artifact_write(ctx, verb, &artifacts);
-    let version_warning = record_persisted_version(
+    let (artifacts, version_warning) = write_and_record_build_artifacts(
         ctx,
-        &input.target,
+        flavor,
+        verb,
+        &input,
         &generated.document,
-        "build",
-        artifacts.persisted,
-    );
+        has_concrete_content,
+    )?;
     finish_threat_model_build(
         ctx,
         flavor,
@@ -225,6 +238,33 @@ pub(crate) fn complete_threat_model_build(
         version_warning,
         reconciliation,
     )
+}
+
+fn write_and_record_build_artifacts(
+    ctx: &ToolExecutionContext<'_>,
+    flavor: BuildFlavor,
+    verb: &str,
+    input: &BuildInput,
+    document: &Value,
+    has_concrete_content: bool,
+) -> Result<(ThreatModelArtifacts, Option<String>)> {
+    let artifacts = write_threat_model_outputs(
+        flavor,
+        input,
+        document,
+        has_concrete_content,
+        ctx.run_id().as_deref(),
+    )?;
+    emit_artifact_write(ctx, verb, &artifacts);
+    let warning = record_persisted_version(
+        ctx,
+        input.workspace_root(),
+        document,
+        "build",
+        artifacts.persisted,
+        artifacts.model_ref.as_ref(),
+    );
+    Ok((artifacts, warning))
 }
 
 /// Summary lines, terminal trace step, and the result envelope for a
@@ -352,7 +392,7 @@ fn seal_build_document(
         source_bundle.provenance_json(),
         !input.is_refine(),
     );
-    finalize_document_identity(document, &input.target)?;
+    finalize_document_identity(document, input)?;
     require_complete_security_context_links(document)
 }
 
@@ -365,7 +405,7 @@ fn seal_build_document(
 fn stamp_build_seed_lineage(document: &mut Value, input: &BuildInput) -> Result<()> {
     let wants_seed = input.is_refine() || input.embeds_prior_model();
     let previous = if wants_seed {
-        try_load_persistent_threat_model(&input.target)?
+        load_selected_build_threat_model(input)?.map(|selected| selected.document)
     } else {
         None
     };
@@ -385,18 +425,25 @@ fn stamp_build_seed_lineage(document: &mut Value, input: &BuildInput) -> Result<
 /// re-scored rows after normalization), and persisted `T1..Tn` displayIds
 /// carried forward from the previously persisted model so references never
 /// renumber across refines.
-fn finalize_document_identity(document: &mut Value, target: &Path) -> Result<()> {
+fn finalize_document_identity(document: &mut Value, input: &BuildInput) -> Result<()> {
     assign_stable_ids(document);
     if let Some(threats) = document.get_mut("threats").and_then(Value::as_array_mut) {
         sort_threats_by_risk(threats);
     }
-    let previous = try_load_persistent_threat_model(target)?;
+    let previous = previous_document_for_identity(input)?;
     assign_display_ids(document, previous.as_ref());
     Ok(())
 }
 
+fn previous_document_for_identity(input: &BuildInput) -> Result<Option<Value>> {
+    if input.is_fresh() || input.new_model {
+        return Ok(None);
+    }
+    Ok(load_selected_build_threat_model(input)?.map(|selected| selected.document))
+}
+
 /// Best-effort append of the just-persisted document to the version ledger
-/// in the index DB. The flat JSON save already succeeded, so a ledger
+/// in the index DB. The immutable revision commit already succeeded, so a ledger
 /// failure must not fail the build -- but it surfaces as an output line
 /// instead of being swallowed.
 pub(crate) fn record_persisted_version(
@@ -405,12 +452,23 @@ pub(crate) fn record_persisted_version(
     document: &Value,
     source: &str,
     persisted: bool,
+    model_ref: Option<&ThreatModelRef>,
 ) -> Option<String> {
     if !persisted {
         return None;
     }
     let run_id = ctx.run_id();
-    match record_threat_model_version(target, document, source, run_id.as_deref()) {
+    let recorded = match model_ref {
+        Some(model_ref) => record_threat_model_version_with_ref(
+            target,
+            document,
+            source,
+            run_id.as_deref(),
+            model_ref,
+        ),
+        None => record_threat_model_version(target, document, source, run_id.as_deref()),
+    };
+    match recorded {
         Ok(_) => None,
         Err(error) => Some(format!(
             "  Warning:  version ledger append failed: {error:#}"
@@ -448,7 +506,17 @@ fn has_runtime_only_source_option(input: &Value, ctx: &ToolExecutionContext<'_>)
     has_nonempty_list(input, "seed")
         || read_string(input, &["vulnsFile", "vulns_file", "vulns"]).is_some()
         || staged_pipeline_options_requested(input)
-        || read_string(input, &["designDoc", "design_doc", "design"]).is_some()
+        || !read_string_list(
+            input,
+            &[
+                "designDocs",
+                "designDoc",
+                "design_docs",
+                "design_doc",
+                "design",
+            ],
+        )
+        .is_empty()
         || explicit_prompt_override_requested(input, ctx)
         || nondefault_sources_requested(input)
         || nondefault_context_controls_requested(input)
@@ -621,9 +689,13 @@ pub(crate) fn emit_grounding_loaded(
 /// A fresh run that leaves a real persisted model on the table says so before
 /// the model call. Emitted pre-persist, so the existence check reflects the
 /// disk state the operator would be comparing against.
-pub(crate) fn emit_seed_disclosure(ctx: &ToolExecutionContext<'_>, verb: &str, input: &BuildInput) {
-    if input.embeds_prior_model() || !persistent_threat_model_path(&input.target).exists() {
-        return;
+pub(crate) fn emit_seed_disclosure(
+    ctx: &ToolExecutionContext<'_>,
+    verb: &str,
+    input: &BuildInput,
+) -> Result<()> {
+    if input.embeds_prior_model() || !has_scope_category_lineage(input)? {
+        return Ok(());
     }
     if let Some(trace) = ctx.trace {
         let _ = trace
@@ -634,6 +706,19 @@ pub(crate) fn emit_seed_disclosure(ctx: &ToolExecutionContext<'_>, verb: &str, i
             )
             .emit();
     }
+    Ok(())
+}
+
+fn has_scope_category_lineage(input: &BuildInput) -> Result<bool> {
+    let scope = effective_build_scope(input)?;
+    let Some(manifest) = load_threat_model_manifest(input.workspace_root())? else {
+        return Ok(false);
+    };
+    Ok(manifest.models.iter().any(|model| {
+        model.methodology == input.methodology
+            && model.scope.scope_id == scope.scope_id
+            && model.scope.rel_path == scope.rel_path
+    }))
 }
 
 pub(crate) fn emit_coverage_checked(
@@ -726,7 +811,7 @@ fn threat_model_prompt(
     // that excludes the persisted model — embeds nothing from the previous
     // generation, full document and count summary alike.
     let previous_model = if input.embeds_prior_model() {
-        try_load_persistent_threat_model(&input.target)?
+        load_selected_build_threat_model(input)?.map(|selected| selected.document)
     } else {
         None
     };
@@ -744,13 +829,13 @@ pub(crate) fn query_threat_model_document(
     let _llm_scope = begin_threat_model_llm_scope(ctx, verb);
     // The prompt embeds every input (source bundle, grounding, previous
     // document), so an unchanged workspace replays the synthesis for free.
-    let cache = crate::semantic_cache::SemanticCache::open_for_target(&input.target);
+    let cache = crate::semantic_cache::SemanticCache::open_for_target(input.workspace_root());
     let costed = crate::structured_output::query_cached_structured_json_with_cost(
         cache.as_ref(),
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
-            input.target.clone(),
+            input.analysis_root().to_path_buf(),
             threat_model_system_prompt(),
             prompt,
         )
@@ -809,6 +894,7 @@ struct ThreatModelArtifacts {
     normalized_artifact: PathBuf,
     markdown_artifact: PathBuf,
     persisted: bool,
+    model_ref: Option<ThreatModelRef>,
 }
 
 fn write_threat_model_outputs(
@@ -816,25 +902,28 @@ fn write_threat_model_outputs(
     input: &BuildInput,
     document: &Value,
     has_concrete_content: bool,
+    run_id: Option<&str>,
 ) -> Result<ThreatModelArtifacts> {
     let normalized_artifact =
-        write_normalized_artifact(&input.target, &input.output_dir, document)?;
+        write_normalized_artifact(input.workspace_root(), &input.output_dir, document)?;
     let markdown = render_schema_markdown(
         document,
         &input.repo_name,
-        &input.target.display().to_string(),
+        &input.workspace_root().display().to_string(),
     );
     let markdown_artifact = write_markdown_artifact(
-        &input.target,
+        input.workspace_root(),
         &input.output_dir,
         "THREAT_MODEL.md",
         &markdown,
     )?;
-    let persisted = persist_threat_model_document(flavor, input, document, has_concrete_content)?;
+    let model_ref =
+        persist_threat_model_document(flavor, input, document, has_concrete_content, run_id)?;
     Ok(ThreatModelArtifacts {
         normalized_artifact,
         markdown_artifact,
-        persisted,
+        persisted: model_ref.is_some(),
+        model_ref,
     })
 }
 
@@ -843,11 +932,51 @@ fn persist_threat_model_document(
     input: &BuildInput,
     document: &Value,
     has_concrete_content: bool,
-) -> Result<bool> {
+    run_id: Option<&str>,
+) -> Result<Option<ThreatModelRef>> {
     if !flavor.persists_document() || !has_concrete_content {
-        return Ok(false);
+        return Ok(None);
     }
-    save_persistent_threat_model(&input.target, document, !input.preserve_user_edits)
+    let scope = effective_build_scope(input)?;
+    let selection = BuildRevisionSelection {
+        workspace_root: input.workspace_root().to_path_buf(),
+        scope: scope.clone(),
+        methodology: input.methodology.clone(),
+        label: build_model_label(input, &scope),
+        model_id: input.model_id.clone(),
+        new_model: input.new_model,
+        fresh: input.is_fresh(),
+        source: if input.is_refine() {
+            ThreatModelRevisionSource::Refine
+        } else {
+            ThreatModelRevisionSource::Build
+        },
+        run_id: run_id.map(str::to_string),
+        activate: input.activate,
+        actor: "tool:threat-model:build".to_string(),
+    };
+    if should_preserve_selected_user_edited_model(&selection, input.preserve_user_edits)? {
+        return Ok(None);
+    }
+    Ok(Some(commit_generated_threat_model_revision(
+        document, selection,
+    )?))
+}
+
+fn build_model_label(input: &BuildInput, scope: &ScopeRef) -> String {
+    if scope.scope_id == crate::workspace::ROOT_SCOPE_ID {
+        format!(
+            "{} {}",
+            input.repo_name,
+            input.methodology.to_ascii_uppercase()
+        )
+    } else {
+        format!(
+            "{} · {}",
+            scope.rel_path.display(),
+            input.methodology.to_ascii_uppercase()
+        )
+    }
 }
 
 fn threat_model_findings(
@@ -882,8 +1011,8 @@ fn threat_model_response(
     source_bundle: ThreatModelSourceBundle,
 ) -> Result<Value> {
     append_top_threats(&mut lines, &generated.document);
-    let target = input.target.clone();
-    let persistent_artifact = persistent_threat_model_path(&input.target);
+    let target = input.workspace_root().to_path_buf();
+    let persistent_artifact = persistent_threat_model_path(input.workspace_root());
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
         &artifacts.markdown_artifact,
@@ -970,7 +1099,7 @@ fn threat_model_result_data(
     persistent_artifact: PathBuf,
 ) -> Value {
     json!({
-        "target": input.target.display().to_string(),
+        "target": input.workspace_root().display().to_string(),
         "repoName": input.repo_name,
         "artifactDir": input.output_dir,
         "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
@@ -984,6 +1113,7 @@ fn threat_model_result_data(
         "document": generated.document,
         "findings": findings,
         "persisted": artifacts.persisted,
+        "modelRef": artifacts.model_ref,
     })
 }
 
@@ -1032,5 +1162,105 @@ mod catalog_receipt_tests {
             json!(30)
         );
         assert_eq!(document["coverage"]["catalogEntryPointsLinked"], json!(1));
+    }
+
+    #[test]
+    fn display_identity_uses_the_selected_lineage_not_the_active_mirror() {
+        let target = tempfile::tempdir().unwrap();
+        let active_scope = test_scope("root", ".");
+        commit_identity_fixture(target.path(), &active_scope, "active", true);
+        let selected_scope = test_scope("api", "services/api");
+        let selected = commit_identity_fixture(target.path(), &selected_scope, "selected", false);
+        let mut input = BuildInput {
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().to_path_buf(),
+                scope: Some(selected_scope),
+            },
+            methodology: "stride".to_string(),
+            seed_mode: "seeded".to_string(),
+            model_id: Some(selected.model_id),
+            ..Default::default()
+        };
+
+        let previous = previous_document_for_identity(&input).unwrap().unwrap();
+        assert_eq!(
+            previous.pointer("/summary/marker"),
+            Some(&json!("selected"))
+        );
+
+        input.seed_mode = "fresh".to_string();
+        assert!(previous_document_for_identity(&input).unwrap().is_none());
+    }
+
+    #[test]
+    fn agentic_fresh_preflight_accepts_stale_scope_but_seeded_refuses() {
+        let target = tempfile::tempdir().unwrap();
+        let stored_scope = test_scope("api", "services/api");
+        commit_identity_fixture(target.path(), &stored_scope, "stored", false);
+        let mut current_scope = stored_scope;
+        current_scope.project_model_sha256 = format!("sha256:{}", "2".repeat(64));
+        let mut input = BuildInput {
+            roots: ThreatModelBuildRoots {
+                workspace_root: target.path().to_path_buf(),
+                analysis_root: target.path().join("services/api"),
+                scope: Some(current_scope),
+            },
+            methodology: "stride".to_string(),
+            mode: "build".to_string(),
+            seed_mode: "fresh".to_string(),
+            ..Default::default()
+        };
+
+        preflight_agentic_build_lineage(&input).unwrap();
+        input.seed_mode = "seeded".to_string();
+        let error = preflight_agentic_build_lineage(&input).unwrap_err();
+        assert!(error.to_string().contains("scope binding is stale"));
+    }
+
+    fn test_scope(scope_id: &str, rel_path: &str) -> ScopeRef {
+        ScopeRef {
+            scope_id: scope_id.to_string(),
+            rel_path: PathBuf::from(rel_path),
+            project_model_sha256: format!("sha256:{}", "1".repeat(64)),
+            target_revision: "revision-a".to_string(),
+        }
+    }
+
+    fn commit_identity_fixture(
+        root: &Path,
+        scope: &ScopeRef,
+        marker: &str,
+        activate: bool,
+    ) -> ThreatModelRef {
+        let document = json!({
+            "version": "2.0",
+            "methodology": "stride",
+            "dfd": {
+                "nodes": [{"id": "app", "name": "Application"}],
+                "flows": [],
+                "trustBoundaries": []
+            },
+            "threats": [],
+            "summary": {"marker": marker}
+        });
+        commit_threat_model_revision(
+            root,
+            &document,
+            ThreatModelCommit {
+                model_id: None,
+                new_model: false,
+                label: marker.to_string(),
+                scope: scope.clone(),
+                methodology: "stride".to_string(),
+                source: ThreatModelRevisionSource::Build,
+                source_revision_id: None,
+                run_id: None,
+                activate: Some(activate),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap()
+        .model_ref
     }
 }

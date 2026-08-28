@@ -55,6 +55,7 @@ pub(crate) enum AgentEvent {
 pub(crate) struct AgentCallAudit {
     pub(crate) cost: kuzushi_core::runtime::RuntimeCostReport,
     pub(crate) call_attempted: bool,
+    pub(crate) tool_policy_receipt: Option<kuzushi_core::runtime::AgentToolPolicyReceipt>,
 }
 
 impl AgentCallAudit {
@@ -62,6 +63,7 @@ impl AgentCallAudit {
         Self {
             cost: kuzushi_core::runtime::RuntimeCostReport::UNAVAILABLE,
             call_attempted: false,
+            tool_policy_receipt: None,
         }
     }
 
@@ -78,6 +80,14 @@ impl AgentCallAudit {
     ) -> Self {
         self.cost = cost;
         self.call_attempted = call_attempted;
+        self
+    }
+
+    pub(crate) fn with_tool_policy_receipt(
+        mut self,
+        receipt: kuzushi_core::runtime::AgentToolPolicyReceipt,
+    ) -> Self {
+        self.tool_policy_receipt = Some(receipt);
         self
     }
 
@@ -157,10 +167,9 @@ pub(crate) enum ThreatPatchEvent {
         patch: ThreatPatch,
         audit: AgentCallAudit,
     },
-    Answer {
-        text: String,
-        audit: AgentCallAudit,
-    },
+    #[allow(dead_code)]
+    // Compatibility event retained for persisted/test event folds; Ask now uses AgentEvent.
+    Answer { text: String, audit: AgentCallAudit },
     Failed {
         error: String,
         audit: AgentCallAudit,

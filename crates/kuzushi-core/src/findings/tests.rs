@@ -805,6 +805,379 @@ mod tests {
     }
 
     #[test]
+    fn identity_assignment_persists_the_distinct_safety_basis() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/db.rs"), "query(input);\n").unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        let first = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/db.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "SQL injection reaches query, CWE-89",
+        );
+
+        store
+            .record_run_started("basis-a", temp.path(), "running")
+            .unwrap();
+        store.insert_finding("basis-a", &first).unwrap();
+        store
+            .record_run_started("basis-b", temp.path(), "running")
+            .unwrap();
+        store.insert_finding("basis-b", &first).unwrap();
+        let mut cross_run = first.clone();
+        cross_run.tool = "agentic-sast".to_string();
+        cross_run.rule_id = "alternate.cwe-89".to_string();
+        cross_run.fingerprint = "fp3_alternate-producer".to_string();
+        store
+            .record_run_started("basis-c", temp.path(), "running")
+            .unwrap();
+        store.insert_finding("basis-c", &cross_run).unwrap();
+
+        let a = store.list_findings_for_scan_id("basis-a").unwrap();
+        let b = store.list_findings_for_scan_id("basis-b").unwrap();
+        let c = store.list_findings_for_scan_id("basis-c").unwrap();
+        assert_eq!(
+            a[0].identity_basis,
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        assert_eq!(
+            b[0].identity_basis,
+            Some(FindingIdentityBasis::ExactProducerFingerprint)
+        );
+        assert_eq!(
+            c[0].identity_basis,
+            Some(FindingIdentityBasis::CrossRunDedupKey)
+        );
+    }
+
+    #[test]
+    fn repeated_identical_sink_lines_do_not_fold_or_propagate_without_corroboration() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/db.rs"),
+            "fn first() {\n    query(input);\n}\nfn second() {\n    query(input);\n}\n",
+        )
+        .unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        let mut first = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/db.rs",
+            2,
+            Some(2),
+            Severity::High,
+            "SQL injection reaches the first query, CWE-89",
+        );
+        let mut second = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/db.rs",
+            5,
+            Some(5),
+            Severity::High,
+            "SQL injection reaches the second query, CWE-89",
+        );
+        first.fingerprint = "fp3_first-identical-line".to_string();
+        first.dedup_key = None;
+        first.source_signature = None;
+        second.fingerprint = "fp3_second-identical-line".to_string();
+        second.dedup_key = None;
+        second.source_signature = None;
+
+        store
+            .record_run_started("identical-a", temp.path(), "running")
+            .unwrap();
+        let first_id = store.insert_finding("identical-a", &first).unwrap();
+        store
+            .record_run_started("identical-b", temp.path(), "running")
+            .unwrap();
+        let second_id = store.insert_finding("identical-b", &second).unwrap();
+        let first = store
+            .list_findings_for_scan_id("identical-a")
+            .unwrap()
+            .remove(0);
+        let second = store
+            .list_findings_for_scan_id("identical-b")
+            .unwrap()
+            .remove(0);
+
+        assert_eq!(first.identity_id, second.identity_id);
+        assert_eq!(
+            first.identity_basis,
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        assert_eq!(
+            second.identity_basis,
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        assert_ne!(first.fingerprint, second.fingerprint);
+        assert_ne!(first.source_signature, second.source_signature);
+        assert_ne!(
+            finding_projection_key(&first, IdentityFoldPolicy::Safe),
+            finding_projection_key(&second, IdentityFoldPolicy::Safe)
+        );
+        let updated = store
+            .record_auto_triage_for_identity(
+                second_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.5,
+                    rationale: "inspect this sink independently".to_string(),
+                    ..TriageOutcome::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+        assert!(store
+            .v3_finding_by_projected_id(first_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .is_none());
+    }
+
+    #[test]
+    fn auto_triage_propagates_strong_identity_and_records_its_source() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/db.rs"), "query(input);\n").unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/db.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "SQL injection reaches query, CWE-89",
+        );
+        store
+            .record_run_started("prop-a", temp.path(), "running")
+            .unwrap();
+        let first_id = store.insert_finding("prop-a", &finding).unwrap();
+        store
+            .record_run_started("prop-b", temp.path(), "running")
+            .unwrap();
+        let source_id = store.insert_finding("prop-b", &finding).unwrap();
+        let outcome = TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.91,
+            rationale: "source and sink are connected".to_string(),
+            cost_usd: 0.125,
+            cost_usd_exact: false,
+            ..TriageOutcome::default()
+        };
+
+        assert_eq!(
+            store
+                .record_auto_triage_for_identity(source_id, &outcome)
+                .unwrap(),
+            2
+        );
+        let propagated = store
+            .v3_finding_by_projected_id(first_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .unwrap();
+        let source = store
+            .v3_finding_by_projected_id(source_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .unwrap();
+        assert_eq!(
+            propagated.cost_usd, 0.0,
+            "propagation cannot duplicate spend"
+        );
+        assert!(propagated.cost_usd_exact);
+        assert_eq!(source.cost_usd, 0.125);
+        assert!(!source.cost_usd_exact);
+        let events = crate::event_log::EventLog::open(temp.path().join(".kuzushi/v3/log"))
+            .unwrap()
+            .read_all()
+            .unwrap();
+        let decisions = events
+            .iter()
+            .filter(|event| event.event_kind == crate::event_log::EventKind::TriageDecided)
+            .collect::<Vec<_>>();
+        assert_eq!(decisions.len(), 2);
+        assert!(decisions
+            .iter()
+            .all(|event| event.payload["sourceFindingIds"] == json!([source_id])));
+        let mut bases = decisions
+            .iter()
+            .map(|event| event.payload["propagationBasis"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        bases.sort_unstable();
+        assert_eq!(bases, vec!["exact_producer_fingerprint", "file_fallback"]);
+
+        let projected: (String, String) = rusqlite::Connection::open(db_path)
+            .unwrap()
+            .query_row(
+                "select propagation_basis, source_finding_ids_json from review_decisions where finding_id = ?1",
+                [source_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(projected.0, "exact_producer_fingerprint");
+        assert_eq!(projected.1, format!("[{source_id}]"));
+    }
+
+    #[test]
+    fn file_fallback_does_not_propagate_across_distinct_source_signatures() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        let mut first = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/missing.rs",
+            8,
+            Some(8),
+            Severity::High,
+            "SQL injection at first sink, CWE-89",
+        );
+        let mut second = first.clone();
+        second.start_line = 80;
+        second.end_line = Some(80);
+        second.fingerprint = "fp3_second-sink".to_string();
+        second.dedup_key = Some(compute_dedup_key("src/missing.rs", 80, Some("CWE-89")));
+        second.source_signature = Some(compute_source_signature(
+            "src/missing.rs",
+            80,
+            Some("CWE-89"),
+        ));
+        first.fingerprint = "fp3_first-sink".to_string();
+        store
+            .record_run_started("fallback-a", temp.path(), "running")
+            .unwrap();
+        let first_id = store.insert_finding("fallback-a", &first).unwrap();
+        store
+            .record_run_started("fallback-b", temp.path(), "running")
+            .unwrap();
+        let second_id = store.insert_finding("fallback-b", &second).unwrap();
+        let first_stored = store.list_findings_for_scan_id("fallback-a").unwrap();
+        let second_stored = store.list_findings_for_scan_id("fallback-b").unwrap();
+        assert_eq!(first_stored[0].identity_id, second_stored[0].identity_id);
+        assert_eq!(
+            first_stored[0].identity_basis,
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        assert_eq!(
+            second_stored[0].identity_basis,
+            Some(FindingIdentityBasis::FileFallback)
+        );
+        store
+            .append_user_review_decision(
+                first_id,
+                &ReviewDecision {
+                    verdict: ReviewDecisionVerdict::Confirmed,
+                    author: TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "operator reviewed the distinct first sink".to_string(),
+                    dismiss_reason: None,
+                    actor: Some("operator".to_string()),
+                },
+            )
+            .unwrap();
+
+        let updated = store
+            .record_auto_triage_for_identity(
+                second_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.5,
+                    rationale: "inspect this sink".to_string(),
+                    ..TriageOutcome::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+        assert!(store
+            .v3_finding_by_projected_id(first_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .is_none());
+        assert!(store
+            .v3_finding_by_projected_id(second_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .is_some());
+    }
+
+    #[test]
+    fn auto_triage_refuses_a_compatible_identity_with_any_human_history() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/db.rs"), "query(input);\n").unwrap();
+        let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/db.rs",
+            1,
+            Some(1),
+            Severity::High,
+            "SQL injection reaches query, CWE-89",
+        );
+        store
+            .record_run_started("human-a", temp.path(), "running")
+            .unwrap();
+        let human_id = store.insert_finding("human-a", &finding).unwrap();
+        store
+            .append_user_review_decision(
+                human_id,
+                &ReviewDecision {
+                    verdict: ReviewDecisionVerdict::Confirmed,
+                    author: TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "operator reviewed the source".to_string(),
+                    dismiss_reason: None,
+                    actor: Some("operator".to_string()),
+                },
+            )
+            .unwrap();
+        store
+            .record_run_started("human-b", temp.path(), "running")
+            .unwrap();
+        let source_id = store.insert_finding("human-b", &finding).unwrap();
+
+        let updated = store
+            .record_auto_triage_for_identity(
+                source_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.9,
+                    rationale: "automated rerun disagreed".to_string(),
+                    ..TriageOutcome::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated, 0);
+        assert_eq!(store.list_review_decisions(human_id).unwrap().len(), 1);
+        assert!(store.list_review_decisions(source_id).unwrap().is_empty());
+        let dominant = store
+            .latest_human_review_decision_for_finding_identity(source_id)
+            .unwrap()
+            .expect("the human identity decision remains visible");
+        assert_eq!(dominant.decision.verdict, ReviewDecisionVerdict::Confirmed);
+        assert!(store
+            .v3_finding_by_projected_id(source_id)
+            .unwrap()
+            .unwrap()
+            .triage
+            .is_none());
+    }
+
+    #[test]
     fn suppressed_and_rekeyed_prior_rows_do_not_donate_identity() {
         let temp = tempfile::tempdir().unwrap();
         let store = FindingStore::open(temp.path().join("findings.db")).unwrap();
@@ -945,8 +1318,12 @@ mod tests {
             stored[0].identity_id.as_deref()
         );
         assert_eq!(
-            events[3].payload["identityMatchBasis"].as_str(),
+            events[3].payload["identityMatchTier"].as_str(),
             Some("stable_fp")
+        );
+        assert_eq!(
+            events[3].payload["identityMatchBasis"].as_str(),
+            Some("file_fallback")
         );
         assert_eq!(
             events[3].payload["displayPath"].as_str(),
@@ -1639,7 +2016,10 @@ mod tests {
         let target_b = store.list_findings_for_scan_id("run-target-b").unwrap();
 
         assert_ne!(target_a[0].identity_id, target_b[0].identity_id);
-        assert_eq!(target_b[0].identity_match_tier.as_deref(), Some("stable_fp"));
+        assert_eq!(
+            target_b[0].identity_match_tier.as_deref(),
+            Some("stable_fp")
+        );
     }
 
     #[test]
@@ -4605,7 +4985,11 @@ mod tests {
         completed_run(
             &store,
             "run-a",
-            &[returning.clone(), persisting.clone(), semgrep_finding("demo.gone", 40, "fixed later")],
+            &[
+                returning.clone(),
+                persisting.clone(),
+                semgrep_finding("demo.gone", 40, "fixed later"),
+            ],
         );
         completed_run(&store, "run-b", std::slice::from_ref(&persisting));
         completed_run(
@@ -5010,7 +5394,11 @@ mod tests {
         completed_run(
             store,
             "run-a",
-            &[semgrep_finding_at("demo.gone", "src/app.ts", "vanished in a clean rerun")],
+            &[semgrep_finding_at(
+                "demo.gone",
+                "src/app.ts",
+                "vanished in a clean rerun",
+            )],
         );
         store
             .record_run_started("run-b", Path::new("/tmp/repo"), "running")

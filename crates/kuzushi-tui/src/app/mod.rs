@@ -9,6 +9,7 @@ pub(crate) use artifacts::*;
 pub(crate) use attention::*;
 pub(crate) use attention_notify::*;
 pub(crate) use background_events::*;
+pub(crate) use batch_scan::*;
 pub(crate) use catalog::*;
 pub(crate) use command_palette::*;
 pub(crate) use command_router::*;
@@ -72,6 +73,7 @@ mod attention;
 mod attention_notify;
 mod autonomy;
 mod background_events;
+mod batch_scan;
 mod campaign;
 mod catalog;
 mod command_palette;
@@ -101,8 +103,8 @@ use self::settings::{preferred_model_choice_index, thinking_level_from_input};
 use self::workers::parse_plan_json;
 use self::workers::parse_threat_patch_json;
 use self::workers::{
-    merge_json, planner_worker, threat_ask_worker, threat_regen_worker, AgentEvent, PlanEvent,
-    ScanEvent, ThreatPatchEvent, ToolEvent,
+    merge_json, planner_worker, threat_regen_worker, AgentEvent, PlanEvent, ScanEvent,
+    ThreatPatchEvent, ToolEvent,
 };
 use self::workspace_context::{default_context_snapshot_view, default_workspace_view};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -157,6 +159,7 @@ mod tests;
 mod with_next_step;
 pub use agent_chat::AgentChatView;
 pub use agent_chat::ChatTurn;
+pub use agent_chat::ThreadContextKey;
 pub(crate) use agent_chat_state::AgentChatState;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
@@ -176,8 +179,10 @@ pub use onboarding::{
     TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub(crate) use onboarding::{
-    bound_target_candidate, immediate_target_candidate, large_repository_needs_decomposition,
-    planning_task_explicit_input, PlanningOperation, DECOMPOSE_FIRST_FILE_THRESHOLD,
+    bound_target_candidate, eligible_leaf_scopes, immediate_target_candidate,
+    large_repository_needs_decomposition, owning_leaf_scope, planning_task_explicit_input,
+    scoped_regeneration_input, MapRunConfigSummary, PlanningOperation, ALL_LEAF_SCOPES,
+    ALL_SCOPES_HARD_CAP, ALL_SCOPES_REVIEW_THRESHOLD, DECOMPOSE_FIRST_FILE_THRESHOLD,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqFinalInput, PrereqPlanAction,

@@ -382,19 +382,31 @@ fn context_partial_from_snapshot(walk_truncated: bool, snapshot: &Value) -> bool
 }
 
 pub(crate) fn build_context_snapshot_for_root(root: &Path, sample_limit: usize) -> Result<()> {
+    let mut snapshot = build_context_snapshot_value_for_root(root, sample_limit)?;
+    save_context_snapshot(root, &mut snapshot)?;
+    Ok(())
+}
+
+/// Builds an authenticated snapshot without choosing a persistence root.
+/// Scoped threat-model builds use this so repository evidence comes from the
+/// analysis root while `.kuzushi` ownership stays with the workspace root.
+pub(crate) fn build_context_snapshot_value_for_root(
+    root: &Path,
+    sample_limit: usize,
+) -> Result<Value> {
     let options = ContextBuildOptions {
         sample_limit: sample_limit.min(2_000),
         discovery: "auto".to_string(),
         enrichment: false,
         scope: "all".to_string(),
     };
-    build_context_snapshot_for_root_with_options(root, &options)
+    build_context_snapshot_value_for_root_with_options(root, &options)
 }
 
-fn build_context_snapshot_for_root_with_options(
+fn build_context_snapshot_value_for_root_with_options(
     root: &Path,
     options: &ContextBuildOptions,
-) -> Result<()> {
+) -> Result<Value> {
     let starting_tree_hash = crate::incremental_index::current_workspace_tree_hash(root)
         .context("context snapshot requires a content tree identity")?;
     let file_sample = collect_context_file_sample(root, options.sample_limit)?;
@@ -403,8 +415,7 @@ fn build_context_snapshot_for_root_with_options(
         .context("context snapshot requires a content tree identity")?;
     require_unchanged_context_tree(&starting_tree_hash, &tree_hash)?;
     stamp_context_tree_hash(&mut snapshot, &tree_hash)?;
-    save_context_snapshot(root, &mut snapshot)?;
-    Ok(())
+    Ok(snapshot)
 }
 
 struct ContextBuildOptions {

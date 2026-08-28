@@ -174,6 +174,11 @@ const CURATED_TOOL_LABELS: &[(&str, &str)] = &[
     ("threat-leads:build", "Build threat leads"),
     ("threat-leads:read", "Read threat leads"),
     ("threat-model:build", "Build threat model"),
+    ("threat-model:models", "List threat models"),
+    ("threat-model:activate", "Activate threat model"),
+    ("threat-model:revisions", "List threat-model revisions"),
+    ("threat-model:restore", "Restore threat-model revision"),
+    ("threat-model:adopt", "Adopt threat-model mirror edits"),
     ("threat-model:import", "Import threat model"),
     (
         "threat-model:methodologies",

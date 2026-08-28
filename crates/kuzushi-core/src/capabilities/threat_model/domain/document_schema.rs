@@ -131,9 +131,10 @@ pub(crate) fn build_agent_prompt(
     source_bundle: &ThreatModelSourceBundle,
     grounding: &PromptGrounding,
 ) -> Result<String> {
-    let files = inventory_files(&input.target, input.max_elements.saturating_mul(4).max(40))?;
-    let manifest_summary = read_manifest_summary(&input.target)?;
-    let project_overview = read_project_overview_evidence(&input.target)?;
+    let analysis_root = input.analysis_root();
+    let files = inventory_files(analysis_root, input.max_elements.saturating_mul(4).max(40))?;
+    let manifest_summary = read_manifest_summary(analysis_root)?;
+    let project_overview = read_project_overview_evidence(analysis_root)?;
     Ok([
         prompt_header(input),
         repository_inventory_section(&files),
@@ -161,14 +162,16 @@ fn prompt_header(input: &BuildInput) -> String {
     format!(
         r#"Build a repository threat model using a staged bootstrap process.
 
-Target: {target}
+Workspace: {workspace}
+Analysis root: {analysis_root}
 Repository name: {repo_name}
 Methodology: {methodology}
 Slice: {slice}
 {methodology_scope}
 Max DFD elements: {max_elements}
 Max threats: {max_threats}"#,
-        target = input.target.display(),
+        workspace = input.workspace_root().display(),
+        analysis_root = input.analysis_root().display(),
         repo_name = input.repo_name,
         methodology = input.methodology,
         slice = input.slice,

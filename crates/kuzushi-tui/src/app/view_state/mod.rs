@@ -57,8 +57,8 @@ pub use activity::SubsystemAggregate;
 pub use activity::{RunFocusOrigin, RunFocusReceipt, RunFocusSteerEditor};
 pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
 pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
-pub(crate) use campaign_deck::dispatcher_args;
 pub use campaign_deck::CampaignRouteState;
+pub(crate) use campaign_deck::{batch_controller_args, dispatcher_args};
 pub use command_palette::{CommandPaletteFooter, CommandPaletteSnapshot, CommandPaletteStatus};
 pub use config_screen::{ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus};
 pub use confirm_dialog::{ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus};
@@ -101,10 +101,11 @@ pub(crate) use routes::ReportOrigin;
 pub use routes::{
     AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
     DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
-    InvestigationBoundary, ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState,
-    PlanningPickerRouteState, PromptDocumentMode, PromptDocumentState, ReportReceipt,
-    ReportRouteState, RouterState, SceneRouteState, ScrollRouteState, SetupEditor, SetupRouteState,
-    SetupRowId, TargetPickerRouteState, ToolsRouteState, WorkbenchRouteState,
+    InvestigationBoundary, MapRunConfigRouteState, MapRunConfigRowId, ModelCatalogRouteState,
+    ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState, PromptDocumentMode,
+    PromptDocumentState, ReportReceipt, ReportRouteState, RouterState, SceneRouteState,
+    ScrollRouteState, SetupEditor, SetupRouteState, SetupRowId, TargetPickerRouteState,
+    ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;

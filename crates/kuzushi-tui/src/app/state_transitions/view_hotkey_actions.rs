@@ -119,6 +119,12 @@ impl ShellApp {
             }
             ViewHotkeyAction::WorkbenchBacklogBulkDefer => self.apply_backlog_bulk_defer(),
             ViewHotkeyAction::WorkbenchBacklogUndo => self.apply_backlog_undo(),
+            ViewHotkeyAction::ThreatModelNext => {
+                InputUpdate::handled_with_effects(self.reduce_threat_model_cycle(false))
+            }
+            ViewHotkeyAction::ThreatModelPrevious => {
+                InputUpdate::handled_with_effects(self.reduce_threat_model_cycle(true))
+            }
             _ => return None,
         };
         Some(update)
@@ -1182,6 +1188,12 @@ impl ShellApp {
                 self.router.threat_mut().open(view);
                 self.set_shell_view(ShellView::Threat);
                 InputUpdate::handled()
+            }
+            ViewHotkeyAction::ThreatModelNext => {
+                InputUpdate::handled_with_effects(self.reduce_threat_model_cycle(false))
+            }
+            ViewHotkeyAction::ThreatModelPrevious => {
+                InputUpdate::handled_with_effects(self.reduce_threat_model_cycle(true))
             }
             ViewHotkeyAction::LogsFilter => {
                 self.open_logs_filter();

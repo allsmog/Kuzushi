@@ -77,7 +77,7 @@ pub struct FindingSource {
     pub last_seen_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Finding {
     pub id: Option<i64>,
     pub scan_id: Option<String>,
@@ -95,11 +95,42 @@ pub struct Finding {
         skip_serializing_if = "Option::is_none"
     )]
     pub identity_match_tier: Option<String>,
+    /// Evidence basis for the durable identity. Absent on legacy rows; callers
+    /// must use `effective_identity_basis()` so an ambiguous legacy
+    /// `stable_fp` is treated as file fallback rather than silently upgraded.
+    #[serde(
+        default,
+        rename = "identityBasis",
+        alias = "identity_basis",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub identity_basis: Option<FindingIdentityBasis>,
     pub fingerprint: String,
     pub rule_id: String,
+    /// Producer-supplied version for the individual rule. This is distinct
+    /// from the observation's aggregate rule-set hash and remains optional for
+    /// legacy producers.
+    #[serde(
+        default,
+        rename = "ruleVersion",
+        alias = "rule_version",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rule_version: Option<String>,
     pub title: String,
     pub severity: Severity,
     pub file_path: String,
+    /// Producer-supplied source symbol. A qualified value may support a
+    /// source-locator identity; an unqualified value is still useful as
+    /// report-only cross-tool clustering evidence.
+    #[serde(
+        default,
+        rename = "symbolLocator",
+        alias = "symbol_locator",
+        alias = "symbol",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub symbol_locator: Option<String>,
     pub start_line: u32,
     pub end_line: Option<u32>,
     pub message: String,
@@ -175,44 +206,72 @@ pub struct Finding {
     pub grounding: Option<super::GroundingStatus>,
 }
 
-impl Default for Finding {
-    fn default() -> Self {
-        Self {
-            id: None,
-            scan_id: None,
-            identity_id: None,
-            identity_match_tier: None,
-            fingerprint: String::new(),
-            rule_id: String::new(),
-            title: String::new(),
-            severity: Severity::Unknown,
-            file_path: String::new(),
-            start_line: 0,
-            end_line: None,
-            message: String::new(),
-            tool: String::new(),
-            actor_fingerprint: None,
-            static_proof_state: None,
-            triage: None,
-            triaged_by: None,
-            verification: None,
-            created_at: String::new(),
-            vuln_source: None,
-            dedup_key: None,
-            source_signature: None,
-            corroboration_count: 0,
-            suppressed: false,
-            snoozed_until: None,
-            remediation: None,
-            impact: None,
-            category: None,
-            exploit_scenario: None,
-            preconditions: Vec::new(),
-            references: Vec::new(),
-            evidence: Vec::new(),
-            sources: Vec::new(),
-            grounding: None,
+impl Finding {
+    pub(crate) fn normalized_symbol_locator(&self) -> Option<String> {
+        normalized_symbol_locator(self.symbol_locator.as_deref()?)
+    }
+
+    pub(crate) fn defensible_source_locator(&self) -> Option<String> {
+        let locator = self.normalized_symbol_locator()?;
+        is_qualified_symbol_locator(&locator).then_some(locator)
+    }
+
+    pub(crate) fn has_compatible_symbol_locator(&self, other: &Self) -> bool {
+        match (
+            self.normalized_symbol_locator(),
+            other.normalized_symbol_locator(),
+        ) {
+            (None, None) => true,
+            (Some(left), Some(right)) => left == right,
+            _ => false,
         }
+    }
+}
+
+fn normalized_symbol_locator(value: &str) -> Option<String> {
+    let locator = value.trim();
+    if locator.is_empty()
+        || locator.len() > 512
+        || locator.chars().any(char::is_control)
+        || matches!(
+            locator.to_ascii_lowercase().as_str(),
+            "unknown" | "<unknown>" | "none" | "n/a" | "?"
+        )
+    {
+        return None;
+    }
+    Some(locator.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+fn is_qualified_symbol_locator(locator: &str) -> bool {
+    ["::", ".", "#", "/"]
+        .iter()
+        .any(|marker| locator.contains(marker))
+}
+
+#[cfg(test)]
+mod metadata_serde_tests {
+    use super::*;
+
+    #[test]
+    fn optional_rule_and_symbol_metadata_round_trip_with_legacy_aliases() {
+        let finding = Finding::default()
+            .with_rule_version("rules-2026.08")
+            .with_symbol_locator("crate::db::execute");
+        let mut value = serde_json::to_value(&finding).unwrap();
+
+        assert_eq!(value["ruleVersion"], "rules-2026.08");
+        assert_eq!(value["symbolLocator"], "crate::db::execute");
+        let object = value.as_object_mut().unwrap();
+        let rule_version = object.remove("ruleVersion").unwrap();
+        let symbol = object.remove("symbolLocator").unwrap();
+        object.insert("rule_version".to_string(), rule_version);
+        object.insert("symbol".to_string(), symbol);
+
+        let legacy: Finding = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.rule_version.as_deref(), Some("rules-2026.08"));
+        assert_eq!(legacy.symbol_locator.as_deref(), Some("crate::db::execute"));
+        assert_eq!(legacy.severity, Severity::Unknown);
     }
 }
 

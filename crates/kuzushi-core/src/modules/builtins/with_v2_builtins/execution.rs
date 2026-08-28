@@ -274,7 +274,9 @@ impl ModuleRegistry {
         let mut input = self.prepare_tool_input(name, input, option_store)?;
         normalize_workspace_path_options(self, name, &mut input, ctx, false, None)?;
         let input = input_with_declared_prompt_defaults(self, name, input, ctx)?;
-        bind_repository_execution_input(name, input, ctx)
+        let input = bind_repository_execution_input(name, input, ctx)?;
+        let input = bind_identity_policy_defaults(name, input, ctx)?;
+        bind_dispatch_snapshot_input(name, input, ctx)
     }
 
     pub fn prepare_dispatch_input(
@@ -1862,6 +1864,87 @@ mod prompt_file_default_tests {
         assert!(input.get("VERIFY_PROMPT").is_none());
         assert_eq!(input["triage"], json!(false));
         assert_eq!(input["verify"], json!(false));
+        assert!(input["threatModelRef"].is_null());
+    }
+
+    #[test]
+    fn sast_preparation_binds_the_exact_active_model_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        crate::capabilities::threat_model::save_persistent_threat_model(
+            temp.path(),
+            &json!({"methodology": "stride"}),
+            true,
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = ModuleRegistry::with_v2_builtins()
+            .prepare_tool_input_for_dispatch("sast:scan", json!({}), &ctx, None)
+            .unwrap();
+        let active = crate::capabilities::threat_model::load_active_threat_model(temp.path())
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(input["threatModelRef"], json!(active.model_ref));
+    }
+
+    #[test]
+    fn prepared_sast_input_does_not_follow_a_later_activation() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        crate::capabilities::threat_model::save_persistent_threat_model(
+            temp.path(),
+            &json!({"methodology": "stride"}),
+            true,
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let registry = ModuleRegistry::with_v2_builtins();
+        let prepared = registry
+            .prepare_tool_input_for_dispatch("sast:scan", json!({}), &ctx, None)
+            .unwrap();
+        let expected: crate::capabilities::threat_model::ThreatModelRef =
+            serde_json::from_value(prepared["threatModelRef"].clone()).unwrap();
+        let scope = crate::capabilities::threat_model::current_scope_ref_for_path(temp.path(), ".")
+            .unwrap()
+            .unwrap();
+        crate::capabilities::threat_model::commit_threat_model_revision(
+            temp.path(),
+            &json!({
+                "version": "2.0",
+                "methodology": "stride",
+                "dfd": {"nodes": [{"id": "app"}], "flows": [], "trustBoundaries": []},
+                "threats": [],
+                "summary": {}
+            }),
+            crate::capabilities::threat_model::ThreatModelCommit {
+                model_id: Some(expected.model_id.clone()),
+                new_model: false,
+                label: "Legacy threat model".to_string(),
+                scope,
+                methodology: "stride".to_string(),
+                source: crate::capabilities::threat_model::ThreatModelRevisionSource::Refine,
+                source_revision_id: Some(expected.revision_id.clone()),
+                run_id: None,
+                activate: Some(true),
+                actor: "test".to_string(),
+            },
+        )
+        .unwrap();
+
+        let still_bound: crate::capabilities::threat_model::ThreatModelRef =
+            serde_json::from_value(prepared["threatModelRef"].clone()).unwrap();
+        assert_eq!(still_bound, expected);
+        let error = crate::capabilities::threat_model::acquire_exact_threat_model_read_lease(
+            temp.path(),
+            Some(&still_bound),
+        )
+        .err()
+        .expect("a pointer change must invalidate the prepared scan");
+        assert!(error.to_string().contains("active threat model changed"));
     }
 
     #[test]
@@ -2028,6 +2111,8 @@ mod prompt_file_default_tests {
             .unwrap();
 
         assert_eq!(&value, opaque.value());
+        assert_eq!(value["identityReconcile"], "off");
+        assert_eq!(value["modelDedupe"], "off");
     }
 
     #[cfg(unix)]

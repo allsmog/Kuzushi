@@ -8,11 +8,18 @@ use kuzushi_core::{
 use std::collections::BTreeMap;
 
 mod model;
+mod scene;
 
 pub(crate) use model::{
     ScreenContext, ScreenCount, ScreenCursor, ScreenEvidenceContext, ScreenFindingSummary,
     ScreenProofContext, ScreenRevision, ScreenSelectedItem, ScreenTriageContext,
     ScreenVerificationContext,
+};
+#[cfg(test)]
+pub(crate) use scene::threat_model_scene_context;
+pub(crate) use scene::{
+    capture_threat_model_scene_snapshot, threat_model_scene_context_from_snapshot,
+    ThreatModelSceneContext, ThreatModelSceneSnapshot,
 };
 
 const VISIBLE_ROW_LIMIT: usize = 8;
@@ -124,6 +131,7 @@ fn setup_screen_label(app: &ShellApp) -> &'static str {
         Some(crate::app::SetupEditor::Model) => "SetupModel",
         Some(crate::app::SetupEditor::Credentials) => "SetupCredentials",
         Some(crate::app::SetupEditor::Plan) => "SetupMapPlan",
+        Some(crate::app::SetupEditor::ThreatModel) => "SetupThreatModel",
         Some(crate::app::SetupEditor::Prompt) => "SetupPrompt",
         Some(crate::app::SetupEditor::Budget) => "SetupBudget",
         Some(crate::app::SetupEditor::Target) => "SetupTarget",

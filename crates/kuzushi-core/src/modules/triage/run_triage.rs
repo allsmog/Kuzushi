@@ -8,18 +8,22 @@ pub(in crate::modules) fn run_triage(
     let mut run = prepare_triage_run(input, ctx)?;
     if run.findings.is_empty() {
         emit_triage_no_findings(ctx);
-        return Ok(empty_triage_response(&run.input, run.missing_fingerprints));
+        let mut response = empty_triage_response(&run.input, run.missing_fingerprints);
+        attach_triage_advisory_reports(&mut response, run.store, &run.input)?;
+        return Ok(response);
     }
     let execution = resolve_triage_execution(ctx, runtime, &run)?;
     let completed = classify_triage_findings(&mut run, ctx, &execution)?;
     emit_triage_done(ctx, &completed.stats);
-    Ok(triage_response(
+    let mut response = triage_response(
         &run.input,
         &execution.config,
         &completed.stage1,
         &completed.stats,
         run.missing_fingerprints,
-    ))
+    );
+    attach_triage_advisory_reports(&mut response, run.store, &run.input)?;
+    Ok(response)
 }
 
 struct PreparedTriageRun<'a> {
@@ -37,11 +41,13 @@ fn prepare_triage_run<'a>(
     let workspace = require_triage_workspace(ctx)?;
     let store = require_triage_store(ctx)?;
     let mut input = TriageRunInput::from_tool_input(&input, workspace.root())?;
-    apply_threat_model_triage_context(&mut input, workspace.root());
+    apply_threat_model_triage_context(&mut input, workspace.root())?;
     emit_triage_start(ctx, &input);
     let (findings, missing_fingerprints) = select_triage_findings(store, &input)?;
     input.suppression_feedback =
         suppression_feedback::suppression_feedback_notes(workspace, &findings)?;
+    input.reviewed_refutation_priors =
+        store.reviewed_refutation_priors_for(&findings, now_unix())?;
     emit_triage_loaded(ctx, findings.len(), missing_fingerprints.len());
     Ok(PreparedTriageRun {
         workspace,
@@ -243,7 +249,7 @@ pub(in crate::modules) fn require_triage_store<'a>(
 }
 
 pub(in crate::modules) fn empty_triage_response(
-    _input: &TriageRunInput,
+    input: &TriageRunInput,
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let summary = "No findings matched triage input.";
@@ -259,6 +265,11 @@ pub(in crate::modules) fn empty_triage_response(
         "costUsd": 0.0,
         "missingFingerprints": missing_fingerprints,
         "findings": [],
+        "policies": {
+            "identityReconcile": input.identity_reconcile.as_str(),
+            "modelDedupe": model_dedupe_receipt(input.model_dedupe),
+            "occurrenceEvidence": occurrence_evidence_receipt(),
+        },
     });
     let mut result = crate::module_result::skipped_output_result(
         summary,
@@ -268,6 +279,139 @@ pub(in crate::modules) fn empty_triage_response(
     );
     result["costUsd"] = json!(0.0);
     result
+}
+
+pub(in crate::modules) fn attach_triage_advisory_reports(
+    response: &mut Value,
+    store: &FindingStore,
+    input: &TriageRunInput,
+) -> Result<()> {
+    let findings = store.list_all_findings()?;
+    let clusters = crate::findings::derive_cross_tool_cluster_report(&findings);
+    let refutation = store.reviewed_refutation_report(now_unix())?;
+    let cluster_count = clusters.candidate_clusters.len();
+    let plain_lines = refutation_plain_lines(&refutation);
+    insert_advisory_data(response, input, clusters, refutation)?;
+    append_advisory_output(response, cluster_count, &plain_lines);
+    Ok(())
+}
+
+fn insert_advisory_data(
+    response: &mut Value,
+    input: &TriageRunInput,
+    clusters: crate::findings::CrossToolClusterReport,
+    refutation: crate::findings::ReviewedRefutationReport,
+) -> Result<()> {
+    let data = response
+        .get_mut("data")
+        .and_then(Value::as_object_mut)
+        .context("triage response is missing its data object")?;
+    data.insert(
+        "crossToolClusters".to_string(),
+        serde_json::to_value(clusters)?,
+    );
+    data.insert(
+        "reviewedRefutation".to_string(),
+        serde_json::to_value(refutation)?,
+    );
+    data.insert(
+        "policies".to_string(),
+        json!({
+            "identityReconcile": input.identity_reconcile.as_str(),
+            "modelDedupe": model_dedupe_receipt(input.model_dedupe),
+            "occurrenceEvidence": occurrence_evidence_receipt(),
+        }),
+    );
+    Ok(())
+}
+
+fn model_dedupe_receipt(policy: ModelDedupePolicy) -> Value {
+    match policy {
+        ModelDedupePolicy::Off => json!({
+            "mode": "off",
+            "prepassExecuted": false,
+        }),
+        ModelDedupePolicy::Manual => json!({
+            "mode": "manual",
+            "prepassExecuted": false,
+            "nextAction": "run triage:dedupe dryRun=true to inspect model proposals",
+        }),
+        ModelDedupePolicy::Auto => json!({
+            "mode": "auto",
+            "prepassExecuted": true,
+        }),
+    }
+}
+
+fn occurrence_evidence_receipt() -> Value {
+    json!({
+        "presence": "corroboration_only",
+        "absence": "not_refutation",
+        "breaksTiedVerdict": false,
+    })
+}
+
+fn append_advisory_output(response: &mut Value, clusters: usize, lines: &[String]) {
+    let Some(output) = response.get_mut("output") else {
+        return;
+    };
+    let mut rendered = output.as_str().unwrap_or_default().to_string();
+    rendered.push_str(&format!(
+        "\nCross-tool candidates: {clusters} cluster(s), report only; no verdict inheritance."
+    ));
+    for line in lines {
+        rendered.push('\n');
+        rendered.push_str(line);
+    }
+    *output = json!(rendered);
+}
+
+fn refutation_plain_lines(report: &crate::findings::ReviewedRefutationReport) -> Vec<String> {
+    report
+        .populations
+        .iter()
+        .filter(|stats| {
+            matches!(
+                stats.population,
+                crate::findings::RefutationPopulation::Human
+                    | crate::findings::RefutationPopulation::Automatic
+            )
+        })
+        .map(refutation_population_line)
+        .collect()
+}
+
+fn refutation_population_line(stats: &crate::findings::RefutationPopulationStats) -> String {
+    let population = match stats.population {
+        crate::findings::RefutationPopulation::Human => "human",
+        crate::findings::RefutationPopulation::Automatic => "automatic",
+        crate::findings::RefutationPopulation::Imported => "imported",
+    };
+    let observed = stats
+        .observed_refutation_rate
+        .map(percent_label)
+        .unwrap_or_else(|| "n/a".to_string());
+    format!(
+        "Reviewed refutation ({population}): {observed} ({}/{} reviewed; {}/{} emitted) · Beta(1,1) shrunken {}, 90% interval {}–{}.",
+        stats.refuted,
+        stats.reviewed,
+        stats.reviewed,
+        stats.emitted,
+        percent_label(stats.shrunken_refutation_rate),
+        percent_label(stats.credible_interval_90[0]),
+        percent_label(stats.credible_interval_90[1]),
+    )
+}
+
+fn percent_label(rate: f64) -> String {
+    format!("{:.0}%", (rate * 100.0).clamp(0.0, 100.0))
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 
 pub(in crate::modules) fn require_triage_runtime(

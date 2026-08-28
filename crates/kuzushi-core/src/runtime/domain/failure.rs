@@ -140,7 +140,8 @@ impl RuntimeFailureMetadata {
     }
 
     pub fn with_model_call(mut self, call_id: impl fmt::Display, stage: Option<&str>) -> Self {
-        self.model_call_id = safe_optional_text(Some(&call_id.to_string()), MAX_MODEL_CALL_ID_CHARS);
+        self.model_call_id =
+            safe_optional_text(Some(&call_id.to_string()), MAX_MODEL_CALL_ID_CHARS);
         self.stage = safe_optional_text(stage, MAX_FAILURE_STAGE_CHARS);
         self
     }
@@ -182,9 +183,15 @@ impl<'de> Deserialize<'de> for RuntimeFailureMetadata {
             safe.model_call_id = None;
         }
         let persisted = (wire.detail, wire.model_call_id, wire.stage);
-        let normalized = (safe.detail.clone(), safe.model_call_id.clone(), safe.stage.clone());
+        let normalized = (
+            safe.detail.clone(),
+            safe.model_call_id.clone(),
+            safe.stage.clone(),
+        );
         if persisted != normalized || wire.http_status != safe.http_status {
-            return Err(serde::de::Error::custom("runtime failure metadata violates safety policy"));
+            return Err(serde::de::Error::custom(
+                "runtime failure metadata violates safety policy",
+            ));
         }
         Ok(safe)
     }

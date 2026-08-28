@@ -5,7 +5,7 @@ use super::{
     WorkbenchCache, WorkspaceView,
 };
 use kuzushi_core::{
-    findings::ReviewDecisionRecord,
+    findings::{IdentityFoldPolicy, ReviewDecisionRecord},
     incremental_index::{coalesce_changes, plan_for_change, ReindexPlan, WorkspaceChange},
     workspace::ToolShelf,
     AgenticSastReport, CarliniThreatHuntReport, Finding, PatchLifecycleRecord, PatchLifecycleState,
@@ -160,6 +160,8 @@ pub struct DomainCache {
     trace_expansion: Option<TraceExpansionSnapshot>,
     program_scope: Option<ProgramScope>,
     findings: Vec<Finding>,
+    finding_aliases: Vec<String>,
+    identity_fold_policy: IdentityFoldPolicy,
     findings_revision: u64,
     findings_total: usize,
     findings_read_watermark: Option<u64>,
@@ -205,6 +207,8 @@ impl DomainCache {
             trace_expansion: None,
             program_scope: None,
             findings: Vec::new(),
+            finding_aliases: Vec::new(),
+            identity_fold_policy: IdentityFoldPolicy::Legacy,
             findings_revision: 0,
             findings_total: 0,
             findings_read_watermark: None,
@@ -260,6 +264,8 @@ impl DomainCache {
 
     fn clear_target_findings(&mut self) {
         self.findings.clear();
+        self.finding_aliases.clear();
+        self.identity_fold_policy = IdentityFoldPolicy::Legacy;
         self.bump_findings_revision();
         self.findings_total = 0;
         self.findings_read_watermark = None;
@@ -654,7 +660,29 @@ impl DomainCache {
     pub(crate) fn set_findings(&mut self, findings: Vec<Finding>) {
         self.findings_total = findings.len();
         self.findings = findings;
+        self.finding_aliases.clear();
         self.bump_findings_revision();
+    }
+
+    pub(crate) fn set_findings_projection(
+        &mut self,
+        findings: Vec<Finding>,
+        aliases: Vec<String>,
+        policy: IdentityFoldPolicy,
+    ) {
+        self.set_findings(findings);
+        if aliases.len() == self.findings.len() {
+            self.finding_aliases = aliases;
+        }
+        self.identity_fold_policy = policy;
+    }
+
+    pub(crate) fn finding_aliases(&self) -> &[String] {
+        &self.finding_aliases
+    }
+
+    pub(crate) fn identity_fold_policy(&self) -> IdentityFoldPolicy {
+        self.identity_fold_policy
     }
 
     pub(crate) fn findings_revision(&self) -> u64 {

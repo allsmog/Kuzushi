@@ -171,10 +171,10 @@ pub(crate) use findings::{
     finding_detail_model_for_projection, findings_model, review_backlog_active,
     selected_finding_detail_model, selected_finding_out_of_window_notice,
     visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
-    visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
-    DecisionHistoryRow, FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, FindingsEmptyState, FindingsModel, ProofTier, SourceSnippetModel,
-    TriageSummaryModel, SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
+    visible_findings_cache_key, visible_findings_len, visible_sorted_finding_alias_indices,
+    CleanScanEmptyState, DecisionHistoryRow, FilteredFindingsEmptyState, FindingDetailModel,
+    FindingEvidenceRow, FindingListRow, FindingsEmptyState, FindingsModel, ProofTier,
+    SourceSnippetModel, TriageSummaryModel, SNIPPET_CONTEXT_AFTER, SNIPPET_CONTEXT_BEFORE,
 };
 pub(crate) use health::{
     health_display_model, health_model, HealthDisplayModel, HealthModel, HealthRow, HealthTone,
@@ -284,8 +284,8 @@ pub(crate) use report_preview::{
 };
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use review_queue::{
-    review_queue_model, ReviewFacetCount, ReviewFacetGroup, ReviewQueueMode, ReviewQueueModel,
-    ReviewQueueRow, ReviewWorkflowGroup, LEARN_ORDERING_INDICATOR,
+    review_queue_model, ReviewFacetCount, ReviewFacetGroup, ReviewOccurrence, ReviewQueueMode,
+    ReviewQueueModel, ReviewQueueRow, ReviewWorkflowGroup, LEARN_ORDERING_INDICATOR,
 };
 pub(crate) use review_yield::{
     review_yield_detail_for, ReviewYieldDetailModel, ReviewYieldSignalViewModel,
@@ -315,7 +315,13 @@ pub(crate) use run_trace::{
 pub(crate) use sast_tasks::{
     plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
 };
-pub(crate) use screen_context::{screen_context_model, ScreenContext};
+#[cfg(test)]
+pub(crate) use screen_context::threat_model_scene_context;
+pub(crate) use screen_context::{
+    capture_threat_model_scene_snapshot, screen_context_model,
+    threat_model_scene_context_from_snapshot, ScreenContext, ThreatModelSceneContext,
+    ThreatModelSceneSnapshot,
+};
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
@@ -335,6 +341,10 @@ pub(crate) use terminal_title::terminal_title;
 pub(crate) use theme_picker::{theme_picker_model, ThemePickerModel};
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
+};
+pub(crate) use threat_model::{
+    threat_model_freshness, threat_model_picker, ThreatModelFreshnessModel, ThreatModelHeadRow,
+    ThreatModelPickerModel,
 };
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::{threat_patch_card_model, ThreatPatchCardModel};

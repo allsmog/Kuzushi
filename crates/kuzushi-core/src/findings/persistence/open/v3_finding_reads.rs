@@ -5,8 +5,24 @@ use std::collections::BTreeMap;
 const LATEST_FINDING_PROJECTION_SQL: &str = r#"
 with observations as (
     select finding_json,
-           coalesce(nullif(json_extract(finding_json, '$.identityId'), ''),
-                    json_extract(finding_json, '$.fingerprint')) as stable_key,
+           case
+             when lower(trim(json_extract(finding_json, '$.tool'))) = 'chains'
+               or lower(trim(json_extract(finding_json, '$.rule_id'))) like 'exploit-chain/%'
+               then 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
+             when nullif(trim(json_extract(finding_json, '$.identityId')), '') is null
+               then 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
+             when json_extract(finding_json, '$.identityBasis') in (
+                    'exact_producer_fingerprint', 'cross_run_dedup_key', 'source_locator'
+                  )
+               then 'identity:' || json_extract(finding_json, '$.identityId')
+             when nullif(trim(json_extract(finding_json, '$.source_signature')), '') is not null
+               then 'identity:' || json_extract(finding_json, '$.identityId')
+                    || ':source:' || trim(json_extract(finding_json, '$.source_signature'))
+             when nullif(trim(json_extract(finding_json, '$.dedup_key')), '') is not null
+               then 'identity:' || json_extract(finding_json, '$.identityId')
+                    || ':dedup:' || trim(json_extract(finding_json, '$.dedup_key'))
+             else 'fingerprint:' || json_extract(finding_json, '$.fingerprint')
+           end as stable_key,
            created_seq
       from finding_observations
      where finding_json is not null
@@ -134,7 +150,7 @@ impl FindingStore {
         Ok(findings.into_iter().next())
     }
 
-    fn hydrate_v3_findings(&self, mut findings: Vec<Finding>) -> Result<Vec<Finding>> {
+    pub(super) fn hydrate_v3_findings(&self, mut findings: Vec<Finding>) -> Result<Vec<Finding>> {
         self.hydrate_v3_findings_in_place(&mut findings)?;
         Ok(findings)
     }
@@ -237,7 +253,7 @@ fn projected_finding_key(finding: &Finding) -> String {
     )
 }
 
-fn finding_list_order(left: &Finding, right: &Finding) -> std::cmp::Ordering {
+pub(super) fn finding_list_order(left: &Finding, right: &Finding) -> std::cmp::Ordering {
     severity_rank(left.severity)
         .cmp(&severity_rank(right.severity))
         .then_with(|| {

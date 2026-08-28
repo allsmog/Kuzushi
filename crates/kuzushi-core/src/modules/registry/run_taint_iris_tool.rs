@@ -214,6 +214,11 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         | "threat-model:read"
         | "threat-model:verify"
         | "threat-model:import"
+        | "threat-model:models"
+        | "threat-model:activate"
+        | "threat-model:revisions"
+        | "threat-model:restore"
+        | "threat-model:adopt"
         | "threat-model:methodologies"
         | "randori:pasta"
         | "randori:threat-model" => {
@@ -275,21 +280,32 @@ fn run_triage_with_optional_dedupe(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let dedupe_enabled = input
+    let legacy_dedupe = input
         .get("dedupe")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let dedupe_enabled = legacy_dedupe
+        || input.get("modelDedupe").and_then(Value::as_str) == Some("auto");
+    let effective_input = effective_model_dedupe_input(input, legacy_dedupe);
     if !dedupe_enabled {
-        return run_triage(input.clone(), ctx, runtime);
+        return run_triage(effective_input, ctx, runtime);
     }
     let dedupe = crate::capabilities::corpus_dedupe::execute_triage_dedupe(
-        dedupe_prepass_input(input),
+        dedupe_prepass_input(&effective_input),
         ctx,
         runtime,
     )?;
-    let mut result = run_triage(input.clone(), ctx, runtime)?;
+    let mut result = run_triage(effective_input, ctx, runtime)?;
     merge_dedupe_into_triage_result(&mut result, dedupe)?;
     Ok(result)
+}
+
+fn effective_model_dedupe_input(input: &Value, legacy_dedupe: bool) -> Value {
+    let mut effective = input.clone();
+    if legacy_dedupe {
+        effective["modelDedupe"] = json!("auto");
+    }
+    effective
 }
 
 fn dedupe_prepass_input(input: &Value) -> Value {

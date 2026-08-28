@@ -11,7 +11,6 @@ use formatting::{
 pub const PROJECT_MODEL_SCHEMA_VERSION: u32 = 1;
 const MAX_PROJECT_MODEL_BYTES: usize = 32 * 1024 * 1024;
 const MAX_PROJECT_MODEL_SOURCE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_SCOPE_ID_BYTES: usize = 160;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -370,12 +369,10 @@ fn source_hash_changed(root: &Path, section: &ProjectModelSection) -> bool {
 }
 
 fn validate_scope_id(scope_id: &str) -> Result<()> {
-    let valid = !scope_id.is_empty()
-        && scope_id.len() <= MAX_SCOPE_ID_BYTES
-        && scope_id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
-    anyhow::ensure!(valid, "Invalid project scope id {scope_id:?}");
+    anyhow::ensure!(
+        crate::workspace::domain::valid_scope_id(scope_id),
+        "Invalid project scope id {scope_id:?}"
+    );
     Ok(())
 }
 

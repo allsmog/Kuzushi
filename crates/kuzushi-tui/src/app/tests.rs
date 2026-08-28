@@ -2219,7 +2219,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
 
-    let effects = app.reduce_ask_agent("What should I run first?");
+    let effects = app.reduce_ask_agent(&AskRequest::screen("What should I run first?"));
 
     assert_eq!(effects.len(), 1);
     match effects.into_iter().next().unwrap() {
@@ -2327,7 +2327,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
 fn ask_reducer_requires_target_before_model() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
-    let effects = app.reduce_ask_agent("What should I inspect?");
+    let effects = app.reduce_ask_agent(&AskRequest::screen("What should I inspect?"));
 
     assert!(effects.is_empty());
     assert!(!app.has_running_work());
@@ -2354,7 +2354,7 @@ fn ask_reducer_refuses_known_missing_credentials_before_dispatch() {
     let mut app = ShellApp::new(config, None);
     app.set_target(Some(target.path().to_path_buf()));
 
-    let effects = app.reduce_ask_agent("What should I inspect?");
+    let effects = app.reduce_ask_agent(&AskRequest::screen("What should I inspect?"));
 
     assert!(effects.is_empty());
     assert!(!app.has_running_work());
@@ -2488,7 +2488,7 @@ fn planner_reducer_returns_start_effect_without_spawning_worker() {
 }
 
 #[test]
-fn threat_reducers_return_start_effects_without_spawning_workers() {
+fn threat_regen_and_inline_ask_return_effects_without_spawning_workers() {
     let target = tempfile::tempdir().expect("threat target");
     let mut config = V2Config::default();
     config.model = Some("openai:gpt-5.5".to_string());
@@ -2496,7 +2496,10 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
     app.set_target(Some(target.path().to_path_buf()));
 
     let regen_effects = app.reduce_threat_regen();
-    let ask_effects = app.reduce_threat_ask("what changed in the threat model?");
+    let ask_effects = app.reduce_ask_agent(&AskRequest::threat_model(
+        "what changed in the threat model?",
+        false,
+    ));
 
     assert_eq!(regen_effects.len(), 1);
     assert_eq!(ask_effects.len(), 1);
@@ -2594,8 +2597,9 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::WritePromptOverride(_) => panic!("expected threat start effect"),
     }
     match ask_effects.into_iter().next().unwrap() {
-        ShellEffect::StartThreat(_) => {}
-        ShellEffect::ApplyReviewedPatch(_)
+        ShellEffect::DispatchAgent(_) => {}
+        ShellEffect::StartThreat(_)
+        | ShellEffect::ApplyReviewedPatch(_)
         | ShellEffect::ApplySastTaskOptions(_)
         | ShellEffect::ApplyThreatPatch(_)
         | ShellEffect::AuthLogin(_)
@@ -2615,7 +2619,6 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::OpenFilePicker
         | ShellEffect::OpenGuidedScan(_)
         | ShellEffect::OpenPromptDocument(_)
-        | ShellEffect::DispatchAgent(_)
         | ShellEffect::DispatchNextPlanningTask(_)
         | ShellEffect::PrepareScan(_)
         | ShellEffect::PrepareRunTool(_)
@@ -2684,7 +2687,7 @@ fn threat_reducers_return_start_effects_without_spawning_workers() {
         | ShellEffect::WorkspaceReindex(_)
         | ShellEffect::WorkspaceScopeInit(_)
         | ShellEffect::WriteHouseRules(_)
-        | ShellEffect::WritePromptOverride(_) => panic!("expected threat start effect"),
+        | ShellEffect::WritePromptOverride(_) => panic!("expected inline agent dispatch effect"),
     }
     assert!(!app.threat_worker_running());
     assert!(app.live_activity().is_none());
@@ -2820,9 +2823,9 @@ fn command_effect_reducer_routes_existing_effectful_commands() {
     );
     assert_eq!(
         command_effect_kind(ShellCommand::ThreatAsk(
-            "what changed in the threat model?".to_string()
+            "what changed in the threat model?".to_string(),
         )),
-        Some(EffectKind::Threat)
+        Some(EffectKind::Agent)
     );
     assert_eq!(
         command_effect_kind(ShellCommand::Quit),
@@ -3902,7 +3905,7 @@ fn threat_apply_reducer_returns_apply_effect_without_writing_artifact() {
         Some(&serde_json::json!("isolated"))
     );
     assert!(app.engagement.has_pending_threat_patch());
-    assert!(load_persistent_threat_model(&target).is_none());
+    assert!(load_persistent_threat_model(&target).unwrap().is_none());
 }
 
 #[test]
@@ -8710,7 +8713,11 @@ fn setup_explains_when_openai_oauth_is_incompatible_with_selected_model() {
         .insert(PlanningTaskId::BuildThreatModel);
 
     let setup = crate::ui_view_models::setup_readiness_model(&app);
-    let credentials = &setup.rows[3];
+    let credentials = setup
+        .rows
+        .iter()
+        .find(|row| row.id == SetupRowId::Credentials)
+        .expect("credentials setup row");
 
     assert_eq!(credentials.status, "MISSING");
     assert!(credentials.detail.contains("requires OPENAI_API_KEY"));
@@ -11369,7 +11376,7 @@ fn setup_start_row_commits_with_enter() {
         .planning_picker_mut()
         .selected_mut()
         .insert(PlanningTaskId::GatherRepoContext);
-    app.router.setup_mut().set_cursor(6);
+    app.router.setup_mut().set_cursor(7);
     assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
 
     let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -11397,7 +11404,7 @@ fn setup_start_with_an_empty_plan_stops_at_the_configured_phase() {
     app.engagement.planning_picker_mut().selected_mut().clear();
     assert!(crate::ui_view_models::setup_readiness_model(&app).can_start);
 
-    app.router.setup_mut().set_cursor(6);
+    app.router.setup_mut().set_cursor(7);
     let update = app.reduce_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert!(update.handled);
@@ -16604,7 +16611,7 @@ fn apply_pending_threat_patch_writes_to_disk() {
         unsupported: vec![],
     });
     update_and_execute_effects(&mut app, Msg::Cmd(ShellCommand::ThreatApply));
-    let written = load_persistent_threat_model(&target).unwrap();
+    let written = load_persistent_threat_model(&target).unwrap().unwrap();
     assert_eq!(
         written
             .pointer("/trustZones/admin")
@@ -16647,7 +16654,7 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
         Msg::Cmd(ShellCommand::ThreatVersionUse(original_id)),
     );
 
-    let mut live = load_persistent_threat_model(&target).unwrap();
+    let mut live = load_persistent_threat_model(&target).unwrap().unwrap();
     assert!(
         live.as_object_mut()
             .unwrap()
@@ -16663,6 +16670,108 @@ fn threats_versions_lists_ledger_rows_and_use_restores_the_selected_model() {
     );
     // restore appended a row: original, newer, restore-of-original
     assert_eq!(app.router.threat().versions().len(), 3);
+}
+
+#[test]
+fn map_model_hotkey_rehydrates_the_activated_dfd_and_executive_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let scope = kuzushi_core::capabilities::current_scope_ref_for_path(temp.path(), ".")
+        .unwrap()
+        .unwrap();
+    let commit =
+        |label: &str, system_context: &str, node_name: &str, new_model: bool, activate: bool| {
+            let document = serde_json::json!({
+                "version": "2.0",
+                "methodology": "stride",
+                "systemContext": system_context,
+                "dfd": {
+                    "nodes": [
+                        {
+                            "id": "app",
+                            "name": node_name,
+                            "type": "process",
+                            "trustZone": "application"
+                        },
+                        {
+                            "id": "store",
+                            "name": "Shared Store",
+                            "type": "data-store",
+                            "trustZone": "data"
+                        }
+                    ],
+                    "flows": [{
+                        "id": "persist",
+                        "sourceId": "app",
+                        "targetId": "store",
+                        "trustBoundaryIds": []
+                    }],
+                    "trustBoundaries": []
+                },
+                "threats": [],
+                "summary": {}
+            });
+            kuzushi_core::capabilities::commit_threat_model_revision(
+                temp.path(),
+                &document,
+                kuzushi_core::capabilities::ThreatModelCommit {
+                    model_id: None,
+                    new_model,
+                    label: label.to_string(),
+                    scope: scope.clone(),
+                    methodology: "stride".to_string(),
+                    source: kuzushi_core::capabilities::ThreatModelRevisionSource::Build,
+                    source_revision_id: None,
+                    run_id: None,
+                    activate: Some(activate),
+                    actor: "test".to_string(),
+                },
+            )
+            .unwrap()
+        };
+    commit(
+        "Primary",
+        "The primary service handles API requests.",
+        "Primary API",
+        false,
+        true,
+    );
+    let alternate = commit(
+        "Alternate",
+        "The alternate service processes queued work.",
+        "Alternate Worker",
+        true,
+        false,
+    );
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    show_guided_map_for_test(&mut app);
+    app.hydrate_all_view_data_for_test();
+
+    let before = crate::ui_view_models::dfd_model(&app);
+    assert_eq!(before.nodes[0].name, "Primary API");
+    assert_eq!(
+        crate::ui_view_models::dfd_overview(&before).executive_summary,
+        "The primary service handles API requests."
+    );
+
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('m'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.running_tool_name(), Some("threat-model:activate"));
+    drain_tool(&mut app);
+    app.hydrate_all_view_data_for_test();
+
+    let active = kuzushi_core::capabilities::load_active_threat_model(temp.path())
+        .unwrap()
+        .unwrap();
+    assert_eq!(active.model_ref, alternate.model_ref);
+    let after = crate::ui_view_models::dfd_model(&app);
+    assert_eq!(after.nodes[0].name, "Alternate Worker");
+    assert_eq!(
+        crate::ui_view_models::dfd_overview(&after).executive_summary,
+        "The alternate service processes queued work."
+    );
 }
 
 #[test]
@@ -17054,6 +17163,9 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -17087,6 +17199,9 @@ fn agent_response_after_abort_request_is_ignored() {
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -17125,6 +17240,9 @@ fn agent_answer_event_does_not_duplicate_the_runtime_model_call() {
         run_id: Some("agent-answer".to_string()),
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -17226,6 +17344,9 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         run_id: Some("agent-failed".to_string()),
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -17378,6 +17499,9 @@ fn aborted_agent_run_terminalizes_the_running_seed_as_canceled() {
         run_id: Some("agent-canceled".to_string()),
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -22948,6 +23072,9 @@ fn clear_conversation_retains_agent_slot_until_terminal_event_then_drains_steer(
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));
@@ -22995,6 +23122,9 @@ fn ctrl_l_clear_conversation_retains_live_agent_slot_and_queued_work() {
         run_id: None,
         started_secs: 0,
         screen_context_scope: None,
+        thread_context_key: None,
+        attached_turn_count: 0,
+        auxiliary_read_only: false,
         failure_context: None,
         pending_failure_context: None,
     }));

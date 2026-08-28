@@ -128,6 +128,23 @@ impl WorkbenchCache {
         self.loading_state(target, &ViewHydrationKey::ProjectScopeTree)
     }
 
+    pub(crate) fn cached_threat_model_store(
+        &self,
+        target: Option<&Path>,
+    ) -> ViewDataState<ThreatModelStoreState> {
+        let Some(target) = target else {
+            return ViewDataState::NotRequested;
+        };
+        if let Some((_, state)) = self
+            .threat_model_store
+            .as_ref()
+            .filter(|(cached_target, _)| cached_target == target)
+        {
+            return ViewDataState::Ready(state.clone());
+        }
+        self.loading_state(target, &ViewHydrationKey::ThreatModelStore)
+    }
+
     pub(crate) fn cached_project_model_document(
         &self,
         target: Option<&Path>,

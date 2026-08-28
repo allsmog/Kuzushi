@@ -12,6 +12,7 @@ pub(crate) enum ThreatPanel {
     Stories,
     Scope,
     Summary,
+    Models,
     Versions,
 }
 
@@ -21,19 +22,21 @@ pub(crate) fn threat_panel_model(view: ThreatView) -> ThreatPanel {
         ThreatView::Stories => ThreatPanel::Stories,
         ThreatView::Scope => ThreatPanel::Scope,
         ThreatView::Summary => ThreatPanel::Summary,
+        ThreatView::Models => ThreatPanel::Models,
         ThreatView::Versions => ThreatPanel::Versions,
     }
 }
 
 // The DFD tab moved into the phase Workbench's center pane; the
 // remaining STRIDE / STORIES / SCOPE / SUMMARY tabs renumber from 1.
-pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 5] {
+pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 6] {
     [
         nav_item(active, ThreatView::Stride, "1 STRIDE"),
         nav_item(active, ThreatView::Stories, "2 STORIES"),
         nav_item(active, ThreatView::Scope, "3 SCOPE"),
         nav_item(active, ThreatView::Summary, "4 SUMMARY"),
         nav_item(active, ThreatView::Versions, "5 VERSIONS"),
+        nav_item(active, ThreatView::Models, "MODELS"),
     ]
 }
 
@@ -52,7 +55,7 @@ mod tests {
     fn threat_nav_model_marks_active_tab() {
         let items = threat_nav_model(ThreatView::Scope);
 
-        assert_eq!(items.len(), 5);
+        assert_eq!(items.len(), 6);
         assert_eq!(items[2].label, "3 SCOPE");
         assert!(items[2].active);
         assert!(!items[0].active);

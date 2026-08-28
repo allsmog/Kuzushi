@@ -1,5 +1,5 @@
 use crate::event_log::{EventEnvelope, EventKind};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, Transaction};
 
 use super::projection_fts::rebuild_fts_if_available;
@@ -40,18 +40,16 @@ fn insert_review_decision_row(
     triage_verdict: Option<&str>,
     confidence: f64,
 ) -> Result<i64> {
-    let read_watermark = payload_u64(&event.payload, "readWatermark")
-        .map(sql_watermark)
-        .transpose()?;
+    let context = decision_insert_context(event)?;
     tx.execute(
         r#"
         insert into review_decisions(
           finding_id, identity_id, decision_verdict, triage_verdict, confidence,
           rationale, author, created_at, dismiss_reason, dismissed_by,
           decision_event_seq, decision_event_hash, decision_read_watermark,
-          review_session_id
+          review_session_id, propagation_basis, source_finding_ids_json
         )
-        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+        values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         "#,
         params![
             finding_id,
@@ -66,11 +64,61 @@ fn insert_review_decision_row(
             payload_str(&event.payload, "dismissedBy"),
             sql_seq(event.seq)?,
             event.event_hash.as_str(),
-            read_watermark,
+            context.read_watermark,
             payload_str(&event.payload, "reviewSessionId"),
+            context.propagation_basis,
+            context.source_finding_ids_json,
         ],
     )?;
     Ok(tx.last_insert_rowid())
+}
+
+struct DecisionInsertContext<'a> {
+    read_watermark: Option<i64>,
+    propagation_basis: Option<&'a str>,
+    source_finding_ids_json: Option<String>,
+}
+
+fn decision_insert_context(event: &EventEnvelope) -> Result<DecisionInsertContext<'_>> {
+    let read_watermark = payload_u64(&event.payload, "readWatermark")
+        .map(sql_watermark)
+        .transpose()?;
+    let (propagation_basis, source_finding_ids_json) = propagation_payload(event)?;
+    Ok(DecisionInsertContext {
+        read_watermark,
+        propagation_basis,
+        source_finding_ids_json,
+    })
+}
+
+fn propagation_payload(event: &EventEnvelope) -> Result<(Option<&str>, Option<String>)> {
+    let basis = payload_str(&event.payload, "propagationBasis");
+    let source_ids = propagation_source_ids_json(event)?;
+    anyhow::ensure!(
+        basis.is_some() == source_ids.is_some(),
+        "review propagation basis and source finding ids must appear together"
+    );
+    if let Some(basis) = basis {
+        crate::findings::FindingIdentityBasis::from_str(basis)
+            .context("review propagation basis is unknown")?;
+    }
+    Ok((basis, source_ids))
+}
+
+fn propagation_source_ids_json(event: &EventEnvelope) -> Result<Option<String>> {
+    let Some(value) = event.payload.get("sourceFindingIds") else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let ids = value
+        .as_array()
+        .filter(|ids| !ids.is_empty() && ids.iter().all(|id| id.as_i64().is_some_and(|id| id > 0)))
+        .context("review propagation sourceFindingIds must be non-empty positive integers")?;
+    serde_json::to_string(ids)
+        .map(Some)
+        .context("Could not serialize review propagation source finding ids")
 }
 
 fn sql_rank(value: u64) -> Result<i64> {

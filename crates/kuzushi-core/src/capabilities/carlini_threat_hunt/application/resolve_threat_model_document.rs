@@ -9,19 +9,20 @@ pub(crate) fn resolve_threat_model_document(input: &Value, target: &Path) -> Res
         return unwrap_document(value.clone());
     }
     let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
-    let raw = crate::bounded_file::read_utf8_text_within(target, &path, 8 * 1024 * 1024)
-        .with_context(|| {
-            let artifact = path.strip_prefix(target).unwrap_or(path.as_path());
-            format!(
-                "carlini-threat-hunt requires an existing {} under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
-                artifact.display(),
-                target.display(),
-                target.display()
-            )
-        })?;
-    let parsed = serde_json::from_str::<Value>(&raw)
-        .with_context(|| format!("Could not parse {}", path.display()))?;
-    unwrap_document(parsed)
+    let document = crate::capabilities::threat_model::try_load_persistent_threat_model(target)
+        .with_context(|| format!("Could not load {}", path.display()))?
+        .with_context(|| missing_threat_model_message(target, &path))?;
+    unwrap_document(document)
+}
+
+fn missing_threat_model_message(target: &Path, path: &Path) -> String {
+    let artifact = path.strip_prefix(target).unwrap_or(path);
+    format!(
+        "carlini-threat-hunt requires an existing {} under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
+        artifact.display(),
+        target.display(),
+        target.display()
+    )
 }
 
 pub(crate) fn unwrap_document(value: Value) -> Result<Value> {

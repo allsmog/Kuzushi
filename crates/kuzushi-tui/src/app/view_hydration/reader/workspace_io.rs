@@ -23,8 +23,7 @@ pub(super) fn read_json_file(target: &Path, path: &Path) -> JsonFileHydration {
     let Ok(document) = serde_json::from_str(&raw) else {
         return JsonFileHydration::state(JsonFileState::Malformed);
     };
-    let content_sha256 =
-        is_context_snapshot(target, path).then(|| kuzushi_core::prompt_content_sha256(&raw));
+    let content_sha256 = hydrated_json_sha256(target, path, &raw, &document);
     let entry_point_catalog_authentication = catalog_authentication(target, path, &document);
     let entry_point_catalog_context_authentication = catalog_context_authentication(
         target,
@@ -37,6 +36,23 @@ pub(super) fn read_json_file(target: &Path, path: &Path) -> JsonFileHydration {
         entry_point_catalog_context_authentication,
         state: JsonFileState::Present(document),
     }
+}
+
+fn hydrated_json_sha256(
+    target: &Path,
+    path: &Path,
+    raw: &str,
+    document: &serde_json::Value,
+) -> Option<String> {
+    if is_context_snapshot(target, path) {
+        return Some(kuzushi_core::prompt_content_sha256(raw));
+    }
+    if path != kuzushi_core::capabilities::persistent_threat_model_path(target) {
+        return None;
+    }
+    kuzushi_core::review_yield::domain::canonical_json_bytes(document)
+        .ok()
+        .map(|bytes| kuzushi_core::run_lifecycle::sha256_content_digest(&bytes))
 }
 
 fn json_read_limit(target: &Path, path: &Path) -> usize {

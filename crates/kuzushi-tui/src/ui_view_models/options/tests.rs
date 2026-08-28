@@ -100,9 +100,15 @@ fn threat_model_options_surface_source_controls_as_standard_options() {
         .map(|row| row.cells[0].as_str())
         .collect::<Vec<_>>();
 
-    for expected in ["methodology", "sources", "seed", "designDoc"] {
+    for expected in ["methodology", "sources", "seed", "designDocs"] {
         assert!(names.contains(&expected), "missing {expected}: {names:?}");
     }
+    let design_docs = table
+        .rows
+        .iter()
+        .find(|row| row.cells[0] == "designDocs")
+        .expect("canonical design-docs option");
+    assert!(design_docs.cells[5].contains("designDoc"));
 }
 
 #[test]
