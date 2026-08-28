@@ -132,7 +132,8 @@ node scripts/verify-receipt.mjs verify --commit "$(git rev-parse HEAD)"
 `pnpm verify:quick:summary` writes a receipt into the git directory (outside the
 working tree, so it cannot attest a tree that contains it) binding the run to
 the commit, tree, clean/dirty state, toolchain, host, and a digest of the plan
-that ran. It also records what the run does **not** cover, including every
+that ran. The tree is snapshotted at both ends of the run, so an edit made while
+the plan was running is recorded as drift rather than hidden. It also records what the run does **not** cover, including every
 CI-only gate a `quick` run skipped. `pnpm verify:receipt:sign` signs it with the
 owner's SSH key; `verify` refuses a receipt that is unsigned, stale, dirty,
 failing, from a different commit, or produced by a weaker plan.

@@ -50,8 +50,9 @@ ever committed.
 | --- | --- |
 | `mode` | `quick` or `ci` |
 | `startedAt` / `finishedAt` | ISO timestamps; `finishedAt` drives `--max-age` |
-| `commit` / `tree` | `git rev-parse HEAD` and `HEAD^{tree}` |
-| `dirty` | `true` if `git status --porcelain` was non-empty; `null` if git could not be read |
+| `commit` / `tree` | `git rev-parse HEAD` and `HEAD^{tree}`, as read when the run **closed** |
+| `dirty` | `true` if `git status --porcelain` was non-empty at **either** end of the run; `null` if git could not be read |
+| `driftedDuringRun` | `true` unless the tree was clean at both ends and `commit`/`tree` never moved between them |
 | `toolchain` | `{ rustc, node, pnpm }` as reported by each tool; `null` per entry when unreadable |
 | `host` | `<platform>-<arch>` |
 | `plan` | `{ mode, digest }`; digest is SHA-256 over the plan's `[name, command]` pairs |
@@ -63,6 +64,12 @@ ever committed.
 `null`, never a convenient default. `verify` treats `dirty: null` as a refusal,
 because unknown is not clean.
 
+The repository state is snapshotted twice — once before the first step, once
+after the last — and folded. If the tree was dirty at either end, or `HEAD` or
+the tree moved while the plan ran, the steps did not all see the same content,
+so `driftedDuringRun` is `true` and `verify` refuses. A receipt that omits the
+field is refused too: absence is not innocence.
+
 The `plan.digest` binds the receipt to the exact plan that produced it. Weaken,
 rename, or reorder a step and every existing receipt stops verifying.
 
@@ -72,7 +79,7 @@ rename, or reorder a step and every existing receipt stops verifying.
 
 - the receipt parses and `ok === true`;
 - every step has `status === 0` and no terminating signal;
-- `dirty === false`;
+- `dirty === false` and `driftedDuringRun === false`;
 - `commit === <sha>` — a receipt never vouches for a commit it did not name;
 - `plan.digest` matches the current plan for the mode the receipt claims;
 - `finishedAt` is within `--max-age` hours (default 24);

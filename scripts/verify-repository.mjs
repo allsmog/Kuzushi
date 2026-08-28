@@ -152,6 +152,28 @@ function repositoryFacts() {
   };
 }
 
+// A run is only attributable to one snapshot if the tree was clean at both ends
+// and never moved between them. Anything else — dirty at either end, a commit or
+// tree that changed mid-run, or a fact we could not read — means the steps did
+// not all see the same content, so the receipt says so instead of picking one
+// snapshot to report.
+export function foldRunSnapshots(before, after) {
+  const dirty = eitherDirty(before.dirty, after.dirty);
+  const moved = before.commit !== after.commit || before.tree !== after.tree;
+  return {
+    commit: after.commit,
+    tree: after.tree,
+    dirty,
+    driftedDuringRun: dirty !== false || moved,
+  };
+}
+
+function eitherDirty(before, after) {
+  if (before === true || after === true) return true;
+  if (before === null || after === null) return null;
+  return false;
+}
+
 function toolchainFacts() {
   return {
     rustc: rustcIdentity(
@@ -195,18 +217,27 @@ function runStep(item, summary) {
 }
 
 function openReceipt(mode, plan) {
-  const { commit, tree, dirty } = repositoryFacts();
+  const opened = repositoryFacts();
   return {
     mode,
     startedAt: new Date().toISOString(),
-    commit,
-    tree,
-    dirty,
+    ...foldRunSnapshots(opened, opened),
     toolchain: toolchainFacts(),
     host: `${process.platform}-${process.arch}`,
     plan: { mode, digest: planDigest(plan) },
     exceptions: verificationExceptions(mode),
     steps: [],
+    opened,
+  };
+}
+
+function closeReceipt(receipt, exitCode) {
+  const { opened, ...rest } = receipt;
+  return {
+    ...rest,
+    ...foldRunSnapshots(opened, repositoryFacts()),
+    ok: exitCode === 0,
+    finishedAt: new Date().toISOString(),
   };
 }
 
@@ -224,10 +255,9 @@ function main() {
   validatePlans();
   const plan = verificationPlan(mode);
   const receiptPath = receiptOverride ?? defaultReceiptPath();
-  const receipt = openReceipt(mode, plan);
-  const exitCode = runPlan(plan, receipt, summary);
-  receipt.ok = exitCode === 0;
-  receipt.finishedAt = new Date().toISOString();
+  const opened = openReceipt(mode, plan);
+  const exitCode = runPlan(plan, opened, summary);
+  const receipt = closeReceipt(opened, exitCode);
   writeReceipt(receiptPath, receipt);
   process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
   process.stderr.write(`verify: receipt written to ${receiptPath}\n`);

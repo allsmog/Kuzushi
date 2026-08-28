@@ -81,11 +81,19 @@ function treeFailures(receipt, commit) {
     receipt.dirty === false
       ? []
       : [`receipt records dirty=${receipt.dirty}; the verified tree must be clean`];
+  // Absence is not innocence: a receipt that does not state it stayed on one
+  // clean snapshot cannot prove the steps all saw the same content.
+  const drifted =
+    receipt.driftedDuringRun === false
+      ? []
+      : [
+          `receipt records driftedDuringRun=${receipt.driftedDuringRun}; the tree moved or was dirty during the run`,
+        ];
   const wrongCommit =
     receipt.commit === commit
       ? []
       : [`receipt attests commit ${receipt.commit ?? "(none)"}, not ${commit}`];
-  return [...dirty, ...wrongCommit];
+  return [...dirty, ...drifted, ...wrongCommit];
 }
 
 function planFailures(plan) {

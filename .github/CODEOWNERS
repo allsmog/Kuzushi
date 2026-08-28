@@ -26,6 +26,7 @@
 /scripts/*coverage*             @allsmog
 /scripts/*mutation*             @allsmog
 /scripts/verify-repository*     @allsmog
+/scripts/verify-receipt*        @allsmog
 
 # Dependency & package metadata — security-sensitive.
 /package.json                   @allsmog
