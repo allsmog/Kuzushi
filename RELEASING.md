@@ -170,13 +170,19 @@ because `pnpm build:native` stages only the current host.
 
 Four runners produce the five shipped platform payloads:
 
-| Slug           | Built on           | Installed and executed on |
-| -------------- | ------------------ | ------------------------- |
-| `linux-x64`    | `ubuntu-24.04`     | `ubuntu-24.04`            |
-| `linux-arm64`  | `ubuntu-24.04-arm` | `ubuntu-24.04-arm`        |
-| `darwin-arm64` | `macos-14`         | `macos-14`                |
-| `darwin-x64`   | `macos-14` (cross) | `macos-15-intel`          |
-| `win32-x64`    | `windows-2025`     | `windows-2025`            |
+| Slug           | Built on              | Installed and executed on |
+| -------------- | --------------------- | ------------------------- |
+| `linux-x64`    | `ubuntu-24.04`        | `ubuntu-24.04`            |
+| `linux-arm64`  | `ubuntu-24.04-arm`    | `ubuntu-24.04-arm`        |
+| `darwin-arm64` | `kuzushi-mac`         | `kuzushi-mac`             |
+| `darwin-x64`   | `kuzushi-mac` (cross) | `kuzushi-mac` (Rosetta)   |
+| `win32-x64`    | `windows-2025`        | `windows-2025`            |
+
+`kuzushi-mac` is the owner's self-hosted Apple silicon runner — see
+[the darwin release legs](#darwin-release-legs-on-the-self-hosted-mac) below for
+its prerequisites and the hosted escape hatch. Passing `hosted: true` (or setting
+the `KUZUSHI_RELEASE_HOSTED` repository variable) restores `macos-14` for
+`darwin-arm64` and `macos-15-intel` for `darwin-x64`.
 
 `darwin-x64` is cross-compiled from the Apple silicon runner with
 `rustup target add x86_64-apple-darwin` followed by a second
@@ -185,8 +191,10 @@ Four runners produce the five shipped platform payloads:
 `release-candidate-native-darwin-x64` artifact. Kuzushi's native dependency set
 crosses cleanly — no openssl, git2, or portable-pty; the tree-sitter grammars
 and bundled `libsqlite3-sys` build through `cc`, wasmtime is cranelift-only, and
-reqwest uses rustls. The x64 payload is still *installed and executed* on a real
-Intel runner, so cross-compilation never replaces execution evidence.
+reqwest uses rustls. The x64 payload is still *installed and executed* as an
+Intel payload — on a hosted Intel runner when `hosted: true`, and otherwise
+through Rosetta 2 on the self-hosted Mac — so cross-compilation never replaces
+execution evidence.
 
 To cross-build one platform locally:
 
@@ -208,6 +216,45 @@ actually installed; the receipt then records the host slug, the smoked slug, and
 `"translation": "rosetta"`. The same opt-in applies to
 `scripts/smoke-release-tarballs.mjs`. No other host/payload pairing is ever
 unlocked.
+
+### Darwin release legs on the self-hosted Mac
+
+Hosted macOS runners bill at 10x, and a release touches five macOS legs: the
+native build, both local-tarball smokes, and both published-install smokes. All
+five default to the owner's self-hosted Apple silicon runner (labels
+`self-hosted, macOS, ARM64, kuzushi-mac`), so a release spends no hosted macOS
+minutes. Linux and Windows legs are unchanged, and `identity`, `assemble`,
+`publish-npm`, and `github-release` stay pinned to `ubuntu-24.04` — they hold
+`NPM_TOKEN` or `contents: write`, which must never reach a persistent machine.
+
+**Owner prerequisites**, one time on the Mac:
+
+```sh
+softwareupdate --install-rosetta --agree-to-license   # translate the x64 payload
+arch -x86_64 /usr/local/bin/brew install node@22      # an x64 Node under /usr/local
+rustup target add x86_64-apple-darwin                 # the candidate re-runs this anyway
+```
+
+The x64 Node is not optional for the `darwin-x64` legs: npm gates
+`@kuzushi/darwin-x64` on `process.arch === "x64"`, so an arm64 Node installs no
+platform package. The workflow puts `vars.KUZUSHI_X64_NODE_PREFIX` (default
+`/usr/local`) first on `PATH` and fails the leg loudly if no x64 Node is there.
+
+**Escape hatch.** To run one release entirely on hosted macOS — the Mac is
+offline, mid-upgrade, or suspect:
+
+```sh
+gh variable set KUZUSHI_RELEASE_HOSTED --body true
+git push origin vX.Y.Z          # this release runs on macos-14 / macos-15-intel
+gh variable delete KUZUSHI_RELEASE_HOSTED
+```
+
+`release.yml` forwards `hosted: ${{ vars.KUZUSHI_RELEASE_HOSTED == 'true' }}` to
+both the candidate and the published smoke, so the one variable moves every
+darwin leg. `workflow_dispatch` on either workflow exposes `hosted` directly.
+
+Full detail, including how a translated leg proves it smoked the Intel payload,
+is in [docs/quality/release-legs-self-hosted.md](./docs/quality/release-legs-self-hosted.md).
 
 ## Verify a tagged release
 

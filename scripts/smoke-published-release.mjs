@@ -7,6 +7,14 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
+import {
+  machineArchitecture,
+  nodeArchitectureFailure,
+  processIsTranslated,
+  rosettaOverrideRequested,
+  rosettaTranslationInstalled,
+  smokeExecutionPlan,
+} from "./local-tarball-smoke-contract.mjs";
 
 const PACKAGE_NAME = "kuzushi";
 const REQUIRED_DOCTOR_CHECKS = [
@@ -27,6 +35,37 @@ export function normalizePublishedVersion(value) {
     throw new Error(`invalid published version ${JSON.stringify(value)}`);
   }
   return normalized;
+}
+
+/**
+ * The leg's declared slug, when the caller pins one. A pinned slug is what lets
+ * the darwin-x64 leg run on Apple silicon and still prove it installed the
+ * Intel payload rather than whatever npm chose for the host.
+ */
+export function resolveSmokePlan(slug, host) {
+  if (!slug?.trim()) return null;
+  const allowRosetta = host.allowRosetta;
+  const plan = smokeExecutionPlan({
+    slug: slug.trim(),
+    platform: host.platform,
+    arch: machineArchitecture(host.nodeArch, host.translated),
+    allowRosetta,
+    rosettaInstalled: allowRosetta && host.rosettaInstalled(),
+  });
+  const failure = nodeArchitectureFailure(plan, host.nodeArch);
+  if (failure) throw new Error(failure);
+  return plan;
+}
+
+function currentSmokeHost() {
+  const allowRosetta = rosettaOverrideRequested(process.env);
+  return {
+    platform: process.platform,
+    nodeArch: process.arch,
+    translated: processIsTranslated(),
+    allowRosetta,
+    rosettaInstalled: rosettaTranslationInstalled,
+  };
 }
 
 export function installedCommandPath(prefix, command, platform = process.platform) {
@@ -172,6 +211,7 @@ function collectCommandReports(kuzushi, target, commandOptions) {
 }
 
 function smokePublishedRelease() {
+  const plan = resolveSmokePlan(process.env.KUZUSHI_SMOKE_SLUG, currentSmokeHost());
   const version = resolvePublishedVersion(process.env.KUZUSHI_SMOKE_VERSION);
   const root = mkdtempSync(path.join(tmpdir(), "kuzushi-published-smoke-"));
   try {
@@ -186,6 +226,9 @@ function smokePublishedRelease() {
       version,
       platform: process.platform,
       arch: process.arch,
+      ...(plan
+        ? { hostSlug: plan.hostSlug, smokedSlug: plan.smokedSlug, translation: plan.translation }
+        : {}),
       installSeconds,
       doctor: doctor.summary,
       demoFindings: demo.findingsCount,

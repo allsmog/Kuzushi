@@ -37,6 +37,18 @@ Notable changes to Kuzushi. Release procedure lives in
   passes. Dependabot batches into one grouped monthly pull request per
   ecosystem. Release candidates run the same complete gauntlet as before.
 
+- Every darwin release leg now runs on the owner's self-hosted Apple silicon
+  runner, so a release spends no 10x-billed hosted macOS minutes. The native
+  build, both local-tarball smokes, and both published-install smokes default to
+  the `self-hosted, macOS, ARM64, kuzushi-mac` labels; the `darwin-x64` smokes
+  execute the Intel payload there through Rosetta 2 under an x64 Node, and refuse
+  loudly rather than skip when Rosetta or that Node is missing. Linux and Windows
+  legs are unchanged, and `identity`, `assemble`, `publish-npm`, and
+  `github-release` stay pinned to hosted `ubuntu-24.04` because they hold
+  `NPM_TOKEN` or `contents: write`. A `hosted` workflow input — reachable on a
+  tag push through the `KUZUSHI_RELEASE_HOSTED` repository variable — sends every
+  darwin leg back to `macos-14` and `macos-15-intel` for one release. See
+  [docs/quality/release-legs-self-hosted.md](./docs/quality/release-legs-self-hosted.md).
 - `darwin-x64` is now cross-compiled on the Apple silicon release runner instead
   of on a separately billed Intel macOS build host. The release candidate builds
   five platform payloads on four runners: `macos-14` builds `darwin-arm64`

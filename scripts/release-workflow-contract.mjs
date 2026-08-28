@@ -23,6 +23,33 @@ export const releaseCrossBuilds = Object.freeze([
   },
 ]);
 
+/**
+ * The owner's self-hosted Apple silicon runner. Every darwin leg defaults to it
+ * because hosted macOS minutes bill at 10x, and `hosted: true` sends the same
+ * legs back to the hosted images named in `releasePlatforms`.
+ */
+export const selfHostedMacLabels = Object.freeze(["self-hosted", "macOS", "ARM64", "kuzushi-mac"]);
+
+/** The one `runs-on` form every self-hosted-eligible matrix job must use. */
+export const selfHostedMatrixRunsOn =
+  `runs-on: \${{ fromJSON(matrix.self_hosted && !inputs.hosted && '${JSON.stringify(selfHostedMacLabels)}'` +
+  ` || format('["{0}"]', matrix.os)) }}`;
+
+/** Darwin legs that must be eligible for the self-hosted runner, per job. */
+export const selfHostedDarwinLegs = Object.freeze([
+  { job: "native-binaries", slug: "darwin-arm64", rosetta: false },
+  { job: "local-tarball-smoke", slug: "darwin-arm64", rosetta: false },
+  { job: "local-tarball-smoke", slug: "darwin-x64", rosetta: true },
+]);
+
+/**
+ * Jobs that hold a publishing credential or a write permission. They stay on
+ * GitHub-hosted ubuntu images: a self-hosted runner is a persistent machine,
+ * and `NPM_TOKEN` and `contents: write` must never reach one.
+ */
+export const hostedOnlyCandidateJobs = Object.freeze(["identity", "assemble"]);
+export const hostedOnlyPublisherJobs = Object.freeze(["publish-npm", "github-release"]);
+
 const crossBuiltSlugs = new Set(releaseCrossBuilds.map(({ slug }) => slug));
 
 export const releaseNativeBuildPlatforms = Object.freeze(
@@ -34,10 +61,41 @@ export function candidateWorkflowFailures(source) {
     ...missingTokens(source, "release candidate", candidateRequirements()),
     ...forbiddenTokens(source, "release candidate", candidateForbiddenTokens()),
     ...releaseMatrixFailures(source),
+    ...selfHostedDarwinFailures(source),
+    ...hostedOnlyJobFailures(source, "release candidate", hostedOnlyCandidateJobs),
+  ];
+}
+
+/**
+ * The published smoke installs from the registry, so it holds no credential.
+ * Its darwin legs still default to the self-hosted runner and its darwin-x64
+ * leg still has to prove it translated rather than smoked the host payload.
+ */
+export function publishedSmokeWorkflowFailures(source) {
+  return [
+    ...missingTokens(source, "published smoke", [
+      "hosted:",
+      "type: boolean",
+      selfHostedMatrixRunsOn,
+      "KUZUSHI_SMOKE_SLUG: ${{ matrix.slug }}",
+      "KUZUSHI_SMOKE_ALLOW_ROSETTA: ${{ matrix.rosetta }}",
+    ]),
+    ...forbiddenTokens(source, "published smoke", ["NPM_TOKEN", "contents: write"]),
+    ...darwinLegFailures(source, "published smoke", "published-install", [
+      { slug: "darwin-arm64", rosetta: false },
+      { slug: "darwin-x64", rosetta: true },
+    ]),
   ];
 }
 
 export function publisherWorkflowFailures(source) {
+  return [
+    ...hostedOnlyJobFailures(source, "release publisher", hostedOnlyPublisherJobs),
+    ...publisherTokenFailures(source),
+  ];
+}
+
+function publisherTokenFailures(source) {
   return missingTokens(source, "release publisher", [
     "tags:",
     '      - "v*"',
@@ -141,6 +199,77 @@ function crossBuildFailures(source) {
 
 function matrixRow(runner, slug) {
   return `          - os: ${runner}\n            slug: ${slug}`;
+}
+
+/**
+ * Every darwin leg must be eligible for the self-hosted runner, and only the
+ * darwin-x64 leg may carry the Rosetta opt-in: an arm64 payload smoked under
+ * translation would prove nothing about the runner it actually ships to.
+ */
+function selfHostedDarwinFailures(source) {
+  const byJob = new Map();
+  for (const { job, slug, rosetta } of selfHostedDarwinLegs) {
+    byJob.set(job, [...(byJob.get(job) ?? []), { slug, rosetta }]);
+  }
+  return [
+    ...missingTokens(source, "release candidate", [
+      "hosted:",
+      "KUZUSHI_SMOKE_ALLOW_ROSETTA: ${{ matrix.rosetta }}",
+    ]),
+    ...[...byJob].flatMap(([job, legs]) =>
+      darwinLegFailures(source, "release candidate", job, legs),
+    ),
+  ];
+}
+
+function darwinLegFailures(source, subject, jobName, legs) {
+  const section = jobSection(source, jobName);
+  return [
+    ...(section.includes(selfHostedMatrixRunsOn)
+      ? []
+      : [`${subject} ${jobName} must select the self-hosted runner by matrix.self_hosted`]),
+    ...legs.flatMap(({ slug, rosetta }) =>
+      darwinRowFailures(subject, jobName, section, slug, rosetta),
+    ),
+  ];
+}
+
+function darwinRowFailures(subject, jobName, section, slug, rosetta) {
+  const row = darwinRowText(section, slug);
+  const failures = [];
+  if (!row.includes("self_hosted: true")) {
+    failures.push(`${subject} ${jobName} must run ${slug} on the self-hosted runner`);
+  }
+  if (row.includes('rosetta: "1"') !== rosetta) {
+    failures.push(`${subject} ${jobName} ${slug} carries the wrong Rosetta opt-in`);
+  }
+  return failures;
+}
+
+/** The matrix row's own keys, up to the next `- os:` entry or the job's end. */
+function darwinRowText(section, slug) {
+  const start = section.indexOf(`            slug: ${slug}\n`);
+  if (start === -1) return "";
+  const rest = section.slice(start);
+  const next = rest.search(/\n {10}- os:/);
+  return next === -1 ? rest : rest.slice(0, next);
+}
+
+/**
+ * A self-hosted runner is a persistent machine the owner reuses, so a job that
+ * touches `NPM_TOKEN` or `contents: write` must stay on an ephemeral hosted one.
+ */
+function hostedOnlyJobFailures(source, subject, jobNames) {
+  return jobNames.flatMap((jobName) => {
+    const section = jobSection(source, jobName);
+    if (!section) return [`${subject} is missing the ${jobName} job`];
+    if (!section.includes("runs-on: ubuntu-24.04")) {
+      return [`${subject} ${jobName} must pin a GitHub-hosted ubuntu runner`];
+    }
+    return selfHostedMacLabels.some((label) => section.includes(`"${label}"`))
+      ? [`${subject} ${jobName} must never run on the self-hosted runner`]
+      : [];
+  });
 }
 
 function externalActionPinFailures(workflowName, source) {

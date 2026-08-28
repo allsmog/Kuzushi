@@ -6,10 +6,15 @@ import {
   actionlintImageFailures,
   callGraphActionPinFailures,
   candidateWorkflowFailures,
+  hostedOnlyCandidateJobs,
+  hostedOnlyPublisherJobs,
   platformPublisherFailures,
+  publishedSmokeWorkflowFailures,
   publisherWorkflowFailures,
   releaseCrossBuilds,
   releaseNativeBuildPlatforms,
+  selfHostedMacLabels,
+  selfHostedMatrixRunsOn,
 } from "./release-workflow-contract.mjs";
 
 const candidate = workflow("release-candidate.yml");
@@ -75,6 +80,60 @@ test("a cross-built slug must be produced by its own target and artifact", () =>
       token,
     );
   }
+});
+
+test("both darwin legs default to the self-hosted runner behind one hosted escape hatch", () => {
+  assert.deepEqual(publishedSmokeWorkflowFailures(publishedSmoke), []);
+  for (const job of ["native-binaries", "local-tarball-smoke"]) {
+    assert.ok(jobSource(candidate, job).includes(selfHostedMatrixRunsOn), job);
+  }
+  assert.ok(jobSource(publishedSmoke, "published-install").includes(selfHostedMatrixRunsOn));
+  // A tag push carries no inputs, so the publisher reaches the hatch by variable.
+  assert.match(publisher, /hosted: \$\{\{ vars\.KUZUSHI_RELEASE_HOSTED == 'true' \}\}/);
+
+  const alwaysHosted = candidate.replace(selfHostedMatrixRunsOn, "runs-on: ${{ matrix.os }}");
+  assert.match(
+    candidateWorkflowFailures(alwaysHosted).join("\n"),
+    /must select the self-hosted runner by matrix\.self_hosted/,
+  );
+});
+
+test("only the translated darwin-x64 leg carries the Rosetta opt-in", () => {
+  const smoke = jobSource(candidate, "local-tarball-smoke");
+  assert.match(smoke, /- os: macos-15-intel\n {12}slug: darwin-x64\n.*rosetta: "1"/s);
+  assert.ok(!/slug: darwin-arm64\n {12}self_hosted: true\n {12}rosetta:/.test(smoke));
+
+  const armRosetta = candidate.replace(
+    "          - os: macos-14\n            slug: darwin-arm64\n            self_hosted: true\n",
+    '          - os: macos-14\n            slug: darwin-arm64\n            self_hosted: true\n            rosetta: "1"\n',
+  );
+  assert.match(
+    candidateWorkflowFailures(armRosetta).join("\n"),
+    /darwin-arm64 carries the wrong Rosetta opt-in/,
+  );
+});
+
+test("no credentialed or write-permission job is eligible for the self-hosted runner", () => {
+  assert.deepEqual(hostedOnlyCandidateJobs, ["identity", "assemble"]);
+  assert.deepEqual(hostedOnlyPublisherJobs, ["publish-npm", "github-release"]);
+  for (const [source, jobs] of [
+    [candidate, hostedOnlyCandidateJobs],
+    [publisher, hostedOnlyPublisherJobs],
+  ]) {
+    for (const job of jobs) {
+      const section = jobSource(source, job);
+      assert.ok(section.includes("runs-on: ubuntu-24.04"), job);
+      for (const label of selfHostedMacLabels) assert.ok(!section.includes(`"${label}"`), job);
+    }
+  }
+  const leaked = publisher.replace(
+    "  publish-npm:\n    needs: [preflight, candidate]\n    runs-on: ubuntu-24.04",
+    '  publish-npm:\n    needs: [preflight, candidate]\n    runs-on: ["self-hosted","macOS","ARM64","kuzushi-mac"]',
+  );
+  assert.match(
+    publisherWorkflowFailures(leaked).join("\n"),
+    /publish-npm must pin a GitHub-hosted ubuntu runner/,
+  );
 });
 
 function jobSource(source, jobName) {

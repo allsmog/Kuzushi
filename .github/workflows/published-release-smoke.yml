@@ -7,12 +7,22 @@ on:
         description: Published npm version or matching v-prefixed release tag
         required: true
         type: string
+      hosted:
+        description: Smoke the darwin legs on GitHub-hosted macOS runners
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       version:
         description: Published npm version; blank uses the npm latest tag
         required: false
         type: string
+      hosted:
+        description: Smoke the darwin legs on GitHub-hosted macOS runners
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,12 +42,18 @@ jobs:
             slug: linux-arm64
           - os: macos-15-intel
             slug: darwin-x64
+            self_hosted: true
+            rosetta: "1"
           - os: macos-14
             slug: darwin-arm64
+            self_hosted: true
           - os: windows-2025
             slug: win32-x64
     name: published-${{ matrix.slug }}
-    runs-on: ${{ matrix.os }}
+    # Both darwin legs default to the owner's self-hosted Apple silicon runner.
+    # darwin-x64 is smoked there under Rosetta; `hosted: true` restores the
+    # 10x-billed `macos-15-intel` and `macos-14` images for one run.
+    runs-on: ${{ fromJSON(matrix.self_hosted && !inputs.hosted && '["self-hosted","macOS","ARM64","kuzushi-mac"]' || format('["{0}"]', matrix.os)) }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -45,10 +61,34 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
+      # npm gates `@kuzushi/darwin-x64` on `process.arch === "x64"`, so the
+      # translated leg needs an x64 Node ahead of the host's arm64 one. Putting
+      # its prefix first on PATH is enough: macOS runs the x64 binaries under
+      # Rosetta, and npm's `#!/usr/bin/env node` shebang then resolves to it.
+      - name: Lead with the x64 Node toolchain for the translated darwin-x64 leg
+        if: ${{ matrix.rosetta && !inputs.hosted }}
+        shell: bash
+        env:
+          X64_NODE_PREFIX: ${{ vars.KUZUSHI_X64_NODE_PREFIX || '/usr/local' }}
+        run: |
+          set -euo pipefail
+          node_path="${X64_NODE_PREFIX}/bin/node"
+          if [[ ! -x "${node_path}" ]]; then
+            echo "no x64 Node at ${node_path}; see docs/quality/release-legs-self-hosted.md" >&2
+            exit 1
+          fi
+          reported="$("${node_path}" -p 'process.arch')"
+          if [[ "${reported}" != "x64" ]]; then
+            echo "${node_path} reports ${reported}, but the darwin-x64 leg needs x64" >&2
+            exit 1
+          fi
+          echo "${X64_NODE_PREFIX}/bin" >> "${GITHUB_PATH}"
       - name: Install and exercise the published release
         env:
           KUZUSHI_SMOKE_VERSION: ${{ inputs.version }}
           KUZUSHI_SMOKE_RECEIPT: published-release-smoke.json
+          KUZUSHI_SMOKE_SLUG: ${{ matrix.slug }}
+          KUZUSHI_SMOKE_ALLOW_ROSETTA: ${{ matrix.rosetta }}
         run: node scripts/smoke-published-release.mjs
       - name: Upload consumer receipt
         if: always() && hashFiles('published-release-smoke.json') != ''
