@@ -146,7 +146,7 @@ Precedence when `--since` meets `--paths` or `--shard`:
 1. `--paths`/`--shard` resolve first into the `paths` input, as today.
 2. `--since` resolves the changed files, then narrows to the **intersection**
    of the two (target-relative, normalized; a root covers whole path
-   components, so `src` covers `src/lib.rs` but not `srclib/x.rs`). The scope
+   components, so `src` covers `src/*` but not `srclib/*`). The scope
    line discloses it as `scope: N files since <ref> ∩ M requested → K`.
 3. `--since` never widens. A requested root that cannot name a target-relative
    diff path narrows to nothing rather than falling back to every change.
