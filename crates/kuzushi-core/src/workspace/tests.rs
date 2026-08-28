@@ -1984,6 +1984,248 @@ mod tests {
         assert!(output.join("findings").join(format!("{alias}.md")).exists());
     }
 
+    /// Field names the fixture cannot populate because their type is not part
+    /// of the crate's public export surface. They are still checked for
+    /// membership in the manifest, just not for presence in the bundle.
+    const BUNDLE_FIELDS_THE_FIXTURE_CANNOT_POPULATE: &[&str] = &["dismissal"];
+
+    /// `MARKDOWN_BUNDLE_OMITTED` and the bundle renderer are two hand-kept
+    /// lists that must agree, and they drifted once. Render a record whose
+    /// every string-valued field carries a distinct sentinel, then assert the
+    /// sentinel is in the bundle exactly when the manifest does not call that
+    /// field omitted.
+    ///
+    /// Numeric and boolean fields carry no distinctive value, so the presence
+    /// half of the check covers the string-valued fields; the membership check
+    /// below still pins every omitted name against the live projection, so a
+    /// renamed or deleted field cannot leave a stale entry behind.
+    #[test]
+    fn markdown_bundle_renders_every_field_its_manifest_does_not_call_omitted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let record = sentinel_export_record();
+        let finding = sentinel_export_finding(&record);
+        let output = tmp.path().join("bundle");
+
+        super::super::application::write_markdown_bundle(
+            &workspace,
+            std::slice::from_ref(&finding),
+            std::slice::from_ref(&record),
+            &output,
+            &WorkspaceExportOptions {
+                format: Some(WorkspaceExportFormat::MarkdownBundle),
+                ..WorkspaceExportOptions::default()
+            },
+            1,
+        )
+        .unwrap();
+
+        let bundle = read_bundle_text(&output);
+        let omitted = workspace_export_omitted_fields(WorkspaceExportFormat::MarkdownBundle);
+        let mut probes = Vec::new();
+        export_field_probes(
+            &serde_json::to_value(&record).unwrap(),
+            "",
+            &omitted,
+            &mut probes,
+        );
+
+        assert!(
+            probes.len() > 40,
+            "field walk collapsed to {} probes",
+            probes.len()
+        );
+        for (name, sentinels) in &probes {
+            let is_omitted = omitted.contains(&name.as_str());
+            for sentinel in sentinels {
+                assert_eq!(
+                    bundle.contains(sentinel.as_str()),
+                    !is_omitted,
+                    "field {name:?} is {} in the manifest but {} in the bundle",
+                    if is_omitted { "omitted" } else { "rendered" },
+                    if is_omitted { "present" } else { "missing" }
+                );
+            }
+        }
+
+        let projected: std::collections::BTreeSet<&str> =
+            probes.iter().map(|(name, _)| name.as_str()).collect();
+        for name in &omitted {
+            assert!(
+                projected.contains(name)
+                    || BUNDLE_FIELDS_THE_FIXTURE_CANNOT_POPULATE.contains(name),
+                "manifest omits {name:?}, which the export projection no longer has"
+            );
+        }
+    }
+
+    /// Flatten the export projection into the dotted field names the manifest
+    /// speaks, pairing each with the string values that carry it into the
+    /// rendered bundle. Recursion stops at a name the manifest itself lists,
+    /// so `dismissal` stays one field rather than four.
+    fn export_field_probes(
+        value: &serde_json::Value,
+        prefix: &str,
+        omitted: &[&str],
+        out: &mut Vec<(String, Vec<String>)>,
+    ) {
+        for (key, child) in value.as_object().expect("export record is an object") {
+            let name = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            if child.is_object() && prefix.is_empty() && !omitted.contains(&name.as_str()) {
+                export_field_probes(child, &name, omitted, out);
+            } else {
+                out.push((name, string_leaves(child)));
+            }
+        }
+    }
+
+    fn string_leaves(value: &serde_json::Value) -> Vec<String> {
+        match value {
+            serde_json::Value::String(text) => vec![text.clone()],
+            serde_json::Value::Array(items) => items.iter().flat_map(string_leaves).collect(),
+            serde_json::Value::Object(fields) => {
+                fields.values().flat_map(string_leaves).collect()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn read_bundle_text(output: &std::path::Path) -> String {
+        let mut text = fs::read_to_string(output.join("README.md")).unwrap();
+        text.push_str(&fs::read_to_string(output.join("manifest.json")).unwrap());
+        for entry in fs::read_dir(output.join("findings")).unwrap() {
+            text.push_str(&fs::read_to_string(entry.unwrap().path()).unwrap());
+        }
+        text
+    }
+
+    fn sentinel_export_finding(record: &WorkspaceFindingExportRecord) -> Finding {
+        let mut finding = Finding::new_semgrep(
+            &record.rule_id,
+            &record.location.file,
+            record.location.start_line,
+            record.location.end_line,
+            Severity::High,
+            &record.message,
+        );
+        finding.fingerprint = record.fingerprint.clone();
+        finding
+    }
+
+    fn sentinel_export_record() -> WorkspaceFindingExportRecord {
+        WorkspaceFindingExportRecord {
+            alias: "sentinel-alias".to_string(),
+            identity_id: Some("sentinel-identity-id".to_string()),
+            fingerprint: "sentinel-fingerprint".to_string(),
+            kind: "sentinel-kind".to_string(),
+            rule_id: "sentinel-rule-id".to_string(),
+            title: "sentinel-title".to_string(),
+            cwe: Some("sentinel-cwe".to_string()),
+            location: WorkspaceFindingExportLocation {
+                file: "sentinel-location-file".to_string(),
+                start_line: 41,
+                end_line: Some(42),
+            },
+            severity: "sentinel-severity".to_string(),
+            confidence: Some(0.5),
+            priority: "sentinel-priority".to_string(),
+            lifecycle_status: "sentinel-lifecycle-status".to_string(),
+            review_decision: "sentinel-review-decision".to_string(),
+            triage_state: "sentinel-triage-state".to_string(),
+            dismissal: None,
+            review_decision_conflict: Some("sentinel-review-decision-conflict".to_string()),
+            review_decision_reason: Some("sentinel-review-decision-reason".to_string()),
+            review_decision_author: Some("sentinel-review-decision-author".to_string()),
+            triage_verdict: Some("sentinel-triage-verdict".to_string()),
+            suppressed: true,
+            snoozed_until: Some("sentinel-snoozed-until".to_string()),
+            evidence: WorkspaceEvidenceExportSummary {
+                state: "sentinel-evidence-state".to_string(),
+                observed_evidence_present: true,
+                observed_count: 3,
+                observed_code_count: 1,
+                observed_capture_count: 1,
+                observed_other_count: 1,
+                model_generated_reasoning_present: true,
+                model_generated_reasoning_count: 2,
+                derived_source_present: true,
+                source_count: 4,
+                raw_http_blob_present: true,
+                evidence_confidence_max: Some(7),
+            },
+            analysis: WorkspaceAnalysisExportSummary {
+                static_proof_recorded: true,
+                automated_reasoning_present: true,
+                human_review_present: true,
+                imported_review_present: true,
+            },
+            static_proof_state: "sentinel-static-proof-state".to_string(),
+            static_proof_label: "sentinel-static-proof-label".to_string(),
+            proof_confidence: "sentinel-proof-confidence".to_string(),
+            verification: WorkspaceVerificationExportSummary {
+                label: "sentinel-verification-label".to_string(),
+                verdict: Some("sentinel-verification-verdict".to_string()),
+                proof_level: Some(3),
+                backend: Some("sentinel-verification-backend".to_string()),
+                language: Some("sentinel-verification-language".to_string()),
+                source_identity: Some(
+                    crate::workflow_attempts::TargetContentIdentity::IndexedSnapshot {
+                        snapshot_hash: crate::run_lifecycle::SafeText::operator_visible(
+                            "sentinel-source-identity-hash",
+                        ),
+                        tree_hash: None,
+                    },
+                ),
+                reproducer: Some(
+                    serde_json::from_value(serde_json::json!({
+                        "kind": "proof-snapshot",
+                        "hash": "sentinel-reproducer-hash",
+                        "sizeBytes": 1
+                    }))
+                    .expect("test proof-snapshot reference"),
+                ),
+            },
+            tool: "sentinel-tool".to_string(),
+            vuln_source: "sentinel-vuln-source".to_string(),
+            source_signature: Some("sentinel-source-signature".to_string()),
+            corroboration_count: 5,
+            run_id: Some("sentinel-run-id".to_string()),
+            provenance: WorkspaceFindingProvenanceSummary {
+                tool: "sentinel-provenance-tool".to_string(),
+                vuln_source: "sentinel-provenance-vuln-source".to_string(),
+                source_signature: Some("sentinel-provenance-source-signature".to_string()),
+                corroboration_count: 6,
+                run_id: Some("sentinel-provenance-run-id".to_string()),
+                run_status: Some("sentinel-provenance-run-status".to_string()),
+                kuzushi_version: Some("sentinel-provenance-kuzushi-version".to_string()),
+                model: Some("sentinel-provenance-model".to_string()),
+                runtime_platform: Some("sentinel-provenance-runtime-platform".to_string()),
+            },
+            remediation: Some(WorkspaceRemediationExportSummary {
+                application_id: "sentinel-remediation-application-id".to_string(),
+                patch_run_id: "sentinel-remediation-patch-run-id".to_string(),
+                finding_scan_id: Some("sentinel-remediation-finding-scan-id".to_string()),
+                application_state: "sentinel-remediation-application-state".to_string(),
+                empirically_verified: true,
+                reverify_outcome: Some("sentinel-remediation-reverify-outcome".to_string()),
+                reverify_run_id: Some("sentinel-remediation-reverify-run-id".to_string()),
+                diff_hash: "sentinel-remediation-diff-hash".to_string(),
+                touched_paths: vec!["sentinel-remediation-touched-path".to_string()],
+            }),
+            recommendation: Some("sentinel-recommendation".to_string()),
+            impact: Some("sentinel-impact".to_string()),
+            category: Some("sentinel-category".to_string()),
+            exploit_scenario: Some("sentinel-exploit-scenario".to_string()),
+            preconditions: vec!["sentinel-precondition".to_string()],
+            references: vec!["sentinel-reference".to_string()],
+            message: "sentinel-message".to_string(),
+        }
+    }
+
     #[test]
     fn markdown_bundle_renders_producer_security_context_without_fabricating_empty_sections() {
         let tmp = tempfile::tempdir().unwrap();

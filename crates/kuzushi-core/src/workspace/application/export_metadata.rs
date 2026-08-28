@@ -109,6 +109,9 @@ const MARKDOWN_BUNDLE_OMITTED: &[&str] = &[
     "vulnSource",
     "sourceSignature",
     "corroborationCount",
+    // The bundle renders the run reference from `provenance.runId`; the
+    // top-level `runId` field itself is not projected into it.
+    "runId",
     "provenance.tool",
     "provenance.vulnSource",
     "provenance.sourceSignature",
