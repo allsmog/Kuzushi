@@ -1,12 +1,20 @@
-# Keep dependency advisories actionable: weekly batched update PRs for the
-# Rust workspace, the npm package, and the pinned GitHub Actions.
+# Keep dependency advisories actionable: one monthly batched update PR per
+# ecosystem for the Rust workspace, the npm package, and the pinned GitHub
+# Actions. Weekly checks opened up to fifteen concurrent pull requests, each
+# of which charged a full CI run; monthly grouped batches keep the same
+# advisory coverage for a fraction of the runner minutes.
+#
+# Grouping covers minor and patch only. Majors stay ungrouped so a breaking
+# upgrade arrives as its own reviewable pull request instead of hiding inside
+# a batch. Security advisories are exempt from `open-pull-requests-limit` and
+# are still raised as soon as Dependabot sees them.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       cargo-minor-and-patch:
         update-types:
@@ -15,8 +23,8 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
     groups:
       npm-minor-and-patch:
         update-types:
@@ -25,5 +33,10 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
+      interval: monthly
+    open-pull-requests-limit: 2
+    groups:
+      github-actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
