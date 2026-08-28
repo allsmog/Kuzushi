@@ -99,6 +99,12 @@ packages, create a tag, or create a GitHub Release._
   they had since left. The stop request now reads
   `stop requested for <job> · <run-ref>` whenever the job hub knows the
   label, and the per-domain cleanup lines are unchanged.
+- An unbuilt Map no longer wastes the terminal it was given. The readiness
+  card is now a width-capped centered form rather than a status pane stretched
+  across the whole body, and each project-context receipt row carries the
+  state and next action the project model already knew — the Ratatui card and
+  plain output project the same columns, collapsing to the compact
+  section/summary row when the terminal cannot afford them.
 - `workspace:export-findings format=sarif` now emits spec-valid URIs. The
   `WORKSPACE_ROOT` base is built as a real `file:` URI instead of an
   interpolated path, so a workspace root containing a space, a non-ASCII
