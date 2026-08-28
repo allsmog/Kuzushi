@@ -1148,7 +1148,9 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             "a cross-provider ping must not spawn the bridge at all"
         );
 
-        let response = runtime.auth_ping_blocking(" openai-codex : gpt-5.5 ").unwrap();
+        let response = runtime
+            .auth_ping_blocking(" openai-codex : gpt-5.5 ")
+            .unwrap();
         assert!(response.ok);
         assert_eq!(response.auth_mode.as_deref(), Some("oauth"));
 

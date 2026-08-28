@@ -2671,7 +2671,12 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn fake_ping_bridge(dir: &std::path::Path, name: &str, stdout: &str, exit_code: i32) -> PathBuf {
+    fn fake_ping_bridge(
+        dir: &std::path::Path,
+        name: &str,
+        stdout: &str,
+        exit_code: i32,
+    ) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
 
         let script = dir.join(name);
@@ -2702,8 +2707,7 @@ mod tests {
         )
         .unwrap();
         let mut config = kuzushi_core::V2Config::default();
-        config.runtime.langgraph_bridge_command =
-            Some(vec![bridge.to_string_lossy().into_owned()]);
+        config.runtime.langgraph_bridge_command = Some(vec![bridge.to_string_lossy().into_owned()]);
         config.runtime.anthropic_oauth = Some(kuzushi_core::AnthropicOauthConfig {
             credentials_path: Some(oauth),
             allow_env_token: false,
