@@ -111,6 +111,9 @@ jobs:
       # A release candidate is the one tree that always earns the mutation
       # sweep, which no longer runs on the monthly Full CI cron.
       deep: true
+      # The hosted escape hatch must cover the full-CI sweep too, or forcing
+      # hosted release legs would still leave ci-full queued on the Mac runner.
+      hosted: ${{ inputs.hosted }}
     permissions:
       contents: read
 
